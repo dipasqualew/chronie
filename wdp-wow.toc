@@ -11,6 +11,8 @@ src/EventDispatcher.lua
 src/LockoutScanner.lua
 src/LockoutStore.lua
 src/LockoutTable.lua
+src/ClassDisplay.lua
+src/ExpansionIndex.lua
 src/LockoutDetails.lua
 src/SlashRouter.lua
 src/DetailWindow.lua

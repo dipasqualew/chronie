@@ -15,6 +15,13 @@ round trip is pure overhead here.
 zero failures before committing. Luacheck caps lines at 120 characters, and new
 WoW API globals have to be declared in `.luacheckrc` or it fails the build.
 
+A run that is not fully green is not a finished piece of work. Leaving lint
+warnings, test failures, or errors behind — whether they predate the change, were
+caused by it, or "only" affect tests you did not write — is never acceptable.
+Fix every one of them, or stop and say plainly which you could not fix and why.
+Do not report work as done while `./scripts/check.sh` exits non-zero, and do not
+silence a problem by deleting or weakening the test that found it.
+
 ## Structure
 
 Every file under `src/` is loaded by the client in the order listed in

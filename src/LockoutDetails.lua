@@ -8,12 +8,14 @@ local _, ns = ...
 ---@field level integer?
 ---@field lastSeen integer?
 
----One instance+difficulty pairing seen on any character.
+---One instance seen on any character. Difficulty is metadata rather than identity:
+---being saved to a raid at one difficulty bars the others too, so grouping per
+---difficulty would report a locked character as available at the sibling size.
 ---@class InstanceDescriptor
----@field key string Identity, matching LockoutStore's.
+---@field key string Identity: the instance name alone.
 ---@field instance string
----@field difficultyId integer
----@field difficulty string
+---@field difficultyId integer? Difficulty of the row this was derived from, if any.
+---@field difficulty string Difficulty of the row this was derived from; "" when unknown.
 ---@field isRaid boolean
 
 ---How far through an instance a character is.
@@ -47,6 +49,8 @@ local _, ns = ...
 ---@class LockoutDetailsDeps
 ---@field now fun(): integer
 ---@field lockoutTable LockoutTable
+---@field classDisplay ClassDisplay
+---@field expansions ExpansionIndex
 
 local AVAILABLE_COLOR = { 0.35, 1, 0.35 }
 local PARTIAL_COLOR = { 1, 0.82, 0 }
@@ -78,10 +82,9 @@ local STATE_RANK = { available = 1, partial = 2, locked = 3 }
 local NONE = "—"
 
 ---@param instance string
----@param difficultyId integer
 ---@return string
-local function keyOf(instance, difficultyId)
-    return instance .. "\0" .. tostring(difficultyId)
+local function keyOf(instance)
+    return instance
 end
 
 ---The instance a lockout row belongs to, stripped of the character that owns it.
@@ -89,7 +92,7 @@ end
 ---@return InstanceDescriptor
 local function descriptorOf(row)
     return {
-        key = keyOf(row.instance, row.difficultyId),
+        key = keyOf(row.instance),
         instance = row.instance,
         difficultyId = row.difficultyId,
         difficulty = row.difficulty or "",
@@ -102,6 +105,8 @@ end
 function ns.newLockoutDetails(deps)
     local now = deps.now
     local lockoutTable = deps.lockoutTable
+    local classDisplay = deps.classDisplay
+    local expansions = deps.expansions
 
     ---An absent or lapsed lockout both mean the character is free to go in.
     ---A lockout with no recorded bosses counts as fully locked: we cannot prove
@@ -129,12 +134,42 @@ function ns.newLockoutDetails(deps)
         return { state = state, killed = killed, total = #encounters }
     end
 
+    ---@param row LockoutRow
+    ---@return integer
+    local function killCount(row)
+        local killed = 0
+        for _, encounter in ipairs(row.encounters or {}) do
+            if encounter.killed then
+                killed = killed + 1
+            end
+        end
+        return killed
+    end
+
+    ---A character saved to one instance at two difficulties is locked out of both,
+    ---so a single row has to speak for the pair. The later reset wins, because that
+    ---is when the character is really free again; equal resets fall to whichever row
+    ---shows more progress, so the drill-down never understates a lockout.
+    ---@param current LockoutRow?
+    ---@param candidate LockoutRow
+    ---@return LockoutRow
+    local function moreBinding(current, candidate)
+        if not current then
+            return candidate
+        end
+        if candidate.expiry ~= current.expiry then
+            return candidate.expiry > current.expiry and candidate or current
+        end
+        return killCount(candidate) > killCount(current) and candidate or current
+    end
+
     ---@param rows LockoutRow[]
     ---@return table<string, LockoutRow> indexed by character .. "\1" .. instance key
     local function indexRows(rows)
         local index = {}
         for _, row in ipairs(rows) do
-            index[row.character .. "\1" .. keyOf(row.instance, row.difficultyId)] = row
+            local key = row.character .. "\1" .. keyOf(row.instance)
+            index[key] = moreBinding(index[key], row)
         end
         return index
     end
@@ -190,10 +225,7 @@ function ns.newLockoutDetails(deps)
         end
 
         table.sort(list, function(left, right)
-            if left.instance ~= right.instance then
-                return left.instance < right.instance
-            end
-            return left.difficultyId < right.difficultyId
+            return left.instance < right.instance
         end)
 
         return list
@@ -204,7 +236,8 @@ function ns.newLockoutDetails(deps)
         descriptorOf = descriptorOf,
         instances = instances,
 
-        ---Every known character measured against one instance+difficulty.
+        ---Every known character measured against one instance, across all of its
+        ---difficulties: a save at any difficulty locks the character out of the rest.
         ---@param descriptor InstanceDescriptor
         ---@param roster RosterEntry[]
         ---@param rows LockoutRow[]
@@ -220,8 +253,13 @@ function ns.newLockoutDetails(deps)
                     state = status.state,
                     sortKey = entry.character,
                     cells = {
-                        ICONS[status.state] .. " " .. entry.character,
+                        -- The class colour is inlined rather than applied to the cell:
+                        -- the cell's own colour is the lockout status, and both matter.
+                        ICONS[status.state] .. " " .. classDisplay.decorate(entry.classFile, entry.character),
                         LABELS[status.state],
+                        -- Which difficulty the save sits on: no longer part of the
+                        -- grouping, but still the thing the player wants to see.
+                        (row and status.state ~= "available" and row.difficulty ~= "" and row.difficulty) or NONE,
                         progressText(status),
                         resetText(row, status),
                     },
@@ -232,8 +270,9 @@ function ns.newLockoutDetails(deps)
             sortByState(entries)
 
             local title = descriptor.instance
-            if descriptor.difficulty ~= "" then
-                title = title .. " — " .. descriptor.difficulty
+            local tag = expansions.tagFor(descriptor.instance)
+            if tag ~= "" then
+                title = tag .. " " .. title
             end
 
             return {
@@ -244,6 +283,7 @@ function ns.newLockoutDetails(deps)
                         columns = {
                             { title = "Character", width = 200 },
                             { title = "Status", width = 100 },
+                            { title = "Difficulty", width = 120 },
                             { title = "Bosses", width = 120 },
                             { title = "Resets", width = 190 },
                         },
@@ -263,16 +303,27 @@ function ns.newLockoutDetails(deps)
         forCharacter = function(character, rows)
             local index = indexRows(rows)
             local raids, dungeons = {}, {}
+            local classFile
+
+            for _, row in ipairs(rows) do
+                if row.character == character and row.classFile then
+                    classFile = row.classFile
+                    break
+                end
+            end
 
             for _, descriptor in ipairs(instances(rows)) do
                 local row = index[character .. "\1" .. descriptor.key]
                 local status = statusOf(row)
                 local entry = {
                     state = status.state,
-                    sortKey = descriptor.instance .. "\0" .. descriptor.difficulty,
+                    sortKey = descriptor.instance,
                     cells = {
                         ICONS[status.state] .. " " .. descriptor.instance,
-                        descriptor.difficulty,
+                        expansions.tagFor(descriptor.instance),
+                        -- The difficulty this character is saved to, not the one the
+                        -- descriptor happened to be built from.
+                        (row and row.difficulty ~= "" and row.difficulty) or NONE,
                         LABELS[status.state],
                         progressText(status),
                         resetText(row, status),
@@ -289,6 +340,7 @@ function ns.newLockoutDetails(deps)
 
             local columns = {
                 { title = "Instance", width = 190 },
+                { title = "Expansion", width = 80 },
                 { title = "Difficulty", width = 120 },
                 { title = "Status", width = 90 },
                 { title = "Bosses", width = 110 },
@@ -296,7 +348,7 @@ function ns.newLockoutDetails(deps)
             }
 
             return {
-                title = character,
+                title = classDisplay.decorate(classFile, character),
                 sections = {
                     { heading = "Raids", columns = columns, rows = raids, empty = "No raids recorded yet." },
                     { heading = "Dungeons", columns = columns, rows = dungeons, empty = "No dungeons recorded yet." },

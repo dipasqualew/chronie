@@ -14,6 +14,13 @@ local addonName, ns = ...
 ---@field getSavedInstanceInfo fun(index: integer): ...
 ---@field getSavedInstanceEncounterInfo fun(instanceIndex: integer, encounterIndex: integer): ...
 ---@field requestRaidInfo fun()
+---@field classColor fun(classFile: string): (number?, number?, number?)
+---@field classIconCoords table<string, number[]> Global CLASS_ICON_TCOORDS.
+---@field getNumTiers fun(): integer
+---@field getCurrentTier fun(): integer
+---@field selectTier fun(tier: integer)
+---@field getTierInfo fun(tier: integer): string?
+---@field getInstanceByIndex fun(index: integer, isRaid: boolean): ...
 ---@field registerSlash fun(tokens: string[], handler: fun(text: string))
 ---@field uiParent table
 ---@field specialFrames string[]
@@ -37,7 +44,24 @@ function ns.main(env)
     local store = ns.newLockoutStore({ db = env.db, now = env.now })
     local lockoutTable = ns.newLockoutTable({ now = env.now, formatDate = env.formatDate })
 
-    local details = ns.newLockoutDetails({ now = env.now, lockoutTable = lockoutTable })
+    local classDisplay = ns.newClassDisplay({
+        classColor = env.classColor,
+        classIconCoords = env.classIconCoords,
+    })
+    local expansions = ns.newExpansionIndex({
+        getNumTiers = env.getNumTiers,
+        getCurrentTier = env.getCurrentTier,
+        selectTier = env.selectTier,
+        getTierInfo = env.getTierInfo,
+        getInstanceByIndex = env.getInstanceByIndex,
+    })
+
+    local details = ns.newLockoutDetails({
+        now = env.now,
+        lockoutTable = lockoutTable,
+        classDisplay = classDisplay,
+        expansions = expansions,
+    })
 
     local instanceWindow = ns.newDetailWindow({
         createFrame = env.createFrame,
@@ -61,6 +85,8 @@ function ns.main(env)
         lockoutTable = lockoutTable,
         onRefreshRequested = env.requestRaidInfo,
         tooltip = env.tooltip,
+        classDisplay = classDisplay,
+        expansions = expansions,
 
         onInstanceSelected = function(row)
             instanceWindow.show(details.forInstance(details.descriptorOf(row), store.characters(), store.all()))
@@ -154,6 +180,19 @@ if CreateFrame then
             getSavedInstanceInfo = GetSavedInstanceInfo,
             getSavedInstanceEncounterInfo = GetSavedInstanceEncounterInfo,
             requestRaidInfo = RequestRaidInfo,
+            classColor = function(classFile)
+                local color = RAID_CLASS_COLORS[classFile]
+                if not color then
+                    return nil
+                end
+                return color.r, color.g, color.b
+            end,
+            classIconCoords = CLASS_ICON_TCOORDS,
+            getNumTiers = EJ_GetNumTiers,
+            getCurrentTier = EJ_GetCurrentTier,
+            selectTier = EJ_SelectTier,
+            getTierInfo = EJ_GetTierInfo,
+            getInstanceByIndex = EJ_GetInstanceByIndex,
             registerSlash = registerSlash,
             uiParent = UIParent,
             specialFrames = UISpecialFrames,

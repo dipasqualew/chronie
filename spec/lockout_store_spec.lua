@@ -414,6 +414,38 @@ describe("ns.newLockoutStore", function()
             assert.equal("Thrall-Ragnaros", store.all()[1].character)
         end)
 
+        -- Class lives on the roster, so a row can only carry it once the character has
+        -- logged in at least once; the UI colours rows by this.
+        it("attaches the owner's class token when the roster knows it", function()
+            local store = newStore()
+            store.remember("Thrall-Ragnaros", { classFile = "WARRIOR" })
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            assert.equal("WARRIOR", store.all()[1].classFile)
+        end)
+
+        it("leaves the class token absent for a character never remembered", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            assert.is_nil(store.all()[1].classFile)
+        end)
+
+        it("gives each character its own class token", function()
+            local store = newStore()
+            store.remember("Thrall-Ragnaros", { classFile = "WARRIOR" })
+            store.remember("Jaina-Draenor", { classFile = "MAGE" })
+            store.save("Thrall-Ragnaros", { lockout() })
+            store.save("Jaina-Draenor", { lockout() })
+
+            local byCharacter = {}
+            for _, row in ipairs(store.all()) do
+                byCharacter[row.character] = row.classFile
+            end
+
+            assert.same({ ["Thrall-Ragnaros"] = "WARRIOR", ["Jaina-Draenor"] = "MAGE" }, byCharacter)
+        end)
+
         it("carries every stored field through onto the row", function()
             local store = newStore()
             store.save("Thrall-Ragnaros", { lockout() })

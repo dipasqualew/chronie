@@ -3,6 +3,7 @@ local _, ns = ...
 ---A stored lockout with its owning character attached.
 ---@class LockoutRow : Lockout
 ---@field character string "Name-Realm".
+---@field classFile string? Non-localised class token of the owner, when it is known.
 
 ---What we know about a character outside of its lockouts.
 ---@class CharacterInfo
@@ -122,12 +123,17 @@ function ns.newLockoutStore(deps)
             local rows = {}
 
             for character, lockouts in pairs(db.characters) do
+                -- Class lives on the roster, not the lockout: it is a fact about the
+                -- character that outlives any particular week's saves.
+                local classFile = (db.roster[character] or {}).classFile
+
                 for key, lockout in pairs(lockouts) do
                     if lockout.expiry < cutoff then
                         lockouts[key] = nil
                     else
                         rows[#rows + 1] = {
                             character = character,
+                            classFile = classFile,
                             instance = lockout.instance,
                             difficultyId = lockout.difficultyId,
                             difficulty = lockout.difficulty,

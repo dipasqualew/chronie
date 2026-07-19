@@ -17,7 +17,7 @@ local ROW_HEIGHT = 16
 local HEADING_HEIGHT = 24
 local PADDING = 12
 local BODY_TOP = -40
-local WIDTH = 660
+local WIDTH = 840
 local HEIGHT = 470
 
 local HEADING_COLOR = { 1, 0.82, 0 }

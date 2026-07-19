@@ -14,9 +14,12 @@ local _, ns = ...
 ---@field tooltip table Global GameTooltip.
 ---@field onCharacterSelected fun(character: string) Drill down into one character.
 ---@field onInstanceSelected fun(row: LockoutRow) Drill down into one instance+difficulty.
+---@field classDisplay ClassDisplay
+---@field expansions ExpansionIndex
 
 local COLUMNS = {
-    { key = "character", title = "Character", width = 140, sortable = true },
+    { key = "character", title = "Character", width = 160, sortable = true },
+    { key = "expansion", title = "Expansion", width = 80, sortable = false },
     { key = "instance", title = "Raid / Dungeon", width = 210, sortable = true },
     { key = "difficulty", title = "Difficulty", width = 140, sortable = false },
     { key = "expiry", title = "Expires", width = 180, sortable = false },
@@ -25,7 +28,7 @@ local COLUMNS = {
 local ROW_HEIGHT = 16
 local PADDING = 12
 local HEADER_Y = -52
-local WIDTH = 730
+local WIDTH = 820
 local HEIGHT = 440
 
 local EXPIRED_COLOR = { 0.45, 0.45, 0.45 }
@@ -33,16 +36,20 @@ local ACTIVE_COLOR = { 1, 1, 1 }
 local KILLED_COLOR = { 0.5, 0.5, 0.5 }
 local ALIVE_COLOR = { 0.1, 1, 0.1 }
 
----Index of the "Raid / Dungeon" column, whose cell owns the boss-list tooltip.
-local INSTANCE_COLUMN = 2
 ---Index of the "Character" column.
 local CHARACTER_COLUMN = 1
+---Index of the "Expansion" column.
+local EXPANSION_COLUMN = 2
+---Index of the "Raid / Dungeon" column, whose cell owns the boss-list tooltip.
+local INSTANCE_COLUMN = 3
 
 ---@param deps LockoutWindowDeps
 ---@return LockoutWindow
 function ns.newLockoutWindow(deps)
     local createFrame = deps.createFrame
     local lockoutTable = deps.lockoutTable
+    local classDisplay = deps.classDisplay
+    local expansions = deps.expansions
 
     local sortKey, sortAscending = "character", true
     ---@type table[]
@@ -98,7 +105,16 @@ function ns.newLockoutWindow(deps)
         local tooltip = deps.tooltip
         tooltip:SetOwner(anchor, "ANCHOR_RIGHT")
         tooltip:AddLine(row.instance)
-        tooltip:AddLine(row.difficulty .. " — " .. row.character, 0.7, 0.7, 0.7)
+
+        local expansion = expansions.abbreviationFor(row.instance)
+        if expansion ~= "" then
+            tooltip:AddLine(expansion, expansions.colorOf(row.instance))
+        end
+
+        tooltip:AddLine(
+            row.difficulty .. " — " .. classDisplay.decorate(row.classFile, row.character),
+            0.7, 0.7, 0.7
+        )
         tooltip:AddLine(lockoutTable.encounterSummary(row), 1, 0.82, 0)
         tooltip:AddLine(" ")
 
@@ -181,13 +197,21 @@ function ns.newLockoutWindow(deps)
             local expired = lockoutTable.isExpired(row)
             local color = expired and EXPIRED_COLOR or ACTIVE_COLOR
 
-            widget.texts[1]:SetText(row.character)
-            widget.texts[2]:SetText(row.instance)
-            widget.texts[3]:SetText(row.difficulty)
-            widget.texts[4]:SetText(lockoutTable.formatExpiry(row))
+            widget.texts[CHARACTER_COLUMN]:SetText(classDisplay.label(row.classFile, row.character))
+            widget.texts[EXPANSION_COLUMN]:SetText(expansions.abbreviationFor(row.instance))
+            widget.texts[INSTANCE_COLUMN]:SetText(row.instance)
+            widget.texts[4]:SetText(row.difficulty)
+            widget.texts[5]:SetText(lockoutTable.formatExpiry(row))
 
             for _, text in ipairs(widget.texts) do
                 text:SetTextColor(color[1], color[2], color[3])
+            end
+
+            -- Class and expansion carry their own colours, but only while the row still
+            -- matters: an expired row stays uniformly grey so it reads as background.
+            if not expired then
+                widget.texts[CHARACTER_COLUMN]:SetTextColor(classDisplay.colorOf(row.classFile))
+                widget.texts[EXPANSION_COLUMN]:SetTextColor(expansions.colorOf(row.instance))
             end
 
             widget.holder:Show()

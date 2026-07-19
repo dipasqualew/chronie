@@ -249,6 +249,89 @@ function fake.newTooltip()
     return tooltip, recorded
 end
 
+---A fake Encounter Journal, driven by a readable tier list rather than the client's
+---select-then-enumerate protocol.
+---
+---Each tier is `{ name = "Classic", raids = { "Molten Core" }, dungeons = { "Deadmines" } }`.
+---The fakes honour the real API's statefulness: `getInstanceByIndex` only sees the tier
+---that was last selected, so an addon that forgets to call `selectTier` reads nothing.
+---@param tiers table[]?
+---@return table journal `{ getNumTiers, getCurrentTier, selectTier, getTierInfo, getInstanceByIndex }`
+---@return table recorded `{ selected = integer[], current = fun(): integer }`
+function fake.newEncounterJournal(tiers)
+    tiers = tiers or {}
+    local selected = {}
+    local current = 1
+
+    local journal = {}
+
+    function journal.getNumTiers()
+        return #tiers
+    end
+
+    function journal.getCurrentTier()
+        return current
+    end
+
+    function journal.selectTier(tier)
+        selected[#selected + 1] = tier
+        current = tier
+    end
+
+    function journal.getTierInfo(tier)
+        local entry = tiers[tier]
+        return entry and entry.name
+    end
+
+    function journal.getInstanceByIndex(index, isRaid)
+        local entry = tiers[current]
+        if not entry then
+            return nil
+        end
+        local list = (isRaid and entry.raids or entry.dungeons) or {}
+        local name = list[index]
+        if not name then
+            return nil
+        end
+        -- instanceID, name
+        return 1000 + index, name
+    end
+
+    return journal, {
+        selected = selected,
+        ---@return integer the tier the journal is left on
+        current = function()
+            return current
+        end,
+    }
+end
+
+---Class colours and icon coordinates for a handful of classes, in the shape the
+---real globals use. Enough to prove the addon reads them correctly; not a full roster.
+---@return fun(classFile: string): (number?, number?, number?) classColor
+---@return table<string, number[]> classIconCoords
+function fake.newClassLook()
+    local colors = {
+        WARRIOR = { r = 0.78, g = 0.61, b = 0.43 },
+        MAGE = { r = 0.25, g = 0.78, b = 0.92 },
+        PRIEST = { r = 1, g = 1, b = 1 },
+    }
+
+    local coords = {
+        WARRIOR = { 0, 0.25, 0, 0.25 },
+        MAGE = { 0.25, 0.49609375, 0, 0.25 },
+        PRIEST = { 0.49609375, 0.7421875, 0, 0.25 },
+    }
+
+    return function(classFile)
+        local color = colors[classFile]
+        if not color then
+            return nil
+        end
+        return color.r, color.g, color.b
+    end, coords
+end
+
 ---A clock the test controls. `now()` is fixed until the test advances it.
 ---@param start integer?
 ---@return table `{ now = fun(): integer, set = fun(t: integer), advance = fun(by: integer) }`
@@ -290,7 +373,7 @@ end
 ---
 ---`options.db` may be shared between two `newEnv` calls to model two characters on
 ---one account writing into the same SavedVariables table.
----@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db }`
+---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db, tiers }`
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -308,6 +391,8 @@ function fake.newEnv(options)
     local getNumSavedInstances, getSavedInstanceInfo, savedInstanceCalls,
         getSavedInstanceEncounterInfo, encounterCalls = fake.newSavedInstances(options.savedInstances)
     local tooltip, tooltipRecorded = fake.newTooltip()
+    local journal, journalRecorded = fake.newEncounterJournal(options.tiers)
+    local classColor, classIconCoords = fake.newClassLook()
 
     local env = {
         createFrame = createFrame,
@@ -338,6 +423,13 @@ function fake.newEnv(options)
         requestRaidInfo = function()
             raidInfoRequests = raidInfoRequests + 1
         end,
+        classColor = classColor,
+        classIconCoords = classIconCoords,
+        getNumTiers = journal.getNumTiers,
+        getCurrentTier = journal.getCurrentTier,
+        selectTier = journal.selectTier,
+        getTierInfo = journal.getTierInfo,
+        getInstanceByIndex = journal.getInstanceByIndex,
         registerSlash = function(tokens, handler)
             slashRegistrations[#slashRegistrations + 1] = { tokens = tokens, handler = handler }
         end,
@@ -361,6 +453,7 @@ function fake.newEnv(options)
         tooltip = tooltipRecorded,
         savedInstanceCalls = savedInstanceCalls,
         encounterCalls = encounterCalls,
+        journal = journalRecorded,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
             return raidInfoRequests

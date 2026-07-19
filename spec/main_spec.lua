@@ -24,6 +24,8 @@ describe("addon integration", function()
             assert.is_function(ns.newLockoutScanner)
             assert.is_function(ns.newLockoutStore)
             assert.is_function(ns.newLockoutTable)
+            assert.is_function(ns.newClassDisplay)
+            assert.is_function(ns.newExpansionIndex)
             assert.is_function(ns.newSlashRouter)
             assert.is_function(ns.newLockoutWindow)
             assert.is_function(ns.main)
@@ -632,6 +634,121 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("the lockout window's row rendering", function()
+        local NOW = 1700000000
+
+        local MAGE_ICON = "|TInterface\\TargetingFrame\\UI-Classes-Circles:14:14:0:0:256:256:64:127:0:64|t"
+        local MAGE_COLOR = { 0.25, 0.78, 0.92 }
+        local WOTLK_COLOR = { 0.45, 0.78, 0.95 }
+        local ACTIVE_COLOR = { 1, 1, 1 }
+        local EXPIRED_COLOR = { 0.45, 0.45, 0.45 }
+
+        local TIERS = {
+            { name = "Classic" },
+            { name = "The Burning Crusade" },
+            { name = "Wrath of the Lich King", raids = { "Ulduar" } },
+        }
+
+        ---Boot a mage with one Ulduar lockout and open the window.
+        ---@param options table?
+        ---@return table app, table recorded
+        local function opened(options)
+            options = options or {}
+            options.playerName = options.playerName or "Jaina"
+            options.realmName = options.realmName or "Draenor"
+            options.now = options.now or NOW
+            options.savedInstances = options.savedInstances or {
+                { name = "Ulduar", reset = 3600, difficultyId = 4, isRaid = true, difficultyName = "25 Player" },
+            }
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+            app.window.toggle()
+            return app, recorded
+        end
+
+        ---The font strings of each rendered row, found via the scroll child that owns
+        ---them rather than by counting frames, so header widgets cannot be mistaken
+        ---for cells.
+        ---@param recorded table
+        ---@return table[][] one list of font strings per row
+        local function rowCellsOf(recorded)
+            local scrollChild
+            for _, frame in ipairs(recorded.frames) do
+                if frame.parent and frame.parent.frameName == "WdpWowLockoutScroll" then
+                    scrollChild = frame
+                    break
+                end
+            end
+
+            local rows = {}
+            for _, frame in ipairs(recorded.frames) do
+                if frame.parent == scrollChild and frame.frameType == "Frame" then
+                    rows[#rows + 1] = frame.fontStrings
+                end
+            end
+            return rows
+        end
+
+        it("prefixes the character cell with its class icon", function()
+            local _, recorded = opened({ class = "Mage", classFile = "MAGE" })
+
+            assert.equal(MAGE_ICON .. " Jaina-Draenor", rowCellsOf(recorded)[1][1].text)
+        end)
+
+        it("leaves the character cell bare when the class was never recorded", function()
+            -- unitClass returns nothing, so the roster never learns a class token.
+            local _, recorded = opened()
+
+            assert.equal("Jaina-Draenor", rowCellsOf(recorded)[1][1].text)
+        end)
+
+        it("colours the character cell by class", function()
+            local _, recorded = opened({ class = "Mage", classFile = "MAGE" })
+
+            assert.same(MAGE_COLOR, rowCellsOf(recorded)[1][1].color)
+        end)
+
+        it("names the expansion the journal places the instance in", function()
+            local _, recorded = opened({ tiers = TIERS })
+
+            local cells = rowCellsOf(recorded)[1]
+            assert.equal("WotLK", cells[2].text)
+            assert.same(WOTLK_COLOR, cells[2].color)
+        end)
+
+        it("leaves the expansion cell blank for an instance the journal never lists", function()
+            local _, recorded = opened({
+                tiers = TIERS,
+                savedInstances = { { name = "Karazhan", reset = 3600, difficultyId = 4, isRaid = true } },
+            })
+
+            assert.equal("", rowCellsOf(recorded)[1][2].text)
+        end)
+
+        it("leaves the remaining cells in the ordinary active colour", function()
+            local _, recorded = opened({ class = "Mage", classFile = "MAGE", tiers = TIERS })
+
+            local cells = rowCellsOf(recorded)[1]
+            for index = 3, 5 do
+                assert.same(ACTIVE_COLOR, cells[index].color)
+            end
+        end)
+
+        -- An expired row is background: neither the class nor the expansion may keep
+        -- shouting once the lockout stops mattering.
+        it("drops every cell to grey once the lockout has expired", function()
+            local app, recorded = opened({ class = "Mage", classFile = "MAGE", tiers = TIERS })
+
+            recorded.clock.advance(7200)
+            app.window.refresh()
+
+            for _, cell in ipairs(rowCellsOf(recorded)[1]) do
+                assert.same(EXPIRED_COLOR, cell.color)
+            end
+        end)
+    end)
+
     describe("drilling down from the lockout window", function()
         local NOW = 1700000000
 
@@ -715,7 +832,7 @@ describe("addon integration", function()
             assert.is_false(app.characterWindow.isShown())
         end)
 
-        it("titles the instance detail window with the instance and difficulty", function()
+        it("titles the instance detail window with the instance, which covers every difficulty", function()
             local app, recorded = opened()
             local instanceCell = rowCells(recorded)
 
@@ -724,7 +841,7 @@ describe("addon integration", function()
             assert.is_true(app.instanceWindow.isShown())
             assert.is_true(contains(
                 textsOf(recorded, "WdpWowInstanceDetailWindow"),
-                "Ulduar — 25 Player"
+                "Ulduar"
             ))
         end)
 
@@ -774,6 +891,12 @@ describe("addon integration", function()
             local ns = loader.load()
             local createFrame, frames = fake.newCreateFrame()
             local selections = { instances = {}, characters = {} }
+
+            local function newClassDisplay()
+                local classColor, classIconCoords = fake.newClassLook()
+                return ns.newClassDisplay({ classColor = classColor, classIconCoords = classIconCoords })
+            end
+
             local window = ns.newLockoutWindow({
                 createFrame = createFrame,
                 uiParent = {},
@@ -797,6 +920,10 @@ describe("addon integration", function()
                 }),
                 onRefreshRequested = function() end,
                 tooltip = fake.newTooltip(),
+                classDisplay = newClassDisplay(),
+                -- An empty journal: these tests are about click routing, and no
+                -- instance having an expansion keeps the cells out of the way.
+                expansions = ns.newExpansionIndex(fake.newEncounterJournal()),
                 onInstanceSelected = function(row)
                     selections.instances[#selections.instances + 1] = row
                 end,
