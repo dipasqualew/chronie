@@ -1,11 +1,16 @@
 ## Interface: 120005
 ## Title: wdp-wow
-## Notes: Says hello on login.
+## Notes: Cross-character raid and dungeon lockouts. /wdp locks
 ## Author: wdp
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: WdpWowDB
 
 src/Greeter.lua
 src/Logger.lua
 src/EventDispatcher.lua
+src/LockoutScanner.lua
+src/LockoutStore.lua
+src/LockoutTable.lua
+src/SlashRouter.lua
+src/LockoutWindow.lua
 Main.lua

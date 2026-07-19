@@ -50,14 +50,105 @@ function fake.newCreateFrame()
     return createFrame, frames, types
 end
 
+---A fake `GetSavedInstanceInfo` pair, driven by a list of readable tables rather
+---than the client's fourteen positional return values.
+---
+---Each entry accepts `{ name, reset, difficultyId, isRaid, maxPlayers, difficultyName }`.
+---`reset` is SECONDS REMAINING, exactly as the real API reports it. Any field may be
+---omitted so tests can exercise the degrade-to-default paths.
+---@param entries table[]?
+---@return fun(): integer getNumSavedInstances
+---@return fun(index: integer): ... getSavedInstanceInfo
+---@return table calls indexes the addon asked about, in order
+function fake.newSavedInstances(entries)
+    entries = entries or {}
+    local calls = {}
+
+    local function getNumSavedInstances()
+        return #entries
+    end
+
+    local function getSavedInstanceInfo(index)
+        calls[#calls + 1] = index
+        local entry = entries[index]
+        if not entry then
+            return nil
+        end
+        -- name, lockoutId, reset, difficultyId, locked, extended, instanceIDMostSig,
+        -- isRaid, maxPlayers, difficultyName, numEncounters, encounterProgress, ...
+        return entry.name,
+            entry.lockoutId or 0,
+            entry.reset,
+            entry.difficultyId,
+            entry.locked,
+            entry.extended,
+            0,
+            entry.isRaid,
+            entry.maxPlayers,
+            entry.difficultyName,
+            entry.numEncounters or 0,
+            entry.encounterProgress or 0
+    end
+
+    return getNumSavedInstances, getSavedInstanceInfo, calls
+end
+
+---A clock the test controls. `now()` is fixed until the test advances it.
+---@param start integer?
+---@return table `{ now = fun(): integer, set = fun(t: integer), advance = fun(by: integer) }`
+function fake.newClock(start)
+    local current = start or 0
+    local clock = {}
+
+    function clock.now()
+        return current
+    end
+
+    function clock.set(value)
+        current = value
+    end
+
+    function clock.advance(by)
+        current = current + by
+    end
+
+    return clock
+end
+
+---A deterministic stand-in for the global `date`, so expiry strings never depend on
+---the machine's timezone or locale.
+---@return fun(format: string, timestamp: integer): string
+---@return table calls `{ { format = string, timestamp = integer }, ... }`
+function fake.newFormatDate()
+    local calls = {}
+
+    local function formatDate(format, timestamp)
+        calls[#calls + 1] = { format = format, timestamp = timestamp }
+        return "<" .. format .. "@" .. tostring(timestamp) .. ">"
+    end
+
+    return formatDate, calls
+end
+
 ---A complete fake WowEnv plus the recordings the test asserts on.
----@param options table? `{ playerName = string? }`
----@return table env, table recorded `{ lines, frames, frameTypes, unitsAsked }`
+---
+---`options.db` may be shared between two `newEnv` calls to model two characters on
+---one account writing into the same SavedVariables table.
+---@param options table? `{ playerName, realmName, now, savedInstances, db }`
+---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
     local createFrame, frames, types = fake.newCreateFrame()
     local lines = {}
     local unitsAsked = {}
+    local raidInfoRequests = 0
+    local slashRegistrations = {}
+    local specialFrames = options.specialFrames or {}
+    local db = options.db or {}
+    local clock = options.clock or fake.newClock(options.now or 1000)
+    local formatDate, formatDateCalls = fake.newFormatDate()
+    local getNumSavedInstances, getSavedInstanceInfo =
+        fake.newSavedInstances(options.savedInstances)
 
     local env = {
         createFrame = createFrame,
@@ -68,6 +159,22 @@ function fake.newEnv(options)
             unitsAsked[#unitsAsked + 1] = unit
             return options.playerName
         end,
+        realmName = function()
+            return options.realmName
+        end,
+        now = clock.now,
+        formatDate = formatDate,
+        getNumSavedInstances = getNumSavedInstances,
+        getSavedInstanceInfo = getSavedInstanceInfo,
+        requestRaidInfo = function()
+            raidInfoRequests = raidInfoRequests + 1
+        end,
+        registerSlash = function(tokens, handler)
+            slashRegistrations[#slashRegistrations + 1] = { tokens = tokens, handler = handler }
+        end,
+        uiParent = options.uiParent or { name = "UIParent" },
+        specialFrames = specialFrames,
+        db = db,
     }
 
     return env, {
@@ -75,6 +182,15 @@ function fake.newEnv(options)
         frames = frames,
         frameTypes = types,
         unitsAsked = unitsAsked,
+        db = db,
+        clock = clock,
+        specialFrames = specialFrames,
+        formatDateCalls = formatDateCalls,
+        slashRegistrations = slashRegistrations,
+        ---@return integer how many times the addon asked the client for raid info
+        raidInfoRequests = function()
+            return raidInfoRequests
+        end,
     }
 end
 

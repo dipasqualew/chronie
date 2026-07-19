@@ -10,11 +10,21 @@ files["spec/**/*.lua"] = { std = "lua51+busted" }
 read_globals = {
     "CreateFrame",
     "UnitName",
+    "GetRealmName",
+    "GetNumSavedInstances",
+    "GetSavedInstanceInfo",
+    "RequestRaidInfo",
+    "UIParent",
+    "UISpecialFrames",
     "print",
+    "time", -- WoW aliases os.time / os.date as bare globals
+    "date",
 }
+
 
 globals = {
     "WdpWowDB", -- SavedVariables
+    "SlashCmdList",
 }
 
 exclude_files = { ".luacheckrc" }
