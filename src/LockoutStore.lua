@@ -72,6 +72,7 @@ function ns.newLockoutStore(deps)
                             maxPlayers = lockout.maxPlayers,
                             isRaid = lockout.isRaid,
                             expiry = lockout.expiry,
+                            encounters = lockout.encounters or {},
                         }
                     end
                 end

@@ -13,6 +13,8 @@ read_globals = {
     "GetRealmName",
     "GetNumSavedInstances",
     "GetSavedInstanceInfo",
+    "GetSavedInstanceEncounterInfo",
+    "GameTooltip",
     "RequestRaidInfo",
     "UIParent",
     "UISpecialFrames",

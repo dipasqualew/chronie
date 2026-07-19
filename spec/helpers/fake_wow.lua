@@ -56,16 +56,36 @@ end
 ---Each entry accepts `{ name, reset, difficultyId, isRaid, maxPlayers, difficultyName }`.
 ---`reset` is SECONDS REMAINING, exactly as the real API reports it. Any field may be
 ---omitted so tests can exercise the degrade-to-default paths.
+---
+---Bosses are declared on the entry as `bosses = { { name = "Ragnaros", killed = true }, ... }`,
+---and `numEncounters` is derived from that list. A test that wants the two to disagree —
+---a client reporting a count it cannot back with data — sets `numEncounters` explicitly.
+---`killed` is passed through verbatim, so `1`/`nil`/`false`/`true` all reach the addon as
+---the client would send them; a boss with no `name` models a gap in the client's data.
 ---@param entries table[]?
 ---@return fun(): integer getNumSavedInstances
 ---@return fun(index: integer): ... getSavedInstanceInfo
 ---@return table calls indexes the addon asked about, in order
+---@return fun(instanceIndex: integer, encounterIndex: integer): ... getSavedInstanceEncounterInfo
+---@return table encounterCalls `{ { instance = integer, encounter = integer }, ... }`
 function fake.newSavedInstances(entries)
     entries = entries or {}
     local calls = {}
+    local encounterCalls = {}
 
     local function getNumSavedInstances()
         return #entries
+    end
+
+    local function getSavedInstanceEncounterInfo(instanceIndex, encounterIndex)
+        encounterCalls[#encounterCalls + 1] = { instance = instanceIndex, encounter = encounterIndex }
+        local entry = entries[instanceIndex]
+        local boss = entry and entry.bosses and entry.bosses[encounterIndex]
+        if not boss then
+            return nil
+        end
+        -- bossName, fileDataID, isKilled
+        return boss.name, boss.fileDataID or 0, boss.killed
     end
 
     local function getSavedInstanceInfo(index)
@@ -86,11 +106,45 @@ function fake.newSavedInstances(entries)
             entry.isRaid,
             entry.maxPlayers,
             entry.difficultyName,
-            entry.numEncounters or 0,
+            entry.numEncounters or (entry.bosses and #entry.bosses) or 0,
             entry.encounterProgress or 0
     end
 
-    return getNumSavedInstances, getSavedInstanceInfo, calls
+    return getNumSavedInstances, getSavedInstanceInfo, calls, getSavedInstanceEncounterInfo, encounterCalls
+end
+
+---A stand-in for the global GameTooltip that records the lines it was asked to draw.
+---@return table tooltip, table recorded `{ owner, anchor, lines, shown, hidden }`
+function fake.newTooltip()
+    local recorded = { lines = {}, shown = 0, hidden = 0 }
+    local tooltip = {}
+
+    -- Declared with dot syntax and an ignored first parameter: the addon calls these
+    -- with `:` on the global tooltip, so `self` arrives whether or not it is wanted.
+    function tooltip.SetOwner(_, owner, anchor)
+        recorded.owner = owner
+        recorded.anchor = anchor
+        -- The real tooltip clears itself when it changes owner.
+        recorded.lines = {}
+    end
+
+    function tooltip.AddLine(_, text, ...)
+        recorded.lines[#recorded.lines + 1] = { text = text, color = { ... } }
+    end
+
+    function tooltip.AddDoubleLine(_, left, right, ...)
+        recorded.lines[#recorded.lines + 1] = { text = left, right = right, color = { ... } }
+    end
+
+    function tooltip.Show()
+        recorded.shown = recorded.shown + 1
+    end
+
+    function tooltip.Hide()
+        recorded.hidden = recorded.hidden + 1
+    end
+
+    return tooltip, recorded
 end
 
 ---A clock the test controls. `now()` is fixed until the test advances it.
@@ -147,8 +201,9 @@ function fake.newEnv(options)
     local db = options.db or {}
     local clock = options.clock or fake.newClock(options.now or 1000)
     local formatDate, formatDateCalls = fake.newFormatDate()
-    local getNumSavedInstances, getSavedInstanceInfo =
-        fake.newSavedInstances(options.savedInstances)
+    local getNumSavedInstances, getSavedInstanceInfo, savedInstanceCalls,
+        getSavedInstanceEncounterInfo, encounterCalls = fake.newSavedInstances(options.savedInstances)
+    local tooltip, tooltipRecorded = fake.newTooltip()
 
     local env = {
         createFrame = createFrame,
@@ -166,6 +221,8 @@ function fake.newEnv(options)
         formatDate = formatDate,
         getNumSavedInstances = getNumSavedInstances,
         getSavedInstanceInfo = getSavedInstanceInfo,
+        getSavedInstanceEncounterInfo = getSavedInstanceEncounterInfo,
+        tooltip = tooltip,
         requestRaidInfo = function()
             raidInfoRequests = raidInfoRequests + 1
         end,
@@ -187,6 +244,9 @@ function fake.newEnv(options)
         specialFrames = specialFrames,
         formatDateCalls = formatDateCalls,
         slashRegistrations = slashRegistrations,
+        tooltip = tooltipRecorded,
+        savedInstanceCalls = savedInstanceCalls,
+        encounterCalls = encounterCalls,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
             return raidInfoRequests

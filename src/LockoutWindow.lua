@@ -11,6 +11,7 @@ local _, ns = ...
 ---@field getRows fun(): LockoutRow[]
 ---@field lockoutTable LockoutTable
 ---@field onRefreshRequested fun() Asks the client for fresh lockout data.
+---@field tooltip table Global GameTooltip.
 
 local COLUMNS = {
     { key = "character", title = "Character", width = 140, sortable = true },
@@ -27,6 +28,11 @@ local HEIGHT = 440
 
 local EXPIRED_COLOR = { 0.45, 0.45, 0.45 }
 local ACTIVE_COLOR = { 1, 1, 1 }
+local KILLED_COLOR = { 0.5, 0.5, 0.5 }
+local ALIVE_COLOR = { 0.1, 1, 0.1 }
+
+---Index of the "Raid / Dungeon" column, whose cell owns the boss-list tooltip.
+local INSTANCE_COLUMN = 2
 
 ---@param deps LockoutWindowDeps
 ---@return LockoutWindow
@@ -72,6 +78,35 @@ function ns.newLockoutWindow(deps)
         return frame
     end
 
+    ---Boss list for the hovered row. Reads widget.row rather than closing over the
+    ---row, so re-sorting does not leave stale tooltips attached to recycled widgets.
+    ---@param anchor table
+    ---@param row LockoutRow?
+    local function showTooltip(anchor, row)
+        if not row then
+            return
+        end
+
+        local tooltip = deps.tooltip
+        tooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+        tooltip:AddLine(row.instance)
+        tooltip:AddLine(row.difficulty .. " — " .. row.character, 0.7, 0.7, 0.7)
+        tooltip:AddLine(lockoutTable.encounterSummary(row), 1, 0.82, 0)
+        tooltip:AddLine(" ")
+
+        for _, encounter in ipairs(row.encounters or {}) do
+            local color = encounter.killed and KILLED_COLOR or ALIVE_COLOR
+            local mark = encounter.killed and "Defeated" or "Alive"
+            tooltip:AddDoubleLine(encounter.name, mark, color[1], color[2], color[3], color[1], color[2], color[3])
+        end
+
+        tooltip:Show()
+    end
+
+    local function hideTooltip()
+        deps.tooltip:Hide()
+    end
+
     local function refresh()
         if not frame then
             return
@@ -88,18 +123,34 @@ function ns.newLockoutWindow(deps)
                 holder:SetPoint("TOPLEFT", 0, -(index - 1) * ROW_HEIGHT)
 
                 local offset = 0
+                local instanceOffset = 0
                 for columnIndex, column in ipairs(COLUMNS) do
                     local text = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                     text:SetPoint("LEFT", offset, 0)
                     text:SetWidth(column.width)
                     text:SetJustifyH("LEFT")
                     widget.texts[columnIndex] = text
+                    if columnIndex == INSTANCE_COLUMN then
+                        instanceOffset = offset
+                    end
                     offset = offset + column.width
                 end
+
+                -- Invisible hit area over the instance cell only, so the boss list
+                -- appears where the player is actually pointing.
+                local hover = createFrame("Button", nil, holder)
+                hover:SetSize(COLUMNS[INSTANCE_COLUMN].width, ROW_HEIGHT)
+                hover:SetPoint("LEFT", instanceOffset, 0)
+                hover:SetScript("OnEnter", function(self)
+                    showTooltip(self, widget.row)
+                end)
+                hover:SetScript("OnLeave", hideTooltip)
 
                 widget.holder = holder
                 rowPool[index] = widget
             end
+
+            widget.row = row
 
             local expired = lockoutTable.isExpired(row)
             local color = expired and EXPIRED_COLOR or ACTIVE_COLOR

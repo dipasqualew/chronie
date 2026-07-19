@@ -10,10 +10,12 @@ local addonName, ns = ...
 ---@field formatDate fun(format: string, timestamp: integer): string
 ---@field getNumSavedInstances fun(): integer
 ---@field getSavedInstanceInfo fun(index: integer): ...
+---@field getSavedInstanceEncounterInfo fun(instanceIndex: integer, encounterIndex: integer): ...
 ---@field requestRaidInfo fun()
 ---@field registerSlash fun(tokens: string[], handler: fun(text: string))
 ---@field uiParent table
 ---@field specialFrames string[]
+---@field tooltip table
 ---@field db table SavedVariables root.
 
 ---Composition root. Wires the modules together and starts listening.
@@ -27,6 +29,7 @@ function ns.main(env)
     local scanner = ns.newLockoutScanner({
         getNumSavedInstances = env.getNumSavedInstances,
         getSavedInstanceInfo = env.getSavedInstanceInfo,
+        getSavedInstanceEncounterInfo = env.getSavedInstanceEncounterInfo,
         now = env.now,
     })
     local store = ns.newLockoutStore({ db = env.db, now = env.now })
@@ -39,6 +42,7 @@ function ns.main(env)
         getRows = store.all,
         lockoutTable = lockoutTable,
         onRefreshRequested = env.requestRaidInfo,
+        tooltip = env.tooltip,
     })
 
     ---Only the logged-in character can be scanned, so identity is captured at save time.
@@ -103,10 +107,12 @@ if CreateFrame then
             formatDate = date,
             getNumSavedInstances = GetNumSavedInstances,
             getSavedInstanceInfo = GetSavedInstanceInfo,
+            getSavedInstanceEncounterInfo = GetSavedInstanceEncounterInfo,
             requestRaidInfo = RequestRaidInfo,
             registerSlash = registerSlash,
             uiParent = UIParent,
             specialFrames = UISpecialFrames,
+            tooltip = GameTooltip,
             db = WdpWowDB,
         })
     end)

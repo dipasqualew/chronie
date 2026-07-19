@@ -276,6 +276,116 @@ describe("addon integration", function()
             assert.equal("?-?", app.store.all()[1].character)
         end)
 
+        it("persists the boss list captured by the scan", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = NOW,
+                savedInstances = {
+                    {
+                        name = "Molten Core",
+                        reset = 3600,
+                        difficultyId = 4,
+                        isRaid = true,
+                        bosses = {
+                            { name = "Lucifron", killed = 1 },
+                            { name = "Magmadar", killed = nil },
+                            { name = "Ragnaros", killed = nil },
+                        },
+                    },
+                },
+            })
+
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            local stored = recorded.db.characters["Thrall-Ragnaros"]["Molten Core\0" .. 4]
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Magmadar", killed = false },
+                { name = "Ragnaros", killed = false },
+            }, stored.encounters)
+            assert.same(stored.encounters, app.store.all()[1].encounters)
+        end)
+
+        it("shows an alt's boss list while logged in on someone else", function()
+            -- The reason boss data is captured at scan time at all: encounter info is
+            -- unreadable for anyone but the logged-in character, so it has to be stored.
+            local db = {}
+            local _, thrallRecorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = NOW,
+                db = db,
+                savedInstances = {
+                    {
+                        name = "Molten Core",
+                        reset = 3600,
+                        difficultyId = 4,
+                        bosses = {
+                            { name = "Lucifron", killed = true },
+                            { name = "Ragnaros", killed = false },
+                        },
+                    },
+                },
+            })
+            thrallRecorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            -- Jaina's client reports only her own lockouts, and knows nothing of Thrall's.
+            local jainaApp, jainaRecorded = boot({
+                playerName = "Jaina",
+                realmName = "Draenor",
+                now = NOW,
+                db = db,
+                savedInstances = { { name = "Karazhan", reset = 7200, difficultyId = 3 } },
+            })
+            jainaRecorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            local byCharacter = {}
+            for _, row in ipairs(jainaApp.store.all()) do
+                byCharacter[row.character] = row
+            end
+
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Ragnaros", killed = false },
+            }, byCharacter["Thrall-Ragnaros"].encounters)
+            assert.equal("Molten Core", byCharacter["Thrall-Ragnaros"].instance)
+            -- Jaina's own lockout genuinely has no bosses to report.
+            assert.same({}, byCharacter["Jaina-Draenor"].encounters)
+        end)
+
+        it("summarises a stored boss list for a character that is not logged in", function()
+            local db = {}
+            local _, thrallRecorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = NOW,
+                db = db,
+                savedInstances = {
+                    {
+                        name = "Molten Core",
+                        reset = 3600,
+                        difficultyId = 4,
+                        bosses = {
+                            { name = "Lucifron", killed = true },
+                            { name = "Magmadar", killed = true },
+                            { name = "Ragnaros", killed = false },
+                        },
+                    },
+                },
+            })
+            thrallRecorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            local ns = loader.load()
+            local lockoutTable = ns.newLockoutTable({
+                now = fake.newClock(NOW).now,
+                formatDate = fake.newFormatDate(),
+            })
+            local jainaApp = boot({ playerName = "Jaina", realmName = "Draenor", now = NOW, db = db })
+
+            assert.equal("2/3 bosses defeated", lockoutTable.encounterSummary(jainaApp.store.all()[1]))
+        end)
+
         it("asks the client to refresh after a boss kill and on entering the world", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
@@ -371,6 +481,7 @@ describe("addon integration", function()
                     formatDate = fake.newFormatDate(),
                 }),
                 onRefreshRequested = function() end,
+                tooltip = fake.newTooltip(),
             })
 
             assert.is_function(window.toggle)
@@ -395,6 +506,7 @@ describe("addon integration", function()
                     formatDate = fake.newFormatDate(),
                 }),
                 onRefreshRequested = function() end,
+                tooltip = fake.newTooltip(),
             })
 
             assert.has_no.errors(window.refresh)
@@ -412,6 +524,30 @@ describe("addon integration", function()
             recorded.frame:fire("UPDATE_INSTANCE_INFO")
 
             assert.equal(1, #recorded.frames)
+        end)
+
+        it("touches the tooltip only once the player opens the window", function()
+            -- Boss data flowing in must not make the window reach for GameTooltip;
+            -- nothing is on screen to hover yet.
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                savedInstances = {
+                    {
+                        name = "Molten Core",
+                        reset = 3600,
+                        difficultyId = 4,
+                        bosses = { { name = "Lucifron", killed = true } },
+                    },
+                },
+            })
+
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            assert.equal(0, #recorded.tooltip.lines)
+            assert.equal(0, recorded.tooltip.shown)
+            assert.equal(0, recorded.tooltip.hidden)
+            assert.is_nil(recorded.tooltip.owner)
         end)
     end)
 

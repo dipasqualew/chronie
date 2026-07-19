@@ -9,14 +9,17 @@ describe("ns.newLockoutScanner", function()
     ---@param entries table[]? saved instances as the client would report them
     ---@param now integer? the fixed instant the scan happens at
     ---@return table scanner, table calls indexes the scanner asked about
+    ---@return table encounterCalls (instanceIndex, encounterIndex) pairs it asked about
     local function newScanner(entries, now)
-        local getNumSavedInstances, getSavedInstanceInfo, calls = fake.newSavedInstances(entries)
+        local getNumSavedInstances, getSavedInstanceInfo, calls, getSavedInstanceEncounterInfo, encounterCalls =
+            fake.newSavedInstances(entries)
         local scanner = ns.newLockoutScanner({
             getNumSavedInstances = getNumSavedInstances,
             getSavedInstanceInfo = getSavedInstanceInfo,
+            getSavedInstanceEncounterInfo = getSavedInstanceEncounterInfo,
             now = fake.newClock(now or NOW).now,
         })
-        return scanner, calls
+        return scanner, calls, encounterCalls
     end
 
     it("is exported by the addon files", function()
@@ -141,6 +144,7 @@ describe("ns.newLockoutScanner", function()
                 maxPlayers = 25,
                 isRaid = true,
                 expiry = NOW + 3600,
+                encounters = {},
             }, scanner.scan()[1])
         end)
 
@@ -234,6 +238,159 @@ describe("ns.newLockoutScanner", function()
             local scanner = newScanner({ { name = "Ulduar", reset = 3600 } })
 
             assert.not_equal(scanner.scan(), scanner.scan())
+        end)
+    end)
+
+    describe("capturing the boss list", function()
+        -- Encounter info is only readable for the logged-in character, so whatever the
+        -- scan captures here is all any other character will ever be able to show.
+        it("records every boss in journal order", function()
+            local scanner = newScanner({
+                {
+                    name = "Molten Core",
+                    reset = 3600,
+                    bosses = {
+                        { name = "Lucifron", killed = true },
+                        { name = "Magmadar", killed = false },
+                        { name = "Ragnaros", killed = false },
+                    },
+                },
+            })
+
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Magmadar", killed = false },
+                { name = "Ragnaros", killed = false },
+            }, scanner.scan()[1].encounters)
+        end)
+
+        it("normalises a truthy isKilled of 1 to boolean true", function()
+            local scanner = newScanner({
+                { name = "Molten Core", reset = 3600, bosses = { { name = "Lucifron", killed = 1 } } },
+            })
+
+            assert.equal(true, scanner.scan()[1].encounters[1].killed)
+        end)
+
+        it("normalises a nil isKilled to boolean false", function()
+            local scanner = newScanner({
+                { name = "Molten Core", reset = 3600, bosses = { { name = "Lucifron", killed = nil } } },
+            })
+
+            assert.equal(false, scanner.scan()[1].encounters[1].killed)
+        end)
+
+        it("normalises a false isKilled to boolean false", function()
+            local scanner = newScanner({
+                { name = "Molten Core", reset = 3600, bosses = { { name = "Lucifron", killed = false } } },
+            })
+
+            assert.equal(false, scanner.scan()[1].encounters[1].killed)
+        end)
+
+        it("keeps a true isKilled as boolean true", function()
+            local scanner = newScanner({
+                { name = "Molten Core", reset = 3600, bosses = { { name = "Lucifron", killed = true } } },
+            })
+
+            assert.equal(true, scanner.scan()[1].encounters[1].killed)
+        end)
+
+        it("gives a lockout with no encounters an empty list rather than nil", function()
+            local scanner = newScanner({
+                { name = "Ulduar", reset = 3600, numEncounters = 0 },
+            })
+
+            assert.same({}, scanner.scan()[1].encounters)
+        end)
+
+        it("gives a lockout whose numEncounters is nil an empty list rather than nil", function()
+            local scanner = newScanner({
+                { name = "Ulduar", reset = 3600, numEncounters = nil },
+            })
+
+            assert.same({}, scanner.scan()[1].encounters)
+        end)
+
+        it("asks for nothing when the client reports no encounters", function()
+            local scanner, _, encounterCalls = newScanner({
+                { name = "Ulduar", reset = 3600, numEncounters = 0 },
+            })
+
+            scanner.scan()
+
+            assert.same({}, encounterCalls)
+        end)
+
+        it("skips a boss the client cannot name, keeping the list contiguous", function()
+            -- The client occasionally reports a count it cannot back with a name.
+            local scanner = newScanner({
+                {
+                    name = "Molten Core",
+                    reset = 3600,
+                    numEncounters = 3,
+                    bosses = {
+                        { name = "Lucifron", killed = true },
+                        { name = nil, killed = true },
+                        { name = "Ragnaros", killed = false },
+                    },
+                },
+            })
+
+            local encounters = scanner.scan()[1].encounters
+
+            assert.equal(2, #encounters)
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Ragnaros", killed = false },
+            }, encounters)
+        end)
+
+        it("queries each boss with its own instance and encounter index", function()
+            -- Transposing these two indexes is the easy mistake, and it would silently
+            -- attach one raid's bosses to another.
+            local scanner, _, encounterCalls = newScanner({
+                { name = "Molten Core", reset = 3600, bosses = { { name = "Lucifron" }, { name = "Ragnaros" } } },
+                { name = "Onyxia's Lair", reset = 7200, bosses = { { name = "Onyxia" } } },
+            })
+
+            scanner.scan()
+
+            assert.same({
+                { instance = 1, encounter = 1 },
+                { instance = 1, encounter = 2 },
+                { instance = 2, encounter = 1 },
+            }, encounterCalls)
+        end)
+
+        it("gives each instance its own boss list", function()
+            local scanner = newScanner({
+                {
+                    name = "Molten Core",
+                    reset = 3600,
+                    bosses = { { name = "Lucifron", killed = true }, { name = "Ragnaros", killed = false } },
+                },
+                { name = "Onyxia's Lair", reset = 7200, bosses = { { name = "Onyxia", killed = true } } },
+            })
+
+            local lockouts = scanner.scan()
+
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Ragnaros", killed = false },
+            }, lockouts[1].encounters)
+            assert.same({ { name = "Onyxia", killed = true } }, lockouts[2].encounters)
+        end)
+
+        it("does not read encounters for an entry it skipped", function()
+            local scanner, _, encounterCalls = newScanner({
+                { name = "Molten Core", reset = 0, bosses = { { name = "Lucifron" } } },
+                { name = "Onyxia's Lair", reset = 7200, bosses = { { name = "Onyxia" } } },
+            })
+
+            scanner.scan()
+
+            assert.same({ { instance = 2, encounter = 1 } }, encounterCalls)
         end)
     end)
 end)

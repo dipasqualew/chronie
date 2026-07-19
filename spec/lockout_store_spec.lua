@@ -222,6 +222,7 @@ describe("ns.newLockoutStore", function()
                 maxPlayers = 25,
                 isRaid = true,
                 expiry = NOW + 3600,
+                encounters = {},
             }, store.all()[1])
         end)
 
@@ -249,6 +250,23 @@ describe("ns.newLockoutStore", function()
             assert.equal(3, #rows)
         end)
 
+        it("carries the boss list through a save and read round trip", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", {
+                lockout({
+                    encounters = {
+                        { name = "Lucifron", killed = true },
+                        { name = "Ragnaros", killed = false },
+                    },
+                }),
+            })
+
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Ragnaros", killed = false },
+            }, store.all()[1].encounters)
+        end)
+
         it("hands back copies, so mutating a row does not corrupt the db", function()
             local store = newStore()
             store.save("Thrall-Ragnaros", { lockout() })
@@ -256,6 +274,102 @@ describe("ns.newLockoutStore", function()
             store.all()[1].instance = "Tampered"
 
             assert.equal("Ulduar", store.all()[1].instance)
+        end)
+    end)
+
+    describe("lockouts saved before boss tracking existed", function()
+        -- Players already have a populated SavedVariables file whose entries have no
+        -- encounter list at all. Those rows must still read back cleanly.
+        it("reads a legacy lockout's encounters as an empty list, not nil", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            local row = store.all()[1]
+
+            assert.is_table(row.encounters)
+            assert.same({}, row.encounters)
+        end)
+
+        it("reads a legacy lockout written straight into the db as an empty list", function()
+            local db = {
+                characters = {
+                    ["Thrall-Ragnaros"] = {
+                        ["Ulduar\0" .. 4] = {
+                            instance = "Ulduar",
+                            difficultyId = 4,
+                            difficulty = "25 Player",
+                            maxPlayers = 25,
+                            isRaid = true,
+                            expiry = NOW + 3600,
+                        },
+                    },
+                },
+            }
+            local store = newStore({ db = db })
+
+            assert.same({}, store.all()[1].encounters)
+        end)
+
+        it("does not mix legacy and tracked rows up", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", { lockout({ instance = "Ulduar" }) })
+            store.save("Jaina-Ragnaros", {
+                lockout({ instance = "Karazhan", encounters = { { name = "Attumen", killed = true } } }),
+            })
+
+            local byCharacter = {}
+            for _, row in ipairs(store.all()) do
+                byCharacter[row.character] = row.encounters
+            end
+
+            assert.same({}, byCharacter["Thrall-Ragnaros"])
+            assert.same({ { name = "Attumen", killed = true } }, byCharacter["Jaina-Ragnaros"])
+        end)
+    end)
+
+    describe("replacing an existing lockout", function()
+        it("replaces the boss list when the later scan wins", function()
+            local store = newStore()
+
+            store.save("Thrall-Ragnaros", {
+                lockout({ expiry = NOW + 100, encounters = { { name = "Lucifron", killed = false } } }),
+                lockout({
+                    expiry = NOW + 5000,
+                    encounters = {
+                        { name = "Lucifron", killed = true },
+                        { name = "Ragnaros", killed = false },
+                    },
+                }),
+            })
+
+            local rows = store.all()
+            assert.equal(1, #rows)
+            assert.same({
+                { name = "Lucifron", killed = true },
+                { name = "Ragnaros", killed = false },
+            }, rows[1].encounters)
+        end)
+
+        it("keeps the earlier boss list when the later entry expires sooner", function()
+            local store = newStore()
+
+            store.save("Thrall-Ragnaros", {
+                lockout({ expiry = NOW + 5000, encounters = { { name = "Ragnaros", killed = true } } }),
+                lockout({ expiry = NOW + 100, encounters = { { name = "Lucifron", killed = false } } }),
+            })
+
+            assert.same({ { name = "Ragnaros", killed = true } }, store.all()[1].encounters)
+        end)
+
+        it("drops the previous boss list when the character is re-saved", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", {
+                lockout({ encounters = { { name = "Lucifron", killed = true } } }),
+            })
+
+            store.save("Thrall-Ragnaros", { lockout({ encounters = {} }) })
+
+            assert.same({}, store.all()[1].encounters)
         end)
     end)
 

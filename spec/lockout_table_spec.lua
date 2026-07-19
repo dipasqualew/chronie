@@ -283,4 +283,69 @@ describe("ns.newLockoutTable", function()
             assert.equal(NOW - DAY, calls[1].timestamp)
         end)
     end)
+
+    describe("encounterSummary", function()
+        local NO_DATA = "No boss data — log in on this character to record it"
+
+        ---@param encounters table[]?
+        ---@return string
+        local function summarise(encounters)
+            local lockoutTable = newTable()
+            local entry = row("Thrall", "Molten Core")
+            entry.encounters = encounters
+            return lockoutTable.encounterSummary(entry)
+        end
+
+        ---@param killedFlags boolean[]
+        ---@return table[]
+        local function bosses(killedFlags)
+            local encounters = {}
+            for index, killed in ipairs(killedFlags) do
+                encounters[index] = { name = "Boss " .. index, killed = killed }
+            end
+            return encounters
+        end
+
+        it("counts every boss as defeated when the raid is cleared", function()
+            assert.equal("3/3 bosses defeated", summarise(bosses({ true, true, true })))
+        end)
+
+        it("counts none when the raid is untouched", function()
+            assert.equal("0/8 bosses defeated", summarise(bosses({
+                false, false, false, false, false, false, false, false,
+            })))
+        end)
+
+        it("counts a partial clear", function()
+            assert.equal("3/8 bosses defeated", summarise(bosses({
+                true, false, true, false, true, false, false, false,
+            })))
+        end)
+
+        it("counts a single killed boss", function()
+            assert.equal("1/1 bosses defeated", summarise(bosses({ true })))
+        end)
+
+        it("counts a single surviving boss", function()
+            assert.equal("0/1 bosses defeated", summarise(bosses({ false })))
+        end)
+
+        it("does not care where in the list the kills fall", function()
+            assert.equal(
+                summarise(bosses({ true, true, false, false })),
+                summarise(bosses({ false, true, false, true }))
+            )
+        end)
+
+        -- Rows saved before boss tracking shipped have no list at all; rows for an
+        -- instance the client reported no encounters for have an empty one. Neither
+        -- can be shown as "0/0", which would read as an untouched raid.
+        it("reports missing data when the row has no encounter list", function()
+            assert.equal(NO_DATA, summarise(nil))
+        end)
+
+        it("reports missing data when the encounter list is empty", function()
+            assert.equal(NO_DATA, summarise({}))
+        end)
+    end)
 end)

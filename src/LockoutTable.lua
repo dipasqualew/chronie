@@ -4,6 +4,7 @@ local _, ns = ...
 ---@field sort fun(rows: LockoutRow[], key: "character"|"instance", ascending: boolean): LockoutRow[]
 ---@field isExpired fun(row: LockoutRow): boolean
 ---@field formatExpiry fun(row: LockoutRow): string
+---@field encounterSummary fun(row: LockoutRow): string
 
 ---@class LockoutTableDeps
 ---@field now fun(): integer
@@ -32,6 +33,26 @@ function ns.newLockoutTable(deps)
 
     return {
         isExpired = isExpired,
+
+        ---"3/8 bosses defeated", or a clear notice when the lockout predates boss
+        ---tracking (rows saved before this feature shipped carry no encounter list).
+        ---@param row LockoutRow
+        ---@return string
+        encounterSummary = function(row)
+            local encounters = row.encounters
+            if not encounters or #encounters == 0 then
+                return "No boss data — log in on this character to record it"
+            end
+
+            local killed = 0
+            for _, encounter in ipairs(encounters) do
+                if encounter.killed then
+                    killed = killed + 1
+                end
+            end
+
+            return string.format("%d/%d bosses defeated", killed, #encounters)
+        end,
 
         ---Sorts a copy; the caller's list is left alone.
         ---@param rows LockoutRow[]
