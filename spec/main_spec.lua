@@ -54,12 +54,23 @@ describe("addon integration", function()
             assert.equal("|cff33ff99wdp-wow|r: Hello World, Thrall!", recorded.lines[1])
         end)
 
-        it("asks the environment for the player unit", function()
+        -- Login asks twice on purpose: once for the greeting, once more to build the
+        -- "Name-Realm" key the roster is written under.
+        it("asks the environment for the player unit, once to greet and once to identify", function()
             local _, recorded = boot({ playerName = "Thrall" })
 
             recorded.frame:fire("PLAYER_LOGIN")
 
-            assert.same({ "player" }, recorded.unitsAsked)
+            assert.same({ "player", "player" }, recorded.unitsAsked)
+        end)
+
+        it("asks the environment for the player's class and level", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.same({ "player" }, recorded.classAsked)
+            assert.same({ "player" }, recorded.levelAsked)
         end)
 
         it("registers PLAYER_LOGIN on a single frame", function()
@@ -111,6 +122,76 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_LOGIN")
 
             assert.equal(1, recorded.raidInfoRequests())
+        end)
+    end)
+
+    describe("the roster", function()
+        local NOW = 1700000000
+
+        it("writes the logged-in character into db.roster under Name-Realm", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                class = "Warrior",
+                classFile = "WARRIOR",
+                level = 60,
+                now = NOW,
+            })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.same({
+                class = "Warrior",
+                classFile = "WARRIOR",
+                level = 60,
+                lastSeen = NOW,
+            }, recorded.db.roster["Thrall-Ragnaros"])
+        end)
+
+        it("writes nothing into the roster before the player logs in", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            assert.is_nil(next(recorded.db.roster))
+        end)
+
+        -- Requirement of the drill-down views: a character with nothing saved must
+        -- still be listable, so it can be shown as available for its alts' instances.
+        it("lists a character that logged in with no saved instances at all", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                savedInstances = {},
+            })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            assert.same({}, app.store.all())
+            assert.equal(1, #app.store.characters())
+            assert.equal("Thrall-Ragnaros", app.store.characters()[1].character)
+        end)
+
+        it("keeps two characters in the roster of one shared db", function()
+            local db = {}
+            local _, firstRecorded = boot({ playerName = "Thrall", realmName = "Ragnaros", db = db })
+            firstRecorded.frame:fire("PLAYER_LOGIN")
+
+            local secondApp, secondRecorded = boot({ playerName = "Jaina", realmName = "Draenor", db = db })
+            secondRecorded.frame:fire("PLAYER_LOGIN")
+
+            local names = {}
+            for index, entry in ipairs(secondApp.store.characters()) do
+                names[index] = entry.character
+            end
+            assert.same({ "Jaina-Draenor", "Thrall-Ragnaros" }, names)
+        end)
+
+        it("uses the same placeholder identity the scan does when names are unknown", function()
+            local app, recorded = boot({ playerName = nil, realmName = nil })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.equal("?-?", app.store.characters()[1].character)
         end)
     end)
 
@@ -548,6 +629,226 @@ describe("addon integration", function()
             assert.equal(0, recorded.tooltip.shown)
             assert.equal(0, recorded.tooltip.hidden)
             assert.is_nil(recorded.tooltip.owner)
+        end)
+    end)
+
+    describe("drilling down from the lockout window", function()
+        local NOW = 1700000000
+
+        ---Boot, capture one lockout, and open the window so its rows exist.
+        ---@param options table?
+        ---@return table app, table recorded
+        local function opened(options)
+            options = options or {}
+            options.playerName = options.playerName or "Thrall"
+            options.realmName = options.realmName or "Ragnaros"
+            options.now = options.now or NOW
+            options.savedInstances = options.savedInstances or {
+                { name = "Ulduar", reset = 3600, difficultyId = 4, isRaid = true, difficultyName = "25 Player" },
+            }
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+            app.window.toggle()
+            return app, recorded
+        end
+
+        ---The invisible hit areas laid over a single row's cells, in the order the
+        ---window creates them: the instance cell first, then the character cell.
+        ---@param recorded table
+        ---@return table instanceCell, table characterCell
+        local function rowCells(recorded)
+            local holders = {}
+            for _, frame in ipairs(recorded.frames) do
+                if frame.parent and frame.parent.frameName == nil and frame.frameType == "Button" then
+                    holders[#holders + 1] = frame
+                end
+            end
+            -- The header's sort buttons are parented to the named window frame, so only
+            -- the two cell buttons of the single row survive that filter.
+            assert.equal(2, #holders)
+            return holders[1], holders[2]
+        end
+
+        ---@param recorded table
+        ---@param name string
+        ---@return string[] the texts that frame's font strings carry
+        local function textsOf(recorded, name)
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == name then
+                    local texts = {}
+                    for index, fontString in ipairs(frame.fontStrings) do
+                        texts[index] = fontString.text
+                    end
+                    return texts
+                end
+            end
+            return {}
+        end
+
+        ---@param texts string[]
+        ---@param wanted string
+        ---@return boolean
+        local function contains(texts, wanted)
+            for _, text in ipairs(texts) do
+                if text == wanted then
+                    return true
+                end
+            end
+            return false
+        end
+
+        it("opens neither detail window until a cell is clicked", function()
+            local app = opened()
+
+            assert.is_false(app.instanceWindow.isShown())
+            assert.is_false(app.characterWindow.isShown())
+        end)
+
+        it("opens the instance detail window when the instance cell is clicked", function()
+            local app, recorded = opened()
+            local instanceCell = rowCells(recorded)
+
+            instanceCell:run("OnClick")
+
+            assert.is_true(app.instanceWindow.isShown())
+            assert.is_false(app.characterWindow.isShown())
+        end)
+
+        it("titles the instance detail window with the instance and difficulty", function()
+            local app, recorded = opened()
+            local instanceCell = rowCells(recorded)
+
+            instanceCell:run("OnClick")
+
+            assert.is_true(app.instanceWindow.isShown())
+            assert.is_true(contains(
+                textsOf(recorded, "WdpWowInstanceDetailWindow"),
+                "Ulduar — 25 Player"
+            ))
+        end)
+
+        it("opens the character detail window when the character cell is clicked", function()
+            local app, recorded = opened()
+            local _, characterCell = rowCells(recorded)
+
+            characterCell:run("OnClick")
+
+            assert.is_true(app.characterWindow.isShown())
+            assert.is_false(app.instanceWindow.isShown())
+        end)
+
+        it("titles the character detail window with the clicked character", function()
+            local app, recorded = opened()
+            local _, characterCell = rowCells(recorded)
+
+            characterCell:run("OnClick")
+
+            assert.is_true(app.characterWindow.isShown())
+            assert.is_true(contains(
+                textsOf(recorded, "WdpWowCharacterDetailWindow"),
+                "Thrall-Ragnaros"
+            ))
+        end)
+
+        it("gives the two detail windows separate frames and Escape-close entries", function()
+            local _, recorded = opened()
+            local instanceCell, characterCell = rowCells(recorded)
+
+            instanceCell:run("OnClick")
+            characterCell:run("OnClick")
+
+            assert.same({
+                "WdpWowLockoutWindow",
+                "WdpWowInstanceDetailWindow",
+                "WdpWowCharacterDetailWindow",
+            }, recorded.specialFrames)
+        end)
+    end)
+
+    describe("the lockout window's callbacks in isolation", function()
+        ---Builds a window with fake deps only, so the click handlers can be driven
+        ---without booting the whole addon.
+        ---@return table window, table frames, table selections `{ instances, characters }`
+        local function newWindow()
+            local ns = loader.load()
+            local createFrame, frames = fake.newCreateFrame()
+            local selections = { instances = {}, characters = {} }
+            local window = ns.newLockoutWindow({
+                createFrame = createFrame,
+                uiParent = {},
+                specialFrames = {},
+                getRows = function()
+                    return {
+                        {
+                            character = "Thrall-Ragnaros",
+                            instance = "Ulduar",
+                            difficulty = "25 Player",
+                            difficultyId = 4,
+                            isRaid = true,
+                            expiry = 3600,
+                            encounters = {},
+                        },
+                    }
+                end,
+                lockoutTable = ns.newLockoutTable({
+                    now = fake.newClock(0).now,
+                    formatDate = fake.newFormatDate(),
+                }),
+                onRefreshRequested = function() end,
+                tooltip = fake.newTooltip(),
+                onInstanceSelected = function(row)
+                    selections.instances[#selections.instances + 1] = row
+                end,
+                onCharacterSelected = function(character)
+                    selections.characters[#selections.characters + 1] = character
+                end,
+            })
+            return window, frames, selections
+        end
+
+        ---@param frames table[]
+        ---@return table instanceCell, table characterCell
+        local function rowCells(frames)
+            local cells = {}
+            for _, frame in ipairs(frames) do
+                if frame.frameType == "Button" and frame.parent and frame.parent.frameName == nil then
+                    cells[#cells + 1] = frame
+                end
+            end
+            assert.equal(2, #cells)
+            return cells[1], cells[2]
+        end
+
+        it("hands the clicked row to onInstanceSelected", function()
+            local window, frames, selections = newWindow()
+            window.toggle()
+            local instanceCell = rowCells(frames)
+
+            instanceCell:run("OnClick")
+
+            assert.equal(1, #selections.instances)
+            assert.equal("Ulduar", selections.instances[1].instance)
+            assert.equal(4, selections.instances[1].difficultyId)
+        end)
+
+        it("hands only the character name to onCharacterSelected", function()
+            local window, frames, selections = newWindow()
+            window.toggle()
+            local _, characterCell = rowCells(frames)
+
+            characterCell:run("OnClick")
+
+            assert.same({ "Thrall-Ragnaros" }, selections.characters)
+        end)
+
+        it("selects nothing until a cell is actually clicked", function()
+            local window, _, selections = newWindow()
+
+            window.toggle()
+
+            assert.same({}, selections.instances)
+            assert.same({}, selections.characters)
         end)
     end)
 

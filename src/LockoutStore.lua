@@ -4,9 +4,17 @@ local _, ns = ...
 ---@class LockoutRow : Lockout
 ---@field character string "Name-Realm".
 
+---What we know about a character outside of its lockouts.
+---@class CharacterInfo
+---@field class string? Localised class name.
+---@field classFile string? Non-localised class token, e.g. "WARRIOR".
+---@field level integer?
+
 ---@class LockoutStore
 ---@field save fun(character: string, lockouts: Lockout[])
 ---@field all fun(): LockoutRow[]
+---@field remember fun(character: string, info: CharacterInfo?)
+---@field characters fun(): RosterEntry[]
 
 ---@class LockoutStoreDeps
 ---@field db table SavedVariables table; mutated in place so the client persists it.
@@ -31,8 +39,62 @@ function ns.newLockoutStore(deps)
     local staleAfter = deps.staleAfterSeconds or DEFAULT_STALE_AFTER
 
     db.characters = db.characters or {}
+    -- Kept beside `characters` rather than inside it: lockout entries are replaced
+    -- wholesale on every scan, and roster facts must outlive that.
+    db.roster = db.roster or {}
 
     return {
+        ---Records that `character` exists, so it can be listed as "available" for
+        ---instances it has never been locked to. Called when the character logs in,
+        ---which is the only moment the client can tell us about it.
+        ---@param character string
+        ---@param info CharacterInfo?
+        remember = function(character, info)
+            info = info or {}
+            local entry = db.roster[character] or {}
+            entry.class = info.class or entry.class
+            entry.classFile = info.classFile or entry.classFile
+            entry.level = info.level or entry.level
+            entry.lastSeen = now()
+            db.roster[character] = entry
+        end,
+
+        ---Every character the addon has ever seen, whether it was remembered at login
+        ---or only ever showed up as the owner of a lockout.
+        ---@return RosterEntry[]
+        characters = function()
+            local seen = {}
+            local list = {}
+
+            local function add(character)
+                if seen[character] then
+                    return
+                end
+                seen[character] = true
+                local entry = db.roster[character] or {}
+                list[#list + 1] = {
+                    character = character,
+                    class = entry.class,
+                    classFile = entry.classFile,
+                    level = entry.level,
+                    lastSeen = entry.lastSeen,
+                }
+            end
+
+            for character in pairs(db.roster) do
+                add(character)
+            end
+            for character in pairs(db.characters) do
+                add(character)
+            end
+
+            table.sort(list, function(left, right)
+                return left.character < right.character
+            end)
+
+            return list
+        end,
+
         ---Replaces what we know about `character`, keeping only the latest lockout per
         ---instance+difficulty. Only the logged-in character can be scanned, so this
         ---never touches other characters' entries.

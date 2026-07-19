@@ -5,6 +5,8 @@ local addonName, ns = ...
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
 ---@field print fun(message: string)
 ---@field unitName fun(unit: string): string?
+---@field unitClass fun(unit: string): string?, string? Localised class name, class token.
+---@field unitLevel fun(unit: string): integer?
 ---@field realmName fun(): string
 ---@field now fun(): integer
 ---@field formatDate fun(format: string, timestamp: integer): string
@@ -35,6 +37,22 @@ function ns.main(env)
     local store = ns.newLockoutStore({ db = env.db, now = env.now })
     local lockoutTable = ns.newLockoutTable({ now = env.now, formatDate = env.formatDate })
 
+    local details = ns.newLockoutDetails({ now = env.now, lockoutTable = lockoutTable })
+
+    local instanceWindow = ns.newDetailWindow({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        specialFrames = env.specialFrames,
+        name = "WdpWowInstanceDetailWindow",
+    })
+
+    local characterWindow = ns.newDetailWindow({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        specialFrames = env.specialFrames,
+        name = "WdpWowCharacterDetailWindow",
+    })
+
     local window = ns.newLockoutWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
@@ -43,6 +61,14 @@ function ns.main(env)
         lockoutTable = lockoutTable,
         onRefreshRequested = env.requestRaidInfo,
         tooltip = env.tooltip,
+
+        onInstanceSelected = function(row)
+            instanceWindow.show(details.forInstance(details.descriptorOf(row), store.characters(), store.all()))
+        end,
+
+        onCharacterSelected = function(character)
+            characterWindow.show(details.forCharacter(character, store.all()))
+        end,
     })
 
     ---Only the logged-in character can be scanned, so identity is captured at save time.
@@ -64,6 +90,14 @@ function ns.main(env)
 
     dispatcher.on("PLAYER_LOGIN", function()
         logger.info(greeter.greet(env.unitName("player")))
+        -- Recorded even when this character has no lockouts at all, so it can still be
+        -- listed as available for instances its siblings are saved to.
+        local class, classFile = env.unitClass("player")
+        store.remember(currentCharacter(), {
+            class = class,
+            classFile = classFile,
+            level = env.unitLevel("player"),
+        })
         env.requestRaidInfo()
     end)
 
@@ -75,7 +109,16 @@ function ns.main(env)
 
     env.registerSlash({ "/wdp" }, router.dispatch)
 
-    return { window = window, store = store, scanner = scanner, router = router, logger = logger }
+    return {
+        window = window,
+        instanceWindow = instanceWindow,
+        characterWindow = characterWindow,
+        details = details,
+        store = store,
+        scanner = scanner,
+        router = router,
+        logger = logger,
+    }
 end
 
 -- Only auto-start inside the game; under test the harness calls ns.main itself.
@@ -102,6 +145,8 @@ if CreateFrame then
             createFrame = CreateFrame,
             print = print,
             unitName = UnitName,
+            unitClass = UnitClass,
+            unitLevel = UnitLevel,
             realmName = GetRealmName,
             now = time,
             formatDate = date,

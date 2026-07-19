@@ -3,18 +3,72 @@
 ---EventDispatcherDeps), so no monkey patching is needed anywhere.
 local fake = {}
 
+---A stand-in for a FontString. Records the last text and colour it was given, and
+---whether it is currently visible, which is all any assertion needs.
+---@return table
+function fake.newFontString()
+    local fontString = { shown = true, points = {} }
+
+    function fontString:SetText(text)
+        self.text = text
+    end
+
+    function fontString:SetTextColor(r, g, b)
+        self.color = { r, g, b }
+    end
+
+    function fontString:SetPoint(...)
+        self.points[#self.points + 1] = { ... }
+    end
+
+    function fontString:SetWidth(width)
+        self.width = width
+    end
+
+    function fontString:SetJustifyH(justify)
+        self.justify = justify
+    end
+
+    function fontString:Show()
+        self.shown = true
+    end
+
+    function fontString:Hide()
+        self.shown = false
+    end
+
+    function fontString:IsShown()
+        return self.shown
+    end
+
+    return fontString
+end
+
 ---A stand-in for a WoW Frame. Records what the addon asked of it and lets the
 ---test drive the frame's scripts by hand.
+---
+---The layout setters are deliberately no-ops that only record: the addon's geometry
+---is not behaviour worth asserting, but calling them must not blow up either.
 ---@return table
 function fake.newFrame()
     local frame = {
         scripts = {},
         registered = {},
         registeredOrder = {},
+        fontStrings = {},
+        points = {},
+        shown = false,
     }
 
     function frame:SetScript(name, handler)
         self.scripts[name] = handler
+    end
+
+    ---Invoke a script the addon installed, as the client would.
+    ---@param name string
+    function frame:run(name, ...)
+        local handler = assert(self.scripts[name], "no " .. name .. " script was set")
+        return handler(self, ...)
     end
 
     function frame:RegisterEvent(event)
@@ -29,20 +83,68 @@ function fake.newFrame()
         return onEvent(self, event, ...)
     end
 
+    function frame:CreateFontString()
+        local fontString = fake.newFontString()
+        self.fontStrings[#self.fontStrings + 1] = fontString
+        return fontString
+    end
+
+    function frame:SetPoint(...)
+        self.points[#self.points + 1] = { ... }
+    end
+
+    function frame:Show()
+        self.shown = true
+    end
+
+    function frame:Hide()
+        self.shown = false
+    end
+
+    function frame:IsShown()
+        return self.shown
+    end
+
+    for _, name in ipairs({
+        "SetSize",
+        "SetWidth",
+        "SetHeight",
+        "SetFrameStrata",
+        "SetToplevel",
+        "SetBackdrop",
+        "SetMovable",
+        "EnableMouse",
+        "RegisterForDrag",
+        "SetScrollChild",
+        "SetHighlightTexture",
+        "SetJustifyH",
+        "Raise",
+        "StartMoving",
+        "StopMovingOrSizing",
+    }) do
+        frame[name] = function() end
+    end
+
     return frame
 end
 
----A `createFrame` fake that hands back frames and remembers them.
----@return fun(frameType: string): table createFrame
+---A `createFrame` fake that hands back frames and remembers them. The frame's
+---requested global name is stored on the frame itself, so a test can pick one
+---window out of several by name rather than by creation order.
+---@return fun(frameType: string, name: string?, parent: table?, template: string?): table createFrame
 ---@return table frames created frames, in creation order
 ---@return table types frame types requested, in creation order
 function fake.newCreateFrame()
     local frames = {}
     local types = {}
 
-    local function createFrame(frameType)
+    local function createFrame(frameType, name, parent, template)
         types[#types + 1] = frameType
         local frame = fake.newFrame()
+        frame.frameType = frameType
+        frame.frameName = name
+        frame.parent = parent
+        frame.template = template
         frames[#frames + 1] = frame
         return frame
     end
@@ -188,13 +290,15 @@ end
 ---
 ---`options.db` may be shared between two `newEnv` calls to model two characters on
 ---one account writing into the same SavedVariables table.
----@param options table? `{ playerName, realmName, now, savedInstances, db }`
+---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db }`
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
     local createFrame, frames, types = fake.newCreateFrame()
     local lines = {}
     local unitsAsked = {}
+    local classAsked = {}
+    local levelAsked = {}
     local raidInfoRequests = 0
     local slashRegistrations = {}
     local specialFrames = options.specialFrames or {}
@@ -213,6 +317,14 @@ function fake.newEnv(options)
         unitName = function(unit)
             unitsAsked[#unitsAsked + 1] = unit
             return options.playerName
+        end,
+        unitClass = function(unit)
+            classAsked[#classAsked + 1] = unit
+            return options.class, options.classFile
+        end,
+        unitLevel = function(unit)
+            levelAsked[#levelAsked + 1] = unit
+            return options.level
         end,
         realmName = function()
             return options.realmName
@@ -239,6 +351,8 @@ function fake.newEnv(options)
         frames = frames,
         frameTypes = types,
         unitsAsked = unitsAsked,
+        classAsked = classAsked,
+        levelAsked = levelAsked,
         db = db,
         clock = clock,
         specialFrames = specialFrames,

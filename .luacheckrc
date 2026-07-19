@@ -10,6 +10,8 @@ files["spec/**/*.lua"] = { std = "lua51+busted" }
 read_globals = {
     "CreateFrame",
     "UnitName",
+    "UnitClass",
+    "UnitLevel",
     "GetRealmName",
     "GetNumSavedInstances",
     "GetSavedInstanceInfo",

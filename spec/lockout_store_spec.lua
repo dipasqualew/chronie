@@ -7,14 +7,15 @@ describe("ns.newLockoutStore", function()
     local NOW = 1700000000
     local WEEK = 7 * 24 * 60 * 60
 
-    ---@param options table? `{ db = table?, now = integer?, staleAfterSeconds = integer? }`
+    ---@param options table? `{ db = table?, now = integer?, staleAfterSeconds = integer?, clock = table? }`
     ---@return table store, table db the SavedVariables table it writes into
     local function newStore(options)
         options = options or {}
         local db = options.db or {}
+        local clock = options.clock or fake.newClock(options.now or NOW)
         local store = ns.newLockoutStore({
             db = db,
-            now = fake.newClock(options.now or NOW).now,
+            now = clock.now,
             staleAfterSeconds = options.staleAfterSeconds,
         })
         return store, db
@@ -67,12 +68,215 @@ describe("ns.newLockoutStore", function()
             assert.equal(existing, db.characters)
         end)
 
+        it("creates the roster table when the db is empty", function()
+            local _, db = newStore()
+
+            assert.is_table(db.roster)
+        end)
+
+        it("keeps the existing roster table when the db was already populated", function()
+            local existing = { ["Thrall-Ragnaros"] = { level = 60 } }
+            local db = { roster = existing }
+
+            newStore({ db = db })
+
+            assert.equal(existing, db.roster)
+            assert.equal(60, db.roster["Thrall-Ragnaros"].level)
+        end)
+
         it("leaves unrelated keys in the db alone", function()
             local db = { version = 3 }
 
             newStore({ db = db })
 
             assert.equal(3, db.version)
+        end)
+    end)
+
+    describe("remember", function()
+        it("records what the client knows about the character", function()
+            local store, db = newStore()
+
+            store.remember("Thrall-Ragnaros", { class = "Warrior", classFile = "WARRIOR", level = 60 })
+
+            assert.same({
+                class = "Warrior",
+                classFile = "WARRIOR",
+                level = 60,
+                lastSeen = NOW,
+            }, db.roster["Thrall-Ragnaros"])
+        end)
+
+        it("stamps lastSeen from the injected clock", function()
+            local clock = fake.newClock(NOW)
+            local store, db = newStore({ clock = clock })
+            store.remember("Thrall-Ragnaros", { level = 60 })
+
+            clock.advance(1234)
+            store.remember("Thrall-Ragnaros", { level = 61 })
+
+            assert.equal(NOW + 1234, db.roster["Thrall-Ragnaros"].lastSeen)
+        end)
+
+        it("records a character the client could tell us nothing about", function()
+            local store, db = newStore()
+
+            store.remember("Thrall-Ragnaros")
+
+            assert.equal(NOW, db.roster["Thrall-Ragnaros"].lastSeen)
+        end)
+
+        it("updates the fields a later login does supply", function()
+            local store, db = newStore()
+            store.remember("Thrall-Ragnaros", { class = "Warrior", classFile = "WARRIOR", level = 60 })
+
+            store.remember("Thrall-Ragnaros", { level = 61 })
+
+            assert.equal(61, db.roster["Thrall-Ragnaros"].level)
+        end)
+
+        -- The client occasionally has not resolved class or level yet at login; a
+        -- blank answer must not erase what an earlier login already established.
+        it("keeps previously known fields the second call omits", function()
+            local store, db = newStore()
+            store.remember("Thrall-Ragnaros", { class = "Warrior", classFile = "WARRIOR", level = 60 })
+
+            store.remember("Thrall-Ragnaros", {})
+
+            local entry = db.roster["Thrall-Ragnaros"]
+            assert.equal("Warrior", entry.class)
+            assert.equal("WARRIOR", entry.classFile)
+            assert.equal(60, entry.level)
+        end)
+
+        it("adds to the roster rather than replacing it", function()
+            local store, db = newStore()
+            store.remember("Thrall-Ragnaros", { level = 60 })
+
+            store.remember("Jaina-Draenor", { level = 70 })
+
+            assert.equal(60, db.roster["Thrall-Ragnaros"].level)
+            assert.equal(70, db.roster["Jaina-Draenor"].level)
+        end)
+
+        it("persists across a fresh store built on the same db", function()
+            local db = {}
+            local first = newStore({ db = db })
+            first.remember("Thrall-Ragnaros", { class = "Warrior" })
+
+            local second = newStore({ db = db })
+
+            assert.equal("Warrior", second.characters()[1].class)
+        end)
+
+        it("leaves the lockout table alone", function()
+            local store, db = newStore()
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            store.remember("Thrall-Ragnaros", { level = 60 })
+
+            assert.equal(1, #store.all())
+            assert.is_table(db.characters["Thrall-Ragnaros"])
+        end)
+    end)
+
+    describe("characters", function()
+        ---@param entries RosterEntry[]
+        ---@return string[]
+        local function names(entries)
+            local list = {}
+            for index, entry in ipairs(entries) do
+                list[index] = entry.character
+            end
+            return list
+        end
+
+        it("returns an empty list on a fresh db", function()
+            local store = newStore()
+
+            assert.same({}, store.characters())
+        end)
+
+        -- The reason `remember` exists: a freshly levelled alt with no lockouts still
+        -- has to appear in the detail views, marked as available for everything.
+        it("includes a character that was remembered but has no lockouts", function()
+            local store = newStore()
+
+            store.remember("Thrall-Ragnaros", { level = 60 })
+
+            assert.same({ "Thrall-Ragnaros" }, names(store.characters()))
+        end)
+
+        it("includes a character that only ever showed up as a lockout owner", function()
+            local store = newStore()
+
+            store.save("Jaina-Draenor", { lockout() })
+
+            assert.same({ "Jaina-Draenor" }, names(store.characters()))
+        end)
+
+        it("unions the roster with the lockout owners", function()
+            local store = newStore()
+            store.remember("Thrall-Ragnaros", { level = 60 })
+            store.save("Jaina-Draenor", { lockout() })
+
+            assert.same({ "Jaina-Draenor", "Thrall-Ragnaros" }, names(store.characters()))
+        end)
+
+        it("lists a character in both places only once", function()
+            local store = newStore()
+            store.remember("Thrall-Ragnaros", { level = 60 })
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            assert.same({ "Thrall-Ragnaros" }, names(store.characters()))
+        end)
+
+        it("sorts by name", function()
+            local store = newStore()
+            store.remember("Thrall-Ragnaros")
+            store.remember("Alleria-Draenor")
+            store.save("Sylvanas-Draenor", { lockout() })
+            store.save("Jaina-Draenor", { lockout() })
+
+            assert.same({
+                "Alleria-Draenor",
+                "Jaina-Draenor",
+                "Sylvanas-Draenor",
+                "Thrall-Ragnaros",
+            }, names(store.characters()))
+        end)
+
+        it("carries the remembered facts onto the entry", function()
+            local store = newStore()
+
+            store.remember("Thrall-Ragnaros", { class = "Warrior", classFile = "WARRIOR", level = 60 })
+
+            assert.same({
+                character = "Thrall-Ragnaros",
+                class = "Warrior",
+                classFile = "WARRIOR",
+                level = 60,
+                lastSeen = NOW,
+            }, store.characters()[1])
+        end)
+
+        it("leaves the facts blank for a character that was never remembered", function()
+            local store = newStore()
+
+            store.save("Jaina-Draenor", { lockout() })
+
+            assert.same({ character = "Jaina-Draenor" }, store.characters()[1])
+        end)
+
+        it("still lists a character whose lockouts were all emptied", function()
+            local store = newStore()
+            store.remember("Thrall-Ragnaros", { level = 60 })
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            store.save("Thrall-Ragnaros", {})
+
+            assert.same({}, store.all())
+            assert.same({ "Thrall-Ragnaros" }, names(store.characters()))
         end)
     end)
 

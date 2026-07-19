@@ -2,7 +2,7 @@
 ## Title: wdp-wow
 ## Notes: Cross-character raid and dungeon lockouts. /wdp locks
 ## Author: wdp
-## Version: 0.3.0
+## Version: 0.4.0
 ## SavedVariables: WdpWowDB
 
 src/Greeter.lua
@@ -11,6 +11,8 @@ src/EventDispatcher.lua
 src/LockoutScanner.lua
 src/LockoutStore.lua
 src/LockoutTable.lua
+src/LockoutDetails.lua
 src/SlashRouter.lua
+src/DetailWindow.lua
 src/LockoutWindow.lua
 Main.lua

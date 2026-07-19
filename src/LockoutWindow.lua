@@ -12,6 +12,8 @@ local _, ns = ...
 ---@field lockoutTable LockoutTable
 ---@field onRefreshRequested fun() Asks the client for fresh lockout data.
 ---@field tooltip table Global GameTooltip.
+---@field onCharacterSelected fun(character: string) Drill down into one character.
+---@field onInstanceSelected fun(row: LockoutRow) Drill down into one instance+difficulty.
 
 local COLUMNS = {
     { key = "character", title = "Character", width = 140, sortable = true },
@@ -22,7 +24,7 @@ local COLUMNS = {
 
 local ROW_HEIGHT = 16
 local PADDING = 12
-local HEADER_Y = -34
+local HEADER_Y = -52
 local WIDTH = 730
 local HEIGHT = 440
 
@@ -33,6 +35,8 @@ local ALIVE_COLOR = { 0.1, 1, 0.1 }
 
 ---Index of the "Raid / Dungeon" column, whose cell owns the boss-list tooltip.
 local INSTANCE_COLUMN = 2
+---Index of the "Character" column.
+local CHARACTER_COLUMN = 1
 
 ---@param deps LockoutWindowDeps
 ---@return LockoutWindow
@@ -68,6 +72,10 @@ function ns.newLockoutWindow(deps)
         local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -14)
         title:SetText("Lockouts")
+
+        local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        hint:SetPoint("TOP", 0, -32)
+        hint:SetText("Click a character or an instance for details")
 
         local close = createFrame("Button", nil, frame, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", -6, -6)
@@ -123,28 +131,46 @@ function ns.newLockoutWindow(deps)
                 holder:SetPoint("TOPLEFT", 0, -(index - 1) * ROW_HEIGHT)
 
                 local offset = 0
-                local instanceOffset = 0
+                local offsets = {}
                 for columnIndex, column in ipairs(COLUMNS) do
                     local text = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                     text:SetPoint("LEFT", offset, 0)
                     text:SetWidth(column.width)
                     text:SetJustifyH("LEFT")
                     widget.texts[columnIndex] = text
-                    if columnIndex == INSTANCE_COLUMN then
-                        instanceOffset = offset
-                    end
+                    offsets[columnIndex] = offset
                     offset = offset + column.width
                 end
 
-                -- Invisible hit area over the instance cell only, so the boss list
-                -- appears where the player is actually pointing.
-                local hover = createFrame("Button", nil, holder)
-                hover:SetSize(COLUMNS[INSTANCE_COLUMN].width, ROW_HEIGHT)
-                hover:SetPoint("LEFT", instanceOffset, 0)
-                hover:SetScript("OnEnter", function(self)
+                ---Invisible hit area over a single cell, so both the tooltip and the
+                ---drill-down land where the player is actually pointing.
+                ---@param columnIndex integer
+                ---@return table
+                local function cellButton(columnIndex)
+                    local button = createFrame("Button", nil, holder)
+                    button:SetSize(COLUMNS[columnIndex].width, ROW_HEIGHT)
+                    button:SetPoint("LEFT", offsets[columnIndex], 0)
+                    button:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                    return button
+                end
+
+                local instanceCell = cellButton(INSTANCE_COLUMN)
+                instanceCell:SetScript("OnEnter", function(self)
                     showTooltip(self, widget.row)
                 end)
-                hover:SetScript("OnLeave", hideTooltip)
+                instanceCell:SetScript("OnLeave", hideTooltip)
+                instanceCell:SetScript("OnClick", function()
+                    if widget.row then
+                        deps.onInstanceSelected(widget.row)
+                    end
+                end)
+
+                local characterCell = cellButton(CHARACTER_COLUMN)
+                characterCell:SetScript("OnClick", function()
+                    if widget.row then
+                        deps.onCharacterSelected(widget.row.character)
+                    end
+                end)
 
                 widget.holder = holder
                 rowPool[index] = widget
