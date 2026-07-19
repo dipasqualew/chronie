@@ -1,0 +1,11 @@
+## Interface: 120005
+## Title: wdp-wow
+## Notes: Says hello on login.
+## Author: wdp
+## Version: 0.1.0
+## SavedVariables: WdpWowDB
+
+src/Greeter.lua
+src/Logger.lua
+src/EventDispatcher.lua
+Main.lua
