@@ -78,8 +78,8 @@ describe("addon integration", function()
         it("registers PLAYER_LOGIN on a single frame", function()
             local _, recorded = boot({ playerName = "Thrall" })
 
-            assert.equal(1, #recorded.frames)
-            assert.same({ "Frame" }, recorded.frameTypes)
+            assert.equal(2, #recorded.frames)
+            assert.same({ "Frame", "Button" }, recorded.frameTypes)
             assert.equal(1, recorded.frame.registered.PLAYER_LOGIN)
         end)
 
@@ -543,9 +543,9 @@ describe("addon integration", function()
         it("builds no frames until it is toggled", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
-            -- Only the event dispatcher's frame exists; the window is lazy.
-            assert.equal(1, #recorded.frames)
-            assert.same({ "Frame" }, recorded.frameTypes)
+            -- Only the event dispatcher and the always-visible minimap button exist.
+            assert.equal(2, #recorded.frames)
+            assert.same({ "Frame", "Button" }, recorded.frameTypes)
         end)
 
         it("constructs standalone from fake deps without touching the frame API", function()
@@ -606,7 +606,7 @@ describe("addon integration", function()
 
             recorded.frame:fire("UPDATE_INSTANCE_INFO")
 
-            assert.equal(1, #recorded.frames)
+            assert.equal(2, #recorded.frames)
         end)
 
         it("touches the tooltip only once the player opens the window", function()
@@ -1033,7 +1033,7 @@ describe("addon integration", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             -- Only the event dispatcher's frame exists; the session panel is lazy.
-            assert.equal(1, #recorded.frames)
+            assert.equal(2, #recorded.frames)
         end)
 
         -- Every zone is a session now, so the panel comes up in the open world too — the
@@ -1358,6 +1358,18 @@ describe("addon integration", function()
     end)
 
     describe("the /wdp sessions slash command", function()
+        it("opens from the minimap button", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == "WdpWowMinimapButton" then
+                    frame:run("OnClick")
+                end
+            end
+
+            assert.is_true(app.sessionWindow.isShown())
+        end)
+
         it("opens the session window on the first call and closes it on the second", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
@@ -1386,11 +1398,77 @@ describe("addon integration", function()
 
         it("stays lazy until the slash is used", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
-            assert.equal(1, #recorded.frames)
+            assert.equal(2, #recorded.frames)
 
             recorded.slashRegistrations[1].handler("sessions")
 
             assert.is_true(#recorded.frames > 1)
+        end)
+
+        it("filters the table and its totals as character, day, and location are edited", function()
+            local db = {
+                sessions = {
+                    {
+                        id = "a",
+                        character = "Thrall-Ragnaros",
+                        classFile = "WARRIOR",
+                        day = "2026-07-25",
+                        instance = "Ulduar",
+                        difficulty = "25 Player",
+                        endedAt = 1000,
+                        lootValue = 10000,
+                        goldDiff = 0,
+                        transmogs = {},
+                        currencies = { { id = 1, name = "Honor", amount = 10 } },
+                        reputation = { { faction = "Argent Dawn", amount = 20 } },
+                    },
+                    {
+                        id = "b",
+                        character = "Jaina-Draenor",
+                        classFile = "MAGE",
+                        day = "2026-07-24",
+                        instance = "Deadmines",
+                        difficulty = "Normal",
+                        endedAt = 900,
+                        lootValue = 20000,
+                        goldDiff = 0,
+                        transmogs = {},
+                        currencies = { { id = 1, name = "Honor", amount = 30 } },
+                        reputation = { { faction = "Argent Dawn", amount = 40 } },
+                    },
+                },
+            }
+            local _, recorded = boot({ db = db, now = 1100 })
+            recorded.slashRegistrations[1].handler("sessions")
+
+            local edits = {}
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameType == "EditBox" then
+                    edits[#edits + 1] = frame
+                end
+            end
+            edits[1]:SetText("Thrall")
+            edits[1]:run("OnTextChanged", true)
+            edits[2]:SetText("07-25")
+            edits[2]:run("OnTextChanged", true)
+            edits[3]:SetText("Uld")
+            edits[3]:run("OnTextChanged", true)
+
+            local visible = {}
+            for _, frame in ipairs(recorded.frames) do
+                if frame.shown then
+                    for _, text in ipairs(frame.fontStrings) do
+                        if text.shown then
+                            visible[text.text] = true
+                        end
+                    end
+                end
+            end
+            assert.is_true(visible["+10"])
+            assert.is_true(visible["+20"])
+            assert.is_nil(visible["+30"])
+            assert.is_nil(visible["+40"])
+            assert.is_nil(visible["Deadmines"])
         end)
 
         it("names sessions and report in the usage text", function()
@@ -1471,7 +1549,7 @@ describe("addon integration", function()
 
         it("stays lazy until the slash is used", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
-            assert.equal(1, #recorded.frames)
+            assert.equal(2, #recorded.frames)
 
             recorded.slashRegistrations[1].handler("report")
 
@@ -1509,7 +1587,7 @@ describe("addon integration", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             -- Only the dispatcher frame; toggling results is what first builds the panel.
-            assert.equal(1, #recorded.frames)
+            assert.equal(2, #recorded.frames)
 
             recorded.slashRegistrations[1].handler("results")
 

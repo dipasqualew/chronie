@@ -8,20 +8,24 @@ local _, ns = ...
 ---@field formatDuration fun(seconds: integer): string
 ---@field formatReputation fun(gains: ReputationGain[]): string
 ---@field formatCurrencies fun(gains: CurrencyGain[]): string
+---@field filter fun(records: SessionRecord[], filters: SessionFilters?): SessionRecord[]
+
+---@class SessionFilters
+---@field character string?
+---@field day string?
+---@field location string?
 
 ---@class SessionTableDeps
 ---@field classDisplay ClassDisplay
 ---@field formatMoney fun(copper: integer): string
 ---@field retainDays integer? Only used in the title. Default 7.
+---@field onSessionSelected fun(record: SessionRecord)?
 
 local ROW_COLOR = { 1, 1, 1 }
 local TOTAL_COLOR = { 1, 0.82, 0 }
 
 local NONE = "—"
 local MINUTE, HOUR = 60, 3600
-
----How many entries fit in the reputation/currency cell before it is abbreviated.
-local NAMED_SHOWN = 2
 
 local DAY_COLUMNS = {
     { title = "Character", width = 148 },
@@ -57,53 +61,34 @@ local function formatDuration(seconds)
     return string.format("%d:%02d", math.floor(seconds / MINUTE), seconds % MINUTE)
 end
 
----Names the first couple of entries in full, then counts the rest, so a busy cell reads
----"Argent Dawn +40, Timbermaw Hold +10, +2 more" without overflowing.
----@param entries table[]?
----@param label fun(entry: table): string
----@return string
-local function summarise(entries, label)
-    entries = entries or {}
-    if #entries == 0 then
-        return NONE
-    end
-
-    local parts = {}
-    for index = 1, math.min(#entries, NAMED_SHOWN) do
-        parts[#parts + 1] = label(entries[index])
-    end
-    if #entries > NAMED_SHOWN then
-        parts[#parts + 1] = "+" .. (#entries - NAMED_SHOWN) .. " more"
-    end
-
-    return table.concat(parts, ", ")
-end
-
 ---@param gains ReputationGain[]?
 ---@return string
 local function formatReputation(gains)
-    return summarise(gains, function(gain)
-        return gain.faction .. " +" .. gain.amount
-    end)
+    local total = 0
+    for _, gain in ipairs(gains or {}) do
+        total = total + (gain.amount or 0)
+    end
+    return #(gains or {}) > 0 and ((total >= 0 and "+" or "") .. total) or NONE
 end
 
 ---@param gains CurrencyGain[]?
 ---@return string
 local function formatCurrencies(gains)
-    return summarise(gains, function(gain)
-        return gain.name .. " " .. (gain.amount >= 0 and "+" or "") .. gain.amount
-    end)
+    local total = 0
+    for _, gain in ipairs(gains or {}) do
+        total = total + (gain.amount or 0)
+    end
+    return #(gains or {}) > 0 and ((total >= 0 and "+" or "") .. total) or NONE
 end
 
----Folds a record into a running tally. Reputation and currency collapse to a name
----count, which is all a totals line has room to say.
+---Folds a record into a running tally.
 ---@param tally table?
 ---@param record SessionRecord
 ---@return table
 local function accumulate(tally, record)
     tally = tally or {
         sessions = 0, seconds = 0, lootValue = 0, goldDiff = 0, transmog = 0,
-        factions = {}, factionCount = 0, currencies = {}, currencyCount = 0,
+        reputation = 0, reputationSeen = false, currency = 0, currencySeen = false,
     }
     tally.sessions = tally.sessions + 1
     tally.seconds = tally.seconds + (record.seconds or 0)
@@ -112,20 +97,44 @@ local function accumulate(tally, record)
     tally.transmog = tally.transmog + #(record.transmogs or {})
 
     for _, gain in ipairs(record.reputation or {}) do
-        if not tally.factions[gain.faction] then
-            tally.factions[gain.faction] = true
-            tally.factionCount = tally.factionCount + 1
-        end
+        tally.reputation = tally.reputation + (gain.amount or 0)
+        tally.reputationSeen = true
     end
 
     for _, gain in ipairs(record.currencies or {}) do
-        if not tally.currencies[gain.id] then
-            tally.currencies[gain.id] = true
-            tally.currencyCount = tally.currencyCount + 1
-        end
+        tally.currency = tally.currency + (gain.amount or 0)
+        tally.currencySeen = true
     end
 
     return tally
+end
+
+---@param value string?
+---@return string
+local function normalise(value)
+    return string.lower((value or ""):match("^%s*(.-)%s*$"))
+end
+
+---@param records SessionRecord[]
+---@param filters SessionFilters?
+---@return SessionRecord[]
+local function filter(records, filters)
+    filters = filters or {}
+    local character = normalise(filters.character)
+    local day = normalise(filters.day)
+    local location = normalise(filters.location)
+    local filtered = {}
+
+    for _, record in ipairs(records or {}) do
+        local matchesCharacter = character == "" or string.find(normalise(record.character), character, 1, true)
+        local matchesDay = day == "" or string.find(normalise(record.day), day, 1, true)
+        local matchesLocation = location == "" or string.find(normalise(record.instance), location, 1, true)
+        if matchesCharacter and matchesDay and matchesLocation then
+            filtered[#filtered + 1] = record
+        end
+    end
+
+    return filtered
 end
 
 ---@param count integer
@@ -141,6 +150,7 @@ function ns.newSessionTable(deps)
     local classDisplay = deps.classDisplay
     local formatMoney = deps.formatMoney
     local retainDays = deps.retainDays or 7
+    local onSessionSelected = deps.onSessionSelected
 
     ---@param record SessionRecord
     ---@return DetailRow
@@ -158,6 +168,9 @@ function ns.newSessionTable(deps)
                 formatReputation(record.reputation),
             },
             color = ROW_COLOR,
+            onClick = onSessionSelected and function()
+                onSessionSelected(record)
+            end or nil,
         }
     end
 
@@ -196,8 +209,8 @@ function ns.newSessionTable(deps)
                     formatMoney(tally.lootValue),
                     formatMoney(tally.goldDiff),
                     tostring(tally.transmog),
-                    tally.currencyCount > 0 and plural(tally.currencyCount, "currency") or NONE,
-                    tally.factionCount > 0 and plural(tally.factionCount, "faction") or NONE,
+                    tally.currencySeen and ((tally.currency >= 0 and "+" or "") .. tally.currency) or NONE,
+                    tally.reputationSeen and ((tally.reputation >= 0 and "+" or "") .. tally.reputation) or NONE,
                 },
                 color = TOTAL_COLOR,
             }
@@ -210,6 +223,7 @@ function ns.newSessionTable(deps)
         formatDuration = formatDuration,
         formatReputation = formatReputation,
         formatCurrencies = formatCurrencies,
+        filter = filter,
 
         ---@param records SessionRecord[] Newest first, as SessionLog.all returns them.
         ---@return DetailSpec

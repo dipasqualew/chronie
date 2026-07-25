@@ -45,6 +45,7 @@ read_globals = {
     "LOOT_ITEM_SELF",
     "LOOT_ITEM_SELF_MULTIPLE",
     "UIParent",
+    "Minimap",
     "UISpecialFrames",
     "print",
     "time", -- WoW aliases os.time / os.date as bare globals

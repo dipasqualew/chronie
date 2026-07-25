@@ -183,6 +183,48 @@ describe("ns.newDetailWindow", function()
     end)
 
     describe("rendering", function()
+        it("renders filters and reports user edits", function()
+            local window, frames = newWindow()
+            local changed
+            local filtered = spec({})
+            filtered.filters = { { key = "character", label = "Character", value = "Thrall" } }
+            filtered.onFilterChanged = function(key, value)
+                changed = { key, value }
+            end
+
+            window.show(filtered)
+
+            local edit
+            for _, frame in ipairs(frames) do
+                if frame.frameType == "EditBox" then
+                    edit = frame
+                end
+            end
+            assert.is_not_nil(edit)
+            assert.equal("Thrall", edit.text)
+            edit:SetText("Jaina")
+            edit:run("OnTextChanged", true)
+            assert.same({ "character", "Jaina" }, changed)
+        end)
+
+        it("runs a row's click action", function()
+            local window, frames = newWindow()
+            local clicked = 0
+            local clickable = spec({ { "Thrall-Ragnaros", "Available" } })
+            clickable.sections[1].rows[1].onClick = function()
+                clicked = clicked + 1
+            end
+
+            window.show(clickable)
+
+            for _, frame in ipairs(frames) do
+                if frame.frameType == "Button" and frame.scripts.OnClick and frame.shown then
+                    frame:run("OnClick")
+                end
+            end
+            assert.equal(1, clicked)
+        end)
+
         it("draws the spec's title", function()
             local window, frames = newWindow()
 

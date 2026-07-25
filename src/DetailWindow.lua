@@ -17,6 +17,7 @@ local ROW_HEIGHT = 16
 local HEADING_HEIGHT = 24
 local PADDING = 12
 local BODY_TOP = -40
+local FILTERED_BODY_TOP = -76
 local WIDTH = 840
 local HEIGHT = 470
 
@@ -31,7 +32,10 @@ function ns.newDetailWindow(deps)
 
     ---@type table[]
     local linePool = {}
-    local frame, scrollChild, title
+    ---@type table[]
+    local filterPool = {}
+    local frame, scroll, scrollChild, title
+    local onFilterChanged
 
     local function buildFrame()
         frame = createFrame("Frame", deps.name, deps.uiParent, "BackdropTemplate")
@@ -63,13 +67,41 @@ function ns.newDetailWindow(deps)
 
         table.insert(deps.specialFrames, deps.name)
 
-        local scroll = createFrame("ScrollFrame", deps.name .. "Scroll", frame, "UIPanelScrollFrameTemplate")
+        scroll = createFrame("ScrollFrame", deps.name .. "Scroll", frame, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", PADDING + 8, BODY_TOP)
         scroll:SetPoint("BOTTOMRIGHT", -(PADDING + 24), PADDING + 4)
 
         scrollChild = createFrame("Frame", nil, scroll)
         scrollChild:SetSize(WIDTH - PADDING * 2, 1)
         scroll:SetScrollChild(scrollChild)
+    end
+
+    ---@param index integer
+    ---@return table
+    local function filterAt(index)
+        local control = filterPool[index]
+        if control then
+            return control
+        end
+
+        local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("TOPLEFT", PADDING + (index - 1) * 265, -43)
+
+        local box = createFrame("EditBox", nil, frame, "InputBoxTemplate")
+        box:SetSize(165, 20)
+        box:SetPoint("TOPLEFT", PADDING + 75 + (index - 1) * 265, -38)
+        box:SetAutoFocus(false)
+        box:SetScript("OnEscapePressed", box.ClearFocus)
+        box:SetScript("OnEnterPressed", box.ClearFocus)
+        box:SetScript("OnTextChanged", function(self, user)
+            if user and onFilterChanged and control.key then
+                onFilterChanged(control.key, self:GetText() or "")
+            end
+        end)
+
+        control = { label = label, box = box }
+        filterPool[index] = control
+        return control
     end
 
     ---Lines are recycled across renders, so every field a previous spec may have set
@@ -88,7 +120,16 @@ function ns.newDetailWindow(deps)
         local heading = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         heading:SetPoint("LEFT", 0, 0)
 
-        line = { holder = holder, heading = heading, cells = {} }
+        local hit = createFrame("Button", nil, holder)
+        hit:SetAllPoints(holder)
+        hit:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        hit:SetScript("OnClick", function()
+            if line.action then
+                line.action()
+            end
+        end)
+
+        line = { holder = holder, heading = heading, cells = {}, hit = hit }
         linePool[index] = line
         return line
     end
@@ -130,6 +171,26 @@ function ns.newDetailWindow(deps)
     ---@param spec DetailSpec
     local function render(spec)
         title:SetText(spec.title)
+        onFilterChanged = spec.onFilterChanged
+        scroll:ClearAllPoints()
+        scroll:SetPoint("TOPLEFT", PADDING + 8, #(spec.filters or {}) > 0 and FILTERED_BODY_TOP or BODY_TOP)
+        scroll:SetPoint("BOTTOMRIGHT", -(PADDING + 24), PADDING + 4)
+
+        for index, filter in ipairs(spec.filters or {}) do
+            local control = filterAt(index)
+            control.key = filter.key
+            control.label:SetText(filter.label)
+            if control.box:GetText() ~= (filter.value or "") then
+                control.box:SetText(filter.value or "")
+            end
+            control.label:Show()
+            control.box:Show()
+        end
+        for index = #(spec.filters or {}) + 1, #filterPool do
+            filterPool[index].key = nil
+            filterPool[index].label:Hide()
+            filterPool[index].box:Hide()
+        end
 
         local used = 0
         local y = 0
@@ -142,6 +203,8 @@ function ns.newDetailWindow(deps)
             line.holder:SetHeight(height)
             line.holder:SetPoint("TOPLEFT", 0, -y)
             line.holder:Show()
+            line.action = nil
+            line.hit:Hide()
             y = y + height
             return line
         end
@@ -173,6 +236,10 @@ function ns.newDetailWindow(deps)
                     local line = nextLine(ROW_HEIGHT)
                     line.heading:Hide()
                     paintCells(line, row.cells, section.columns, row.color)
+                    line.action = row.onClick
+                    if row.onClick then
+                        line.hit:Show()
+                    end
                 end
             end
 

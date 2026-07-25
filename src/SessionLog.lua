@@ -138,6 +138,11 @@ function ns.newSessionLog(deps)
         local copy = {}
         for index, event in ipairs(events or {}) do
             copy[index] = { id = event.id, at = event.at }
+            for _, key in ipairs({ "sourceID", "appearanceID", "newAppearance" }) do
+                if event[key] ~= nil then
+                    copy[index][key] = event[key]
+                end
+            end
         end
         return copy
     end

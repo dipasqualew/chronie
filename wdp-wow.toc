@@ -2,7 +2,7 @@
 ## Title: wdp-wow
 ## Notes: Cross-character lockouts and per-zone session/event history. /wdp locks
 ## Author: wdp
-## Version: 0.6.0
+## Version: 0.7.0
 ## SavedVariables: WdpWowDB
 
 src/Greeter.lua
@@ -19,6 +19,7 @@ src/DetailWindow.lua
 src/LockoutWindow.lua
 src/SessionTally.lua
 src/ResultsWindow.lua
+src/MinimapButton.lua
 src/SessionLog.lua
 src/SessionTracker.lua
 src/SessionTable.lua

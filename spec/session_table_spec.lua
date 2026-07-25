@@ -5,11 +5,13 @@ describe("ns.newSessionTable", function()
     local ns = loader.load()
 
     ---@return SessionTable
-    local function newTable()
+    local function newTable(options)
+        options = options or {}
         local classColor, classIconCoords = fake.newClassLook()
         return ns.newSessionTable({
             classDisplay = ns.newClassDisplay({ classColor = classColor, classIconCoords = classIconCoords }),
             formatMoney = ns.formatMoney,
+            onSessionSelected = options.onSessionSelected,
         })
     end
 
@@ -96,6 +98,37 @@ describe("ns.newSessionTable", function()
         end)
     end)
 
+    describe("filtering", function()
+        local records = {
+            record({ character = "Thrall-Ragnaros", day = "2026-07-25", instance = "Ulduar" }),
+            record({ id = "b", character = "Jaina-Draenor", day = "2026-07-24", instance = "Deadmines" }),
+            record({ id = "c", character = "Thrall-Ragnaros", day = "2026-07-24", instance = "Westfall" }),
+        }
+
+        it("filters by character, day, or location without case sensitivity", function()
+            local sessions = newTable()
+
+            assert.equal(2, #sessions.filter(records, { character = "thrall" }))
+            assert.equal(2, #sessions.filter(records, { day = "07-24" }))
+            assert.equal(1, #sessions.filter(records, { location = "DEAD" }))
+        end)
+
+        it("combines all active filters", function()
+            local filtered = newTable().filter(records, {
+                character = "thrall",
+                day = "2026-07-24",
+                location = "west",
+            })
+
+            assert.equal(1, #filtered)
+            assert.equal("c", filtered[1].id)
+        end)
+
+        it("keeps every record when filters are blank", function()
+            assert.equal(3, #newTable().filter(records, { character = "  " }))
+        end)
+    end)
+
     describe("a day's rows", function()
         it("gives each day its own section, in the order the records arrive", function()
             local spec = newTable().spec({
@@ -134,8 +167,8 @@ describe("ns.newSessionTable", function()
                 "1g 50s 0c",
                 "1g 20s 0c",
                 "2",
-                "Timewarped Badge +15",
-                "Argent Dawn +40",
+                "+15",
+                "+40",
             }, spec.sections[2].rows[1].cells)
         end)
 
@@ -155,6 +188,20 @@ describe("ns.newSessionTable", function()
             local spec = newTable().spec({ record({ currencies = {} }) })
 
             assert.equal("—", spec.sections[2].rows[1].cells[8])
+        end)
+
+        it("opens the selected session when its row is clicked", function()
+            local selected
+            local visit = record()
+            local spec = newTable({
+                onSessionSelected = function(value)
+                    selected = value
+                end,
+            }).spec({ visit })
+
+            spec.sections[2].rows[1].onClick()
+
+            assert.equal(visit, selected)
         end)
     end)
 
@@ -176,8 +223,8 @@ describe("ns.newSessionTable", function()
                 "2g 0s 0c",
                 "1g 40s 0c",
                 "3",
-                "1 currency",
-                "1 faction",
+                "+30",
+                "+80",
             }, totals.rows[1].cells)
         end)
 
@@ -194,22 +241,22 @@ describe("ns.newSessionTable", function()
             assert.is_truthy(totals.rows[2].cells[1]:find("Thrall-Ragnaros", 1, true))
         end)
 
-        it("counts each faction once however many sessions fed it", function()
+        it("sums a faction across sessions", function()
             local spec = newTable().spec({
                 record({ reputation = { { faction = "Argent Dawn", amount = 40 } } }),
                 record({ id = "b", reputation = { { faction = "Argent Dawn", amount = 60 } } }),
             })
 
-            assert.equal("1 faction", sectionFor(spec, "Totals").rows[1].cells[9])
+            assert.equal("+100", sectionFor(spec, "Totals").rows[1].cells[9])
         end)
 
-        it("counts each currency once however many sessions fed it", function()
+        it("sums a currency across sessions", function()
             local spec = newTable().spec({
                 record({ currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } } }),
                 record({ id = "b", currencies = { { id = 1166, name = "Timewarped Badge", amount = 5 } } }),
             })
 
-            assert.equal("1 currency", sectionFor(spec, "Totals").rows[1].cells[8])
+            assert.equal("+20", sectionFor(spec, "Totals").rows[1].cells[8])
         end)
 
         it("dashes a character who earned no reputation at all", function()
@@ -242,17 +289,17 @@ describe("ns.newSessionTable", function()
             assert.equal("—", newTable().formatReputation(nil))
         end)
 
-        it("names one or two factions in full", function()
+        it("sums reputation into one signed value", function()
             local sessions = newTable()
 
-            assert.equal("Argent Dawn +40", sessions.formatReputation({ { faction = "Argent Dawn", amount = 40 } }))
-            assert.equal("A +1, B +2", sessions.formatReputation({
+            assert.equal("+40", sessions.formatReputation({ { faction = "Argent Dawn", amount = 40 } }))
+            assert.equal("+3", sessions.formatReputation({
                 { faction = "A", amount = 1 },
                 { faction = "B", amount = 2 },
             }))
         end)
 
-        it("abbreviates once a third faction turns up", function()
+        it("stays compact when many factions turn up", function()
             local text = newTable().formatReputation({
                 { faction = "A", amount = 1 },
                 { faction = "B", amount = 2 },
@@ -260,7 +307,7 @@ describe("ns.newSessionTable", function()
                 { faction = "D", amount = 4 },
             })
 
-            assert.equal("A +1, B +2, +2 more", text)
+            assert.equal("+10", text)
         end)
     end)
 
@@ -270,22 +317,22 @@ describe("ns.newSessionTable", function()
             assert.equal("—", newTable().formatCurrencies(nil))
         end)
 
-        it("names one or two currencies in full", function()
-            assert.equal("Honor +7", newTable().formatCurrencies({ { id = 1, name = "Honor", amount = 7 } }))
+        it("sums currencies into one signed value", function()
+            assert.equal("+7", newTable().formatCurrencies({ { id = 1, name = "Honor", amount = 7 } }))
         end)
 
         it("shows a currency spend with its sign", function()
-            assert.equal("Valor -3", newTable().formatCurrencies({ { id = 2, name = "Valor", amount = -3 } }))
+            assert.equal("-3", newTable().formatCurrencies({ { id = 2, name = "Valor", amount = -3 } }))
         end)
 
-        it("abbreviates once a third currency turns up", function()
+        it("stays compact when many currencies turn up", function()
             local text = newTable().formatCurrencies({
                 { id = 1, name = "A", amount = 1 },
                 { id = 2, name = "B", amount = 2 },
                 { id = 3, name = "C", amount = 3 },
             })
 
-            assert.equal("A +1, B +2, +1 more", text)
+            assert.equal("+6", text)
         end)
     end)
 end)

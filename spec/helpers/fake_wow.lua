@@ -141,6 +141,7 @@ function fake.newFrame()
 
     for _, name in ipairs({
         "SetSize",
+        "SetAllPoints",
         "SetWidth",
         "SetHeight",
         "SetFrameStrata",
@@ -151,11 +152,14 @@ function fake.newFrame()
         "RegisterForDrag",
         "SetClampedToScreen",
         "SetScrollChild",
+        "SetNormalTexture",
         "SetHighlightTexture",
+        "RegisterForClicks",
         "SetJustifyH",
         "SetAutoFocus",
         "SetCursorPosition",
         "SetFontObject",
+        "ClearAllPoints",
         "ClearFocus",
         "Raise",
         "StartMoving",
@@ -535,6 +539,7 @@ function fake.newEnv(options)
             "Your %s reputation has increased by %d.",
         },
         uiParent = options.uiParent or { name = "UIParent" },
+        minimap = options.minimap or { frameName = "Minimap" },
         specialFrames = specialFrames,
         db = db,
     }

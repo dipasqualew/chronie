@@ -182,6 +182,25 @@ describe("ns.newSessionLog", function()
             assert.same({ { id = 1166, name = "Timewarped Badge", amount = 15 } }, record.currencies)
         end)
 
+        it("keeps transmog collection metadata needed by saved-session links", function()
+            local log = newLog()
+            local pending = visit()
+            pending.summary.transmogs = {
+                {
+                    id = 19019,
+                    at = NOW - 100,
+                    sourceID = 11,
+                    appearanceID = 22,
+                    newAppearance = false,
+                },
+            }
+
+            local record = log.record(pending)
+
+            assert.same(pending.summary.transmogs, record.transmogs)
+            assert.not_equal(pending.summary.transmogs[1], record.transmogs[1])
+        end)
+
         it("copies the achievement list out of the caller's summary", function()
             local log = newLog()
             local pending = visit()

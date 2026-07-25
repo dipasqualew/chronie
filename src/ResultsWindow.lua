@@ -21,6 +21,9 @@ local _, ns = ...
 ---@field previewTransmog fun(itemID: integer)?
 ---@field openTransmogCollection fun(sourceID: integer)?
 ---@field itemName fun(itemID: integer): string?
+---@field title string|fun(summary: SessionSummary): string?
+---@field closable boolean?
+---@field specialFrames string[]?
 
 local WIDTH = 190
 local PADDING = 12
@@ -73,8 +76,19 @@ function ns.newResultsWindow(deps)
 
         title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         title:SetPoint("TOPLEFT", PADDING, -PADDING)
-        title:SetText("Current Session")
+        title:SetText(type(deps.title) == "string" and deps.title or "Current Session")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
+
+        if deps.closable then
+            local close = createFrame("Button", nil, frame, "UIPanelCloseButton")
+            close:SetPoint("TOPRIGHT", 2, 2)
+            close:SetScript("OnClick", function()
+                frame:Hide()
+            end)
+            if deps.specialFrames then
+                table.insert(deps.specialFrames, deps.name)
+            end
+        end
 
         frame:Hide()
     end
@@ -100,6 +114,9 @@ function ns.newResultsWindow(deps)
 
     ---@param summary SessionSummary
     local function render(summary)
+        if type(deps.title) == "function" then
+            title:SetText(deps.title(summary) or "Session Details")
+        end
         local y = -PADDING - LINE - 4
         local used = 0
 
@@ -131,6 +148,7 @@ function ns.newResultsWindow(deps)
         ---@param entries table[]
         ---@param label fun(entry: table): string, string value the left text and right value
         local function block(heading, entries, label)
+            entries = entries or {}
             if #entries == 0 then
                 line(heading, "none", MUTED_COLOR)
                 return
@@ -188,8 +206,8 @@ function ns.newResultsWindow(deps)
         if #(summary.achievements or {}) == 0 then
             line("Achievements", "none", MUTED_COLOR)
         else
-            line("Achievements", tostring(#summary.achievements), LABEL_COLOR)
-            for _, event in ipairs(summary.achievements) do
+            line("Achievements", tostring(#(summary.achievements or {})), LABEL_COLOR)
+            for _, event in ipairs(summary.achievements or {}) do
                 local current = event
                 local scope = current.accountFirst and "account first" or "character first"
                 line("  " .. current.name, scope, REP_COLOR, function()

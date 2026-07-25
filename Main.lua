@@ -37,6 +37,7 @@ local addonName, ns = ...
 ---@field uiParent table
 ---@field specialFrames string[]
 ---@field tooltip table
+---@field minimap table
 ---@field db table SavedVariables root.
 
 ---Composition root. Wires the modules together and starts listening.
@@ -140,16 +141,40 @@ function ns.main(env)
         end,
     })
 
-    local sessionTable = ns.newSessionTable({
-        classDisplay = classDisplay,
-        formatMoney = ns.formatMoney,
-    })
-
     local sessionWindow = ns.newDetailWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
         name = "WdpWowSessionWindow",
+    })
+
+    local sessionDetailWindow = ns.newResultsWindow({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        name = "WdpWowSessionDetailWindow",
+        title = function(record)
+            return record.character .. " — " .. record.instance
+        end,
+        closable = true,
+        specialFrames = env.specialFrames,
+        formatMoney = ns.formatMoney,
+        loadPoint = function()
+            return "CENTER", 260, 0
+        end,
+        savePoint = function() end,
+        openAchievement = env.openAchievement,
+        previewTransmog = env.previewTransmog,
+        openTransmogCollection = env.openTransmogCollection,
+        itemName = env.itemName,
+    })
+
+    local sessionTable = ns.newSessionTable({
+        classDisplay = classDisplay,
+        formatMoney = ns.formatMoney,
+        onSessionSelected = function(record)
+            sessionDetailWindow.update(record)
+            sessionDetailWindow.show()
+        end,
     })
 
     -- Read straight off the saved variables so a player on a non-default install can
@@ -210,16 +235,47 @@ function ns.main(env)
             resultsWindow.show()
         end
     end)
-    router.add("sessions", function()
+    local sessionFilters = { character = "", day = "", location = "" }
+    local function sessionSpec()
+        local all = sessionLog.all()
+        local filtered = sessionTable.filter(all, sessionFilters)
+        local spec = sessionTable.spec(filtered)
+        if #all > 0 and #filtered == 0 then
+            spec.sections[1].empty = "No sessions match those filters."
+        end
+        spec.filters = {
+            { key = "character", label = "Character", value = sessionFilters.character },
+            { key = "day", label = "Day", value = sessionFilters.day },
+            { key = "location", label = "Location", value = sessionFilters.location },
+        }
+        spec.onFilterChanged = function(key, value)
+            sessionFilters[key] = value
+            sessionWindow.show(sessionSpec())
+        end
+        return spec
+    end
+
+    local function toggleSessions()
         if sessionWindow.isShown() then
             sessionWindow.hide()
         else
-            sessionWindow.show(sessionTable.spec(sessionLog.all()))
+            sessionWindow.show(sessionSpec())
         end
-    end)
+    end
+    router.add("sessions", toggleSessions)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
     end)
+
+    local minimapButton = ns.newMinimapButton({
+        createFrame = env.createFrame,
+        minimap = env.minimap,
+        tooltip = env.tooltip,
+        onClick = function()
+            sessionWindow.show(sessionSpec())
+        end,
+    })
+    minimapButton.show()
 
     dispatcher.on("PLAYER_LOGIN", function()
         logger.info(greeter.greet(env.unitName("player")))
@@ -310,6 +366,8 @@ function ns.main(env)
         sessionTracker = sessionTracker,
         sessionTable = sessionTable,
         sessionWindow = sessionWindow,
+        sessionDetailWindow = sessionDetailWindow,
+        minimapButton = minimapButton,
         reportCommand = reportCommand,
         reportWindow = reportWindow,
     }
@@ -434,6 +492,7 @@ if CreateFrame then
             uiParent = UIParent,
             specialFrames = UISpecialFrames,
             tooltip = GameTooltip,
+            minimap = Minimap,
             db = WdpWowDB,
         })
     end)
