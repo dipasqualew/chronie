@@ -7,6 +7,7 @@ local _, ns = ...
 ---@field id string Stable identity, so re-recording the same session overwrites it.
 ---@field character string "Name-Realm".
 ---@field classFile string? Non-localised class token of the character that ran it.
+---@field level integer? Character level when the session started.
 ---@field day string "YYYY-MM-DD", the local day the session ended.
 ---@field instance string Location name — the zone or instance the session took place in.
 ---@field difficulty string "" when the client never named one.
@@ -23,12 +24,17 @@ local _, ns = ...
 ---@field currencies CurrencyGain[]
 ---@field reputation ReputationGain[]
 ---@field achievements AchievementEvent[]
+---@field levelUps LevelUpEvent[]
+---@field mounts CollectionEvent[]
+---@field pets CollectionEvent[]
 ---@field quests QuestEvent[]
+---@field toys CollectionEvent[]
 
 ---What the tracker hands over when a session ends.
 ---@class SessionVisit
 ---@field character string
 ---@field classFile string?
+---@field level integer?
 ---@field instance string
 ---@field difficulty string?
 ---@field instanceType string?
@@ -117,6 +123,16 @@ function ns.newSessionLog(deps)
         return copy
     end
 
+    ---@param events LevelUpEvent[]?
+    ---@return LevelUpEvent[]
+    local function copyLevelUps(events)
+        local copy = {}
+        for index, event in ipairs(events or {}) do
+            copy[index] = { level = event.level, at = event.at }
+        end
+        return copy
+    end
+
     ---@param completed QuestEvent[]?
     ---@return QuestEvent[]
     local function copyQuests(completed)
@@ -147,6 +163,19 @@ function ns.newSessionLog(deps)
         return copy
     end
 
+    ---@param events CollectionEvent[]?
+    ---@return CollectionEvent[]
+    local function copyCollection(events)
+        local copy = {}
+        for index, event in ipairs(events or {}) do
+            copy[index] = { id = event.id, name = event.name, at = event.at }
+            if event.guid then
+                copy[index].guid = event.guid
+            end
+        end
+        return copy
+    end
+
     return {
         prune = prune,
 
@@ -164,6 +193,7 @@ function ns.newSessionLog(deps)
                 id = table.concat({ visit.character, tostring(startedAt), visit.instance }, "|"),
                 character = visit.character,
                 classFile = visit.classFile,
+                level = visit.level,
                 day = formatDate("%Y-%m-%d", endedAt),
                 instance = visit.instance,
                 difficulty = visit.difficulty or "",
@@ -180,7 +210,11 @@ function ns.newSessionLog(deps)
                 currencies = copyCurrencies(summary.currencies),
                 reputation = copyReputation(summary.reputation),
                 achievements = copyAchievements(summary.achievements),
+                levelUps = copyLevelUps(summary.levelUps),
+                mounts = copyCollection(summary.mounts),
+                pets = copyCollection(summary.pets),
                 quests = copyQuests(summary.quests),
+                toys = copyCollection(summary.toys),
             }
 
             local replaced = false

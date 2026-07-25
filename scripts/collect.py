@@ -283,6 +283,14 @@ def normalise(record: dict) -> dict | None:
                 "at": int(event.get("at") or 0),
             })
 
+    level_ups = []
+    for event in record.get("levelUps") or []:
+        if isinstance(event, dict) and event.get("level"):
+            level_ups.append({
+                "level": int(event["level"]),
+                "at": int(event.get("at") or 0),
+            })
+
     transmogs = []
     for event in record.get("transmogs") or []:
         if isinstance(event, dict) and event.get("id"):
@@ -299,6 +307,20 @@ def normalise(record: dict) -> dict | None:
                 "at": int(event.get("at") or 0),
             })
 
+    def collections(key: str) -> list[dict]:
+        cleaned = []
+        for event in record.get(key) or []:
+            if isinstance(event, dict) and event.get("id"):
+                entry = {
+                    "id": int(event["id"]),
+                    "name": str(event.get("name") or event["id"]),
+                    "at": int(event.get("at") or 0),
+                }
+                if event.get("guid"):
+                    entry["guid"] = str(event["guid"])
+                cleaned.append(entry)
+        return cleaned
+
     ended = int(record["endedAt"])
     started = int(record.get("startedAt") or ended)
 
@@ -306,6 +328,7 @@ def normalise(record: dict) -> dict | None:
         "id": str(record["id"]),
         "character": str(record["character"]),
         "classFile": str(record["classFile"]) if record.get("classFile") else None,
+        "level": int(record["level"]) if record.get("level") is not None else None,
         "day": str(record.get("day") or datetime.fromtimestamp(ended).strftime("%Y-%m-%d")),
         "instance": str(record.get("instance") or "Unknown"),
         "difficulty": str(record.get("difficulty") or ""),
@@ -321,7 +344,11 @@ def normalise(record: dict) -> dict | None:
         "currencies": currencies,
         "reputation": reputation,
         "achievements": achievements,
+        "levelUps": level_ups,
+        "mounts": collections("mounts"),
+        "pets": collections("pets"),
         "quests": quests,
+        "toys": collections("toys"),
     }
 
 

@@ -30,6 +30,9 @@ local addonName, ns = ...
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
+---@field mountInfo fun(id: integer): string? Localised name of a mount.
+---@field petInfo fun(guid: string): (integer?, string?) Battle pet species ID and localised name.
+---@field toyInfo fun(id: integer): string? Localised name of a toy.
 ---@field openAchievement fun(id: integer)
 ---@field previewTransmog fun(itemID: integer)
 ---@field openTransmogCollection fun(sourceID: integer)
@@ -153,6 +156,9 @@ function ns.main(env)
         classFile = function()
             local _, classFile = env.unitClass("player")
             return classFile
+        end,
+        level = function()
+            return env.unitLevel("player")
         end,
     })
 
@@ -372,6 +378,23 @@ function ns.main(env)
         tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
         refreshResults()
     end)
+    dispatcher.on("PLAYER_LEVEL_UP", function(level)
+        tally.levelUp(level, env.now())
+        refreshResults()
+    end)
+    dispatcher.on("NEW_MOUNT_ADDED", function(id)
+        tally.mount(id, env.mountInfo(id), env.now())
+        refreshResults()
+    end)
+    dispatcher.on("NEW_PET_ADDED", function(guid)
+        local speciesID, name = env.petInfo(guid)
+        tally.pet(speciesID, name, env.now(), guid)
+        refreshResults()
+    end)
+    dispatcher.on("NEW_TOY_ADDED", function(id)
+        tally.toy(id, env.toyInfo(id), env.now())
+        refreshResults()
+    end)
     dispatcher.on("QUEST_ACCEPTED", snapshotQuest)
     dispatcher.on("QUEST_LOG_UPDATE", snapshotActiveQuests)
     dispatcher.on("QUEST_TURNED_IN", function(id)
@@ -529,6 +552,16 @@ if CreateFrame then
             end,
             achievementInfo = function(id)
                 return (select(2, GetAchievementInfo(id)))
+            end,
+            mountInfo = function(id)
+                return (C_MountJournal.GetMountInfoByID(id))
+            end,
+            petInfo = function(guid)
+                local speciesID, _, _, _, _, _, _, name = C_PetJournal.GetPetInfoByPetID(guid)
+                return speciesID, name
+            end,
+            toyInfo = function(id)
+                return (select(2, C_ToyBox.GetToyInfo(id)))
             end,
             openAchievement = function(id)
                 AchievementFrame_LoadUI()

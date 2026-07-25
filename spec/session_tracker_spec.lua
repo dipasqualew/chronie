@@ -8,7 +8,7 @@ describe("ns.newSessionTracker", function()
 
     ---A tracker over the real tally and the real log: all three are pure, and the
     ---boundaries only mean anything when the modules that own them are the real ones.
-    ---@param options table? `{ zone, money, character, classFile }`
+    ---@param options table? `{ zone, money, character, classFile, level }`
     ---@return table `{ tracker, tally, log, db, clock, setZone, setMoney, earn }`
     local function newTracker(options)
         options = options or {}
@@ -35,6 +35,9 @@ describe("ns.newSessionTracker", function()
             end,
             classFile = function()
                 return options.classFile or "WARRIOR"
+            end,
+            level = function()
+                return options.level
             end,
         })
 
@@ -84,17 +87,26 @@ describe("ns.newSessionTracker", function()
         end)
 
         it("records who was on and what they were doing", function()
-            local harness = newTracker({ zone = RAID })
+            local harness = newTracker({ zone = RAID, level = 41 })
 
             harness.tracker.sync()
 
             local current = harness.tracker.current()
             assert.equal("Thrall-Ragnaros", current.character)
             assert.equal("WARRIOR", current.classFile)
+            assert.equal(41, current.level)
             assert.equal("25 Player", current.difficulty)
             assert.equal("raid", current.instanceType)
             assert.equal(4, current.difficultyId)
             assert.equal(NOW, current.startedAt)
+        end)
+
+        it("allows the character level to be unknown", function()
+            local harness = newTracker({ zone = RAID })
+
+            harness.tracker.sync()
+
+            assert.is_nil(harness.tracker.current().level)
         end)
 
         -- A load screen, a graveyard run and a summon all fire the same event inside
@@ -162,7 +174,7 @@ describe("ns.newSessionTracker", function()
         end)
 
         it("carries the session's identity onto the record", function()
-            local harness = newTracker({ zone = RAID })
+            local harness = newTracker({ zone = RAID, level = 41 })
             harness.tracker.sync()
             harness.earn(100)
 
@@ -177,6 +189,7 @@ describe("ns.newSessionTracker", function()
             assert.equal(4, record.difficultyId)
             assert.equal("Thrall-Ragnaros", record.character)
             assert.equal("WARRIOR", record.classFile)
+            assert.equal(41, record.level)
             assert.equal(NOW, record.startedAt)
             assert.equal(NOW + 3600, record.endedAt)
             assert.equal(3600, record.seconds)
@@ -266,6 +279,7 @@ describe("ns.newSessionTracker", function()
                 getMoney = function() return money end,
                 character = function() return character end,
                 classFile = function() return "WARRIOR" end,
+                level = function() return nil end,
             })
 
             tracker.sync()

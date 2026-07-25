@@ -28,6 +28,7 @@ WdpWowDB = {
 \t\t\t["id"] = "Thrall-Ragnaros|100|Ulduar",
 \t\t\t["character"] = "Thrall-Ragnaros",
 \t\t\t["classFile"] = "WARRIOR",
+\t\t\t["level"] = 41,
 \t\t\t["day"] = "2026-07-25",
 \t\t\t["instance"] = "Ulduar",
 \t\t\t["difficulty"] = "25 Player",
@@ -138,6 +139,7 @@ class SavedVariablesTest(unittest.TestCase):
         saved = collect.read_saved_variables(self.path)
 
         self.assertEqual(saved["sessions"][0]["instance"], "Ulduar")
+        self.assertEqual(saved["sessions"][0]["level"], 41)
         self.assertEqual(saved["roster"]["Thrall-Ragnaros"]["level"], 80)
 
     def test_skips_globals_it_was_not_asked_for(self):
@@ -154,13 +156,18 @@ class SavedVariablesTest(unittest.TestCase):
 class NormaliseTest(unittest.TestCase):
     def record(self, **overrides):
         base = {
-            "id": "a", "character": "Thrall-Ragnaros", "endedAt": 200, "startedAt": 100,
+            "id": "a", "character": "Thrall-Ragnaros", "level": 41,
+            "endedAt": 200, "startedAt": 100,
             "instance": "Ulduar", "lootValue": 2000, "goldDiff": 1500,
             "reputation": [{"faction": "Argent Dawn", "amount": 40}],
             "currencies": [{"id": 1166, "name": "Timewarped Badge", "amount": 15}],
             "achievements": [{"id": 1234, "name": "The Loremaster", "at": 150}],
+            "levelUps": [{"level": 42, "at": 155}],
+            "mounts": [{"id": 123, "name": "Alabaster Hyena", "at": 160}],
+            "pets": [{"id": 456, "name": "Darkmoon Rabbit", "at": 165, "guid": "BattlePet-0-1"}],
             "transmogs": [{"id": 19019, "at": 175}],
             "quests": [{"id": 7848, "at": 180}],
+            "toys": [{"id": 789, "name": "Katy's Stampwhistle", "at": 185}],
         }
         base.update(overrides)
         return base
@@ -172,12 +179,19 @@ class NormaliseTest(unittest.TestCase):
         self.assertEqual(cleaned["difficulty"], "")
         self.assertEqual(cleaned["transmogs"], [{"id": 19019, "at": 175}])
         self.assertIsNone(cleaned["classFile"])
+        self.assertEqual(cleaned["level"], 41)
         self.assertEqual(cleaned["lootValue"], 2000)
         self.assertEqual(cleaned["goldDiff"], 1500)
         self.assertEqual(cleaned["reputation"], [{"faction": "Argent Dawn", "amount": 40}])
         self.assertEqual(cleaned["currencies"], [{"id": 1166, "name": "Timewarped Badge", "amount": 15}])
         self.assertEqual(cleaned["achievements"], [{"id": 1234, "name": "The Loremaster", "at": 150}])
+        self.assertEqual(cleaned["levelUps"], [{"level": 42, "at": 155}])
+        self.assertEqual(cleaned["mounts"], [{"id": 123, "name": "Alabaster Hyena", "at": 160}])
+        self.assertEqual(cleaned["pets"], [{
+            "id": 456, "name": "Darkmoon Rabbit", "at": 165, "guid": "BattlePet-0-1",
+        }])
         self.assertEqual(cleaned["quests"], [{"id": 7848, "at": 180}])
+        self.assertEqual(cleaned["toys"], [{"id": 789, "name": "Katy's Stampwhistle", "at": 185}])
 
     def test_defaults_the_new_totals_to_zero_when_absent(self):
         cleaned = collect.normalise({"id": "a", "character": "Thrall-Ragnaros", "endedAt": 200})
@@ -186,7 +200,12 @@ class NormaliseTest(unittest.TestCase):
         self.assertEqual(cleaned["goldDiff"], 0)
         self.assertEqual(cleaned["currencies"], [])
         self.assertEqual(cleaned["achievements"], [])
+        self.assertEqual(cleaned["levelUps"], [])
+        self.assertIsNone(cleaned["level"])
+        self.assertEqual(cleaned["mounts"], [])
+        self.assertEqual(cleaned["pets"], [])
         self.assertEqual(cleaned["quests"], [])
+        self.assertEqual(cleaned["toys"], [])
 
     def test_drops_a_record_with_no_identity(self):
         self.assertIsNone(collect.normalise(self.record(id=None)))
@@ -208,6 +227,11 @@ class NormaliseTest(unittest.TestCase):
         cleaned = collect.normalise(self.record(achievements=[{"id": 1, "at": 5}, "junk"]))
 
         self.assertEqual(cleaned["achievements"], [])
+
+    def test_drops_a_level_up_entry_with_no_level(self):
+        cleaned = collect.normalise(self.record(levelUps=[{"at": 5}, "junk"]))
+
+        self.assertEqual(cleaned["levelUps"], [])
 
     def test_drops_a_quest_entry_with_no_id(self):
         cleaned = collect.normalise(self.record(quests=[{"at": 5}, "junk"]))

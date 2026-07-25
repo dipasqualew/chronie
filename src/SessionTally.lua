@@ -16,9 +16,13 @@ local _, ns = ...
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
 ---@field achievement fun(id: integer, name: string?, at: integer, accountFirst: boolean?)
 ---Append an earned achievement.
+---@field levelUp fun(level: integer, at: integer) Append a level gained.
 ---@field quest fun(id: integer, at: integer, name: string?, characterFirst: boolean?, accountFirst: boolean?)
 ---Append a completed quest.
 ---@field transmog fun(event: TransmogEvent) Append a newly collected transmog source.
+---@field mount fun(id: integer, name: string?, at: integer) Append a newly collected mount.
+---@field pet fun(id: integer, name: string?, at: integer, guid: string?) Append a newly collected battle pet.
+---@field toy fun(id: integer, name: string?, at: integer) Append a newly collected toy.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
 ---@field summary fun(): SessionSummary
@@ -38,6 +42,10 @@ local _, ns = ...
 ---@field at integer When it was earned.
 ---@field accountFirst boolean True when this was also the account's first completion.
 
+---@class LevelUpEvent
+---@field level integer The new character level.
+---@field at integer When the level was gained.
+
 ---@class TransmogEvent
 ---@field id integer Item ID.
 ---@field sourceID integer? Item modified appearance/source ID.
@@ -52,6 +60,12 @@ local _, ns = ...
 ---@field characterFirst boolean? True when this character had not completed it before.
 ---@field accountFirst boolean? True when no character on the account had completed it before.
 
+---@class CollectionEvent
+---@field id integer Collection ID (mount ID, pet species ID, or toy item ID).
+---@field name string Localised collection entry name.
+---@field at integer When it was collected.
+---@field guid string? Instance GUID, present for battle pets.
+
 ---@class SessionSummary
 ---@field active boolean
 ---@field lootValue integer Vendor value of items entering the inventory, in copper.
@@ -64,7 +78,11 @@ local _, ns = ...
 ---@field reputationTotal integer Summed reputation gained across every faction.
 ---@field reputation ReputationGain[] Per-faction totals, sorted by faction name.
 ---@field achievements AchievementEvent[] Achievements earned, in the order they were.
+---@field levelUps LevelUpEvent[] Levels gained, in the order they were.
+---@field mounts CollectionEvent[] Mounts collected, in acquisition order.
+---@field pets CollectionEvent[] Battle pets collected, in acquisition order.
 ---@field quests QuestEvent[] Quests completed, in completion order.
+---@field toys CollectionEvent[] Toys collected, in acquisition order.
 
 ---@class SessionTallyDeps
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
@@ -193,7 +211,11 @@ function ns.newSessionTally(deps)
         session.reputation = {}
         session.currencies = {}
         session.achievements = {}
+        session.levelUps = {}
+        session.mounts = {}
+        session.pets = {}
         session.quests = {}
+        session.toys = {}
     end
 
     begin(0)
@@ -308,6 +330,45 @@ function ns.newSessionTally(deps)
             session.achievements[#session.achievements + 1] = event
         end,
 
+        ---@param level integer
+        ---@param at integer
+        levelUp = function(level, at)
+            if session.active and level then
+                session.levelUps[#session.levelUps + 1] = { level = level, at = at }
+            end
+        end,
+
+        ---@param id integer
+        ---@param name string?
+        ---@param at integer
+        mount = function(id, name, at)
+            if session.active and id then
+                session.mounts[#session.mounts + 1] = {
+                    id = id,
+                    name = name or tostring(id),
+                    at = at,
+                }
+            end
+        end,
+
+        ---@param id integer
+        ---@param name string?
+        ---@param at integer
+        ---@param guid string?
+        pet = function(id, name, at, guid)
+            if session.active and id then
+                local event = {
+                    id = id,
+                    name = name or tostring(id),
+                    at = at,
+                }
+                if guid then
+                    event.guid = guid
+                end
+                session.pets[#session.pets + 1] = event
+            end
+        end,
+
         ---@param id integer
         ---@param at integer
         ---@param name string?
@@ -328,6 +389,19 @@ function ns.newSessionTally(deps)
                 event.accountFirst = accountFirst and true or false
             end
             session.quests[#session.quests + 1] = event
+        end,
+
+        ---@param id integer
+        ---@param name string?
+        ---@param at integer
+        toy = function(id, name, at)
+            if session.active and id then
+                session.toys[#session.toys + 1] = {
+                    id = id,
+                    name = name or tostring(id),
+                    at = at,
+                }
+            end
         end,
 
         ---@param event TransmogEvent
@@ -373,7 +447,11 @@ function ns.newSessionTally(deps)
                 or next(session.currencies) ~= nil
                 or next(session.reputation) ~= nil
                 or #session.achievements > 0
+                or #session.levelUps > 0
+                or #session.mounts > 0
+                or #session.pets > 0
                 or #session.quests > 0
+                or #session.toys > 0
         end,
 
         ---@return SessionSummary
@@ -409,6 +487,11 @@ function ns.newSessionTally(deps)
                 end
             end
 
+            local levelUps = {}
+            for index, event in ipairs(session.levelUps) do
+                levelUps[index] = { level = event.level, at = event.at }
+            end
+
             local transmogs = {}
             for index, event in ipairs(session.transmogs) do
                 transmogs[index] = { id = event.id, at = event.at }
@@ -429,6 +512,17 @@ function ns.newSessionTally(deps)
                 end
             end
 
+            local function copyCollection(events)
+                local copy = {}
+                for index, event in ipairs(events) do
+                    copy[index] = { id = event.id, name = event.name, at = event.at }
+                    if event.guid then
+                        copy[index].guid = event.guid
+                    end
+                end
+                return copy
+            end
+
             return {
                 active = session.active,
                 lootValue = session.itemValue,
@@ -441,7 +535,11 @@ function ns.newSessionTally(deps)
                 reputationTotal = reputationTotal,
                 reputation = reputation,
                 achievements = achievements,
+                levelUps = levelUps,
+                mounts = copyCollection(session.mounts),
+                pets = copyCollection(session.pets),
                 quests = quests,
+                toys = copyCollection(session.toys),
             }
         end,
     }

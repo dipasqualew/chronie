@@ -25,6 +25,7 @@ local _, ns = ...
 ---@field getMoney fun(): integer
 ---@field character fun(): string "Name-Realm" of the character running it.
 ---@field classFile fun(): string?
+---@field level fun(): integer?
 
 ---@param character string
 ---@param info InstanceInfo
@@ -64,6 +65,7 @@ function ns.newSessionTracker(deps)
             kept = sessionLog.record({
                 character = current.character,
                 classFile = current.classFile,
+                level = current.level,
                 instance = current.instance,
                 difficulty = current.difficulty,
                 instanceType = current.instanceType,
@@ -104,6 +106,7 @@ function ns.newSessionTracker(deps)
                     identity = identity,
                     character = character,
                     classFile = deps.classFile(),
+                    level = deps.level(),
                     instance = info.name or "Unknown",
                     difficulty = info.difficulty or "",
                     instanceType = info.kind or "",

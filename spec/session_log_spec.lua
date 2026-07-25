@@ -28,6 +28,7 @@ describe("ns.newSessionLog", function()
         local base = {
             character = "Thrall-Ragnaros",
             classFile = "WARRIOR",
+            level = 41,
             instance = "Ulduar",
             difficulty = "25 Player",
             instanceType = "raid",
@@ -43,7 +44,11 @@ describe("ns.newSessionLog", function()
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
                 achievements = { { id = 1, name = "First", at = NOW } },
+                levelUps = { { level = 42, at = NOW - 75 } },
+                mounts = {},
+                pets = {},
                 quests = { { id = 7848, at = NOW - 50 } },
+                toys = {},
             },
         }
         for key, value in pairs(overrides or {}) do
@@ -67,6 +72,7 @@ describe("ns.newSessionLog", function()
                 id = "Thrall-Ragnaros|" .. (NOW - 1800) .. "|Ulduar",
                 character = "Thrall-Ragnaros",
                 classFile = "WARRIOR",
+                level = 41,
                 day = "<%Y-%m-%d@" .. NOW .. ">",
                 instance = "Ulduar",
                 difficulty = "25 Player",
@@ -83,7 +89,11 @@ describe("ns.newSessionLog", function()
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
                 achievements = { { id = 1, name = "First", at = NOW } },
+                levelUps = { { level = 42, at = NOW - 75 } },
+                mounts = {},
+                pets = {},
                 quests = { { id = 7848, at = NOW - 50 } },
+                toys = {},
             }, db.sessions[1])
         end)
 
@@ -125,7 +135,11 @@ describe("ns.newSessionLog", function()
             assert.same({}, record.reputation)
             assert.same({}, record.currencies)
             assert.same({}, record.achievements)
+            assert.same({}, record.levelUps)
+            assert.same({}, record.mounts)
+            assert.same({}, record.pets)
             assert.same({}, record.quests)
+            assert.same({}, record.toys)
         end)
 
         it("stores an empty difficulty rather than a hole when the client named none", function()
@@ -137,6 +151,16 @@ describe("ns.newSessionLog", function()
 
             assert.equal("", record.difficulty)
             assert.equal("", record.instanceType)
+        end)
+
+        it("allows the character level to be unknown", function()
+            local log = newLog()
+            local pending = visit()
+            pending.level = nil
+
+            local record = log.record(pending)
+
+            assert.is_nil(record.level)
         end)
 
         it("replaces a visit that is filed twice instead of duplicating it", function()
@@ -210,6 +234,17 @@ describe("ns.newSessionLog", function()
             pending.summary.achievements[2] = { id = 2, name = "Second", at = NOW }
 
             assert.same({ { id = 1, name = "First", at = NOW } }, record.achievements)
+        end)
+
+        it("copies the level-up list out of the caller's summary", function()
+            local log = newLog()
+            local pending = visit()
+
+            local record = log.record(pending)
+            pending.summary.levelUps[1].level = 99
+            pending.summary.levelUps[2] = { level = 43, at = NOW }
+
+            assert.same({ { level = 42, at = NOW - 75 } }, record.levelUps)
         end)
 
         it("copies the quest list out of the caller's summary", function()

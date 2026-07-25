@@ -66,6 +66,11 @@ describe("ns.newResultsWindow", function()
             reputationTotal = 0,
             reputation = {},
             achievements = {},
+            levelUps = {},
+            mounts = {},
+            pets = {},
+            quests = {},
+            toys = {},
         }
         for key, value in pairs(overrides or {}) do
             base[key] = value
@@ -228,12 +233,12 @@ describe("ns.newResultsWindow", function()
         end)
 
 
-        it("shows 'none' against reputation when nothing was earned", function()
+        it("hides reputation until some was earned", function()
             local window, frames = newWindow()
 
             window.update(summary({ reputation = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "Reputation +"))
+            assert.is_nil(valueFor(rowsOf(frames[1]), "Reputation +"))
         end)
 
         it("renders one indented signed line per faction", function()
@@ -277,12 +282,12 @@ describe("ns.newResultsWindow", function()
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Timbermaw Hold"))
         end)
 
-        it("shows 'none' against currency when nothing changed", function()
+        it("hides currency until one changed", function()
             local window, frames = newWindow()
 
             window.update(summary({ currencies = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "Currency +"))
+            assert.is_nil(valueFor(rowsOf(frames[1]), "Currency +"))
         end)
 
         it("renders one indented signed line per currency", function()
@@ -308,12 +313,78 @@ describe("ns.newResultsWindow", function()
             assert.equal("-3", valueFor(lines, "  Valor"))
         end)
 
-        it("shows 'none' against achievements when none were earned", function()
+        it("hides achievements until one was earned", function()
             local window, frames = newWindow()
 
             window.update(summary({ achievements = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "Achievements +"))
+            assert.is_nil(valueFor(rowsOf(frames[1]), "Achievements +"))
+        end)
+
+        it("expands level ups with the level reached", function()
+            local window, frames = newWindow()
+            window.update(summary({ levelUps = { { level = 42, at = 5000 } } }))
+
+            assert.equal("1", valueFor(rowsOf(frames[1]), "Level ups +"))
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "Level ups +" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            assert.equal("reached", valueFor(rowsOf(frames[1]), "  Level 42"))
+        end)
+
+        it("shows completed category headings alphabetically after a divider", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                achievements = { { id = 1, name = "First" } },
+                currencies = { { id = 2, name = "Valor", amount = 1 } },
+                currencyTotal = 1,
+                mounts = { { id = 3, name = "Alabaster Hyena" } },
+                pets = { { id = 4, name = "Darkmoon Rabbit" } },
+                quests = { { id = 5, name = "A Quest" } },
+                reputation = { { faction = "Argent Dawn", amount = 2 } },
+                reputationTotal = 2,
+                toys = { { id = 6, name = "Train Set" } },
+                transmogs = { { id = 7, newAppearance = true } },
+            }))
+
+            local lines = rowsOf(frames[1])
+            local labels = {}
+            for _, entry in ipairs(lines) do
+                labels[#labels + 1] = entry.label
+            end
+            assert.same({
+                "Loot value", "Gold Δ", "────────────────────────",
+                "Achievements +", "Currency +", "Mounts +", "Pets +",
+                "Quests +", "Reputation +", "Toys +", "Transmog +",
+            }, labels)
+        end)
+
+        it("expands newly collected mounts, pets and toys by name", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                mounts = { { id = 1, name = "Alabaster Hyena" } },
+                pets = { { id = 2, name = "Darkmoon Rabbit" } },
+                toys = { { id = 3, name = "Katy's Stampwhistle" } },
+            }))
+
+            for _, heading in ipairs({ "Mounts +", "Pets +", "Toys +" }) do
+                for _, fontString in ipairs(frames[1].fontStrings) do
+                    if fontString.text == heading then
+                        fontString:run("OnMouseUp", "LeftButton")
+                        break
+                    end
+                end
+            end
+
+            local lines = rowsOf(frames[1])
+            assert.equal("collected", valueFor(lines, "  Alabaster Hyena"))
+            assert.equal("collected", valueFor(lines, "  Darkmoon Rabbit"))
+            assert.equal("collected", valueFor(lines, "  Katy's Stampwhistle"))
         end)
 
         it("names each achievement earned", function()

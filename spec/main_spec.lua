@@ -1140,6 +1140,29 @@ describe("addon integration", function()
             assert.same({ { id = 19019, sourceID = 11, at = 1000 } }, app.tally.summary().transmogs)
         end)
 
+        it("records newly collected mounts, pets and toys from their collection events", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                mounts = { [123] = "Alabaster Hyena" },
+                pets = { ["BattlePet-0-1"] = { id = 456, name = "Darkmoon Rabbit" } },
+                toys = { [789] = "Katy's Stampwhistle" },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("NEW_MOUNT_ADDED", 123)
+            recorded.frame:fire("NEW_PET_ADDED", "BattlePet-0-1")
+            recorded.frame:fire("NEW_TOY_ADDED", 789)
+
+            local summary = app.tally.summary()
+            assert.same({ { id = 123, name = "Alabaster Hyena", at = 1000 } }, summary.mounts)
+            assert.same({
+                { id = 456, name = "Darkmoon Rabbit", at = 1000, guid = "BattlePet-0-1" },
+            }, summary.pets)
+            assert.same({ { id = 789, name = "Katy's Stampwhistle", at = 1000 } }, summary.toys)
+        end)
+
         -- The open world is a tracked session now, so a loot line out there counts just
         -- as it would inside an instance.
         it("tracks loot fired out in the open world", function()
@@ -1189,6 +1212,23 @@ describe("addon integration", function()
             assert.same(
                 { { id = 1234, name = "The Loremaster", at = 1700000000, accountFirst = true } },
                 app.tally.summary().achievements
+            )
+        end)
+
+        it("records the new level from the player level up event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                now = 1700000000,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("PLAYER_LEVEL_UP", 42)
+
+            assert.same(
+                { { level = 42, at = 1700000000 } },
+                app.tally.summary().levelUps
             )
         end)
 
@@ -1271,6 +1311,10 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
             assert.equal(1, recorded.frame.registered.CURRENCY_DISPLAY_UPDATE)
             assert.equal(1, recorded.frame.registered.ACHIEVEMENT_EARNED)
+            assert.equal(1, recorded.frame.registered.PLAYER_LEVEL_UP)
+            assert.equal(1, recorded.frame.registered.NEW_MOUNT_ADDED)
+            assert.equal(1, recorded.frame.registered.NEW_PET_ADDED)
+            assert.equal(1, recorded.frame.registered.NEW_TOY_ADDED)
             assert.equal(1, recorded.frame.registered.QUEST_ACCEPTED)
             assert.equal(1, recorded.frame.registered.QUEST_LOG_UPDATE)
             assert.equal(1, recorded.frame.registered.QUEST_TURNED_IN)
@@ -1310,7 +1354,12 @@ describe("addon integration", function()
         end)
 
         it("files the session into the db on the way back out to the world", function()
-            local _, recorded = inside({ class = "Warrior", classFile = "WARRIOR", money = 0 })
+            local _, recorded = inside({
+                class = "Warrior",
+                classFile = "WARRIOR",
+                level = 41,
+                money = 0,
+            })
             earn(recorded, 500)
 
             recorded.clock.advance(1800)
@@ -1323,6 +1372,7 @@ describe("addon integration", function()
             assert.equal("Deadmines", record.instance)
             assert.equal("Normal", record.difficulty)
             assert.equal("WARRIOR", record.classFile)
+            assert.equal(41, record.level)
             assert.equal(1800, record.seconds)
         end)
 

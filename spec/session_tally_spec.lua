@@ -410,6 +410,25 @@ describe("ns.newSessionTally", function()
         end)
     end)
 
+    describe("levels gained", function()
+        it("appends the new level and its time", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.levelUp(42, 5000)
+
+            assert.same({ { level = 42, at = 5000 } }, tally.summary().levelUps)
+        end)
+
+        it("ignores level ups while inactive", function()
+            local tally = newTally()
+
+            tally.levelUp(42, 5000)
+
+            assert.same({}, tally.summary().levelUps)
+        end)
+    end)
+
     describe("transmog events", function()
         it("records every newly collected item with its acquisition time", function()
             local tally = newTally()
@@ -472,6 +491,37 @@ describe("ns.newSessionTally", function()
         end)
     end)
 
+    describe("mount, pet and toy collections", function()
+        it("records named collection entries and the pet GUID", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.mount(123, "Alabaster Hyena", 100)
+            tally.pet(456, "Darkmoon Rabbit", 101, "BattlePet-0-1")
+            tally.toy(789, "Katy's Stampwhistle", 102)
+
+            local summary = tally.summary()
+            assert.same({ { id = 123, name = "Alabaster Hyena", at = 100 } }, summary.mounts)
+            assert.same({
+                { id = 456, name = "Darkmoon Rabbit", at = 101, guid = "BattlePet-0-1" },
+            }, summary.pets)
+            assert.same({ { id = 789, name = "Katy's Stampwhistle", at = 102 } }, summary.toys)
+            assert.is_true(tally.hasEvents())
+        end)
+
+        it("ignores collection events while inactive", function()
+            local tally = newTally()
+
+            tally.mount(1, "Mount", 100)
+            tally.pet(2, "Pet", 100)
+            tally.toy(3, "Toy", 100)
+
+            assert.same({}, tally.summary().mounts)
+            assert.same({}, tally.summary().pets)
+            assert.same({}, tally.summary().toys)
+        end)
+    end)
+
     describe("hasEvents", function()
         it("is false for a session where nothing happened", function()
             local tally = newTally()
@@ -528,6 +578,14 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
+        it("is true once a level is gained", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.levelUp(42, 100)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
         it("is true once a quest is completed", function()
             local tally = newTally()
             tally.begin(0)
@@ -576,8 +634,12 @@ describe("ns.newSessionTally", function()
             assert.same({}, summary.reputation)
             assert.same({}, summary.currencies)
             assert.same({}, summary.achievements)
+            assert.same({}, summary.levelUps)
+            assert.same({}, summary.mounts)
+            assert.same({}, summary.pets)
             assert.same({}, summary.transmogs)
             assert.same({}, summary.quests)
+            assert.same({}, summary.toys)
         end)
 
         it("carries every tally onto one summary table", function()
@@ -591,6 +653,7 @@ describe("ns.newSessionTally", function()
             tally.reputation("Your Argent Dawn reputation has increased by 30.")
             tally.currency(1166, 15, "Timewarped Badge")
             tally.achievement(1, "First", 500)
+            tally.levelUp(42, 525)
             tally.quest(7848, 550)
 
             assert.same({
@@ -605,7 +668,11 @@ describe("ns.newSessionTally", function()
                 reputationTotal = 30,
                 reputation = { { faction = "Argent Dawn", amount = 30 } },
                 achievements = { { id = 1, name = "First", at = 500 } },
+                levelUps = { { level = 42, at = 525 } },
+                mounts = {},
+                pets = {},
                 quests = { { id = 7848, at = 550 } },
+                toys = {},
             }, tally.summary())
         end)
     end)

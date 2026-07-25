@@ -59,7 +59,11 @@ function ns.newResultsWindow(deps)
         currencies = false,
         reputation = false,
         achievements = false,
+        levelUps = false,
+        mounts = false,
+        pets = false,
         quests = false,
+        toys = false,
     }
     local reviewedTransmogs = {}
     local reviewedSessionKey
@@ -175,141 +179,185 @@ function ns.newResultsWindow(deps)
         line("Loot value", deps.formatMoney(summary.lootValue), GOLD_COLOR)
         line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
 
-        local transmogs = summary.transmogs or {}
-        local appearances = 0
-        for _, event in ipairs(transmogs) do
-            if event.newAppearance then
-                appearances = appearances + 1
-            end
-        end
-        local variants = #transmogs - appearances
-        local transmogValue = tostring(appearances) .. " new"
-        if variants > 0 then
-            transmogValue = transmogValue .. " · " .. variants .. " variant"
-            if variants ~= 1 then
-                transmogValue = transmogValue .. "s"
-            end
-        end
-        line(disclosure("Transmog", expanded.transmogs), transmogValue, VALUE_COLOR, function()
-            expanded.transmogs = not expanded.transmogs
-            render(latest)
-        end)
-        if expanded.transmogs then
-            for index, event in ipairs(transmogs) do
-                local current = event
-                local itemName = deps.itemName and deps.itemName(current.id)
-                local kind = current.newAppearance and "new" or "variant"
-                local kindColor = current.newAppearance and REP_COLOR or VARIANT_COLOR
-                local reviewKey = tostring(current.sourceID or current.id) .. ":" .. tostring(index)
-                local prefix = reviewedTransmogs[reviewKey] and "✓ " or ""
-                line("  " .. prefix .. (itemName or ("Item " .. current.id)), kind, kindColor, function(button)
-                    reviewedTransmogs[reviewKey] = true
-                    if button == "RightButton" and current.sourceID and deps.openTransmogCollection then
-                        deps.openTransmogCollection(current.sourceID)
-                    elseif deps.previewTransmog then
-                        deps.previewTransmog(current.id)
-                    end
-                    render(latest)
-                end)
-            end
-        end
-
-        local currencies = summary.currencies or {}
-        line(disclosure("Currency", expanded.currencies),
-            #currencies == 0 and "none"
-                or ((summary.currencyTotal or 0) >= 0 and "+" or "") .. (summary.currencyTotal or 0),
-            #currencies == 0 and MUTED_COLOR or VALUE_COLOR,
-            function()
-                expanded.currencies = not expanded.currencies
-                render(latest)
-            end)
-        if expanded.currencies then
-            for _, gain in ipairs(currencies) do
-                line("  " .. gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount, REP_COLOR)
-            end
-        end
-
-        local reputation = summary.reputation or {}
-        line(disclosure("Reputation", expanded.reputation),
-            #reputation == 0 and "none" or "+" .. (summary.reputationTotal or 0),
-            #reputation == 0 and MUTED_COLOR or VALUE_COLOR,
-            function()
-                expanded.reputation = not expanded.reputation
-                render(latest)
-            end)
-        if expanded.reputation then
-            for _, gain in ipairs(reputation) do
-                line("  " .. gain.faction, "+" .. gain.amount, REP_COLOR)
-            end
-        end
         local achievements = summary.achievements or {}
-        local accountAchievements, characterAchievements = 0, 0
-        for _, event in ipairs(achievements) do
-            if event.accountFirst == true then
-                accountAchievements = accountAchievements + 1
-            elseif event.accountFirst == false then
-                characterAchievements = characterAchievements + 1
-            end
+        local currencies = summary.currencies or {}
+        local levelUps = summary.levelUps or {}
+        local mounts = summary.mounts or {}
+        local pets = summary.pets or {}
+        local quests = summary.quests or {}
+        local reputation = summary.reputation or {}
+        local toys = summary.toys or {}
+        local transmogs = summary.transmogs or {}
+        if #achievements + #currencies + #levelUps + #mounts + #pets + #quests
+            + #reputation + #toys + #transmogs > 0 then
+            line("────────────────────────", "", MUTED_COLOR)
         end
-        local achievementValue = ACCOUNT_HEX .. accountAchievements .. " account" .. COLOR_END
-            .. " / " .. CHARACTER_HEX .. characterAchievements .. " character" .. COLOR_END
-        line(disclosure("Achievements", expanded.achievements),
-            #achievements == 0 and "none" or achievementValue,
-            #achievements == 0 and MUTED_COLOR or VALUE_COLOR,
-            function()
+
+        -- Completed categories are deliberately rendered in heading order. Empty
+        -- categories stay absent so the compact panel only reports things that happened.
+        if #achievements > 0 then
+            local accountAchievements, characterAchievements = 0, 0
+            for _, event in ipairs(achievements) do
+                if event.accountFirst == true then
+                    accountAchievements = accountAchievements + 1
+                elseif event.accountFirst == false then
+                    characterAchievements = characterAchievements + 1
+                end
+            end
+            local achievementValue = ACCOUNT_HEX .. accountAchievements .. " account" .. COLOR_END
+                .. " / " .. CHARACTER_HEX .. characterAchievements .. " character" .. COLOR_END
+            line(disclosure("Achievements", expanded.achievements), achievementValue, VALUE_COLOR, function()
                 expanded.achievements = not expanded.achievements
                 render(latest)
             end)
-        if expanded.achievements then
-            for _, event in ipairs(summary.achievements or {}) do
-                local current = event
-                local scope = "earned"
-                local color = REP_COLOR
-                if current.accountFirst == true then
-                    scope = "account first"
-                    color = ACCOUNT_COLOR
-                elseif current.accountFirst == false then
-                    scope = "character first"
-                    color = CHARACTER_COLOR
-                end
-                line("  " .. current.name, scope, color, function()
-                    if deps.openAchievement then
-                        deps.openAchievement(current.id)
+            if expanded.achievements then
+                for _, event in ipairs(achievements) do
+                    local current = event
+                    local scope = "earned"
+                    local color = REP_COLOR
+                    if current.accountFirst == true then
+                        scope = "account first"
+                        color = ACCOUNT_COLOR
+                    elseif current.accountFirst == false then
+                        scope = "character first"
+                        color = CHARACTER_COLOR
                     end
-                end)
+                    line("  " .. current.name, scope, color, function()
+                        if deps.openAchievement then
+                            deps.openAchievement(current.id)
+                        end
+                    end)
+                end
             end
         end
 
-        local quests = summary.quests or {}
-        local accountQuests, characterQuests = 0, 0
-        for _, event in ipairs(quests) do
-            if event.accountFirst == true then
-                accountQuests = accountQuests + 1
-            elseif event.characterFirst == true then
-                characterQuests = characterQuests + 1
+        if #currencies > 0 then
+            line(disclosure("Currency", expanded.currencies),
+                ((summary.currencyTotal or 0) >= 0 and "+" or "") .. (summary.currencyTotal or 0),
+                VALUE_COLOR,
+                function()
+                    expanded.currencies = not expanded.currencies
+                    render(latest)
+                end)
+            if expanded.currencies then
+                for _, gain in ipairs(currencies) do
+                    line("  " .. gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount, REP_COLOR)
+                end
             end
         end
-        local questValue = ACCOUNT_HEX .. accountQuests .. " warband" .. COLOR_END
-            .. " / " .. CHARACTER_HEX .. characterQuests .. " character" .. COLOR_END
-        line(disclosure("Quests", expanded.quests),
-            #quests == 0 and "none" or questValue,
-            #quests == 0 and MUTED_COLOR or VALUE_COLOR,
-            function()
-            expanded.quests = not expanded.quests
-            render(latest)
-        end)
-        if expanded.quests then
-            for _, event in ipairs(quests) do
-                local scope = "completed"
-                local color = REP_COLOR
-                if event.accountFirst == true then
-                    scope = "warband first"
-                    color = ACCOUNT_COLOR
-                elseif event.characterFirst == true then
-                    scope = "character first"
-                    color = CHARACTER_COLOR
+
+        if #levelUps > 0 then
+            line(disclosure("Level ups", expanded.levelUps), tostring(#levelUps), VALUE_COLOR, function()
+                expanded.levelUps = not expanded.levelUps
+                render(latest)
+            end)
+            if expanded.levelUps then
+                for _, event in ipairs(levelUps) do
+                    line("  Level " .. event.level, "reached", REP_COLOR)
                 end
-                line("  " .. (event.name or ("Quest " .. event.id)), scope, color)
+            end
+        end
+
+        local function collection(heading, key, events)
+            if #events == 0 then
+                return
+            end
+            line(disclosure(heading, expanded[key]), tostring(#events), VALUE_COLOR, function()
+                expanded[key] = not expanded[key]
+                render(latest)
+            end)
+            if expanded[key] then
+                for _, event in ipairs(events) do
+                    line("  " .. event.name, "collected", REP_COLOR)
+                end
+            end
+        end
+        collection("Mounts", "mounts", mounts)
+        collection("Pets", "pets", pets)
+
+        if #quests > 0 then
+            local accountQuests, characterQuests = 0, 0
+            for _, event in ipairs(quests) do
+                if event.accountFirst == true then
+                    accountQuests = accountQuests + 1
+                elseif event.characterFirst == true then
+                    characterQuests = characterQuests + 1
+                end
+            end
+            local questValue = ACCOUNT_HEX .. accountQuests .. " warband" .. COLOR_END
+                .. " / " .. CHARACTER_HEX .. characterQuests .. " character" .. COLOR_END
+            line(disclosure("Quests", expanded.quests), questValue, VALUE_COLOR, function()
+                expanded.quests = not expanded.quests
+                render(latest)
+            end)
+            if expanded.quests then
+                for _, event in ipairs(quests) do
+                    local scope = "completed"
+                    local color = REP_COLOR
+                    if event.accountFirst == true then
+                        scope = "warband first"
+                        color = ACCOUNT_COLOR
+                    elseif event.characterFirst == true then
+                        scope = "character first"
+                        color = CHARACTER_COLOR
+                    end
+                    line("  " .. (event.name or ("Quest " .. event.id)), scope, color)
+                end
+            end
+        end
+
+        if #reputation > 0 then
+            line(disclosure("Reputation", expanded.reputation), "+" .. (summary.reputationTotal or 0),
+                VALUE_COLOR, function()
+                    expanded.reputation = not expanded.reputation
+                    render(latest)
+                end)
+            if expanded.reputation then
+                for _, gain in ipairs(reputation) do
+                    line("  " .. gain.faction, "+" .. gain.amount, REP_COLOR)
+                end
+            end
+        end
+
+        collection("Toys", "toys", toys)
+
+        if #transmogs > 0 then
+            local appearances = 0
+            for _, event in ipairs(transmogs) do
+                if event.newAppearance then
+                    appearances = appearances + 1
+                end
+            end
+            local variants = #transmogs - appearances
+            local transmogValue = tostring(appearances) .. " new"
+            if variants > 0 then
+                transmogValue = transmogValue .. " · " .. variants .. " variant"
+                if variants ~= 1 then
+                    transmogValue = transmogValue .. "s"
+                end
+            end
+            line(disclosure("Transmog", expanded.transmogs), transmogValue, VALUE_COLOR, function()
+                expanded.transmogs = not expanded.transmogs
+                render(latest)
+            end)
+            if expanded.transmogs then
+                for index, event in ipairs(transmogs) do
+                    local current = event
+                    local itemName = deps.itemName and deps.itemName(current.id)
+                    local kind = current.newAppearance and "new" or "variant"
+                    local kindColor = current.newAppearance and REP_COLOR or VARIANT_COLOR
+                    local reviewKey = tostring(current.sourceID or current.id) .. ":" .. tostring(index)
+                    local prefix = reviewedTransmogs[reviewKey] and "✓ " or ""
+                    line("  " .. prefix .. (itemName or ("Item " .. current.id)), kind, kindColor, function(button)
+                        reviewedTransmogs[reviewKey] = true
+                        if button == "RightButton" and current.sourceID and deps.openTransmogCollection then
+                            deps.openTransmogCollection(current.sourceID)
+                        elseif deps.previewTransmog then
+                            deps.previewTransmog(current.id)
+                        end
+                        render(latest)
+                    end)
+                end
             end
         end
 
