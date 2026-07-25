@@ -93,6 +93,20 @@ function fake.newFrame()
         self.points[#self.points + 1] = { ... }
     end
 
+    -- EditBox widgets carry text of their own, and the report window's read-only
+    -- boxes are the only thing a test can inspect to prove what it offered to copy.
+    function frame:SetText(text)
+        self.text = text
+    end
+
+    function frame:GetText()
+        return self.text
+    end
+
+    function frame:HighlightText()
+        self.highlighted = (self.highlighted or 0) + 1
+    end
+
     function frame:Show()
         self.shown = true
     end
@@ -126,6 +140,10 @@ function fake.newFrame()
         "SetScrollChild",
         "SetHighlightTexture",
         "SetJustifyH",
+        "SetAutoFocus",
+        "SetCursorPosition",
+        "SetFontObject",
+        "ClearFocus",
         "Raise",
         "StartMoving",
         "StopMovingOrSizing",
@@ -382,7 +400,8 @@ end
 ---`options.db` may be shared between two `newEnv` calls to model two characters on
 ---one account writing into the same SavedVariables table.
 ---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db,
----  tiers, money, instanceType, itemPrices, transmogSources, appearanceSources, lootFormats, factionFormats }`
+---  tiers, money, instanceType, instanceName, difficultyId, difficultyName, itemPrices,
+---  transmogSources, appearanceSources, lootFormats, factionFormats }`
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -406,7 +425,12 @@ function fake.newEnv(options)
     -- Mutable so a test can drive the wallet, the zone, and the collection across a
     -- sequence of events, the same way the client mutates them under the addon's feet.
     local money = options.money or 0
-    local instanceType = options.instanceType
+    local zone = {
+        name = options.instanceName or "Deadmines",
+        kind = options.instanceType,
+        difficultyId = options.difficultyId or 1,
+        difficulty = options.difficultyName or "Normal",
+    }
     local itemPrices = options.itemPrices or {}
     local transmogSources = options.transmogSources or {}
     local appearanceSourceLists = options.appearanceSources or {}
@@ -453,8 +477,13 @@ function fake.newEnv(options)
         getMoney = function()
             return money
         end,
-        instanceType = function()
-            return instanceType
+        instanceInfo = function()
+            return {
+                name = zone.name,
+                kind = zone.kind,
+                difficultyId = zone.difficultyId,
+                difficulty = zone.difficulty,
+            }
         end,
         itemSellPrice = function(itemID)
             return itemPrices[itemID]
@@ -503,10 +532,18 @@ function fake.newEnv(options)
         setMoney = function(value)
             money = value
         end,
-        ---Drive the zone the addon reads through env.instanceType.
+        ---Drive the instance type the addon reads through env.instanceInfo. Passing
+        ---nil models zoning out into the open world.
         ---@param value string?
         setInstanceType = function(value)
-            instanceType = value
+            zone.kind = value
+        end,
+        ---Drive the whole zone at once, for tests that move between instances.
+        ---@param value table `{ name, kind, difficultyId, difficulty }`
+        setInstance = function(value)
+            for key, field in pairs(value) do
+                zone[key] = field
+            end
         end,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()

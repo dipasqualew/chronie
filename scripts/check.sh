@@ -10,3 +10,8 @@ luacheck src Main.lua spec
 
 echo "==> busted"
 busted --verbose
+
+# The collector runs outside the game, on whatever Python the gaming machine has,
+# so it is tested with the standard library and nothing else.
+echo "==> collector"
+python3 -m unittest discover --start-directory scripts --pattern "*_test.py"

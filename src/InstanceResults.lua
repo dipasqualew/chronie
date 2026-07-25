@@ -6,6 +6,7 @@ local _, ns = ...
 ---collection queries) or as raw chat strings it parses itself.
 ---@class InstanceResults
 ---@field enter fun(instanceType: string?, money: integer): boolean Sync to a zone; true while tracking.
+---@field leave fun() Stop tracking, so the next enter() starts a fresh tally.
 ---@field money fun(current: integer) Fold the current wallet total into gold looted.
 ---@field loot fun(message: string) Add a self-loot chat line's vendor value.
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
@@ -251,6 +252,12 @@ function ns.newInstanceResults(deps)
             end
             session.newVersions = session.newVersions + 1
             return "version"
+        end,
+
+        ---Ends the visit without waiting for a zone change. The tally is left intact
+        ---so a caller can still read `summary()` off it; the next enter() wipes it.
+        leave = function()
+            session.active = false
         end,
 
         isActive = function()

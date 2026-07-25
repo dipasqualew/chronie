@@ -1162,6 +1162,238 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("recording instance sessions", function()
+        local NOW = 1700000000
+
+        ---Boot a character standing in the default fake instance, ready to zone.
+        ---@param options table?
+        ---@return table app, table recorded
+        local function inside(options)
+            options = options or {}
+            options.playerName = options.playerName or "Thrall"
+            options.realmName = options.realmName or "Ragnaros"
+            options.now = options.now or NOW
+            options.instanceType = options.instanceType or "party"
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            return app, recorded
+        end
+
+        it("writes nothing while the visit is still under way", function()
+            local _, recorded = inside()
+
+            assert.same({}, recorded.db.sessions)
+        end)
+
+        it("files the visit into the db on the way back out to the world", function()
+            local _, recorded = inside({ class = "Warrior", classFile = "WARRIOR" })
+
+            recorded.clock.advance(1800)
+            recorded.setInstanceType(nil)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(1, #recorded.db.sessions)
+            local record = recorded.db.sessions[1]
+            assert.equal("Thrall-Ragnaros", record.character)
+            assert.equal("Deadmines", record.instance)
+            assert.equal("Normal", record.difficulty)
+            assert.equal("WARRIOR", record.classFile)
+            assert.equal(1800, record.seconds)
+        end)
+
+        it("carries the instance's takings onto the filed record", function()
+            local _, recorded = inside({ money = 0, itemPrices = { [4242] = 60 } })
+
+            recorded.setMoney(2500)
+            recorded.frame:fire("PLAYER_MONEY")
+            recorded.frame:fire(
+                "CHAT_MSG_LOOT",
+                "You receive loot: |cffa335ee|Hitem:4242::::::::::::|h[Item]|h|rx2."
+            )
+            recorded.setInstanceType(nil)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local record = recorded.db.sessions[1]
+            assert.equal(2500, record.goldLooted)
+            assert.equal(120, record.itemValue)
+            assert.equal(2620, record.gold)
+        end)
+
+        it("files one record per instance when zoning straight into the next one", function()
+            local _, recorded = inside()
+
+            recorded.clock.advance(600)
+            recorded.setInstance({ name = "Ulduar", kind = "raid", difficultyId = 4, difficulty = "25 Player" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.clock.advance(600)
+            recorded.setInstanceType(nil)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(2, #recorded.db.sessions)
+        end)
+
+        -- SavedVariables only reach disk when the client shuts down, so a visit that
+        -- is still open at logout has to be filed there or it is lost outright.
+        it("files the open visit when the player logs out inside the instance", function()
+            local _, recorded = inside()
+
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(1, #recorded.db.sessions)
+            assert.equal("Deadmines", recorded.db.sessions[1].instance)
+        end)
+
+        it("files nothing at logout out in the open world", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", instanceType = nil })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.same({}, recorded.db.sessions)
+        end)
+
+        it("registers the logout event that flushes the visit", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            assert.equal(1, recorded.frame.registered.PLAYER_LOGOUT)
+        end)
+
+        it("keeps both characters' sessions in one shared db", function()
+            local db = {}
+            local _, first = inside({ db = db })
+            first.setInstanceType(nil)
+            first.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local _, second = inside({ playerName = "Jaina", realmName = "Draenor", db = db })
+            second.setInstanceType(nil)
+            second.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(2, #db.sessions)
+        end)
+    end)
+
+    describe("the /wdp sessions slash command", function()
+        it("opens the session window on the first call and closes it on the second", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("sessions")
+            assert.is_true(app.sessionWindow.isShown())
+
+            recorded.slashRegistrations[1].handler("sessions")
+            assert.is_false(app.sessionWindow.isShown())
+        end)
+
+        it("titles the window with the retention window", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("sessions")
+
+            local titles = {}
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == "WdpWowSessionWindow" then
+                    for index, fontString in ipairs(frame.fontStrings) do
+                        titles[index] = fontString.text
+                    end
+                end
+            end
+            assert.equal("Instance sessions — last 7 days", titles[1])
+        end)
+
+        it("stays lazy until the slash is used", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            assert.equal(1, #recorded.frames)
+
+            recorded.slashRegistrations[1].handler("sessions")
+
+            assert.is_true(#recorded.frames > 1)
+        end)
+
+        it("names sessions and report in the usage text", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("nonsense")
+
+            assert.equal("|cff33ff99wdp-wow|r: usage: /wdp locks | results | sessions | report", recorded.lines[1])
+        end)
+    end)
+
+    describe("the /wdp report slash command", function()
+        ---@param recorded table
+        ---@return string[] the text every edit box in the report window carries
+        local function commands(recorded)
+            local texts = {}
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameType == "EditBox" then
+                    texts[#texts + 1] = frame.text
+                end
+            end
+            return texts
+        end
+
+        it("opens the report window on the first call and closes it on the second", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("report")
+            assert.is_true(app.reportWindow.isShown())
+
+            recorded.slashRegistrations[1].handler("report")
+            assert.is_false(app.reportWindow.isShown())
+        end)
+
+        it("puts the collector commands in copyable boxes", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("report")
+
+            local texts = commands(recorded)
+            assert.equal(3, #texts)
+            assert.is_truthy(texts[1]:find("collect.py", 1, true))
+            assert.is_truthy(texts[1]:find("--watch", 1, true))
+            assert.is_truthy(texts[2]:find("--open", 1, true))
+            assert.is_truthy(texts[3]:find("report.html", 1, true))
+        end)
+
+        -- The player is meant to copy out of these boxes, not type into them, so a
+        -- stray keystroke has to put the command straight back.
+        it("restores a box the player typed into", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            recorded.slashRegistrations[1].handler("report")
+            local box
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameType == "EditBox" then
+                    box = box or frame
+                end
+            end
+            local original = box.text
+
+            box:SetText("oops")
+            box:run("OnTextChanged", true)
+
+            assert.equal(original, box.text)
+        end)
+
+        it("takes its paths from the saved variables when they are set", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                db = { report = { python = "py -3", addonPath = "D:\\wow\\AddOns\\wdp-wow" } },
+            })
+
+            recorded.slashRegistrations[1].handler("report")
+
+            assert.equal('py -3 "D:\\wow\\AddOns\\wdp-wow\\scripts\\collect.py" --watch', commands(recorded)[1])
+        end)
+
+        it("stays lazy until the slash is used", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            assert.equal(1, #recorded.frames)
+
+            recorded.slashRegistrations[1].handler("report")
+
+            assert.is_true(#recorded.frames > 1)
+        end)
+    end)
+
     describe("the /wdp results slash command", function()
         it("names results in the usage text for an unknown subcommand", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })

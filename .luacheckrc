@@ -26,7 +26,7 @@ read_globals = {
     "EJ_GetTierInfo",
     "EJ_GetInstanceByIndex",
     "GetMoney",
-    "IsInInstance",
+    "GetInstanceInfo",
     "GetItemInfo",
     "C_TransmogCollection",
     "FACTION_STANDING_INCREASED",

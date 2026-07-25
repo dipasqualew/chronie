@@ -11,8 +11,8 @@ round trip is pure overhead here.
 
 ## Checks
 
-`./scripts/check.sh` runs luacheck then busted. It must report zero warnings and
-zero failures before committing. Luacheck caps lines at 120 characters, and new
+`./scripts/check.sh` runs luacheck, busted, then the collector's unittest suite. It
+must report zero warnings and zero failures before committing. Luacheck caps lines at 120 characters, and new
 WoW API globals have to be declared in `.luacheckrc` or it fails the build.
 
 A run that is not fully green is not a finished piece of work. Leaving lint
@@ -34,3 +34,10 @@ in `spec/helpers/fake_wow.lua` without monkey patching.
 
 Keep frame code thin and push logic into a pure module beside it — the pure
 module is where the tests earn their keep.
+
+`scripts/` and `web/` are not part of the addon: the client never loads them, and
+they must stay out of the .toc. That is where the out-of-game session collector
+(`scripts/collect.py`, Python 3 standard library only, tested by
+`scripts/collect_test.py`) and its HTML report template live. The addon's only job
+in that pipeline is writing `db.sessions`; everything downstream reads the file
+the client dumps at logout.

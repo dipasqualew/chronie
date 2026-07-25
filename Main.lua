@@ -23,7 +23,7 @@ local addonName, ns = ...
 ---@field getInstanceByIndex fun(index: integer, isRaid: boolean): ...
 ---@field registerSlash fun(tokens: string[], handler: fun(text: string))
 ---@field getMoney fun(): integer Current wallet total, in copper.
----@field instanceType fun(): string? IsInInstance's type: "party", "raid", "scenario", ...
+---@field instanceInfo fun(): InstanceInfo? Name, type and difficulty of the current zone.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---@field transmogSourceVisual fun(sourceID: integer): integer?
 ---@field transmogAppearanceSources fun(visualID: integer): integer[]?
@@ -111,6 +111,53 @@ function ns.main(env)
         end,
     })
 
+    ---Only the logged-in character can be scanned, so identity is captured at save time.
+    local function currentCharacter()
+        return (env.unitName("player") or "?") .. "-" .. (env.realmName() or "?")
+    end
+
+    local sessionLog = ns.newSessionLog({
+        db = env.db,
+        now = env.now,
+        formatDate = env.formatDate,
+    })
+
+    local sessionTracker = ns.newSessionTracker({
+        results = results,
+        sessionLog = sessionLog,
+        now = env.now,
+        instanceInfo = env.instanceInfo,
+        getMoney = env.getMoney,
+        character = currentCharacter,
+        classFile = function()
+            local _, classFile = env.unitClass("player")
+            return classFile
+        end,
+    })
+
+    local sessionTable = ns.newSessionTable({
+        classDisplay = classDisplay,
+        formatMoney = ns.formatMoney,
+    })
+
+    local sessionWindow = ns.newDetailWindow({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        specialFrames = env.specialFrames,
+        name = "WdpWowSessionWindow",
+    })
+
+    -- Read straight off the saved variables so a player on a non-default install can
+    -- fix the paths in wdp-wow.lua without touching addon code.
+    local reportCommand = ns.newReportCommand(env.db.report)
+
+    local reportWindow = ns.newReportWindow({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        specialFrames = env.specialFrames,
+        name = "WdpWowReportWindow",
+    })
+
     ---Only redraws when the panel is actually on screen, so a busy loot log does not
     ---churn hidden font strings.
     local function refreshResults()
@@ -139,11 +186,6 @@ function ns.main(env)
         end,
     })
 
-    ---Only the logged-in character can be scanned, so identity is captured at save time.
-    local function currentCharacter()
-        return (env.unitName("player") or "?") .. "-" .. (env.realmName() or "?")
-    end
-
     local function captureLockouts()
         store.save(currentCharacter(), scanner.scan())
         window.refresh()
@@ -151,7 +193,7 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /wdp locks | results")
+            logger.info("usage: /wdp locks | results | sessions | report")
         end,
     })
     router.add("locks", window.toggle)
@@ -162,6 +204,16 @@ function ns.main(env)
             resultsWindow.update(results.summary())
             resultsWindow.show()
         end
+    end)
+    router.add("sessions", function()
+        if sessionWindow.isShown() then
+            sessionWindow.hide()
+        else
+            sessionWindow.show(sessionTable.spec(sessionLog.all()))
+        end
+    end)
+    router.add("report", function()
+        reportWindow.toggle(reportCommand.lines())
     end)
 
     dispatcher.on("PLAYER_LOGIN", function()
@@ -183,16 +235,21 @@ function ns.main(env)
     dispatcher.on("BOSS_KILL", env.requestRaidInfo)
 
     -- Zoning is also the signal that an instance visit has begun or ended: start a
-    -- fresh tally on the way in, hide the panel on the way out.
+    -- fresh tally on the way in, file the finished visit and hide the panel on the
+    -- way out.
     dispatcher.on("PLAYER_ENTERING_WORLD", function()
         env.requestRaidInfo()
-        if results.enter(env.instanceType(), env.getMoney()) then
+        if sessionTracker.sync() then
             resultsWindow.update(results.summary())
             resultsWindow.show()
         else
             resultsWindow.hide()
         end
     end)
+
+    -- Logging out or reloading is the last chance to file a visit: SavedVariables are
+    -- only written to disk on the way out, so an unfiled visit would never be exported.
+    dispatcher.on("PLAYER_LOGOUT", sessionTracker.flush)
 
     dispatcher.on("PLAYER_MONEY", function()
         results.money(env.getMoney())
@@ -224,6 +281,12 @@ function ns.main(env)
         logger = logger,
         results = results,
         resultsWindow = resultsWindow,
+        sessionLog = sessionLog,
+        sessionTracker = sessionTracker,
+        sessionTable = sessionTable,
+        sessionWindow = sessionWindow,
+        reportCommand = reportCommand,
+        reportWindow = reportWindow,
     }
 end
 
@@ -290,9 +353,9 @@ if CreateFrame then
             getInstanceByIndex = EJ_GetInstanceByIndex,
             registerSlash = registerSlash,
             getMoney = GetMoney,
-            instanceType = function()
-                local _, instanceType = IsInInstance()
-                return instanceType
+            instanceInfo = function()
+                local name, kind, difficultyId, difficulty = GetInstanceInfo()
+                return { name = name, kind = kind, difficultyId = difficultyId, difficulty = difficulty }
             end,
             itemSellPrice = function(itemID)
                 if not itemID then

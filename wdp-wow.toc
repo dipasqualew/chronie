@@ -1,8 +1,8 @@
 ## Interface: 120005
 ## Title: wdp-wow
-## Notes: Cross-character raid and dungeon lockouts. /wdp locks
+## Notes: Cross-character lockouts and instance session history. /wdp locks
 ## Author: wdp
-## Version: 0.4.0
+## Version: 0.5.0
 ## SavedVariables: WdpWowDB
 
 src/Greeter.lua
@@ -19,4 +19,9 @@ src/DetailWindow.lua
 src/LockoutWindow.lua
 src/InstanceResults.lua
 src/ResultsWindow.lua
+src/SessionLog.lua
+src/SessionTracker.lua
+src/SessionTable.lua
+src/ReportCommand.lua
+src/ReportWindow.lua
 Main.lua

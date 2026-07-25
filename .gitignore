@@ -1,4 +1,5 @@
 .luarocks/
+__pycache__/
 luacov.*
 *.swp
 .DS_Store
