@@ -1126,19 +1126,18 @@ describe("addon integration", function()
             )
         end)
 
-        it("classifies a newly collected transmog source from its event", function()
+        it("records a newly collected transmog item from its source event", function()
             local app, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
                 instanceType = "party",
-                transmogSources = { [11] = { visual = 500, collected = true } },
-                appearanceSources = { [500] = { 11 } },
+                transmogSources = { [11] = { item = 19019 } },
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
 
-            assert.equal(1, app.tally.summary().newAppearances)
+            assert.same({ { id = 19019, at = 1000 } }, app.tally.summary().transmogs)
         end)
 
         -- The open world is a tracked session now, so a loot line out there counts just

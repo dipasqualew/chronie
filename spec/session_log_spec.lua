@@ -37,8 +37,7 @@ describe("ns.newSessionLog", function()
             summary = {
                 lootValue = 2000,
                 goldDiff = 1500,
-                newAppearances = 2,
-                newVersions = 1,
+                transmogs = { { id = 19019, at = NOW - 100 } },
                 currencyTotal = 15,
                 reputationTotal = 40,
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
@@ -77,8 +76,7 @@ describe("ns.newSessionLog", function()
                 seconds = 1800,
                 lootValue = 2000,
                 goldDiff = 1500,
-                newAppearances = 2,
-                newVersions = 1,
+                transmogs = { { id = 19019, at = NOW - 100 } },
                 currencyTotal = 15,
                 reputationTotal = 40,
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
@@ -120,7 +118,7 @@ describe("ns.newSessionLog", function()
 
             assert.equal(0, record.lootValue)
             assert.equal(0, record.goldDiff)
-            assert.equal(0, record.newAppearances)
+            assert.same({}, record.transmogs)
             assert.equal(0, record.currencyTotal)
             assert.same({}, record.reputation)
             assert.same({}, record.currencies)

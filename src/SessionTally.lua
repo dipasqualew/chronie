@@ -15,7 +15,7 @@ local _, ns = ...
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
 ---@field achievement fun(id: integer, name: string?, at: integer) Append an earned achievement.
----@field transmogSource fun(sourceID: integer): string? Classify a newly collected source.
+---@field transmog fun(itemID: integer, at: integer) Append a newly collected transmog item.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
 ---@field summary fun(): SessionSummary
@@ -34,14 +34,17 @@ local _, ns = ...
 ---@field name string
 ---@field at integer When it was earned.
 
+---@class TransmogEvent
+---@field id integer Item ID.
+---@field at integer When it was collected.
+
 ---@class SessionSummary
 ---@field active boolean
 ---@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
 ---@field goldLooted integer Copper picked up as money.
 ---@field itemValue integer Summed vendor value of looted items, in copper.
 ---@field goldDiff integer Net wallet change over the session, in copper; may be negative.
----@field newAppearances integer Transmog appearances collected for the first time ever.
----@field newVersions integer New sources of an appearance already known.
+---@field transmogs TransmogEvent[] Newly collected transmog items, in acquisition order.
 ---@field currencyTotal integer Summed absolute-signed currency change across every currency.
 ---@field currencies CurrencyGain[] Per-currency totals, sorted by name.
 ---@field reputationTotal integer Summed reputation gained across every faction.
@@ -52,9 +55,6 @@ local _, ns = ...
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
 ---@field factionFormats string[]? Reputation-increase message templates.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
----@field sourceVisual fun(sourceID: integer): integer? The appearance visual a source belongs to.
----@field appearanceSources fun(visualID: integer): integer[]? Every source that shares a visual.
----@field isSourceCollected fun(sourceID: integer): boolean
 
 -- Lua-pattern magic characters, escaped so literal chunks of a printf template match verbatim.
 local MAGIC = "([%^%$%(%)%.%[%]%*%+%-%?%%])"
@@ -138,9 +138,6 @@ end
 ---@return SessionTally
 function ns.newSessionTally(deps)
     deps = deps or {}
-    local sourceVisual = deps.sourceVisual or function() end
-    local appearanceSources = deps.appearanceSources or function() end
-    local isSourceCollected = deps.isSourceCollected or function() return false end
     local itemSellPrice = deps.itemSellPrice or function() return 0 end
 
     local lootPatterns = compileAll(deps.lootFormats)
@@ -159,8 +156,7 @@ function ns.newSessionTally(deps)
         session.latestMoney = money
         session.goldLooted = 0
         session.itemValue = 0
-        session.newAppearances = 0
-        session.newVersions = 0
+        session.transmogs = {}
         session.reputation = {}
         session.currencies = {}
         session.achievements = {}
@@ -273,33 +269,13 @@ function ns.newSessionTally(deps)
             }
         end,
 
-        ---A source is a single item that grants an appearance. If it is the only
-        ---collected source of its visual it is a brand-new appearance; otherwise the
-        ---visual was already known and this is just another version of it.
-        ---@param sourceID integer
-        ---@return string? kind "appearance", "version", or nil when it could not be classified
-        transmogSource = function(sourceID)
-            if not session.active then
+        ---@param itemID integer
+        ---@param at integer
+        transmog = function(itemID, at)
+            if not session.active or not itemID then
                 return
             end
-            local visual = sourceVisual(sourceID)
-            if not visual then
-                return
-            end
-
-            local collected = 0
-            for _, id in ipairs(appearanceSources(visual) or {}) do
-                if isSourceCollected(id) then
-                    collected = collected + 1
-                end
-            end
-
-            if collected <= 1 then
-                session.newAppearances = session.newAppearances + 1
-                return "appearance"
-            end
-            session.newVersions = session.newVersions + 1
-            return "version"
+            session.transmogs[#session.transmogs + 1] = { id = itemID, at = at }
         end,
 
         ---Ends the session without waiting for a zone change. The tally is left intact
@@ -320,8 +296,7 @@ function ns.newSessionTally(deps)
             local goldDiff = session.latestMoney - session.openingMoney
             return lootValue ~= 0
                 or goldDiff ~= 0
-                or session.newAppearances > 0
-                or session.newVersions > 0
+                or #session.transmogs > 0
                 or next(session.currencies) ~= nil
                 or next(session.reputation) ~= nil
                 or #session.achievements > 0
@@ -357,14 +332,18 @@ function ns.newSessionTally(deps)
                 achievements[index] = { id = earned.id, name = earned.name, at = earned.at }
             end
 
+            local transmogs = {}
+            for index, event in ipairs(session.transmogs) do
+                transmogs[index] = { id = event.id, at = event.at }
+            end
+
             return {
                 active = session.active,
                 lootValue = session.goldLooted + session.itemValue,
                 goldLooted = session.goldLooted,
                 itemValue = session.itemValue,
                 goldDiff = session.latestMoney - session.openingMoney,
-                newAppearances = session.newAppearances,
-                newVersions = session.newVersions,
+                transmogs = transmogs,
                 currencyTotal = currencyTotal,
                 currencies = currencies,
                 reputationTotal = reputationTotal,

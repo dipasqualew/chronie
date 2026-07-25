@@ -8,29 +8,16 @@ describe("ns.newSessionTally", function()
 
     ---Build the tally directly with fake seams, mirroring how lockout_store_spec builds
     ---the store: no frames, no Main, just the pure module and injected dependencies.
-    ---@param options table? `{ prices, sources, appearances, lootFormats, factionFormats }`
+    ---@param options table? `{ prices, lootFormats, factionFormats }`
     ---@return SessionTally
     local function newTally(options)
         options = options or {}
         local prices = options.prices or {}
-        local sources = options.sources or {}
-        local appearances = options.appearances or {}
         return ns.newSessionTally({
             lootFormats = options.lootFormats or LOOT_FORMATS,
             factionFormats = options.factionFormats or FACTION_FORMATS,
             itemSellPrice = function(itemID)
                 return prices[itemID]
-            end,
-            sourceVisual = function(sourceID)
-                local source = sources[sourceID]
-                return source and source.visual
-            end,
-            appearanceSources = function(visual)
-                return appearances[visual]
-            end,
-            isSourceCollected = function(sourceID)
-                local source = sources[sourceID]
-                return source ~= nil and source.collected == true
             end,
         })
     end
@@ -406,51 +393,25 @@ describe("ns.newSessionTally", function()
         end)
     end)
 
-    describe("transmog classification", function()
-        it("counts a source whose visual is collected only once as a brand-new appearance", function()
-            local tally = newTally({
-                sources = { [11] = { visual = 500, collected = true } },
-                appearances = { [500] = { 11 } },
-            })
+    describe("transmog events", function()
+        it("records every newly collected item with its acquisition time", function()
+            local tally = newTally()
             tally.begin(0)
 
-            assert.equal("appearance", tally.transmogSource(11))
-            assert.equal(1, tally.summary().newAppearances)
-            assert.equal(0, tally.summary().newVersions)
+            tally.transmog(19019, 1234)
+            tally.transmog(17182, 1235)
+
+            assert.same({
+                { id = 19019, at = 1234 },
+                { id = 17182, at = 1235 },
+            }, tally.summary().transmogs)
         end)
 
-        it("counts a source of an already-known visual as an additional version", function()
-            local tally = newTally({
-                sources = {
-                    [11] = { visual = 500, collected = true },
-                    [12] = { visual = 500, collected = true },
-                },
-                appearances = { [500] = { 11, 12 } },
-            })
-            tally.begin(0)
+        it("ignores transmog while inactive", function()
+            local tally = newTally()
 
-            assert.equal("version", tally.transmogSource(12))
-            assert.equal(0, tally.summary().newAppearances)
-            assert.equal(1, tally.summary().newVersions)
-        end)
-
-        it("returns nil and changes no counter for an unknown visual", function()
-            local tally = newTally({ sources = {}, appearances = {} })
-            tally.begin(0)
-
-            assert.is_nil(tally.transmogSource(404))
-            assert.equal(0, tally.summary().newAppearances)
-            assert.equal(0, tally.summary().newVersions)
-        end)
-
-        it("ignores transmog sources while inactive", function()
-            local tally = newTally({
-                sources = { [11] = { visual = 500, collected = true } },
-                appearances = { [500] = { 11 } },
-            })
-
-            assert.is_nil(tally.transmogSource(11))
-            assert.equal(0, tally.summary().newAppearances)
+            tally.transmog(19019, 1234)
+            assert.same({}, tally.summary().transmogs)
         end)
     end)
 
@@ -550,18 +511,17 @@ describe("ns.newSessionTally", function()
             assert.same({}, summary.reputation)
             assert.same({}, summary.currencies)
             assert.same({}, summary.achievements)
+            assert.same({}, summary.transmogs)
         end)
 
         it("carries every tally onto one summary table", function()
             local tally = newTally({
                 prices = { [4242] = 50 },
-                sources = { [11] = { visual = 500, collected = true } },
-                appearances = { [500] = { 11 } },
             })
             tally.begin(100)
             tally.money(200)
             tally.loot("You receive loot: " .. link(4242) .. ".")
-            tally.transmogSource(11)
+            tally.transmog(19019, 450)
             tally.reputation("Your Argent Dawn reputation has increased by 30.")
             tally.currency(1166, 15, "Timewarped Badge")
             tally.achievement(1, "First", 500)
@@ -572,8 +532,7 @@ describe("ns.newSessionTally", function()
                 goldLooted = 100,
                 itemValue = 50,
                 goldDiff = 100,
-                newAppearances = 1,
-                newVersions = 0,
+                transmogs = { { id = 19019, at = 450 } },
                 currencyTotal = 15,
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputationTotal = 30,

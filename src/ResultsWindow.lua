@@ -133,8 +133,7 @@ function ns.newResultsWindow(deps)
 
         line("Loot", deps.formatMoney(summary.lootValue), GOLD_COLOR)
         line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
-        line("New transmog", tostring(summary.newAppearances), VALUE_COLOR)
-        line("New versions", tostring(summary.newVersions), VALUE_COLOR)
+        line("New transmog", tostring(#(summary.transmogs or {})), VALUE_COLOR)
 
         block("Currency", summary.currencies, function(gain)
             return gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount

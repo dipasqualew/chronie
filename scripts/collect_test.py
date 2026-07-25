@@ -38,8 +38,9 @@ WdpWowDB = {
 \t\t\t["seconds"] = 1800,
 \t\t\t["lootValue"] = 2000,
 \t\t\t["goldDiff"] = 1500,
-\t\t\t["newAppearances"] = 2,
-\t\t\t["newVersions"] = 1,
+\t\t\t["transmogs"] = {
+\t\t\t\t{ ["id"] = 19019, ["at"] = 150 },
+\t\t\t},
 \t\t\t["currencyTotal"] = 15,
 \t\t\t["reputationTotal"] = 40,
 \t\t\t["currencies"] = {
@@ -158,6 +159,7 @@ class NormaliseTest(unittest.TestCase):
             "reputation": [{"faction": "Argent Dawn", "amount": 40}],
             "currencies": [{"id": 1166, "name": "Timewarped Badge", "amount": 15}],
             "achievements": [{"id": 1234, "name": "The Loremaster", "at": 150}],
+            "transmogs": [{"id": 19019, "at": 175}],
         }
         base.update(overrides)
         return base
@@ -167,7 +169,7 @@ class NormaliseTest(unittest.TestCase):
 
         self.assertEqual(cleaned["seconds"], 100)
         self.assertEqual(cleaned["difficulty"], "")
-        self.assertEqual(cleaned["newAppearances"], 0)
+        self.assertEqual(cleaned["transmogs"], [{"id": 19019, "at": 175}])
         self.assertIsNone(cleaned["classFile"])
         self.assertEqual(cleaned["lootValue"], 2000)
         self.assertEqual(cleaned["goldDiff"], 1500)

@@ -401,7 +401,7 @@ end
 ---one account writing into the same SavedVariables table.
 ---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db,
 ---  tiers, money, instanceType, instanceName, difficultyId, difficultyName, itemPrices,
----  transmogSources, appearanceSources, currencies, achievements, lootFormats, factionFormats }`
+---  transmogSources, currencies, achievements, lootFormats, factionFormats }`
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
 ---@return table env, table recorded
 function fake.newEnv(options)
@@ -434,7 +434,6 @@ function fake.newEnv(options)
     }
     local itemPrices = options.itemPrices or {}
     local transmogSources = options.transmogSources or {}
-    local appearanceSourceLists = options.appearanceSources or {}
     local currencyNames = options.currencies or {}
     local achievementNames = options.achievements or {}
 
@@ -491,16 +490,9 @@ function fake.newEnv(options)
         itemSellPrice = function(itemID)
             return itemPrices[itemID]
         end,
-        transmogSourceVisual = function(sourceID)
+        transmogSourceItem = function(sourceID)
             local source = transmogSources[sourceID]
-            return source and source.visual
-        end,
-        transmogAppearanceSources = function(visual)
-            return appearanceSourceLists[visual]
-        end,
-        transmogSourceCollected = function(sourceID)
-            local source = transmogSources[sourceID]
-            return source ~= nil and source.collected == true
+            return source and source.item
         end,
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]

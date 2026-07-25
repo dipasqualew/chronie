@@ -257,6 +257,10 @@ const currencyText = (gains) =>
   (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}`).join(", ");
 const achievementText = (earned) =>
   (earned || []).map((event) => event.name).join(", ");
+const transmogLink = (event) =>
+  `<a href="https://www.wowhead.com/item=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">Item ${escapeHtml(event.id)}</a>`;
+const transmogCell = (events) =>
+  (events || []).length ? events.map(transmogLink).join(", ") : '<span class="muted">—</span>';
 
 // A compact cell that names the first couple of entries and counts the rest, with the
 // full list in the title attribute so nothing is lost to the abbreviation.
@@ -283,8 +287,7 @@ const totals = SESSIONS.reduce((acc, session) => {
   acc.lootValue += session.lootValue || 0;
   acc.goldDiff += session.goldDiff || 0;
   acc.seconds += session.seconds || 0;
-  acc.appearances += session.newAppearances || 0;
-  acc.versions += session.newVersions || 0;
+  acc.transmogs += (session.transmogs || []).length;
   acc.achievements += (session.achievements || []).length;
   (session.reputation || []).forEach((gain) => {
     acc.reputation[gain.faction] = (acc.reputation[gain.faction] || 0) + gain.amount;
@@ -293,7 +296,7 @@ const totals = SESSIONS.reduce((acc, session) => {
     acc.currencies[gain.name] = (acc.currencies[gain.name] || 0) + gain.amount;
   });
   return acc;
-}, { lootValue: 0, goldDiff: 0, seconds: 0, appearances: 0, versions: 0, achievements: 0, reputation: {}, currencies: {} });
+}, { lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, achievements: 0, reputation: {}, currencies: {} });
 
 const topFaction = Object.entries(totals.reputation).sort((a, b) => b[1] - a[1])[0];
 const topCurrency = Object.entries(totals.currencies).sort((a, b) => b[1] - a[1])[0];
@@ -308,7 +311,7 @@ $("tiles").innerHTML = [
   { label: "Loot", value: gold(totals.lootValue), foot: "coin + vendor value" },
   { label: "Net gold", value: signedGold(totals.goldDiff), foot: "wallet change", cls: totals.goldDiff < 0 ? "loss" : "gold" },
   { label: "Time played", value: duration(totals.seconds), foot: "across every session" },
-  { label: "New transmog", value: totals.appearances, foot: `${totals.versions} extra versions` },
+  { label: "New transmog", value: totals.transmogs, foot: "items collected" },
   {
     label: "Currency",
     value: topCurrency ? signed(topCurrency[1]) : "0",
@@ -429,13 +432,16 @@ function drawTimeline() {
     (session.achievements || []).forEach((event) => {
       parts.push(`<span class="chip achv">🏆 ${escapeHtml(event.name)}</span>`);
     });
+    (session.transmogs || []).forEach((event) => {
+      parts.push(`<span class="chip">${transmogLink(event)}</span>`);
+    });
     return parts.length ? `<div class="tl-extras">${parts.join("")}</div>` : "";
   };
 
   const stats = (session) => {
     const bits = [`Loot ${gold(session.lootValue)}`];
     if (session.goldDiff) bits.push(`Gold ${signedGold(session.goldDiff)}`);
-    if (session.newAppearances || session.newVersions) bits.push(`Transmog ${session.newAppearances} / ${session.newVersions}`);
+    if ((session.transmogs || []).length) bits.push(`Transmog ${session.transmogs.length}`);
     if ((session.reputation || []).length) bits.push(`Rep ${repText(session.reputation)}`);
     return bits.map(escapeHtml).join(" · ");
   };
@@ -478,7 +484,7 @@ const COLUMNS = [
   { key: "seconds", title: "Time", num: true, cell: (s) => duration(s.seconds), sort: (s) => s.seconds },
   { key: "lootValue", title: "Loot", num: true, cell: (s) => `<span class="gold">${escapeHtml(gold(s.lootValue))}</span>`, sort: (s) => s.lootValue },
   { key: "goldDiff", title: "Gold Δ", num: true, cell: (s) => `<span class="${s.goldDiff < 0 ? "loss" : "gold"}">${escapeHtml(signedGold(s.goldDiff))}</span>`, sort: (s) => s.goldDiff },
-  { key: "newAppearances", title: "Transmog", num: true, cell: (s) => `${s.newAppearances} <span class="muted">/ ${s.newVersions}</span>`, sort: (s) => s.newAppearances },
+  { key: "transmogs", title: "Transmog", cell: (s) => transmogCell(s.transmogs), sort: (s) => (s.transmogs || []).length },
   { key: "currencies", title: "Currency", cell: (s) => currencyCell(s.currencies), sort: (s) => (s.currencies || []).reduce((total, gain) => total + gain.amount, 0) },
   { key: "reputation", title: "Reputation", cell: (s) => repCell(s.reputation), sort: (s) => (s.reputation || []).reduce((total, gain) => total + gain.amount, 0) },
   { key: "achievements", title: "Achievements", cell: (s) => achievementCell(s.achievements), sort: (s) => (s.achievements || []).length },

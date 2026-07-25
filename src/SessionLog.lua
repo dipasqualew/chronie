@@ -17,8 +17,7 @@ local _, ns = ...
 ---@field seconds integer How long the session lasted.
 ---@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
 ---@field goldDiff integer Net wallet change over the session, in copper; may be negative.
----@field newAppearances integer
----@field newVersions integer
+---@field transmogs TransmogEvent[]
 ---@field currencyTotal integer
 ---@field reputationTotal integer
 ---@field currencies CurrencyGain[]
@@ -114,6 +113,16 @@ function ns.newSessionLog(deps)
         return copy
     end
 
+    ---@param events TransmogEvent[]?
+    ---@return TransmogEvent[]
+    local function copyTransmogs(events)
+        local copy = {}
+        for index, event in ipairs(events or {}) do
+            copy[index] = { id = event.id, at = event.at }
+        end
+        return copy
+    end
+
     return {
         prune = prune,
 
@@ -141,8 +150,7 @@ function ns.newSessionLog(deps)
                 seconds = math.max(endedAt - startedAt, 0),
                 lootValue = summary.lootValue or 0,
                 goldDiff = summary.goldDiff or 0,
-                newAppearances = summary.newAppearances or 0,
-                newVersions = summary.newVersions or 0,
+                transmogs = copyTransmogs(summary.transmogs),
                 currencyTotal = summary.currencyTotal or 0,
                 reputationTotal = summary.reputationTotal or 0,
                 currencies = copyCurrencies(summary.currencies),

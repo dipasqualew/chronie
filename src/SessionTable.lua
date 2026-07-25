@@ -109,7 +109,7 @@ local function accumulate(tally, record)
     tally.seconds = tally.seconds + (record.seconds or 0)
     tally.lootValue = tally.lootValue + (record.lootValue or 0)
     tally.goldDiff = tally.goldDiff + (record.goldDiff or 0)
-    tally.transmog = tally.transmog + (record.newAppearances or 0)
+    tally.transmog = tally.transmog + #(record.transmogs or {})
 
     for _, gain in ipairs(record.reputation or {}) do
         if not tally.factions[gain.faction] then
@@ -153,7 +153,7 @@ function ns.newSessionTable(deps)
                 formatDuration(record.seconds),
                 formatMoney(record.lootValue),
                 formatMoney(record.goldDiff),
-                record.newAppearances .. " / " .. record.newVersions,
+                tostring(#(record.transmogs or {})),
                 formatCurrencies(record.currencies),
                 formatReputation(record.reputation),
             },

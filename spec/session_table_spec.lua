@@ -40,8 +40,7 @@ describe("ns.newSessionTable", function()
             seconds = 1800,
             lootValue = 15000,
             goldDiff = 12000,
-            newAppearances = 2,
-            newVersions = 1,
+            transmogs = { { id = 19019, at = 100 }, { id = 17182, at = 200 } },
             currencyTotal = 15,
             reputationTotal = 40,
             currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
@@ -134,7 +133,7 @@ describe("ns.newSessionTable", function()
                 "30:00",
                 "1g 50s 0c",
                 "1g 20s 0c",
-                "2 / 1",
+                "2",
                 "Timewarped Badge +15",
                 "Argent Dawn +40",
             }, spec.sections[2].rows[1].cells)
@@ -162,8 +161,8 @@ describe("ns.newSessionTable", function()
     describe("the totals section", function()
         it("sums one line per character", function()
             local spec = newTable().spec({
-                record({ lootValue = 15000, goldDiff = 10000, seconds = 1800, newAppearances = 2 }),
-                record({ id = "b", lootValue = 5000, goldDiff = 4000, seconds = 600, newAppearances = 1 }),
+                record({ lootValue = 15000, goldDiff = 10000, seconds = 1800 }),
+                record({ id = "b", lootValue = 5000, goldDiff = 4000, seconds = 600, transmogs = { { id = 1 } } }),
                 record({ id = "c", character = "Jaina-Draenor", classFile = "MAGE", lootValue = 100 }),
             })
 

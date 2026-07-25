@@ -283,6 +283,14 @@ def normalise(record: dict) -> dict | None:
                 "at": int(event.get("at") or 0),
             })
 
+    transmogs = []
+    for event in record.get("transmogs") or []:
+        if isinstance(event, dict) and event.get("id"):
+            transmogs.append({
+                "id": int(event["id"]),
+                "at": int(event.get("at") or 0),
+            })
+
     ended = int(record["endedAt"])
     started = int(record.get("startedAt") or ended)
 
@@ -299,8 +307,7 @@ def normalise(record: dict) -> dict | None:
         "seconds": int(record.get("seconds") or max(ended - started, 0)),
         "lootValue": int(record.get("lootValue") or 0),
         "goldDiff": int(record.get("goldDiff") or 0),
-        "newAppearances": int(record.get("newAppearances") or 0),
-        "newVersions": int(record.get("newVersions") or 0),
+        "transmogs": transmogs,
         "currencyTotal": int(record.get("currencyTotal") or 0),
         "reputationTotal": int(record.get("reputationTotal") or 0),
         "currencies": currencies,

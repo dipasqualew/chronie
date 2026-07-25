@@ -25,9 +25,7 @@ local addonName, ns = ...
 ---@field getMoney fun(): integer Current wallet total, in copper.
 ---@field instanceInfo fun(): InstanceInfo? Name, type and difficulty of the current zone.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
----@field transmogSourceVisual fun(sourceID: integer): integer?
----@field transmogAppearanceSources fun(visualID: integer): integer[]?
----@field transmogSourceCollected fun(sourceID: integer): boolean
+---@field transmogSourceItem fun(sourceID: integer): integer?
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
 ---@field lootSelfFormats string[] Self-loot chat templates, most specific first.
@@ -91,9 +89,6 @@ function ns.main(env)
         lootFormats = env.lootSelfFormats,
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
-        sourceVisual = env.transmogSourceVisual,
-        appearanceSources = env.transmogAppearanceSources,
-        isSourceCollected = env.transmogSourceCollected,
     })
 
     local resultsWindow = ns.newResultsWindow({
@@ -259,7 +254,7 @@ function ns.main(env)
         refreshResults()
     end)
     dispatcher.on("TRANSMOG_COLLECTION_SOURCE_ADDED", function(sourceID)
-        tally.transmogSource(sourceID)
+        tally.transmog(env.transmogSourceItem(sourceID), env.now())
         refreshResults()
     end)
     dispatcher.on("CHAT_MSG_COMBAT_FACTION_CHANGE", function(message)
@@ -372,16 +367,9 @@ if CreateFrame then
                 end
                 return (select(11, GetItemInfo(itemID)))
             end,
-            transmogSourceVisual = function(sourceID)
+            transmogSourceItem = function(sourceID)
                 local info = C_TransmogCollection.GetSourceInfo(sourceID)
-                return info and info.visualID
-            end,
-            transmogAppearanceSources = function(visualID)
-                return C_TransmogCollection.GetAllAppearanceSources(visualID)
-            end,
-            transmogSourceCollected = function(sourceID)
-                local info = C_TransmogCollection.GetSourceInfo(sourceID)
-                return info ~= nil and info.isCollected == true
+                return info and info.itemID
             end,
             currencyInfo = function(currencyType)
                 if not currencyType then

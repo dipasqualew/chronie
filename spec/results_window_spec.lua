@@ -48,8 +48,7 @@ describe("ns.newResultsWindow", function()
             goldLooted = 0,
             itemValue = 0,
             goldDiff = 0,
-            newAppearances = 0,
-            newVersions = 0,
+            transmogs = {},
             currencyTotal = 0,
             currencies = {},
             reputationTotal = 0,
@@ -208,21 +207,14 @@ describe("ns.newResultsWindow", function()
             assert.equal("$-500", valueFor(rowsOf(frames[1]), "Gold Δ"))
         end)
 
-        it("renders the new-appearance count", function()
+        it("renders the transmog event count", function()
             local window, frames = newWindow()
 
-            window.update(summary({ newAppearances = 3 }))
+            window.update(summary({ transmogs = { { id = 1 }, { id = 2 }, { id = 3 } } }))
 
             assert.equal("3", valueFor(rowsOf(frames[1]), "New transmog"))
         end)
 
-        it("renders the new-version count", function()
-            local window, frames = newWindow()
-
-            window.update(summary({ newVersions = 2 }))
-
-            assert.equal("2", valueFor(rowsOf(frames[1]), "New versions"))
-        end)
 
         it("shows 'none' against reputation when nothing was earned", function()
             local window, frames = newWindow()
