@@ -25,9 +25,13 @@ local addonName, ns = ...
 ---@field getMoney fun(): integer Current wallet total, in copper.
 ---@field instanceInfo fun(): InstanceInfo? Name, type and difficulty of the current zone.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
----@field transmogSourceItem fun(sourceID: integer): integer?
+---@field transmogSourceInfo fun(sourceID: integer): table?
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
+---@field openAchievement fun(id: integer)
+---@field previewTransmog fun(itemID: integer)
+---@field openTransmogCollection fun(sourceID: integer)
+---@field itemName fun(itemID: integer): string?
 ---@field lootSelfFormats string[] Self-loot chat templates, most specific first.
 ---@field factionIncreaseFormats string[] Reputation-increase chat templates.
 ---@field uiParent table
@@ -106,6 +110,10 @@ function ns.main(env)
         savePoint = function(point, x, y)
             env.db.resultsWindow = { point = point, x = x, y = y }
         end,
+        openAchievement = env.openAchievement,
+        previewTransmog = env.previewTransmog,
+        openTransmogCollection = env.openTransmogCollection,
+        itemName = env.itemName,
     })
 
     ---Only the logged-in character can be scanned, so identity is captured at save time.
@@ -254,7 +262,16 @@ function ns.main(env)
         refreshResults()
     end)
     dispatcher.on("TRANSMOG_COLLECTION_SOURCE_ADDED", function(sourceID)
-        tally.transmog(env.transmogSourceItem(sourceID), env.now())
+        local info = env.transmogSourceInfo(sourceID)
+        if info and info.itemID then
+            tally.transmog({
+                id = info.itemID,
+                sourceID = sourceID,
+                appearanceID = info.visualID,
+                newAppearance = info.newAppearance,
+                at = env.now(),
+            })
+        end
         refreshResults()
     end)
     dispatcher.on("CHAT_MSG_COMBAT_FACTION_CHANGE", function(message)
@@ -267,8 +284,8 @@ function ns.main(env)
         tally.currency(currencyType, change, env.currencyInfo(currencyType))
         refreshResults()
     end)
-    dispatcher.on("ACHIEVEMENT_EARNED", function(id)
-        tally.achievement(id, env.achievementInfo(id), env.now())
+    dispatcher.on("ACHIEVEMENT_EARNED", function(id, alreadyEarned)
+        tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
         refreshResults()
     end)
     dispatcher.on("QUEST_TURNED_IN", function(id)
@@ -371,9 +388,16 @@ if CreateFrame then
                 end
                 return (select(11, GetItemInfo(itemID)))
             end,
-            transmogSourceItem = function(sourceID)
+            transmogSourceInfo = function(sourceID)
                 local info = C_TransmogCollection.GetSourceInfo(sourceID)
-                return info and info.itemID
+                if not info then
+                    return nil
+                end
+                return {
+                    itemID = info.itemID,
+                    visualID = info.visualID,
+                    newAppearance = C_TransmogCollection.IsNewAppearance(info.visualID),
+                }
             end,
             currencyInfo = function(currencyType)
                 if not currencyType then
@@ -384,6 +408,22 @@ if CreateFrame then
             end,
             achievementInfo = function(id)
                 return (select(2, GetAchievementInfo(id)))
+            end,
+            openAchievement = function(id)
+                AchievementFrame_LoadUI()
+                ShowUIPanel(AchievementFrame)
+                AchievementFrame_SelectAchievement(id)
+            end,
+            previewTransmog = function(itemID)
+                DressUpItemLink("item:" .. itemID)
+            end,
+            openTransmogCollection = function(sourceID)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(5)
+                WardrobeCollectionFrame:OpenTransmogLink("transmogappearance:" .. sourceID)
+            end,
+            itemName = function(itemID)
+                return (GetItemInfo(itemID))
             end,
             lootSelfFormats = templates(LOOT_ITEM_SELF_MULTIPLE, LOOT_ITEM_SELF),
             factionIncreaseFormats = templates(

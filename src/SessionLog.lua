@@ -15,7 +15,7 @@ local _, ns = ...
 ---@field startedAt integer
 ---@field endedAt integer
 ---@field seconds integer How long the session lasted.
----@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
+---@field lootValue integer Vendor value of items entering the inventory, in copper.
 ---@field goldDiff integer Net wallet change over the session, in copper; may be negative.
 ---@field transmogs TransmogEvent[]
 ---@field currencyTotal integer
@@ -110,6 +110,9 @@ function ns.newSessionLog(deps)
         local copy = {}
         for index, event in ipairs(earned or {}) do
             copy[index] = { id = event.id, name = event.name, at = event.at }
+            if event.accountFirst ~= nil then
+                copy[index].accountFirst = event.accountFirst and true or false
+            end
         end
         return copy
     end
@@ -120,6 +123,11 @@ function ns.newSessionLog(deps)
         local copy = {}
         for index, event in ipairs(completed or {}) do
             copy[index] = { id = event.id, at = event.at }
+            for _, key in ipairs({ "sourceID", "appearanceID", "newAppearance" }) do
+                if event[key] ~= nil then
+                    copy[index][key] = event[key]
+                end
+            end
         end
         return copy
     end

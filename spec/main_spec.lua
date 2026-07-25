@@ -1137,7 +1137,7 @@ describe("addon integration", function()
 
             recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
 
-            assert.same({ { id = 19019, at = 1000 } }, app.tally.summary().transmogs)
+            assert.same({ { id = 19019, sourceID = 11, at = 1000 } }, app.tally.summary().transmogs)
         end)
 
         -- The open world is a tracked session now, so a loot line out there counts just
@@ -1187,7 +1187,7 @@ describe("addon integration", function()
             recorded.frame:fire("ACHIEVEMENT_EARNED", 1234)
 
             assert.same(
-                { { id = 1234, name = "The Loremaster", at = 1700000000 } },
+                { { id = 1234, name = "The Loremaster", at = 1700000000, accountFirst = true } },
                 app.tally.summary().achievements
             )
         end)
@@ -1294,8 +1294,8 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             local record = recorded.db.sessions[1]
-            -- 2500 coin + 120 vendor value; the wallet also netted +2500 over the visit.
-            assert.equal(2620, record.lootValue)
+            -- Loot value is inventory intake only; the wallet is reported separately.
+            assert.equal(120, record.lootValue)
             assert.equal(2500, record.goldDiff)
         end)
 

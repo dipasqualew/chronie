@@ -7,7 +7,7 @@ local fake = {}
 ---whether it is currently visible, which is all any assertion needs.
 ---@return table
 function fake.newFontString()
-    local fontString = { shown = true, points = {} }
+    local fontString = { shown = true, points = {}, scripts = {} }
 
     function fontString:SetText(text)
         self.text = text
@@ -39,6 +39,19 @@ function fake.newFontString()
 
     function fontString:IsShown()
         return self.shown
+    end
+
+    function fontString:EnableMouse(enabled)
+        self.mouseEnabled = enabled
+    end
+
+    function fontString:SetScript(name, handler)
+        self.scripts[name] = handler
+    end
+
+    function fontString:run(name, ...)
+        local handler = assert(self.scripts[name], "no " .. name .. " script was set")
+        return handler(self, ...)
     end
 
     return fontString
@@ -490,15 +503,29 @@ function fake.newEnv(options)
         itemSellPrice = function(itemID)
             return itemPrices[itemID]
         end,
-        transmogSourceItem = function(sourceID)
+        transmogSourceInfo = function(sourceID)
             local source = transmogSources[sourceID]
-            return source and source.item
+            if not source then
+                return nil
+            end
+            return {
+                itemID = source.item,
+                visualID = source.visualID,
+                newAppearance = source.newAppearance,
+            }
         end,
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]
         end,
         achievementInfo = function(id)
             return achievementNames[id]
+        end,
+        openAchievement = function() end,
+        previewTransmog = function() end,
+        openTransmogCollection = function() end,
+        itemName = function(itemID)
+            local source = itemPrices[itemID]
+            return source and ("Item " .. itemID)
         end,
         lootSelfFormats = options.lootFormats or {
             "You receive loot: %sx%d.",

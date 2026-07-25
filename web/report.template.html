@@ -173,8 +173,8 @@
   <div class="tiles" id="tiles"></div>
 
   <section class="panel chart">
-    <h2>Loot per day</h2>
-    <div class="sub">Coin plus the vendor value of everything looted, by the day the session ended.</div>
+    <h2>Loot value per day</h2>
+    <div class="sub">Vendor value of items added to inventory, by the day the session ended.</div>
     <svg id="chart" viewBox="0 0 900 220" role="img" aria-label="Loot value per day"></svg>
   </section>
 
@@ -255,10 +255,18 @@ const repText = (gains) =>
   (gains || []).map((gain) => `${gain.faction} +${gain.amount.toLocaleString()}`).join(", ");
 const currencyText = (gains) =>
   (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}`).join(", ");
+const achievementScope = (event) =>
+  event.accountFirst ? "account first" : "character first";
 const achievementText = (earned) =>
-  (earned || []).map((event) => event.name).join(", ");
+  (earned || []).map((event) => `${event.name} (${achievementScope(event)})`).join(", ");
+const transmogScope = (event) => {
+  if (event.newAppearance === true) return "new appearance";
+  if (event.newAppearance === false) return "known appearance variant";
+  return "appearance status unavailable";
+};
 const transmogLink = (event) =>
-  `<a href="https://www.wowhead.com/item=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">Item ${escapeHtml(event.id)}</a>`;
+  `<a href="https://www.wowhead.com/item=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">Item ${escapeHtml(event.id)}</a>` +
+  ` <span class="muted">(${transmogScope(event)})</span>`;
 const transmogCell = (events) =>
   (events || []).length ? events.map(transmogLink).join(", ") : '<span class="muted">—</span>';
 
@@ -292,6 +300,8 @@ const totals = SESSIONS.reduce((acc, session) => {
   acc.goldDiff += session.goldDiff || 0;
   acc.seconds += session.seconds || 0;
   acc.transmogs += (session.transmogs || []).length;
+  acc.appearances += (session.transmogs || []).filter((event) => event.newAppearance).length;
+  acc.variants += (session.transmogs || []).filter((event) => event.newAppearance === false).length;
   acc.achievements += (session.achievements || []).length;
   acc.quests += (session.quests || []).length;
   (session.reputation || []).forEach((gain) => {
@@ -302,7 +312,8 @@ const totals = SESSIONS.reduce((acc, session) => {
   });
   return acc;
 }, {
-  lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, achievements: 0, quests: 0,
+  lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, appearances: 0, variants: 0,
+  achievements: 0, quests: 0,
   reputation: {}, currencies: {},
 });
 
@@ -316,10 +327,17 @@ $("meta").textContent = SESSIONS.length
 
 $("tiles").innerHTML = [
   { label: "Sessions", value: SESSIONS.length, foot: `${new Set(SESSIONS.map((s) => s.character)).size} characters` },
-  { label: "Loot", value: gold(totals.lootValue), foot: "coin + vendor value" },
+  { label: "Loot value", value: gold(totals.lootValue), foot: "items entering inventory" },
   { label: "Net gold", value: signedGold(totals.goldDiff), foot: "wallet change", cls: totals.goldDiff < 0 ? "loss" : "gold" },
   { label: "Time played", value: duration(totals.seconds), foot: "across every session" },
-  { label: "New transmog", value: totals.transmogs, foot: "items collected" },
+  {
+    label: "New transmog",
+    value: totals.appearances,
+    foot: `${totals.variants} known-appearance variants` +
+      (totals.transmogs > totals.appearances + totals.variants
+        ? ` · ${totals.transmogs - totals.appearances - totals.variants} legacy unknown`
+        : ""),
+  },
   {
     label: "Currency",
     value: topCurrency ? signed(topCurrency[1]) : "0",
@@ -439,7 +457,7 @@ function drawTimeline() {
     const parts = [];
     if ((session.currencies || []).length) parts.push(`<span class="chip">${escapeHtml(currencyText(session.currencies))}</span>`);
     (session.achievements || []).forEach((event) => {
-      parts.push(`<span class="chip achv">🏆 ${escapeHtml(event.name)}</span>`);
+      parts.push(`<span class="chip achv">🏆 ${escapeHtml(event.name)} · ${escapeHtml(achievementScope(event))}</span>`);
     });
     (session.transmogs || []).forEach((event) => {
       parts.push(`<span class="chip">${transmogLink(event)}</span>`);
@@ -451,7 +469,7 @@ function drawTimeline() {
   };
 
   const stats = (session) => {
-    const bits = [`Loot ${gold(session.lootValue)}`];
+    const bits = [`Loot value ${gold(session.lootValue)}`];
     if (session.goldDiff) bits.push(`Gold ${signedGold(session.goldDiff)}`);
     if ((session.transmogs || []).length) bits.push(`Transmog ${session.transmogs.length}`);
     if ((session.reputation || []).length) bits.push(`Rep ${repText(session.reputation)}`);
@@ -498,7 +516,7 @@ const COLUMNS = [
   { key: "type", title: "Type", cell: (s) => `<span class="badge">${escapeHtml(locationType(s))}</span>`, sort: (s) => locationType(s) },
   { key: "difficulty", title: "Difficulty", cell: (s) => escapeHtml(s.difficulty) || '<span class="muted">—</span>', sort: (s) => s.difficulty },
   { key: "seconds", title: "Time", num: true, cell: (s) => duration(s.seconds), sort: (s) => s.seconds },
-  { key: "lootValue", title: "Loot", num: true, cell: (s) => `<span class="gold">${escapeHtml(gold(s.lootValue))}</span>`, sort: (s) => s.lootValue },
+  { key: "lootValue", title: "Loot value", num: true, cell: (s) => `<span class="gold">${escapeHtml(gold(s.lootValue))}</span>`, sort: (s) => s.lootValue },
   { key: "goldDiff", title: "Gold Δ", num: true, cell: (s) => `<span class="${s.goldDiff < 0 ? "loss" : "gold"}">${escapeHtml(signedGold(s.goldDiff))}</span>`, sort: (s) => s.goldDiff },
   { key: "transmogs", title: "Transmog", cell: (s) => transmogCell(s.transmogs), sort: (s) => (s.transmogs || []).length },
   { key: "currencies", title: "Currency", cell: (s) => currencyCell(s.currencies), sort: (s) => (s.currencies || []).reduce((total, gain) => total + gain.amount, 0) },

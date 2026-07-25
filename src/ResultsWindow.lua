@@ -17,6 +17,10 @@ local _, ns = ...
 ---@field formatMoney fun(copper: integer): string
 ---@field loadPoint fun(): (string?, number?, number?) Saved point, x, y — or nil for the default spot.
 ---@field savePoint fun(point: string, x: number, y: number) Persist a dragged position.
+---@field openAchievement fun(id: integer)?
+---@field previewTransmog fun(itemID: integer)?
+---@field openTransmogCollection fun(sourceID: integer)?
+---@field itemName fun(itemID: integer): string?
 
 local WIDTH = 190
 local PADDING = 12
@@ -37,6 +41,8 @@ function ns.newResultsWindow(deps)
     ---@type { label: table, value: table }[]
     local rows = {}
     local frame, title
+    local latest
+    local expanded = { transmogs = false, quests = false }
 
     local function build()
         frame = createFrame("Frame", deps.name, deps.uiParent, "BackdropTemplate")
@@ -100,7 +106,8 @@ function ns.newResultsWindow(deps)
         ---@param text string
         ---@param valueText string
         ---@param color number[]
-        local function line(text, valueText, color)
+        ---@param action fun(button: string)? Called when the line is clicked.
+        local function line(text, valueText, color, action)
             used = used + 1
             local label, value = rowAt(used)
             label:SetPoint("TOPLEFT", PADDING, y)
@@ -111,6 +118,10 @@ function ns.newResultsWindow(deps)
             value:SetText(valueText)
             value:SetTextColor(color[1], color[2], color[3])
             value:Show()
+            label:EnableMouse(action ~= nil)
+            value:EnableMouse(action ~= nil)
+            label:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
+            value:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
             y = y - LINE
         end
 
@@ -131,9 +142,42 @@ function ns.newResultsWindow(deps)
             end
         end
 
-        line("Loot", deps.formatMoney(summary.lootValue), GOLD_COLOR)
+        line("Loot value", deps.formatMoney(summary.lootValue), GOLD_COLOR)
         line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
-        line("New transmog", tostring(#(summary.transmogs or {})), VALUE_COLOR)
+
+        local transmogs = summary.transmogs or {}
+        local appearances = 0
+        for _, event in ipairs(transmogs) do
+            if event.newAppearance then
+                appearances = appearances + 1
+            end
+        end
+        local variants = #transmogs - appearances
+        local transmogValue = tostring(appearances) .. " new"
+        if variants > 0 then
+            transmogValue = transmogValue .. " · " .. variants .. " variant"
+            if variants ~= 1 then
+                transmogValue = transmogValue .. "s"
+            end
+        end
+        line((expanded.transmogs and "▼ " or "▶ ") .. "Transmog", transmogValue, VALUE_COLOR, function()
+            expanded.transmogs = not expanded.transmogs
+            render(latest)
+        end)
+        if expanded.transmogs then
+            for _, event in ipairs(transmogs) do
+                local current = event
+                local itemName = deps.itemName and deps.itemName(current.id)
+                local kind = current.newAppearance and "new appearance" or "known appearance variant"
+                line("  " .. (itemName or ("Item " .. current.id)), kind, REP_COLOR, function(button)
+                    if button == "RightButton" and current.sourceID and deps.openTransmogCollection then
+                        deps.openTransmogCollection(current.sourceID)
+                    elseif deps.previewTransmog then
+                        deps.previewTransmog(current.id)
+                    end
+                end)
+            end
+        end
 
         block("Currency", summary.currencies, function(gain)
             return gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount
@@ -141,9 +185,31 @@ function ns.newResultsWindow(deps)
         block("Reputation", summary.reputation, function(gain)
             return gain.faction, "+" .. gain.amount
         end)
-        block("Achievements", summary.achievements, function(event)
-            return event.name, ""
+        if #(summary.achievements or {}) == 0 then
+            line("Achievements", "none", MUTED_COLOR)
+        else
+            line("Achievements", tostring(#summary.achievements), LABEL_COLOR)
+            for _, event in ipairs(summary.achievements) do
+                local current = event
+                local scope = current.accountFirst and "account first" or "character first"
+                line("  " .. current.name, scope, REP_COLOR, function()
+                    if deps.openAchievement then
+                        deps.openAchievement(current.id)
+                    end
+                end)
+            end
+        end
+
+        local quests = summary.quests or {}
+        line((expanded.quests and "▼ " or "▶ ") .. "Quests", tostring(#quests), VALUE_COLOR, function()
+            expanded.quests = not expanded.quests
+            render(latest)
         end)
+        if expanded.quests then
+            for _, event in ipairs(quests) do
+                line("  Quest " .. event.id, "", REP_COLOR)
+            end
+        end
 
         for index = used + 1, #rows do
             rows[index].label:Hide()
@@ -159,6 +225,7 @@ function ns.newResultsWindow(deps)
             if not frame then
                 build()
             end
+            latest = summary
             render(summary)
         end,
 

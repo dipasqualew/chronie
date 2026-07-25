@@ -14,9 +14,10 @@ local _, ns = ...
 ---@field loot fun(message: string) Add a self-loot chat line's vendor value.
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
----@field achievement fun(id: integer, name: string?, at: integer) Append an earned achievement.
+---@field achievement fun(id: integer, name: string?, at: integer, accountFirst: boolean?)
+---Append an earned achievement.
 ---@field quest fun(id: integer, at: integer) Append a completed quest.
----@field transmog fun(itemID: integer, at: integer) Append a newly collected transmog item.
+---@field transmog fun(event: TransmogEvent) Append a newly collected transmog source.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
 ---@field summary fun(): SessionSummary
@@ -34,9 +35,13 @@ local _, ns = ...
 ---@field id integer
 ---@field name string
 ---@field at integer When it was earned.
+---@field accountFirst boolean True when this was also the account's first completion.
 
 ---@class TransmogEvent
 ---@field id integer Item ID.
+---@field sourceID integer? Item modified appearance/source ID.
+---@field appearanceID integer? Shared visual appearance ID.
+---@field newAppearance boolean True for a new visual; false for another source/variant.
 ---@field at integer When it was collected.
 
 ---@class QuestEvent
@@ -45,7 +50,7 @@ local _, ns = ...
 
 ---@class SessionSummary
 ---@field active boolean
----@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
+---@field lootValue integer Vendor value of items entering the inventory, in copper.
 ---@field goldLooted integer Copper picked up as money.
 ---@field itemValue integer Summed vendor value of looted items, in copper.
 ---@field goldDiff integer Net wallet change over the session, in copper; may be negative.
@@ -265,15 +270,20 @@ function ns.newSessionTally(deps)
         ---@param id integer
         ---@param name string?
         ---@param at integer
-        achievement = function(id, name, at)
+        ---@param accountFirst boolean?
+        achievement = function(id, name, at, accountFirst)
             if not session.active or not id then
                 return
             end
-            session.achievements[#session.achievements + 1] = {
+            local event = {
                 id = id,
                 name = name or tostring(id),
                 at = at,
             }
+            if accountFirst ~= nil then
+                event.accountFirst = accountFirst and true or false
+            end
+            session.achievements[#session.achievements + 1] = event
         end,
 
         ---@param id integer
@@ -285,13 +295,25 @@ function ns.newSessionTally(deps)
             session.quests[#session.quests + 1] = { id = id, at = at }
         end,
 
-        ---@param itemID integer
-        ---@param at integer
-        transmog = function(itemID, at)
-            if not session.active or not itemID then
+        ---@param event TransmogEvent
+        transmog = function(event, at)
+            if type(event) == "number" then
+                event = { id = event, at = at }
+            end
+            if not session.active or not event or not event.id then
                 return
             end
-            session.transmogs[#session.transmogs + 1] = { id = itemID, at = at }
+            local copy = { id = event.id, at = event.at }
+            if event.sourceID then
+                copy.sourceID = event.sourceID
+            end
+            if event.appearanceID then
+                copy.appearanceID = event.appearanceID
+            end
+            if event.newAppearance ~= nil then
+                copy.newAppearance = event.newAppearance and true or false
+            end
+            session.transmogs[#session.transmogs + 1] = copy
         end,
 
         ---Ends the session without waiting for a zone change. The tally is left intact
@@ -308,7 +330,7 @@ function ns.newSessionTally(deps)
         ---a zone leaves every counter at rest, and such a session is dropped on close.
         ---@return boolean
         hasEvents = function()
-            local lootValue = session.goldLooted + session.itemValue
+            local lootValue = session.itemValue
             local goldDiff = session.latestMoney - session.openingMoney
             return lootValue ~= 0
                 or goldDiff ~= 0
@@ -347,11 +369,19 @@ function ns.newSessionTally(deps)
             local achievements = {}
             for index, earned in ipairs(session.achievements) do
                 achievements[index] = { id = earned.id, name = earned.name, at = earned.at }
+                if earned.accountFirst ~= nil then
+                    achievements[index].accountFirst = earned.accountFirst
+                end
             end
 
             local transmogs = {}
             for index, event in ipairs(session.transmogs) do
                 transmogs[index] = { id = event.id, at = event.at }
+                for _, key in ipairs({ "sourceID", "appearanceID", "newAppearance" }) do
+                    if event[key] ~= nil then
+                        transmogs[index][key] = event[key]
+                    end
+                end
             end
 
             local quests = {}
@@ -361,7 +391,7 @@ function ns.newSessionTally(deps)
 
             return {
                 active = session.active,
-                lootValue = session.goldLooted + session.itemValue,
+                lootValue = session.itemValue,
                 goldLooted = session.goldLooted,
                 itemValue = session.itemValue,
                 goldDiff = session.latestMoney - session.openingMoney,

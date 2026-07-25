@@ -144,7 +144,7 @@ describe("ns.newSessionTracker", function()
 
             assert.equal(1, #harness.log.all())
             assert.equal("Elwynn Forest", harness.log.all()[1].instance)
-            assert.equal(500, harness.log.all()[1].lootValue)
+            assert.equal(0, harness.log.all()[1].lootValue)
         end)
     end)
 
@@ -182,7 +182,7 @@ describe("ns.newSessionTracker", function()
             assert.equal(3600, record.seconds)
         end)
 
-        it("carries the gold gathered inside onto the record", function()
+        it("keeps gathered gold out of inventory loot value", function()
             local harness = newTracker({ zone = DUNGEON, money = 500 })
             harness.tracker.sync()
 
@@ -190,7 +190,7 @@ describe("ns.newSessionTracker", function()
             harness.setZone(WORLD)
             harness.tracker.sync()
 
-            assert.equal(9000, harness.log.all()[1].lootValue)
+            assert.equal(0, harness.log.all()[1].lootValue)
         end)
     end)
 
@@ -229,7 +229,7 @@ describe("ns.newSessionTracker", function()
             -- The empty second visit is dropped, so only the first dungeon is on file.
             assert.equal(1, #rows)
             assert.equal("Deadmines", rows[1].instance)
-            assert.equal(4000, rows[1].lootValue)
+            assert.equal(0, rows[1].lootValue)
         end)
 
         it("treats the same instance at another difficulty as a new session", function()

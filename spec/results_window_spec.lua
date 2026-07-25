@@ -14,7 +14,7 @@ describe("ns.newResultsWindow", function()
     local function newWindow(options)
         options = options or {}
         local createFrame, frames = fake.newCreateFrame()
-        local recorded = { saved = {}, loadCalls = 0 }
+        local recorded = { saved = {}, loadCalls = 0, achievements = {}, previews = {}, collections = {} }
         local window = ns.newResultsWindow({
             createFrame = createFrame,
             uiParent = { name = "UIParent" },
@@ -34,6 +34,18 @@ describe("ns.newResultsWindow", function()
             end,
             savePoint = function(point, x, y)
                 recorded.saved[#recorded.saved + 1] = { point = point, x = x, y = y }
+            end,
+            openAchievement = function(id)
+                recorded.achievements[#recorded.achievements + 1] = id
+            end,
+            previewTransmog = function(id)
+                recorded.previews[#recorded.previews + 1] = id
+            end,
+            openTransmogCollection = function(id)
+                recorded.collections[#recorded.collections + 1] = id
+            end,
+            itemName = function(id)
+                return "Named item " .. id
             end,
         })
         return window, frames, recorded
@@ -196,7 +208,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ lootValue = 1234 }))
 
-            assert.equal("$1234", valueFor(rowsOf(frames[1]), "Loot"))
+            assert.equal("$1234", valueFor(rowsOf(frames[1]), "Loot value"))
         end)
 
         it("renders the net gold difference through formatMoney", function()
@@ -212,7 +224,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ transmogs = { { id = 1 }, { id = 2 }, { id = 3 } } }))
 
-            assert.equal("3", valueFor(rowsOf(frames[1]), "New transmog"))
+            assert.equal("0 new · 3 variants", valueFor(rowsOf(frames[1]), "▶ Transmog"))
         end)
 
 
@@ -295,6 +307,59 @@ describe("ns.newResultsWindow", function()
             }))
 
             assert.is_not_nil(valueFor(rowsOf(frames[1]), "  The Loremaster"))
+        end)
+
+        it("opens an achievement from its named row", function()
+            local window, frames, recorded = newWindow()
+            window.update(summary({
+                achievements = { { id = 42, name = "Explore", accountFirst = true } },
+            }))
+
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "  Explore" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                end
+            end
+
+            assert.same({ 42 }, recorded.achievements)
+        end)
+
+        it("expands quests from their count", function()
+            local window, frames = newWindow()
+            window.update(summary({ quests = { { id = 7848 } } }))
+
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "▶ Quests" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            assert.equal("", valueFor(rowsOf(frames[1]), "  Quest 7848"))
+        end)
+
+        it("previews a transmog on left click and opens its source on right click", function()
+            local window, frames, recorded = newWindow()
+            window.update(summary({
+                transmogs = { { id = 19019, sourceID = 11, newAppearance = true } },
+            }))
+
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "▶ Transmog" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "  Named item 19019" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    fontString:run("OnMouseUp", "RightButton")
+                    break
+                end
+            end
+
+            assert.same({ 19019 }, recorded.previews)
+            assert.same({ 11 }, recorded.collections)
         end)
     end)
 

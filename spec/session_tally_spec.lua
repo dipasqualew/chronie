@@ -522,7 +522,7 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.summary().active)
         end)
 
-        it("sums gold looted and item value into the loot value", function()
+        it("uses only items entering inventory for loot value", function()
             local tally = newTally({ prices = { [4242] = 200 } })
             tally.begin(0)
             tally.money(300)
@@ -531,7 +531,7 @@ describe("ns.newSessionTally", function()
             local summary = tally.summary()
             assert.equal(300, summary.goldLooted)
             assert.equal(400, summary.itemValue)
-            assert.equal(700, summary.lootValue)
+            assert.equal(400, summary.lootValue)
         end)
 
         it("hands back empty lists on a fresh session", function()
@@ -561,7 +561,7 @@ describe("ns.newSessionTally", function()
 
             assert.same({
                 active = true,
-                lootValue = 150,
+                lootValue = 50,
                 goldLooted = 100,
                 itemValue = 50,
                 goldDiff = 100,
