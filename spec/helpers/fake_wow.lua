@@ -139,6 +139,13 @@ function fake.newFrame()
         return placed[1], placed[2], placed[3], placed[4], placed[5]
     end
 
+    function frame:GetCenter()
+        if self.center then
+            return self.center[1], self.center[2]
+        end
+        return nil, nil
+    end
+
     for _, name in ipairs({
         "SetSize",
         "SetAllPoints",

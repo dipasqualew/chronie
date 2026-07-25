@@ -224,7 +224,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ transmogs = { { id = 1 }, { id = 2 }, { id = 3 } } }))
 
-            assert.equal("0 new · 3 variants", valueFor(rowsOf(frames[1]), "+ Transmog"))
+            assert.equal("0 new · 3 variants", valueFor(rowsOf(frames[1]), "Transmog +"))
         end)
 
 
@@ -233,19 +233,27 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ reputation = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "Reputation"))
+            assert.equal("none", valueFor(rowsOf(frames[1]), "Reputation +"))
         end)
 
         it("renders one indented signed line per faction", function()
             local window, frames = newWindow()
 
             window.update(summary({
+                reputationTotal = 260,
                 reputation = {
                     { faction = "Argent Dawn", amount = 250 },
                     { faction = "Timbermaw Hold", amount = 10 },
                 },
             }))
 
+            assert.equal("+260", valueFor(rowsOf(frames[1]), "Reputation +"))
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "Reputation +" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
             local lines = rowsOf(frames[1])
             assert.equal("+250", valueFor(lines, "  Argent Dawn"))
             assert.equal("+10", valueFor(lines, "  Timbermaw Hold"))
@@ -256,6 +264,7 @@ describe("ns.newResultsWindow", function()
         it("hides leftover faction lines when a later summary has fewer", function()
             local window, frames = newWindow()
             window.update(summary({
+                reputationTotal = 260,
                 reputation = {
                     { faction = "Argent Dawn", amount = 250 },
                     { faction = "Timbermaw Hold", amount = 10 },
@@ -273,19 +282,27 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ currencies = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "Currency"))
+            assert.equal("none", valueFor(rowsOf(frames[1]), "Currency +"))
         end)
 
         it("renders one indented signed line per currency", function()
             local window, frames = newWindow()
 
             window.update(summary({
+                currencyTotal = 4,
                 currencies = {
                     { id = 1, name = "Honor", amount = 7 },
                     { id = 2, name = "Valor", amount = -3 },
                 },
             }))
 
+            assert.equal("+4", valueFor(rowsOf(frames[1]), "Currency +"))
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "Currency +" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
             local lines = rowsOf(frames[1])
             assert.equal("+7", valueFor(lines, "  Honor"))
             assert.equal("-3", valueFor(lines, "  Valor"))
@@ -296,7 +313,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ achievements = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "+ Achievements"))
+            assert.equal("none", valueFor(rowsOf(frames[1]), "Achievements +"))
         end)
 
         it("names each achievement earned", function()
@@ -306,7 +323,7 @@ describe("ns.newResultsWindow", function()
                 achievements = { { id = 1, name = "The Loremaster", at = 5000 } },
             }))
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "+ Achievements" then
+                if fontString.text == "Achievements +" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
@@ -328,7 +345,7 @@ describe("ns.newResultsWindow", function()
 
             assert.equal(
                 "|cffb373ff1 account|r / |cff59d9732 character|r",
-                valueFor(rowsOf(frames[1]), "+ Achievements")
+                valueFor(rowsOf(frames[1]), "Achievements +")
             )
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Account"))
         end)
@@ -340,7 +357,7 @@ describe("ns.newResultsWindow", function()
             }))
 
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "+ Achievements" then
+                if fontString.text == "Achievements +" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
@@ -359,7 +376,7 @@ describe("ns.newResultsWindow", function()
             window.update(summary({ quests = { { id = 7848 } } }))
 
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "+ Quests" then
+                if fontString.text == "Quests +" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
@@ -389,10 +406,10 @@ describe("ns.newResultsWindow", function()
 
             assert.equal(
                 "|cffb373ff1 warband|r / |cff59d9731 character|r",
-                valueFor(rowsOf(frames[1]), "+ Quests")
+                valueFor(rowsOf(frames[1]), "Quests +")
             )
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "+ Quests" then
+                if fontString.text == "Quests +" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
@@ -409,7 +426,7 @@ describe("ns.newResultsWindow", function()
             }))
 
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "+ Transmog" then
+                if fontString.text == "Transmog +" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
@@ -424,6 +441,7 @@ describe("ns.newResultsWindow", function()
 
             assert.same({ 19019 }, recorded.previews)
             assert.same({ 11 }, recorded.collections)
+            assert.equal("new", valueFor(rowsOf(frames[1]), "  ✓ Named item 19019"))
         end)
     end)
 

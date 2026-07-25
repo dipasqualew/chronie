@@ -24,6 +24,8 @@ local _, ns = ...
 ---@field title string|fun(summary: SessionSummary): string?
 ---@field closable boolean?
 ---@field specialFrames string[]?
+---@field frameStrata string?
+---@field toplevel boolean?
 
 local WIDTH = 190
 local PADDING = 12
@@ -37,6 +39,7 @@ local REP_COLOR = { 0.4, 0.8, 0.4 }
 local MUTED_COLOR = { 0.5, 0.5, 0.5 }
 local ACCOUNT_COLOR = { 0.7, 0.45, 1 }
 local CHARACTER_COLOR = { 0.35, 0.85, 0.45 }
+local VARIANT_COLOR = { 0.7, 0.45, 1 }
 
 local ACCOUNT_HEX = "|cffb373ff"
 local CHARACTER_HEX = "|cff59d973"
@@ -51,13 +54,25 @@ function ns.newResultsWindow(deps)
     local rows = {}
     local frame, title
     local latest
-    local expanded = { transmogs = false, achievements = false, quests = false }
+    local expanded = {
+        transmogs = false,
+        currencies = false,
+        reputation = false,
+        achievements = false,
+        quests = false,
+    }
+    local reviewedTransmogs = {}
+    local reviewedSessionKey
+    local lastTransmogCount = 0
 
     local function build()
         frame = createFrame("Frame", deps.name, deps.uiParent, "BackdropTemplate")
         frame:SetWidth(WIDTH)
         frame:SetHeight(90)
-        frame:SetFrameStrata("MEDIUM")
+        frame:SetFrameStrata(deps.frameStrata or "MEDIUM")
+        if deps.toplevel then
+            frame:SetToplevel(true)
+        end
         frame:SetBackdrop({
             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
             edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
@@ -148,22 +163,13 @@ function ns.newResultsWindow(deps)
             y = y - LINE
         end
 
-        ---An itemised block: a header line, then one indented signed line per entry, or
-        ---a muted "none" when the list is empty.
+        ---Keeps the disclosure marker after the heading so changing + to - never
+        ---shifts the heading itself.
         ---@param heading string
-        ---@param entries table[]
-        ---@param label fun(entry: table): string, string value the left text and right value
-        local function block(heading, entries, label)
-            entries = entries or {}
-            if #entries == 0 then
-                line(heading, "none", MUTED_COLOR)
-                return
-            end
-            line(heading, "", LABEL_COLOR)
-            for _, entry in ipairs(entries) do
-                local left, right = label(entry)
-                line("  " .. left, right, REP_COLOR)
-            end
+        ---@param isExpanded boolean
+        ---@return string
+        local function disclosure(heading, isExpanded)
+            return heading .. (isExpanded and " -" or " +")
         end
 
         line("Loot value", deps.formatMoney(summary.lootValue), GOLD_COLOR)
@@ -184,31 +190,58 @@ function ns.newResultsWindow(deps)
                 transmogValue = transmogValue .. "s"
             end
         end
-        line((expanded.transmogs and "- " or "+ ") .. "Transmog", transmogValue, VALUE_COLOR, function()
+        line(disclosure("Transmog", expanded.transmogs), transmogValue, VALUE_COLOR, function()
             expanded.transmogs = not expanded.transmogs
             render(latest)
         end)
         if expanded.transmogs then
-            for _, event in ipairs(transmogs) do
+            for index, event in ipairs(transmogs) do
                 local current = event
                 local itemName = deps.itemName and deps.itemName(current.id)
-                local kind = current.newAppearance and "new appearance" or "known appearance variant"
-                line("  " .. (itemName or ("Item " .. current.id)), kind, REP_COLOR, function(button)
+                local kind = current.newAppearance and "new" or "variant"
+                local kindColor = current.newAppearance and REP_COLOR or VARIANT_COLOR
+                local reviewKey = tostring(current.sourceID or current.id) .. ":" .. tostring(index)
+                local prefix = reviewedTransmogs[reviewKey] and "✓ " or ""
+                line("  " .. prefix .. (itemName or ("Item " .. current.id)), kind, kindColor, function(button)
+                    reviewedTransmogs[reviewKey] = true
                     if button == "RightButton" and current.sourceID and deps.openTransmogCollection then
                         deps.openTransmogCollection(current.sourceID)
                     elseif deps.previewTransmog then
                         deps.previewTransmog(current.id)
                     end
+                    render(latest)
                 end)
             end
         end
 
-        block("Currency", summary.currencies, function(gain)
-            return gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount
-        end)
-        block("Reputation", summary.reputation, function(gain)
-            return gain.faction, "+" .. gain.amount
-        end)
+        local currencies = summary.currencies or {}
+        line(disclosure("Currency", expanded.currencies),
+            #currencies == 0 and "none"
+                or ((summary.currencyTotal or 0) >= 0 and "+" or "") .. (summary.currencyTotal or 0),
+            #currencies == 0 and MUTED_COLOR or VALUE_COLOR,
+            function()
+                expanded.currencies = not expanded.currencies
+                render(latest)
+            end)
+        if expanded.currencies then
+            for _, gain in ipairs(currencies) do
+                line("  " .. gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount, REP_COLOR)
+            end
+        end
+
+        local reputation = summary.reputation or {}
+        line(disclosure("Reputation", expanded.reputation),
+            #reputation == 0 and "none" or "+" .. (summary.reputationTotal or 0),
+            #reputation == 0 and MUTED_COLOR or VALUE_COLOR,
+            function()
+                expanded.reputation = not expanded.reputation
+                render(latest)
+            end)
+        if expanded.reputation then
+            for _, gain in ipairs(reputation) do
+                line("  " .. gain.faction, "+" .. gain.amount, REP_COLOR)
+            end
+        end
         local achievements = summary.achievements or {}
         local accountAchievements, characterAchievements = 0, 0
         for _, event in ipairs(achievements) do
@@ -220,7 +253,7 @@ function ns.newResultsWindow(deps)
         end
         local achievementValue = ACCOUNT_HEX .. accountAchievements .. " account" .. COLOR_END
             .. " / " .. CHARACTER_HEX .. characterAchievements .. " character" .. COLOR_END
-        line((expanded.achievements and "- " or "+ ") .. "Achievements",
+        line(disclosure("Achievements", expanded.achievements),
             #achievements == 0 and "none" or achievementValue,
             #achievements == 0 and MUTED_COLOR or VALUE_COLOR,
             function()
@@ -258,7 +291,7 @@ function ns.newResultsWindow(deps)
         end
         local questValue = ACCOUNT_HEX .. accountQuests .. " warband" .. COLOR_END
             .. " / " .. CHARACTER_HEX .. characterQuests .. " character" .. COLOR_END
-        line((expanded.quests and "- " or "+ ") .. "Quests",
+        line(disclosure("Quests", expanded.quests),
             #quests == 0 and "none" or questValue,
             #quests == 0 and MUTED_COLOR or VALUE_COLOR,
             function()
@@ -294,6 +327,14 @@ function ns.newResultsWindow(deps)
             if not frame then
                 build()
             end
+            local sessionKey = summary.id or summary.startedAt
+            local transmogCount = #(summary.transmogs or {})
+            if (sessionKey and reviewedSessionKey and sessionKey ~= reviewedSessionKey)
+                or transmogCount < lastTransmogCount then
+                reviewedTransmogs = {}
+            end
+            reviewedSessionKey = sessionKey or reviewedSessionKey
+            lastTransmogCount = transmogCount
             latest = summary
             render(summary)
         end,

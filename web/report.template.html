@@ -123,6 +123,8 @@
   .muted { color: var(--text-muted); }
   .gold { color: var(--gold); font-weight: 550; }
   .loss { color: #c65a5a; font-weight: 550; }
+  .appearance-new { color: #59d973; }
+  .appearance-variant { color: #b373ff; }
   .empty { padding: 40px 16px; text-align: center; color: var(--text-muted); }
 
   .badge {
@@ -260,13 +262,13 @@ const achievementScope = (event) =>
 const achievementText = (earned) =>
   (earned || []).map((event) => `${event.name} (${achievementScope(event)})`).join(", ");
 const transmogScope = (event) => {
-  if (event.newAppearance === true) return "new appearance";
-  if (event.newAppearance === false) return "known appearance variant";
-  return "appearance status unavailable";
+  if (event.newAppearance === true) return '<span class="appearance-new">new</span>';
+  if (event.newAppearance === false) return '<span class="appearance-variant">variant</span>';
+  return '<span class="muted">unknown</span>';
 };
 const transmogLink = (event) =>
   `<a href="https://www.wowhead.com/item=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">Item ${escapeHtml(event.id)}</a>` +
-  ` <span class="muted">(${transmogScope(event)})</span>`;
+  ` (${transmogScope(event)})`;
 const transmogCell = (events) =>
   (events || []).length ? events.map(transmogLink).join(", ") : '<span class="muted">—</span>';
 
@@ -333,7 +335,7 @@ $("tiles").innerHTML = [
   {
     label: "New transmog",
     value: totals.appearances,
-    foot: `${totals.variants} known-appearance variants` +
+    foot: `${totals.variants} variants` +
       (totals.transmogs > totals.appearances + totals.variants
         ? ` · ${totals.transmogs - totals.appearances - totals.variants} legacy unknown`
         : ""),

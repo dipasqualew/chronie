@@ -172,6 +172,8 @@ function ns.main(env)
         end,
         closable = true,
         specialFrames = env.specialFrames,
+        frameStrata = "FULLSCREEN_DIALOG",
+        toplevel = true,
         formatMoney = ns.formatMoney,
         loadPoint = function()
             return "CENTER", 260, 0
@@ -286,6 +288,16 @@ function ns.main(env)
         createFrame = env.createFrame,
         minimap = env.minimap,
         tooltip = env.tooltip,
+        loadPoint = function()
+            local saved = env.db.minimapButton
+            if not saved then
+                return nil
+            end
+            return saved.point, saved.x, saved.y
+        end,
+        savePoint = function(point, x, y)
+            env.db.minimapButton = { point = point, x = x, y = y }
+        end,
         onClick = function()
             sessionWindow.show(sessionSpec())
         end,
