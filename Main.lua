@@ -26,6 +26,8 @@ local addonName, ns = ...
 ---@field instanceInfo fun(): InstanceInfo? Name, type and difficulty of the current zone.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---@field transmogSourceInfo fun(sourceID: integer): table?
+---@field activeQuestIDs fun(): integer[]
+---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
 ---@field openAchievement fun(id: integer)
@@ -95,6 +97,19 @@ function ns.main(env)
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
     })
+    local questBaselines = {}
+
+    local function snapshotQuest(questID)
+        if questID and not questBaselines[questID] then
+            questBaselines[questID] = env.questCompletionInfo(questID)
+        end
+    end
+
+    local function snapshotActiveQuests()
+        for _, questID in ipairs(env.activeQuestIDs()) do
+            snapshotQuest(questID)
+        end
+    end
 
     local resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
@@ -300,6 +315,7 @@ function ns.main(env)
     -- for wherever the player now is. Every zone has a session, so the panel is always on.
     dispatcher.on("PLAYER_ENTERING_WORLD", function()
         env.requestRaidInfo()
+        snapshotActiveQuests()
         sessionTracker.sync()
         resultsWindow.update(tally.summary())
         resultsWindow.show()
@@ -344,8 +360,23 @@ function ns.main(env)
         tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
         refreshResults()
     end)
+    dispatcher.on("QUEST_ACCEPTED", snapshotQuest)
+    dispatcher.on("QUEST_LOG_UPDATE", snapshotActiveQuests)
     dispatcher.on("QUEST_TURNED_IN", function(id)
-        tally.quest(id, env.now())
+        local baseline = questBaselines[id]
+        local characterFirst, accountFirst
+        if baseline then
+            characterFirst = not baseline.characterCompleted
+            accountFirst = not baseline.accountCompleted
+        end
+        tally.quest(
+            id,
+            env.now(),
+            baseline and baseline.name or nil,
+            characterFirst,
+            accountFirst
+        )
+        questBaselines[id] = nil
         refreshResults()
     end)
 
@@ -451,10 +482,30 @@ if CreateFrame then
                 if not info then
                     return nil
                 end
+                local sources = C_TransmogCollection.GetAppearanceSources(info.visualID)
+                local uiNew = C_TransmogCollection.IsNewAppearance(info.visualID)
                 return {
                     itemID = info.itemID,
                     visualID = info.visualID,
-                    newAppearance = C_TransmogCollection.IsNewAppearance(info.visualID),
+                    newAppearance = ns.isNewTransmogAppearance(sources, uiNew),
+                }
+            end,
+            activeQuestIDs = function()
+                local ids = {}
+                local entries = C_QuestLog.GetNumQuestLogEntries()
+                for index = 1, entries do
+                    local info = C_QuestLog.GetInfo(index)
+                    if info and not info.isHeader and info.questID then
+                        ids[#ids + 1] = info.questID
+                    end
+                end
+                return ids
+            end,
+            questCompletionInfo = function(questID)
+                return {
+                    name = C_QuestLog.GetTitleForQuestID(questID),
+                    characterCompleted = C_QuestLog.IsQuestFlaggedCompleted(questID),
+                    accountCompleted = C_QuestLog.IsQuestFlaggedCompletedOnAccount(questID),
                 }
             end,
             currencyInfo = function(currencyType)

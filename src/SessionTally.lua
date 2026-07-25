@@ -16,7 +16,8 @@ local _, ns = ...
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
 ---@field achievement fun(id: integer, name: string?, at: integer, accountFirst: boolean?)
 ---Append an earned achievement.
----@field quest fun(id: integer, at: integer) Append a completed quest.
+---@field quest fun(id: integer, at: integer, name: string?, characterFirst: boolean?, accountFirst: boolean?)
+---Append a completed quest.
 ---@field transmog fun(event: TransmogEvent) Append a newly collected transmog source.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
@@ -46,7 +47,10 @@ local _, ns = ...
 
 ---@class QuestEvent
 ---@field id integer Quest ID.
+---@field name string? Localised quest title when available.
 ---@field at integer When it was completed.
+---@field characterFirst boolean? True when this character had not completed it before.
+---@field accountFirst boolean? True when no character on the account had completed it before.
 
 ---@class SessionSummary
 ---@field active boolean
@@ -69,6 +73,24 @@ local _, ns = ...
 
 -- Lua-pattern magic characters, escaped so literal chunks of a printf template match verbatim.
 local MAGIC = "([%^%$%(%)%.%[%]%*%+%-%?%%])"
+
+---Classifies a source-add event by durable collection state. IsNewAppearance is a
+---wardrobe "unseen" marker, so it is only a fallback when source data is unavailable.
+---@param sources table[]?
+---@param uiNew boolean?
+---@return boolean
+function ns.isNewTransmogAppearance(sources, uiNew)
+    local collected = 0
+    for _, source in ipairs(sources or {}) do
+        if source.isCollected then
+            collected = collected + 1
+        end
+    end
+    if collected > 0 then
+        return collected == 1
+    end
+    return uiNew and true or false
+end
 
 ---@param text string
 ---@return string
@@ -288,11 +310,24 @@ function ns.newSessionTally(deps)
 
         ---@param id integer
         ---@param at integer
-        quest = function(id, at)
+        ---@param name string?
+        ---@param characterFirst boolean?
+        ---@param accountFirst boolean?
+        quest = function(id, at, name, characterFirst, accountFirst)
             if not session.active or not id then
                 return
             end
-            session.quests[#session.quests + 1] = { id = id, at = at }
+            local event = { id = id, at = at }
+            if name and name ~= "" then
+                event.name = name
+            end
+            if characterFirst ~= nil then
+                event.characterFirst = characterFirst and true or false
+            end
+            if accountFirst ~= nil then
+                event.accountFirst = accountFirst and true or false
+            end
+            session.quests[#session.quests + 1] = event
         end,
 
         ---@param event TransmogEvent
@@ -387,6 +422,11 @@ function ns.newSessionTally(deps)
             local quests = {}
             for index, event in ipairs(session.quests) do
                 quests[index] = { id = event.id, at = event.at }
+                for _, key in ipairs({ "name", "characterFirst", "accountFirst" }) do
+                    if event[key] ~= nil then
+                        quests[index][key] = event[key]
+                    end
+                end
             end
 
             return {

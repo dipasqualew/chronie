@@ -1198,15 +1198,68 @@ describe("addon integration", function()
                 realmName = "Ragnaros",
                 instanceType = "party",
                 now = 1700000000,
+                activeQuests = { 7848 },
+                questStates = {
+                    [7848] = {
+                        name = "A Hunter's Challenge",
+                        characterCompleted = false,
+                        accountCompleted = false,
+                    },
+                },
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             recorded.frame:fire("QUEST_TURNED_IN", 7848, 1000, 2000)
 
             assert.same(
-                { { id = 7848, at = 1700000000 } },
+                {
+                    {
+                        id = 7848,
+                        name = "A Hunter's Challenge",
+                        at = 1700000000,
+                        characterFirst = true,
+                        accountFirst = true,
+                    },
+                },
                 app.tally.summary().quests
             )
+        end)
+
+        it("distinguishes a character-first quest from an account-first quest", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                activeQuests = { 7848 },
+                questStates = {
+                    [7848] = {
+                        characterCompleted = false,
+                        accountCompleted = true,
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("QUEST_TURNED_IN", 7848)
+
+            local quest = app.tally.summary().quests[1]
+            assert.is_true(quest.characterFirst)
+            assert.is_false(quest.accountFirst)
+        end)
+
+        it("does not invent quest scope when no pre-completion snapshot exists", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("QUEST_TURNED_IN", 7848)
+
+            local quest = app.tally.summary().quests[1]
+            assert.is_nil(quest.characterFirst)
+            assert.is_nil(quest.accountFirst)
         end)
 
         it("registers the events that feed the session panel", function()
@@ -1218,6 +1271,8 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
             assert.equal(1, recorded.frame.registered.CURRENCY_DISPLAY_UPDATE)
             assert.equal(1, recorded.frame.registered.ACHIEVEMENT_EARNED)
+            assert.equal(1, recorded.frame.registered.QUEST_ACCEPTED)
+            assert.equal(1, recorded.frame.registered.QUEST_LOG_UPDATE)
             assert.equal(1, recorded.frame.registered.QUEST_TURNED_IN)
         end)
     end)

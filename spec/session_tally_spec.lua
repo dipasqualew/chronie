@@ -3,6 +3,23 @@ local loader = require("addon_loader")
 describe("ns.newSessionTally", function()
     local ns = loader.load()
 
+    describe("transmog appearance classification", function()
+        it("treats the first collected source as a new appearance even if the UI marker is false", function()
+            assert.is_true(ns.isNewTransmogAppearance({ { isCollected = true } }, false))
+        end)
+
+        it("treats an additional collected source as a known appearance variant", function()
+            assert.is_false(ns.isNewTransmogAppearance({
+                { isCollected = true },
+                { isCollected = true },
+            }, true))
+        end)
+
+        it("falls back to the UI marker when collection sources are unavailable", function()
+            assert.is_true(ns.isNewTransmogAppearance(nil, true))
+        end)
+    end)
+
     local LOOT_FORMATS = { "You receive loot: %sx%d.", "You receive loot: %s." }
     local FACTION_FORMATS = { "Your %s reputation has increased by %d." }
 
@@ -426,6 +443,23 @@ describe("ns.newSessionTally", function()
             assert.same({
                 { id = 7848, at = 5000 },
                 { id = 7849, at = 5001 },
+            }, tally.summary().quests)
+        end)
+
+        it("keeps first-completion scope and the quest name when known", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.quest(7848, 5000, "A Hunter's Challenge", true, false)
+
+            assert.same({
+                {
+                    id = 7848,
+                    name = "A Hunter's Challenge",
+                    at = 5000,
+                    characterFirst = true,
+                    accountFirst = false,
+                },
             }, tally.summary().quests)
         end)
 

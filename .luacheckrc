@@ -30,6 +30,7 @@ read_globals = {
     "GetItemInfo",
     "C_TransmogCollection",
     "C_CurrencyInfo",
+    "C_QuestLog",
     "GetAchievementInfo",
     "AchievementFrame_LoadUI",
     "AchievementFrame",

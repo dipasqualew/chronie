@@ -224,7 +224,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ transmogs = { { id = 1 }, { id = 2 }, { id = 3 } } }))
 
-            assert.equal("0 new · 3 variants", valueFor(rowsOf(frames[1]), "▶ Transmog"))
+            assert.equal("0 new · 3 variants", valueFor(rowsOf(frames[1]), "+ Transmog"))
         end)
 
 
@@ -296,7 +296,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ achievements = {} }))
 
-            assert.equal("none", valueFor(rowsOf(frames[1]), "Achievements"))
+            assert.equal("none", valueFor(rowsOf(frames[1]), "+ Achievements"))
         end)
 
         it("names each achievement earned", function()
@@ -305,8 +305,32 @@ describe("ns.newResultsWindow", function()
             window.update(summary({
                 achievements = { { id = 1, name = "The Loremaster", at = 5000 } },
             }))
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "+ Achievements" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
 
             assert.is_not_nil(valueFor(rowsOf(frames[1]), "  The Loremaster"))
+        end)
+
+        it("summarises account-first and character-first achievements while collapsed", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                achievements = {
+                    { id = 1, name = "Account", accountFirst = true },
+                    { id = 2, name = "Character", accountFirst = false },
+                    { id = 3, name = "Another character", accountFirst = false },
+                },
+            }))
+
+            assert.equal(
+                "|cffb373ff1 account|r / |cff59d9732 character|r",
+                valueFor(rowsOf(frames[1]), "+ Achievements")
+            )
+            assert.is_nil(valueFor(rowsOf(frames[1]), "  Account"))
         end)
 
         it("opens an achievement from its named row", function()
@@ -315,6 +339,12 @@ describe("ns.newResultsWindow", function()
                 achievements = { { id = 42, name = "Explore", accountFirst = true } },
             }))
 
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "+ Achievements" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
             for _, fontString in ipairs(frames[1].fontStrings) do
                 if fontString.text == "  Explore" then
                     fontString:run("OnMouseUp", "LeftButton")
@@ -329,13 +359,47 @@ describe("ns.newResultsWindow", function()
             window.update(summary({ quests = { { id = 7848 } } }))
 
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "▶ Quests" then
+                if fontString.text == "+ Quests" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
             end
 
-            assert.equal("", valueFor(rowsOf(frames[1]), "  Quest 7848"))
+            assert.equal("completed", valueFor(rowsOf(frames[1]), "  Quest 7848"))
+        end)
+
+        it("summarises and labels quest first-completion scope", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                quests = {
+                    {
+                        id = 1,
+                        name = "Warband discovery",
+                        accountFirst = true,
+                        characterFirst = true,
+                    },
+                    {
+                        id = 2,
+                        name = "Alt discovery",
+                        accountFirst = false,
+                        characterFirst = true,
+                    },
+                },
+            }))
+
+            assert.equal(
+                "|cffb373ff1 warband|r / |cff59d9731 character|r",
+                valueFor(rowsOf(frames[1]), "+ Quests")
+            )
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "+ Quests" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+            local lines = rowsOf(frames[1])
+            assert.equal("warband first", valueFor(lines, "  Warband discovery"))
+            assert.equal("character first", valueFor(lines, "  Alt discovery"))
         end)
 
         it("previews a transmog on left click and opens its source on right click", function()
@@ -345,7 +409,7 @@ describe("ns.newResultsWindow", function()
             }))
 
             for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "▶ Transmog" then
+                if fontString.text == "+ Transmog" then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end

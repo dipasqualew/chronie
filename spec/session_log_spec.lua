@@ -215,12 +215,23 @@ describe("ns.newSessionLog", function()
         it("copies the quest list out of the caller's summary", function()
             local log = newLog()
             local pending = visit()
+            pending.summary.quests[1].name = "A Hunter's Challenge"
+            pending.summary.quests[1].characterFirst = true
+            pending.summary.quests[1].accountFirst = false
 
             local record = log.record(pending)
             pending.summary.quests[1].id = 999
             pending.summary.quests[2] = { id = 2, at = NOW }
 
-            assert.same({ { id = 7848, at = NOW - 50 } }, record.quests)
+            assert.same({
+                {
+                    id = 7848,
+                    name = "A Hunter's Challenge",
+                    at = NOW - 50,
+                    characterFirst = true,
+                    accountFirst = false,
+                },
+            }, record.quests)
         end)
     end)
 

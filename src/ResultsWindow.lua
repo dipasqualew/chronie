@@ -35,6 +35,12 @@ local VALUE_COLOR = { 1, 1, 1 }
 local GOLD_COLOR = { 1, 0.82, 0 }
 local REP_COLOR = { 0.4, 0.8, 0.4 }
 local MUTED_COLOR = { 0.5, 0.5, 0.5 }
+local ACCOUNT_COLOR = { 0.7, 0.45, 1 }
+local CHARACTER_COLOR = { 0.35, 0.85, 0.45 }
+
+local ACCOUNT_HEX = "|cffb373ff"
+local CHARACTER_HEX = "|cff59d973"
+local COLOR_END = "|r"
 
 ---@param deps ResultsWindowDeps
 ---@return ResultsWindow
@@ -45,7 +51,7 @@ function ns.newResultsWindow(deps)
     local rows = {}
     local frame, title
     local latest
-    local expanded = { transmogs = false, quests = false }
+    local expanded = { transmogs = false, achievements = false, quests = false }
 
     local function build()
         frame = createFrame("Frame", deps.name, deps.uiParent, "BackdropTemplate")
@@ -178,7 +184,7 @@ function ns.newResultsWindow(deps)
                 transmogValue = transmogValue .. "s"
             end
         end
-        line((expanded.transmogs and "▼ " or "▶ ") .. "Transmog", transmogValue, VALUE_COLOR, function()
+        line((expanded.transmogs and "- " or "+ ") .. "Transmog", transmogValue, VALUE_COLOR, function()
             expanded.transmogs = not expanded.transmogs
             render(latest)
         end)
@@ -203,14 +209,37 @@ function ns.newResultsWindow(deps)
         block("Reputation", summary.reputation, function(gain)
             return gain.faction, "+" .. gain.amount
         end)
-        if #(summary.achievements or {}) == 0 then
-            line("Achievements", "none", MUTED_COLOR)
-        else
-            line("Achievements", tostring(#(summary.achievements or {})), LABEL_COLOR)
+        local achievements = summary.achievements or {}
+        local accountAchievements, characterAchievements = 0, 0
+        for _, event in ipairs(achievements) do
+            if event.accountFirst == true then
+                accountAchievements = accountAchievements + 1
+            elseif event.accountFirst == false then
+                characterAchievements = characterAchievements + 1
+            end
+        end
+        local achievementValue = ACCOUNT_HEX .. accountAchievements .. " account" .. COLOR_END
+            .. " / " .. CHARACTER_HEX .. characterAchievements .. " character" .. COLOR_END
+        line((expanded.achievements and "- " or "+ ") .. "Achievements",
+            #achievements == 0 and "none" or achievementValue,
+            #achievements == 0 and MUTED_COLOR or VALUE_COLOR,
+            function()
+                expanded.achievements = not expanded.achievements
+                render(latest)
+            end)
+        if expanded.achievements then
             for _, event in ipairs(summary.achievements or {}) do
                 local current = event
-                local scope = current.accountFirst and "account first" or "character first"
-                line("  " .. current.name, scope, REP_COLOR, function()
+                local scope = "earned"
+                local color = REP_COLOR
+                if current.accountFirst == true then
+                    scope = "account first"
+                    color = ACCOUNT_COLOR
+                elseif current.accountFirst == false then
+                    scope = "character first"
+                    color = CHARACTER_COLOR
+                end
+                line("  " .. current.name, scope, color, function()
                     if deps.openAchievement then
                         deps.openAchievement(current.id)
                     end
@@ -219,13 +248,35 @@ function ns.newResultsWindow(deps)
         end
 
         local quests = summary.quests or {}
-        line((expanded.quests and "▼ " or "▶ ") .. "Quests", tostring(#quests), VALUE_COLOR, function()
+        local accountQuests, characterQuests = 0, 0
+        for _, event in ipairs(quests) do
+            if event.accountFirst == true then
+                accountQuests = accountQuests + 1
+            elseif event.characterFirst == true then
+                characterQuests = characterQuests + 1
+            end
+        end
+        local questValue = ACCOUNT_HEX .. accountQuests .. " warband" .. COLOR_END
+            .. " / " .. CHARACTER_HEX .. characterQuests .. " character" .. COLOR_END
+        line((expanded.quests and "- " or "+ ") .. "Quests",
+            #quests == 0 and "none" or questValue,
+            #quests == 0 and MUTED_COLOR or VALUE_COLOR,
+            function()
             expanded.quests = not expanded.quests
             render(latest)
         end)
         if expanded.quests then
             for _, event in ipairs(quests) do
-                line("  Quest " .. event.id, "", REP_COLOR)
+                local scope = "completed"
+                local color = REP_COLOR
+                if event.accountFirst == true then
+                    scope = "warband first"
+                    color = ACCOUNT_COLOR
+                elseif event.characterFirst == true then
+                    scope = "character first"
+                    color = CHARACTER_COLOR
+                end
+                line("  " .. (event.name or ("Quest " .. event.id)), scope, color)
             end
         end
 
