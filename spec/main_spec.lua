@@ -1021,4 +1021,182 @@ describe("addon integration", function()
             assert.equal("Main.lua", files[#files])
         end)
     end)
+
+    describe("the instance results panel", function()
+        ---@param itemID integer
+        ---@return string a self-loot chat line's item link
+        local function link(itemID)
+            return "|cffa335ee|Hitem:" .. itemID .. "::::::::::::|h[Item " .. itemID .. "]|h|r"
+        end
+
+        it("stays lazy until an instance is entered or the slash is used", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            -- Only the event dispatcher's frame exists; the results panel is lazy.
+            assert.equal(1, #recorded.frames)
+        end)
+
+        it("does not build the panel merely by leaving into the open world", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", instanceType = nil })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.is_false(app.resultsWindow.isShown())
+            assert.equal(1, #recorded.frames)
+        end)
+
+        it("shows the panel with a fresh tally on entering a tracked instance", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 500,
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.is_true(app.results.isActive())
+            assert.is_true(app.resultsWindow.isShown())
+            assert.equal(0, app.results.summary().gold)
+        end)
+
+        it("hides the panel again on leaving the instance", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setInstanceType(nil)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.is_false(app.results.isActive())
+            assert.is_false(app.resultsWindow.isShown())
+        end)
+
+        it("folds a wallet change into the gold looted while inside", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 0,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setMoney(1000)
+            recorded.frame:fire("PLAYER_MONEY")
+
+            assert.equal(1000, app.results.summary().goldLooted)
+        end)
+
+        it("adds a looted item's vendor value from the loot chat event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                itemPrices = { [4242] = 60 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive loot: " .. link(4242) .. "x2.")
+
+            assert.equal(120, app.results.summary().itemValue)
+        end)
+
+        it("accumulates reputation from the faction-change event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire(
+                "CHAT_MSG_COMBAT_FACTION_CHANGE",
+                "Your Argent Dawn reputation has increased by 40."
+            )
+
+            assert.same(
+                { { faction = "Argent Dawn", amount = 40 } },
+                app.results.summary().reputation
+            )
+        end)
+
+        it("classifies a newly collected transmog source from its event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                transmogSources = { [11] = { visual = 500, collected = true } },
+                appearanceSources = { [500] = { 11 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            assert.equal(1, app.results.summary().newAppearances)
+        end)
+
+        it("ignores instance events fired out in the open world", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = nil,
+                itemPrices = { [4242] = 60 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive loot: " .. link(4242) .. ".")
+
+            assert.equal(0, app.results.summary().itemValue)
+        end)
+
+        it("registers the events that feed the results panel", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            assert.equal(1, recorded.frame.registered.PLAYER_MONEY)
+            assert.equal(1, recorded.frame.registered.CHAT_MSG_LOOT)
+            assert.equal(1, recorded.frame.registered.CHAT_MSG_COMBAT_FACTION_CHANGE)
+            assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
+        end)
+    end)
+
+    describe("the /wdp results slash command", function()
+        it("names results in the usage text for an unknown subcommand", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("nonsense")
+
+            assert.is_truthy(recorded.lines[1]:find("usage: /wdp locks | results", 1, true))
+        end)
+
+        it("opens the panel on the first /wdp results", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("results")
+
+            assert.is_true(app.resultsWindow.isShown())
+        end)
+
+        it("closes the panel on a second /wdp results", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("results")
+            recorded.slashRegistrations[1].handler("results")
+
+            assert.is_false(app.resultsWindow.isShown())
+        end)
+
+        it("stays lazy until the slash is used", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            -- Only the dispatcher frame; toggling results is what first builds the panel.
+            assert.equal(1, #recorded.frames)
+
+            recorded.slashRegistrations[1].handler("results")
+
+            assert.is_true(#recorded.frames > 1)
+        end)
+    end)
 end)

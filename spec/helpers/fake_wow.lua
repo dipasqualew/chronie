@@ -105,6 +105,13 @@ function fake.newFrame()
         return self.shown
     end
 
+    ---Returns whatever point the test planted on the frame, defaulting to the centre.
+    ---Shape mirrors the real API: point, relativeTo, relativePoint, x, y.
+    function frame:GetPoint()
+        local placed = self.placedPoint or { "CENTER", nil, "CENTER", 0, 0 }
+        return placed[1], placed[2], placed[3], placed[4], placed[5]
+    end
+
     for _, name in ipairs({
         "SetSize",
         "SetWidth",
@@ -115,6 +122,7 @@ function fake.newFrame()
         "SetMovable",
         "EnableMouse",
         "RegisterForDrag",
+        "SetClampedToScreen",
         "SetScrollChild",
         "SetHighlightTexture",
         "SetJustifyH",
@@ -373,7 +381,8 @@ end
 ---
 ---`options.db` may be shared between two `newEnv` calls to model two characters on
 ---one account writing into the same SavedVariables table.
----@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db, tiers }`
+---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db,
+---  tiers, money, instanceType, itemPrices, transmogSources, appearanceSources, lootFormats, factionFormats }`
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -393,6 +402,14 @@ function fake.newEnv(options)
     local tooltip, tooltipRecorded = fake.newTooltip()
     local journal, journalRecorded = fake.newEncounterJournal(options.tiers)
     local classColor, classIconCoords = fake.newClassLook()
+
+    -- Mutable so a test can drive the wallet, the zone, and the collection across a
+    -- sequence of events, the same way the client mutates them under the addon's feet.
+    local money = options.money or 0
+    local instanceType = options.instanceType
+    local itemPrices = options.itemPrices or {}
+    local transmogSources = options.transmogSources or {}
+    local appearanceSourceLists = options.appearanceSources or {}
 
     local env = {
         createFrame = createFrame,
@@ -433,6 +450,33 @@ function fake.newEnv(options)
         registerSlash = function(tokens, handler)
             slashRegistrations[#slashRegistrations + 1] = { tokens = tokens, handler = handler }
         end,
+        getMoney = function()
+            return money
+        end,
+        instanceType = function()
+            return instanceType
+        end,
+        itemSellPrice = function(itemID)
+            return itemPrices[itemID]
+        end,
+        transmogSourceVisual = function(sourceID)
+            local source = transmogSources[sourceID]
+            return source and source.visual
+        end,
+        transmogAppearanceSources = function(visual)
+            return appearanceSourceLists[visual]
+        end,
+        transmogSourceCollected = function(sourceID)
+            local source = transmogSources[sourceID]
+            return source ~= nil and source.collected == true
+        end,
+        lootSelfFormats = options.lootFormats or {
+            "You receive loot: %sx%d.",
+            "You receive loot: %s.",
+        },
+        factionIncreaseFormats = options.factionFormats or {
+            "Your %s reputation has increased by %d.",
+        },
         uiParent = options.uiParent or { name = "UIParent" },
         specialFrames = specialFrames,
         db = db,
@@ -454,6 +498,16 @@ function fake.newEnv(options)
         savedInstanceCalls = savedInstanceCalls,
         encounterCalls = encounterCalls,
         journal = journalRecorded,
+        ---Drive the wallet the addon reads through env.getMoney.
+        ---@param value integer
+        setMoney = function(value)
+            money = value
+        end,
+        ---Drive the zone the addon reads through env.instanceType.
+        ---@param value string?
+        setInstanceType = function(value)
+            instanceType = value
+        end,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
             return raidInfoRequests

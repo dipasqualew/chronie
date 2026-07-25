@@ -17,4 +17,6 @@ src/LockoutDetails.lua
 src/SlashRouter.lua
 src/DetailWindow.lua
 src/LockoutWindow.lua
+src/InstanceResults.lua
+src/ResultsWindow.lua
 Main.lua

@@ -1,0 +1,298 @@
+local loader = require("addon_loader")
+local fake = require("fake_wow")
+
+describe("ns.newResultsWindow", function()
+    local ns = loader.load()
+
+    local NAME = "WdpWowTestResultsWindow"
+
+    ---Build the window with fake frames and deps, recording what it loads and saves.
+    ---`loadPoint` returns whatever the test planted, so both the default and the
+    ---restored-position paths are drivable.
+    ---@param options table? `{ name = string?, point = { string, number, number }? }`
+    ---@return table window, table frames, table recorded `{ saved, loadCalls }`
+    local function newWindow(options)
+        options = options or {}
+        local createFrame, frames = fake.newCreateFrame()
+        local recorded = { saved = {}, loadCalls = 0 }
+        local window = ns.newResultsWindow({
+            createFrame = createFrame,
+            uiParent = { name = "UIParent" },
+            name = options.name or NAME,
+            -- A visible sentinel around the copper amount, so a test can prove the row's
+            -- value came from formatMoney(summary.gold) rather than any other field.
+            formatMoney = function(copper)
+                return "$" .. tostring(copper)
+            end,
+            loadPoint = function()
+                recorded.loadCalls = recorded.loadCalls + 1
+                local point = options.point
+                if not point then
+                    return nil
+                end
+                return point[1], point[2], point[3]
+            end,
+            savePoint = function(point, x, y)
+                recorded.saved[#recorded.saved + 1] = { point = point, x = x, y = y }
+            end,
+        })
+        return window, frames, recorded
+    end
+
+    ---@param overrides table?
+    ---@return ResultsSummary
+    local function summary(overrides)
+        local base = {
+            active = true,
+            goldLooted = 0,
+            itemValue = 0,
+            gold = 0,
+            newAppearances = 0,
+            newVersions = 0,
+            reputation = {},
+        }
+        for key, value in pairs(overrides or {}) do
+            base[key] = value
+        end
+        return base
+    end
+
+    ---The rendered label/value pairs, in order. The window distinguishes labels from
+    ---values by justification (left vs right), and creates them label-then-value, so
+    ---pairing them by their shown order reconstructs each on-screen line.
+    ---@param frame table
+    ---@return table[] `{ { label = string, value = string }, ... }`
+    local function rowsOf(frame)
+        local labels, values = {}, {}
+        for _, fontString in ipairs(frame.fontStrings) do
+            if fontString.shown and fontString.justify == "LEFT" then
+                labels[#labels + 1] = fontString.text
+            elseif fontString.shown and fontString.justify == "RIGHT" then
+                values[#values + 1] = fontString.text
+            end
+        end
+        local lines = {}
+        for index, label in ipairs(labels) do
+            lines[index] = { label = label, value = values[index] }
+        end
+        return lines
+    end
+
+    ---@param lines table[]
+    ---@param label string
+    ---@return string? the value paired with the first row carrying that label
+    local function valueFor(lines, label)
+        for _, line in ipairs(lines) do
+            if line.label == label then
+                return line.value
+            end
+        end
+        return nil
+    end
+
+    it("is exported by the addon files", function()
+        assert.is_function(ns.newResultsWindow)
+    end)
+
+    describe("laziness", function()
+        it("builds no frame when it is constructed", function()
+            local _, frames = newWindow()
+
+            assert.equal(0, #frames)
+        end)
+
+        it("reports not shown before it has ever been built", function()
+            local window = newWindow()
+
+            assert.is_false(window.isShown())
+        end)
+
+        it("does not blow up when hidden before it was ever shown", function()
+            local window, frames = newWindow()
+
+            assert.has_no.errors(window.hide)
+            assert.equal(0, #frames)
+        end)
+
+        it("builds its frame on the first show", function()
+            local window, frames = newWindow()
+
+            window.show()
+
+            assert.equal(1, #frames)
+            assert.equal(NAME, frames[1].frameName)
+        end)
+
+        it("builds its frame on the first update", function()
+            local window, frames = newWindow()
+
+            window.update(summary())
+
+            assert.equal(1, #frames)
+        end)
+
+        it("builds its frame on the first toggle", function()
+            local window, frames = newWindow()
+
+            window.toggle()
+
+            assert.equal(1, #frames)
+        end)
+    end)
+
+    describe("show, hide and toggle", function()
+        it("is shown once show is called", function()
+            local window = newWindow()
+
+            window.show()
+
+            assert.is_true(window.isShown())
+        end)
+
+        it("is hidden again after hide", function()
+            local window = newWindow()
+            window.show()
+
+            window.hide()
+
+            assert.is_false(window.isShown())
+        end)
+
+        it("reuses the one frame across repeated shows", function()
+            local window, frames = newWindow()
+
+            window.show()
+            window.hide()
+            window.show()
+
+            assert.equal(1, #frames)
+        end)
+
+        it("toggles from hidden to shown", function()
+            local window = newWindow()
+
+            window.toggle()
+
+            assert.is_true(window.isShown())
+        end)
+
+        it("toggles from shown back to hidden", function()
+            local window = newWindow()
+            window.show()
+
+            window.toggle()
+
+            assert.is_false(window.isShown())
+        end)
+    end)
+
+    describe("rendering the summary", function()
+        it("renders the gold row through formatMoney", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ gold = 1234 }))
+
+            assert.equal("$1234", valueFor(rowsOf(frames[1]), "Gold"))
+        end)
+
+        it("renders the new-appearance count", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ newAppearances = 3 }))
+
+            assert.equal("3", valueFor(rowsOf(frames[1]), "New transmog"))
+        end)
+
+        it("renders the new-version count", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ newVersions = 2 }))
+
+            assert.equal("2", valueFor(rowsOf(frames[1]), "New versions"))
+        end)
+
+        it("shows 'none' against reputation when nothing was earned", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ reputation = {} }))
+
+            assert.equal("none", valueFor(rowsOf(frames[1]), "Reputation"))
+        end)
+
+        it("renders one indented signed line per faction", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                reputation = {
+                    { faction = "Argent Dawn", amount = 250 },
+                    { faction = "Timbermaw Hold", amount = 10 },
+                },
+            }))
+
+            local lines = rowsOf(frames[1])
+            assert.equal("+250", valueFor(lines, "  Argent Dawn"))
+            assert.equal("+10", valueFor(lines, "  Timbermaw Hold"))
+        end)
+
+        -- Rows are pooled and reused across renders, so a faction from a busier summary
+        -- must be taken off screen when a later, quieter summary no longer lists it.
+        it("hides leftover faction lines when a later summary has fewer", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                reputation = {
+                    { faction = "Argent Dawn", amount = 250 },
+                    { faction = "Timbermaw Hold", amount = 10 },
+                },
+            }))
+
+            window.update(summary({ reputation = {} }))
+
+            assert.is_nil(valueFor(rowsOf(frames[1]), "  Argent Dawn"))
+            assert.is_nil(valueFor(rowsOf(frames[1]), "  Timbermaw Hold"))
+        end)
+    end)
+
+    describe("remembering its position", function()
+        it("consults loadPoint when the frame is built", function()
+            local window, _, recorded = newWindow()
+
+            window.show()
+
+            assert.equal(1, recorded.loadCalls)
+        end)
+
+        it("anchors to the saved point loadPoint returns", function()
+            local window, frames = newWindow({ point = { "TOPRIGHT", 5, -5 } })
+
+            window.show()
+
+            local point = frames[1].points[1]
+            assert.equal("TOPRIGHT", point[1])
+            assert.equal(5, point[4])
+            assert.equal(-5, point[5])
+        end)
+
+        it("falls back to the centre when loadPoint has no saved spot", function()
+            local window, frames = newWindow()
+
+            window.show()
+
+            local point = frames[1].points[1]
+            assert.equal("CENTER", point[1])
+            assert.equal(0, point[4])
+            assert.equal(0, point[5])
+        end)
+
+        -- OnDragStop is the only place the window learns where the player left it: it
+        -- reads GetPoint after the drag and persists exactly those coordinates.
+        it("saves the point GetPoint reports when a drag ends", function()
+            local window, frames, recorded = newWindow()
+            window.show()
+            frames[1].placedPoint = { "BOTTOMLEFT", nil, "BOTTOMLEFT", 10, 20 }
+
+            frames[1]:run("OnDragStop")
+
+            assert.same({ { point = "BOTTOMLEFT", x = 10, y = 20 } }, recorded.saved)
+        end)
+    end)
+end)
