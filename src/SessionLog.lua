@@ -23,6 +23,7 @@ local _, ns = ...
 ---@field currencies CurrencyGain[]
 ---@field reputation ReputationGain[]
 ---@field achievements AchievementEvent[]
+---@field quests QuestEvent[]
 
 ---What the tracker hands over when a session ends.
 ---@class SessionVisit
@@ -113,6 +114,16 @@ function ns.newSessionLog(deps)
         return copy
     end
 
+    ---@param completed QuestEvent[]?
+    ---@return QuestEvent[]
+    local function copyQuests(completed)
+        local copy = {}
+        for index, event in ipairs(completed or {}) do
+            copy[index] = { id = event.id, at = event.at }
+        end
+        return copy
+    end
+
     ---@param events TransmogEvent[]?
     ---@return TransmogEvent[]
     local function copyTransmogs(events)
@@ -156,6 +167,7 @@ function ns.newSessionLog(deps)
                 currencies = copyCurrencies(summary.currencies),
                 reputation = copyReputation(summary.reputation),
                 achievements = copyAchievements(summary.achievements),
+                quests = copyQuests(summary.quests),
             }
 
             local replaced = false

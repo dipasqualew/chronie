@@ -291,6 +291,14 @@ def normalise(record: dict) -> dict | None:
                 "at": int(event.get("at") or 0),
             })
 
+    quests = []
+    for event in record.get("quests") or []:
+        if isinstance(event, dict) and event.get("id"):
+            quests.append({
+                "id": int(event["id"]),
+                "at": int(event.get("at") or 0),
+            })
+
     ended = int(record["endedAt"])
     started = int(record.get("startedAt") or ended)
 
@@ -313,6 +321,7 @@ def normalise(record: dict) -> dict | None:
         "currencies": currencies,
         "reputation": reputation,
         "achievements": achievements,
+        "quests": quests,
     }
 
 

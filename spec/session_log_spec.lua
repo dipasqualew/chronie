@@ -43,6 +43,7 @@ describe("ns.newSessionLog", function()
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
                 achievements = { { id = 1, name = "First", at = NOW } },
+                quests = { { id = 7848, at = NOW - 50 } },
             },
         }
         for key, value in pairs(overrides or {}) do
@@ -82,6 +83,7 @@ describe("ns.newSessionLog", function()
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
                 achievements = { { id = 1, name = "First", at = NOW } },
+                quests = { { id = 7848, at = NOW - 50 } },
             }, db.sessions[1])
         end)
 
@@ -123,6 +125,7 @@ describe("ns.newSessionLog", function()
             assert.same({}, record.reputation)
             assert.same({}, record.currencies)
             assert.same({}, record.achievements)
+            assert.same({}, record.quests)
         end)
 
         it("stores an empty difficulty rather than a hole when the client named none", function()
@@ -188,6 +191,17 @@ describe("ns.newSessionLog", function()
             pending.summary.achievements[2] = { id = 2, name = "Second", at = NOW }
 
             assert.same({ { id = 1, name = "First", at = NOW } }, record.achievements)
+        end)
+
+        it("copies the quest list out of the caller's summary", function()
+            local log = newLog()
+            local pending = visit()
+
+            local record = log.record(pending)
+            pending.summary.quests[1].id = 999
+            pending.summary.quests[2] = { id = 2, at = NOW }
+
+            assert.same({ { id = 7848, at = NOW - 50 } }, record.quests)
         end)
     end)
 

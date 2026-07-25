@@ -160,6 +160,7 @@ class NormaliseTest(unittest.TestCase):
             "currencies": [{"id": 1166, "name": "Timewarped Badge", "amount": 15}],
             "achievements": [{"id": 1234, "name": "The Loremaster", "at": 150}],
             "transmogs": [{"id": 19019, "at": 175}],
+            "quests": [{"id": 7848, "at": 180}],
         }
         base.update(overrides)
         return base
@@ -176,6 +177,7 @@ class NormaliseTest(unittest.TestCase):
         self.assertEqual(cleaned["reputation"], [{"faction": "Argent Dawn", "amount": 40}])
         self.assertEqual(cleaned["currencies"], [{"id": 1166, "name": "Timewarped Badge", "amount": 15}])
         self.assertEqual(cleaned["achievements"], [{"id": 1234, "name": "The Loremaster", "at": 150}])
+        self.assertEqual(cleaned["quests"], [{"id": 7848, "at": 180}])
 
     def test_defaults_the_new_totals_to_zero_when_absent(self):
         cleaned = collect.normalise({"id": "a", "character": "Thrall-Ragnaros", "endedAt": 200})
@@ -184,6 +186,7 @@ class NormaliseTest(unittest.TestCase):
         self.assertEqual(cleaned["goldDiff"], 0)
         self.assertEqual(cleaned["currencies"], [])
         self.assertEqual(cleaned["achievements"], [])
+        self.assertEqual(cleaned["quests"], [])
 
     def test_drops_a_record_with_no_identity(self):
         self.assertIsNone(collect.normalise(self.record(id=None)))
@@ -205,6 +208,11 @@ class NormaliseTest(unittest.TestCase):
         cleaned = collect.normalise(self.record(achievements=[{"id": 1, "at": 5}, "junk"]))
 
         self.assertEqual(cleaned["achievements"], [])
+
+    def test_drops_a_quest_entry_with_no_id(self):
+        cleaned = collect.normalise(self.record(quests=[{"at": 5}, "junk"]))
+
+        self.assertEqual(cleaned["quests"], [])
 
     def test_dates_a_record_the_addon_never_dated(self):
         cleaned = collect.normalise(self.record(day=None))

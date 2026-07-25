@@ -415,6 +415,29 @@ describe("ns.newSessionTally", function()
         end)
     end)
 
+    describe("quests completed", function()
+        it("records every quest with its id and completion time", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.quest(7848, 5000)
+            tally.quest(7849, 5001)
+
+            assert.same({
+                { id = 7848, at = 5000 },
+                { id = 7849, at = 5001 },
+            }, tally.summary().quests)
+        end)
+
+        it("ignores quests while inactive", function()
+            local tally = newTally()
+
+            tally.quest(7848, 5000)
+
+            assert.same({}, tally.summary().quests)
+        end)
+    end)
+
     describe("hasEvents", function()
         it("is false for a session where nothing happened", function()
             local tally = newTally()
@@ -471,6 +494,14 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
+        it("is true once a quest is completed", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.quest(7848, 100)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
         -- A currency that is earned then wholly spent nets to zero, but the session did
         -- see the currency move, so it is still worth keeping.
         it("stays true for a currency that nets back to zero", function()
@@ -512,6 +543,7 @@ describe("ns.newSessionTally", function()
             assert.same({}, summary.currencies)
             assert.same({}, summary.achievements)
             assert.same({}, summary.transmogs)
+            assert.same({}, summary.quests)
         end)
 
         it("carries every tally onto one summary table", function()
@@ -525,6 +557,7 @@ describe("ns.newSessionTally", function()
             tally.reputation("Your Argent Dawn reputation has increased by 30.")
             tally.currency(1166, 15, "Timewarped Badge")
             tally.achievement(1, "First", 500)
+            tally.quest(7848, 550)
 
             assert.same({
                 active = true,
@@ -538,6 +571,7 @@ describe("ns.newSessionTally", function()
                 reputationTotal = 30,
                 reputation = { { faction = "Argent Dawn", amount = 30 } },
                 achievements = { { id = 1, name = "First", at = 500 } },
+                quests = { { id = 7848, at = 550 } },
             }, tally.summary())
         end)
     end)

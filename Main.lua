@@ -271,6 +271,10 @@ function ns.main(env)
         tally.achievement(id, env.achievementInfo(id), env.now())
         refreshResults()
     end)
+    dispatcher.on("QUEST_TURNED_IN", function(id)
+        tally.quest(id, env.now())
+        refreshResults()
+    end)
 
     env.registerSlash({ "/wdp" }, router.dispatch)
 

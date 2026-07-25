@@ -1192,6 +1192,23 @@ describe("addon integration", function()
             )
         end)
 
+        it("records a completed quest from the quest turn-in event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                now = 1700000000,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("QUEST_TURNED_IN", 7848, 1000, 2000)
+
+            assert.same(
+                { { id = 7848, at = 1700000000 } },
+                app.tally.summary().quests
+            )
+        end)
+
         it("registers the events that feed the session panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
@@ -1201,6 +1218,7 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
             assert.equal(1, recorded.frame.registered.CURRENCY_DISPLAY_UPDATE)
             assert.equal(1, recorded.frame.registered.ACHIEVEMENT_EARNED)
+            assert.equal(1, recorded.frame.registered.QUEST_TURNED_IN)
         end)
     end)
 

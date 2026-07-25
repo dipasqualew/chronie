@@ -15,6 +15,7 @@ local _, ns = ...
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
 ---@field achievement fun(id: integer, name: string?, at: integer) Append an earned achievement.
+---@field quest fun(id: integer, at: integer) Append a completed quest.
 ---@field transmog fun(itemID: integer, at: integer) Append a newly collected transmog item.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
@@ -38,6 +39,10 @@ local _, ns = ...
 ---@field id integer Item ID.
 ---@field at integer When it was collected.
 
+---@class QuestEvent
+---@field id integer Quest ID.
+---@field at integer When it was completed.
+
 ---@class SessionSummary
 ---@field active boolean
 ---@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
@@ -50,6 +55,7 @@ local _, ns = ...
 ---@field reputationTotal integer Summed reputation gained across every faction.
 ---@field reputation ReputationGain[] Per-faction totals, sorted by faction name.
 ---@field achievements AchievementEvent[] Achievements earned, in the order they were.
+---@field quests QuestEvent[] Quests completed, in completion order.
 
 ---@class SessionTallyDeps
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
@@ -160,6 +166,7 @@ function ns.newSessionTally(deps)
         session.reputation = {}
         session.currencies = {}
         session.achievements = {}
+        session.quests = {}
     end
 
     begin(0)
@@ -269,6 +276,15 @@ function ns.newSessionTally(deps)
             }
         end,
 
+        ---@param id integer
+        ---@param at integer
+        quest = function(id, at)
+            if not session.active or not id then
+                return
+            end
+            session.quests[#session.quests + 1] = { id = id, at = at }
+        end,
+
         ---@param itemID integer
         ---@param at integer
         transmog = function(itemID, at)
@@ -300,6 +316,7 @@ function ns.newSessionTally(deps)
                 or next(session.currencies) ~= nil
                 or next(session.reputation) ~= nil
                 or #session.achievements > 0
+                or #session.quests > 0
         end,
 
         ---@return SessionSummary
@@ -337,6 +354,11 @@ function ns.newSessionTally(deps)
                 transmogs[index] = { id = event.id, at = event.at }
             end
 
+            local quests = {}
+            for index, event in ipairs(session.quests) do
+                quests[index] = { id = event.id, at = event.at }
+            end
+
             return {
                 active = session.active,
                 lootValue = session.goldLooted + session.itemValue,
@@ -349,6 +371,7 @@ function ns.newSessionTally(deps)
                 reputationTotal = reputationTotal,
                 reputation = reputation,
                 achievements = achievements,
+                quests = quests,
             }
         end,
     }

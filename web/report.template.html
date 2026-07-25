@@ -275,6 +275,10 @@ function listCell(entries, asText) {
 const repCell = (gains) => listCell(gains, repText);
 const currencyCell = (gains) => listCell(gains, currencyText);
 const achievementCell = (earned) => listCell(earned, achievementText);
+const questLink = (event) =>
+  `<a href="https://www.wowhead.com/quest=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">📜 Quest ${escapeHtml(event.id)}</a>`;
+const questCell = (events) =>
+  (events || []).length ? events.map(questLink).join(", ") : '<span class="muted">—</span>';
 
 function escapeHtml(text) {
   return String(text ?? "").replace(/[&<>"]/g, (char) =>
@@ -289,6 +293,7 @@ const totals = SESSIONS.reduce((acc, session) => {
   acc.seconds += session.seconds || 0;
   acc.transmogs += (session.transmogs || []).length;
   acc.achievements += (session.achievements || []).length;
+  acc.quests += (session.quests || []).length;
   (session.reputation || []).forEach((gain) => {
     acc.reputation[gain.faction] = (acc.reputation[gain.faction] || 0) + gain.amount;
   });
@@ -296,7 +301,10 @@ const totals = SESSIONS.reduce((acc, session) => {
     acc.currencies[gain.name] = (acc.currencies[gain.name] || 0) + gain.amount;
   });
   return acc;
-}, { lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, achievements: 0, reputation: {}, currencies: {} });
+}, {
+  lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, achievements: 0, quests: 0,
+  reputation: {}, currencies: {},
+});
 
 const topFaction = Object.entries(totals.reputation).sort((a, b) => b[1] - a[1])[0];
 const topCurrency = Object.entries(totals.currencies).sort((a, b) => b[1] - a[1])[0];
@@ -323,6 +331,7 @@ $("tiles").innerHTML = [
     foot: topFaction ? topFaction[0] : "none earned",
   },
   { label: "Achievements", value: totals.achievements, foot: "earned this window" },
+  { label: "Quests", value: totals.quests, foot: "completed this window" },
 ].map((tile) => `<div class="panel tile">
     <div class="label">${escapeHtml(tile.label)}</div>
     <div class="value${tile.cls ? " " + tile.cls : ""}">${escapeHtml(tile.value)}</div>
@@ -435,6 +444,9 @@ function drawTimeline() {
     (session.transmogs || []).forEach((event) => {
       parts.push(`<span class="chip">${transmogLink(event)}</span>`);
     });
+    (session.quests || []).forEach((event) => {
+      parts.push(`<span class="chip">${questLink(event)}</span>`);
+    });
     return parts.length ? `<div class="tl-extras">${parts.join("")}</div>` : "";
   };
 
@@ -450,7 +462,7 @@ function drawTimeline() {
     const rows = byDay.get(day).map((session) => {
       const dot = `<span class="dot" style="background:${CLASS_COLORS[session.classFile] || "var(--text-muted)"}"></span>`;
       return `<div class="tl-row">
-        <div class="tl-time">${escapeHtml(clock(session.endedAt))}</div>
+        <div class="tl-time" title="Session start and end">${escapeHtml(clock(session.startedAt))}<br>– ${escapeHtml(clock(session.endedAt))}</div>
         <div class="tl-body">
           <div class="tl-head">
             <span>${dot}${escapeHtml(session.character)}</span>
@@ -473,7 +485,11 @@ drawTimeline();
 /* ---------- the table ---------- */
 
 const COLUMNS = [
-  { key: "day", title: "Day", cell: (s) => `${escapeHtml(s.day)} <span class="muted">${escapeHtml(clock(s.endedAt))}</span>`, sort: (s) => s.endedAt },
+  {
+    key: "day", title: "Started – ended",
+    cell: (s) => `${escapeHtml(s.day)} <span class="muted">${escapeHtml(clock(s.startedAt))} – ${escapeHtml(clock(s.endedAt))}</span>`,
+    sort: (s) => s.endedAt,
+  },
   {
     key: "character", title: "Character", sort: (s) => s.character,
     cell: (s) => `<span class="dot" style="background:${CLASS_COLORS[s.classFile] || "var(--text-muted)"}"></span>${escapeHtml(s.character)}`,
@@ -488,6 +504,7 @@ const COLUMNS = [
   { key: "currencies", title: "Currency", cell: (s) => currencyCell(s.currencies), sort: (s) => (s.currencies || []).reduce((total, gain) => total + gain.amount, 0) },
   { key: "reputation", title: "Reputation", cell: (s) => repCell(s.reputation), sort: (s) => (s.reputation || []).reduce((total, gain) => total + gain.amount, 0) },
   { key: "achievements", title: "Achievements", cell: (s) => achievementCell(s.achievements), sort: (s) => (s.achievements || []).length },
+  { key: "quests", title: "Quests", cell: (s) => questCell(s.quests), sort: (s) => (s.quests || []).length },
 ];
 
 let sortKey = "day";
