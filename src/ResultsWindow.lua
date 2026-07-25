@@ -27,9 +27,12 @@ local _, ns = ...
 ---@field frameStrata string?
 ---@field toplevel boolean?
 
-local WIDTH = 190
+local WIDTH = 260
 local PADDING = 12
 local LINE = 15
+local COLUMN_GAP = 8
+local VALUE_WIDTH = 92
+local SUMMARY_VALUE_WIDTH = 140
 
 local TITLE_COLOR = { 1, 0.82, 0 }
 local LABEL_COLOR = { 0.7, 0.7, 0.7 }
@@ -118,8 +121,9 @@ function ns.newResultsWindow(deps)
         frame:Hide()
     end
 
-    ---A label/value pair sharing one line; both span the content width so the value
-    ---sits flush right while the label reads from the left.
+    ---A label/value pair sharing one line. Word wrapping is disabled because every row
+    ---has a fixed height; a long localized name is clipped inside its column instead of
+    ---wrapping over the row below.
     ---@param index integer
     ---@return table label, table value
     local function rowAt(index)
@@ -127,10 +131,10 @@ function ns.newResultsWindow(deps)
         if not row then
             local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             local value = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            label:SetWidth(WIDTH - PADDING * 2)
-            value:SetWidth(WIDTH - PADDING * 2)
             label:SetJustifyH("LEFT")
             value:SetJustifyH("RIGHT")
+            label:SetWordWrap(false)
+            value:SetWordWrap(false)
             row = { label = label, value = value }
             rows[index] = row
         end
@@ -149,14 +153,19 @@ function ns.newResultsWindow(deps)
         ---@param valueText string
         ---@param color number[]
         ---@param action fun(button: string)? Called when the line is clicked.
-        local function line(text, valueText, color, action)
+        ---@param requestedValueWidth number? Width reserved for unusually long summary values.
+        local function line(text, valueText, color, action, requestedValueWidth)
             used = used + 1
             local label, value = rowAt(used)
+            local valueWidth = valueText ~= "" and (requestedValueWidth or VALUE_WIDTH) or 0
+            local gap = valueWidth > 0 and COLUMN_GAP or 0
+            label:SetWidth(WIDTH - PADDING * 2 - valueWidth - gap)
+            value:SetWidth(valueWidth)
             label:SetPoint("TOPLEFT", PADDING, y)
             label:SetText(text)
             label:SetTextColor(LABEL_COLOR[1], LABEL_COLOR[2], LABEL_COLOR[3])
             label:Show()
-            value:SetPoint("TOPLEFT", PADDING, y)
+            value:SetPoint("TOPRIGHT", -PADDING, y)
             value:SetText(valueText)
             value:SetTextColor(color[1], color[2], color[3])
             value:Show()
@@ -190,7 +199,7 @@ function ns.newResultsWindow(deps)
         local transmogs = summary.transmogs or {}
         if #achievements + #currencies + #levelUps + #mounts + #pets + #quests
             + #reputation + #toys + #transmogs > 0 then
-            line("────────────────────────", "", MUTED_COLOR)
+            line("------------------------", "", MUTED_COLOR)
         end
 
         -- Completed categories are deliberately rendered in heading order. Empty
@@ -209,7 +218,7 @@ function ns.newResultsWindow(deps)
             line(disclosure("Achievements", expanded.achievements), achievementValue, VALUE_COLOR, function()
                 expanded.achievements = not expanded.achievements
                 render(latest)
-            end)
+            end, SUMMARY_VALUE_WIDTH)
             if expanded.achievements then
                 for _, event in ipairs(achievements) do
                     local current = event
@@ -289,7 +298,7 @@ function ns.newResultsWindow(deps)
             line(disclosure("Quests", expanded.quests), questValue, VALUE_COLOR, function()
                 expanded.quests = not expanded.quests
                 render(latest)
-            end)
+            end, SUMMARY_VALUE_WIDTH)
             if expanded.quests then
                 for _, event in ipairs(quests) do
                     local scope = "completed"

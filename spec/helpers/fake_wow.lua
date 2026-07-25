@@ -29,6 +29,10 @@ function fake.newFontString()
         self.justify = justify
     end
 
+    function fontString:SetWordWrap(enabled)
+        self.wordWrap = enabled
+    end
+
     function fontString:Show()
         self.shown = true
     end

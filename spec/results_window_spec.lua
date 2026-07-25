@@ -358,7 +358,7 @@ describe("ns.newResultsWindow", function()
                 labels[#labels + 1] = entry.label
             end
             assert.same({
-                "Loot value", "Gold Δ", "────────────────────────",
+                "Loot value", "Gold Δ", "------------------------",
                 "Achievements +", "Currency +", "Mounts +", "Pets +",
                 "Quests +", "Reputation +", "Toys +", "Transmog +",
             }, labels)
@@ -401,6 +401,48 @@ describe("ns.newResultsWindow", function()
             end
 
             assert.is_not_nil(valueFor(rowsOf(frames[1]), "  The Loremaster"))
+        end)
+
+        it("keeps long achievement and quest names out of the status column", function()
+            local window, frames = newWindow()
+            local longAchievement = "  An Extremely Long Achievement Name That Cannot Fit Beside Its Status"
+            local longQuest = "  An Extremely Long Quest Name That Cannot Fit Beside Its Status"
+
+            window.update(summary({
+                achievements = {
+                    { id = 1, name = longAchievement:sub(3), accountFirst = false },
+                },
+                quests = {
+                    { id = 2, name = longQuest:sub(3), characterFirst = true },
+                },
+            }))
+            for _, heading in ipairs({ "Achievements +", "Quests +" }) do
+                for _, fontString in ipairs(frames[1].fontStrings) do
+                    if fontString.text == heading then
+                        fontString:run("OnMouseUp", "LeftButton")
+                        break
+                    end
+                end
+            end
+
+            local labels = {}
+            local values = {}
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == longAchievement or fontString.text == longQuest then
+                    labels[#labels + 1] = fontString
+                elseif fontString.text == "character first" then
+                    values[#values + 1] = fontString
+                end
+            end
+
+            assert.equal(2, #labels)
+            assert.equal(2, #values)
+            for index = 1, 2 do
+                assert.is_false(labels[index].wordWrap)
+                assert.is_false(values[index].wordWrap)
+                assert.equal(136, labels[index].width)
+                assert.equal(92, values[index].width)
+            end
         end)
 
         it("summarises account-first and character-first achievements while collapsed", function()

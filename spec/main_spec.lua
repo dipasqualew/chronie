@@ -484,6 +484,7 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.UPDATE_INSTANCE_INFO)
             assert.equal(1, recorded.frame.registered.BOSS_KILL)
             assert.equal(1, recorded.frame.registered.PLAYER_ENTERING_WORLD)
+            assert.equal(1, recorded.frame.registered.ZONE_CHANGED_NEW_AREA)
         end)
     end)
 
@@ -1417,6 +1418,34 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             assert.equal(2, #recorded.db.sessions)
+        end)
+
+        it("starts a new outdoor session after a seamless taxi zone change", function()
+            local _, recorded = inside({
+                instanceName = "Dragonblight",
+                instanceType = "none",
+                difficultyId = 0,
+                difficultyName = "",
+                itemPrices = { [1111] = 40, [2222] = 75 },
+            })
+            recorded.frame:fire(
+                "CHAT_MSG_LOOT",
+                "You receive loot: |cffffffff|Hitem:1111::::::::::::|h[Dragonblight Item]|h|r."
+            )
+
+            recorded.setInstance({ name = "Borean Tundra", kind = "none", difficultyId = 0, difficulty = "" })
+            recorded.frame:fire("ZONE_CHANGED_NEW_AREA")
+            recorded.frame:fire(
+                "CHAT_MSG_LOOT",
+                "You receive loot: |cffffffff|Hitem:2222::::::::::::|h[Borean Item]|h|r."
+            )
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(2, #recorded.db.sessions)
+            assert.equal("Dragonblight", recorded.db.sessions[1].instance)
+            assert.equal(40, recorded.db.sessions[1].lootValue)
+            assert.equal("Borean Tundra", recorded.db.sessions[2].instance)
+            assert.equal(75, recorded.db.sessions[2].lootValue)
         end)
 
         -- SavedVariables only reach disk when the client shuts down, so a session that

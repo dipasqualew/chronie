@@ -328,16 +328,19 @@ function ns.main(env)
     dispatcher.on("UPDATE_INSTANCE_INFO", captureLockouts)
     dispatcher.on("BOSS_KILL", env.requestRaidInfo)
 
-    -- Zoning is the signal that one session has ended and another begun: the tracker
-    -- files the finished session (dropping it if nothing happened) and opens a fresh one
-    -- for wherever the player now is. Every zone has a session, so the panel is always on.
-    dispatcher.on("PLAYER_ENTERING_WORLD", function()
+    -- Both events matter: PLAYER_ENTERING_WORLD covers load screens, while
+    -- ZONE_CHANGED_NEW_AREA covers seamless outdoor boundaries such as a taxi flight
+    -- between two neighbouring zones. Duplicate notifications are harmless because the
+    -- tracker keeps the current session when the location identity has not changed.
+    local function syncSession()
         env.requestRaidInfo()
         snapshotActiveQuests()
         sessionTracker.sync()
         resultsWindow.update(tally.summary())
         resultsWindow.show()
-    end)
+    end
+    dispatcher.on("PLAYER_ENTERING_WORLD", syncSession)
+    dispatcher.on("ZONE_CHANGED_NEW_AREA", syncSession)
 
     -- Logging out or reloading is the last chance to file a session: SavedVariables are
     -- only written to disk on the way out, so an unfiled session would never be exported.
