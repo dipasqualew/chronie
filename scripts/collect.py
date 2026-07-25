@@ -253,7 +253,8 @@ def default_output_dir() -> Path:
 
 def normalise(record: dict) -> dict | None:
     """Keeps a session only if it carries the identity the report is built around:
-    who ran it, what they ran, and when it ended."""
+    who was on, where they were, and when it ended. A session is one character's
+    continuous stay in one location — an instance or an open-world zone."""
     if not isinstance(record, dict):
         return None
     if not record.get("id") or not record.get("character") or not record.get("endedAt"):
@@ -263,6 +264,24 @@ def normalise(record: dict) -> dict | None:
     for gain in record.get("reputation") or []:
         if isinstance(gain, dict) and gain.get("faction"):
             reputation.append({"faction": str(gain["faction"]), "amount": int(gain.get("amount") or 0)})
+
+    currencies = []
+    for gain in record.get("currencies") or []:
+        if isinstance(gain, dict) and gain.get("name"):
+            currencies.append({
+                "id": int(gain.get("id") or 0),
+                "name": str(gain["name"]),
+                "amount": int(gain.get("amount") or 0),
+            })
+
+    achievements = []
+    for event in record.get("achievements") or []:
+        if isinstance(event, dict) and event.get("name"):
+            achievements.append({
+                "id": int(event.get("id") or 0),
+                "name": str(event["name"]),
+                "at": int(event.get("at") or 0),
+            })
 
     ended = int(record["endedAt"])
     started = int(record.get("startedAt") or ended)
@@ -278,12 +297,15 @@ def normalise(record: dict) -> dict | None:
         "startedAt": started,
         "endedAt": ended,
         "seconds": int(record.get("seconds") or max(ended - started, 0)),
-        "goldLooted": int(record.get("goldLooted") or 0),
-        "itemValue": int(record.get("itemValue") or 0),
-        "gold": int(record.get("gold") or 0),
+        "lootValue": int(record.get("lootValue") or 0),
+        "goldDiff": int(record.get("goldDiff") or 0),
         "newAppearances": int(record.get("newAppearances") or 0),
         "newVersions": int(record.get("newVersions") or 0),
+        "currencyTotal": int(record.get("currencyTotal") or 0),
+        "reputationTotal": int(record.get("reputationTotal") or 0),
+        "currencies": currencies,
         "reputation": reputation,
+        "achievements": achievements,
     }
 
 

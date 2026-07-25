@@ -7,6 +7,7 @@ local _, ns = ...
 ---@field spec fun(records: SessionRecord[]): DetailSpec
 ---@field formatDuration fun(seconds: integer): string
 ---@field formatReputation fun(gains: ReputationGain[]): string
+---@field formatCurrencies fun(gains: CurrencyGain[]): string
 
 ---@class SessionTableDeps
 ---@field classDisplay ClassDisplay
@@ -19,27 +20,31 @@ local TOTAL_COLOR = { 1, 0.82, 0 }
 local NONE = "—"
 local MINUTE, HOUR = 60, 3600
 
----How many factions fit in the reputation cell before it is abbreviated.
-local REPUTATION_SHOWN = 2
+---How many entries fit in the reputation/currency cell before it is abbreviated.
+local NAMED_SHOWN = 2
 
 local DAY_COLUMNS = {
-    { title = "Character", width = 170 },
-    { title = "Instance", width = 190 },
-    { title = "Difficulty", width = 110 },
-    { title = "Time", width = 60 },
-    { title = "Gold", width = 110 },
-    { title = "Transmog", width = 80 },
-    { title = "Reputation", width = 120 },
+    { title = "Character", width = 148 },
+    { title = "Location", width = 150 },
+    { title = "Difficulty", width = 80 },
+    { title = "Time", width = 52 },
+    { title = "Loot", width = 92 },
+    { title = "Gold Δ", width = 84 },
+    { title = "Transmog", width = 56 },
+    { title = "Currency", width = 88 },
+    { title = "Reputation", width = 66 },
 }
 
 local TOTAL_COLUMNS = {
-    { title = "Character", width = 170 },
-    { title = "Runs", width = 190 },
-    { title = "", width = 110 },
-    { title = "Time", width = 60 },
-    { title = "Gold", width = 110 },
-    { title = "Transmog", width = 80 },
-    { title = "Reputation", width = 120 },
+    { title = "Character", width = 148 },
+    { title = "Sessions", width = 150 },
+    { title = "", width = 80 },
+    { title = "Time", width = 52 },
+    { title = "Loot", width = 92 },
+    { title = "Gold Δ", width = 84 },
+    { title = "Transmog", width = 56 },
+    { title = "Currency", width = 88 },
+    { title = "Reputation", width = 66 },
 }
 
 ---@param seconds integer?
@@ -52,41 +57,71 @@ local function formatDuration(seconds)
     return string.format("%d:%02d", math.floor(seconds / MINUTE), seconds % MINUTE)
 end
 
----@param gains ReputationGain[]?
+---Names the first couple of entries in full, then counts the rest, so a busy cell reads
+---"Argent Dawn +40, Timbermaw Hold +10, +2 more" without overflowing.
+---@param entries table[]?
+---@param label fun(entry: table): string
 ---@return string
-local function formatReputation(gains)
-    gains = gains or {}
-    if #gains == 0 then
+local function summarise(entries, label)
+    entries = entries or {}
+    if #entries == 0 then
         return NONE
     end
 
     local parts = {}
-    for index = 1, math.min(#gains, REPUTATION_SHOWN) do
-        parts[#parts + 1] = gains[index].faction .. " +" .. gains[index].amount
+    for index = 1, math.min(#entries, NAMED_SHOWN) do
+        parts[#parts + 1] = label(entries[index])
     end
-    if #gains > REPUTATION_SHOWN then
-        parts[#parts + 1] = "+" .. (#gains - REPUTATION_SHOWN) .. " more"
+    if #entries > NAMED_SHOWN then
+        parts[#parts + 1] = "+" .. (#entries - NAMED_SHOWN) .. " more"
     end
 
     return table.concat(parts, ", ")
 end
 
----Folds a record into a running tally. Reputation collapses to a faction count,
----which is all a totals line has room to say.
+---@param gains ReputationGain[]?
+---@return string
+local function formatReputation(gains)
+    return summarise(gains, function(gain)
+        return gain.faction .. " +" .. gain.amount
+    end)
+end
+
+---@param gains CurrencyGain[]?
+---@return string
+local function formatCurrencies(gains)
+    return summarise(gains, function(gain)
+        return gain.name .. " " .. (gain.amount >= 0 and "+" or "") .. gain.amount
+    end)
+end
+
+---Folds a record into a running tally. Reputation and currency collapse to a name
+---count, which is all a totals line has room to say.
 ---@param tally table?
 ---@param record SessionRecord
 ---@return table
 local function accumulate(tally, record)
-    tally = tally or { runs = 0, seconds = 0, gold = 0, transmog = 0, factions = {}, factionCount = 0 }
-    tally.runs = tally.runs + 1
+    tally = tally or {
+        sessions = 0, seconds = 0, lootValue = 0, goldDiff = 0, transmog = 0,
+        factions = {}, factionCount = 0, currencies = {}, currencyCount = 0,
+    }
+    tally.sessions = tally.sessions + 1
     tally.seconds = tally.seconds + (record.seconds or 0)
-    tally.gold = tally.gold + (record.gold or 0)
+    tally.lootValue = tally.lootValue + (record.lootValue or 0)
+    tally.goldDiff = tally.goldDiff + (record.goldDiff or 0)
     tally.transmog = tally.transmog + (record.newAppearances or 0)
 
     for _, gain in ipairs(record.reputation or {}) do
         if not tally.factions[gain.faction] then
             tally.factions[gain.faction] = true
             tally.factionCount = tally.factionCount + 1
+        end
+    end
+
+    for _, gain in ipairs(record.currencies or {}) do
+        if not tally.currencies[gain.id] then
+            tally.currencies[gain.id] = true
+            tally.currencyCount = tally.currencyCount + 1
         end
     end
 
@@ -116,8 +151,10 @@ function ns.newSessionTable(deps)
                 record.instance,
                 record.difficulty ~= "" and record.difficulty or NONE,
                 formatDuration(record.seconds),
-                formatMoney(record.gold),
+                formatMoney(record.lootValue),
+                formatMoney(record.goldDiff),
                 record.newAppearances .. " / " .. record.newVersions,
+                formatCurrencies(record.currencies),
                 formatReputation(record.reputation),
             },
             color = ROW_COLOR,
@@ -141,8 +178,8 @@ function ns.newSessionTable(deps)
 
         table.sort(order, function(left, right)
             local a, b = byCharacter[left], byCharacter[right]
-            if a.gold ~= b.gold then
-                return a.gold > b.gold
+            if a.lootValue ~= b.lootValue then
+                return a.lootValue > b.lootValue
             end
             return left < right
         end)
@@ -153,11 +190,13 @@ function ns.newSessionTable(deps)
             rows[index] = {
                 cells = {
                     classDisplay.decorate(tally.classFile, character),
-                    plural(tally.runs, "run"),
+                    plural(tally.sessions, "session"),
                     "",
                     formatDuration(tally.seconds),
-                    formatMoney(tally.gold),
+                    formatMoney(tally.lootValue),
+                    formatMoney(tally.goldDiff),
                     tostring(tally.transmog),
+                    tally.currencyCount > 0 and plural(tally.currencyCount, "currency") or NONE,
                     tally.factionCount > 0 and plural(tally.factionCount, "faction") or NONE,
                 },
                 color = TOTAL_COLOR,
@@ -170,6 +209,7 @@ function ns.newSessionTable(deps)
     return {
         formatDuration = formatDuration,
         formatReputation = formatReputation,
+        formatCurrencies = formatCurrencies,
 
         ---@param records SessionRecord[] Newest first, as SessionLog.all returns them.
         ---@return DetailSpec
@@ -181,7 +221,7 @@ function ns.newSessionTable(deps)
                     heading = "Totals",
                     columns = TOTAL_COLUMNS,
                     rows = totalRows(records),
-                    empty = "No instances recorded yet.",
+                    empty = "No sessions recorded yet.",
                 },
             }
 
@@ -206,8 +246,8 @@ function ns.newSessionTable(deps)
                     heading = string.format(
                         "%s — %s, %s",
                         day,
-                        plural(bucket.tally.runs, "run"),
-                        formatMoney(bucket.tally.gold)
+                        plural(bucket.tally.sessions, "session"),
+                        formatMoney(bucket.tally.lootValue)
                     ),
                     columns = DAY_COLUMNS,
                     rows = bucket.rows,
@@ -215,7 +255,7 @@ function ns.newSessionTable(deps)
             end
 
             return {
-                title = "Instance sessions — last " .. retainDays .. " days",
+                title = "Sessions — last " .. retainDays .. " days",
                 sections = sections,
             }
         end,

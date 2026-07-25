@@ -29,6 +29,8 @@ read_globals = {
     "GetInstanceInfo",
     "GetItemInfo",
     "C_TransmogCollection",
+    "C_CurrencyInfo",
+    "GetAchievementInfo",
     "FACTION_STANDING_INCREASED",
     "FACTION_STANDING_INCREASED_BONUS",
     "FACTION_STANDING_INCREASED_ACCOUNT_WIDE",

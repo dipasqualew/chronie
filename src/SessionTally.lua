@@ -1,42 +1,60 @@
 local _, ns = ...
 
----A per-visit tally of what an instance yielded: gold looted, the vendor value of
----items looted, transmog appearances gained, and reputation earned. Pure logic; the
----only WoW-shaped things it touches arrive as injected seams (item prices, transmog
----collection queries) or as raw chat strings it parses itself.
----@class InstanceResults
----@field enter fun(instanceType: string?, money: integer): boolean Sync to a zone; true while tracking.
----@field leave fun() Stop tracking, so the next enter() starts a fresh tally.
----@field money fun(current: integer) Fold the current wallet total into gold looted.
+---A running tally of the events that happen to one character during one session:
+---a continuous stay in a single location, whether an instance or an open-world zone.
+---Pure logic; the only WoW-shaped things it touches arrive as injected seams (item
+---prices, transmog collection queries) or as raw chat strings it parses itself.
+---
+---The tracker owns the session's boundaries and drives begin()/leave(); this module
+---only accumulates whatever lands between them.
+---@class SessionTally
+---@field begin fun(money: integer?) Start a fresh session, anchoring the money baseline.
+---@field leave fun() Stop tallying; the totals survive for one last summary() read.
+---@field money fun(current: integer) Fold the current wallet total into loot and net diff.
 ---@field loot fun(message: string) Add a self-loot chat line's vendor value.
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
+---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
+---@field achievement fun(id: integer, name: string?, at: integer) Append an earned achievement.
 ---@field transmogSource fun(sourceID: integer): string? Classify a newly collected source.
 ---@field isActive fun(): boolean
----@field summary fun(): ResultsSummary
+---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
+---@field summary fun(): SessionSummary
 
 ---@class ReputationGain
 ---@field faction string
 ---@field amount integer
 
----@class ResultsSummary
+---@class CurrencyGain
+---@field id integer
+---@field name string
+---@field amount integer Net change over the session; may be negative.
+
+---@class AchievementEvent
+---@field id integer
+---@field name string
+---@field at integer When it was earned.
+
+---@class SessionSummary
 ---@field active boolean
+---@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
 ---@field goldLooted integer Copper picked up as money.
 ---@field itemValue integer Summed vendor value of looted items, in copper.
----@field gold integer goldLooted + itemValue, in copper.
+---@field goldDiff integer Net wallet change over the session, in copper; may be negative.
 ---@field newAppearances integer Transmog appearances collected for the first time ever.
 ---@field newVersions integer New sources of an appearance already known.
+---@field currencyTotal integer Summed absolute-signed currency change across every currency.
+---@field currencies CurrencyGain[] Per-currency totals, sorted by name.
+---@field reputationTotal integer Summed reputation gained across every faction.
 ---@field reputation ReputationGain[] Per-faction totals, sorted by faction name.
+---@field achievements AchievementEvent[] Achievements earned, in the order they were.
 
----@class InstanceResultsDeps
----@field trackedTypes table<string, boolean>? IsInInstance types that count. Default party/raid/scenario.
+---@class SessionTallyDeps
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
 ---@field factionFormats string[]? Reputation-increase message templates.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---@field sourceVisual fun(sourceID: integer): integer? The appearance visual a source belongs to.
 ---@field appearanceSources fun(visualID: integer): integer[]? Every source that shares a visual.
 ---@field isSourceCollected fun(sourceID: integer): boolean
-
-local DEFAULT_TRACKED = { party = true, raid = true, scenario = true }
 
 -- Lua-pattern magic characters, escaped so literal chunks of a printf template match verbatim.
 local MAGIC = "([%^%$%(%)%.%[%]%*%+%-%?%%])"
@@ -91,10 +109,16 @@ end
 
 ---Formats a copper amount the way the client does, dropping the higher denominations
 ---that would only ever read as zero. Always shows copper so an empty haul reads "0c".
+---A negative amount keeps its sign, so a session that lost gold reads "-1g 0s 0c".
 ---@param copper integer?
 ---@return string
 function ns.formatMoney(copper)
     copper = math.floor((copper or 0) + 0.5)
+    local sign = ""
+    if copper < 0 then
+        sign = "-"
+        copper = -copper
+    end
     local gold = math.floor(copper / 10000)
     local silver = math.floor((copper % 10000) / 100)
     local units = copper % 100
@@ -107,14 +131,13 @@ function ns.formatMoney(copper)
         parts[#parts + 1] = silver .. "s"
     end
     parts[#parts + 1] = units .. "c"
-    return table.concat(parts, " ")
+    return sign .. table.concat(parts, " ")
 end
 
----@param deps InstanceResultsDeps
----@return InstanceResults
-function ns.newInstanceResults(deps)
+---@param deps SessionTallyDeps
+---@return SessionTally
+function ns.newSessionTally(deps)
     deps = deps or {}
-    local tracked = deps.trackedTypes or DEFAULT_TRACKED
     local sourceVisual = deps.sourceVisual or function() end
     local appearanceSources = deps.appearanceSources or function() end
     local isSourceCollected = deps.isSourceCollected or function() return false end
@@ -123,28 +146,28 @@ function ns.newInstanceResults(deps)
     local lootPatterns = compileAll(deps.lootFormats)
     local factionPatterns = compileAll(deps.factionFormats)
 
-    local session = {
-        active = false,
-        moneyBaseline = 0,
-        goldLooted = 0,
-        itemValue = 0,
-        newAppearances = 0,
-        newVersions = 0,
-        reputation = {},
-    }
+    local session = {}
 
-    ---Wipes the tally clean for a fresh visit, anchoring the money baseline so only
-    ---coin gained from here on is counted.
+    ---Wipes the tally clean for a fresh session, anchoring the money baselines so only
+    ---coin gained from here on is counted, and the net diff runs from this wallet total.
     ---@param money integer?
     local function begin(money)
+        money = money or 0
         session.active = true
-        session.moneyBaseline = money or 0
+        session.moneyBaseline = money
+        session.openingMoney = money
+        session.latestMoney = money
         session.goldLooted = 0
         session.itemValue = 0
         session.newAppearances = 0
         session.newVersions = 0
         session.reputation = {}
+        session.currencies = {}
+        session.achievements = {}
     end
+
+    begin(0)
+    session.active = false
 
     ---Runs `message` through a list of compiled templates, returning the first match's
     ---captures split into the single number and the last string it carried.
@@ -171,21 +194,8 @@ function ns.newInstanceResults(deps)
     end
 
     return {
-        ---@param instanceType string?
-        ---@param money integer
-        ---@return boolean active whether tracking is now running
-        enter = function(instanceType, money)
-            if tracked[instanceType or ""] then
-                -- Re-entering the same instance (a load screen, a graveyard run) must not
-                -- wipe progress, so only the world -> instance transition resets.
-                if not session.active then
-                    begin(money)
-                end
-            else
-                session.active = false
-            end
-            return session.active
-        end,
+        ---@param money integer?
+        begin = begin,
 
         ---@param current integer
         money = function(current)
@@ -195,7 +205,9 @@ function ns.newInstanceResults(deps)
             current = current or 0
             local delta = current - session.moneyBaseline
             session.moneyBaseline = current
-            -- Only gains are loot; a repair or vendor sale merely re-anchors the baseline.
+            session.latestMoney = current
+            -- Only gains are loot; a repair or vendor sale merely re-anchors the loot
+            -- baseline, but it still moves the net diff below the opening wallet.
             if delta > 0 then
                 session.goldLooted = session.goldLooted + delta
             end
@@ -223,6 +235,42 @@ function ns.newInstanceResults(deps)
             if faction and amount then
                 session.reputation[faction] = (session.reputation[faction] or 0) + amount
             end
+        end,
+
+        ---Folds a currency change into the per-currency total. The change may be
+        ---negative (spending), and the running total is kept even when it nets to zero
+        ---so the session still remembers the currency was touched.
+        ---@param currencyType integer
+        ---@param change integer
+        ---@param name string?
+        currency = function(currencyType, change, name)
+            if not session.active or not currencyType or not change or change == 0 then
+                return
+            end
+            local entry = session.currencies[currencyType]
+            if not entry then
+                entry = { id = currencyType, name = name or tostring(currencyType), amount = 0 }
+                session.currencies[currencyType] = entry
+            end
+            -- A later update may carry the name the first one lacked.
+            if name and name ~= "" then
+                entry.name = name
+            end
+            entry.amount = entry.amount + change
+        end,
+
+        ---@param id integer
+        ---@param name string?
+        ---@param at integer
+        achievement = function(id, name, at)
+            if not session.active or not id then
+                return
+            end
+            session.achievements[#session.achievements + 1] = {
+                id = id,
+                name = name or tostring(id),
+                at = at,
+            }
         end,
 
         ---A source is a single item that grants an appearance. If it is the only
@@ -254,8 +302,8 @@ function ns.newInstanceResults(deps)
             return "version"
         end,
 
-        ---Ends the visit without waiting for a zone change. The tally is left intact
-        ---so a caller can still read `summary()` off it; the next enter() wipes it.
+        ---Ends the session without waiting for a zone change. The tally is left intact
+        ---so a caller can still read summary() and hasEvents() off it; begin() wipes it.
         leave = function()
             session.active = false
         end,
@@ -264,24 +312,64 @@ function ns.newInstanceResults(deps)
             return session.active
         end,
 
-        ---@return ResultsSummary
+        ---Whether the session accrued anything worth persisting. An empty stroll through
+        ---a zone leaves every counter at rest, and such a session is dropped on close.
+        ---@return boolean
+        hasEvents = function()
+            local lootValue = session.goldLooted + session.itemValue
+            local goldDiff = session.latestMoney - session.openingMoney
+            return lootValue ~= 0
+                or goldDiff ~= 0
+                or session.newAppearances > 0
+                or session.newVersions > 0
+                or next(session.currencies) ~= nil
+                or next(session.reputation) ~= nil
+                or #session.achievements > 0
+        end,
+
+        ---@return SessionSummary
         summary = function()
             local reputation = {}
+            local reputationTotal = 0
             for faction, amount in pairs(session.reputation) do
                 reputation[#reputation + 1] = { faction = faction, amount = amount }
+                reputationTotal = reputationTotal + amount
             end
             table.sort(reputation, function(left, right)
                 return left.faction < right.faction
             end)
 
+            local currencies = {}
+            local currencyTotal = 0
+            for _, entry in pairs(session.currencies) do
+                currencies[#currencies + 1] = { id = entry.id, name = entry.name, amount = entry.amount }
+                currencyTotal = currencyTotal + entry.amount
+            end
+            table.sort(currencies, function(left, right)
+                if left.name ~= right.name then
+                    return left.name < right.name
+                end
+                return left.id < right.id
+            end)
+
+            local achievements = {}
+            for index, earned in ipairs(session.achievements) do
+                achievements[index] = { id = earned.id, name = earned.name, at = earned.at }
+            end
+
             return {
                 active = session.active,
+                lootValue = session.goldLooted + session.itemValue,
                 goldLooted = session.goldLooted,
                 itemValue = session.itemValue,
-                gold = session.goldLooted + session.itemValue,
+                goldDiff = session.latestMoney - session.openingMoney,
                 newAppearances = session.newAppearances,
                 newVersions = session.newVersions,
+                currencyTotal = currencyTotal,
+                currencies = currencies,
+                reputationTotal = reputationTotal,
                 reputation = reputation,
+                achievements = achievements,
             }
         end,
     }

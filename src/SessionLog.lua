@@ -1,37 +1,43 @@
 local _, ns = ...
 
----One finished instance visit, as it is written to SavedVariables and later exported.
----Flat and JSON-shaped on purpose: the collector script reads this table verbatim.
+---One finished session, as it is written to SavedVariables and later exported. Flat
+---and JSON-shaped on purpose: the collector script reads this table verbatim. A session
+---is one character's continuous stay in one location — an instance or an open-world zone.
 ---@class SessionRecord
----@field id string Stable identity, so re-recording the same visit overwrites it.
+---@field id string Stable identity, so re-recording the same session overwrites it.
 ---@field character string "Name-Realm".
 ---@field classFile string? Non-localised class token of the character that ran it.
----@field day string "YYYY-MM-DD", the local day the visit ended.
----@field instance string
+---@field day string "YYYY-MM-DD", the local day the session ended.
+---@field instance string Location name — the zone or instance the session took place in.
 ---@field difficulty string "" when the client never named one.
----@field instanceType string "party", "raid", "scenario", ...
+---@field instanceType string "party", "raid", "scenario", "none" (open world), ...
+---@field difficultyId integer?
 ---@field startedAt integer
 ---@field endedAt integer
----@field seconds integer How long the visit lasted.
----@field goldLooted integer Copper picked up as money.
----@field itemValue integer Vendor value of looted items, in copper.
----@field gold integer goldLooted + itemValue.
+---@field seconds integer How long the session lasted.
+---@field lootValue integer Coin looted plus the vendor value of items looted, in copper.
+---@field goldDiff integer Net wallet change over the session, in copper; may be negative.
 ---@field newAppearances integer
 ---@field newVersions integer
+---@field currencyTotal integer
+---@field reputationTotal integer
+---@field currencies CurrencyGain[]
 ---@field reputation ReputationGain[]
+---@field achievements AchievementEvent[]
 
----What the tracker hands over when a visit ends.
+---What the tracker hands over when a session ends.
 ---@class SessionVisit
 ---@field character string
 ---@field classFile string?
 ---@field instance string
 ---@field difficulty string?
 ---@field instanceType string?
+---@field difficultyId integer?
 ---@field startedAt integer
 ---@field endedAt integer
----@field summary ResultsSummary
+---@field summary SessionSummary
 
----A rolling log of finished instance visits, capped at a window of recent days.
+---A rolling log of finished sessions, capped at a window of recent days.
 ---@class SessionLog
 ---@field record fun(visit: SessionVisit): SessionRecord
 ---@field all fun(): SessionRecord[] Newest first, pruned to the retention window.
@@ -88,12 +94,32 @@ function ns.newSessionLog(deps)
         return copy
     end
 
+    ---@param gains CurrencyGain[]?
+    ---@return CurrencyGain[]
+    local function copyCurrencies(gains)
+        local copy = {}
+        for index, gain in ipairs(gains or {}) do
+            copy[index] = { id = gain.id, name = gain.name, amount = gain.amount }
+        end
+        return copy
+    end
+
+    ---@param earned AchievementEvent[]?
+    ---@return AchievementEvent[]
+    local function copyAchievements(earned)
+        local copy = {}
+        for index, event in ipairs(earned or {}) do
+            copy[index] = { id = event.id, name = event.name, at = event.at }
+        end
+        return copy
+    end
+
     return {
         prune = prune,
 
-        ---Files a finished visit. Recording the same visit twice — a flush on logout
+        ---Files a finished session. Recording the same session twice — a flush on logout
         ---after the zone change already filed it — replaces the record rather than
-        ---duplicating it, because the identity is the visit, not the call.
+        ---duplicating it, because the identity is the session, not the call.
         ---@param visit SessionVisit
         ---@return SessionRecord
         record = function(visit)
@@ -109,15 +135,19 @@ function ns.newSessionLog(deps)
                 instance = visit.instance,
                 difficulty = visit.difficulty or "",
                 instanceType = visit.instanceType or "",
+                difficultyId = visit.difficultyId,
                 startedAt = startedAt,
                 endedAt = endedAt,
                 seconds = math.max(endedAt - startedAt, 0),
-                goldLooted = summary.goldLooted or 0,
-                itemValue = summary.itemValue or 0,
-                gold = summary.gold or 0,
+                lootValue = summary.lootValue or 0,
+                goldDiff = summary.goldDiff or 0,
                 newAppearances = summary.newAppearances or 0,
                 newVersions = summary.newVersions or 0,
+                currencyTotal = summary.currencyTotal or 0,
+                reputationTotal = summary.reputationTotal or 0,
+                currencies = copyCurrencies(summary.currencies),
                 reputation = copyReputation(summary.reputation),
+                achievements = copyAchievements(summary.achievements),
             }
 
             local replaced = false

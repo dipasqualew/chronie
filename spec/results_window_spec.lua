@@ -40,16 +40,21 @@ describe("ns.newResultsWindow", function()
     end
 
     ---@param overrides table?
-    ---@return ResultsSummary
+    ---@return SessionSummary
     local function summary(overrides)
         local base = {
             active = true,
+            lootValue = 0,
             goldLooted = 0,
             itemValue = 0,
-            gold = 0,
+            goldDiff = 0,
             newAppearances = 0,
             newVersions = 0,
+            currencyTotal = 0,
+            currencies = {},
+            reputationTotal = 0,
             reputation = {},
+            achievements = {},
         }
         for key, value in pairs(overrides or {}) do
             base[key] = value
@@ -187,12 +192,20 @@ describe("ns.newResultsWindow", function()
     end)
 
     describe("rendering the summary", function()
-        it("renders the gold row through formatMoney", function()
+        it("renders the loot row through formatMoney", function()
             local window, frames = newWindow()
 
-            window.update(summary({ gold = 1234 }))
+            window.update(summary({ lootValue = 1234 }))
 
-            assert.equal("$1234", valueFor(rowsOf(frames[1]), "Gold"))
+            assert.equal("$1234", valueFor(rowsOf(frames[1]), "Loot"))
+        end)
+
+        it("renders the net gold difference through formatMoney", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ goldDiff = -500 }))
+
+            assert.equal("$-500", valueFor(rowsOf(frames[1]), "Gold Δ"))
         end)
 
         it("renders the new-appearance count", function()
@@ -249,6 +262,47 @@ describe("ns.newResultsWindow", function()
 
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Argent Dawn"))
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Timbermaw Hold"))
+        end)
+
+        it("shows 'none' against currency when nothing changed", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ currencies = {} }))
+
+            assert.equal("none", valueFor(rowsOf(frames[1]), "Currency"))
+        end)
+
+        it("renders one indented signed line per currency", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                currencies = {
+                    { id = 1, name = "Honor", amount = 7 },
+                    { id = 2, name = "Valor", amount = -3 },
+                },
+            }))
+
+            local lines = rowsOf(frames[1])
+            assert.equal("+7", valueFor(lines, "  Honor"))
+            assert.equal("-3", valueFor(lines, "  Valor"))
+        end)
+
+        it("shows 'none' against achievements when none were earned", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ achievements = {} }))
+
+            assert.equal("none", valueFor(rowsOf(frames[1]), "Achievements"))
+        end)
+
+        it("names each achievement earned", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                achievements = { { id = 1, name = "The Loremaster", at = 5000 } },
+            }))
+
+            assert.is_not_nil(valueFor(rowsOf(frames[1]), "  The Loremaster"))
         end)
     end)
 

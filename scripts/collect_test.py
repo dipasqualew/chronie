@@ -32,18 +32,34 @@ WdpWowDB = {
 \t\t\t["instance"] = "Ulduar",
 \t\t\t["difficulty"] = "25 Player",
 \t\t\t["instanceType"] = "raid",
+\t\t\t["difficultyId"] = 4,
 \t\t\t["startedAt"] = 100,
 \t\t\t["endedAt"] = %(ended)d,
 \t\t\t["seconds"] = 1800,
-\t\t\t["goldLooted"] = 1200,
-\t\t\t["itemValue"] = 800,
-\t\t\t["gold"] = 2000,
+\t\t\t["lootValue"] = 2000,
+\t\t\t["goldDiff"] = 1500,
 \t\t\t["newAppearances"] = 2,
 \t\t\t["newVersions"] = 1,
+\t\t\t["currencyTotal"] = 15,
+\t\t\t["reputationTotal"] = 40,
+\t\t\t["currencies"] = {
+\t\t\t\t{
+\t\t\t\t\t["id"] = 1166,
+\t\t\t\t\t["name"] = "Timewarped Badge",
+\t\t\t\t\t["amount"] = 15,
+\t\t\t\t}, -- [1]
+\t\t\t},
 \t\t\t["reputation"] = {
 \t\t\t\t{
 \t\t\t\t\t["faction"] = "Argent Dawn",
 \t\t\t\t\t["amount"] = 40,
+\t\t\t\t}, -- [1]
+\t\t\t},
+\t\t\t["achievements"] = {
+\t\t\t\t{
+\t\t\t\t\t["id"] = 1234,
+\t\t\t\t\t["name"] = "The Loremaster",
+\t\t\t\t\t["at"] = 150,
 \t\t\t\t}, -- [1]
 \t\t\t},
 \t\t}, -- [1]
@@ -138,7 +154,10 @@ class NormaliseTest(unittest.TestCase):
     def record(self, **overrides):
         base = {
             "id": "a", "character": "Thrall-Ragnaros", "endedAt": 200, "startedAt": 100,
-            "instance": "Ulduar", "gold": 2000, "reputation": [{"faction": "Argent Dawn", "amount": 40}],
+            "instance": "Ulduar", "lootValue": 2000, "goldDiff": 1500,
+            "reputation": [{"faction": "Argent Dawn", "amount": 40}],
+            "currencies": [{"id": 1166, "name": "Timewarped Badge", "amount": 15}],
+            "achievements": [{"id": 1234, "name": "The Loremaster", "at": 150}],
         }
         base.update(overrides)
         return base
@@ -150,7 +169,19 @@ class NormaliseTest(unittest.TestCase):
         self.assertEqual(cleaned["difficulty"], "")
         self.assertEqual(cleaned["newAppearances"], 0)
         self.assertIsNone(cleaned["classFile"])
+        self.assertEqual(cleaned["lootValue"], 2000)
+        self.assertEqual(cleaned["goldDiff"], 1500)
         self.assertEqual(cleaned["reputation"], [{"faction": "Argent Dawn", "amount": 40}])
+        self.assertEqual(cleaned["currencies"], [{"id": 1166, "name": "Timewarped Badge", "amount": 15}])
+        self.assertEqual(cleaned["achievements"], [{"id": 1234, "name": "The Loremaster", "at": 150}])
+
+    def test_defaults_the_new_totals_to_zero_when_absent(self):
+        cleaned = collect.normalise({"id": "a", "character": "Thrall-Ragnaros", "endedAt": 200})
+
+        self.assertEqual(cleaned["lootValue"], 0)
+        self.assertEqual(cleaned["goldDiff"], 0)
+        self.assertEqual(cleaned["currencies"], [])
+        self.assertEqual(cleaned["achievements"], [])
 
     def test_drops_a_record_with_no_identity(self):
         self.assertIsNone(collect.normalise(self.record(id=None)))
@@ -162,6 +193,16 @@ class NormaliseTest(unittest.TestCase):
         cleaned = collect.normalise(self.record(reputation=[{"amount": 5}, "junk"]))
 
         self.assertEqual(cleaned["reputation"], [])
+
+    def test_drops_a_currency_entry_with_no_name(self):
+        cleaned = collect.normalise(self.record(currencies=[{"id": 1, "amount": 5}, "junk"]))
+
+        self.assertEqual(cleaned["currencies"], [])
+
+    def test_drops_an_achievement_entry_with_no_name(self):
+        cleaned = collect.normalise(self.record(achievements=[{"id": 1, "at": 5}, "junk"]))
+
+        self.assertEqual(cleaned["achievements"], [])
 
     def test_dates_a_record_the_addon_never_dated(self):
         cleaned = collect.normalise(self.record(day=None))

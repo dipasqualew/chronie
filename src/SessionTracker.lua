@@ -7,16 +7,18 @@ local _, ns = ...
 ---@field difficultyId integer?
 ---@field difficulty string? Localised difficulty name.
 
----Owns the lifecycle of an instance visit: when it starts, when it ends, and what
----identity it is filed under. The running tally itself lives in InstanceResults;
----this only decides the boundaries and hands finished visits to the log.
+---Owns the lifecycle of a session: when it starts, when it ends, and what identity it
+---is filed under. A session is one character's continuous stay in one location — any
+---zone, instance or open world. The running tally itself lives in SessionTally; this
+---only decides the boundaries, drops sessions that saw nothing, and hands the rest to
+---the log.
 ---@class SessionTracker
----@field sync fun(): boolean Reconcile with the current zone. True while a visit is open.
----@field flush fun(): SessionRecord? File the open visit early, e.g. on logout.
----@field current fun(): table? The open visit's descriptor, or nil.
+---@field sync fun(): boolean Reconcile with the current zone. True while a session is open.
+---@field flush fun(): SessionRecord? File the open session early, e.g. on logout.
+---@field current fun(): table? The open session's descriptor, or nil.
 
 ---@class SessionTrackerDeps
----@field results InstanceResults
+---@field tally SessionTally
 ---@field sessionLog SessionLog
 ---@field now fun(): integer
 ---@field instanceInfo fun(): InstanceInfo? The zone the player is in right now.
@@ -24,47 +26,57 @@ local _, ns = ...
 ---@field character fun(): string "Name-Realm" of the character running it.
 ---@field classFile fun(): string?
 
+---@param character string
 ---@param info InstanceInfo
 ---@return string
-local function identityOf(info)
-    -- Difficulty is part of the identity: walking out of Heroic and back in on
-    -- Mythic is two visits, even though the instance name never changed.
-    return tostring(info.name or "") .. "\0" .. tostring(info.difficultyId or "")
+local function identityOf(character, info)
+    -- Difficulty is part of the identity: walking out of Heroic and back in on Mythic
+    -- is two sessions, even though the instance name never changed. Character is too, so
+    -- a relog into the same spot never folds two players' sessions into one.
+    return table.concat({
+        tostring(character or ""),
+        tostring(info.name or ""),
+        tostring(info.difficultyId or ""),
+    }, "\0")
 end
 
 ---@param deps SessionTrackerDeps
 ---@return SessionTracker
 function ns.newSessionTracker(deps)
-    local results = deps.results
+    local tally = deps.tally
     local sessionLog = deps.sessionLog
     local now = deps.now
 
     ---@type table?
     local current
 
+    ---Closes the open session. It reaches the log only if something actually happened
+    ---in it — an empty stroll through a zone leaves no record. Either way the tally is
+    ---wiped so the next session cannot inherit this one's totals.
     ---@return SessionRecord?
     local function finish()
         if not current then
             return nil
         end
 
-        local visit = {
-            character = current.character,
-            classFile = current.classFile,
-            instance = current.instance,
-            difficulty = current.difficulty,
-            instanceType = current.instanceType,
-            startedAt = current.startedAt,
-            endedAt = now(),
-            summary = results.summary(),
-        }
+        local kept
+        if tally.hasEvents() then
+            kept = sessionLog.record({
+                character = current.character,
+                classFile = current.classFile,
+                instance = current.instance,
+                difficulty = current.difficulty,
+                instanceType = current.instanceType,
+                difficultyId = current.difficultyId,
+                startedAt = current.startedAt,
+                endedAt = now(),
+                summary = tally.summary(),
+            })
+        end
 
         current = nil
-        -- Closes the tally before it is reused, so the next enter() cannot fold this
-        -- visit's gold into the following one.
-        results.leave()
-
-        return sessionLog.record(visit)
+        tally.leave()
+        return kept
     end
 
     return {
@@ -72,40 +84,40 @@ function ns.newSessionTracker(deps)
             return current
         end,
 
-        ---Called whenever the player finishes zoning. Ends the open visit if the
-        ---player is no longer in it, then opens one if the new zone is trackable.
+        ---Called whenever the player finishes zoning. Ends the open session if the
+        ---player has moved on, then opens one for wherever they are now. Every zone —
+        ---the open world included — gets a session; the empty ones simply never reach
+        ---the log when they close.
         ---@return boolean active
         sync = function()
             local info = deps.instanceInfo() or {}
-            local identity = identityOf(info)
+            local character = deps.character()
+            local identity = identityOf(character, info)
 
             if current and identity ~= current.identity then
                 finish()
             end
 
-            local active = results.enter(info.kind, deps.getMoney())
-
-            if not active then
-                -- Whatever the zone is called, it is not one we track: any visit still
-                -- open ended on the way here. No-op when none was.
-                finish()
-            elseif not current then
+            if not current then
+                tally.begin(deps.getMoney())
                 current = {
                     identity = identity,
-                    character = deps.character(),
+                    character = character,
                     classFile = deps.classFile(),
                     instance = info.name or "Unknown",
                     difficulty = info.difficulty or "",
                     instanceType = info.kind or "",
+                    difficultyId = info.difficultyId,
                     startedAt = now(),
                 }
             end
 
-            return active
+            return true
         end,
 
-        ---SavedVariables are only written when the client shuts the session down, so
-        ---a visit still open at logout has to be filed here or it never reaches disk.
+        ---SavedVariables are only written when the client shuts the session down, so a
+        ---session still open at logout has to be filed here or it never reaches disk.
+        ---An empty one is dropped the same as on any other close.
         flush = finish,
     }
 end

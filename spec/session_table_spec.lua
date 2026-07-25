@@ -34,15 +34,19 @@ describe("ns.newSessionTable", function()
             instance = "Ulduar",
             difficulty = "25 Player",
             instanceType = "raid",
+            difficultyId = 4,
             startedAt = 1,
             endedAt = 1801,
             seconds = 1800,
-            goldLooted = 10000,
-            itemValue = 5000,
-            gold = 15000,
+            lootValue = 15000,
+            goldDiff = 12000,
             newAppearances = 2,
             newVersions = 1,
+            currencyTotal = 15,
+            reputationTotal = 40,
+            currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
             reputation = { { faction = "Argent Dawn", amount = 40 } },
+            achievements = {},
         }
         for key, value in pairs(overrides or {}) do
             base[key] = value
@@ -69,7 +73,7 @@ describe("ns.newSessionTable", function()
         it("names the retention window in the title", function()
             local spec = newTable().spec({})
 
-            assert.equal("Instance sessions — last 7 days", spec.title)
+            assert.equal("Sessions — last 7 days", spec.title)
         end)
 
         it("leads with a totals section", function()
@@ -83,7 +87,7 @@ describe("ns.newSessionTable", function()
 
             assert.equal(1, #spec.sections)
             assert.same({}, spec.sections[1].rows)
-            assert.equal("No instances recorded yet.", spec.sections[1].empty)
+            assert.equal("No sessions recorded yet.", spec.sections[1].empty)
         end)
 
         it("copes with being handed nothing at all", function()
@@ -105,22 +109,22 @@ describe("ns.newSessionTable", function()
             assert.is_truthy(spec.sections[3].heading:find("2026-07-24", 1, true))
         end)
 
-        it("sums the day's runs and gold into its heading", function()
+        it("sums the day's sessions and loot into its heading", function()
             local spec = newTable().spec({
-                record({ gold = 15000 }),
-                record({ id = "b", gold = 5000 }),
+                record({ lootValue = 15000 }),
+                record({ id = "b", lootValue = 5000 }),
             })
 
-            assert.equal("2026-07-25 — 2 runs, 2g 0s 0c", spec.sections[2].heading)
+            assert.equal("2026-07-25 — 2 sessions, 2g 0s 0c", spec.sections[2].heading)
         end)
 
-        it("says '1 run' rather than '1 runs'", function()
-            local spec = newTable().spec({ record({ gold = 0 }) })
+        it("says '1 session' rather than '1 sessions'", function()
+            local spec = newTable().spec({ record({ lootValue = 0, goldDiff = 0 }) })
 
-            assert.equal("2026-07-25 — 1 run, 0c", spec.sections[2].heading)
+            assert.equal("2026-07-25 — 1 session, 0c", spec.sections[2].heading)
         end)
 
-        it("renders a run as one line of cells", function()
+        it("renders a session as one line of cells", function()
             local spec = newTable().spec({ record() })
 
             assert.same({
@@ -129,9 +133,17 @@ describe("ns.newSessionTable", function()
                 "25 Player",
                 "30:00",
                 "1g 50s 0c",
+                "1g 20s 0c",
                 "2 / 1",
+                "Timewarped Badge +15",
                 "Argent Dawn +40",
             }, spec.sections[2].rows[1].cells)
+        end)
+
+        it("shows a negative gold difference with its sign", function()
+            local spec = newTable().spec({ record({ goldDiff = -5000 }) })
+
+            assert.equal("-50s 0c", spec.sections[2].rows[1].cells[6])
         end)
 
         it("dashes the difficulty the client never named", function()
@@ -139,35 +151,43 @@ describe("ns.newSessionTable", function()
 
             assert.equal("—", spec.sections[2].rows[1].cells[3])
         end)
+
+        it("dashes an empty currency cell", function()
+            local spec = newTable().spec({ record({ currencies = {} }) })
+
+            assert.equal("—", spec.sections[2].rows[1].cells[8])
+        end)
     end)
 
     describe("the totals section", function()
         it("sums one line per character", function()
             local spec = newTable().spec({
-                record({ gold = 15000, seconds = 1800, newAppearances = 2 }),
-                record({ id = "b", gold = 5000, seconds = 600, newAppearances = 1 }),
-                record({ id = "c", character = "Jaina-Draenor", classFile = "MAGE", gold = 100 }),
+                record({ lootValue = 15000, goldDiff = 10000, seconds = 1800, newAppearances = 2 }),
+                record({ id = "b", lootValue = 5000, goldDiff = 4000, seconds = 600, newAppearances = 1 }),
+                record({ id = "c", character = "Jaina-Draenor", classFile = "MAGE", lootValue = 100 }),
             })
 
             local totals = sectionFor(spec, "Totals")
             assert.equal(2, #totals.rows)
             assert.same({
                 warrior("Thrall-Ragnaros"),
-                "2 runs",
+                "2 sessions",
                 "",
                 "40:00",
                 "2g 0s 0c",
+                "1g 40s 0c",
                 "3",
+                "1 currency",
                 "1 faction",
             }, totals.rows[1].cells)
         end)
 
-        -- The question a player opens this for is "which character is worth playing",
-        -- so the richest run of the week sits at the top.
-        it("puts the character who earned most first", function()
+        -- The question a player opens this for is "which character is worth playing", so
+        -- the character with the richest haul of the week sits at the top.
+        it("puts the character who looted most first", function()
             local spec = newTable().spec({
-                record({ character = "Thrall-Ragnaros", gold = 100 }),
-                record({ id = "b", character = "Jaina-Draenor", classFile = "MAGE", gold = 900 }),
+                record({ character = "Thrall-Ragnaros", lootValue = 100 }),
+                record({ id = "b", character = "Jaina-Draenor", classFile = "MAGE", lootValue = 900 }),
             })
 
             local totals = sectionFor(spec, "Totals")
@@ -175,19 +195,28 @@ describe("ns.newSessionTable", function()
             assert.is_truthy(totals.rows[2].cells[1]:find("Thrall-Ragnaros", 1, true))
         end)
 
-        it("counts each faction once however many runs fed it", function()
+        it("counts each faction once however many sessions fed it", function()
             local spec = newTable().spec({
                 record({ reputation = { { faction = "Argent Dawn", amount = 40 } } }),
                 record({ id = "b", reputation = { { faction = "Argent Dawn", amount = 60 } } }),
             })
 
-            assert.equal("1 faction", sectionFor(spec, "Totals").rows[1].cells[7])
+            assert.equal("1 faction", sectionFor(spec, "Totals").rows[1].cells[9])
+        end)
+
+        it("counts each currency once however many sessions fed it", function()
+            local spec = newTable().spec({
+                record({ currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } } }),
+                record({ id = "b", currencies = { { id = 1166, name = "Timewarped Badge", amount = 5 } } }),
+            })
+
+            assert.equal("1 currency", sectionFor(spec, "Totals").rows[1].cells[8])
         end)
 
         it("dashes a character who earned no reputation at all", function()
             local spec = newTable().spec({ record({ reputation = {} }) })
 
-            assert.equal("—", sectionFor(spec, "Totals").rows[1].cells[7])
+            assert.equal("—", sectionFor(spec, "Totals").rows[1].cells[9])
         end)
     end)
 
@@ -233,6 +262,31 @@ describe("ns.newSessionTable", function()
             })
 
             assert.equal("A +1, B +2, +2 more", text)
+        end)
+    end)
+
+    describe("formatCurrencies", function()
+        it("dashes an empty list", function()
+            assert.equal("—", newTable().formatCurrencies({}))
+            assert.equal("—", newTable().formatCurrencies(nil))
+        end)
+
+        it("names one or two currencies in full", function()
+            assert.equal("Honor +7", newTable().formatCurrencies({ { id = 1, name = "Honor", amount = 7 } }))
+        end)
+
+        it("shows a currency spend with its sign", function()
+            assert.equal("Valor -3", newTable().formatCurrencies({ { id = 2, name = "Valor", amount = -3 } }))
+        end)
+
+        it("abbreviates once a third currency turns up", function()
+            local text = newTable().formatCurrencies({
+                { id = 1, name = "A", amount = 1 },
+                { id = 2, name = "B", amount = 2 },
+                { id = 3, name = "C", amount = 3 },
+            })
+
+            assert.equal("A +1, B +2, +1 more", text)
         end)
     end)
 end)

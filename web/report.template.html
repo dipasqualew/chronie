@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wdp-wow — instance sessions</title>
+<title>wdp-wow — sessions</title>
 <style>
   :root {
     color-scheme: light;
@@ -122,7 +122,33 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: baseline; }
   .muted { color: var(--text-muted); }
   .gold { color: var(--gold); font-weight: 550; }
+  .loss { color: #c65a5a; font-weight: 550; }
   .empty { padding: 40px 16px; text-align: center; color: var(--text-muted); }
+
+  .badge {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-secondary); background: var(--surface-2);
+    vertical-align: baseline;
+  }
+  .chip {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 6px;
+    background: var(--surface-2); color: var(--text-secondary); margin: 0 4px 4px 0;
+  }
+  .chip.achv { background: var(--series-1-soft); color: var(--text-primary); }
+
+  .timeline { padding: 4px 16px 8px; }
+  .tl-day { margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .06em; }
+  .tl-row {
+    display: grid; grid-template-columns: 56px 1fr; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 1px; }
+  .tl-body .tl-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .tl-where { font-weight: 550; }
+  .tl-stats { color: var(--text-secondary); font-size: 12px; margin-top: 3px; }
+  .tl-extras { margin-top: 5px; }
 
   #tooltip {
     position: fixed; pointer-events: none; opacity: 0;
@@ -140,24 +166,32 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Instance sessions</h1>
+    <h1>Sessions</h1>
     <div class="sub" id="meta"></div>
   </header>
 
   <div class="tiles" id="tiles"></div>
 
   <section class="panel chart">
-    <h2>Gold per day</h2>
-    <div class="sub">Coin plus the vendor value of everything looted, by the day the run ended.</div>
-    <svg id="chart" viewBox="0 0 900 220" role="img" aria-label="Gold earned per day"></svg>
+    <h2>Loot per day</h2>
+    <div class="sub">Coin plus the vendor value of everything looted, by the day the session ended.</div>
+    <svg id="chart" viewBox="0 0 900 220" role="img" aria-label="Loot value per day"></svg>
+  </section>
+
+  <section class="panel timeline-panel">
+    <div class="table-head">
+      <h2>Timeline</h2>
+      <div class="sub">Every session as it happened, newest first, across characters.</div>
+    </div>
+    <div id="timeline" class="timeline"></div>
   </section>
 
   <section class="panel">
     <div class="table-head">
-      <h2>Every run</h2>
+      <h2>Every session</h2>
       <div class="sub">Click a column to sort.</div>
       <div class="controls">
-        <input id="search" type="search" placeholder="Filter instance or character…" aria-label="Filter runs">
+        <input id="search" type="search" placeholder="Filter location or character…" aria-label="Filter sessions">
         <select id="character" aria-label="Character"></select>
         <select id="day" aria-label="Day"></select>
         <span class="count" id="count"></span>
@@ -195,6 +229,17 @@ function gold(copper) {
   return `${c}c`;
 }
 
+// A net difference keeps its sign, so a session that ended down on gold reads as a loss.
+function signedGold(copper) {
+  const value = Math.round(copper || 0);
+  if (value < 0) return `-${gold(-value)}`;
+  return gold(value);
+}
+
+// "none" for open world, else "instance"; used as a small badge on each session.
+const isInstance = (session) => !!session.instanceType && session.instanceType !== "none";
+const locationType = (session) => (isInstance(session) ? "instance" : "world");
+
 function duration(seconds) {
   const total = Math.max(Math.round(seconds || 0), 0);
   const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60);
@@ -205,17 +250,27 @@ function duration(seconds) {
 const clock = (epoch) =>
   new Date(epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+const signed = (amount) => `${amount >= 0 ? "+" : ""}${amount.toLocaleString()}`;
 const repText = (gains) =>
   (gains || []).map((gain) => `${gain.faction} +${gain.amount.toLocaleString()}`).join(", ");
+const currencyText = (gains) =>
+  (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}`).join(", ");
+const achievementText = (earned) =>
+  (earned || []).map((event) => event.name).join(", ");
 
-// Two factions is all the column has room for; the rest live in the title attribute.
-function repCell(gains) {
-  const list = gains || [];
+// A compact cell that names the first couple of entries and counts the rest, with the
+// full list in the title attribute so nothing is lost to the abbreviation.
+function listCell(entries, asText) {
+  const list = entries || [];
   if (list.length === 0) return '<span class="muted">—</span>';
-  const shown = repText(list.slice(0, 2));
+  const shown = asText(list.slice(0, 2));
   const rest = list.length > 2 ? ` <span class="muted">+${list.length - 2} more</span>` : "";
-  return `<span title="${escapeHtml(repText(list))}">${escapeHtml(shown)}</span>${rest}`;
+  return `<span title="${escapeHtml(asText(list))}">${escapeHtml(shown)}</span>${rest}`;
 }
+
+const repCell = (gains) => listCell(gains, repText);
+const currencyCell = (gains) => listCell(gains, currencyText);
+const achievementCell = (earned) => listCell(earned, achievementText);
 
 function escapeHtml(text) {
   return String(text ?? "").replace(/[&<>"]/g, (char) =>
@@ -225,36 +280,49 @@ function escapeHtml(text) {
 /* ---------- header + tiles ---------- */
 
 const totals = SESSIONS.reduce((acc, session) => {
-  acc.gold += session.gold || 0;
+  acc.lootValue += session.lootValue || 0;
+  acc.goldDiff += session.goldDiff || 0;
   acc.seconds += session.seconds || 0;
   acc.appearances += session.newAppearances || 0;
   acc.versions += session.newVersions || 0;
+  acc.achievements += (session.achievements || []).length;
   (session.reputation || []).forEach((gain) => {
     acc.reputation[gain.faction] = (acc.reputation[gain.faction] || 0) + gain.amount;
   });
+  (session.currencies || []).forEach((gain) => {
+    acc.currencies[gain.name] = (acc.currencies[gain.name] || 0) + gain.amount;
+  });
   return acc;
-}, { gold: 0, seconds: 0, appearances: 0, versions: 0, reputation: {} });
+}, { lootValue: 0, goldDiff: 0, seconds: 0, appearances: 0, versions: 0, achievements: 0, reputation: {}, currencies: {} });
 
 const topFaction = Object.entries(totals.reputation).sort((a, b) => b[1] - a[1])[0];
+const topCurrency = Object.entries(totals.currencies).sort((a, b) => b[1] - a[1])[0];
 
 $("meta").textContent = SESSIONS.length
-  ? `${SESSIONS.length} runs over the last ${PAYLOAD.retainDays} days` +
+  ? `${SESSIONS.length} sessions over the last ${PAYLOAD.retainDays} days` +
     (PAYLOAD.generatedAt ? ` · collected ${new Date(PAYLOAD.generatedAt).toLocaleString()}` : "")
-  : "Nothing collected yet — run an instance, then log out or /reload so the game writes its saved variables.";
+  : "Nothing collected yet — play for a bit, then log out or /reload so the game writes its saved variables.";
 
 $("tiles").innerHTML = [
-  { label: "Runs", value: SESSIONS.length, foot: `${new Set(SESSIONS.map((s) => s.character)).size} characters` },
-  { label: "Gold", value: gold(totals.gold), foot: "coin + vendor value" },
-  { label: "Time in instances", value: duration(totals.seconds), foot: "across every run" },
+  { label: "Sessions", value: SESSIONS.length, foot: `${new Set(SESSIONS.map((s) => s.character)).size} characters` },
+  { label: "Loot", value: gold(totals.lootValue), foot: "coin + vendor value" },
+  { label: "Net gold", value: signedGold(totals.goldDiff), foot: "wallet change", cls: totals.goldDiff < 0 ? "loss" : "gold" },
+  { label: "Time played", value: duration(totals.seconds), foot: "across every session" },
   { label: "New transmog", value: totals.appearances, foot: `${totals.versions} extra versions` },
+  {
+    label: "Currency",
+    value: topCurrency ? signed(topCurrency[1]) : "0",
+    foot: topCurrency ? topCurrency[0] : "none earned",
+  },
   {
     label: "Reputation",
     value: topFaction ? topFaction[1].toLocaleString() : "0",
     foot: topFaction ? topFaction[0] : "none earned",
   },
+  { label: "Achievements", value: totals.achievements, foot: "earned this window" },
 ].map((tile) => `<div class="panel tile">
     <div class="label">${escapeHtml(tile.label)}</div>
-    <div class="value">${escapeHtml(tile.value)}</div>
+    <div class="value${tile.cls ? " " + tile.cls : ""}">${escapeHtml(tile.value)}</div>
     <div class="foot">${escapeHtml(tile.foot)}</div>
   </div>`).join("");
 
@@ -278,7 +346,7 @@ function drawChart() {
   const byDay = new Map();
   SESSIONS.forEach((session) => {
     const bucket = byDay.get(session.day) || { gold: 0, runs: 0 };
-    bucket.gold += session.gold || 0;
+    bucket.gold += session.lootValue || 0;
     bucket.runs += 1;
     byDay.set(session.day, bucket);
   });
@@ -326,13 +394,75 @@ function drawChart() {
 
   svg.querySelectorAll(".bar-group").forEach((group) => {
     const move = (event) => showTooltip(event,
-      `<b>${escapeHtml(group.dataset.day)}</b>${escapeHtml(gold(Number(group.dataset.gold)))} · ${group.dataset.runs} run(s)`);
+      `<b>${escapeHtml(group.dataset.day)}</b>${escapeHtml(gold(Number(group.dataset.gold)))} · ${group.dataset.runs} session(s)`);
     group.addEventListener("mousemove", move);
     group.addEventListener("mouseleave", hideTooltip);
   });
 }
 
 drawChart();
+
+/* ---------- the timeline ---------- */
+
+// Sessions arrive newest first from the collector; the timeline groups them by day and
+// lays each one out as a moment — who, where, and what it yielded — across characters.
+function drawTimeline() {
+  const host = $("timeline");
+  if (SESSIONS.length === 0) {
+    host.innerHTML = '<div class="empty">No sessions collected yet.</div>';
+    return;
+  }
+
+  const byDay = new Map();
+  const order = [];
+  SESSIONS.forEach((session) => {
+    if (!byDay.has(session.day)) {
+      byDay.set(session.day, []);
+      order.push(session.day);
+    }
+    byDay.get(session.day).push(session);
+  });
+
+  const chips = (session) => {
+    const parts = [];
+    if ((session.currencies || []).length) parts.push(`<span class="chip">${escapeHtml(currencyText(session.currencies))}</span>`);
+    (session.achievements || []).forEach((event) => {
+      parts.push(`<span class="chip achv">🏆 ${escapeHtml(event.name)}</span>`);
+    });
+    return parts.length ? `<div class="tl-extras">${parts.join("")}</div>` : "";
+  };
+
+  const stats = (session) => {
+    const bits = [`Loot ${gold(session.lootValue)}`];
+    if (session.goldDiff) bits.push(`Gold ${signedGold(session.goldDiff)}`);
+    if (session.newAppearances || session.newVersions) bits.push(`Transmog ${session.newAppearances} / ${session.newVersions}`);
+    if ((session.reputation || []).length) bits.push(`Rep ${repText(session.reputation)}`);
+    return bits.map(escapeHtml).join(" · ");
+  };
+
+  host.innerHTML = order.map((day) => {
+    const rows = byDay.get(day).map((session) => {
+      const dot = `<span class="dot" style="background:${CLASS_COLORS[session.classFile] || "var(--text-muted)"}"></span>`;
+      return `<div class="tl-row">
+        <div class="tl-time">${escapeHtml(clock(session.endedAt))}</div>
+        <div class="tl-body">
+          <div class="tl-head">
+            <span>${dot}${escapeHtml(session.character)}</span>
+            <span class="tl-where">${escapeHtml(session.instance)}</span>
+            <span class="badge">${escapeHtml(locationType(session))}</span>
+            ${session.difficulty ? `<span class="muted">${escapeHtml(session.difficulty)}</span>` : ""}
+            <span class="muted">${escapeHtml(duration(session.seconds))}</span>
+          </div>
+          <div class="tl-stats">${stats(session)}</div>
+          ${chips(session)}
+        </div>
+      </div>`;
+    }).join("");
+    return `<div class="tl-day">${escapeHtml(day)}</div>${rows}`;
+  }).join("");
+}
+
+drawTimeline();
 
 /* ---------- the table ---------- */
 
@@ -342,12 +472,16 @@ const COLUMNS = [
     key: "character", title: "Character", sort: (s) => s.character,
     cell: (s) => `<span class="dot" style="background:${CLASS_COLORS[s.classFile] || "var(--text-muted)"}"></span>${escapeHtml(s.character)}`,
   },
-  { key: "instance", title: "Instance", cell: (s) => escapeHtml(s.instance), sort: (s) => s.instance },
+  { key: "instance", title: "Location", cell: (s) => escapeHtml(s.instance), sort: (s) => s.instance },
+  { key: "type", title: "Type", cell: (s) => `<span class="badge">${escapeHtml(locationType(s))}</span>`, sort: (s) => locationType(s) },
   { key: "difficulty", title: "Difficulty", cell: (s) => escapeHtml(s.difficulty) || '<span class="muted">—</span>', sort: (s) => s.difficulty },
   { key: "seconds", title: "Time", num: true, cell: (s) => duration(s.seconds), sort: (s) => s.seconds },
-  { key: "gold", title: "Gold", num: true, cell: (s) => `<span class="gold">${escapeHtml(gold(s.gold))}</span>`, sort: (s) => s.gold },
+  { key: "lootValue", title: "Loot", num: true, cell: (s) => `<span class="gold">${escapeHtml(gold(s.lootValue))}</span>`, sort: (s) => s.lootValue },
+  { key: "goldDiff", title: "Gold Δ", num: true, cell: (s) => `<span class="${s.goldDiff < 0 ? "loss" : "gold"}">${escapeHtml(signedGold(s.goldDiff))}</span>`, sort: (s) => s.goldDiff },
   { key: "newAppearances", title: "Transmog", num: true, cell: (s) => `${s.newAppearances} <span class="muted">/ ${s.newVersions}</span>`, sort: (s) => s.newAppearances },
+  { key: "currencies", title: "Currency", cell: (s) => currencyCell(s.currencies), sort: (s) => (s.currencies || []).reduce((total, gain) => total + gain.amount, 0) },
   { key: "reputation", title: "Reputation", cell: (s) => repCell(s.reputation), sort: (s) => (s.reputation || []).reduce((total, gain) => total + gain.amount, 0) },
+  { key: "achievements", title: "Achievements", cell: (s) => achievementCell(s.achievements), sort: (s) => (s.achievements || []).length },
 ];
 
 let sortKey = "day";
@@ -399,10 +533,10 @@ function draw() {
   $("rows").innerHTML = rows.map((session) =>
     `<tr>${COLUMNS.map((column) => `<td${column.num ? ' class="num"' : ""}>${column.cell(session)}</td>`).join("")}</tr>`).join("");
 
-  $("count").textContent = `${rows.length} of ${SESSIONS.length} runs`;
+  $("count").textContent = `${rows.length} of ${SESSIONS.length} sessions`;
   const empty = $("empty");
   empty.hidden = rows.length > 0;
-  empty.textContent = SESSIONS.length ? "No runs match those filters." : "No runs collected yet.";
+  empty.textContent = SESSIONS.length ? "No sessions match those filters." : "No sessions collected yet.";
 }
 
 ["search", "character", "day"].forEach((id) => $(id).addEventListener("input", draw));

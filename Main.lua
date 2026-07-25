@@ -28,6 +28,8 @@ local addonName, ns = ...
 ---@field transmogSourceVisual fun(sourceID: integer): integer?
 ---@field transmogAppearanceSources fun(visualID: integer): integer[]?
 ---@field transmogSourceCollected fun(sourceID: integer): boolean
+---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
+---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
 ---@field lootSelfFormats string[] Self-loot chat templates, most specific first.
 ---@field factionIncreaseFormats string[] Reputation-increase chat templates.
 ---@field uiParent table
@@ -85,7 +87,7 @@ function ns.main(env)
         name = "WdpWowCharacterDetailWindow",
     })
 
-    local results = ns.newInstanceResults({
+    local tally = ns.newSessionTally({
         lootFormats = env.lootSelfFormats,
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
@@ -123,7 +125,7 @@ function ns.main(env)
     })
 
     local sessionTracker = ns.newSessionTracker({
-        results = results,
+        tally = tally,
         sessionLog = sessionLog,
         now = env.now,
         instanceInfo = env.instanceInfo,
@@ -162,7 +164,7 @@ function ns.main(env)
     ---churn hidden font strings.
     local function refreshResults()
         if resultsWindow.isShown() then
-            resultsWindow.update(results.summary())
+            resultsWindow.update(tally.summary())
         end
     end
 
@@ -201,7 +203,7 @@ function ns.main(env)
         if resultsWindow.isShown() then
             resultsWindow.hide()
         else
-            resultsWindow.update(results.summary())
+            resultsWindow.update(tally.summary())
             resultsWindow.show()
         end
     end)
@@ -234,37 +236,44 @@ function ns.main(env)
     dispatcher.on("UPDATE_INSTANCE_INFO", captureLockouts)
     dispatcher.on("BOSS_KILL", env.requestRaidInfo)
 
-    -- Zoning is also the signal that an instance visit has begun or ended: start a
-    -- fresh tally on the way in, file the finished visit and hide the panel on the
-    -- way out.
+    -- Zoning is the signal that one session has ended and another begun: the tracker
+    -- files the finished session (dropping it if nothing happened) and opens a fresh one
+    -- for wherever the player now is. Every zone has a session, so the panel is always on.
     dispatcher.on("PLAYER_ENTERING_WORLD", function()
         env.requestRaidInfo()
-        if sessionTracker.sync() then
-            resultsWindow.update(results.summary())
-            resultsWindow.show()
-        else
-            resultsWindow.hide()
-        end
+        sessionTracker.sync()
+        resultsWindow.update(tally.summary())
+        resultsWindow.show()
     end)
 
-    -- Logging out or reloading is the last chance to file a visit: SavedVariables are
-    -- only written to disk on the way out, so an unfiled visit would never be exported.
+    -- Logging out or reloading is the last chance to file a session: SavedVariables are
+    -- only written to disk on the way out, so an unfiled session would never be exported.
     dispatcher.on("PLAYER_LOGOUT", sessionTracker.flush)
 
     dispatcher.on("PLAYER_MONEY", function()
-        results.money(env.getMoney())
+        tally.money(env.getMoney())
         refreshResults()
     end)
     dispatcher.on("CHAT_MSG_LOOT", function(message)
-        results.loot(message)
+        tally.loot(message)
         refreshResults()
     end)
     dispatcher.on("TRANSMOG_COLLECTION_SOURCE_ADDED", function(sourceID)
-        results.transmogSource(sourceID)
+        tally.transmogSource(sourceID)
         refreshResults()
     end)
     dispatcher.on("CHAT_MSG_COMBAT_FACTION_CHANGE", function(message)
-        results.reputation(message)
+        tally.reputation(message)
+        refreshResults()
+    end)
+    -- The client hands the signed change straight to the event, so a spend arrives as a
+    -- negative and only the localised name has to be looked up.
+    dispatcher.on("CURRENCY_DISPLAY_UPDATE", function(currencyType, _, change)
+        tally.currency(currencyType, change, env.currencyInfo(currencyType))
+        refreshResults()
+    end)
+    dispatcher.on("ACHIEVEMENT_EARNED", function(id)
+        tally.achievement(id, env.achievementInfo(id), env.now())
         refreshResults()
     end)
 
@@ -279,7 +288,7 @@ function ns.main(env)
         scanner = scanner,
         router = router,
         logger = logger,
-        results = results,
+        tally = tally,
         resultsWindow = resultsWindow,
         sessionLog = sessionLog,
         sessionTracker = sessionTracker,
@@ -373,6 +382,16 @@ if CreateFrame then
             transmogSourceCollected = function(sourceID)
                 local info = C_TransmogCollection.GetSourceInfo(sourceID)
                 return info ~= nil and info.isCollected == true
+            end,
+            currencyInfo = function(currencyType)
+                if not currencyType then
+                    return nil
+                end
+                local info = C_CurrencyInfo.GetCurrencyInfo(currencyType)
+                return info and info.name
+            end,
+            achievementInfo = function(id)
+                return (select(2, GetAchievementInfo(id)))
             end,
             lootSelfFormats = templates(LOOT_ITEM_SELF_MULTIPLE, LOOT_ITEM_SELF),
             factionIncreaseFormats = templates(

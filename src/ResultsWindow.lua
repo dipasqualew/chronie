@@ -1,13 +1,14 @@
 local _, ns = ...
 
----A small, draggable HUD panel that renders a ResultsSummary. Deliberately thin:
----it lays out font strings and remembers where it was dragged, and nothing else.
+---A small, draggable HUD panel that renders the current session's SessionSummary.
+---Deliberately thin: it lays out font strings and remembers where it was dragged, and
+---nothing else.
 ---@class ResultsWindow
 ---@field show fun()
 ---@field hide fun()
 ---@field toggle fun()
 ---@field isShown fun(): boolean
----@field update fun(summary: ResultsSummary) Repaint; builds the frame on first use.
+---@field update fun(summary: SessionSummary) Repaint; builds the frame on first use.
 
 ---@class ResultsWindowDeps
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
@@ -66,7 +67,7 @@ function ns.newResultsWindow(deps)
 
         title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         title:SetPoint("TOPLEFT", PADDING, -PADDING)
-        title:SetText("Instance Results")
+        title:SetText("Current Session")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
 
         frame:Hide()
@@ -91,7 +92,7 @@ function ns.newResultsWindow(deps)
         return row.label, row.value
     end
 
-    ---@param summary ResultsSummary
+    ---@param summary SessionSummary
     local function render(summary)
         local y = -PADDING - LINE - 4
         local used = 0
@@ -113,18 +114,37 @@ function ns.newResultsWindow(deps)
             y = y - LINE
         end
 
-        line("Gold", deps.formatMoney(summary.gold), GOLD_COLOR)
+        ---An itemised block: a header line, then one indented signed line per entry, or
+        ---a muted "none" when the list is empty.
+        ---@param heading string
+        ---@param entries table[]
+        ---@param label fun(entry: table): string, string value the left text and right value
+        local function block(heading, entries, label)
+            if #entries == 0 then
+                line(heading, "none", MUTED_COLOR)
+                return
+            end
+            line(heading, "", LABEL_COLOR)
+            for _, entry in ipairs(entries) do
+                local left, right = label(entry)
+                line("  " .. left, right, REP_COLOR)
+            end
+        end
+
+        line("Loot", deps.formatMoney(summary.lootValue), GOLD_COLOR)
+        line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
         line("New transmog", tostring(summary.newAppearances), VALUE_COLOR)
         line("New versions", tostring(summary.newVersions), VALUE_COLOR)
 
-        if #summary.reputation == 0 then
-            line("Reputation", "none", MUTED_COLOR)
-        else
-            line("Reputation", "", LABEL_COLOR)
-            for _, rep in ipairs(summary.reputation) do
-                line("  " .. rep.faction, "+" .. rep.amount, REP_COLOR)
-            end
-        end
+        block("Currency", summary.currencies, function(gain)
+            return gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount
+        end)
+        block("Reputation", summary.reputation, function(gain)
+            return gain.faction, "+" .. gain.amount
+        end)
+        block("Achievements", summary.achievements, function(event)
+            return event.name, ""
+        end)
 
         for index = used + 1, #rows do
             rows[index].label:Hide()
@@ -135,7 +155,7 @@ function ns.newResultsWindow(deps)
     end
 
     return {
-        ---@param summary ResultsSummary
+        ---@param summary SessionSummary
         update = function(summary)
             if not frame then
                 build()

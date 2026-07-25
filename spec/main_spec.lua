@@ -1022,30 +1022,32 @@ describe("addon integration", function()
         end)
     end)
 
-    describe("the instance results panel", function()
+    describe("the current session panel", function()
         ---@param itemID integer
         ---@return string a self-loot chat line's item link
         local function link(itemID)
             return "|cffa335ee|Hitem:" .. itemID .. "::::::::::::|h[Item " .. itemID .. "]|h|r"
         end
 
-        it("stays lazy until an instance is entered or the slash is used", function()
+        it("stays lazy until a zone is entered or the slash is used", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
-            -- Only the event dispatcher's frame exists; the results panel is lazy.
+            -- Only the event dispatcher's frame exists; the session panel is lazy.
             assert.equal(1, #recorded.frames)
         end)
 
-        it("does not build the panel merely by leaving into the open world", function()
+        -- Every zone is a session now, so the panel comes up in the open world too — the
+        -- current breakdown is always on show, not only inside instances.
+        it("shows the panel on entering the open world", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", instanceType = nil })
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.is_false(app.resultsWindow.isShown())
-            assert.equal(1, #recorded.frames)
+            assert.is_true(app.tally.isActive())
+            assert.is_true(app.resultsWindow.isShown())
         end)
 
-        it("shows the panel with a fresh tally on entering a tracked instance", function()
+        it("shows the panel with a fresh tally on entering an instance", function()
             local app, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
@@ -1055,12 +1057,12 @@ describe("addon integration", function()
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.is_true(app.results.isActive())
+            assert.is_true(app.tally.isActive())
             assert.is_true(app.resultsWindow.isShown())
-            assert.equal(0, app.results.summary().gold)
+            assert.equal(0, app.tally.summary().lootValue)
         end)
 
-        it("hides the panel again on leaving the instance", function()
+        it("keeps the panel up when moving from an instance out to the world", function()
             local app, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
@@ -1068,11 +1070,12 @@ describe("addon integration", function()
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            recorded.setInstanceType(nil)
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.is_false(app.results.isActive())
-            assert.is_false(app.resultsWindow.isShown())
+            -- A fresh world session is open, so the tally is active and the panel stays on.
+            assert.is_true(app.tally.isActive())
+            assert.is_true(app.resultsWindow.isShown())
         end)
 
         it("folds a wallet change into the gold looted while inside", function()
@@ -1087,7 +1090,7 @@ describe("addon integration", function()
             recorded.setMoney(1000)
             recorded.frame:fire("PLAYER_MONEY")
 
-            assert.equal(1000, app.results.summary().goldLooted)
+            assert.equal(1000, app.tally.summary().goldLooted)
         end)
 
         it("adds a looted item's vendor value from the loot chat event", function()
@@ -1101,7 +1104,7 @@ describe("addon integration", function()
 
             recorded.frame:fire("CHAT_MSG_LOOT", "You receive loot: " .. link(4242) .. "x2.")
 
-            assert.equal(120, app.results.summary().itemValue)
+            assert.equal(120, app.tally.summary().itemValue)
         end)
 
         it("accumulates reputation from the faction-change event", function()
@@ -1119,7 +1122,7 @@ describe("addon integration", function()
 
             assert.same(
                 { { faction = "Argent Dawn", amount = 40 } },
-                app.results.summary().reputation
+                app.tally.summary().reputation
             )
         end)
 
@@ -1135,10 +1138,12 @@ describe("addon integration", function()
 
             recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
 
-            assert.equal(1, app.results.summary().newAppearances)
+            assert.equal(1, app.tally.summary().newAppearances)
         end)
 
-        it("ignores instance events fired out in the open world", function()
+        -- The open world is a tracked session now, so a loot line out there counts just
+        -- as it would inside an instance.
+        it("tracks loot fired out in the open world", function()
             local app, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
@@ -1149,20 +1154,58 @@ describe("addon integration", function()
 
             recorded.frame:fire("CHAT_MSG_LOOT", "You receive loot: " .. link(4242) .. ".")
 
-            assert.equal(0, app.results.summary().itemValue)
+            assert.equal(60, app.tally.summary().itemValue)
         end)
 
-        it("registers the events that feed the results panel", function()
+        it("records a currency change from the currency event, named through the seam", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                currencies = { [1166] = "Timewarped Badge" },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            -- currencyType, quantity, quantityChange — the client hands the change over.
+            recorded.frame:fire("CURRENCY_DISPLAY_UPDATE", 1166, 30, 15)
+
+            assert.same(
+                { { id = 1166, name = "Timewarped Badge", amount = 15 } },
+                app.tally.summary().currencies
+            )
+        end)
+
+        it("records an achievement from the achievement event, named through the seam", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                now = 1700000000,
+                achievements = { [1234] = "The Loremaster" },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 1234)
+
+            assert.same(
+                { { id = 1234, name = "The Loremaster", at = 1700000000 } },
+                app.tally.summary().achievements
+            )
+        end)
+
+        it("registers the events that feed the session panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             assert.equal(1, recorded.frame.registered.PLAYER_MONEY)
             assert.equal(1, recorded.frame.registered.CHAT_MSG_LOOT)
             assert.equal(1, recorded.frame.registered.CHAT_MSG_COMBAT_FACTION_CHANGE)
             assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
+            assert.equal(1, recorded.frame.registered.CURRENCY_DISPLAY_UPDATE)
+            assert.equal(1, recorded.frame.registered.ACHIEVEMENT_EARNED)
         end)
     end)
 
-    describe("recording instance sessions", function()
+    describe("recording sessions", function()
         local NOW = 1700000000
 
         ---Boot a character standing in the default fake instance, ready to zone.
@@ -1179,17 +1222,27 @@ describe("addon integration", function()
             return app, recorded
         end
 
-        it("writes nothing while the visit is still under way", function()
+        ---Give the open session an event, the way a coin pickup would, so it is not
+        ---dropped as empty when it closes.
+        ---@param recorded table
+        ---@param amount integer
+        local function earn(recorded, amount)
+            recorded.setMoney(amount)
+            recorded.frame:fire("PLAYER_MONEY")
+        end
+
+        it("writes nothing while the session is still under way", function()
             local _, recorded = inside()
 
             assert.same({}, recorded.db.sessions)
         end)
 
-        it("files the visit into the db on the way back out to the world", function()
-            local _, recorded = inside({ class = "Warrior", classFile = "WARRIOR" })
+        it("files the session into the db on the way back out to the world", function()
+            local _, recorded = inside({ class = "Warrior", classFile = "WARRIOR", money = 0 })
+            earn(recorded, 500)
 
             recorded.clock.advance(1800)
-            recorded.setInstanceType(nil)
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             assert.equal(1, #recorded.db.sessions)
@@ -1201,41 +1254,54 @@ describe("addon integration", function()
             assert.equal(1800, record.seconds)
         end)
 
-        it("carries the instance's takings onto the filed record", function()
+        -- A session that saw nothing — a load screen straight back out — leaves no trace.
+        it("drops an empty visit rather than filing it", function()
+            local _, recorded = inside()
+
+            recorded.clock.advance(60)
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.same({}, recorded.db.sessions)
+        end)
+
+        it("carries the session's takings onto the filed record", function()
             local _, recorded = inside({ money = 0, itemPrices = { [4242] = 60 } })
 
-            recorded.setMoney(2500)
-            recorded.frame:fire("PLAYER_MONEY")
+            earn(recorded, 2500)
             recorded.frame:fire(
                 "CHAT_MSG_LOOT",
                 "You receive loot: |cffa335ee|Hitem:4242::::::::::::|h[Item]|h|rx2."
             )
-            recorded.setInstanceType(nil)
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             local record = recorded.db.sessions[1]
-            assert.equal(2500, record.goldLooted)
-            assert.equal(120, record.itemValue)
-            assert.equal(2620, record.gold)
+            -- 2500 coin + 120 vendor value; the wallet also netted +2500 over the visit.
+            assert.equal(2620, record.lootValue)
+            assert.equal(2500, record.goldDiff)
         end)
 
-        it("files one record per instance when zoning straight into the next one", function()
-            local _, recorded = inside()
+        it("files one record per zone when zoning straight into the next one", function()
+            local _, recorded = inside({ money = 0 })
+            earn(recorded, 400)
 
             recorded.clock.advance(600)
             recorded.setInstance({ name = "Ulduar", kind = "raid", difficultyId = 4, difficulty = "25 Player" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            earn(recorded, 900)
             recorded.clock.advance(600)
-            recorded.setInstanceType(nil)
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             assert.equal(2, #recorded.db.sessions)
         end)
 
-        -- SavedVariables only reach disk when the client shuts down, so a visit that
+        -- SavedVariables only reach disk when the client shuts down, so a session that
         -- is still open at logout has to be filed there or it is lost outright.
-        it("files the open visit when the player logs out inside the instance", function()
-            local _, recorded = inside()
+        it("files the open session when the player logs out inside the instance", function()
+            local _, recorded = inside({ money = 0 })
+            earn(recorded, 300)
 
             recorded.frame:fire("PLAYER_LOGOUT")
 
@@ -1243,7 +1309,7 @@ describe("addon integration", function()
             assert.equal("Deadmines", recorded.db.sessions[1].instance)
         end)
 
-        it("files nothing at logout out in the open world", function()
+        it("files nothing at logout when the open session saw nothing", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", instanceType = nil })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
@@ -1260,12 +1326,14 @@ describe("addon integration", function()
 
         it("keeps both characters' sessions in one shared db", function()
             local db = {}
-            local _, first = inside({ db = db })
-            first.setInstanceType(nil)
+            local _, first = inside({ db = db, money = 0 })
+            earn(first, 500)
+            first.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             first.frame:fire("PLAYER_ENTERING_WORLD")
 
-            local _, second = inside({ playerName = "Jaina", realmName = "Draenor", db = db })
-            second.setInstanceType(nil)
+            local _, second = inside({ playerName = "Jaina", realmName = "Draenor", db = db, money = 0 })
+            earn(second, 700)
+            second.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             second.frame:fire("PLAYER_ENTERING_WORLD")
 
             assert.equal(2, #db.sessions)
@@ -1296,7 +1364,7 @@ describe("addon integration", function()
                     end
                 end
             end
-            assert.equal("Instance sessions — last 7 days", titles[1])
+            assert.equal("Sessions — last 7 days", titles[1])
         end)
 
         it("stays lazy until the slash is used", function()

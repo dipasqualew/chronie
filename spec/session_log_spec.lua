@@ -31,15 +31,19 @@ describe("ns.newSessionLog", function()
             instance = "Ulduar",
             difficulty = "25 Player",
             instanceType = "raid",
+            difficultyId = 4,
             startedAt = NOW - 1800,
             endedAt = NOW,
             summary = {
-                goldLooted = 1200,
-                itemValue = 800,
-                gold = 2000,
+                lootValue = 2000,
+                goldDiff = 1500,
                 newAppearances = 2,
                 newVersions = 1,
+                currencyTotal = 15,
+                reputationTotal = 40,
+                currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
+                achievements = { { id = 1, name = "First", at = NOW } },
             },
         }
         for key, value in pairs(overrides or {}) do
@@ -67,15 +71,19 @@ describe("ns.newSessionLog", function()
                 instance = "Ulduar",
                 difficulty = "25 Player",
                 instanceType = "raid",
+                difficultyId = 4,
                 startedAt = NOW - 1800,
                 endedAt = NOW,
                 seconds = 1800,
-                goldLooted = 1200,
-                itemValue = 800,
-                gold = 2000,
+                lootValue = 2000,
+                goldDiff = 1500,
                 newAppearances = 2,
                 newVersions = 1,
+                currencyTotal = 15,
+                reputationTotal = 40,
+                currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
+                achievements = { { id = 1, name = "First", at = NOW } },
             }, db.sessions[1])
         end)
 
@@ -110,9 +118,13 @@ describe("ns.newSessionLog", function()
 
             local record = log.record(visit({ summary = {} }))
 
-            assert.equal(0, record.gold)
+            assert.equal(0, record.lootValue)
+            assert.equal(0, record.goldDiff)
             assert.equal(0, record.newAppearances)
+            assert.equal(0, record.currencyTotal)
             assert.same({}, record.reputation)
+            assert.same({}, record.currencies)
+            assert.same({}, record.achievements)
         end)
 
         it("stores an empty difficulty rather than a hole when the client named none", function()
@@ -130,10 +142,10 @@ describe("ns.newSessionLog", function()
             local log, db = newLog()
 
             log.record(visit())
-            log.record(visit({ endedAt = NOW + 60, summary = { gold = 5000 } }))
+            log.record(visit({ endedAt = NOW + 60, summary = { lootValue = 5000 } }))
 
             assert.equal(1, #db.sessions)
-            assert.equal(5000, db.sessions[1].gold)
+            assert.equal(5000, db.sessions[1].lootValue)
         end)
 
         it("keeps two visits of the same instance apart by when they started", function()
@@ -156,6 +168,28 @@ describe("ns.newSessionLog", function()
             pending.summary.reputation[2] = { faction = "Timbermaw Hold", amount = 10 }
 
             assert.same({ { faction = "Argent Dawn", amount = 40 } }, record.reputation)
+        end)
+
+        it("copies the currency list out of the caller's summary", function()
+            local log = newLog()
+            local pending = visit()
+
+            local record = log.record(pending)
+            pending.summary.currencies[1].amount = 999
+            pending.summary.currencies[2] = { id = 2, name = "Valor", amount = 3 }
+
+            assert.same({ { id = 1166, name = "Timewarped Badge", amount = 15 } }, record.currencies)
+        end)
+
+        it("copies the achievement list out of the caller's summary", function()
+            local log = newLog()
+            local pending = visit()
+
+            local record = log.record(pending)
+            pending.summary.achievements[1].name = "Rewritten"
+            pending.summary.achievements[2] = { id = 2, name = "Second", at = NOW }
+
+            assert.same({ { id = 1, name = "First", at = NOW } }, record.achievements)
         end)
     end)
 
