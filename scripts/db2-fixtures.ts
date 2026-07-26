@@ -107,6 +107,13 @@ export class Bytes {
     this.u16(value >>> 16);
   }
 
+  /** A single-precision float, which is how a model stores every position it has. */
+  f32(value: number): void {
+    const view = new DataView(new ArrayBuffer(4));
+    view.setFloat32(0, value, true);
+    for (let index = 0; index < 4; index += 1) this.u8(view.getUint8(index));
+  }
+
   u64(value: bigint): void {
     this.u32(Number(value & 0xffffffffn));
     this.u32(Number((value >> 32n) & 0xffffffffn));
@@ -550,7 +557,8 @@ export function writeIcon(icon: IconSpec): Uint8Array {
 /* ---------- putting a set of them on disk ---------- */
 
 /**
- * A file written exactly as given, for the one case no encoder produces.
+ * A file written exactly as given: one an area's own writer produced, or one of the cases no
+ * encoder produces at all.
  *
  * A texture belonging to content the game has not shipped arrives as zeroes of the right
  * length, because only Blizzard holds the key to the chunk it was in — so what a reader is
@@ -561,7 +569,7 @@ export interface RawFixture {
   extension: string;
   bytes: Uint8Array;
   /** Why the file is what it is, printed beside it so a run says what it wrote. */
-  note: string;
+  note?: string;
 }
 
 /** Writes one area's tables, textures and raw files into `apps/desktop/fixtures/<area>`. */
@@ -578,5 +586,7 @@ export function emit(
   };
   for (const table of tables) write(`${table.fileDataId}.db2`, writeTable(table));
   for (const icon of icons) write(`${icon.fileDataId}.blp`, writeIcon(icon));
-  for (const file of raw) write(`${file.fileDataId}.${file.extension}`, file.bytes, `  ${file.note}`);
+  for (const file of raw) {
+    write(`${file.fileDataId}.${file.extension}`, file.bytes, file.note ? `  ${file.note}` : "");
+  }
 }

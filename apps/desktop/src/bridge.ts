@@ -13,6 +13,7 @@ import type {
   Segment,
   Settings,
   SyncResult,
+  TransmogModelPayload,
   TransmogPayload,
   TransmogSetItemsPayload,
 } from "./types";
@@ -48,6 +49,12 @@ export const desktop = {
   gameIcons: (iconFileDataIds: number[]): Promise<IconsPayload> => mock
     ? Promise.resolve({ icons: mockIcons(iconFileDataIds) })
     : invoke<IconsPayload>("game_icons", { iconFileDataIds }),
+  // One appearance's model, asked for when a reader picks that row and not before: a set's
+  // worth of geometry is tens of megabytes nobody has clicked on. Most rows have none, and
+  // `null` is what says so.
+  transmogModel: (displayInfoId: number): Promise<TransmogModelPayload> => mock
+    ? Promise.resolve({ displayInfoId, model: mock.transmogModels[displayInfoId] ?? null })
+    : invoke<TransmogModelPayload>("transmog_model", { displayInfoId }),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {

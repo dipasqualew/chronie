@@ -30,25 +30,31 @@ use crate::casc::GameFiles;
 /// in a list row would cost far more than the row is worth.
 const LARGEST_ICON: u32 = 512;
 
-/// One decoded texture, as a `data:` URL a page can put straight in an `img` element.
+/// Anything the window is handed, as a `data:` URL.
 ///
 /// A data URL rather than a file or a served route because the window has no origin to
 /// serve from: the frontend is loaded from the bundle and every byte it shows comes across
-/// the command bridge. An icon is a couple of kilobytes, which is small enough for that.
-pub fn data_url(png: &[u8]) -> String {
-    format!("data:image/png;base64,{}", STANDARD.encode(png))
+/// the command bridge. An icon is a couple of kilobytes and an item's model a few hundred,
+/// which is small enough for that.
+pub fn data_url(kind: &str, bytes: &[u8]) -> String {
+    format!("data:{kind};base64,{}", STANDARD.encode(bytes))
 }
 
 /// Decodes one BLP texture's level 0 into PNG bytes.
-pub fn png_of(blp: &[u8]) -> Result<Vec<u8>, String> {
+///
+/// `largest` is what the caller expects the texture to be at most, a side at a time. It is a
+/// sanity check rather than a rule of the format: an icon is 64 pixels and a texture painted
+/// on a model a few hundred, so anything far beyond that is a lookup that landed somewhere
+/// unintended, and re-encoding it would cost more than everything around it put together.
+pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
     let parsed = parse_blp(blp).map_err(|error| format!("not a texture this build can read: {error}"))?;
     let decoded = blp_to_image(&parsed, 0).map_err(|error| format!("would not decode: {error}"))?;
     let (width, height) = (decoded.width(), decoded.height());
     if width == 0 || height == 0 {
         return Err("has no pixels".into());
     }
-    if width > LARGEST_ICON || height > LARGEST_ICON {
-        return Err(format!("is {width}×{height}, far larger than an icon"));
+    if width > largest || height > largest {
+        return Err(format!("is {width}×{height}, far larger than it should be"));
     }
 
     // A palettized BLP stores its colours blue first, and the decoder reads them red first —
@@ -92,8 +98,8 @@ pub fn decode(files: &dyn GameFiles, wanted: &[u32]) -> Vec<(u32, Option<String>
         .map(|fdid| {
             let decoded = files
                 .read(*fdid)
-                .and_then(|bytes| png_of(&bytes))
-                .map(|png| data_url(&png));
+                .and_then(|bytes| png_of(&bytes, LARGEST_ICON))
+                .map(|png| data_url("image/png", &png));
             (*fdid, decoded.ok())
         })
         .collect()
@@ -179,7 +185,7 @@ mod tests {
     /// the window would actually be handed.
     fn decoded(fdid: u32) -> image::RgbaImage {
         let bytes = fixture_files().read(fdid).unwrap();
-        let png = png_of(&bytes).unwrap_or_else(|error| panic!("icon {fdid}: {error}"));
+        let png = png_of(&bytes, LARGEST_ICON).unwrap_or_else(|error| panic!("icon {fdid}: {error}"));
         image::load_from_memory_with_format(&png, ImageFormat::Png)
             .unwrap()
             .into_rgba8()
@@ -288,7 +294,7 @@ mod tests {
     #[test]
     fn hands_over_a_picture_the_window_can_show_without_knowing_the_format() {
         let bytes = fixture_files().read(DXT5).unwrap();
-        let url = data_url(&png_of(&bytes).unwrap());
+        let url = data_url("image/png", &png_of(&bytes, LARGEST_ICON).unwrap());
         assert!(url.starts_with("data:image/png;base64,"), "{url}");
         let encoded = url.trim_start_matches("data:image/png;base64,");
         assert_eq!(&STANDARD.decode(encoded).unwrap()[1..4], b"PNG");
@@ -310,8 +316,8 @@ mod tests {
 
     #[test]
     fn says_what_was_wrong_with_a_texture_it_could_not_read() {
-        assert!(png_of(&[0u8; 1172]).unwrap_err().contains("not a texture"));
-        assert!(png_of(&[]).unwrap_err().contains("not a texture"));
+        assert!(png_of(&[0u8; 1172], LARGEST_ICON).unwrap_err().contains("not a texture"));
+        assert!(png_of(&[], LARGEST_ICON).unwrap_err().contains("not a texture"));
     }
 
     /* ---------- the cache ---------- */

@@ -3,7 +3,10 @@ pub mod achievements;
 pub mod casc;
 mod collector;
 pub mod db2;
+pub mod glb;
 pub mod icons;
+pub mod m2;
+pub mod models;
 pub mod transmog;
 
 use achievements::AchievementBook;
@@ -175,6 +178,18 @@ async fn game_icons(
         cache.store(decoded);
     }
     Ok(cache.answer(&icon_file_data_ids))
+}
+
+/// The model one appearance is drawn with, as a `.glb` in a data URL, or `null`.
+///
+/// Asked for one appearance at a time, because a reader looks at one at a time and a set's
+/// worth of models is tens of megabytes of geometry nobody has clicked on. Only heads,
+/// shoulders, weapons and shields have anything to answer with; the rest of a set is texture
+/// painted onto the character's body, and `null` is the ordinary answer for it rather than a
+/// failure — the window keeps showing the icon it already has.
+#[tauri::command]
+async fn transmog_model(display_info_id: u32, state: State<'_, AppState>) -> Result<Value, String> {
+    read_game_files(&state, move |files| models::model_of(files, display_info_id)).await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -591,6 +606,7 @@ pub fn run() {
             dashboard,
             transmog_sets,
             transmog_set_items,
+            transmog_model,
             achievement_details,
             game_icons,
             settings,

@@ -256,6 +256,21 @@ display whose only model sits in the second slot, an achievement filed under a c
 whose parent is encrypted, one filed under a category that is not in the tree at all, and
 one the game withholds entirely.
 
+The transmog script also writes the models: invented `.m2` files with the chunk layout the retail
+client uses, their `.skin` profiles, and the `.blp`s they are painted with. Between them they
+hold both of the traps in [character-rendering.md](character-rendering.md) — offsets counted
+from inside the `MD21` chunk, and a submesh that starts past the first 64k of the index list,
+which is why `141004.skin` is 131 KB of mostly padding.
+
+`helm.glb` is the one derived fixture: the converter's own output for display 900001, which
+the browser tests load into three.js to prove that what this app writes is glTF a loader will
+take. A test in `models.rs` fails if it has drifted from what the converter now produces:
+
+```sh
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
+    --fixtures apps/desktop/fixtures/transmog 900001 apps/desktop/fixtures/transmog/helm.glb
+```
+
 Every fixture table carries an encrypted section, because that is where the edge cases
 live. Nothing in `apps/desktop/fixtures/` is derived from game assets, which is what
 keeps the committed tests distributable.

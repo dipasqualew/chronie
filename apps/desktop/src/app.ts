@@ -81,6 +81,7 @@ const transmogDetail = createTransmogModal({
   dialog: $<HTMLDialogElement>("transmog-detail"),
   load: (setId) => desktop.transmogSetItems(setId),
   loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
+  loadModel: (displayInfoId) => desktop.transmogModel(displayInfoId),
 });
 
 const transmog = createTransmog({

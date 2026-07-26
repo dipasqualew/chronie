@@ -188,11 +188,17 @@ Chunks that matter:
 `bone_indices` — the vertex position is already the bind pose. Bones, sequences, `.anim`
 files and `M2Track` decoding are all skippable.
 
-**Coordinate system:** M2 is Z-up. To Y-up: `(X, Y, Z) → (X, -Z, Y)`.
+**Coordinate system:** M2 is Z-up with X forward. To Y-up: `(X, Y, Z) → (X, Z, -Y)`, which
+is what wow.export's `M2Loader.js` does and what `m2.rs` follows. Both this and its mirror
+`(X, -Z, Y)` are proper rotations, so neither turns a model inside out — but the mirror puts
+the model's up axis at `-Y` and hangs it upside down. *(This line said `(X, -Z, Y)` until
+2026-07-26; the version above is the one that has been rendered and looked at.)*
 
-**The `Level` gotcha.** In `M2SkinSection`, the real start indices are
-`(Level << 16) | vertexStart` and `(Level << 16) | indexStart`. Character models routinely
-exceed 65,535 indices; miss this and geometry past the first 64k silently draws wrong.
+**The `Level` gotcha.** In `M2SkinSection`, the real first index is
+`(Level << 16) | indexStart`. Character models routinely exceed 65,535 indices; miss this
+and geometry past the first 64k silently draws wrong. Note that wow.export applies the level
+to `indexStart` **only**, not to `vertexStart`, and `m2.rs` does the same — it never reads
+`vertexStart`, because the triangle list already names the vertices a submesh uses.
 
 **Texture indirection:** `batch.textureComboIndex` → `textureCombos[i]` → `textures[j]`.
 If `textures[j].type == 0` the texture is a file (`TXID[j]`); otherwise the caller supplies
@@ -229,8 +235,22 @@ all differ so that a swap cannot pass unnoticed.
 |---|---|---|
 | [`wow-blp`](https://crates.io/crates/wow-blp) | MIT/Apache-2.0 | BLP decode. Handles every encoding above. |
 | [`gltf-json`](https://crates.io/crates/gltf-json) | MIT/Apache-2.0 | Writing `.glb` for three.js. |
-| [`wow-m2`](https://crates.io/crates/wow-m2) | MIT/Apache-2.0 | M2 parse. Parses `MD21`/`SFID`/`TXID` and has a skin module, but is lightly used and its parent claims only 1.12–5.4.8 support. **Prototype against a real `humanfemale_hd.m2` early**; hand-rolling the static subset is ~600 lines if it fails. |
+| ~~[`wow-m2`](https://crates.io/crates/wow-m2)~~ | MIT/Apache-2.0 | **Not used.** See below. |
 | [`texture2ddecoder`](https://crates.io/crates/texture2ddecoder) | MIT/Apache-2.0 | Fallback BC1–BC7 decoder. |
+
+### Why the M2 parser is hand-rolled
+
+`wow-m2` was the plan, on condition of prototyping it against a real `humanfemale_hd.m2`
+first — and that prototype is exactly what `CLAUDE.md` forbids, so it could not be done. What
+could be checked pointed the other way anyway: at 0.7.0 it loads from a *path* rather than
+from the bytes `GameFiles` hands over, it depends on `wow-blp ^0.7` against the `0.3.2`
+already in the tree, and its parent crate claims 1.12–5.4.8.
+
+So `apps/desktop/src-tauri/src/m2.rs` reads the static subset directly — around 370 lines
+for chunks, vertices, textures, materials, texture combos, submeshes and batches. It is
+written against this document and cross-read against wow.export's `M2Loader.js` and
+`Skin.js`. If the day comes that a real file can be put in front of a candidate crate, the
+module is small enough to be a fair comparison rather than a sunk cost.
 
 ## Reference implementations
 

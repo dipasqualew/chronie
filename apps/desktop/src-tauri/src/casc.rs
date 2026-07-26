@@ -36,8 +36,9 @@ pub struct DirFiles {
     dir: PathBuf,
 }
 
-/// The kinds of file the fixtures hold: the game's tables, and the textures they point at.
-const FIXTURE_EXTENSIONS: [&str; 2] = ["db2", "blp"];
+/// The kinds of file the fixtures hold: the game's tables, the textures they point at, and
+/// the models and skin profiles behind the appearances that have geometry.
+const FIXTURE_EXTENSIONS: [&str; 4] = ["db2", "blp", "m2", "skin"];
 
 impl DirFiles {
     pub fn new(dir: impl Into<PathBuf>) -> Self {

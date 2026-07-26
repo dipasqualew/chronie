@@ -247,6 +247,19 @@ export interface IconsPayload {
   icons: Record<string, string>;
 }
 
+/**
+ * The model one appearance is drawn with, as a `.glb` in a data URL.
+ *
+ * `null` is the ordinary answer rather than a failure. Only heads, shoulders, weapons and
+ * shields have geometry of their own — the rest of a set is texture painted onto the
+ * character's body — and an install can also be missing the file an appearance names, or
+ * hold it only in the encrypted form the game ships unreleased content as.
+ */
+export interface TransmogModelPayload {
+  displayInfoId: number;
+  model: string | null;
+}
+
 /* ---------- achievements, as the game describes them ---------- */
 
 /**
@@ -310,6 +323,9 @@ export interface E2EMock {
   transmog: TransmogPayload;
   /** What each set is made of, keyed by set id, as opening one asks for. */
   transmogItems: Record<number, TransmogSetItemsPayload>;
+  /** The converted models, keyed by display info id. An id absent from here is an appearance
+   * this install has no model for, which the real backend answers with `null`. */
+  transmogModels: Record<number, string>;
   /** The decoded icons, keyed the way whatever named them named them. An id absent from here
    * is an icon the install cannot show, which is a row the real backend answers nothing for. */
   gameIcons: Record<number, string>;
