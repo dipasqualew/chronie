@@ -11,6 +11,7 @@ import { desktop, message } from "./bridge";
 import { activityFields, activityLabel, fieldValue, parseMetadata } from "./activities";
 import type { ActivityField } from "./activities";
 import { buildSessions } from "./sessions";
+import { createAchievementBook } from "./achievements";
 import { createDetails } from "./details";
 import { createSegmentModal } from "./segmentModal";
 import { createTimeline } from "./timeline";
@@ -47,9 +48,18 @@ installExternalLinks({
 
 /* ---------- the three views ---------- */
 
+// What the game says about an achievement outlives any one segment, so the book is made
+// once here rather than per modal: a reader walking a history meets the same achievements
+// over and over, and each is looked up the first time and never again.
+const achievements = createAchievementBook({
+  load: (ids) => desktop.achievementDetails(ids),
+  loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
+});
+
 const modal = createSegmentModal({
   dialog: $<HTMLDialogElement>("segment-detail"),
   onEditActivities: (segmentId) => openEditor(segmentId),
+  achievements,
 });
 
 const timeline = createTimeline({
@@ -70,7 +80,7 @@ const details = createDetails({
 const transmogDetail = createTransmogModal({
   dialog: $<HTMLDialogElement>("transmog-detail"),
   load: (setId) => desktop.transmogSetItems(setId),
-  loadIcons: (iconFileDataIds) => desktop.transmogIcons(iconFileDataIds),
+  loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
   loadModel: (displayInfoId) => desktop.transmogModel(displayInfoId),
 });
 

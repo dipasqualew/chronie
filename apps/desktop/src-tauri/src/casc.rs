@@ -65,19 +65,32 @@ impl GameFiles for DirFiles {
     }
 }
 
-/// The invented tables the tests read in place of a game install.
+/// The invented tables and textures the tests read in place of a game install.
 ///
-/// They are real WDC5 files with made-up content, written by
-/// `scripts/make-transmog-fixtures.ts`, and the path is resolved from the crate rather than
-/// from the working directory so a test run from anywhere finds them.
+/// They are real WDC5 and BLP2 files with made-up content, written by the scripts under
+/// `scripts/` — one directory per area of the game — and the path is resolved from the crate
+/// rather than from the working directory so a test run from anywhere finds them.
 #[cfg(test)]
-pub fn fixture_files() -> DirFiles {
+pub fn fixtures(area: &str) -> DirFiles {
     DirFiles::new(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("fixtures")
-            .join("transmog"),
+            .join(area),
     )
+}
+
+/// The fixtures for the transmog chain, written by `scripts/make-transmog-fixtures.ts`.
+#[cfg(test)]
+pub fn fixture_files() -> DirFiles {
+    fixtures("transmog")
+}
+
+/// The fixtures for the achievement tables, written by
+/// `scripts/make-achievement-fixtures.ts`.
+#[cfg(test)]
+pub fn achievement_fixture_files() -> DirFiles {
+    fixtures("achievements")
 }
 
 /* ---------- the real thing ---------- */

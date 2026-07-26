@@ -85,6 +85,8 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `ChrModelTextureLayer` | 3548976 | fixed | yes |
 | `ChrModel` | 3384313 | fixed | yes |
 | `HelmetGeosetData` | 2821752 | fixed | yes |
+| `Achievement` | 1260179 | fixed | yes |
+| `Achievement_Category` | 1324299 | fixed | yes |
 | **`ItemSparse`** | **1572924** | **offset map** | **no — see below** |
 
 ### ItemSparse
@@ -186,21 +188,75 @@ independently verified; which values carry a model *was* verified. The set detai
 because the definitions do not say which of those is the main hand and which the off hand
 and four labelled guesses would read as fact.
 
+## Achievements
+
+Two tables, no chain: `Achievement` is the achievements and `Achievement_Category` is the
+tree they are filed in. `achievements.rs` reads them for the ids a window is showing.
+
+```
+Achievement                       (id inline, in column 3)
+  col0  = Description_lang         "Reach level 10."
+  col1  = Title_lang               "Level 10"
+  col2  = Reward_lang              "Reward: Title & Loremaster's Colors", usually empty
+  col4  = InstanceID               a map id, or -1
+  col5  = Faction                  sparse, default -1 ──▶ 0 Horde, 1 Alliance, -1 both
+  col6  = Supercedes               the achievement this one is earned on top of
+  col7  = Category               ──▶ Achievement_Category.ID
+  col9  = Points                   packed — see below
+  col12 = IconFileID             ──▶ a BLP icon
+     │
+     ▼
+Achievement_Category              (id inline, in column 1)
+  col0 = Name_lang
+  col2 = Parent                    -1 at a root; walk it up for the path
+  col3 = UiOrder
+```
+
+**Points are not stored as points.** Column 9 is a palette of ten values, and every one of
+them is `0x3C00` with the points in its low byte: `0x3C0A` is ten points, `0x3C64` is a
+hundred. All 13,732 readable rows carry that shape — not one deviates — and the low bytes
+are exactly the set the game awards: 0, 5, 10, 15, 20, 25, 30, 40, 50, 100. A reader that
+takes the column whole reports every achievement as being worth fifteen thousand. The
+fixture stores it the same way so that stays caught.
+
+**What each column was checked against**, since a reordered table shows wrong values rather
+than failing:
+
+| Column | Checked against |
+|---|---|
+| `InstanceID` | "Heroic: The Nexus" reads 576, which is The Nexus |
+| `Faction` | the level-60 Horde rank titles (High Warlord, Centurion) read 0; the Silverwing flag-room achievements read 1 |
+| `Category` | "Level 10" reads 92, which the other table names "Characters" |
+| `Points` | feats of strength and the whole legacy tree come out at nothing; "Level 10", "Heroic: The Nexus" and "The Loremaster" come out at ten |
+| `IconFileID` | 400 sampled ids all decode, 399 of them 64×64 |
+| `Supercedes` | "Level 20" names "Level 10" |
+| the tree | the roots come out as the game's own list: Statistics, Feats of Strength, Characters, Player vs. Player, Quests, Exploration, World Events, Dungeons & Raids, Professions, Reputation, Guild, Pet Battles, Legacy, Collections, Expansion Features, Delves, Housing |
+
+Measured on 12.0.5.67: 13,736 declared rows, 13,732 readable, 3,846 distinct icons, 243
+categories. `cargo run --example dump_achievements -- "<install>"` prints the lot for a
+handful of ids and is what to run after a patch.
+
 ## Regenerating the fixtures
 
-Tests never read the game. `scripts/make-transmog-fixtures.ts` writes real WDC5 files
-with entirely invented contents — same columns, same storage per column, same bit
-offsets as the game's own, so the awkward halves of the reader stay exercised. Every table
-on the chain above has one, and between them they hold each way a hop can fail: an
-appearance stored as a copy of another, an `ItemModifiedAppearance` row the game encrypts,
-an `ItemAppearance` whose display info is encrypted, one with no icon at all, and a display
-whose only model sits in the second slot:
+Tests never read the game. One script per area writes real WDC5 tables and real BLP2
+textures with entirely invented contents — same columns, same storage per column, same bit
+offsets, same encodings as the game's own, so the awkward halves of the reader stay
+exercised. `scripts/db2-fixtures.ts` is the machinery they share and is where the formats
+themselves are explained.
 
 ```sh
 bun run scripts/make-transmog-fixtures.ts
+bun run scripts/make-achievement-fixtures.ts
 ```
 
-The same script writes the models: invented `.m2` files with the chunk layout the retail
+Every table on the chains above has a fixture, and between them they hold each way a hop can
+fail: an appearance stored as a copy of another, an `ItemModifiedAppearance` row the game
+encrypts, an `ItemAppearance` whose display info is encrypted, one with no icon at all, a
+display whose only model sits in the second slot, an achievement filed under a category
+whose parent is encrypted, one filed under a category that is not in the tree at all, and
+one the game withholds entirely.
+
+The transmog script also writes the models: invented `.m2` files with the chunk layout the retail
 client uses, their `.skin` profiles, and the `.blp`s they are painted with. Between them they
 hold both of the traps in [character-rendering.md](character-rendering.md) — offsets counted
 from inside the `MD21` chunk, and a submesh that starts past the first 64k of the index list,

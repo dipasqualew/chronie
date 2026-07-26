@@ -1,4 +1,5 @@
 mod activity;
+pub mod achievements;
 pub mod casc;
 mod collector;
 pub mod db2;
@@ -8,6 +9,7 @@ pub mod m2;
 pub mod models;
 pub mod transmog;
 
+use achievements::AchievementBook;
 use chrono::Utc;
 use collector::{dashboard as load_dashboard, SyncResult};
 use icons::IconCache;
@@ -48,6 +50,8 @@ struct AppState {
     /// The icons decoded so far. Shared rather than owned, because reading the game's files
     /// happens on a worker thread that outlives the command that started it.
     icons: Arc<IconCache>,
+    /// The achievements looked up so far, shared for the same reason.
+    achievements: Arc<AchievementBook>,
     /// False in builds shipped without signing keys, where the release pipeline strips
     /// `plugins.updater` from the config. Touching the updater then panics, so every
     /// caller has to check this first.
@@ -133,15 +137,36 @@ async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<V
     read_game_files(&state, move |files| transmog::set_items(files, set_id)).await
 }
 
-/// The pictures for a set's appearances, as PNG data URLs keyed by FileDataID.
+/// What the game says about the achievements a window is showing.
 ///
-/// Asked for after the rows are on screen rather than with them: the ids come out of the
-/// same payload the rows were drawn from, and a set reads as a list of slots long before its
-/// textures have been decoded. Icons already decoded are answered from memory, which is what
-/// makes the second set of a collection cost nothing — so this only reaches the game's
-/// storage when the request holds something genuinely new.
+/// The dashboard already carries the ids, because the addon recorded them at the moment they
+/// were earned; everything a reader recognises an achievement by is in the game's own tables
+/// and is looked up here. Asked for after the segment is drawn, for the same reason the
+/// icons are: a list of achievements is worth reading while the tables that describe them
+/// are still being opened.
 #[tauri::command]
-async fn transmog_icons(
+async fn achievement_details(ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value, String> {
+    let book = Arc::clone(&state.achievements);
+    let missing = book.missing(&ids);
+    if !missing.is_empty() {
+        let found =
+            read_game_files(&state, move |files| achievements::read(files, &missing)).await?;
+        book.store(found);
+    }
+    Ok(book.answer(&ids))
+}
+
+/// The game's own pictures for a list of things, as PNG data URLs keyed by FileDataID.
+///
+/// Whatever named them — a transmog appearance, an achievement — a picture is a texture in
+/// the same storage everything else comes out of, so there is one command for all of them
+/// and one cache behind it. Asked for after the rows are on screen rather than with them:
+/// the ids come out of the same payload the rows were drawn from, and a list reads as a list
+/// long before its textures have been decoded. Icons already decoded are answered from
+/// memory, which is what makes the second set of a collection cost nothing — so this only
+/// reaches the game's storage when the request holds something genuinely new.
+#[tauri::command]
+async fn game_icons(
     icon_file_data_ids: Vec<u32>,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
@@ -553,6 +578,7 @@ pub fn run() {
                 settings: Mutex::new(load_settings(&data_dir.join("settings.json"))),
                 data_dir,
                 icons: Arc::default(),
+                achievements: Arc::default(),
                 updater_configured,
             };
             app.manage(state);
@@ -580,8 +606,9 @@ pub fn run() {
             dashboard,
             transmog_sets,
             transmog_set_items,
-            transmog_icons,
             transmog_model,
+            achievement_details,
+            game_icons,
             settings,
             choose_wow_path,
             save_wow_path,

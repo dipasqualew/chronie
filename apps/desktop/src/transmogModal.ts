@@ -22,7 +22,7 @@ import type { ModelStage } from "./modelViewer";
 import { classLabel, expansionName, patchName } from "./transmog";
 import type {
   TransmogAppearance,
-  TransmogIconsPayload,
+  IconsPayload,
   TransmogModelPayload,
   TransmogSet,
   TransmogSetItemsPayload,
@@ -116,7 +116,7 @@ export interface TransmogModalOptions {
   /** Asks the backend what a set is made of. Injected so the modal is drivable without one. */
   load: (setId: number) => Promise<TransmogSetItemsPayload>;
   /** Asks the backend for the pictures those rows need, decoded out of the game's textures. */
-  loadIcons: (iconFileDataIds: number[]) => Promise<TransmogIconsPayload>;
+  loadIcons: (iconFileDataIds: number[]) => Promise<IconsPayload>;
   /** Asks for one appearance's model, converted to something a browser can load. */
   loadModel: (displayInfoId: number) => Promise<TransmogModelPayload>;
   /**
