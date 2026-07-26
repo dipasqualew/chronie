@@ -24,6 +24,9 @@ local addonName, ns = ...
 ---@field registerSlash fun(tokens: string[], handler: fun(text: string))
 ---@field getMoney fun(): integer Current wallet total, in copper.
 ---@field instanceInfo fun(): InstanceInfo? Name, type and difficulty of the current zone.
+---@field experienceState fun(): table? `{ level, xp, xpMax }`, or nil at the level cap.
+---@field activeKeystone fun(): table? `{ level, mapId, affixes }` for the key in the slot.
+---@field keystoneCompletion fun(): table? `{ level, mapId, durationMs, onTime, upgrades }`.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---@field transmogSourceInfo fun(sourceID: integer): table?
 ---@field activeQuestIDs fun(): integer[]
@@ -174,6 +177,8 @@ function ns.main(env)
         level = function()
             return env.unitLevel("player")
         end,
+        expansions = expansions,
+        experienceState = env.experienceState,
     })
 
     local segmentWindow = ns.newDetailWindow({
@@ -281,9 +286,20 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /chronie locks | results | segments | currency | report")
+            logger.info("usage: /chronie locks | results | segments | currency | report | events")
         end,
     })
+    ---Names every event this client build refused, so a wrong or since-renamed event name
+    ---shows up as a missing feature the player can actually see rather than silence.
+    local function reportUnsupportedEvents()
+        local missing = dispatcher.unsupported()
+        if #missing == 0 then
+            return
+        end
+        logger.info("this client rejected " .. #missing .. " event(s), so the matching "
+            .. "tracking is off: " .. table.concat(missing, ", "))
+    end
+
     router.add("locks", window.toggle)
     router.add("results", function()
         if resultsWindow.isShown() then
@@ -322,6 +338,13 @@ function ns.main(env)
     end
     router.add("segments", toggleSegments)
     router.add("currency", currencyWindow.toggle)
+    router.add("events", function()
+        if #dispatcher.unsupported() == 0 then
+            logger.info("this client accepted every event the addon tracks.")
+            return
+        end
+        reportUnsupportedEvents()
+    end)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
     end)
@@ -356,6 +379,7 @@ function ns.main(env)
             level = env.unitLevel("player"),
         })
         env.requestRaidInfo()
+        reportUnsupportedEvents()
     end)
 
     -- Fired after RequestRaidInfo, and whenever the client's lockout state changes
@@ -397,6 +421,11 @@ function ns.main(env)
     onTallyEvent("CHAT_MSG_LOOT", function(message)
         tally.loot(message)
     end)
+    -- A first-time drop is not cached when its loot line arrives, so the tally parked it
+    -- unpriced. This is the server answering the price query that parking triggered.
+    onTallyEvent("GET_ITEM_INFO_RECEIVED", function(itemID)
+        tally.itemInfoReceived(itemID)
+    end)
     onTallyEvent("TRANSMOG_COLLECTION_SOURCE_ADDED", function(sourceID)
         local info = env.transmogSourceInfo(sourceID)
         if info and info.itemID then
@@ -422,7 +451,7 @@ function ns.main(env)
     -- item on every batched bag change and folding the difference in tracks both gains and
     -- spends. Because the count spans every storage the character can reach, including the
     -- warband bank, a deposit or withdrawal nets to zero and is never miscounted as either.
-    onTallyEvent("BAG_UPDATE_DELTA", function()
+    onTallyEvent("BAG_UPDATE_DELAYED", function()
         for _, itemID in ipairs(currencyItems.ids()) do
             tally.currencyItem(itemID, env.ownedItemCount(itemID), env.itemName(itemID))
         end
@@ -430,9 +459,51 @@ function ns.main(env)
     onTallyEvent("ACHIEVEMENT_EARNED", function(id, alreadyEarned)
         tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
     end)
+    -- The client reports the standing, not the delta, so the tally is handed the whole
+    -- state and works the gain out against the baseline it anchored when the segment began.
+    local function foldExperience()
+        local state = env.experienceState()
+        if state then
+            tally.experience(state.level, state.xp, state.xpMax)
+        end
+    end
+    onTallyEvent("PLAYER_XP_UPDATE", foldExperience)
+    -- A level-up moves the bar as well as the level, and it is folded from inside this one
+    -- handler rather than by subscribing twice: the dispatcher keeps a single handler per
+    -- event name, so a second subscription would quietly replace the level tracking here.
     onTallyEvent("PLAYER_LEVEL_UP", function(level)
         tally.levelUp(level, env.now())
+        foldExperience()
     end)
+    -- A boss fight that ended, won or lost. ENCOUNTER_END is the only event that reports
+    -- wipes, and a raid night's wipe count is what separates progression from a farm clear.
+    onTallyEvent("ENCOUNTER_END", function(id, name, difficultyId, groupSize, success)
+        tally.encounter({
+            id = id,
+            name = name,
+            at = env.now(),
+            difficultyId = difficultyId,
+            groupSize = groupSize,
+            -- The client sends 1/0 rather than a boolean here.
+            success = success == true or success == 1,
+        })
+    end)
+    -- Neither challenge-mode event carries a payload; both are a signal to go and read the
+    -- run's state off the client, which is why the level and the completion arrive through
+    -- seams rather than through the handler's arguments.
+    onTallyEvent("CHALLENGE_MODE_START", function()
+        local keystone = env.activeKeystone()
+        if keystone then
+            tally.keystoneStart(keystone, env.now())
+        end
+    end)
+    onTallyEvent("CHALLENGE_MODE_COMPLETED", function()
+        local completion = env.keystoneCompletion()
+        if completion then
+            tally.keystoneComplete(completion, env.now())
+        end
+    end)
+    onTallyEvent("CHALLENGE_MODE_RESET", tally.keystoneReset)
     onTallyEvent("NEW_MOUNT_ADDED", function(id)
         tally.mount(id, env.mountInfo(id), env.now())
     end)
@@ -445,6 +516,11 @@ function ns.main(env)
     end)
     -- Housing decor is warband-wide, so the owned count decides first-time from duplicate:
     -- one copy means this segment collected it for the whole warband, more is an extra.
+    --
+    -- NOTE: these three names are unconfirmed. The 12.0 API listing spells most housing
+    -- events HOUSE_* rather than HOUSING_*, so the client may well reject all three and
+    -- leave housing untracked; `/chronie` reports whichever it refused. Registering them is
+    -- safe either way now that one rejected event no longer aborts the rest of this wiring.
     onTallyEvent("HOUSING_DECOR_ADDED", function(id)
         local name, quantity = env.housingItemInfo(id)
         tally.housingItem(id, name, env.now(), (quantity or 1) <= 1)
@@ -568,6 +644,44 @@ if CreateFrame then
                 local name, kind, difficultyId, difficulty = GetInstanceInfo()
                 return { name = name, kind = kind, difficultyId = difficultyId, difficulty = difficulty }
             end,
+            -- UnitXPMax reads 0 at the level cap, where "percent of a level" has no meaning
+            -- any more. Reporting nil there keeps the tally from dividing by it and from
+            -- recording a capped character as having levelled.
+            experienceState = function()
+                local maximum = UnitXPMax("player") or 0
+                if maximum <= 0 then
+                    return nil
+                end
+                return {
+                    level = UnitLevel("player"),
+                    xp = UnitXP("player") or 0,
+                    xpMax = maximum,
+                }
+            end,
+            activeKeystone = function()
+                local level, affixes = C_ChallengeMode.GetActiveKeystoneInfo()
+                if not level or level <= 0 then
+                    return nil
+                end
+                return {
+                    level = level,
+                    mapId = C_ChallengeMode.GetActiveChallengeMapID(),
+                    affixes = affixes,
+                }
+            end,
+            keystoneCompletion = function()
+                local mapId, level, durationMs, onTime, upgrades = C_ChallengeMode.GetCompletionInfo()
+                if not level then
+                    return nil
+                end
+                return {
+                    level = level,
+                    mapId = mapId,
+                    durationMs = durationMs,
+                    onTime = onTime,
+                    upgrades = upgrades,
+                }
+            end,
             itemSellPrice = function(itemID)
                 if not itemID then
                     return nil
@@ -667,7 +781,20 @@ if CreateFrame then
             itemName = function(itemID)
                 return (GetItemInfo(itemID))
             end,
-            lootSelfFormats = templates(LOOT_ITEM_SELF_MULTIPLE, LOOT_ITEM_SELF),
+            -- Every way an item can land in the player's own bags, because each one is
+            -- vendor value the segment should count. "You receive loot:" alone misses most
+            -- of it: quest rewards, container contents and anything pushed straight to a
+            -- bag arrive as "You receive item:", and a bonus roll has its own wording again.
+            --
+            -- Order matters and is load-bearing. parse() takes the first template that
+            -- matches, and the singular "...: %s." pattern also matches a stacked line,
+            -- swallowing the "x3" into the item capture and counting the stack as one. Each
+            -- _MULTIPLE variant therefore has to be offered before its singular partner.
+            lootSelfFormats = templates(
+                LOOT_ITEM_SELF_MULTIPLE, LOOT_ITEM_SELF,
+                LOOT_ITEM_PUSHED_SELF_MULTIPLE, LOOT_ITEM_PUSHED_SELF,
+                LOOT_ITEM_BONUS_ROLL_SELF_MULTIPLE, LOOT_ITEM_BONUS_ROLL_SELF
+            ),
             factionIncreaseFormats = templates(
                 FACTION_STANDING_INCREASED,
                 FACTION_STANDING_INCREASED_BONUS,

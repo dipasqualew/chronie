@@ -1091,6 +1091,109 @@ describe("addon integration", function()
             assert.equal(120, app.tally.summary().itemValue)
         end)
 
+        ---What the panel itself is showing as the loot value. The value font string is
+        ---created straight after its label, so it is the one following "Loot value".
+        ---@param recorded table
+        ---@return string?
+        local function panelLootValue(recorded)
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == "ChronieResultsWindow" then
+                    for index, fontString in ipairs(frame.fontStrings) do
+                        if fontString.text == "Loot value" then
+                            local value = frame.fontStrings[index + 1]
+                            return value and value.text
+                        end
+                    end
+                end
+            end
+        end
+
+        -- A quest reward, a container's contents and anything else the server pushes
+        -- straight into a bag are worded "You receive item:", which the addon used to
+        -- offer no template for and so never counted at all.
+        it("counts an item pushed straight into a bag in the panel", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                itemPrices = { [4242] = 60 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive item: " .. link(4242) .. ".")
+
+            assert.equal(60, app.tally.summary().itemValue)
+            assert.equal("60c", panelLootValue(recorded))
+        end)
+
+        it("counts a bonus roll's loot in the panel", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                itemPrices = { [4242] = 60 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive bonus loot: " .. link(4242) .. "x2.")
+
+            assert.equal(120, app.tally.summary().itemValue)
+            assert.equal("1s 20c", panelLootValue(recorded))
+        end)
+
+        -- The singular template also matches a stacked line and would swallow the "x3",
+        -- so a stack counts in full only while each _MULTIPLE variant is offered first.
+        it("counts a stacked pushed-loot line as the whole stack", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                itemPrices = { [4242] = 60 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive item: " .. link(4242) .. "x3.")
+
+            assert.equal(180, app.tally.summary().itemValue)
+        end)
+
+        -- A first-time drop is not cached when its loot line arrives, so the tally parks
+        -- it unpriced; GET_ITEM_INFO_RECEIVED is the server answering that price query.
+        it("folds a first-time drop's value in when the client answers with its price", function()
+            local prices = {}
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                itemPrices = prices,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive loot: " .. link(4242) .. "x2.")
+            assert.equal(0, app.tally.summary().itemValue)
+            assert.equal("0c", panelLootValue(recorded))
+
+            prices[4242] = 60
+            recorded.frame:fire("GET_ITEM_INFO_RECEIVED", 4242)
+
+            assert.equal(120, app.tally.summary().itemValue)
+            assert.equal("1s 20c", panelLootValue(recorded))
+        end)
+
+        it("ignores a price answer for an item this segment never looted", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                itemPrices = { [4242] = 60, [9999] = 500 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("CHAT_MSG_LOOT", "You receive loot: " .. link(4242) .. ".")
+
+            recorded.frame:fire("GET_ITEM_INFO_RECEIVED", 9999)
+
+            assert.equal(60, app.tally.summary().itemValue)
+        end)
+
         it("accumulates reputation from the faction-change event", function()
             local app, recorded = boot({
                 playerName = "Thrall",
@@ -1251,7 +1354,7 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             recorded.setItemCount(5001, 55)
-            recorded.frame:fire("BAG_UPDATE_DELTA")
+            recorded.frame:fire("BAG_UPDATE_DELAYED")
 
             assert.same(
                 { { id = 5001, name = "Bloody Token", amount = 15 } },
@@ -1270,7 +1373,7 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             recorded.setItemCount(5001, 12)
-            recorded.frame:fire("BAG_UPDATE_DELTA")
+            recorded.frame:fire("BAG_UPDATE_DELAYED")
 
             assert.equal(-28, app.tally.summary().currencies[1].amount)
         end)
@@ -1287,7 +1390,7 @@ describe("addon integration", function()
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            recorded.frame:fire("BAG_UPDATE_DELTA")
+            recorded.frame:fire("BAG_UPDATE_DELAYED")
 
             assert.same({}, app.tally.summary().currencies)
         end)
@@ -1328,12 +1431,12 @@ describe("addon integration", function()
 
             -- First bag update after tracking only anchors the baseline at the held 40.
             recorded.setItemCount(5001, 55)
-            recorded.frame:fire("BAG_UPDATE_DELTA")
+            recorded.frame:fire("BAG_UPDATE_DELAYED")
             assert.same({}, app.tally.summary().currencies)
 
             -- A further gain from that anchor is what counts.
             recorded.setItemCount(5001, 70)
-            recorded.frame:fire("BAG_UPDATE_DELTA")
+            recorded.frame:fire("BAG_UPDATE_DELAYED")
             assert.equal(15, app.tally.summary().currencies[1].amount)
         end)
 
@@ -1447,10 +1550,11 @@ describe("addon integration", function()
 
             assert.equal(1, recorded.frame.registered.PLAYER_MONEY)
             assert.equal(1, recorded.frame.registered.CHAT_MSG_LOOT)
+            assert.equal(1, recorded.frame.registered.GET_ITEM_INFO_RECEIVED)
             assert.equal(1, recorded.frame.registered.CHAT_MSG_COMBAT_FACTION_CHANGE)
             assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
             assert.equal(1, recorded.frame.registered.CURRENCY_DISPLAY_UPDATE)
-            assert.equal(1, recorded.frame.registered.BAG_UPDATE_DELTA)
+            assert.equal(1, recorded.frame.registered.BAG_UPDATE_DELAYED)
             assert.equal(1, recorded.frame.registered.ACHIEVEMENT_EARNED)
             assert.equal(1, recorded.frame.registered.PLAYER_LEVEL_UP)
             assert.equal(1, recorded.frame.registered.NEW_MOUNT_ADDED)
@@ -1462,6 +1566,159 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.HOUSING_DECOR_ADDED)
             assert.equal(1, recorded.frame.registered.HOUSING_XP_GAINED)
             assert.equal(1, recorded.frame.registered.HOUSING_LEVEL_UP)
+            assert.equal(1, recorded.frame.registered.PLAYER_XP_UPDATE)
+            assert.equal(1, recorded.frame.registered.ENCOUNTER_END)
+            assert.equal(1, recorded.frame.registered.CHALLENGE_MODE_START)
+            assert.equal(1, recorded.frame.registered.CHALLENGE_MODE_COMPLETED)
+            assert.equal(1, recorded.frame.registered.CHALLENGE_MODE_RESET)
+        end)
+    end)
+
+    describe("what the player was doing", function()
+        ---Boot inside an instance with a segment already open, which is what every one of
+        ---these events needs before the tally will accept anything.
+        ---@param options table?
+        ---@return table app, table recorded
+        local function zonedIn(options)
+            options = options or {}
+            options.playerName = options.playerName or "Thrall"
+            options.realmName = options.realmName or "Ragnaros"
+            options.instanceType = options.instanceType or "party"
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            return app, recorded
+        end
+
+        it("records a boss kill the client reported", function()
+            local app, recorded = zonedIn()
+
+            recorded.frame:fire("ENCOUNTER_END", 745, "Flame Leviathan", 4, 25, 1)
+
+            local encounters = app.tally.summary().encounters
+            assert.equal(1, #encounters)
+            assert.equal(745, encounters[1].id)
+            assert.equal("Flame Leviathan", encounters[1].name)
+            assert.equal(25, encounters[1].groupSize)
+            assert.is_true(encounters[1].success)
+        end)
+
+        it("records a wipe as an encounter that failed", function()
+            local app, recorded = zonedIn()
+
+            recorded.frame:fire("ENCOUNTER_END", 745, "Flame Leviathan", 4, 25, 0)
+
+            assert.is_false(app.tally.summary().encounters[1].success)
+        end)
+
+        it("reads the keystone off the client when a run starts", function()
+            local app, recorded = zonedIn({
+                activeKeystone = { level = 14, mapId = 378, affixes = { 9, 6 } },
+            })
+
+            recorded.frame:fire("CHALLENGE_MODE_START")
+
+            local keystone = app.tally.summary().keystone
+            assert.equal(14, keystone.level)
+            assert.equal(378, keystone.mapId)
+            assert.is_false(keystone.completed)
+        end)
+
+        it("folds the completion report onto the run when it finishes", function()
+            local app, recorded = zonedIn({
+                activeKeystone = { level = 14, mapId = 378 },
+                keystoneCompletion = {
+                    level = 14, mapId = 378, durationMs = 1740000, onTime = true, upgrades = 2,
+                },
+            })
+            recorded.frame:fire("CHALLENGE_MODE_START")
+
+            recorded.frame:fire("CHALLENGE_MODE_COMPLETED")
+
+            local keystone = app.tally.summary().keystone
+            assert.is_true(keystone.completed)
+            assert.is_true(keystone.onTime)
+            assert.equal(2, keystone.upgrades)
+        end)
+
+        it("strips the completion when the party resets the key", function()
+            local app, recorded = zonedIn({ activeKeystone = { level = 14 } })
+            recorded.frame:fire("CHALLENGE_MODE_START")
+
+            recorded.frame:fire("CHALLENGE_MODE_RESET")
+
+            assert.is_false(app.tally.summary().keystone.completed)
+        end)
+
+        it("measures experience against the standing the segment opened on", function()
+            local app, recorded = zonedIn({ experience = { level = 41, xp = 2000, xpMax = 10000 } })
+
+            recorded.setExperience({ level = 41, xp = 4500, xpMax = 10000 })
+            recorded.frame:fire("PLAYER_XP_UPDATE")
+
+            local experience = app.tally.summary().experience
+            assert.equal(2500, experience.gained)
+            assert.near(0.25, experience.percent, 1e-9)
+        end)
+
+        -- A level-up empties the bar, so an addon that only listened to PLAYER_XP_UPDATE
+        -- would lose the experience that carried the character over the line.
+        it("counts the experience a level up was made of", function()
+            local app, recorded = zonedIn({ experience = { level = 41, xp = 8000, xpMax = 10000 } })
+
+            recorded.setExperience({ level = 42, xp = 3000, xpMax = 20000 })
+            recorded.frame:fire("PLAYER_LEVEL_UP", 42)
+
+            local summary = app.tally.summary()
+            assert.equal(5000, summary.experience.gained)
+            assert.equal(42, summary.experience.endLevel)
+            assert.same({ level = 42, at = 1000 }, summary.levelUps[1])
+        end)
+
+        it("records nothing for a character at the level cap", function()
+            local app, recorded = zonedIn({ experience = nil })
+
+            recorded.frame:fire("PLAYER_XP_UPDATE")
+
+            assert.is_nil(app.tally.summary().experience)
+        end)
+
+        it("files the expansion the location belongs to alongside the newest one", function()
+            local app, recorded = zonedIn({
+                instanceName = "Ulduar",
+                tiers = {
+                    { name = "Classic", raids = { "Molten Core" } },
+                    { name = "The Burning Crusade", raids = { "Karazhan" } },
+                    { name = "Wrath of the Lich King", raids = { "Ulduar" } },
+                    { name = "Cataclysm", raids = { "Firelands" } },
+                },
+            })
+            recorded.frame:fire("ENCOUNTER_END", 745, "Flame Leviathan", 4, 25, 1)
+
+            recorded.setInstance({ name = "Orgrimmar", kind = "none" })
+            recorded.frame:fire("ZONE_CHANGED_NEW_AREA")
+
+            local record = app.segmentLog.all()[1]
+            assert.equal("Ulduar", record.instance)
+            assert.equal(3, record.expansionTier)
+            assert.equal(4, record.latestExpansionTier)
+        end)
+
+        it("carries a keystone run all the way onto the filed segment", function()
+            local app, recorded = zonedIn({
+                instanceName = "Halls of Atonement",
+                activeKeystone = { level = 14, mapId = 378, affixes = { 9, 6 } },
+                keystoneCompletion = { level = 14, mapId = 378, durationMs = 1740000, onTime = true },
+            })
+            recorded.frame:fire("CHALLENGE_MODE_START")
+            recorded.frame:fire("CHALLENGE_MODE_COMPLETED")
+
+            recorded.setInstance({ name = "Oribos", kind = "none" })
+            recorded.frame:fire("ZONE_CHANGED_NEW_AREA")
+
+            local record = app.segmentLog.all()[1]
+            assert.equal(14, record.keystone.level)
+            assert.is_true(record.keystone.completed)
+            assert.same({ 9, 6 }, record.keystone.affixes)
         end)
     end)
 
@@ -1748,13 +2005,14 @@ describe("addon integration", function()
             assert.is_nil(visible["Deadmines"])
         end)
 
-        it("names segments, currency and report in the usage text", function()
+        it("names segments, currency, report and events in the usage text", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("nonsense")
 
             assert.equal(
-                "|cff33ff99chronie|r: usage: /chronie locks | results | segments | currency | report",
+                "|cff33ff99chronie|r: usage: /chronie locks | results | segments | currency "
+                    .. "| report | events",
                 recorded.lines[1]
             )
         end)
@@ -1834,6 +2092,184 @@ describe("addon integration", function()
             recorded.slashRegistrations[1].handler("report")
 
             assert.is_true(#recorded.frames > 1)
+        end)
+    end)
+
+    describe("an event this client build refuses to register", function()
+        -- The regression this whole seam exists for. Main.lua wired BAG_UPDATE_DELTA, a
+        -- name no client defines, and since patch 8.0.1 RegisterEvent *raises* on such a
+        -- name — so ns.main aborted on that line and every subscription after it was
+        -- silently lost: achievements, level ups, collections, all three quest events and
+        -- the slash command. Loot still worked, which is why it went unnoticed.
+        local REFUSED = { "BAG_UPDATE_DELAYED" }
+
+        ---Every event wired after the refused one, which is what used to disappear.
+        local WIRED_AFTER = {
+            "ACHIEVEMENT_EARNED",
+            "PLAYER_LEVEL_UP",
+            "NEW_MOUNT_ADDED",
+            "NEW_PET_ADDED",
+            "NEW_TOY_ADDED",
+            "QUEST_ACCEPTED",
+            "QUEST_LOG_UPDATE",
+            "QUEST_TURNED_IN",
+        }
+
+        it("boots the addon rather than dying on the refusal", function()
+            assert.has_no.errors(function()
+                boot({ playerName = "Thrall", realmName = "Ragnaros", rejectEvents = REFUSED })
+            end)
+        end)
+
+        it("registers every event wired after the refused one", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                rejectEvents = REFUSED,
+            })
+
+            for _, event in ipairs(WIRED_AFTER) do
+                assert.is_truthy(recorded.frame.registered[event], event .. " was never registered")
+            end
+        end)
+
+        it("leaves only the refused event unregistered", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                rejectEvents = REFUSED,
+            })
+
+            assert.is_nil(recorded.frame.registered.BAG_UPDATE_DELAYED)
+            assert.is_truthy(recorded.frame.registered.CHAT_MSG_LOOT)
+        end)
+
+        it("still registers the slash command, which is wired last of all", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                rejectEvents = REFUSED,
+            })
+
+            assert.equal(1, #recorded.slashRegistrations)
+            assert.same({ "/chronie" }, recorded.slashRegistrations[1].tokens)
+        end)
+
+        it("still records a quest turn-in and an achievement in the tally", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                now = 1700000000,
+                rejectEvents = REFUSED,
+                achievements = { [1234] = "The Loremaster" },
+                activeQuests = { 7848 },
+                questStates = {
+                    [7848] = {
+                        name = "A Hunter's Challenge",
+                        characterCompleted = false,
+                        accountCompleted = false,
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("QUEST_TURNED_IN", 7848)
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 1234)
+
+            local summary = app.tally.summary()
+            assert.equal("A Hunter's Challenge", summary.quests[1].name)
+            assert.is_true(summary.quests[1].characterFirst)
+            assert.equal("The Loremaster", summary.achievements[1].name)
+        end)
+
+        it("keeps the events before the refusal working too", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 0,
+                rejectEvents = REFUSED,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setMoney(1000)
+            recorded.frame:fire("PLAYER_MONEY")
+
+            assert.equal(1000, app.tally.summary().goldLooted)
+        end)
+
+        -- Only the refused event's own feature is lost: nothing recounts the tracked
+        -- currency items, because the batched bag update never arrives.
+        it("loses only the feature the refused event fed", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                rejectEvents = REFUSED,
+                currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+                trackedCurrencies = { 5001 },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setItemCount(5001, 55)
+
+            assert.same({}, app.tally.summary().currencies)
+        end)
+    end)
+
+    describe("the /chronie events slash command", function()
+        it("says the client accepted everything when nothing was refused", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("events")
+
+            assert.equal(
+                "|cff33ff99chronie|r: this client accepted every event the addon tracks.",
+                recorded.lines[1]
+            )
+        end)
+
+        it("names the event this client refused", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                rejectEvents = { "BAG_UPDATE_DELAYED" },
+            })
+
+            recorded.slashRegistrations[1].handler("events")
+
+            assert.equal(1, #recorded.lines)
+            assert.is_truthy(recorded.lines[1]:find("BAG_UPDATE_DELAYED", 1, true))
+            assert.is_truthy(recorded.lines[1]:find("1 event(s)", 1, true))
+        end)
+
+        it("names every refused event, in the order they were wired", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                rejectEvents = { "NEW_TOY_ADDED", "BAG_UPDATE_DELAYED" },
+            })
+
+            recorded.slashRegistrations[1].handler("events")
+
+            assert.is_truthy(recorded.lines[1]:find("2 event(s)", 1, true))
+            assert.is_truthy(recorded.lines[1]:find("BAG_UPDATE_DELAYED, NEW_TOY_ADDED", 1, true))
+        end)
+
+        -- Reported unprompted at login as well, so a feature this client cannot support
+        -- shows up as something the player can see rather than as silence.
+        it("reports the refused events at login", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                rejectEvents = { "BAG_UPDATE_DELAYED" },
+            })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.equal(1, #recorded.lines)
+            assert.is_truthy(recorded.lines[1]:find("BAG_UPDATE_DELAYED", 1, true))
         end)
     end)
 

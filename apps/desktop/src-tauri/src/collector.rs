@@ -1,3 +1,4 @@
+use crate::activity;
 use chrono::{DateTime, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
@@ -9,7 +10,10 @@ use std::{
     time::Duration,
 };
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_initial.sql"),
+    include_str!("../migrations/0002_activities.sql"),
+];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
 #[derive(Debug, Clone, Serialize)]
@@ -397,9 +401,18 @@ fn normalized(mut segment: Value) -> Option<Value> {
         "toys",
         "housingItems",
         "housingLevelUps",
+        "encounters",
     ] {
         if !object.get(key).is_some_and(Value::is_array) {
             object.insert(key.into(), Value::Array(Vec::new()));
+        }
+    }
+    // `keystone` and `experience` are deliberately left absent when the segment carried
+    // none: the inference reads the absence of a keystone as "this was not a Mythic+ run",
+    // which an empty stand-in would destroy.
+    for key in ["keystone", "experience"] {
+        if !object.get(key).is_some_and(Value::is_object) {
+            object.remove(key);
         }
     }
     Some(segment)
@@ -554,11 +567,63 @@ fn clear_outcomes(transaction: &Transaction<'_>, segment_id: i64) -> Result<(), 
         "toys",
         "housing_items",
         "housing_level_ups",
+        "encounters",
+        "keystone_runs",
     ] {
         transaction
             .execute(
                 &format!("DELETE FROM {table} WHERE segment_id = ?1"),
                 [segment_id],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Rebuilds the guesses for one segment, leaving everything the user did untouched.
+///
+/// Only 'inferred' rows are thrown away and recomputed, so a better rule set reaches all of
+/// history on the next sync. A kind the user suppressed — by deleting the guess or by
+/// editing it into a correction of their own — is skipped, which is what makes an edit
+/// survive a sync instead of being quietly overwritten by the guess it replaced.
+fn refresh_activities(
+    transaction: &Transaction<'_>,
+    segment_id: i64,
+    segment: &Value,
+    now: i64,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "DELETE FROM activities WHERE segment_id = ?1 AND source = 'inferred'",
+            [segment_id],
+        )
+        .map_err(|error| error.to_string())?;
+    let mut suppressed = transaction
+        .prepare("SELECT kind FROM activity_suppressions WHERE segment_id = ?1")
+        .map_err(|error| error.to_string())?;
+    let kinds = suppressed
+        .query_map([segment_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(suppressed);
+
+    for guess in activity::infer(segment) {
+        if kinds.contains(&guess.kind) {
+            continue;
+        }
+        transaction
+            .execute(
+                "INSERT INTO activities (
+                     segment_id, kind, source, confidence, metadata_json, created_at, updated_at
+                 ) VALUES (?1, ?2, 'inferred', ?3, ?4, ?5, ?5)",
+                params![
+                    segment_id,
+                    guess.kind,
+                    guess.confidence,
+                    guess.metadata.to_string(),
+                    now
+                ],
             )
             .map_err(|error| error.to_string())?;
     }
@@ -798,6 +863,62 @@ fn insert_outcomes(
             )
             .map_err(|error| error.to_string())?;
     }
+
+    for (position, event) in events(segment, "encounters").iter().enumerate() {
+        let Some(encounter_id) = optional_integer(event, "id") else {
+            continue;
+        };
+        transaction
+            .execute(
+                "INSERT INTO encounters (
+                     segment_id, position, encounter_id, name, ended_at,
+                     difficulty_id, group_size, success
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    segment_id,
+                    position as i64,
+                    encounter_id,
+                    optional_text(event, "name"),
+                    optional_integer(event, "at"),
+                    optional_integer(event, "difficultyId"),
+                    optional_integer(event, "groupSize"),
+                    optional_boolean(event, "success").unwrap_or(0)
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    if let Some(keystone) = segment.get("keystone").filter(|value| value.is_object()) {
+        // A run with no level is not one the app can say anything useful about, and the
+        // column is NOT NULL for exactly that reason.
+        if let Some(level) = optional_integer(keystone, "level") {
+            let affixes = keystone
+                .get("affixes")
+                .filter(|value| value.is_array())
+                .cloned()
+                .unwrap_or_else(|| Value::Array(Vec::new()));
+            transaction
+                .execute(
+                    "INSERT INTO keystone_runs (
+                         segment_id, level, map_id, affixes_json, started_at,
+                         completed_at, completed, duration_ms, on_time, upgrades
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        segment_id,
+                        level,
+                        optional_integer(keystone, "mapId"),
+                        affixes.to_string(),
+                        optional_integer(keystone, "startedAt"),
+                        optional_integer(keystone, "completedAt"),
+                        optional_boolean(keystone, "completed").unwrap_or(0),
+                        optional_integer(keystone, "durationMs"),
+                        optional_boolean(keystone, "onTime"),
+                        optional_integer(keystone, "upgrades")
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -817,16 +938,20 @@ fn upsert_segment(
         .optional()
         .map_err(|error| error.to_string())?;
     let ended_at = integer(segment, "endedAt");
+    let experience = segment.get("experience").filter(|value| value.is_object());
     transaction
         .execute(
             "INSERT INTO segments (
                  character_id, source_id, ended_day, instance_name, instance_type,
                  difficulty_name, difficulty_id, started_at, ended_at, duration_seconds,
                  character_level, loot_value, gold_diff, currency_total, reputation_total,
-                 housing_xp, first_seen_at, last_seen_at
+                 housing_xp, first_seen_at, last_seen_at,
+                 expansion_tier, latest_expansion_tier, experience_gained,
+                 experience_percent, experience_start_level, experience_end_level
              ) VALUES (
                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17
+                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17,
+                 ?18, ?19, ?20, ?21, ?22, ?23
              )
              ON CONFLICT(character_id, source_id) DO UPDATE SET
                  ended_day = excluded.ended_day,
@@ -843,7 +968,13 @@ fn upsert_segment(
                  currency_total = excluded.currency_total,
                  reputation_total = excluded.reputation_total,
                  housing_xp = excluded.housing_xp,
-                 last_seen_at = excluded.last_seen_at",
+                 last_seen_at = excluded.last_seen_at,
+                 expansion_tier = excluded.expansion_tier,
+                 latest_expansion_tier = excluded.latest_expansion_tier,
+                 experience_gained = excluded.experience_gained,
+                 experience_percent = excluded.experience_percent,
+                 experience_start_level = excluded.experience_start_level,
+                 experience_end_level = excluded.experience_end_level",
             params![
                 character_id,
                 source_id,
@@ -861,12 +992,22 @@ fn upsert_segment(
                 integer(segment, "currencyTotal"),
                 integer(segment, "reputationTotal"),
                 integer(segment, "housingXP"),
-                now
+                now,
+                optional_integer(segment, "expansionTier"),
+                optional_integer(segment, "latestExpansionTier"),
+                experience.map(|value| integer(value, "gained")).unwrap_or(0),
+                experience
+                    .and_then(|value| value.get("percent"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                experience.and_then(|value| optional_integer(value, "startLevel")),
+                experience.and_then(|value| optional_integer(value, "endLevel")),
             ],
         )
         .map_err(|error| error.to_string())?;
     let segment_id = existing.unwrap_or_else(|| transaction.last_insert_rowid());
     insert_outcomes(transaction, segment_id, segment)?;
+    refresh_activities(transaction, segment_id, segment, now)?;
     Ok(existing.is_none())
 }
 
@@ -974,7 +1115,9 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
                  s.ended_day, s.instance_name, s.difficulty_name, s.instance_type,
                  s.difficulty_id, s.started_at, s.ended_at, s.duration_seconds,
                  s.loot_value, s.gold_diff, s.currency_total, s.reputation_total,
-                 s.housing_xp
+                 s.housing_xp, s.expansion_tier, s.latest_expansion_tier,
+                 s.experience_gained, s.experience_percent,
+                 s.experience_start_level, s.experience_end_level
              FROM segments s
              JOIN characters c ON c.id = s.character_id
              ORDER BY s.ended_at DESC, s.source_id ASC",
@@ -982,9 +1125,17 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([], |row| {
+            let experience_gained: i64 = row.get(20)?;
+            let experience_percent: f64 = row.get(21)?;
+            let experience_start: Option<i64> = row.get(22)?;
+            let experience_end: Option<i64> = row.get(23)?;
             Ok((
                 row.get::<_, i64>(0)?,
                 serde_json::json!({
+                    // The database row id, which is what an activity is filed against. The
+                    // `id` beside it is the addon's own identity for the segment; the editor
+                    // needs the one that survives a rename of the other.
+                    "segmentId": row.get::<_, i64>(0)?,
                     "id": row.get::<_, String>(1)?,
                     "character": row.get::<_, String>(2)?,
                     "classFile": row.get::<_, Option<String>>(3)?,
@@ -1002,6 +1153,18 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
                     "currencyTotal": row.get::<_, i64>(15)?,
                     "reputationTotal": row.get::<_, i64>(16)?,
                     "housingXP": row.get::<_, i64>(17)?,
+                    "expansionTier": row.get::<_, Option<i64>>(18)?,
+                    "latestExpansionTier": row.get::<_, Option<i64>>(19)?,
+                    // Absent, not zeroed, when the character never earned any: the same
+                    // rule the ingest side follows, so a reader can trust the absence.
+                    "experience": (experience_gained != 0).then(|| serde_json::json!({
+                        "gained": experience_gained,
+                        "percent": experience_percent,
+                        "startLevel": experience_start,
+                        "endLevel": experience_end,
+                    })),
+                    "activities": [],
+                    "encounters": [],
                     "transmogs": [],
                     "currencies": [],
                     "reputation": [],
@@ -1206,10 +1369,310 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
         ))
     );
 
+    load_rows!(
+        "SELECT segment_id, encounter_id, name, ended_at, difficulty_id, group_size, success
+         FROM encounters ORDER BY segment_id, position",
+        "encounters",
+        |row| Ok((
+            row.get::<_, i64>(0)?,
+            serde_json::json!({
+                "id": row.get::<_, i64>(1)?,
+                "name": row.get::<_, Option<String>>(2)?,
+                "at": row.get::<_, Option<i64>>(3)?,
+                "difficultyId": row.get::<_, Option<i64>>(4)?,
+                "groupSize": row.get::<_, Option<i64>>(5)?,
+                "success": row.get::<_, i64>(6)? != 0
+            })
+        ))
+    );
+    load_rows!(
+        "SELECT id, segment_id, kind, source, confidence, metadata_json
+         FROM activities ORDER BY segment_id, source DESC, kind",
+        "activities",
+        |row| {
+            let metadata: String = row.get(5)?;
+            Ok((
+                row.get::<_, i64>(1)?,
+                serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "kind": row.get::<_, String>(2)?,
+                    "source": row.get::<_, String>(3)?,
+                    "confidence": row.get::<_, f64>(4)?,
+                    "metadata": serde_json::from_str::<Value>(&metadata)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                }),
+            ))
+        }
+    );
+
+    // A keystone run is one per segment rather than a list, so it is attached directly
+    // instead of pushed onto an event array.
+    let mut statement = connection
+        .prepare(
+            "SELECT segment_id, level, map_id, affixes_json, started_at, completed_at,
+                    completed, duration_ms, on_time, upgrades
+             FROM keystone_runs",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let affixes: String = row.get(3)?;
+            Ok((
+                row.get::<_, i64>(0)?,
+                serde_json::json!({
+                    "level": row.get::<_, i64>(1)?,
+                    "mapId": row.get::<_, Option<i64>>(2)?,
+                    "affixes": serde_json::from_str::<Value>(&affixes)
+                        .unwrap_or_else(|_| Value::Array(Vec::new())),
+                    "startedAt": row.get::<_, Option<i64>>(4)?,
+                    "completedAt": row.get::<_, Option<i64>>(5)?,
+                    "completed": row.get::<_, i64>(6)? != 0,
+                    "durationMs": row.get::<_, Option<i64>>(7)?,
+                    "onTime": row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
+                    "upgrades": row.get::<_, Option<i64>>(9)?,
+                }),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (segment_id, keystone) = row.map_err(|error| error.to_string())?;
+        if let Some(index) = indices.get(&segment_id) {
+            segments[*index]["keystone"] = keystone;
+        }
+    }
+    drop(statement);
+
     Ok(serde_json::json!({
         "generatedAt": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "knownActivityKinds": activity::KNOWN_KINDS,
         "segments": segments,
     }))
+}
+
+/// Everything the desktop app can do to a segment's activities.
+///
+/// The editing rules live here rather than in the Tauri command layer so they can be tested
+/// against a real database without a running app. All three write a suppression where one is
+/// needed, which is the single mechanism that stops the next sync undoing a user's work.
+pub fn add_activity(
+    database_path: &Path,
+    segment_id: i64,
+    kind: &str,
+    metadata: &Value,
+    now: i64,
+) -> Result<(), String> {
+    let mut connection = open_database(database_path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    // Adding a kind by hand also suppresses the guess for it, so the next sync cannot end up
+    // with the user's version and the inferred one sitting side by side.
+    suppress(&transaction, segment_id, kind, now)?;
+    transaction
+        .execute(
+            "DELETE FROM activities
+             WHERE segment_id = ?1 AND kind = ?2 AND source = 'inferred'",
+            params![segment_id, kind],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO activities (
+                 segment_id, kind, source, confidence, metadata_json, created_at, updated_at
+             ) VALUES (?1, ?2, 'manual', 1, ?3, ?4, ?4)",
+            params![segment_id, kind, metadata.to_string(), now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+/// Edits an activity. Editing a guess adopts it: the row becomes the user's, and the guess
+/// that produced it is suppressed so the next sync does not add it back alongside.
+pub fn update_activity(
+    database_path: &Path,
+    activity_id: i64,
+    kind: &str,
+    metadata: &Value,
+    now: i64,
+) -> Result<(), String> {
+    let mut connection = open_database(database_path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let existing: Option<(i64, String)> = transaction
+        .query_row(
+            "SELECT segment_id, kind FROM activities WHERE id = ?1",
+            [activity_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((segment_id, previous_kind)) = existing else {
+        return Err("That activity no longer exists.".into());
+    };
+    suppress(&transaction, segment_id, &previous_kind, now)?;
+    if previous_kind != kind {
+        suppress(&transaction, segment_id, kind, now)?;
+        transaction
+            .execute(
+                "DELETE FROM activities
+                 WHERE segment_id = ?1 AND kind = ?2 AND source = 'inferred'",
+                params![segment_id, kind],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction
+        .execute(
+            "UPDATE activities
+             SET kind = ?2, source = 'manual', confidence = 1,
+                 metadata_json = ?3, updated_at = ?4
+             WHERE id = ?1",
+            params![activity_id, kind, metadata.to_string(), now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+/// Removes an activity for good. A guess is suppressed as well as deleted, or the next sync
+/// would simply put it back and the deletion would look like it never happened.
+pub fn delete_activity(database_path: &Path, activity_id: i64, now: i64) -> Result<(), String> {
+    let mut connection = open_database(database_path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let existing: Option<(i64, String)> = transaction
+        .query_row(
+            "SELECT segment_id, kind FROM activities WHERE id = ?1",
+            [activity_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((segment_id, kind)) = existing else {
+        return Ok(());
+    };
+    suppress(&transaction, segment_id, &kind, now)?;
+    transaction
+        .execute("DELETE FROM activities WHERE id = ?1", [activity_id])
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+/// Throws away everything the user did to one segment's activities and re-runs the guesses.
+/// The way back from an edit the user regrets, and the only way a suppressed kind ever
+/// returns.
+pub fn reset_activities(database_path: &Path, segment_id: i64, now: i64) -> Result<(), String> {
+    let mut connection = open_database(database_path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM activity_suppressions WHERE segment_id = ?1",
+            [segment_id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM activities WHERE segment_id = ?1", [segment_id])
+        .map_err(|error| error.to_string())?;
+    let segment = segment_value(&transaction, segment_id)?;
+    refresh_activities(&transaction, segment_id, &segment, now)?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+fn suppress(
+    transaction: &Transaction<'_>,
+    segment_id: i64,
+    kind: &str,
+    now: i64,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT INTO activity_suppressions (segment_id, kind, created_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(segment_id, kind) DO NOTHING",
+            params![segment_id, kind, now],
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+/// Rebuilds just enough of a stored segment for the inference to read, so a reset can
+/// re-guess without the SavedVariables file the segment originally came from — which may be
+/// long gone, since the addon only keeps a rolling week.
+fn segment_value(transaction: &Transaction<'_>, segment_id: i64) -> Result<Value, String> {
+    let mut segment = transaction
+        .query_row(
+            "SELECT instance_name, instance_type, difficulty_name, difficulty_id,
+                    duration_seconds, expansion_tier, latest_expansion_tier,
+                    experience_gained, experience_percent,
+                    experience_start_level, experience_end_level
+             FROM segments WHERE id = ?1",
+            [segment_id],
+            |row| {
+                let gained: i64 = row.get(7)?;
+                Ok(serde_json::json!({
+                    "instance": row.get::<_, String>(0)?,
+                    "instanceType": row.get::<_, String>(1)?,
+                    "difficulty": row.get::<_, String>(2)?,
+                    "difficultyId": row.get::<_, Option<i64>>(3)?,
+                    "seconds": row.get::<_, i64>(4)?,
+                    "expansionTier": row.get::<_, Option<i64>>(5)?,
+                    "latestExpansionTier": row.get::<_, Option<i64>>(6)?,
+                    "experience": (gained != 0).then(|| serde_json::json!({
+                        "gained": gained,
+                        "percent": row.get::<_, f64>(8).unwrap_or(0.0),
+                        "startLevel": row.get::<_, Option<i64>>(9).unwrap_or(None),
+                        "endLevel": row.get::<_, Option<i64>>(10).unwrap_or(None),
+                    })),
+                }))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "That segment no longer exists.".to_string())?;
+
+    let mut statement = transaction
+        .prepare(
+            "SELECT success FROM encounters WHERE segment_id = ?1 ORDER BY position",
+        )
+        .map_err(|error| error.to_string())?;
+    let encounters = statement
+        .query_map([segment_id], |row| {
+            Ok(serde_json::json!({ "id": 0, "success": row.get::<_, i64>(0)? != 0 }))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    drop(statement);
+    segment["encounters"] = Value::Array(encounters);
+
+    let levels: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM level_ups WHERE segment_id = ?1",
+            [segment_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    segment["levelUps"] = Value::Array(vec![serde_json::json!({}); levels as usize]);
+
+    let keystone: Option<Value> = transaction
+        .query_row(
+            "SELECT level, map_id, affixes_json, completed, duration_ms, on_time, upgrades
+             FROM keystone_runs WHERE segment_id = ?1",
+            [segment_id],
+            |row| {
+                let affixes: String = row.get(2)?;
+                Ok(serde_json::json!({
+                    "level": row.get::<_, i64>(0)?,
+                    "mapId": row.get::<_, Option<i64>>(1)?,
+                    "affixes": serde_json::from_str::<Value>(&affixes)
+                        .unwrap_or_else(|_| Value::Array(Vec::new())),
+                    "completed": row.get::<_, i64>(3)? != 0,
+                    "durationMs": row.get::<_, Option<i64>>(4)?,
+                    "onTime": row.get::<_, Option<i64>>(5)?.map(|value| value != 0),
+                    "upgrades": row.get::<_, Option<i64>>(6)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(keystone) = keystone {
+        segment["keystone"] = keystone;
+    }
+    Ok(segment)
 }
 
 #[cfg(test)]
@@ -1332,6 +1795,272 @@ ChronieDB = {{ ["segments"] = {{
         let result = collect(&wow, &database, now + DAY_SECONDS).unwrap();
         assert_eq!(result.segment_count, 2);
         assert_eq!(dashboard(&database).unwrap()["segments"][1]["id"], "old");
+    }
+
+    /// A wow folder holding one segment, written the way the addon writes it. Returns the
+    /// paths so a test can sync, edit, and sync again against real storage.
+    fn synthetic_install(segment_lua: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        let saved = wow.join("WTF/Account/TEST/SavedVariables");
+        fs::create_dir_all(&saved).unwrap();
+        fs::write(
+            saved.join("chronie.lua"),
+            format!(r#"ChronieDB = {{ ["segments"] = {{ {segment_lua} }} }}"#),
+        )
+        .unwrap();
+        let database = temp.path().join("data/chronie.sqlite3");
+        (temp, wow, database)
+    }
+
+    /// The same file re-read; the collector skips a source whose size and timestamp are
+    /// unchanged, so a test that wants a second pass has to make the file look different.
+    fn touch(wow: &Path, segment_lua: &str) {
+        let path = wow.join("WTF/Account/TEST/SavedVariables/chronie.lua");
+        fs::write(
+            &path,
+            format!(r#"ChronieDB = {{ ["segments"] = {{ {segment_lua} }} }}  -- touched"#),
+        )
+        .unwrap();
+    }
+
+    fn activities_of(database: &Path) -> Vec<Value> {
+        dashboard(database).unwrap()["segments"][0]["activities"]
+            .as_array()
+            .expect("an activities array")
+            .clone()
+    }
+
+    const RAID_SEGMENT: &str = r#"
+      { ["id"] = "raid-1", ["character"] = "Aster-Vale", ["instance"] = "Ulduar",
+        ["instanceType"] = "raid", ["difficulty"] = "25 Player",
+        ["expansionTier"] = 3, ["latestExpansionTier"] = 11,
+        ["endedAt"] = 2000000000, ["startedAt"] = 1999990000, ["seconds"] = 10000,
+        ["encounters"] = {
+          { ["id"] = 745, ["name"] = "Flame Leviathan", ["success"] = true },
+          { ["id"] = 746, ["name"] = "Ignis", ["success"] = false }
+        } }
+    "#;
+
+    #[test]
+    fn stores_a_keystone_run_and_guesses_the_activity_from_it() {
+        let keystone = r#"
+          { ["id"] = "key-1", ["character"] = "Aster-Vale", ["instance"] = "Halls of Atonement",
+            ["instanceType"] = "party", ["difficultyId"] = 8, ["endedAt"] = 2000000000,
+            ["experience"] = { ["gained"] = 200, ["percent"] = 0.02 },
+            ["keystone"] = { ["level"] = 14, ["mapId"] = 378, ["affixes"] = { 9, 6 },
+              ["completed"] = true, ["onTime"] = true, ["upgrades"] = 2,
+              ["durationMs"] = 1740000 } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(keystone);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        assert_eq!(segment["keystone"]["level"], 14);
+        assert_eq!(segment["keystone"]["affixes"], serde_json::json!([9, 6]));
+        assert_eq!(segment["keystone"]["onTime"], true);
+        // Two hundred experience is incidental, not a levelling session.
+        let activities = segment["activities"].as_array().unwrap();
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0]["kind"], "mythic_plus");
+        assert_eq!(activities[0]["source"], "inferred");
+        assert_eq!(activities[0]["metadata"]["keystoneLevel"], 14);
+    }
+
+    #[test]
+    fn stores_encounters_with_their_wipes_and_guesses_a_legacy_raid() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        assert_eq!(segment["encounters"].as_array().unwrap().len(), 2);
+        assert_eq!(segment["encounters"][1]["success"], false);
+        let activities = segment["activities"].as_array().unwrap();
+        assert_eq!(activities[0]["kind"], "legacy_raid");
+        assert_eq!(activities[0]["metadata"]["bossesKilled"], 1);
+        assert_eq!(activities[0]["metadata"]["wipes"], 1);
+    }
+
+    /// The heart of the editing contract: a sync must never undo what the user decided.
+    #[test]
+    fn keeps_manual_activities_and_deletions_across_a_resync() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        collect(&wow, &database, 2_000_000_000).unwrap();
+        let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
+            .as_i64()
+            .unwrap();
+        let inferred = activities_of(&database);
+        let inferred_id = inferred[0]["id"].as_i64().unwrap();
+
+        // The user throws the guess away and files two corrections of their own.
+        delete_activity(&database, inferred_id, 2_000_000_100).unwrap();
+        add_activity(
+            &database,
+            segment_id,
+            "transmog_farm",
+            &serde_json::json!({ "note": "chasing the Val'anyr shards" }),
+            2_000_000_200,
+        )
+        .unwrap();
+        add_activity(
+            &database,
+            segment_id,
+            "progress_raid",
+            &serde_json::json!({ "bossesKilled": 9 }),
+            2_000_000_300,
+        )
+        .unwrap();
+
+        touch(&wow, RAID_SEGMENT);
+        collect(&wow, &database, 2_000_000_400).unwrap();
+
+        let after = activities_of(&database);
+        let kinds: Vec<&str> = after
+            .iter()
+            .map(|entry| entry["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, vec!["progress_raid", "transmog_farm"]);
+        assert!(after.iter().all(|entry| entry["source"] == "manual"));
+        assert!(
+            !kinds.contains(&"legacy_raid"),
+            "the deleted guess came back: {kinds:?}"
+        );
+        assert_eq!(after[0]["metadata"]["bossesKilled"], 9);
+    }
+
+    #[test]
+    fn editing_a_guess_adopts_it_so_the_next_sync_leaves_it_alone() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        collect(&wow, &database, 2_000_000_000).unwrap();
+        let inferred_id = activities_of(&database)[0]["id"].as_i64().unwrap();
+
+        update_activity(
+            &database,
+            inferred_id,
+            "progress_raid",
+            &serde_json::json!({ "bossesKilled": 4, "wipes": 12 }),
+            2_000_000_100,
+        )
+        .unwrap();
+        touch(&wow, RAID_SEGMENT);
+        collect(&wow, &database, 2_000_000_200).unwrap();
+
+        let after = activities_of(&database);
+        assert_eq!(after.len(), 1, "unexpected extra activities: {after:?}");
+        assert_eq!(after[0]["kind"], "progress_raid");
+        assert_eq!(after[0]["source"], "manual");
+        assert_eq!(after[0]["metadata"]["wipes"], 12);
+    }
+
+    /// Better data — and, by the same mechanism, better rules — has to reach history the
+    /// user never touched. That is the whole reason inferred rows are rebuilt on every sync
+    /// rather than written once when the segment first arrives.
+    #[test]
+    fn rebuilds_untouched_guesses_on_every_sync() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        collect(&wow, &database, 2_000_000_000).unwrap();
+        assert_eq!(activities_of(&database)[0]["metadata"]["bossesKilled"], 1);
+
+        // The same segment, filed again after the group killed a second boss.
+        touch(
+            &wow,
+            &RAID_SEGMENT.replace(
+                r#"{ ["id"] = 746, ["name"] = "Ignis", ["success"] = false }"#,
+                r#"{ ["id"] = 746, ["name"] = "Ignis", ["success"] = true }"#,
+            ),
+        );
+        collect(&wow, &database, 2_000_000_100).unwrap();
+
+        let after = activities_of(&database);
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0]["kind"], "legacy_raid");
+        assert_eq!(after[0]["metadata"]["bossesKilled"], 2);
+        assert_eq!(after[0]["metadata"]["wipes"], 0);
+    }
+
+    /// The way back from an edit the user regrets, and the only test that proves a segment
+    /// can be re-guessed from stored state alone — the saved variables the segment came from
+    /// are long gone by then, since the addon only keeps a rolling week.
+    #[test]
+    fn resetting_a_segment_restores_the_guesses_from_stored_state() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        collect(&wow, &database, 2_000_000_000).unwrap();
+        let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
+            .as_i64()
+            .unwrap();
+        delete_activity(
+            &database,
+            activities_of(&database)[0]["id"].as_i64().unwrap(),
+            2_000_000_100,
+        )
+        .unwrap();
+        add_activity(
+            &database,
+            segment_id,
+            "transmog_farm",
+            &serde_json::json!({}),
+            2_000_000_200,
+        )
+        .unwrap();
+        assert_eq!(activities_of(&database).len(), 1);
+
+        reset_activities(&database, segment_id, 2_000_000_300).unwrap();
+
+        let after = activities_of(&database);
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0]["kind"], "legacy_raid");
+        assert_eq!(after[0]["source"], "inferred");
+        assert_eq!(after[0]["metadata"]["bossesKilled"], 1);
+    }
+
+    #[test]
+    fn resetting_recovers_a_keystone_guess_without_the_saved_variables() {
+        let keystone = r#"
+          { ["id"] = "key-2", ["character"] = "Aster-Vale", ["instance"] = "Mists of Tirna Scithe",
+            ["instanceType"] = "party", ["difficultyId"] = 8, ["endedAt"] = 2000000000,
+            ["keystone"] = { ["level"] = 9, ["completed"] = true, ["onTime"] = false,
+              ["upgrades"] = 0, ["durationMs"] = 2400000 } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(keystone);
+        collect(&wow, &database, 2_000_000_000).unwrap();
+        let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
+            .as_i64()
+            .unwrap();
+        delete_activity(
+            &database,
+            activities_of(&database)[0]["id"].as_i64().unwrap(),
+            2_000_000_100,
+        )
+        .unwrap();
+
+        reset_activities(&database, segment_id, 2_000_000_200).unwrap();
+
+        let after = activities_of(&database);
+        assert_eq!(after[0]["kind"], "mythic_plus");
+        assert_eq!(after[0]["metadata"]["keystoneLevel"], 9);
+        assert_eq!(after[0]["metadata"]["timed"], false);
+        assert_eq!(after[0]["metadata"]["durationSeconds"], 2400);
+    }
+
+    /// An existing database predates the activities schema entirely; the migration has to
+    /// carry it forward rather than demanding a fresh install.
+    #[test]
+    fn migrates_a_database_written_before_activities_existed() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            transaction.execute_batch(MIGRATIONS[0]).unwrap();
+            transaction.pragma_update(None, "user_version", 1_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        assert_eq!(activities_of(&database)[0]["kind"], "legacy_raid");
     }
 
     #[test]

@@ -3,6 +3,17 @@
 A World of Warcraft addon. Lua 5.1 / LuaJIT semantics — the game client has no
 LuaRocks, no `require`, and no standard library beyond what Blizzard exposes.
 
+## The local WoW install is off limits
+
+Never search the filesystem for a World of Warcraft installation, and never read
+its files — not the game directory, not `Interface/AddOns`, not
+`WTF/.../SavedVariables`. Do not run `find`, `ls`, `grep`, or any other command
+against those paths, and do not use them to inspect real data or reproduce a bug.
+Reason about the addon from this repository's source and from the fakes in
+`apps/addon/spec/helpers/fake_wow.lua` instead. If a question can only be settled
+by looking at live game data, ask for the relevant snippet rather than going to
+find it.
+
 ## Git workflow
 
 Commit and push straight to `main`. Do not create a feature branch or open a PR

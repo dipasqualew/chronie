@@ -23,6 +23,26 @@ describe("ns.newSegmentTally", function()
     local LOOT_FORMATS = { "You receive loot: %sx%d.", "You receive loot: %s." }
     local FACTION_FORMATS = { "Your %s reputation has increased by %d." }
 
+    ---Every self-loot template Main.lua hands the tally, in the order it hands them over:
+    ---each _MULTIPLE variant ahead of its singular partner. Verbatim from the enUS globals.
+    local ALL_LOOT_FORMATS = {
+        "You receive loot: %sx%d.",
+        "You receive loot: %s.",
+        "You receive item: %sx%d.",
+        "You receive item: %s.",
+        "You receive bonus loot: %sx%d.",
+        "You receive bonus loot: %s.",
+    }
+
+    ---The three ways an item can land in the player's own bags, each with the wording the
+    ---client uses for it: ordinary loot, anything pushed straight to a bag (a quest reward,
+    ---a container's contents), and a bonus roll.
+    local LOOT_WORDINGS = {
+        { name = "an ordinary loot line", prefix = "You receive loot: " },
+        { name = "a pushed-loot line", prefix = "You receive item: " },
+        { name = "a bonus-loot line", prefix = "You receive bonus loot: " },
+    }
+
     ---Build the tally directly with fake seams, mirroring how lockout_store_spec builds
     ---the store: no frames, no Main, just the pure module and injected dependencies.
     ---@param options table? `{ prices, lootFormats, factionFormats }`
@@ -224,6 +244,207 @@ describe("ns.newSegmentTally", function()
             tally.loot("You receive loot: " .. link(4242) .. ".")
 
             assert.equal(0, tally.summary().itemValue)
+        end)
+    end)
+
+    describe("every self-loot template the client can word a drop with", function()
+        for _, wording in ipairs(LOOT_WORDINGS) do
+            it("counts a single item's vendor value from " .. wording.name, function()
+                local tally = newTally({ prices = { [4242] = 75 }, lootFormats = ALL_LOOT_FORMATS })
+                tally.begin(0)
+
+                tally.loot(wording.prefix .. link(4242) .. ".")
+
+                assert.equal(75, tally.summary().itemValue)
+            end)
+
+            -- The ordering guard. The singular "...: %s." pattern also matches a stacked
+            -- line, swallowing the "x3" into the item capture, so a stack of three would be
+            -- counted as one unless the _MULTIPLE variant is offered first.
+            it("counts a stack of three from " .. wording.name .. " as three, not one", function()
+                local tally = newTally({ prices = { [4242] = 75 }, lootFormats = ALL_LOOT_FORMATS })
+                tally.begin(0)
+
+                tally.loot(wording.prefix .. link(4242) .. "x3.")
+
+                assert.equal(225, tally.summary().itemValue)
+                assert.are_not.equal(75, tally.summary().itemValue)
+            end)
+        end
+
+        it("counts a haul that arrived through all three wordings at once", function()
+            local tally = newTally({ prices = { [4242] = 10 }, lootFormats = ALL_LOOT_FORMATS })
+            tally.begin(0)
+
+            tally.loot("You receive loot: " .. link(4242) .. ".")
+            tally.loot("You receive item: " .. link(4242) .. "x2.")
+            tally.loot("You receive bonus loot: " .. link(4242) .. "x3.")
+
+            assert.equal(60, tally.summary().itemValue)
+        end)
+    end)
+
+    describe("loot the client has not cached a price for yet", function()
+        it("counts nothing at loot time, rather than booking the item as worthless", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            assert.equal(0, tally.summary().lootValue)
+        end)
+
+        it("folds the parked value in once the client answers with a price", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. ".")
+
+            prices[9999] = 60
+            tally.itemInfoReceived(9999)
+
+            assert.equal(60, tally.summary().lootValue)
+        end)
+
+        it("honours the stack quantity the parked loot line carried", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x4.")
+
+            prices[9999] = 25
+            tally.itemInfoReceived(9999)
+
+            assert.equal(100, tally.summary().lootValue)
+        end)
+
+        -- The client answers a given item once however many times it was looted, so both
+        -- parked lines have to be settled by that single answer.
+        it("resolves two parked loots of the same item on one answer", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. ".")
+            tally.loot("You receive loot: " .. link(9999) .. "x3.")
+
+            prices[9999] = 10
+            tally.itemInfoReceived(9999)
+
+            assert.equal(40, tally.summary().lootValue)
+        end)
+
+        it("resolves parked items independently of one another", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(1111) .. ".")
+            tally.loot("You receive loot: " .. link(2222) .. ".")
+
+            prices[1111] = 40
+            prices[2222] = 75
+            tally.itemInfoReceived(1111)
+            assert.equal(40, tally.summary().lootValue)
+
+            tally.itemInfoReceived(2222)
+            assert.equal(115, tally.summary().lootValue)
+        end)
+
+        -- The event fires for every item the client loads, most of which this segment
+        -- never looted; an answer nobody is waiting on must change nothing.
+        it("changes nothing for an item that was never parked", function()
+            local tally = newTally({ prices = { [4242] = 75, [9999] = 500 } })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(4242) .. ".")
+
+            tally.itemInfoReceived(9999)
+
+            assert.equal(75, tally.summary().lootValue)
+        end)
+
+        it("does not count a parked item twice when the answer arrives again", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            prices[9999] = 30
+            tally.itemInfoReceived(9999)
+            tally.itemInfoReceived(9999)
+
+            assert.equal(60, tally.summary().lootValue)
+        end)
+
+        it("adds nothing when the price is still unavailable on the second look", function()
+            local tally = newTally({ prices = {} })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            tally.itemInfoReceived(9999)
+
+            assert.equal(0, tally.summary().lootValue)
+        end)
+
+        -- Treating that still-missing price as zero has to drop the entry too, or a later
+        -- answer for the same item would count a haul the tally already settled.
+        it("drops the entry when the price is still unavailable, so it cannot count later", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+            tally.itemInfoReceived(9999)
+
+            prices[9999] = 30
+            tally.itemInfoReceived(9999)
+
+            assert.equal(0, tally.summary().lootValue)
+        end)
+
+        -- Parked loot outlives the loot line itself, so a segment boundary has to clear it
+        -- or the previous zone's unpriced drop would be booked against the next one.
+        it("clears parked items on begin, so they cannot leak into the next segment", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            tally.begin(0)
+            prices[9999] = 30
+            tally.itemInfoReceived(9999)
+
+            assert.equal(0, tally.summary().lootValue)
+        end)
+
+        it("ignores an answer that arrives once the segment is over", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+            tally.leave()
+
+            prices[9999] = 30
+            tally.itemInfoReceived(9999)
+
+            assert.equal(0, tally.summary().lootValue)
+        end)
+
+        it("ignores an answer while no segment was ever begun", function()
+            local tally = newTally({ prices = { [9999] = 30 } })
+
+            assert.has_no.errors(function()
+                tally.itemInfoReceived(9999)
+            end)
+            assert.equal(0, tally.summary().lootValue)
+        end)
+
+        it("ignores an answer with no item id at all", function()
+            local tally = newTally({ prices = {} })
+            tally.begin(0)
+
+            assert.has_no.errors(function()
+                tally.itemInfoReceived(nil)
+            end)
+            assert.equal(0, tally.summary().lootValue)
         end)
     end)
 
@@ -723,6 +944,245 @@ describe("ns.newSegmentTally", function()
         end)
     end)
 
+    describe("boss encounters", function()
+        ---@param overrides table?
+        ---@return EncounterEvent
+        local function encounter(overrides)
+            local base = {
+                id = 745, name = "Flame Leviathan", at = 5000,
+                difficultyId = 4, groupSize = 25, success = true,
+            }
+            for key, value in pairs(overrides or {}) do
+                base[key] = value
+            end
+            return base
+        end
+
+        it("appends a kill with everything the client reported about it", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.encounter(encounter())
+
+            assert.same({ encounter() }, tally.summary().encounters)
+        end)
+
+        -- Wipes are the whole point of keeping both outcomes: a night of eight pulls and
+        -- one kill is a progression raid, while eight kills and no wipes is a farm clear.
+        it("keeps wipes alongside kills, in the order they ended", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.encounter(encounter({ at = 5000, success = false }))
+            tally.encounter(encounter({ at = 5100, success = false }))
+            tally.encounter(encounter({ at = 5200, success = true }))
+
+            local encounters = tally.summary().encounters
+            assert.equal(3, #encounters)
+            assert.same({ false, false, true }, {
+                encounters[1].success, encounters[2].success, encounters[3].success,
+            })
+        end)
+
+        it("normalises the client's truthy success flag to a boolean", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.encounter(encounter({ success = 1 }))
+            -- No success at all: a wipe is exactly how the addon should read that.
+            tally.encounter({ id = 745, at = 5100 })
+
+            local encounters = tally.summary().encounters
+            assert.is_true(encounters[1].success)
+            assert.is_false(encounters[2].success)
+        end)
+
+        it("ignores an encounter with no id, and any encounter while inactive", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.encounter({ name = "Flame Leviathan", at = 5000, success = true })
+            tally.leave()
+            tally.encounter(encounter())
+
+            assert.same({}, tally.summary().encounters)
+        end)
+    end)
+
+    describe("mythic keystone runs", function()
+        it("records the key's level, map and affixes when the run starts", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.keystoneStart({ level = 14, mapId = 501, affixes = { 9, 6 } }, 5000)
+
+            assert.same({
+                level = 14, mapId = 501, affixes = { 9, 6 },
+                startedAt = 5000, completed = false,
+            }, tally.summary().keystone)
+        end)
+
+        it("copies the affix list rather than aliasing the caller's table", function()
+            local tally = newTally()
+            tally.begin(0)
+            local affixes = { 9, 6 }
+
+            tally.keystoneStart({ level = 14, affixes = affixes }, 5000)
+            affixes[1] = 148
+
+            assert.same({ 9, 6 }, tally.summary().keystone.affixes)
+        end)
+
+        it("folds the completion report onto the open run", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.keystoneStart({ level = 14, mapId = 501 }, 5000)
+
+            tally.keystoneComplete({
+                level = 14, mapId = 501, durationMs = 1740000, onTime = true, upgrades = 1,
+            }, 6800)
+
+            assert.same({
+                level = 14, mapId = 501, startedAt = 5000, completedAt = 6800,
+                completed = true, durationMs = 1740000, onTime = true, upgrades = 1,
+            }, tally.summary().keystone)
+        end)
+
+        -- Zoning into a key already in progress means the start was never seen, but the
+        -- completion report carries everything that matters, so the run is still recorded.
+        it("records a completion that arrived without a start", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.keystoneComplete({ level = 12, mapId = 501, onTime = false, upgrades = 0 }, 6800)
+
+            local keystone = tally.summary().keystone
+            assert.equal(12, keystone.level)
+            assert.is_true(keystone.completed)
+            assert.is_false(keystone.onTime)
+        end)
+
+        it("keeps an abandoned run but strips its completion", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.keystoneStart({ level = 14, mapId = 501 }, 5000)
+            tally.keystoneComplete({ level = 14, durationMs = 1740000, onTime = true }, 6800)
+
+            tally.keystoneReset()
+
+            local keystone = tally.summary().keystone
+            assert.equal(14, keystone.level)
+            assert.is_false(keystone.completed)
+            assert.is_nil(keystone.completedAt)
+            assert.is_nil(keystone.durationMs)
+            assert.is_nil(keystone.onTime)
+        end)
+
+        it("ignores a start with no level, and any keystone call while inactive", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.keystoneStart({ mapId = 501 }, 5000)
+            tally.leave()
+            tally.keystoneStart({ level = 14 }, 5000)
+            tally.keystoneComplete({ level = 14 }, 6800)
+
+            assert.is_nil(tally.summary().keystone)
+        end)
+    end)
+
+    describe("experience earned", function()
+        ---@param baseline table? `{ level, xp, xpMax }` as the segment opens
+        ---@return SegmentTally
+        local function newLevellingTally(baseline)
+            local tally = newTally()
+            tally.begin(0, nil, baseline)
+            return tally
+        end
+
+        it("counts nothing until experience actually moves", function()
+            local tally = newLevellingTally({ level = 41, xp = 2000, xpMax = 10000 })
+
+            assert.is_nil(tally.summary().experience)
+            assert.is_false(tally.hasEvents())
+        end)
+
+        it("measures a gain inside one level against that level's maximum", function()
+            local tally = newLevellingTally({ level = 41, xp = 2000, xpMax = 10000 })
+
+            tally.experience(41, 4500, 10000)
+
+            assert.same({
+                gained = 2500, percent = 0.25, startLevel = 41, endLevel = 41,
+            }, tally.summary().experience)
+        end)
+
+        it("accumulates across several updates", function()
+            local tally = newLevellingTally({ level = 41, xp = 0, xpMax = 10000 })
+
+            tally.experience(41, 1000, 10000)
+            tally.experience(41, 3000, 10000)
+
+            assert.equal(3000, tally.summary().experience.gained)
+            -- A fraction of a level is a running sum of divisions, so it is compared with a
+            -- tolerance; the points beside it are the exact figure.
+            assert.near(0.3, tally.summary().experience.percent, 1e-9)
+        end)
+
+        -- Each side of a level boundary is measured against its own maximum, because the
+        -- two levels do not cost the same and a single denominator would misreport both.
+        it("splits a gain that crosses a level across both levels' maximums", function()
+            local tally = newLevellingTally({ level = 41, xp = 8000, xpMax = 10000 })
+
+            tally.experience(42, 3000, 20000)
+
+            local experience = tally.summary().experience
+            assert.equal(5000, experience.gained)
+            assert.near(0.35, experience.percent, 1e-9)
+            assert.equal(41, experience.startLevel)
+            assert.equal(42, experience.endLevel)
+        end)
+
+        it("counts the levels skipped when several updates are missed at once", function()
+            local tally = newLevellingTally({ level = 41, xp = 9000, xpMax = 10000 })
+
+            tally.experience(44, 5000, 20000)
+
+            local experience = tally.summary().experience
+            -- 1000 to finish 41, two whole levels at the new maximum, then 5000 into 44.
+            assert.equal(1000 + 2 * 20000 + 5000, experience.gained)
+            assert.near(0.1 + 2 + 0.25, experience.percent, 1e-9)
+        end)
+
+        it("re-anchors rather than subtracting when experience goes backwards", function()
+            local tally = newLevellingTally({ level = 41, xp = 5000, xpMax = 10000 })
+
+            tally.experience(41, 1000, 10000)
+            tally.experience(41, 3000, 10000)
+
+            assert.equal(2000, tally.summary().experience.gained)
+        end)
+
+        -- Tracking that starts mid-segment has no baseline to measure against, so the
+        -- first standing it sees becomes the baseline instead of being booked as a gain.
+        it("adopts the first standing as the baseline when the segment opened without one", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.experience(41, 6000, 10000)
+            tally.experience(41, 7000, 10000)
+
+            assert.equal(1000, tally.summary().experience.gained)
+        end)
+
+        it("ignores experience while inactive", function()
+            local tally = newLevellingTally({ level = 41, xp = 0, xpMax = 10000 })
+            tally.leave()
+
+            tally.experience(41, 5000, 10000)
+
+            assert.is_nil(tally.summary().experience)
+        end)
+    end)
+
     describe("hasEvents", function()
         it("is false for a segment where nothing happened", function()
             local tally = newTally()
@@ -753,6 +1213,40 @@ describe("ns.newSegmentTally", function()
             tally.loot("You receive loot: " .. link(4242) .. ".")
 
             assert.is_true(tally.hasEvents())
+        end)
+
+        -- An unpriced drop is parked, not counted, so it has contributed nothing yet: a
+        -- segment holding only that would be filed with an empty haul if it counted here.
+        it("stays false while a looted item is parked awaiting its price", function()
+            local tally = newTally({ prices = {} })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            assert.is_false(tally.hasEvents())
+        end)
+
+        it("is true once the parked item is priced and folded in", function()
+            local prices = {}
+            local tally = newTally({ prices = prices })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            prices[9999] = 30
+            tally.itemInfoReceived(9999)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
+        -- A genuinely unsellable drop resolves to zero value, which is no more an event
+        -- than the parked line was.
+        it("stays false when the parked item turns out to be worthless", function()
+            local tally = newTally({ prices = {} })
+            tally.begin(0)
+            tally.loot("You receive loot: " .. link(9999) .. "x2.")
+
+            tally.itemInfoReceived(9999)
+
+            assert.is_false(tally.hasEvents())
         end)
 
         it("is true once reputation is earned", function()
@@ -885,6 +1379,9 @@ describe("ns.newSegmentTally", function()
             assert.same({}, summary.housingItems)
             assert.equal(0, summary.housingXP)
             assert.same({}, summary.housingLevelUps)
+            assert.same({}, summary.encounters)
+            assert.is_nil(summary.keystone)
+            assert.is_nil(summary.experience)
         end)
 
         it("carries every tally onto one summary table", function()
@@ -921,6 +1418,7 @@ describe("ns.newSegmentTally", function()
                 housingItems = {},
                 housingXP = 0,
                 housingLevelUps = {},
+                encounters = {},
             }, tally.summary())
         end)
     end)

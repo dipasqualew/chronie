@@ -154,6 +154,37 @@
     background: var(--surface-2); color: var(--text-secondary); margin: 0 4px 4px 0;
   }
   .chip.achv { background: var(--series-1-soft); color: var(--text-primary); }
+  .chip.activity {
+    background: transparent; border: 1px solid var(--series-1);
+    color: var(--text-primary); font-weight: 550;
+  }
+  .chip.activity.guess { border-style: dashed; color: var(--text-secondary); }
+  .chip.activity .detail { font-weight: 400; color: var(--text-secondary); }
+
+  .tl-activities { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+  .tl-activities button { font-size: 11px; padding: 2px 8px; }
+  .tl-activities .muted { font-size: 11px; }
+
+  dialog {
+    border: 1px solid var(--border); border-radius: 12px; padding: 0;
+    background: var(--surface-1); color: var(--text-primary);
+    width: min(560px, 92vw); box-shadow: 0 10px 40px rgba(0, 0, 0, .3);
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  .dialog-body { padding: 18px; }
+  .dialog-body h2 { font-size: 15px; margin: 0 0 2px; }
+  .dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .dialog-actions .spacer { margin-left: auto; }
+  .editor-list { display: grid; gap: 10px; margin-top: 14px; }
+  .editor-row { border: 1px solid var(--border); border-radius: 9px; padding: 12px; }
+  .editor-row .row-head { display: flex; gap: 8px; align-items: center; }
+  .editor-row .row-head select, .editor-row .row-head input { flex: 1; min-width: 0; }
+  .editor-fields {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px; margin-top: 10px;
+  }
+  .editor-fields .field { display: grid; gap: 3px; }
+  .editor-fields label { font-size: 12px; color: var(--text-secondary); }
 
   .timeline { padding: 4px 16px 8px; }
   .tl-day { margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
@@ -257,11 +288,35 @@
 
 <div id="tooltip" role="status"></div>
 
+<dialog id="activity-editor" aria-labelledby="activity-editor-title">
+  <form method="dialog" class="dialog-body">
+    <h2 id="activity-editor-title">Activities</h2>
+    <div class="sub" id="activity-editor-sub"></div>
+    <div class="editor-list" id="activity-editor-list"></div>
+    <p class="status" id="activity-editor-status" role="status"></p>
+    <div class="dialog-actions">
+      <button type="button" id="activity-add">Add activity</button>
+      <button type="button" id="activity-reset">Reset to guesses</button>
+      <button type="button" id="activity-close" class="primary spacer">Done</button>
+    </div>
+  </form>
+</dialog>
+
 <script type="module">
 import { desktop, message } from "/src/bridge.js";
+import {
+  ACTIVITY_KINDS, activityFields, activityIcon, activityLabel, activitySummary,
+  fieldValue, isUncertain, parseMetadata,
+} from "/src/activities.js";
 
 const PAYLOAD = await desktop.dashboard();
 const SEGMENTS = PAYLOAD.segments || [];
+// Kinds the backend can guess at, plus any the user has already invented, so the editor's
+// picker offers what this history actually contains rather than only what the app ships with.
+const KNOWN_KINDS = [...new Set([
+  ...(PAYLOAD.knownActivityKinds || Object.keys(ACTIVITY_KINDS)),
+  ...SEGMENTS.flatMap((segment) => (segment.activities || []).map((entry) => entry.kind)),
+])].sort();
 
 // The client's own class colours, so a character reads the same here as in game.
 const CLASS_COLORS = {
@@ -352,6 +407,30 @@ function escapeHtml(text) {
   return String(text ?? "").replace(/[&<>"]/g, (char) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]));
 }
+
+/* ---------- activities ---------- */
+
+// A guess the backend was unsure about is drawn with a dashed border and says so in its
+// tooltip, so the eye can tell "Chronie thinks" apart from "I said so" at a glance.
+function activityChip(activity) {
+  const detail = activitySummary(activity);
+  const guess = isUncertain(activity);
+  const title = activity.source === "manual"
+    ? "You set this activity"
+    : `Guessed by Chronie · confidence ${Math.round((activity.confidence ?? 1) * 100)}%`;
+  return `<span class="chip activity${guess ? " guess" : ""}" title="${escapeHtml(title)}">` +
+    `${escapeHtml(activityIcon(activity.kind))} ${escapeHtml(activityLabel(activity.kind))}` +
+    (detail ? ` <span class="detail">${escapeHtml(detail)}</span>` : "") +
+    "</span>";
+}
+
+const activityText = (activities) =>
+  (activities || []).map((activity) => {
+    const detail = activitySummary(activity);
+    return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
+  }).join(", ");
+
+const activityCell = (activities) => listCell(activities, activityText);
 
 /* ---------- header + tiles ---------- */
 
@@ -604,6 +683,14 @@ function drawTimeline() {
             ${segment.difficulty ? `<span class="muted">${escapeHtml(segment.difficulty)}</span>` : ""}
             <span class="muted">${escapeHtml(duration(segment.seconds))}</span>
           </div>
+          <div class="tl-activities">
+            ${(segment.activities || []).map(activityChip).join("") ||
+              '<span class="muted">No activity recorded</span>'}
+            <button type="button" class="edit-activities" data-segment="${segment.segmentId}"
+              aria-label="Edit activities for ${escapeHtml(segment.character)} in ${escapeHtml(segment.instance)}">
+              Edit activities
+            </button>
+          </div>
           <div class="tl-stats">${stats(segment)}</div>
           ${chips(segment)}
         </div>
@@ -611,6 +698,10 @@ function drawTimeline() {
     }).join("");
     return `<div class="tl-day">${escapeHtml(day)}</div>${rows}`;
   }).join("");
+
+  host.querySelectorAll(".edit-activities").forEach((button) => {
+    button.addEventListener("click", () => openEditor(Number(button.dataset.segment)));
+  });
 }
 
 drawTimeline();
@@ -629,6 +720,10 @@ const COLUMNS = [
       (s.level == null ? "" : ` <span class="muted">Level ${escapeHtml(s.level)}</span>`),
   },
   { key: "instance", title: "Location", cell: (s) => escapeHtml(s.instance), sort: (s) => s.instance },
+  {
+    key: "activities", title: "Activity", cell: (s) => activityCell(s.activities),
+    sort: (s) => activityText(s.activities),
+  },
   { key: "type", title: "Type", cell: (s) => `<span class="badge">${escapeHtml(locationType(s))}</span>`, sort: (s) => locationType(s) },
   { key: "difficulty", title: "Difficulty", cell: (s) => escapeHtml(s.difficulty) || '<span class="muted">—</span>', sort: (s) => s.difficulty },
   { key: "seconds", title: "Time", num: true, cell: (s) => duration(s.seconds), sort: (s) => s.seconds },
@@ -648,6 +743,9 @@ const COLUMNS = [
   { key: "housingLevelUps", title: "Housing levels", cell: (s) => levelUpCell(s.housingLevelUps), sort: (s) => (s.housingLevelUps || []).length },
 ].filter((column) => {
   if (column.key === "housingXP") return SEGMENTS.some((segment) => (segment.housingXP || 0) !== 0);
+  // Activity is always offered: it is the one column a user can fill in themselves, so
+  // hiding it while empty would hide the feature from whoever most needs to find it.
+  if (column.key === "activities") return true;
   const optional = ["achievements", "levelUps", "currencies", "mounts", "pets", "quests",
     "reputation", "toys", "transmogs", "housingItems", "housingLevelUps"];
   return !optional.includes(column.key) || SEGMENTS.some((segment) => (segment[column.key] || []).length);
@@ -710,6 +808,185 @@ function draw() {
 
 ["search", "character", "day"].forEach((id) => $(id).addEventListener("input", draw));
 draw();
+
+/* ---------- editing a segment's activities ---------- */
+
+// Rows are keyed by activity id; a row the user has just added has none yet, so it carries a
+// negative draft id until it is saved. That is what lets the same rendering code draw a row
+// that exists in the database and one that does not.
+let editing = null;
+let draftSequence = 0;
+
+const editorDialog = $("activity-editor");
+const editorStatus = $("activity-editor-status");
+
+// Rows are rebuilt from whatever the backend last returned, so what the dialog shows is
+// always what was stored — an edit that failed leaves the old value on screen rather than
+// the optimistic one the user typed.
+function segmentById(segmentId) {
+  return SEGMENTS.find((segment) => segment.segmentId === segmentId);
+}
+
+function kindOptions(selected) {
+  const values = [...new Set([...KNOWN_KINDS, selected].filter(Boolean))].sort();
+  return values.map((kind) =>
+    `<option value="${escapeHtml(kind)}"${kind === selected ? " selected" : ""}>` +
+    `${escapeHtml(activityLabel(kind))}</option>`).join("");
+}
+
+// The label sits beside its control rather than wrapping it: a wrapping label takes its
+// accessible name from its whole text content, which for a select would swallow every
+// option ("Beat the timer UnknownYesNo") and leave the field unaddressable by its name.
+function fieldInput(row, field) {
+  const value = fieldValue(row, field);
+  const id = `field-${row.rowId}-${field.key}`;
+  const control = field.type === "boolean"
+    ? `<select id="${id}" data-field="${escapeHtml(field.key)}">
+        <option value=""${value === "" ? " selected" : ""}>Unknown</option>
+        <option value="yes"${value === "yes" ? " selected" : ""}>Yes</option>
+        <option value="no"${value === "no" ? " selected" : ""}>No</option>
+      </select>`
+    : `<input id="${id}" data-field="${escapeHtml(field.key)}"
+        type="${field.type === "number" ? "number" : "text"}"
+        value="${escapeHtml(value)}">`;
+  return `<div class="field">
+    <label for="${id}">${escapeHtml(field.label)}</label>${control}
+  </div>`;
+}
+
+function drawEditor() {
+  const segment = segmentById(editing.segmentId);
+  $("activity-editor-title").textContent = `Activities — ${segment.instance}`;
+  $("activity-editor-sub").textContent =
+    `${segment.character} · ${segment.day} · ${duration(segment.seconds)}`;
+
+  $("activity-editor-list").innerHTML = editing.rows.map((row) => `
+    <div class="editor-row" data-row="${row.rowId}">
+      <div class="row-head">
+        <select data-role="kind" aria-label="Activity kind">${kindOptions(row.kind)}</select>
+        <button type="button" data-role="remove"
+          aria-label="Remove ${escapeHtml(activityLabel(row.kind))}">Remove</button>
+      </div>
+      <div class="editor-fields">
+        ${activityFields(row.kind).map((field) => fieldInput(row, field)).join("") ||
+          '<span class="muted">Chronie has no fields for this kind; it will be saved by name.</span>'}
+      </div>
+    </div>`).join("") || '<div class="muted">No activities on this segment yet.</div>';
+
+  $("activity-editor-list").querySelectorAll(".editor-row").forEach((element) => {
+    const row = editing.rows.find((entry) => String(entry.rowId) === element.dataset.row);
+    // Changing the kind swaps the whole field set, so the values typed so far are captured
+    // before the redraw; anything the new kind also has survives the switch.
+    element.querySelector('[data-role="kind"]').addEventListener("change", (event) => {
+      row.metadata = collectRow(element, row.kind);
+      row.kind = event.target.value;
+      row.dirty = true;
+      drawEditor();
+    });
+    element.querySelector('[data-role="remove"]').addEventListener("click", () => removeRow(row));
+    element.querySelectorAll("[data-field]").forEach((input) => {
+      input.addEventListener("input", () => { row.dirty = true; });
+      input.addEventListener("change", () => { row.dirty = true; });
+    });
+  });
+}
+
+function collectRow(element, kind) {
+  const values = {};
+  element.querySelectorAll("[data-field]").forEach((input) => {
+    values[input.dataset.field] = input.value;
+  });
+  return parseMetadata(kind, values);
+}
+
+/** Saves every row the user actually touched, then repaints from what came back. */
+async function saveRows() {
+  for (const row of editing.rows) {
+    if (!row.dirty) continue;
+    const element = $("activity-editor-list").querySelector(`[data-row="${row.rowId}"]`);
+    const metadata = element ? collectRow(element, row.kind) : row.metadata || {};
+    const payload = row.id === undefined
+      ? await desktop.addActivity(editing.segmentId, row.kind, metadata)
+      : await desktop.updateActivity(row.id, row.kind, metadata);
+    applyDashboard(payload);
+  }
+}
+
+async function runEdit(action) {
+  editorStatus.textContent = "";
+  try {
+    await action();
+    loadRows();
+    drawEditor();
+  } catch (error) {
+    editorStatus.textContent = message(error);
+  }
+}
+
+function removeRow(row) {
+  // A draft the user added and changed their mind about was never stored, so it is simply
+  // forgotten; anything else has to be deleted where it lives.
+  if (row.id === undefined) {
+    editing.rows = editing.rows.filter((entry) => entry !== row);
+    drawEditor();
+    return;
+  }
+  runEdit(async () => applyDashboard(await desktop.deleteActivity(row.id)));
+}
+
+/** Folds a fresh dashboard onto the segments already on screen and repaints what changed. */
+function applyDashboard(payload) {
+  const byId = new Map((payload.segments || []).map((segment) => [segment.segmentId, segment]));
+  SEGMENTS.forEach((segment) => {
+    const next = byId.get(segment.segmentId);
+    if (next) segment.activities = next.activities || [];
+  });
+  drawTimeline();
+  draw();
+}
+
+function loadRows() {
+  const segment = segmentById(editing.segmentId) || {};
+  editing.rows = (segment.activities || []).map((activity) => ({
+    rowId: activity.id,
+    id: activity.id,
+    kind: activity.kind,
+    metadata: activity.metadata || {},
+    dirty: false,
+  }));
+}
+
+function openEditor(segmentId) {
+  editing = { segmentId, rows: [] };
+  loadRows();
+  editorStatus.textContent = "";
+  drawEditor();
+  editorDialog.showModal();
+}
+
+$("activity-add").addEventListener("click", () => {
+  draftSequence -= 1;
+  editing.rows.push({
+    rowId: draftSequence,
+    kind: KNOWN_KINDS[0] || "mythic_plus",
+    metadata: {},
+    dirty: true,
+  });
+  drawEditor();
+});
+
+$("activity-reset").addEventListener("click", () =>
+  runEdit(async () => applyDashboard(await desktop.resetActivities(editing.segmentId))));
+
+$("activity-close").addEventListener("click", async () => {
+  editorStatus.textContent = "";
+  try {
+    await saveRows();
+    editorDialog.close();
+  } catch (error) {
+    editorStatus.textContent = message(error);
+  }
+});
 
 const settings = await desktop.settings();
 $("wow-path").value = settings.wowPath || "";

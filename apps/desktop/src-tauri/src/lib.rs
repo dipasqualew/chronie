@@ -1,3 +1,4 @@
+mod activity;
 mod collector;
 
 use chrono::Utc;
@@ -138,6 +139,56 @@ fn save_wow_path(wow_path: String, state: State<'_, AppState>) -> Result<Setting
 #[tauri::command]
 fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> {
     perform_sync(&state)
+}
+
+/// The four ways a user can correct the app's guess about what a segment was.
+///
+/// Each one returns the whole dashboard rather than an acknowledgement, so the window
+/// repaints from stored state instead of from what the frontend hoped the write did.
+#[tauri::command]
+fn add_activity(
+    segment_id: i64,
+    kind: String,
+    metadata: Value,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    collector::add_activity(
+        &state.database_path(),
+        segment_id,
+        kind.trim(),
+        &metadata,
+        Utc::now().timestamp(),
+    )?;
+    load_dashboard(&state.database_path())
+}
+
+#[tauri::command]
+fn update_activity(
+    activity_id: i64,
+    kind: String,
+    metadata: Value,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    collector::update_activity(
+        &state.database_path(),
+        activity_id,
+        kind.trim(),
+        &metadata,
+        Utc::now().timestamp(),
+    )?;
+    load_dashboard(&state.database_path())
+}
+
+#[tauri::command]
+fn delete_activity(activity_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+    collector::delete_activity(&state.database_path(), activity_id, Utc::now().timestamp())?;
+    load_dashboard(&state.database_path())
+}
+
+#[tauri::command]
+fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+    collector::reset_activities(&state.database_path(), segment_id, Utc::now().timestamp())?;
+    load_dashboard(&state.database_path())
 }
 
 fn safe_archive_path(path: &str) -> Option<PathBuf> {
@@ -432,6 +483,10 @@ pub fn run() {
             sync_now,
             install_addon,
             check_for_app_update,
+            add_activity,
+            update_activity,
+            delete_activity,
+            reset_activities,
         ])
         .run(context);
     if let Err(error) = result {

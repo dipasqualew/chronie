@@ -3,6 +3,73 @@
 ---EventDispatcherDeps), so no monkey patching is needed anywhere.
 local fake = {}
 
+---Every client event the addon is allowed to subscribe to.
+---
+---The real RegisterEvent raises on a name the client does not define (patch 8.0.1), and
+---because ns.main subscribes in a straight line one bad name used to abort every feature
+---wired after it. A fake that accepts any string could never catch that, so this list is
+---the guard: adding an event to the addon means adding it here, and adding it here means
+---having checked the name against the live API listing rather than guessing at it.
+---
+---Verified against https://warcraft.wiki.gg/wiki/Events (patch 12.0.5).
+fake.KNOWN_EVENTS = {
+    "ACHIEVEMENT_EARNED",
+    "BAG_UPDATE_DELAYED",
+    "BOSS_KILL",
+    "CHALLENGE_MODE_COMPLETED",
+    "CHALLENGE_MODE_RESET",
+    "CHALLENGE_MODE_START",
+    "CHAT_MSG_COMBAT_FACTION_CHANGE",
+    "CHAT_MSG_LOOT",
+    "CURRENCY_DISPLAY_UPDATE",
+    "ENCOUNTER_END",
+    "GET_ITEM_INFO_RECEIVED",
+    "NEW_MOUNT_ADDED",
+    "NEW_PET_ADDED",
+    "NEW_TOY_ADDED",
+    "PLAYER_ENTERING_WORLD",
+    "PLAYER_LEVEL_UP",
+    "PLAYER_LOGIN",
+    "PLAYER_LOGOUT",
+    "PLAYER_MONEY",
+    "PLAYER_XP_UPDATE",
+    "QUEST_ACCEPTED",
+    "QUEST_LOG_UPDATE",
+    "QUEST_TURNED_IN",
+    "TRANSMOG_COLLECTION_SOURCE_ADDED",
+    "UPDATE_INSTANCE_INFO",
+    "ZONE_CHANGED_NEW_AREA",
+}
+
+---Names the addon subscribes to that could NOT be found in the API listing above.
+---
+---Housing landed in 12.0 and the listing spells most of its events `HOUSE_*` rather than
+---`HOUSING_*`, so these three are very likely wrong and housing tracking is inert in the
+---live client. They stay wired because the dispatcher now degrades one bad name instead of
+---dying on it, and because the tally logic behind them is worth keeping tested. Move a name
+---up into KNOWN_EVENTS once it has been confirmed against a real client, or correct it.
+fake.UNVERIFIED_EVENTS = {
+    "HOUSING_DECOR_ADDED",
+    "HOUSING_LEVEL_UP",
+    "HOUSING_XP_GAINED",
+}
+
+---@type table<string, boolean>
+local knownEvents = {}
+for _, event in ipairs(fake.KNOWN_EVENTS) do
+    knownEvents[event] = true
+end
+for _, event in ipairs(fake.UNVERIFIED_EVENTS) do
+    knownEvents[event] = true
+end
+
+---Whether this client build defines `event`, as the fake sees the world.
+---@param event string
+---@return boolean
+function fake.isKnownEvent(event)
+    return knownEvents[event] == true
+end
+
 ---A stand-in for a FontString. Records the last text and colour it was given, and
 ---whether it is currently visible, which is all any assertion needs.
 ---@return table
@@ -66,8 +133,24 @@ end
 ---
 ---The layout setters are deliberately no-ops that only record: the addon's geometry
 ---is not behaviour worth asserting, but calling them must not blow up either.
+---
+---Pass `{ anyEvent = true }` to switch off event-name validation, for the dispatcher's own
+---unit tests: those exercise routing mechanics with placeholder names like "A" and "B" and
+---deliberately fire events nobody registered, neither of which is about real event names.
+---Every other test wants the strict default, which is what catches an invented name.
+---
+---Pass `{ rejectEvents = { "SOME_EVENT" } }` to make RegisterEvent raise for those names
+---however valid they look, standing in for a client build that does not define them. That
+---is what proves one refused event no longer takes down everything wired after it.
+---@param options table? `{ anyEvent = boolean?, rejectEvents = string[]? }`
 ---@return table
-function fake.newFrame()
+function fake.newFrame(options)
+    options = options or {}
+    local anyEvent = options.anyEvent
+    local rejected = {}
+    for _, event in ipairs(options.rejectEvents or {}) do
+        rejected[event] = true
+    end
     local frame = {
         scripts = {},
         registered = {},
@@ -88,14 +171,23 @@ function fake.newFrame()
         return handler(self, ...)
     end
 
+    ---Mirrors the live client: an event this build does not define raises rather than
+    ---quietly doing nothing, so a wrong name fails a test instead of shipping.
     function frame:RegisterEvent(event)
+        if rejected[event] or (not anyEvent and not fake.isKnownEvent(event)) then
+            error("Attempted to register unknown event '" .. tostring(event) .. "'", 2)
+        end
         self.registered[event] = (self.registered[event] or 0) + 1
         self.registeredOrder[#self.registeredOrder + 1] = event
     end
 
-    ---Simulate the client firing an event at this frame.
+    ---Simulate the client firing an event at this frame. The client only delivers events
+    ---the frame actually subscribed to, so firing an unregistered one would let a test
+    ---prove a handler works when the addon never asked to hear about it.
     ---@param event string
     function frame:fire(event, ...)
+        assert(anyEvent or self.registered[event],
+            "the addon never registered '" .. tostring(event) .. "'")
         local onEvent = assert(self.scripts.OnEvent, "no OnEvent script was set")
         return onEvent(self, event, ...)
     end
@@ -188,13 +280,14 @@ end
 ---@return fun(frameType: string, name: string?, parent: table?, template: string?): table createFrame
 ---@return table frames created frames, in creation order
 ---@return table types frame types requested, in creation order
-function fake.newCreateFrame()
+---@param options table? Forwarded to every frame it builds; see fake.newFrame.
+function fake.newCreateFrame(options)
     local frames = {}
     local types = {}
 
     local function createFrame(frameType, name, parent, template)
         types[#types + 1] = frameType
-        local frame = fake.newFrame()
+        local frame = fake.newFrame(options)
         frame.frameType = frameType
         frame.frameName = name
         frame.parent = parent
@@ -438,7 +531,9 @@ end
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
-    local createFrame, frames, types = fake.newCreateFrame()
+    -- rejectEvents lets a test boot the whole addon against a client that refuses a given
+    -- event name, which is the only way to prove ns.main survives one.
+    local createFrame, frames, types = fake.newCreateFrame({ rejectEvents = options.rejectEvents })
     local lines = {}
     local unitsAsked = {}
     local classAsked = {}
@@ -489,6 +584,12 @@ function fake.newEnv(options)
     end
     local activeQuests = options.activeQuests or {}
     local questStates = options.questStates or {}
+    -- The character's experience standing, mutable so a test can drive it the way the
+    -- client does. nil models a capped character, where UnitXPMax reads zero.
+    local experience = options.experience
+    -- The keystone in the slot and the completion report, both nil until a test plants one.
+    local activeKeystone = options.activeKeystone
+    local keystoneCompletion = options.keystoneCompletion
 
     local env = {
         createFrame = createFrame,
@@ -539,6 +640,22 @@ function fake.newEnv(options)
                 difficultyId = zone.difficultyId,
                 difficulty = zone.difficulty,
             }
+        end,
+        experienceState = function()
+            if not experience then
+                return nil
+            end
+            return {
+                level = experience.level,
+                xp = experience.xp,
+                xpMax = experience.xpMax,
+            }
+        end,
+        activeKeystone = function()
+            return activeKeystone
+        end,
+        keystoneCompletion = function()
+            return keystoneCompletion
         end,
         itemSellPrice = function(itemID)
             return itemPrices[itemID]
@@ -617,9 +734,16 @@ function fake.newEnv(options)
             local source = itemPrices[itemID]
             return source and ("Item " .. itemID)
         end,
+        -- The real client's self-loot templates, in the order Main.lua offers them:
+        -- every _MULTIPLE variant ahead of its singular partner, or the singular pattern
+        -- swallows the stack count. Verbatim from the enUS global strings.
         lootSelfFormats = options.lootFormats or {
             "You receive loot: %sx%d.",
             "You receive loot: %s.",
+            "You receive item: %sx%d.",
+            "You receive item: %s.",
+            "You receive bonus loot: %sx%d.",
+            "You receive bonus loot: %s.",
         },
         factionIncreaseFormats = options.factionFormats or {
             "Your %s reputation has increased by %d.",
@@ -678,6 +802,22 @@ function fake.newEnv(options)
         ---@return integer how many times the addon cleared the cursor
         cursorCleared = function()
             return cursorCleared
+        end,
+        ---Drive the character's experience standing, as earning experience would.
+        ---Passing nil models reaching the level cap.
+        ---@param value table? `{ level, xp, xpMax }`
+        setExperience = function(value)
+            experience = value
+        end,
+        ---Put a keystone in the slot, so CHALLENGE_MODE_START has a run to read.
+        ---@param value table? `{ level, mapId, affixes }`
+        setActiveKeystone = function(value)
+            activeKeystone = value
+        end,
+        ---Plant the completion report CHALLENGE_MODE_COMPLETED sends the addon to fetch.
+        ---@param value table? `{ level, mapId, durationMs, onTime, upgrades }`
+        setKeystoneCompletion = function(value)
+            keystoneCompletion = value
         end,
         ---Drive the instance type the addon reads through env.instanceInfo. Passing
         ---nil models zoning out into the open world.

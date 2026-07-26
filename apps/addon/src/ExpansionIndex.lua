@@ -9,6 +9,7 @@ local _, ns = ...
 
 ---@class ExpansionIndex
 ---@field forInstance fun(instance: string): Expansion?
+---@field latestTier fun(): integer The newest tier this client build knows about.
 ---@field abbreviationFor fun(instance: string): string
 ---@field colorOf fun(instance: string): number, number, number
 ---@field tagFor fun(instance: string): string
@@ -120,6 +121,15 @@ function ns.newExpansionIndex(deps)
 
     return {
         forInstance = forInstance,
+
+        ---The journal has always listed tiers oldest first, so the tier count *is* the
+        ---current expansion's number. EJ_GetCurrentTier is deliberately not used here: it
+        ---reports whichever tier the Adventure Guide happens to be showing, which the
+        ---player moves around, not which expansion the game is on.
+        ---@return integer
+        latestTier = function()
+            return deps.getNumTiers()
+        end,
 
         ---@param instance string
         ---@return string

@@ -32,6 +32,13 @@ local _, ns = ...
 ---@field housingItems HousingItemEvent[]
 ---@field housingXP integer Housing experience gained over the segment.
 ---@field housingLevelUps LevelUpEvent[]
+---@field encounters EncounterEvent[] Boss fights that ended, kills and wipes alike.
+---@field keystone KeystoneRun? Present only when the segment was a Mythic+ run.
+---@field experience ExperienceGain? Present only when the character earned any.
+---@field expansionTier integer? Encounter Journal tier the location belongs to, 1 = Classic.
+---@field latestExpansionTier integer? The newest tier this client knows about. Together with
+---expansionTier this is what separates current content from legacy content, without anyone
+---having to maintain a list of which raids are current.
 
 ---What the tracker hands over when a segment ends.
 ---@class SegmentVisit
@@ -42,6 +49,8 @@ local _, ns = ...
 ---@field difficulty string?
 ---@field instanceType string?
 ---@field difficultyId integer?
+---@field expansionTier integer?
+---@field latestExpansionTier integer?
 ---@field startedAt integer
 ---@field endedAt integer
 ---@field summary SegmentSummary
@@ -93,8 +102,10 @@ function ns.newSegmentLog(deps)
 
     -- Every list a record carries is copied out of the live tally through the one shared
     -- schema (ns.segmentEventSpecs / ns.copyEventList), so a filed record shares no table
-    -- with the tally and can never be reached by a later mutation of it.
+    -- with the tally and can never be reached by a later mutation of it. The single-valued
+    -- details a segment carries go through the same schema, via ns.copyDetail.
     local specs = ns.segmentEventSpecs
+    local details = ns.segmentDetailSpecs
 
     return {
         prune = prune,
@@ -119,6 +130,8 @@ function ns.newSegmentLog(deps)
                 difficulty = visit.difficulty or "",
                 instanceType = visit.instanceType or "",
                 difficultyId = visit.difficultyId,
+                expansionTier = visit.expansionTier,
+                latestExpansionTier = visit.latestExpansionTier,
                 startedAt = startedAt,
                 endedAt = endedAt,
                 seconds = math.max(endedAt - startedAt, 0),
@@ -138,6 +151,9 @@ function ns.newSegmentLog(deps)
                 housingItems = ns.copyEventList(specs.housingItems, summary.housingItems),
                 housingXP = summary.housingXP or 0,
                 housingLevelUps = ns.copyEventList(specs.housingLevelUps, summary.housingLevelUps),
+                encounters = ns.copyEventList(specs.encounters, summary.encounters),
+                keystone = ns.copyDetail(details.keystone, summary.keystone),
+                experience = ns.copyDetail(details.experience, summary.experience),
             }
 
             local replaced = false

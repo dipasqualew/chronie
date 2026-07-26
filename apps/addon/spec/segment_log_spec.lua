@@ -54,6 +54,13 @@ describe("ns.newSegmentLog", function()
                 },
                 housingXP = 300,
                 housingLevelUps = { { level = 3, at = NOW - 30 } },
+                encounters = {
+                    {
+                        id = 745, name = "Flame Leviathan", at = NOW - 900,
+                        difficultyId = 4, groupSize = 25, success = true,
+                    },
+                },
+                experience = { gained = 4500, percent = 0.45, startLevel = 41, endLevel = 41 },
             },
         }
         for key, value in pairs(overrides or {}) do
@@ -104,7 +111,48 @@ describe("ns.newSegmentLog", function()
                 },
                 housingXP = 300,
                 housingLevelUps = { { level = 3, at = NOW - 30 } },
+                encounters = {
+                    {
+                        id = 745, name = "Flame Leviathan", at = NOW - 900,
+                        difficultyId = 4, groupSize = 25, success = true,
+                    },
+                },
+                experience = { gained = 4500, percent = 0.45, startLevel = 41, endLevel = 41 },
             }, db.segments[1])
+        end)
+
+        -- A visit with no keystone must not grow an empty one: the desktop app reads the
+        -- key's absence as "this was not a Mythic+ run", which a stub table would break.
+        it("leaves out the details the visit never carried", function()
+            local log, db = newLog()
+
+            log.record(visit())
+
+            assert.is_nil(db.segments[1].keystone)
+        end)
+
+        it("carries a keystone run and its expansion onto the record", function()
+            local log, db = newLog()
+
+            log.record(visit({
+                expansionTier = 3,
+                latestExpansionTier = 12,
+                summary = {
+                    keystone = {
+                        level = 14, mapId = 501, affixes = { 9, 6 }, startedAt = NOW - 1800,
+                        completedAt = NOW, completed = true, durationMs = 1740000,
+                        onTime = true, upgrades = 1,
+                    },
+                },
+            }))
+
+            assert.equal(3, db.segments[1].expansionTier)
+            assert.equal(12, db.segments[1].latestExpansionTier)
+            assert.same({
+                level = 14, mapId = 501, affixes = { 9, 6 }, startedAt = NOW - 1800,
+                completedAt = NOW, completed = true, durationMs = 1740000,
+                onTime = true, upgrades = 1,
+            }, db.segments[1].keystone)
         end)
 
         it("dates the record by the day the visit ended", function()

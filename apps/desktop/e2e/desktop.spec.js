@@ -1,11 +1,71 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
+
+/**
+ * The activity editor, addressed the way a user addresses it: by the names and roles on
+ * screen. Nothing here knows a CSS class, so a restyle cannot break the test and a change
+ * that makes the dialog unreachable by keyboard or screen reader will.
+ */
+class ActivityEditor {
+  constructor(page) {
+    this.page = page;
+    this.dialog = page.getByRole("dialog");
+  }
+
+  /** Opens the editor from the timeline row for a given character and location. */
+  async openFor(character, instance) {
+    await this.page
+      .getByRole("button", { name: `Edit activities for ${character} in ${instance}` })
+      .click();
+    await expect(this.dialog).toBeVisible();
+  }
+
+  row(index) {
+    return this.dialog.getByRole("combobox", { name: "Activity kind" }).nth(index);
+  }
+
+  field(label) {
+    return this.dialog.getByLabel(label, { exact: true });
+  }
+
+  add() {
+    return this.dialog.getByRole("button", { name: "Add activity" }).click();
+  }
+
+  reset() {
+    return this.dialog.getByRole("button", { name: "Reset to guesses" }).click();
+  }
+
+  async done() {
+    await this.dialog.getByRole("button", { name: "Done" }).click();
+    await expect(this.dialog).toBeHidden();
+  }
+}
+
+const test = base.extend({
+  editor: async ({ page }, use) => {
+    await use(new ActivityEditor(page));
+  },
+});
 
 const mockDesktop = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
+    knownActivityKinds: ["mythic_plus", "progress_raid", "legacy_raid", "levelling"],
     segments: [
       {
         id: "synthetic-001",
+        segmentId: 1,
+        activities: [
+          {
+            id: 11,
+            kind: "mythic_plus",
+            source: "inferred",
+            confidence: 1,
+            metadata: { dungeon: "Glass Caverns", keystoneLevel: 14, timed: true },
+          },
+        ],
+        keystone: { level: 14, completed: true, onTime: true, upgrades: 1 },
+        encounters: [{ id: 900, name: "The Curator", at: 1785064000, success: true }],
         character: "Aster-Vale",
         classFile: "SENTINEL",
         level: 12,
@@ -35,6 +95,9 @@ const mockDesktop = {
       },
       {
         id: "synthetic-002",
+        segmentId: 2,
+        activities: [],
+        encounters: [],
         character: "Brin-Hearth",
         classFile: "ARTIFICER",
         level: 8,
@@ -89,6 +152,44 @@ test("renders a complete segment dashboard from the injected datastore", async (
   await expect(page.locator("#timeline")).toContainText("Glass Caverns");
   await expect(page.locator("#timeline")).toContainText("Into the Light");
   await expect(page.locator("#rows tr")).toHaveCount(2);
+
+  await test.step("names what each segment was, and admits when it knows of nothing", async () => {
+    await expect(page.locator("#timeline")).toContainText("Mythic+ run");
+    await expect(page.locator("#timeline")).toContainText("+14");
+    await expect(page.locator("#timeline")).toContainText("No activity recorded");
+  });
+});
+
+test("lets the player correct what Chronie guessed a segment was", async ({ page, editor }) => {
+  await test.step("correct the guess on a segment Chronie already labelled", async () => {
+    await editor.openFor("Aster-Vale", "Glass Caverns");
+    await editor.field("Keystone level").fill("18");
+    await editor.field("Beat the timer").selectOption("no");
+    await editor.done();
+
+    await expect(page.locator("#timeline")).toContainText("+18");
+    await expect(page.locator("#timeline")).toContainText("depleted");
+  });
+
+  await test.step("add an activity to a segment that had none", async () => {
+    await editor.openFor("Brin-Hearth", "Copperwood");
+    await editor.add();
+    await editor.row(0).selectOption("levelling");
+    await editor.field("Levels gained").fill("2");
+    await editor.done();
+
+    await expect(page.locator("#timeline")).toContainText("Levelling");
+    await expect(page.locator("#timeline")).toContainText("2 levels");
+  });
+
+  await test.step("remove an activity that does not belong", async () => {
+    await editor.openFor("Brin-Hearth", "Copperwood");
+    await editor.dialog.getByRole("button", { name: "Remove Levelling" }).click();
+    await editor.done();
+
+    await expect(page.locator("#rows")).toContainText("Brin-Hearth");
+    await expect(page.locator("#timeline")).not.toContainText("Levelling");
+  });
 });
 
 test("filters segments by synthetic character and location", async ({ page }) => {

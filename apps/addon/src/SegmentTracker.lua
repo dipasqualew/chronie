@@ -27,6 +27,8 @@ local _, ns = ...
 ---@field character fun(): string "Name-Realm" of the character running it.
 ---@field classFile fun(): string?
 ---@field level fun(): integer?
+---@field expansions ExpansionIndex? Resolves the location to the expansion that shipped it.
+---@field experienceState fun(): table? `{ level, xp, xpMax }` right now, for the tally's baseline.
 
 ---@param character string
 ---@param info InstanceInfo
@@ -71,6 +73,8 @@ function ns.newSegmentTracker(deps)
                 difficulty = current.difficulty,
                 instanceType = current.instanceType,
                 difficultyId = current.difficultyId,
+                expansionTier = current.expansionTier,
+                latestExpansionTier = current.latestExpansionTier,
                 startedAt = current.startedAt,
                 endedAt = now(),
                 summary = tally.summary(),
@@ -103,16 +107,25 @@ function ns.newSegmentTracker(deps)
 
             if not current then
                 local currencyItemCounts = deps.currencyItemCounts and deps.currencyItemCounts() or nil
-                tally.begin(deps.getMoney(), currencyItemCounts)
+                local experience = deps.experienceState and deps.experienceState() or nil
+                tally.begin(deps.getMoney(), currencyItemCounts, experience)
+                -- Which expansion shipped this location is settled once, here, from the
+                -- client that is standing in it. Deciding it later, in the desktop app, would
+                -- mean maintaining a list of every instance ever released; the client already
+                -- knows, and a segment that records the answer stays right forever.
+                local instance = info.name or "Unknown"
+                local expansion = deps.expansions and deps.expansions.forInstance(instance) or nil
                 current = {
                     identity = identity,
                     character = character,
                     classFile = deps.classFile(),
                     level = deps.level(),
-                    instance = info.name or "Unknown",
+                    instance = instance,
                     difficulty = info.difficulty or "",
                     instanceType = info.kind or "",
                     difficultyId = info.difficultyId,
+                    expansionTier = expansion and expansion.tier,
+                    latestExpansionTier = deps.expansions and deps.expansions.latestTier() or nil,
                     startedAt = now(),
                 }
             end

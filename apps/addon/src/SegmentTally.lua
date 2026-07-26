@@ -13,6 +13,8 @@ local _, ns = ...
 ---@field leave fun() Stop tallying; the totals survive for one last summary() read.
 ---@field money fun(current: integer) Fold the current wallet total into loot and net diff.
 ---@field loot fun(message: string) Add a self-loot chat line's vendor value.
+---@field itemInfoReceived fun(itemID: integer) Price the loot that was parked waiting on this
+---item's data and fold it in.
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
 ---@field currencyItem fun(itemID: integer, total: integer, name: string?) Fold an item-based currency's
@@ -30,6 +32,12 @@ local _, ns = ...
 ---Append a collected housing item.
 ---@field housingXP fun(amount: integer) Fold a housing experience gain into the segment total.
 ---@field housingLevelUp fun(level: integer, at: integer) Append a housing level gained.
+---@field encounter fun(event: EncounterEvent) Append a boss encounter that ended, kill or wipe.
+---@field keystoneStart fun(info: table, at: integer) Open a Mythic+ run: `{ level, mapId, affixes }`.
+---@field keystoneComplete fun(info: table, at: integer) Close it: `{ durationMs, onTime, upgrades, level }`.
+---@field keystoneReset fun() Abandon the open run; the level and map stay, completion does not.
+---@field experience fun(level: integer, xp: integer, xpMax: integer) Fold the character's
+---current experience standing into the segment's gain.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this segment.
 ---@field summary fun(): SegmentSummary
@@ -79,6 +87,40 @@ local _, ns = ...
 ---@field at integer When it was collected.
 ---@field warbandFirst boolean True when the warband had never collected it; false for a duplicate.
 
+---One boss fight that reached an end, whether the group won it or wiped. Both outcomes are
+---kept: a raid night is as much its wipes as its kills, and the ratio is the clearest signal
+---there is for telling a progression raid from a farm clear.
+---@class EncounterEvent
+---@field id integer Encounter (journal) ID.
+---@field name string? Localised boss name.
+---@field at integer When the fight ended.
+---@field difficultyId integer? Difficulty the fight ran on.
+---@field groupSize integer? How many players were in the group.
+---@field success boolean True for a kill, false for a wipe.
+
+---A Mythic+ run, at most one per segment. A segment is one continuous stay in one instance
+---at one difficulty, and a party that finishes a key and immediately starts another one in
+---the same dungeon never leaves — so a second run inside a segment overwrites the first
+---rather than appending. That is rare, and losing the earlier of two runs beats reporting a
+---segment that claims two keystone levels at once.
+---@class KeystoneRun
+---@field level integer Keystone level the run started on.
+---@field mapId integer? Challenge-mode map ID.
+---@field affixes integer[]? Affix IDs in effect.
+---@field startedAt integer When the key was activated.
+---@field completedAt integer? When the dungeon was completed; absent for an abandoned run.
+---@field completed boolean Whether the run reached the final boss.
+---@field durationMs integer? Clock time the client reported, in milliseconds.
+---@field onTime boolean? Whether it beat the timer.
+---@field upgrades integer? Keystone upgrade levels earned: 0 for depleted-but-completed, 1..3 otherwise.
+
+---How much experience the character earned over the segment.
+---@class ExperienceGain
+---@field gained integer Raw experience points.
+---@field percent number Gain as a fraction of a level: 1.0 is exactly one full level's worth.
+---@field startLevel integer Level held when the segment opened.
+---@field endLevel integer Level held at the last update seen.
+
 ---@class SegmentSummary
 ---@field active boolean
 ---@field lootValue integer Vendor value of items entering the inventory, in copper.
@@ -99,11 +141,16 @@ local _, ns = ...
 ---@field housingItems HousingItemEvent[] Housing items collected, in acquisition order.
 ---@field housingXP integer Housing experience gained over the segment.
 ---@field housingLevelUps LevelUpEvent[] Housing levels gained, in the order they were.
+---@field encounters EncounterEvent[] Boss fights that ended, in the order they did.
+---@field keystone KeystoneRun? The Mythic+ run this segment was, when it was one.
+---@field experience ExperienceGain? Experience earned, when the client ever reported any.
 
 ---@class SegmentTallyDeps
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
 ---@field factionFormats string[]? Reputation-increase message templates.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
+---nil means the client has not cached the item yet — distinct from 0, which means the item
+---genuinely cannot be sold.
 
 -- Lua-pattern magic characters, escaped so literal chunks of a printf template match verbatim.
 local MAGIC = "([%^%$%(%)%.%[%]%*%+%-%?%%])"
@@ -217,9 +264,14 @@ function ns.newSegmentTally(deps)
     ---Item-based currencies get the same treatment: their owned counts at segment start
     ---become the baselines every later update is measured against, so currency held before
     ---the segment is never counted as gained.
+    ---Experience is anchored the same way, from whatever standing the character holds as
+    ---the segment opens: `{ level, xp, xpMax }`. Without a baseline the first update of the
+    ---segment cannot be turned into a gain, so the tracker reads it at begin() rather than
+    ---letting the tally swallow the first event to learn where it started.
     ---@param money integer?
     ---@param currencyItemCounts table<integer, integer>?
-    local function begin(money, currencyItemCounts)
+    ---@param experience table? `{ level, xp, xpMax }` as of right now.
+    local function begin(money, currencyItemCounts, experience)
         money = money or 0
         segment.active = true
         segment.moneyBaseline = money
@@ -227,6 +279,7 @@ function ns.newSegmentTally(deps)
         segment.latestMoney = money
         segment.goldLooted = 0
         segment.itemValue = 0
+        segment.pendingItems = {}
         segment.transmogs = {}
         segment.reputation = {}
         segment.currencies = {}
@@ -245,6 +298,24 @@ function ns.newSegmentTally(deps)
         segment.housingItems = {}
         segment.housingXP = 0
         segment.housingLevelUps = {}
+        segment.encounters = {}
+        segment.keystone = nil
+        segment.experienceGained = 0
+        segment.experiencePercent = 0
+        segment.experienceBaseline = nil
+        segment.experienceLast = nil
+        if experience and experience.level then
+            segment.experienceBaseline = {
+                level = experience.level,
+                xp = experience.xp or 0,
+                xpMax = experience.xpMax or 0,
+            }
+            segment.experienceLast = {
+                level = segment.experienceBaseline.level,
+                xp = segment.experienceBaseline.xp,
+                xpMax = segment.experienceBaseline.xpMax,
+            }
+        end
     end
 
     begin(0)
@@ -294,16 +365,54 @@ function ns.newSegmentTally(deps)
             end
         end,
 
+        ---Folds a self-loot line's vendor value into the segment.
+        ---
+        ---An item the client has never seen is not cached when the loot line arrives, and
+        ---the price query is answered asynchronously — so pricing it right now would read
+        ---nil and book the item as worthless. That is the common case for a first-time drop
+        ---and it silently undercounts the haul, which is why an unpriced item is parked
+        ---here and folded in by itemInfoReceived once the server answers. Asking for the
+        ---price is itself what triggers the query, so no separate request is needed.
         ---@param message string
         loot = function(message)
             if not segment.active then
                 return
             end
             local link, quantity = parse(message, lootPatterns)
-            local itemID = link and link:match("Hitem:(%d+)")
-            if itemID then
-                local price = itemSellPrice(tonumber(itemID)) or 0
-                segment.itemValue = segment.itemValue + price * (quantity or 1)
+            local itemID = link and tonumber(link:match("Hitem:(%d+)"))
+            if not itemID then
+                return
+            end
+            quantity = quantity or 1
+            local price = itemSellPrice(itemID)
+            if price == nil then
+                local waiting = segment.pendingItems[itemID]
+                if not waiting then
+                    waiting = {}
+                    segment.pendingItems[itemID] = waiting
+                end
+                waiting[#waiting + 1] = quantity
+                return
+            end
+            segment.itemValue = segment.itemValue + price * quantity
+        end,
+
+        ---The client has finished loading an item's data, so anything loot() parked on it
+        ---can be priced. A price that is still unavailable is treated as worthless and
+        ---dropped rather than parked again, so a bad item ID cannot accumulate forever.
+        ---@param itemID integer
+        itemInfoReceived = function(itemID)
+            if not segment.active or not itemID then
+                return
+            end
+            local waiting = segment.pendingItems[itemID]
+            if not waiting then
+                return
+            end
+            segment.pendingItems[itemID] = nil
+            local price = itemSellPrice(itemID) or 0
+            for _, quantity in ipairs(waiting) do
+                segment.itemValue = segment.itemValue + price * quantity
             end
         end,
 
@@ -474,6 +583,142 @@ function ns.newSegmentTally(deps)
             end
         end,
 
+        ---A boss fight that ended. Wipes are recorded alongside kills, so the ratio between
+        ---them survives into the record; a reader that only wants kills filters on success.
+        ---@param event EncounterEvent
+        encounter = function(event)
+            if not segment.active or not event or not event.id then
+                return
+            end
+            segment.encounters[#segment.encounters + 1] = {
+                id = event.id,
+                name = event.name,
+                at = event.at,
+                difficultyId = event.difficultyId,
+                groupSize = event.groupSize,
+                success = event.success and true or false,
+            }
+        end,
+
+        ---Opens a Mythic+ run on this segment. A level of nil is not a keystone start the
+        ---tally can say anything useful about, so it is dropped rather than recorded as a
+        ---run of unknown level.
+        ---@param info table `{ level, mapId, affixes }`
+        ---@param at integer
+        keystoneStart = function(info, at)
+            if not segment.active or not info or not info.level then
+                return
+            end
+            local affixes
+            if info.affixes then
+                affixes = {}
+                for index, affix in ipairs(info.affixes) do
+                    affixes[index] = affix
+                end
+            end
+            segment.keystone = {
+                level = info.level,
+                mapId = info.mapId,
+                affixes = affixes,
+                startedAt = at,
+                completed = false,
+            }
+        end,
+
+        ---Closes the open run. The completion report carries its own level, which is the
+        ---authority: a run can only be completed at the level it was started on, and the
+        ---start may have been missed entirely by a player who zoned in mid-key. So a
+        ---completion with no open run still records one, dated to the completion itself.
+        ---@param info table `{ level, mapId, durationMs, onTime, upgrades }`
+        ---@param at integer
+        keystoneComplete = function(info, at)
+            if not segment.active or not info then
+                return
+            end
+            local run = segment.keystone
+            if not run then
+                run = { level = info.level, mapId = info.mapId, startedAt = at }
+                segment.keystone = run
+            end
+            run.level = info.level or run.level
+            run.mapId = info.mapId or run.mapId
+            run.completed = true
+            run.completedAt = at
+            run.durationMs = info.durationMs
+            run.onTime = info.onTime and true or false
+            run.upgrades = info.upgrades
+        end,
+
+        ---The party abandoned or reset the key. The run stays on the segment — it is still
+        ---what the player spent the time doing — but it never became a completion.
+        keystoneReset = function()
+            if segment.active and segment.keystone then
+                segment.keystone.completed = false
+                segment.keystone.completedAt = nil
+                segment.keystone.durationMs = nil
+                segment.keystone.onTime = nil
+                segment.keystone.upgrades = nil
+            end
+        end,
+
+        ---Folds the character's current experience standing into the segment's gain.
+        ---
+        ---Both the raw points and the fraction of a level they represent are kept, because
+        ---neither answers on its own: raw points are incomparable between levels, while the
+        ---fraction is what "did I actually level meaningfully here?" is asking. The fraction
+        ---accumulates each step against the maximum in force at the time, so a gain spanning
+        ---a level boundary is still measured against the right denominators.
+        ---
+        ---Crossing more than one level in a single update is only possible when several
+        ---updates are missed at once; those middle levels are counted at the new level's
+        ---maximum, which is an approximation the summary cannot avoid — the client never
+        ---reports what the maxima of the levels in between were.
+        ---@param level integer
+        ---@param xp integer
+        ---@param xpMax integer
+        experience = function(level, xp, xpMax)
+            if not segment.active or not level then
+                return
+            end
+            xp = xp or 0
+            xpMax = xpMax or 0
+            local last = segment.experienceLast
+            if not last then
+                -- No baseline: tracking began mid-segment, so adopt this standing as the
+                -- start and count nothing, exactly as an untracked currency item does.
+                segment.experienceBaseline = { level = level, xp = xp, xpMax = xpMax }
+                segment.experienceLast = { level = level, xp = xp, xpMax = xpMax }
+                return
+            end
+
+            local gained, percent = 0, 0
+            if level == last.level then
+                gained = xp - last.xp
+                if last.xpMax > 0 then
+                    percent = gained / last.xpMax
+                end
+            elseif level > last.level then
+                local remainder = math.max((last.xpMax or 0) - last.xp, 0)
+                local middleLevels = level - last.level - 1
+                gained = remainder + middleLevels * xpMax + xp
+                if last.xpMax > 0 then
+                    percent = remainder / last.xpMax
+                end
+                percent = percent + middleLevels
+                if xpMax > 0 then
+                    percent = percent + xp / xpMax
+                end
+            end
+            -- A level loss, or experience going backwards inside one level, is not something
+            -- the game does; treat it as a client hiccup and re-anchor rather than subtract.
+            segment.experienceLast = { level = level, xp = xp, xpMax = xpMax }
+            if gained <= 0 then
+                return
+            end
+            segment.experienceGained = segment.experienceGained + gained
+            segment.experiencePercent = segment.experiencePercent + percent
+        end,
+
         ---A single housing item collected. Whether it is the warband's first copy or a
         ---duplicate is decided upstream and folded onto the event, mirroring how a quest
         ---carries its first-completion scope.
@@ -559,6 +804,9 @@ function ns.newSegmentTally(deps)
                 or #segment.housingItems > 0
                 or segment.housingXP ~= 0
                 or #segment.housingLevelUps > 0
+                or #segment.encounters > 0
+                or segment.keystone ~= nil
+                or segment.experienceGained ~= 0
         end,
 
         ---@return SegmentSummary
@@ -587,6 +835,16 @@ function ns.newSegmentTally(deps)
             end)
 
             local specs = ns.segmentEventSpecs
+            local details = ns.segmentDetailSpecs
+            local experience
+            if segment.experienceGained ~= 0 then
+                experience = {
+                    gained = segment.experienceGained,
+                    percent = segment.experiencePercent,
+                    startLevel = segment.experienceBaseline and segment.experienceBaseline.level,
+                    endLevel = segment.experienceLast and segment.experienceLast.level,
+                }
+            end
             return {
                 active = segment.active,
                 lootValue = segment.itemValue,
@@ -607,6 +865,9 @@ function ns.newSegmentTally(deps)
                 housingItems = ns.copyEventList(specs.housingItems, segment.housingItems),
                 housingXP = segment.housingXP,
                 housingLevelUps = ns.copyEventList(specs.housingLevelUps, segment.housingLevelUps),
+                encounters = ns.copyEventList(specs.encounters, segment.encounters),
+                keystone = ns.copyDetail(details.keystone, segment.keystone),
+                experience = ns.copyDetail(details.experience, experience),
             }
         end,
     }
