@@ -14,6 +14,11 @@ Reason about the addon from this repository's source and from the fakes in
 by looking at live game data, ask for the relevant snippet rather than going to
 find it.
 
+What the desktop app needs to know about the game's own file formats is written
+down in `docs/game-files.md` and `docs/character-rendering.md` — file ids, column
+indices, verified constants and the traps. That is what those documents are for:
+read them instead of going to look.
+
 ## All work happens on a pull request
 
 `main` is not a working branch. Commit to a branch named for the change, push it,
