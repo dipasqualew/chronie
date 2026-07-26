@@ -227,7 +227,12 @@ async function viaFetch(path: string): Promise<string> {
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${GITHUB_API}${path}`, { headers });
   if (!response.ok) {
-    throw new HttpError(response.status, `GET ${path} answered ${response.status} ${response.statusText}.`);
+    // The body is where the reason lives, and a bare "403 Forbidden" sends the reader off
+    // checking their token when the answer — a rate limit, a repository the token cannot
+    // see, a gateway that has GitHub access switched off entirely — was right there.
+    const body = await response.text().catch(() => "");
+    const reason = body.trim() ? ` ${body.trim().slice(0, 500)}` : "";
+    throw new HttpError(response.status, `GET ${path} answered ${response.status} ${response.statusText}.${reason}`);
   }
   return await response.text();
 }
