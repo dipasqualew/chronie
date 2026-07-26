@@ -291,6 +291,10 @@ const NIGHT_BEFORE = 1784977200;
 
 // Typed as the real backend's answers, so a fixture that has drifted from what a command
 // actually returns fails the type check rather than the assertion three steps later.
+//
+// The places are invented, the classes are not: a class token is the app's own vocabulary —
+// the palette in `ui.ts` is keyed by it — so a made-up one would draw every character in the
+// colourless fallback and hide the very thing the cast is coloured for.
 const mockDesktop: E2EMock = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
@@ -302,7 +306,7 @@ const mockDesktop: E2EMock = {
         activities: [],
         encounters: [],
         character: "Brin-Hearth",
-        classFile: "ARTIFICER",
+        classFile: "DRUID",
         level: 9,
         day: "2026-07-26",
         instance: "Copperwood Depths",
@@ -343,7 +347,7 @@ const mockDesktop: E2EMock = {
         keystone: { level: 14, completed: true, onTime: true, upgrades: 1 },
         encounters: [{ id: 900, name: "The Curator", at: EVENING + 400, success: true }],
         character: "Aster-Vale",
-        classFile: "SENTINEL",
+        classFile: "MAGE",
         level: 12,
         day: "2026-07-26",
         instance: "Glass Caverns",
@@ -380,7 +384,7 @@ const mockDesktop: E2EMock = {
         activities: [],
         encounters: [],
         character: "Brin-Hearth",
-        classFile: "ARTIFICER",
+        classFile: "DRUID",
         level: 8,
         day: "2026-07-25",
         instance: "Copperwood",
@@ -598,6 +602,16 @@ const timeline = (page: Page): Locator => page.locator("#timeline");
 const sessions = (page: Page): Locator => page.locator("#timeline .session");
 
 /**
+ * The colour each of a set of elements is ringed in, as the browser resolved it.
+ *
+ * Computed rather than read off the markup on purpose: a class colour reaches the screen
+ * through a custom property and a border that names it, and only the browser can say the
+ * two ever met.
+ */
+const borderColours = (elements: Locator): Promise<string[]> =>
+  elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).borderTopColor));
+
+/**
  * The urls the window has asked the operating system to open, in the order it asked.
  *
  * A real browser opening is the one outcome a browser test cannot see, so this stands in for
@@ -626,7 +640,15 @@ test("stitches segments into play sessions and leads with what happened", async 
   await test.step("the cast is named where a screen reader can reach it", async () => {
     const cast = sessions(page).first().getByRole("img");
     await expect(cast).toHaveCount(2);
-    await expect(cast.first()).toHaveAttribute("aria-label", /Aster-Vale, Sentinel · level 12/);
+    await expect(cast.first()).toHaveAttribute("aria-label", /Aster-Vale, Mage · level 12/);
+  });
+
+  // The circle is the only thing on a session card that says who played at a glance, and it
+  // says it in the colour the game uses. A ring drawn in the fallback grey is the failure
+  // this catches: everyone the same colour is the same as nobody named.
+  await test.step("each character is drawn in their own class colour", async () => {
+    await expect(borderColours(sessions(page).first().getByRole("img")))
+      .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
   });
 
   await test.step("both kinds of time are reported, because they differ", async () => {

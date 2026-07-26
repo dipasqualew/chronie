@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { highlightList } from "./ui";
+import { characterCircle, highlightList } from "./ui";
 import { highlights } from "./sessions";
+import type { SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
 
 const BASE = 1_785_000_000;
@@ -142,5 +143,39 @@ describe("highlightList", () => {
 
   it("has nothing to draw for a segment nothing happened in", () => {
     expect(draw([segment()])).toBe("");
+  });
+});
+
+/** A character with only what the circle draws from; the rest of the card is elsewhere. */
+const character = (overrides: Partial<SessionCharacter> = {}): SessionCharacter => ({
+  name: "Aster-Vale",
+  classFile: "MAGE",
+  level: 12,
+  seconds: 1800,
+  segmentCount: 2,
+  lootValue: 0,
+  goldDiff: 0,
+  places: [],
+  ...overrides,
+});
+
+describe("characterCircle", () => {
+  // The circle carries the colour on a custom property the stylesheet reads twice, for the
+  // ring and for the wash inside it. Handing it a class the palette does not know leaves
+  // both drawn in the muted grey, which is how a whole cast ends up looking alike.
+  it.each([
+    ["MAGE", "#3fc7eb"],
+    ["DRUID", "#ff7c0a"],
+    ["DEATHKNIGHT", "#c41e3a"],
+  ])("draws a %s in the colour the game gives it", (classFile, colour) => {
+    expect(characterCircle(character({ classFile }))).toContain(`--class-color:${colour}`);
+  });
+
+  it.each([
+    ["a class nothing knows", "ARTIFICER"],
+    ["a segment that never said", null],
+    ["a segment that said nothing", undefined],
+  ])("falls back to the muted grey for %s", (_case, classFile) => {
+    expect(characterCircle(character({ classFile }))).toContain("--class-color:var(--text-muted)");
   });
 });
