@@ -70,7 +70,17 @@ The desktop frontend and this repository's scripts are TypeScript. Nothing compi
 them ahead of time — Vite, Vitest and Bun strip the types — so `bun run typecheck` is
 what actually reads them.
 
-After pushing a branch, wait for its CI rather than guessing at it:
+Every change reaches `main` through a pull request. Branch, push, and open the
+pull request straight away — it is what runs CI, and it is where the change is
+reviewed if anyone wants to review it:
+
+```sh
+git switch -c some-change
+git push -u origin some-change
+gh pr create --fill
+```
+
+Then wait for its CI rather than guessing at it:
 
 ```sh
 bun run ci:wait                  # the branch currently checked out
@@ -81,6 +91,11 @@ bun run ci:wait some-branch
 has finished, prints the failed jobs, their annotations and their error lines, and exits
 non-zero if anything was not green. It uses the `gh` CLI when one is installed and the
 GitHub REST API with `GH_TOKEN`/`GITHUB_TOKEN` when one is not.
+
+Green CI is enough to merge — `gh pr merge --squash --delete-branch` — and that
+holds for agents working in this repository too. A pull request should be left
+open for a human only when the change is genuinely unclear rather than merely
+large, and it should say what the open question is.
 
 ## Rolling development updates
 
