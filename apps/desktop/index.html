@@ -298,6 +298,14 @@
     /* Set names run long and the cards have to stay on a grid, so let them wrap twice. */
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
+  .mog-open {
+    border: none; background: transparent; padding: 0; font: inherit;
+    color: inherit; text-align: left; cursor: pointer;
+  }
+  .mog-open:hover, .mog-card:hover .mog-open {
+    background: transparent; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .mog-card:hover { border-color: var(--series-1); }
   .mog-facts { display: flex; flex-wrap: wrap; gap: 4px; }
   .mog-foot {
     display: flex; justify-content: space-between; align-items: baseline;
@@ -349,6 +357,17 @@
   .detail-section li { margin: 3px 0; }
   .detail-section p { margin: 0; }
   .detail-section a { color: var(--series-1); }
+
+  #transmog-detail { width: min(560px, 94vw); max-height: 86vh; }
+  #transmog-detail[open] { display: flex; flex-direction: column; }
+  .mog-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .mog-item {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+    padding: 7px 8px; border-radius: 8px;
+  }
+  .mog-item:hover { background: var(--surface-2); }
+  .mog-item .badge { flex: none; min-width: 74px; text-align: center; }
+  .mog-item a { color: var(--series-1); }
 
   #activity-editor { width: min(560px, 92vw); }
   .dialog-body { padding: 18px; }
@@ -478,6 +497,19 @@
       <button type="button" data-role="prev" aria-label="Previous segment">‹</button>
       <button type="button" data-role="next" aria-label="Next segment">›</button>
       <button type="button" data-role="close" aria-label="Close segment">Close</button>
+    </div>
+  </div>
+  <div class="detail-body"></div>
+</dialog>
+
+<dialog id="transmog-detail" aria-labelledby="transmog-detail-title">
+  <div class="detail-head">
+    <div>
+      <h2 class="detail-title" id="transmog-detail-title"></h2>
+      <span class="detail-position"></span>
+    </div>
+    <div class="detail-nav">
+      <button type="button" data-role="close" aria-label="Close set">Close</button>
     </div>
   </div>
   <div class="detail-body"></div>

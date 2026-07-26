@@ -15,6 +15,7 @@ import { createDetails } from "./details";
 import { createSegmentModal } from "./segmentModal";
 import { createTimeline } from "./timeline";
 import { createTransmog } from "./transmog";
+import { createTransmogModal } from "./transmogModal";
 import { duration, escapeHtml, plural } from "./format";
 import { installExternalLinks } from "./links";
 import type { ActivityMetadata, DashboardPayload, Segment } from "./types";
@@ -66,14 +67,22 @@ const details = createDetails({
   onOpenSegment: (segmentId, order) => modal.open(segmentId, order),
 });
 
+const transmogDetail = createTransmogModal({
+  dialog: $<HTMLDialogElement>("transmog-detail"),
+  load: (setId) => desktop.transmogSetItems(setId),
+});
+
 const transmog = createTransmog({
-  meta: $("transmog-meta"),
-  search: $<HTMLInputElement>("transmog-search"),
-  expansion: $<HTMLSelectElement>("transmog-expansion"),
-  klass: $<HTMLSelectElement>("transmog-class"),
-  list: $("transmog-list"),
-  empty: $("transmog-empty"),
-  count: $("transmog-count"),
+  elements: {
+    meta: $("transmog-meta"),
+    search: $<HTMLInputElement>("transmog-search"),
+    expansion: $<HTMLSelectElement>("transmog-expansion"),
+    klass: $<HTMLSelectElement>("transmog-class"),
+    list: $("transmog-list"),
+    empty: $("transmog-empty"),
+    count: $("transmog-count"),
+  },
+  onOpenSet: (set) => transmogDetail.open(set),
 });
 
 // The sets come out of the game's own files, which costs a second and a few hundred

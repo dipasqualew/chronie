@@ -81,6 +81,12 @@ export interface TransmogElements {
   count: HTMLElement;
 }
 
+export interface TransmogOptions {
+  elements: TransmogElements;
+  /** Opens one set. The grid knows which set was clicked and nothing about what is in it. */
+  onOpenSet: (set: TransmogSet) => void;
+}
+
 export interface TransmogView {
   /** Draws a loaded payload. */
   render(payload: TransmogPayload): void;
@@ -122,7 +128,7 @@ export function groupSets(sets: TransmogSet[]): Array<{ group: string; sets: Tra
   return groups;
 }
 
-export function createTransmog(elements: TransmogElements): TransmogView {
+export function createTransmog({ elements, onOpenSet }: TransmogOptions): TransmogView {
   let loaded: TransmogPayload | null = null;
 
   function draw(): void {
@@ -154,8 +160,12 @@ export function createTransmog(elements: TransmogElements): TransmogView {
   function card(set: TransmogSet): string {
     const patch = patchName(set.patchIntroduced);
     const classes = classNames(set.classMask);
-    return `<article class="mog-card"${classes.length ? ` title="${escapeHtml(classes.join(", "))}"` : ""}>
-      <h4>${escapeHtml(set.name) || '<span class="muted">Unnamed set</span>'}</h4>
+    // The name is the button rather than the card being one, because a card holds a heading
+    // and a heading cannot live inside a button — and the heading is how the view is walked.
+    return `<article class="mog-card" data-set="${set.id}"${
+      classes.length ? ` title="${escapeHtml(classes.join(", "))}"` : ""}>
+      <h4><button type="button" class="mog-open">${
+        escapeHtml(set.name) || "Unnamed set"}</button></h4>
       <div class="mog-facts">
         <span class="chip">${escapeHtml(classLabel(set.classMask))}</span>
         <span class="chip">${escapeHtml(expansionName(set.expansionId))}</span>
@@ -172,6 +182,14 @@ export function createTransmog(elements: TransmogElements): TransmogView {
     control.addEventListener("input", draw);
     control.addEventListener("change", draw);
   }
+
+  // Delegated, so a card opens whether it was clicked on its name or anywhere else on it,
+  // and so that redrawing the grid never has to re-attach anything.
+  elements.list.addEventListener("click", (event) => {
+    const card = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-set]") : null;
+    const found = loaded?.sets.find((set) => String(set.id) === card?.dataset.set);
+    if (found) onOpenSet(found);
+  });
 
   return {
     render(payload) {

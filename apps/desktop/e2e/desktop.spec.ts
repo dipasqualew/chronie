@@ -293,6 +293,91 @@ const mockDesktop: E2EMock = {
       },
     ],
   },
+  // And what those sets are made of, which the window asks for a set at a time. The item
+  // ids, slots and the one appearance the game withholds are the backend fixtures' own, so
+  // a change to the chain the Rust tests hold still shows up here too.
+  transmogItems: {
+    201: {
+      setId: 201,
+      readCount: 4,
+      withheldCount: 0,
+      appearances: [
+        {
+          modifiedAppearanceId: 71001, itemId: 30001, appearanceId: 80001,
+          displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+        },
+        // The set names the same appearance twice, which is why the card counts four.
+        {
+          modifiedAppearanceId: 71001, itemId: 30001, appearanceId: 80001,
+          displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+        },
+        {
+          modifiedAppearanceId: 71002, itemId: 30002, appearanceId: 80002,
+          displayType: 1, displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
+        },
+        {
+          modifiedAppearanceId: 71003, itemId: 30003, appearanceId: 80003,
+          displayType: 2, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
+        },
+      ],
+    },
+    202: {
+      setId: 202,
+      readCount: 2,
+      withheldCount: 0,
+      appearances: [
+        {
+          modifiedAppearanceId: 71004, itemId: 30004, appearanceId: 80004,
+          displayType: 5, displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
+        },
+        {
+          modifiedAppearanceId: 71005, itemId: 30005, appearanceId: 80005,
+          displayType: 7, displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
+        },
+      ],
+    },
+    // The set whose appearances span several slots, which is what the list is grouped by.
+    203: {
+      setId: 203,
+      readCount: 4,
+      withheldCount: 0,
+      appearances: [
+        {
+          modifiedAppearanceId: 71006, itemId: 30006, appearanceId: 80006,
+          displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+        },
+        {
+          modifiedAppearanceId: 71007, itemId: 30007, appearanceId: 80007,
+          displayType: 1, displayInfoId: 900009, iconFileDataId: 130002, hasModel: true,
+        },
+        {
+          modifiedAppearanceId: 71008, itemId: 30008, appearanceId: 80008,
+          displayType: 2, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
+        },
+        {
+          modifiedAppearanceId: 71009, itemId: 30009, appearanceId: 80009,
+          displayType: 4, displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
+        },
+      ],
+    },
+    // Two appearances, one of which the game encrypts — so the modal has to list something
+    // it cannot name rather than come up one row short of the card.
+    205: {
+      setId: 205,
+      readCount: 1,
+      withheldCount: 1,
+      appearances: [
+        {
+          modifiedAppearanceId: 71011, itemId: 30011, appearanceId: 80011,
+          displayType: 2, displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
+        },
+        {
+          modifiedAppearanceId: 71012, itemId: 0, appearanceId: 0,
+          displayType: 0, displayInfoId: 0, iconFileDataId: 0, hasModel: false,
+        },
+      ],
+    },
+  },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
