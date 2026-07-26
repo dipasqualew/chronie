@@ -29,9 +29,10 @@ local addonName, ns = ...
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
----@field currencyItemIDs fun(): integer[] Item IDs tracked as item-based currencies.
 ---@field ownedItemCount fun(itemID: integer): integer Grand total owned across bags and every bank,
 ---the warband bank included, so internal transfers leave it unchanged.
+---@field getCursorItem fun(): (integer?, string?) Item held on the cursor: id and name, or nil.
+---@field clearCursor fun() Release whatever the cursor is holding.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
 ---@field mountInfo fun(id: integer): string? Localised name of a mount.
 ---@field petInfo fun(guid: string): (integer?, string?) Battle pet species ID and localised name.
@@ -104,6 +105,7 @@ function ns.main(env)
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
     })
+    local currencyItems = ns.newCurrencyItems({ db = env.db })
     local questBaselines = {}
 
     local function snapshotQuest(questID)
@@ -160,7 +162,7 @@ function ns.main(env)
         -- tally measures later changes against what was held on arrival rather than zero.
         currencyItemCounts = function()
             local counts = {}
-            for _, itemID in ipairs(env.currencyItemIDs()) do
+            for _, itemID in ipairs(currencyItems.ids()) do
                 counts[itemID] = env.ownedItemCount(itemID)
             end
             return counts
@@ -224,6 +226,27 @@ function ns.main(env)
         name = "WdpWowReportWindow",
     })
 
+    local currencyWindow = ns.newCurrencyWindow({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        specialFrames = env.specialFrames,
+        name = "WdpWowCurrencyWindow",
+        items = currencyItems,
+        getCursorItem = env.getCursorItem,
+        clearCursor = env.clearCursor,
+        itemName = env.itemName,
+        loadPoint = function()
+            local saved = env.db.currencyWindow
+            if not saved then
+                return nil
+            end
+            return saved.point, saved.x, saved.y
+        end,
+        savePoint = function(point, x, y)
+            env.db.currencyWindow = { point = point, x = x, y = y }
+        end,
+    })
+
     ---Only redraws when the panel is actually on screen, so a busy loot log does not
     ---churn hidden font strings.
     local function refreshResults()
@@ -259,7 +282,7 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /wdp locks | results | sessions | report")
+            logger.info("usage: /wdp locks | results | sessions | currency | report")
         end,
     })
     router.add("locks", window.toggle)
@@ -299,6 +322,7 @@ function ns.main(env)
         end
     end
     router.add("sessions", toggleSessions)
+    router.add("currency", currencyWindow.toggle)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
     end)
@@ -396,7 +420,7 @@ function ns.main(env)
     -- spends. Because the count spans every storage the character can reach, including the
     -- warband bank, a deposit or withdrawal nets to zero and is never miscounted as either.
     dispatcher.on("BAG_UPDATE_DELTA", function()
-        for _, itemID in ipairs(env.currencyItemIDs()) do
+        for _, itemID in ipairs(currencyItems.ids()) do
             tally.currencyItem(itemID, env.ownedItemCount(itemID), env.itemName(itemID))
         end
         refreshResults()
@@ -479,6 +503,8 @@ function ns.main(env)
         minimapButton = minimapButton,
         reportCommand = reportCommand,
         reportWindow = reportWindow,
+        currencyItems = currencyItems,
+        currencyWindow = currencyWindow,
     }
 end
 
@@ -501,9 +527,6 @@ if CreateFrame then
         self:UnregisterAllEvents()
 
         WdpWowDB = WdpWowDB or {}
-        -- Seeded empty so the list of item-based currencies to watch is discoverable in
-        -- the SavedVariables file: a player drops the item IDs they treat as currency here.
-        WdpWowDB.currencyItems = WdpWowDB.currencyItems or {}
 
         ---Collects the client's globals into a list, dropping any this client build
         ---does not define so a missing template never becomes a nil hole.
@@ -596,20 +619,6 @@ if CreateFrame then
                 local info = C_CurrencyInfo.GetCurrencyInfo(currencyType)
                 return info and info.name
             end,
-            -- The tracked set is data, not code: a player lists the item IDs of whatever
-            -- they treat as currency in WdpWowDB.currencyItems and it is picked up here,
-            -- so shifting a patch's currencies never means editing the addon.
-            currencyItemIDs = function()
-                local ids = {}
-                local seen = {}
-                for _, itemID in ipairs(WdpWowDB.currencyItems or {}) do
-                    if type(itemID) == "number" and not seen[itemID] then
-                        seen[itemID] = true
-                        ids[#ids + 1] = itemID
-                    end
-                end
-                return ids
-            end,
             -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
             -- store the character owns, so moving the item between them never shifts the total.
             ownedItemCount = function(itemID)
@@ -618,6 +627,14 @@ if CreateFrame then
                 end
                 return C_Item.GetItemCount(itemID, true, false, true, true) or 0
             end,
+            getCursorItem = function()
+                local kind, itemID = GetCursorInfo()
+                if kind ~= "item" or not itemID then
+                    return nil
+                end
+                return itemID, (GetItemInfo(itemID))
+            end,
+            clearCursor = ClearCursor,
             achievementInfo = function(id)
                 return (select(2, GetAchievementInfo(id)))
             end,

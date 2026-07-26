@@ -29,6 +29,8 @@ read_globals = {
     "GetInstanceInfo",
     "GetItemInfo",
     "C_Item",
+    "GetCursorInfo",
+    "ClearCursor",
     "C_TransmogCollection",
     "C_CurrencyInfo",
     "C_QuestLog",

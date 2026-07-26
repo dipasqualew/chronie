@@ -400,13 +400,25 @@ describe("ns.newSessionTally", function()
             assert.same({}, tally.summary().currencies)
         end)
 
-        it("treats the first total of an unseeded item as the whole gain", function()
+        -- Tracking an item mid-session leaves it unseeded by begin(); the first sight then
+        -- only anchors the baseline, so holdings that predate the choice are not booked.
+        it("adopts an unseeded item's first total as its baseline, counting nothing", function()
             local tally = newTally()
             tally.begin(0)
 
             tally.currencyItem(5001, 12, "Bloody Token")
 
-            assert.equal(12, tally.summary().currencies[1].amount)
+            assert.same({}, tally.summary().currencies)
+        end)
+
+        it("counts changes after an unseeded item is first anchored", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.currencyItem(5001, 12, "Bloody Token")
+
+            tally.currencyItem(5001, 20, "Bloody Token")
+
+            assert.equal(8, tally.summary().currencies[1].amount)
         end)
 
         it("accumulates a run of gains and spends from the baseline", function()

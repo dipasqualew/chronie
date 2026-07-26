@@ -434,6 +434,7 @@ end
 ---  `housingItems` maps an id to `{ name, quantity }`, quantity being the warband-owned count.
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
 ---  `currencyItems` maps an item id to `{ name, count }`, count being the grand total owned.
+---  `trackedCurrencies` is a list of item ids to pre-seed into the tracked-currency store.
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -474,6 +475,18 @@ function fake.newEnv(options)
     -- Maps an item ID to `{ name, count }`, count being the grand total the character owns
     -- across every store — bags and every bank — the way ownedItemCount reports it.
     local currencyItems = options.currencyItems or {}
+    -- The item the client currently has on the cursor, or nil; drives getCursorItem.
+    local cursor
+    local cursorCleared = 0
+    -- Pre-seed the tracked-currency store the way a player who had already added items would,
+    -- mapping each id to its world name so the manager and tally see it as tracked from boot.
+    if options.trackedCurrencies then
+        db.currencyItems = db.currencyItems or {}
+        for _, itemID in ipairs(options.trackedCurrencies) do
+            local world = currencyItems[itemID]
+            db.currencyItems[itemID] = (world and world.name) or tostring(itemID)
+        end
+    end
     local activeQuests = options.activeQuests or {}
     local questStates = options.questStates or {}
 
@@ -544,17 +557,19 @@ function fake.newEnv(options)
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]
         end,
-        currencyItemIDs = function()
-            local ids = {}
-            for id in pairs(currencyItems) do
-                ids[#ids + 1] = id
-            end
-            table.sort(ids)
-            return ids
-        end,
         ownedItemCount = function(itemID)
             local item = currencyItems[itemID]
             return item and item.count or 0
+        end,
+        getCursorItem = function()
+            if not cursor then
+                return nil
+            end
+            return cursor.id, cursor.name
+        end,
+        clearCursor = function()
+            cursor = nil
+            cursorCleared = cursorCleared + 1
         end,
         achievementInfo = function(id)
             return achievementNames[id]
@@ -647,6 +662,22 @@ function fake.newEnv(options)
             else
                 currencyItems[itemID] = { count = count }
             end
+        end,
+        ---Put an item on the cursor, as picking one up from a bag would, so a drop onto the
+        ---currency manager has something to read. Passing nil empties the cursor.
+        ---@param itemID integer?
+        ---@param name string?
+        setCursorItem = function(itemID, name)
+            if itemID == nil then
+                cursor = nil
+                return
+            end
+            local world = currencyItems[itemID]
+            cursor = { id = itemID, name = name or (world and world.name) }
+        end,
+        ---@return integer how many times the addon cleared the cursor
+        cursorCleared = function()
+            return cursorCleared
         end,
         ---Drive the instance type the addon reads through env.instanceInfo. Passing
         ---nil models zoning out into the open world.

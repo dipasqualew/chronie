@@ -354,8 +354,15 @@ function ns.newSessionTally(deps)
             if not session.active or not itemID or not total then
                 return
             end
-            local baseline = session.currencyItemCounts[itemID] or 0
+            local baseline = session.currencyItemCounts[itemID]
             session.currencyItemCounts[itemID] = total
+            -- No baseline means the item was not tracked when the session opened, so tracking
+            -- began mid-session: adopt the current total as the baseline and count nothing, or
+            -- holdings that predate the choice to track would be booked as this session's gain.
+            -- begin() seeds every already-tracked item, so those never take this path.
+            if baseline == nil then
+                return
+            end
             local change = total - baseline
             if change == 0 then
                 return

@@ -23,6 +23,8 @@ src/MinimapButton.lua
 src/SessionLog.lua
 src/SessionTracker.lua
 src/SessionTable.lua
+src/CurrencyItems.lua
+src/CurrencyWindow.lua
 src/ReportCommand.lua
 src/ReportWindow.lua
 Main.lua

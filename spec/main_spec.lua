@@ -28,6 +28,8 @@ describe("addon integration", function()
             assert.is_function(ns.newExpansionIndex)
             assert.is_function(ns.newSlashRouter)
             assert.is_function(ns.newLockoutWindow)
+            assert.is_function(ns.newCurrencyItems)
+            assert.is_function(ns.newCurrencyWindow)
             assert.is_function(ns.main)
         end)
 
@@ -1263,6 +1265,7 @@ describe("addon integration", function()
                 realmName = "Ragnaros",
                 instanceType = "party",
                 currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+                trackedCurrencies = { 5001 },
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
@@ -1281,6 +1284,7 @@ describe("addon integration", function()
                 realmName = "Ragnaros",
                 instanceType = "party",
                 currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+                trackedCurrencies = { 5001 },
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
@@ -1298,12 +1302,58 @@ describe("addon integration", function()
                 realmName = "Ragnaros",
                 instanceType = "party",
                 currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+                trackedCurrencies = { 5001 },
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             recorded.frame:fire("BAG_UPDATE_DELTA")
 
             assert.same({}, app.tally.summary().currencies)
+        end)
+
+        it("opens the currency manager on the slash command", function()
+            local app = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            app.router.dispatch("currency")
+            assert.is_true(app.currencyWindow.isShown())
+
+            app.router.dispatch("currency")
+            assert.is_false(app.currencyWindow.isShown())
+        end)
+
+        -- The whole loop through the real seams: pick an item up, drop it on the manager,
+        -- and it becomes tracked; holdings that predate the choice are not booked, but a
+        -- genuine gain afterwards is.
+        it("tracks an item dropped on the manager, then counts it without back-dating", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            app.currencyWindow.show()
+            recorded.setCursorItem(5001)
+            local slot
+            for _, frame in ipairs(recorded.frames) do
+                if frame.parent and frame.parent.frameName == "WdpWowCurrencyWindow"
+                    and frame.frameType == "Button" and frame.template == "BackdropTemplate" then
+                    slot = frame
+                end
+            end
+            slot:run("OnReceiveDrag")
+            assert.is_true(app.currencyItems.has(5001))
+
+            -- First bag update after tracking only anchors the baseline at the held 40.
+            recorded.setItemCount(5001, 55)
+            recorded.frame:fire("BAG_UPDATE_DELTA")
+            assert.same({}, app.tally.summary().currencies)
+
+            -- A further gain from that anchor is what counts.
+            recorded.setItemCount(5001, 70)
+            recorded.frame:fire("BAG_UPDATE_DELTA")
+            assert.equal(15, app.tally.summary().currencies[1].amount)
         end)
 
         it("records an achievement from the achievement event, named through the seam", function()
@@ -1717,12 +1767,15 @@ describe("addon integration", function()
             assert.is_nil(visible["Deadmines"])
         end)
 
-        it("names sessions and report in the usage text", function()
+        it("names sessions, currency and report in the usage text", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("nonsense")
 
-            assert.equal("|cff33ff99wdp-wow|r: usage: /wdp locks | results | sessions | report", recorded.lines[1])
+            assert.equal(
+                "|cff33ff99wdp-wow|r: usage: /wdp locks | results | sessions | currency | report",
+                recorded.lines[1]
+            )
         end)
     end)
 
