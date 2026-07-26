@@ -1,5 +1,6 @@
 /**
- * Writes the DB2 fixtures the transmog tests read.
+ * Writes the game-file fixtures the transmog tests read: the DB2 tables, and the BLP icons
+ * those tables point at.
  *
  * The game describes its transmog sets across a chain of WDC5 tables, and the reader that
  * pulls them apart has to cope with every way that format squeezes a column: bit fields that stop on
@@ -7,11 +8,12 @@
  * a default, ids kept beside the rows rather than in them, rows that are another row under
  * a second id, and whole sections Blizzard encrypted because they belong to content it has
  * not shipped. A fixture that skipped any of that would leave the interesting half of the
- * reader untested.
+ * reader untested. The icons are the same argument in a second format: one BLP per encoding
+ * the client actually ships, so the decoder is tested against all of them.
  *
  * So these files have exactly the shape the real ones do — same columns, same storage per
- * column, same bit offsets — and content that is entirely invented. Nothing here is copied
- * from the game.
+ * column, same bit offsets, same texture headers — and content that is entirely invented.
+ * Nothing here is copied from the game.
  *
  *     bun run scripts/make-transmog-fixtures.ts
  */
@@ -753,6 +755,216 @@ function writeTable(table: TableSpec): Uint8Array {
   return out.toBuffer();
 }
 
+/* ---------- the icons ---------- */
+
+/**
+ * How a BLP2 stores its pixels, in the format's own numbering.
+ *
+ * The client ships all three. Which one a given icon uses is not something the tables say,
+ * so the decoder meets whichever it is handed and has to read them all.
+ */
+const Encoding = {
+  /** One byte per pixel, indexing a 256-entry palette the header carries. */
+  palette: 1,
+  /** S3TC blocks of 4×4 pixels; `AlphaType` then picks between BC1, BC2 and BC3. */
+  dxt: 2,
+  /** Four bytes per pixel, in the order the format writes them: blue, green, red, alpha. */
+  bgra: 3,
+} as const;
+
+/** Which S3TC flavour a DXT-encoded texture is in, which the header spells as `AlphaType`. */
+const AlphaType = {
+  /** BC1: colour only. */
+  dxt1: 0,
+  /** BC2: four explicit bits of alpha per pixel. */
+  dxt3: 1,
+  /** BC3: interpolated alpha, two endpoints and a three-bit index per pixel. */
+  dxt5: 7,
+} as const;
+
+/**
+ * The four colours every icon fixture is painted in, one per quadrant, as `[r, g, b]`.
+ *
+ * Each channel is a value 5-6-5 can hold exactly, so a DXT block decodes back to the colour
+ * it was written as and the tests can name it rather than allow for rounding. No two
+ * channels of a colour are equal, which is what makes a decoder that mixed red up with blue
+ * — the trap the palette format sets, since its entries are stored blue first — fail rather
+ * than quietly pass.
+ */
+const QUADRANTS: ReadonlyArray<readonly [number, number, number]> = [
+  [66, 130, 198], // top left
+  [198, 65, 66], // top right
+  [255, 0, 132], // bottom left
+  [0, 195, 255], // bottom right
+];
+
+/** Icons are square. Eight pixels is two DXT blocks each way, which is the smallest size
+ * that puts one whole quadrant in each block. */
+const ICON_SIZE = 8;
+
+/** The quadrant a pixel falls in, numbered the way `QUADRANTS` lists them. */
+function quadrantAt(x: number, y: number): number {
+  return (y < ICON_SIZE / 2 ? 0 : 2) + (x < ICON_SIZE / 2 ? 0 : 1);
+}
+
+/**
+ * How opaque a quadrant is, for the encodings that carry alpha at all.
+ *
+ * The bottom right corner is fully transparent so that a decoder which drops the alpha
+ * channel, or fills it with the ever-plausible 255, is caught.
+ */
+function alphaAt(quadrant: number): number {
+  return quadrant === 3 ? 0 : 255;
+}
+
+/** A colour packed into the 5-6-5 bits a DXT block gives its two endpoints. */
+function to565([red, green, blue]: readonly [number, number, number]): number {
+  return ((red >>> 3) << 11) | ((green >>> 2) << 5) | (blue >>> 3);
+}
+
+/** The palette a palettized icon indexes into: one entry per quadrant, stored blue first. */
+function iconPalette(): Bytes {
+  const palette = new Bytes();
+  for (const [red, green, blue] of QUADRANTS) {
+    palette.u8(blue);
+    palette.u8(green);
+    palette.u8(red);
+    palette.u8(0xff);
+  }
+  palette.zeros(1024 - QUADRANTS.length * 4);
+  return palette;
+}
+
+/** A palettized icon's pixels: the indices, then a plane of alpha when the header says so. */
+function palettePixels(alphaBits: number): Bytes {
+  const body = new Bytes();
+  for (let y = 0; y < ICON_SIZE; y += 1) {
+    for (let x = 0; x < ICON_SIZE; x += 1) body.u8(quadrantAt(x, y));
+  }
+  if (alphaBits === 8) {
+    for (let y = 0; y < ICON_SIZE; y += 1) {
+      for (let x = 0; x < ICON_SIZE; x += 1) body.u8(alphaAt(quadrantAt(x, y)));
+    }
+  }
+  return body;
+}
+
+/** An uncompressed icon's pixels, in the blue-green-red-alpha order the format stores. */
+function bgraPixels(): Bytes {
+  const body = new Bytes();
+  for (let y = 0; y < ICON_SIZE; y += 1) {
+    for (let x = 0; x < ICON_SIZE; x += 1) {
+      const quadrant = quadrantAt(x, y);
+      const [red, green, blue] = QUADRANTS[quadrant]!;
+      body.u8(blue);
+      body.u8(green);
+      body.u8(red);
+      body.u8(alphaAt(quadrant));
+    }
+  }
+  return body;
+}
+
+/**
+ * A DXT icon's blocks, one 4×4 block per quadrant.
+ *
+ * Every block is a flat colour, which is the one case S3TC reproduces exactly: both
+ * endpoints are the quadrant's colour and every pixel takes the first of them, so nothing
+ * is interpolated and nothing is rounded twice.
+ */
+function dxtBlocks(alphaType: number): Bytes {
+  const body = new Bytes();
+  for (let blockY = 0; blockY < ICON_SIZE / 4; blockY += 1) {
+    for (let blockX = 0; blockX < ICON_SIZE / 4; blockX += 1) {
+      const quadrant = quadrantAt(blockX * 4, blockY * 4);
+      const alpha = alphaAt(quadrant);
+      if (alphaType === AlphaType.dxt3) {
+        // Four bits per pixel, two to a byte. A nibble is expanded by repeating it, so 0xf
+        // is fully opaque and 0x0 fully transparent.
+        const nibble = alpha === 0 ? 0x00 : 0xff;
+        for (let byte = 0; byte < 8; byte += 1) body.u8(nibble);
+      }
+      if (alphaType === AlphaType.dxt5) {
+        // Two endpoints and a three-bit index per pixel; equal endpoints and index zero
+        // give every pixel the first endpoint exactly.
+        body.u8(alpha);
+        body.u8(alpha);
+        body.zeros(6);
+      }
+      const colour = to565(QUADRANTS[quadrant]!);
+      body.u16(colour);
+      body.u16(colour);
+      body.zeros(4); // two bits of index per pixel, all naming the first endpoint
+    }
+  }
+  return body;
+}
+
+interface IconSpec {
+  fileDataId: number;
+  encoding: number;
+  /** How many bits of alpha the pixels carry; the DXT flavours declare 0 or 8. */
+  alphaBits: number;
+  /** Which S3TC flavour, for a DXT icon. Ignored by the other encodings. */
+  alphaType: number;
+  body: Bytes;
+}
+
+/**
+ * One BLP2 texture: a 148-byte header, the palette region the format always reserves, and
+ * the level-0 pixels.
+ *
+ * No mipmaps. The header's mipmap sizes are wrong for small levels in the real files, and
+ * an icon only ever needs level 0 — so the fixtures declare what the reader is entitled to
+ * ask for and nothing else.
+ */
+function writeIcon(icon: IconSpec): Uint8Array {
+  const HEADER = 148;
+  const PALETTE = 1024;
+  const out = new Bytes();
+  out.bytes(new TextEncoder().encode("BLP2"));
+  out.u32(1); // content: pixels rather than a JPEG
+  out.u8(icon.encoding);
+  out.u8(icon.alphaBits);
+  out.u8(icon.alphaType);
+  out.u8(0); // no mipmaps
+  out.u32(ICON_SIZE);
+  out.u32(ICON_SIZE);
+  // Offsets are counted from the front of the file, and only level 0 is there.
+  out.u32(HEADER + PALETTE);
+  out.zeros(15 * 4);
+  out.u32(icon.body.length);
+  out.zeros(15 * 4);
+  out.bytes(icon.encoding === Encoding.palette ? iconPalette().toBuffer() : new Uint8Array(PALETTE));
+  out.bytes(icon.body.toBuffer());
+  return out.toBuffer();
+}
+
+/**
+ * The icons `ItemAppearance` names, one per encoding the client ships.
+ *
+ * Which set a given one lands in is worth reading off `itemAppearance` above: sets 201 and
+ * 203 share three of these between them, which is the case a decoder that caches has to get
+ * right, and 204 and 205 are the two sets whose icons cannot be shown at all.
+ */
+const icons: IconSpec[] = [
+  { fileDataId: 130001, encoding: Encoding.palette, alphaBits: 0, alphaType: 0, body: palettePixels(0) },
+  { fileDataId: 130002, encoding: Encoding.palette, alphaBits: 8, alphaType: 0, body: palettePixels(8) },
+  {
+    fileDataId: 130003, encoding: Encoding.dxt, alphaBits: 0,
+    alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
+  },
+  {
+    fileDataId: 130004, encoding: Encoding.dxt, alphaBits: 8,
+    alphaType: AlphaType.dxt3, body: dxtBlocks(AlphaType.dxt3),
+  },
+  {
+    fileDataId: 130005, encoding: Encoding.dxt, alphaBits: 8,
+    alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
+  },
+  { fileDataId: 130006, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
+];
+
 /* ---------- go ---------- */
 
 mkdirSync(OUT, { recursive: true });
@@ -770,3 +982,18 @@ for (const table of [
   writeFileSync(path, bytes);
   console.log(`${path}  ${bytes.length} bytes`);
 }
+
+for (const icon of icons) {
+  const bytes = writeIcon(icon);
+  const path = join(OUT, `${icon.fileDataId}.blp`);
+  writeFileSync(path, bytes);
+  console.log(`${path}  ${bytes.length} bytes`);
+}
+
+// Icon 130007 belongs to content the game has not shipped. Its chunk is encrypted, and a
+// chunk only Blizzard holds the key to arrives as zeroes of the right length — so this is
+// what a reader is actually handed rather than an error it can act on. 130008 is named by
+// an appearance and installed by nobody, which is the other half of the same story.
+const withheld = join(OUT, "130007.blp");
+writeFileSync(withheld, new Uint8Array(1172));
+console.log(`${withheld}  1172 bytes`);

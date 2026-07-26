@@ -2,17 +2,19 @@ mod activity;
 pub mod casc;
 mod collector;
 pub mod db2;
+pub mod icons;
 pub mod transmog;
 
 use chrono::Utc;
 use collector::{dashboard as load_dashboard, SyncResult};
+use icons::IconCache;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tauri::{
@@ -40,6 +42,9 @@ struct Settings {
 struct AppState {
     data_dir: PathBuf,
     settings: Mutex<Settings>,
+    /// The icons decoded so far. Shared rather than owned, because reading the game's files
+    /// happens on a worker thread that outlives the command that started it.
+    icons: Arc<IconCache>,
     /// False in builds shipped without signing keys, where the release pipeline strips
     /// `plugins.updater` from the config. Touching the updater then panics, so every
     /// caller has to check this first.
@@ -125,6 +130,28 @@ async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<V
     read_game_files(&state, move |files| transmog::set_items(files, set_id)).await
 }
 
+/// The pictures for a set's appearances, as PNG data URLs keyed by FileDataID.
+///
+/// Asked for after the rows are on screen rather than with them: the ids come out of the
+/// same payload the rows were drawn from, and a set reads as a list of slots long before its
+/// textures have been decoded. Icons already decoded are answered from memory, which is what
+/// makes the second set of a collection cost nothing — so this only reaches the game's
+/// storage when the request holds something genuinely new.
+#[tauri::command]
+async fn transmog_icons(
+    icon_file_data_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let cache = Arc::clone(&state.icons);
+    let missing = cache.missing(&icon_file_data_ids);
+    if !missing.is_empty() {
+        let decoded =
+            read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        cache.store(decoded);
+    }
+    Ok(cache.answer(&icon_file_data_ids))
+}
+
 /// Runs a read of the installed game's own files, off the main thread.
 ///
 /// This reads the game's storage rather than anything the addon collected, so it needs the
@@ -132,9 +159,10 @@ async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<V
 /// and `Data/` is its sibling. Getting at it means inflating a couple of hundred megabytes,
 /// which on the main thread would freeze the window for as long as it took; the views that
 /// ask for this are opened by a click that should stay responsive.
-async fn read_game_files<F>(state: &State<'_, AppState>, read: F) -> Result<Value, String>
+async fn read_game_files<T, F>(state: &State<'_, AppState>, read: F) -> Result<T, String>
 where
-    F: FnOnce(&dyn casc::GameFiles) -> Result<Value, String> + Send + 'static,
+    T: Send + 'static,
+    F: FnOnce(&dyn casc::GameFiles) -> Result<T, String> + Send + 'static,
 {
     let retail = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
@@ -509,6 +537,7 @@ pub fn run() {
             let state = AppState {
                 settings: Mutex::new(load_settings(&data_dir.join("settings.json"))),
                 data_dir,
+                icons: Arc::default(),
                 updater_configured,
             };
             app.manage(state);
@@ -536,6 +565,7 @@ pub fn run() {
             dashboard,
             transmog_sets,
             transmog_set_items,
+            transmog_icons,
             settings,
             choose_wow_path,
             save_wow_path,

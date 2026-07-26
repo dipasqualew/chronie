@@ -234,6 +234,19 @@ export interface TransmogSetItemsPayload {
   withheldCount: number;
 }
 
+/**
+ * The pictures for a set's appearances, decoded out of the game's own textures.
+ *
+ * Keyed by the FileDataID the appearance named, and holding a PNG as a `data:` URL, which is
+ * how a picture reaches a window that has no origin to load one from. An icon this install
+ * cannot show — a texture it never downloaded, or one belonging to content the game keeps
+ * encrypted — is simply absent, because a row with no icon and a row whose icon has not
+ * arrived draw the same placeholder.
+ */
+export interface TransmogIconsPayload {
+  icons: Record<string, string>;
+}
+
 export interface Settings {
   wowPath?: string | null;
   lastSync?: string | null;
@@ -264,6 +277,9 @@ export interface E2EMock {
   transmog: TransmogPayload;
   /** What each set is made of, keyed by set id, as opening one asks for. */
   transmogItems: Record<number, TransmogSetItemsPayload>;
+  /** The decoded icons, keyed the way the appearances name them. An id absent from here is
+   * an icon the install cannot show, which is a row the real backend answers nothing for. */
+  transmogIcons: Record<number, string>;
   settings: Settings;
   chosenPath: string;
   syncResult: SyncResult;

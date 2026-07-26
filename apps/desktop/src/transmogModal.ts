@@ -6,14 +6,24 @@
  * backend walks on demand — so this is the one view that asks for something after the page
  * has loaded, and the one that has a loading state and a failure to draw.
  *
- * There are no names or icons here yet, only ids and a way through to Wowhead. That is
- * deliberate: item names live in a table the DB2 reader cannot open yet, and a row that
- * says which slot it fills and links out is already worth opening a set for.
+ * There are no names here yet, only ids and a way through to Wowhead. That is deliberate:
+ * item names live in a table the DB2 reader cannot open yet, and a row that says which slot
+ * it fills, shows the game's own picture of it and links out is worth opening a set for.
+ *
+ * The icons arrive after the rows do. Decoding a set's worth of textures takes longer than
+ * reading the tables that named them, and a list of slots is worth looking at while that
+ * happens — so a row draws an empty frame and fills it in when its picture turns up, or
+ * leaves it empty for good if the install has nothing to put there.
  */
 
 import { escapeHtml, plural } from "./format";
 import { classLabel, expansionName, patchName } from "./transmog";
-import type { TransmogAppearance, TransmogSet, TransmogSetItemsPayload } from "./types";
+import type {
+  TransmogAppearance,
+  TransmogIconsPayload,
+  TransmogSet,
+  TransmogSetItemsPayload,
+} from "./types";
 
 /**
  * The slot an appearance fills, as `ItemAppearance.DisplayType` numbers them.
@@ -42,6 +52,8 @@ export interface AppearanceRow {
   label: string;
   itemId: number;
   appearanceId: number;
+  /** Which texture is the row's picture, or zero when the game names none for it. */
+  iconFileDataId: number;
   hasModel: boolean;
   /** True when the game encrypts a hop of the chain, so nothing can be said about it. */
   withheld: boolean;
@@ -61,10 +73,23 @@ export function appearanceRows(payload: TransmogSetItemsPayload): AppearanceRow[
       label: withheld ? "The game keeps this appearance encrypted" : `Item ${appearance.itemId}`,
       itemId: appearance.itemId,
       appearanceId: appearance.appearanceId,
+      iconFileDataId: appearance.iconFileDataId,
       hasModel: appearance.hasModel,
       withheld,
     };
   });
+}
+
+/**
+ * The textures a set's rows need, without the repeats.
+ *
+ * A set names the same appearance twice often enough, and two slots of one set can share a
+ * picture, so asking per row would ask for the same texture several times over. Zero is what
+ * an appearance the tables give no icon carries, and there is no file behind it.
+ */
+export function iconIds(payload: TransmogSetItemsPayload): number[] {
+  const wanted = (payload.appearances || []).map((appearance) => appearance.iconFileDataId);
+  return [...new Set(wanted)].filter((id) => id > 0);
 }
 
 /** How the set's contents read as one line: how many, and how many could not be named. */
@@ -81,6 +106,8 @@ export interface TransmogModalOptions {
   dialog: HTMLDialogElement;
   /** Asks the backend what a set is made of. Injected so the modal is drivable without one. */
   load: (setId: number) => Promise<TransmogSetItemsPayload>;
+  /** Asks the backend for the pictures those rows need, decoded out of the game's textures. */
+  loadIcons: (iconFileDataIds: number[]) => Promise<TransmogIconsPayload>;
 }
 
 export interface TransmogModal {
@@ -96,10 +123,16 @@ function part(dialog: HTMLDialogElement, selector: string): HTMLElement {
   return found;
 }
 
-export function createTransmogModal({ dialog, load }: TransmogModalOptions): TransmogModal {
+export function createTransmogModal(
+  { dialog, load, loadIcons }: TransmogModalOptions,
+): TransmogModal {
   // What a set is made of never changes under a running app — it is read out of the
   // installed game — so a set opened twice is read once.
   const known = new Map<number, TransmogSetItemsPayload>();
+  // The pictures, by the id the rows name them by. Kept beside the sets rather than inside
+  // them because sets share their icons: a collection's tier variants are the same textures
+  // throughout, so a set opened after its neighbour draws complete straight away.
+  const pictures = new Map<number, string>();
   let showing: number | null = null;
 
   function open(set: TransmogSet): void {
@@ -139,6 +172,39 @@ export function createTransmogModal({ dialog, load }: TransmogModalOptions): Tra
       <p class="detail-facts">${escapeHtml(appearanceSummary(payload))}</p>
       ${rows.length ? `<ul class="mog-items">${rows.map(line).join("")}</ul>` : ""}
     `;
+    fillIcons();
+
+    const wanted = iconIds(payload).filter((id) => !pictures.has(id));
+    if (wanted.length === 0) return;
+    void loadIcons(wanted)
+      .then((payload) => {
+        for (const [id, url] of Object.entries(payload.icons || {})) pictures.set(Number(id), url);
+        fillIcons();
+      })
+      // An icon is the one thing on a row that can be missing without the row losing its
+      // point, so a picture that will not come stays an empty frame rather than an error
+      // where the set used to be.
+      .catch(() => {});
+  }
+
+  /**
+   * Puts every picture now in hand into the frame waiting for it.
+   *
+   * By the id in the frame's own attribute rather than by position, so this stays right for
+   * whichever set is on screen — a reader who opened another one while the first was still
+   * decoding gets the icons of the set they are actually looking at.
+   */
+  function fillIcons(): void {
+    for (const frame of dialog.querySelectorAll<HTMLElement>(".mog-icon[data-icon]")) {
+      const url = pictures.get(Number(frame.dataset.icon));
+      if (!url || frame.firstElementChild) continue;
+      const picture = new Image();
+      // Decorative: the row already says which slot it is and which item it came from, and
+      // the game gives its textures no description worth reading out.
+      picture.alt = "";
+      picture.src = url;
+      frame.replaceChildren(picture);
+    }
   }
 
   part(dialog, '[data-role="close"]').addEventListener("click", () => dialog.close());
@@ -147,13 +213,19 @@ export function createTransmogModal({ dialog, load }: TransmogModalOptions): Tra
   return { open, isOpen: () => dialog.open };
 }
 
-/** One appearance, named as far as the tables allow and linked out for the rest. */
+/** One appearance, pictured and named as far as the tables allow, and linked out for the rest. */
 function line(row: AppearanceRow): string {
   const name = row.withheld
     ? `<span class="muted">${escapeHtml(row.label)}</span>`
     : `<a href="https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}"
         target="_blank" rel="noopener noreferrer">${escapeHtml(row.label)}</a>`;
+  // An empty frame either way. A row whose appearance names no icon keeps it so the list
+  // stays a column of pictures rather than one that indents wherever the game said nothing.
+  const icon = row.iconFileDataId
+    ? `<span class="mog-icon" data-icon="${escapeHtml(row.iconFileDataId)}"></span>`
+    : '<span class="mog-icon"></span>';
   return `<li class="mog-item">
+    ${icon}
     <span class="badge">${escapeHtml(row.slot)}</span>
     ${name}
     ${row.hasModel ? '<span class="chip">has its own model</span>' : ""}

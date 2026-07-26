@@ -362,12 +362,23 @@
   #transmog-detail[open] { display: flex; flex-direction: column; }
   .mog-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
   .mog-item {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 7px 8px; border-radius: 8px;
   }
   .mog-item:hover { background: var(--surface-2); }
   .mog-item .badge { flex: none; min-width: 74px; text-align: center; }
   .mog-item a { color: var(--series-1); }
+  /* The frame is drawn before the picture is decoded, and stays empty for the appearances
+     this install has no texture for — so the column of icons never goes ragged. */
+  .mog-icon {
+    flex: none; width: 32px; height: 32px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+  }
+  .mog-icon img {
+    display: block; width: 100%; height: 100%;
+    /* Icons are stored at 64 pixels and shown at half that, which bilinear scaling suits. */
+    object-fit: cover;
+  }
 
   #activity-editor { width: min(560px, 92vw); }
   .dialog-body { padding: 18px; }

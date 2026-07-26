@@ -178,6 +178,22 @@ class TransmogDetail {
     return this.dialog.getByRole("link", { name: label });
   }
 
+  /**
+   * The frame every row keeps for its picture, and the pictures that have arrived in them.
+   *
+   * Not an accessibility locator, and deliberately: an icon beside a row that already names
+   * its slot and its item is decorative, so it carries no alternative text and is not in the
+   * accessibility tree at all. Giving it one to make it selectable would have a screen
+   * reader announce every row twice.
+   */
+  iconFrames(): Locator {
+    return this.dialog.locator(".mog-icon");
+  }
+
+  icons(): Locator {
+    return this.dialog.locator(".mog-icon img");
+  }
+
   /** Anything the dialog says in its own words: where the set sits, what it holds. */
   says(text: string): Locator {
     return this.dialog.getByText(text);
@@ -442,6 +458,21 @@ const mockDesktop: E2EMock = {
       ],
     },
   },
+  // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
+  // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
+  // set 205 names it and the install holds no such file, which is the case a row has to
+  // survive rather than break on. So is the icon the tables give appearance 71012, which is
+  // no icon at all.
+  transmogIcons: {
+    130001: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
+      + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+    130002: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
+      + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+    130003: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mP4z9"
+      + "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
+    130006: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
+      + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+  },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
@@ -693,6 +724,27 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.named("Tideglass Regalia")).toBeVisible();
   });
 
+  // The pictures come out of the game's own textures, and they arrive after the rows do —
+  // so what is checked here is that every row ends up carrying one, not that it had one the
+  // moment the list appeared.
+  await test.step("every appearance carries the game's own picture of it", async () => {
+    await expect(transmogDetail.iconFrames()).toHaveCount(4);
+    await expect(transmogDetail.icons()).toHaveCount(4);
+    // The set names its first appearance twice, so two of the four rows show one texture.
+    const sources = await transmogDetail.icons().evaluateAll(
+      (images) => images.map((image) => (image as HTMLImageElement).currentSrc),
+    );
+    expect(new Set(sources).size).toBe(3);
+    for (const source of sources) expect(source).toContain("data:image/png;base64,");
+
+    // Decoded, not merely fetched: a data url the browser could not read would leave the
+    // element with no intrinsic size at all.
+    const widths = await transmogDetail.icons().evaluateAll(
+      (images) => images.map((image) => (image as HTMLImageElement).naturalWidth),
+    );
+    expect(widths).toEqual([8, 8, 8, 8]);
+  });
+
   await test.step("closing a set hands back the grid the reader left", async () => {
     // A window short enough that the grid has somewhere to scroll to, so that the position
     // being kept is a fact about the app rather than about there being nothing to scroll.
@@ -718,6 +770,12 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.rows()).toHaveCount(2);
     await expect(transmogDetail.says("2 appearances · 1 the game keeps encrypted")).toBeVisible();
     await expect(transmogDetail.says("The game keeps this appearance encrypted")).toBeVisible();
+
+    // One row names a texture this install does not hold and the other names none at all,
+    // so neither has a picture to show — and both still keep the frame, so the list reads as
+    // a column of icons with two blanks rather than as two rows that lost their indent.
+    await expect(transmogDetail.iconFrames()).toHaveCount(2);
+    await expect(transmogDetail.icons()).toHaveCount(0);
     await transmogDetail.close();
   });
 });

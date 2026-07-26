@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appearanceRows, appearanceSummary, slotName } from "./transmogModal";
+import { appearanceRows, appearanceSummary, iconIds, slotName } from "./transmogModal";
 import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
 
 /** One appearance with only the fields a test cares about spelled out. */
@@ -73,6 +73,7 @@ describe("appearanceRows", () => {
           label: "Item 30007",
           itemId: 30007,
           appearanceId: 80001,
+          iconFileDataId: 130001,
           hasModel: true,
           withheld: false,
         },
@@ -83,7 +84,9 @@ describe("appearanceRows", () => {
   // its display type is zero for want of anything to read — which is the head slot, so
   // labelling it by slot would be inventing one.
   it("says nothing it cannot know about an appearance the game withholds", () => {
-    const withheld = appearance({ modifiedAppearanceId: 71012, itemId: 0, appearanceId: 0 });
+    const withheld = appearance({
+      modifiedAppearanceId: 71012, itemId: 0, appearanceId: 0, iconFileDataId: 0,
+    });
     expect(appearanceRows(payload([withheld])))
       .toEqual([
         {
@@ -91,6 +94,7 @@ describe("appearanceRows", () => {
           label: "The game keeps this appearance encrypted",
           itemId: 0,
           appearanceId: 0,
+          iconFileDataId: 0,
           hasModel: false,
           withheld: true,
         },
@@ -110,6 +114,23 @@ describe("appearanceRows", () => {
 
   it("has no rows to draw for a set the game lists nothing for", () => {
     expect(appearanceRows(payload([]))).toEqual([]);
+  });
+});
+
+describe("iconIds", () => {
+  // Every read of the game's storage costs a couple of hundred megabytes of transient memory,
+  // so a set that names one texture four times has to ask for it once.
+  it.each<[string, number[], number[]]>([
+    ["one per appearance", [130001, 130002, 130003], [130001, 130002, 130003]],
+    ["the same appearance listed twice", [130001, 130001, 130002], [130001, 130002]],
+    ["two slots sharing a picture", [130004, 130002, 130004], [130004, 130002]],
+    // Zero is what an appearance the tables give no icon carries, and what the game
+    // withholds outright comes across the same way. Neither is a file to go looking for.
+    ["appearances the game gives no icon", [0, 130001, 0], [130001]],
+    ["nothing at all", [], []],
+  ])("asks for the textures of a set naming %s", (_what, icons, expected) => {
+    const appearances = icons.map((iconFileDataId) => appearance({ iconFileDataId }));
+    expect(iconIds(payload(appearances))).toEqual(expected);
   });
 });
 
