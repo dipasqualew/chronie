@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chronie — segments</title>
+<title>Chronie</title>
 <style>
   :root {
     color-scheme: light;
@@ -18,6 +18,8 @@
     --series-1-soft: #cde2fb;
     --grid: #e6e4dd;
     --gold: #a67c00;
+    --ok: #2f8f57;
+    --bad: #c65a5a;
     --shadow: 0 1px 2px rgba(11, 11, 11, .06), 0 8px 24px rgba(11, 11, 11, .04);
   }
   @media (prefers-color-scheme: dark) {
@@ -34,6 +36,8 @@
       --series-1-soft: #184f95;
       --grid: #2a2a27;
       --gold: #e0b64a;
+      --ok: #59d973;
+      --bad: #e07b7b;
       --shadow: none;
     }
   }
@@ -50,40 +54,49 @@
     --series-1-soft: #184f95;
     --grid: #2a2a27;
     --gold: #e0b64a;
+    --ok: #59d973;
+    --bad: #e07b7b;
     --shadow: none;
   }
 
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 32px 24px 64px;
+    padding: 28px 24px 64px;
     background: var(--surface-0);
     color: var(--text-primary);
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 1180px; margin: 0 auto; }
+  [hidden] { display: none !important; }
 
-  header { margin-bottom: 24px; }
-  .appbar { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
-  .appbar .brand { font-weight: 700; margin-right: auto; }
+  h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-muted); font-size: 13px; }
+  .muted { color: var(--text-muted); }
+  .gold { color: var(--gold); font-weight: 550; }
+  .loss { color: var(--bad); font-weight: 550; }
+  .ok { color: var(--ok); font-weight: 550; }
+  .appearance-new { color: var(--ok); }
+  .appearance-variant { color: #b373ff; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em;
+    background: var(--surface-2); border-radius: 4px; padding: 1px 5px;
+  }
+
   button {
     font: inherit; color: var(--text-primary); background: var(--surface-1);
     border: 1px solid var(--border); border-radius: 7px; padding: 7px 11px; cursor: pointer;
   }
   button:hover { background: var(--surface-2); }
   button.primary { color: white; background: var(--series-1); border-color: var(--series-1); }
-  button:disabled { cursor: wait; opacity: .65; }
-  .status { color: var(--text-secondary); min-height: 21px; }
-  .setup { padding: 18px; margin-bottom: 16px; }
-  .setup-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
-  .setup label { color: var(--text-secondary); font-size: 12px; }
-  .path-row { display: flex; gap: 8px; margin-top: 5px; }
-  .path-row input { width: 100%; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  [hidden] { display: none !important; }
-  h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .sub { color: var(--text-muted); font-size: 13px; }
+  button:disabled { cursor: default; opacity: .4; }
+  button:focus-visible, .circle:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+  input, select {
+    font: inherit; color: var(--text-primary); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px;
+  }
+  input:focus-visible, select:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
 
   .panel {
     background: var(--surface-1);
@@ -92,57 +105,124 @@
     box-shadow: var(--shadow);
   }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
-  .tile { padding: 14px 16px; }
-  .tile .label { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-  .tile .value { font-size: 26px; font-weight: 620; margin-top: 6px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .tile .foot { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  /* ---------- app bar ---------- */
 
-  section.chart { padding: 16px 16px 8px; margin-bottom: 16px; }
-  .chart h2, .table-head h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
-  .chart .sub, .table-head .sub { margin-bottom: 12px; }
-  svg { display: block; width: 100%; height: auto; overflow: visible; }
-  .grid-line { stroke: var(--grid); stroke-width: 1; }
-  .axis-text { fill: var(--text-muted); font-size: 11px; }
-  .bar { fill: var(--series-1); }
-  .bar-hit { fill: transparent; cursor: default; }
-  .bar-group:hover .bar { fill: var(--text-primary); }
+  .appbar { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; }
+  .appbar .brand { font-weight: 700; margin-right: auto; letter-spacing: -0.01em; }
+  .appbar button { border-radius: 999px; padding: 6px 14px; }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
-  input, select {
-    font: inherit;
+  header.view-head { margin-bottom: 18px; }
+
+  /* ---------- the timeline spine ---------- */
+
+  .spine { position: relative; padding-left: 34px; }
+  .spine::before {
+    content: ""; position: absolute; left: 11px; top: 4px; bottom: 4px; width: 2px;
+    background: linear-gradient(to bottom, transparent, var(--border) 40px,
+      var(--border) calc(100% - 40px), transparent);
+  }
+  .spine-day {
+    position: sticky; top: 0; z-index: 3;
+    margin: 20px 0 12px -34px; padding: 8px 0 6px;
+    background: linear-gradient(var(--surface-0) 72%, transparent);
+  }
+  .spine-day:first-child { margin-top: 0; }
+  .spine-day span {
+    display: inline-block; font-size: 11px; font-weight: 650;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary);
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 12px;
+  }
+
+  .session { position: relative; margin-bottom: 12px; }
+  .session-node {
+    position: absolute; left: -30px; top: 19px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--class-color);
+    box-shadow: 0 0 0 4px var(--surface-0), 0 0 0 5px var(--border);
+  }
+  .session-card { padding: 14px 16px 12px; border-left: 3px solid var(--class-color); }
+
+  .session-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 11px; }
+  .session-when { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .session-clock {
+    font-size: 15px; font-weight: 620; letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+  }
+  .session-cast { display: flex; padding-left: 8px; }
+  .session-cast .circle + .circle { margin-left: -9px; }
+  .session-time { margin-left: auto; text-align: right; line-height: 1.25; }
+  .session-played {
+    display: block; font-size: 19px; font-weight: 640;
+    letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  }
+  .session-elapsed { font-size: 11.5px; color: var(--text-muted); }
+  .session-quiet { color: var(--text-muted); font-size: 13px; margin: 0; }
+
+  .circle {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: inline-grid; place-items: center;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    background: var(--surface-2);
+    background: color-mix(in srgb, var(--class-color) 22%, var(--surface-1));
+    border: 2px solid var(--class-color);
     color: var(--text-primary);
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 6px 9px;
+    cursor: default; flex: none;
   }
-  input:focus-visible, select:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
-  .count { color: var(--text-muted); font-size: 12px; margin-left: auto; }
 
-  .table-head { padding: 16px 16px 0; }
-  .scroller { overflow-x: auto; padding: 0 4px 4px; }
-  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 8px 12px; white-space: nowrap; border-bottom: 1px solid var(--border); }
-  th {
-    position: sticky; top: 0; z-index: 1;
-    background: var(--surface-1);
-    color: var(--text-secondary);
-    font-size: 12px; font-weight: 600;
-    cursor: pointer; user-select: none;
+  /* ---------- highlights ---------- */
+
+  .hl-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .hl {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: inherit; font-size: 12px; line-height: 1.4;
+    padding: 4px 11px 4px 9px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-primary); text-align: left;
   }
-  th:hover { color: var(--text-primary); }
-  th .arrow { color: var(--series-1); font-size: 10px; }
-  tbody tr:hover { background: var(--surface-2); }
-  td.num { text-align: right; }
-  tr:last-child td { border-bottom: none; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: baseline; }
-  .muted { color: var(--text-muted); }
-  .gold { color: var(--gold); font-weight: 550; }
-  .loss { color: #c65a5a; font-weight: 550; }
-  .appearance-new { color: #59d973; }
-  .appearance-variant { color: #b373ff; }
-  .empty { padding: 40px 16px; text-align: center; color: var(--text-muted); }
+  button.hl { cursor: pointer; }
+  button.hl:hover { border-color: var(--series-1); background: var(--series-1-soft); }
+  .hl-icon { font-size: 13px; line-height: 1; }
+  .hl .detail { color: var(--text-muted); }
+  .hl-more { color: var(--text-muted); background: transparent; border-style: dashed; }
+  /* A tint for the three that are genuinely rare, so an evening with one is visible from
+     across the room; everything else stays neutral or the tinting means nothing. */
+  .hl-achievement { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, var(--surface-1)); }
+  .hl-levelUp { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--surface-1)); }
+  .hl-mount { border-color: #b373ff; background: color-mix(in srgb, #b373ff 14%, var(--surface-1)); }
+
+  .tally-row {
+    display: flex; flex-wrap: wrap; gap: 4px 18px;
+    margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border);
+  }
+  .tally { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .tally-icon { font-size: 12px; }
+  .tally-value { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-primary); }
+
+  .session-toggle {
+    margin-top: 10px; padding: 3px 0; border: none; background: transparent;
+    color: var(--text-secondary); font-size: 12px; display: inline-flex; gap: 6px; align-items: center;
+  }
+  .session-toggle:hover { background: transparent; color: var(--text-primary); }
+  .session-toggle .caret { color: var(--text-muted); }
+
+  .session-segments {
+    list-style: none; margin: 6px 0 0; padding: 6px 0 0;
+    border-top: 1px solid var(--border); display: grid; gap: 2px;
+  }
+  .seg {
+    display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: start;
+    width: 100%; text-align: left; padding: 7px 8px;
+    border: none; border-radius: 8px; background: transparent;
+  }
+  .seg:hover { background: var(--surface-2); }
+  .seg-time { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .seg-body { min-width: 0; }
+  .seg-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .seg-who { font-weight: 550; }
+  .seg-where { color: var(--text-secondary); }
+  .seg-activities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; font-size: 11px; }
+  .seg-dur { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+
+  /* ---------- chips and badges ---------- */
 
   .badge {
     display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
@@ -151,26 +231,96 @@
   }
   .chip {
     display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 6px;
-    background: var(--surface-2); color: var(--text-secondary); margin: 0 4px 4px 0;
+    background: var(--surface-2); color: var(--text-secondary);
   }
-  .chip.achv { background: var(--series-1-soft); color: var(--text-primary); }
   .chip.activity {
     background: transparent; border: 1px solid var(--series-1);
     color: var(--text-primary); font-weight: 550;
   }
   .chip.activity.guess { border-style: dashed; color: var(--text-secondary); }
   .chip.activity .detail { font-weight: 400; color: var(--text-secondary); }
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 7px; vertical-align: baseline;
+  }
 
-  .tl-activities { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
-  .tl-activities button { font-size: 11px; padding: 2px 8px; }
-  .tl-activities .muted { font-size: 11px; }
+  .empty { padding: 44px 16px; text-align: center; color: var(--text-muted); }
+  .empty p { max-width: 42ch; margin: 0 auto; }
+  .empty-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px !important; }
+
+  /* ---------- details table ---------- */
+
+  .table-head { padding: 16px 16px 0; }
+  .table-head h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .table-head .sub { margin-bottom: 12px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+  .count { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+  .scroller { overflow-x: auto; padding: 0 4px 4px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 12px; white-space: nowrap; border-bottom: 1px solid var(--border); }
+  th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--surface-1); color: var(--text-secondary);
+    font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+  }
+  th:hover { color: var(--text-primary); }
+  th .arrow { color: var(--series-1); font-size: 10px; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  .row-open {
+    border: none; background: transparent; padding: 0; font: inherit;
+    color: inherit; text-align: left;
+  }
+  tbody tr:hover .row-open { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---------- setup ---------- */
+
+  .setup { padding: 18px; }
+  .setup-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+  .setup label { color: var(--text-secondary); font-size: 12px; }
+  .path-row { display: flex; gap: 8px; margin-top: 5px; }
+  .path-row input { width: 100%; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .status { color: var(--text-secondary); min-height: 21px; }
+
+  /* ---------- dialogs ---------- */
 
   dialog {
     border: 1px solid var(--border); border-radius: 12px; padding: 0;
     background: var(--surface-1); color: var(--text-primary);
-    width: min(560px, 92vw); box-shadow: 0 10px 40px rgba(0, 0, 0, .3);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .3);
   }
-  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog::backdrop { background: rgba(0, 0, 0, .5); }
+
+  #segment-detail { width: min(680px, 94vw); max-height: 86vh; }
+  #segment-detail[open] { display: flex; flex-direction: column; }
+  .detail-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 16px; border-bottom: 1px solid var(--border); flex: none;
+  }
+  .detail-title { font-size: 16px; font-weight: 620; margin: 0; letter-spacing: -0.01em; }
+  .detail-position { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .detail-nav { margin-left: auto; display: flex; gap: 6px; flex: none; }
+  .detail-nav button { padding: 5px 11px; line-height: 1.1; }
+  .detail-body { padding: 16px; overflow-y: auto; }
+  .detail-who { margin: 0 0 3px; font-size: 15px; }
+  .detail-facts { margin: 0 0 12px; color: var(--text-secondary); font-size: 12.5px; }
+  .detail-activities { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 14px; }
+  .detail-activities button { font-size: 11px; padding: 2px 8px; }
+  .detail-highlights { margin-top: 14px; }
+  .detail-highlights .tally-row { margin-top: 0; }
+  .detail-section h3 {
+    font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-secondary); margin: 16px 0 5px;
+  }
+  .detail-section ul { margin: 0; padding-left: 18px; }
+  .detail-section li { margin: 3px 0; }
+  .detail-section p { margin: 0; }
+  .detail-section a { color: var(--series-1); }
+
+  #activity-editor { width: min(560px, 92vw); }
   .dialog-body { padding: 18px; }
   .dialog-body h2 { font-size: 15px; margin: 0 0 2px; }
   .dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
@@ -186,45 +336,65 @@
   .editor-fields .field { display: grid; gap: 3px; }
   .editor-fields label { font-size: 12px; color: var(--text-secondary); }
 
-  .timeline { padding: 4px 16px 8px; }
-  .tl-day { margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
-    text-transform: uppercase; letter-spacing: .06em; }
-  .tl-row {
-    display: grid; grid-template-columns: 56px 1fr; gap: 10px;
-    padding: 8px 0; border-bottom: 1px solid var(--border);
-  }
-  .tl-row:last-child { border-bottom: none; }
-  .tl-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 1px; }
-  .tl-body .tl-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-  .tl-where { font-weight: 550; }
-  .tl-stats { color: var(--text-secondary); font-size: 12px; margin-top: 3px; }
-  .tl-extras { margin-top: 5px; }
+  /* ---------- tooltip ---------- */
 
   #tooltip {
     position: fixed; pointer-events: none; opacity: 0;
     transition: opacity .1s;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
-    padding: 8px 10px; font-size: 12px; z-index: 10;
-    max-width: 260px;
+    padding: 8px 10px; font-size: 12px; z-index: 20; max-width: 280px;
   }
   #tooltip b { display: block; margin-bottom: 2px; }
+  #tooltip .tip-places { display: block; margin-top: 3px; color: var(--text-muted); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <nav class="appbar" aria-label="Application">
     <span class="brand">Chronie</span>
-    <button id="segments-tab" class="primary" type="button">Segments</button>
-    <button id="settings-tab" type="button">Setup</button>
+    <button id="timeline-tab" class="primary" type="button">Timeline</button>
+    <button id="details-tab" type="button">Details</button>
+    <button id="setup-tab" type="button">Setup</button>
   </nav>
 
+  <main id="timeline-view">
+    <header class="view-head">
+      <h1>Timeline</h1>
+      <div class="sub" id="timeline-meta"></div>
+    </header>
+    <div id="timeline"></div>
+  </main>
+
+  <section id="details-view" hidden>
+    <header class="view-head">
+      <h1>Details</h1>
+      <div class="sub">Every segment on its own row. Click a column to sort, a row to open it.</div>
+    </header>
+    <section class="panel">
+      <div class="table-head">
+        <div class="controls">
+          <input id="search" type="search" placeholder="Filter location or character…" aria-label="Filter segments">
+          <select id="character" aria-label="Character"></select>
+          <select id="day" aria-label="Day"></select>
+          <span class="count" id="count"></span>
+        </div>
+      </div>
+      <div class="scroller"><table>
+        <thead><tr id="head"></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+      <div class="empty" id="empty" hidden></div>
+    </section>
+  </section>
+
   <section id="setup-view" hidden>
-    <div class="panel setup">
+    <header class="view-head">
       <h1>Setup</h1>
-      <p class="sub">Choose the game’s <strong>_retail_</strong> folder. Chronie will sync segments and manage the addon from there.</p>
+      <div class="sub">Choose the game’s <strong>_retail_</strong> folder. Chronie syncs segments and
+        manages the addon from there.</div>
+    </header>
+    <div class="panel setup">
       <div class="setup-grid">
         <label>Game folder
           <span class="path-row">
@@ -243,50 +413,24 @@
       <p id="last-sync" class="sub"></p>
     </div>
   </section>
-
-  <main id="segments-view">
-  <header>
-    <h1>Segments</h1>
-    <div class="sub" id="meta"></div>
-  </header>
-
-  <div class="tiles" id="tiles"></div>
-
-  <section class="panel chart">
-    <h2>Loot value per day</h2>
-    <div class="sub">Vendor value of items added to inventory, by the day the segment ended.</div>
-    <svg id="chart" viewBox="0 0 900 220" role="img" aria-label="Loot value per day"></svg>
-  </section>
-
-  <section class="panel timeline-panel">
-    <div class="table-head">
-      <h2>Timeline</h2>
-      <div class="sub">Every segment as it happened, newest first, across characters.</div>
-    </div>
-    <div id="timeline" class="timeline"></div>
-  </section>
-
-  <section class="panel">
-    <div class="table-head">
-      <h2>Every segment</h2>
-      <div class="sub">Click a column to sort.</div>
-      <div class="controls">
-        <input id="search" type="search" placeholder="Filter location or character…" aria-label="Filter segments">
-        <select id="character" aria-label="Character"></select>
-        <select id="day" aria-label="Day"></select>
-        <span class="count" id="count"></span>
-      </div>
-    </div>
-    <div class="scroller"><table>
-      <thead><tr id="head"></tr></thead>
-      <tbody id="rows"></tbody>
-    </table></div>
-    <div class="empty" id="empty" hidden></div>
-  </section>
-  </main>
 </div>
 
 <div id="tooltip" role="status"></div>
+
+<dialog id="segment-detail" aria-labelledby="segment-detail-title">
+  <div class="detail-head">
+    <div>
+      <h2 class="detail-title" id="segment-detail-title"></h2>
+      <span class="detail-position"></span>
+    </div>
+    <div class="detail-nav">
+      <button type="button" data-role="prev" aria-label="Previous segment">‹</button>
+      <button type="button" data-role="next" aria-label="Next segment">›</button>
+      <button type="button" data-role="close" aria-label="Close segment">Close</button>
+    </div>
+  </div>
+  <div class="detail-body"></div>
+</dialog>
 
 <dialog id="activity-editor" aria-labelledby="activity-editor-title">
   <form method="dialog" class="dialog-body">
@@ -302,749 +446,6 @@
   </form>
 </dialog>
 
-<script type="module">
-import { desktop, message } from "/src/bridge.js";
-import {
-  ACTIVITY_KINDS, activityFields, activityIcon, activityLabel, activitySummary,
-  fieldValue, isUncertain, parseMetadata,
-} from "/src/activities.js";
-
-const PAYLOAD = await desktop.dashboard();
-const SEGMENTS = PAYLOAD.segments || [];
-// Kinds the backend can guess at, plus any the user has already invented, so the editor's
-// picker offers what this history actually contains rather than only what the app ships with.
-const KNOWN_KINDS = [...new Set([
-  ...(PAYLOAD.knownActivityKinds || Object.keys(ACTIVITY_KINDS)),
-  ...SEGMENTS.flatMap((segment) => (segment.activities || []).map((entry) => entry.kind)),
-])].sort();
-
-// The client's own class colours, so a character reads the same here as in game.
-const CLASS_COLORS = {
-  DEATHKNIGHT: "#c41e3a", DEMONHUNTER: "#a330c9", DRUID: "#ff7c0a", EVOKER: "#33937f",
-  HUNTER: "#aad372", MAGE: "#3fc7eb", MONK: "#00ff98", PALADIN: "#f48cba",
-  PRIEST: "#ffffff", ROGUE: "#fff468", SHAMAN: "#0070dd", WARLOCK: "#8788ee",
-  WARRIOR: "#c69b6d",
-};
-
-const $ = (id) => document.getElementById(id);
-
-function gold(copper) {
-  const total = Math.max(Math.round(copper || 0), 0);
-  const g = Math.floor(total / 10000), s = Math.floor((total % 10000) / 100), c = total % 100;
-  if (g > 0) return `${g.toLocaleString()}g ${s}s`;
-  if (s > 0) return `${s}s ${c}c`;
-  return `${c}c`;
-}
-
-// A net difference keeps its sign, so a segment that ended down on gold reads as a loss.
-function signedGold(copper) {
-  const value = Math.round(copper || 0);
-  if (value < 0) return `-${gold(-value)}`;
-  return gold(value);
-}
-
-// "none" for open world, else "instance"; used as a small badge on each segment.
-const isInstance = (segment) => !!segment.instanceType && segment.instanceType !== "none";
-const locationType = (segment) => (isInstance(segment) ? "instance" : "world");
-
-function duration(seconds) {
-  const total = Math.max(Math.round(seconds || 0), 0);
-  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60);
-  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-  return `${m}:${String(total % 60).padStart(2, "0")}`;
-}
-
-const clock = (epoch) =>
-  new Date(epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-const signed = (amount) => `${amount >= 0 ? "+" : ""}${amount.toLocaleString()}`;
-const repText = (gains) =>
-  (gains || []).map((gain) => `${gain.faction} +${gain.amount.toLocaleString()}`).join(", ");
-const currencyText = (gains) =>
-  (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}`).join(", ");
-const achievementScope = (event) =>
-  event.accountFirst ? "account first" : "character first";
-const achievementText = (earned) =>
-  (earned || []).map((event) => `${event.name} (${achievementScope(event)})`).join(", ");
-const transmogScope = (event) => {
-  if (event.newAppearance === true) return '<span class="appearance-new">new</span>';
-  if (event.newAppearance === false) return '<span class="appearance-variant">variant</span>';
-  return '<span class="muted">unknown</span>';
-};
-const transmogLink = (event) =>
-  `<a href="https://www.wowhead.com/item=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">Item ${escapeHtml(event.id)}</a>` +
-  ` (${transmogScope(event)})`;
-const transmogCell = (events) =>
-  (events || []).length ? events.map(transmogLink).join(", ") : '<span class="muted">—</span>';
-
-// A compact cell that names the first couple of entries and counts the rest, with the
-// full list in the title attribute so nothing is lost to the abbreviation.
-function listCell(entries, asText) {
-  const list = entries || [];
-  if (list.length === 0) return '<span class="muted">—</span>';
-  const shown = asText(list.slice(0, 2));
-  const rest = list.length > 2 ? ` <span class="muted">+${list.length - 2} more</span>` : "";
-  return `<span title="${escapeHtml(asText(list))}">${escapeHtml(shown)}</span>${rest}`;
-}
-
-const repCell = (gains) => listCell(gains, repText);
-const currencyCell = (gains) => listCell(gains, currencyText);
-const achievementCell = (earned) => listCell(earned, achievementText);
-const levelUpText = (events) => (events || []).map((event) => `Level ${event.level}`).join(", ");
-const levelUpCell = (events) => listCell(events, levelUpText);
-const questLink = (event) =>
-  `<a href="https://www.wowhead.com/quest=${encodeURIComponent(event.id)}" target="_blank" rel="noopener noreferrer">📜 Quest ${escapeHtml(event.id)}</a>`;
-const questCell = (events) =>
-  (events || []).length ? events.map(questLink).join(", ") : '<span class="muted">—</span>';
-const collectionText = (events) => (events || []).map((event) => event.name).join(", ");
-const collectionCell = (events) => listCell(events, collectionText);
-const housingScope = (event) => (event.warbandFirst ? "warband first" : "additional");
-const housingText = (events) =>
-  (events || []).map((event) => `${event.name} (${housingScope(event)})`).join(", ");
-const housingCell = (events) => listCell(events, housingText);
-
-function escapeHtml(text) {
-  return String(text ?? "").replace(/[&<>"]/g, (char) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]));
-}
-
-/* ---------- activities ---------- */
-
-// A guess the backend was unsure about is drawn with a dashed border and says so in its
-// tooltip, so the eye can tell "Chronie thinks" apart from "I said so" at a glance.
-function activityChip(activity) {
-  const detail = activitySummary(activity);
-  const guess = isUncertain(activity);
-  const title = activity.source === "manual"
-    ? "You set this activity"
-    : `Guessed by Chronie · confidence ${Math.round((activity.confidence ?? 1) * 100)}%`;
-  return `<span class="chip activity${guess ? " guess" : ""}" title="${escapeHtml(title)}">` +
-    `${escapeHtml(activityIcon(activity.kind))} ${escapeHtml(activityLabel(activity.kind))}` +
-    (detail ? ` <span class="detail">${escapeHtml(detail)}</span>` : "") +
-    "</span>";
-}
-
-const activityText = (activities) =>
-  (activities || []).map((activity) => {
-    const detail = activitySummary(activity);
-    return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
-  }).join(", ");
-
-const activityCell = (activities) => listCell(activities, activityText);
-
-/* ---------- header + tiles ---------- */
-
-const totals = SEGMENTS.reduce((acc, segment) => {
-  acc.lootValue += segment.lootValue || 0;
-  acc.goldDiff += segment.goldDiff || 0;
-  acc.seconds += segment.seconds || 0;
-  acc.transmogs += (segment.transmogs || []).length;
-  acc.appearances += (segment.transmogs || []).filter((event) => event.newAppearance).length;
-  acc.variants += (segment.transmogs || []).filter((event) => event.newAppearance === false).length;
-  acc.achievements += (segment.achievements || []).length;
-  acc.levelUps += (segment.levelUps || []).length;
-  acc.mounts += (segment.mounts || []).length;
-  acc.pets += (segment.pets || []).length;
-  acc.quests += (segment.quests || []).length;
-  acc.toys += (segment.toys || []).length;
-  acc.housingItems += (segment.housingItems || []).length;
-  acc.housingWarband += (segment.housingItems || []).filter((event) => event.warbandFirst).length;
-  acc.housingXP += segment.housingXP || 0;
-  acc.housingLevelUps += (segment.housingLevelUps || []).length;
-  (segment.reputation || []).forEach((gain) => {
-    acc.reputation[gain.faction] = (acc.reputation[gain.faction] || 0) + gain.amount;
-  });
-  (segment.currencies || []).forEach((gain) => {
-    acc.currencies[gain.name] = (acc.currencies[gain.name] || 0) + gain.amount;
-  });
-  return acc;
-}, {
-  lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, appearances: 0, variants: 0,
-  achievements: 0, levelUps: 0, mounts: 0, pets: 0, quests: 0, toys: 0,
-  housingItems: 0, housingWarband: 0, housingXP: 0, housingLevelUps: 0,
-  reputation: {}, currencies: {},
-});
-
-const topFaction = Object.entries(totals.reputation).sort((a, b) => b[1] - a[1])[0];
-const topCurrency = Object.entries(totals.currencies).sort((a, b) => b[1] - a[1])[0];
-const completedTotals = {
-  Achievements: totals.achievements,
-  "Level ups": totals.levelUps,
-  Currency: Object.keys(totals.currencies).length,
-  Mounts: totals.mounts,
-  "New transmog": totals.appearances,
-  Pets: totals.pets,
-  Quests: totals.quests,
-  Reputation: Object.keys(totals.reputation).length,
-  Toys: totals.toys,
-  "Housing items": totals.housingItems,
-  "Housing XP": totals.housingXP,
-  "Housing levels": totals.housingLevelUps,
-};
-
-$("meta").textContent = SEGMENTS.length
-  ? `${SEGMENTS.length} segments across all recorded history` +
-    (PAYLOAD.generatedAt ? ` · collected ${new Date(PAYLOAD.generatedAt).toLocaleString()}` : "")
-  : "Nothing collected yet — play for a bit, then log out or /reload so the game writes its saved variables.";
-
-$("tiles").innerHTML = [
-  { label: "Segments", value: SEGMENTS.length, foot: `${new Set(SEGMENTS.map((s) => s.character)).size} characters` },
-  { label: "Loot value", value: gold(totals.lootValue), foot: "items entering inventory" },
-  { label: "Net gold", value: signedGold(totals.goldDiff), foot: "wallet change", cls: totals.goldDiff < 0 ? "loss" : "gold" },
-  { label: "Time played", value: duration(totals.seconds), foot: "across every segment" },
-  {
-    label: "New transmog",
-    value: totals.appearances,
-    foot: `${totals.variants} variants` +
-      (totals.transmogs > totals.appearances + totals.variants
-        ? ` · ${totals.transmogs - totals.appearances - totals.variants} unknown`
-        : ""),
-  },
-  {
-    label: "Currency",
-    value: topCurrency ? signed(topCurrency[1]) : "0",
-    foot: topCurrency ? topCurrency[0] : "none earned",
-  },
-  {
-    label: "Reputation",
-    value: topFaction ? topFaction[1].toLocaleString() : "0",
-    foot: topFaction ? topFaction[0] : "none earned",
-  },
-  { label: "Achievements", value: totals.achievements, foot: "earned in recorded history" },
-  { label: "Level ups", value: totals.levelUps, foot: "gained in recorded history" },
-  { label: "Mounts", value: totals.mounts, foot: "collected in recorded history" },
-  { label: "Pets", value: totals.pets, foot: "collected in recorded history" },
-  { label: "Quests", value: totals.quests, foot: "completed in recorded history" },
-  { label: "Toys", value: totals.toys, foot: "collected in recorded history" },
-  {
-    label: "Housing items",
-    value: totals.housingItems,
-    foot: `${totals.housingWarband} warband first · ${totals.housingItems - totals.housingWarband} extra`,
-  },
-  { label: "Housing XP", value: totals.housingXP.toLocaleString(), foot: "gained in recorded history" },
-  { label: "Housing levels", value: totals.housingLevelUps, foot: "gained in recorded history" },
-].filter((tile) => !(tile.label in completedTotals) || completedTotals[tile.label] > 0).map((tile) => `<div class="panel tile">
-    <div class="label">${escapeHtml(tile.label)}</div>
-    <div class="value${tile.cls ? " " + tile.cls : ""}">${escapeHtml(tile.value)}</div>
-    <div class="foot">${escapeHtml(tile.foot)}</div>
-  </div>`).join("");
-
-/* ---------- gold per day ---------- */
-
-const tooltip = $("tooltip");
-
-function showTooltip(event, html) {
-  tooltip.innerHTML = html;
-  tooltip.style.opacity = "1";
-  const box = tooltip.getBoundingClientRect();
-  const x = Math.min(event.clientX + 14, window.innerWidth - box.width - 8);
-  tooltip.style.left = `${x}px`;
-  tooltip.style.top = `${Math.max(event.clientY - box.height - 12, 8)}px`;
-}
-
-const hideTooltip = () => { tooltip.style.opacity = "0"; };
-
-function drawChart() {
-  const svg = $("chart");
-  const byDay = new Map();
-  SEGMENTS.forEach((segment) => {
-    const bucket = byDay.get(segment.day) || { gold: 0, runs: 0 };
-    bucket.gold += segment.lootValue || 0;
-    bucket.runs += 1;
-    byDay.set(segment.day, bucket);
-  });
-
-  // Include every day between the first and last stored segment so gaps remain visible.
-  const days = [];
-  const sortedDays = [...byDay.keys()].sort();
-  const first = SEGMENTS.length ? new Date(`${sortedDays[0]}T00:00:00`) : new Date();
-  const last = SEGMENTS.length ? new Date(`${sortedDays.at(-1)}T00:00:00`) : new Date();
-  for (const date = new Date(first); date <= last; date.setDate(date.getDate() + 1)) {
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    days.push({ key, date: new Date(date), ...(byDay.get(key) || { gold: 0, runs: 0 }) });
-  }
-
-  const W = 900, H = 220, PAD_L = 58, PAD_R = 8, PAD_T = 12, PAD_B = 28;
-  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
-  // Rounded up to a whole number of gold, so the axis reads 0 / 50g / 100g rather
-  // than whatever copper the best day happened to land on.
-  const busiest = Math.max(...days.map((day) => day.gold), 1) / 10000;
-  const magnitude = 10 ** Math.floor(Math.log10(Math.max(busiest, 1)));
-  const peak = Math.ceil(busiest / magnitude) * magnitude * 10000;
-  const ticks = [0, peak / 2, peak];
-  const step = plotW / days.length;
-  const barW = Math.min(step - 10, 64);
-
-  const parts = ticks.map((tick) => {
-    const y = PAD_T + plotH - (tick / peak) * plotH;
-    return `<line class="grid-line" x1="${PAD_L}" x2="${W - PAD_R}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"></line>
-      <text class="axis-text" x="${PAD_L - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end">${Math.round(tick / 10000).toLocaleString()}g</text>`;
-  });
-
-  days.forEach((day, index) => {
-    const x = PAD_L + index * step + (step - barW) / 2;
-    const height = (day.gold / peak) * plotH;
-    const y = PAD_T + plotH - height;
-    const label = day.date.toLocaleDateString([], { weekday: "short", day: "numeric" });
-    parts.push(`<g class="bar-group" data-day="${escapeHtml(day.key)}" data-runs="${day.runs}" data-gold="${day.gold}">
-      ${height > 0.5 ? `<rect class="bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(height, 2).toFixed(1)}" rx="4"></rect>` : ""}
-      <rect class="bar-hit" x="${(PAD_L + index * step).toFixed(1)}" y="${PAD_T}" width="${step.toFixed(1)}" height="${plotH}"></rect>
-      <text class="axis-text" x="${(x + barW / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${escapeHtml(label)}</text>
-    </g>`);
-  });
-
-  svg.innerHTML = parts.join("");
-
-  svg.querySelectorAll(".bar-group").forEach((group) => {
-    const move = (event) => showTooltip(event,
-      `<b>${escapeHtml(group.dataset.day)}</b>${escapeHtml(gold(Number(group.dataset.gold)))} · ${group.dataset.runs} segment(s)`);
-    group.addEventListener("mousemove", move);
-    group.addEventListener("mouseleave", hideTooltip);
-  });
-}
-
-drawChart();
-
-/* ---------- the timeline ---------- */
-
-// Segments arrive newest first from the collector; the timeline groups them by day and
-// lays each one out as a moment — who, where, and what it yielded — across characters.
-function drawTimeline() {
-  const host = $("timeline");
-  if (SEGMENTS.length === 0) {
-    host.innerHTML = '<div class="empty">No segments collected yet.</div>';
-    return;
-  }
-
-  const byDay = new Map();
-  const order = [];
-  SEGMENTS.forEach((segment) => {
-    if (!byDay.has(segment.day)) {
-      byDay.set(segment.day, []);
-      order.push(segment.day);
-    }
-    byDay.get(segment.day).push(segment);
-  });
-
-  const chips = (segment) => {
-    const parts = [];
-    if ((segment.currencies || []).length) parts.push(`<span class="chip">${escapeHtml(currencyText(segment.currencies))}</span>`);
-    (segment.achievements || []).forEach((event) => {
-      parts.push(`<span class="chip achv">🏆 ${escapeHtml(event.name)} · ${escapeHtml(achievementScope(event))}</span>`);
-    });
-    (segment.levelUps || []).forEach((event) => {
-      parts.push(`<span class="chip">⬆️ Level ${escapeHtml(event.level)}</span>`);
-    });
-    ["mounts", "pets", "toys"].forEach((key) => {
-      (segment[key] || []).forEach((event) => {
-        parts.push(`<span class="chip">${escapeHtml(event.name)}</span>`);
-      });
-    });
-    (segment.transmogs || []).forEach((event) => {
-      parts.push(`<span class="chip">${transmogLink(event)}</span>`);
-    });
-    (segment.quests || []).forEach((event) => {
-      parts.push(`<span class="chip">${questLink(event)}</span>`);
-    });
-    (segment.housingItems || []).forEach((event) => {
-      parts.push(`<span class="chip">🏠 ${escapeHtml(event.name)} · ${escapeHtml(housingScope(event))}</span>`);
-    });
-    (segment.housingLevelUps || []).forEach((event) => {
-      parts.push(`<span class="chip">⬆️ Housing Level ${escapeHtml(event.level)}</span>`);
-    });
-    return parts.length ? `<div class="tl-extras">${parts.join("")}</div>` : "";
-  };
-
-  const stats = (segment) => {
-    const bits = [`Loot value ${gold(segment.lootValue)}`];
-    if (segment.goldDiff) bits.push(`Gold ${signedGold(segment.goldDiff)}`);
-    if ((segment.transmogs || []).length) bits.push(`Transmog ${segment.transmogs.length}`);
-    if ((segment.levelUps || []).length) bits.push(`Level ups ${segment.levelUps.length}`);
-    if ((segment.mounts || []).length) bits.push(`Mounts ${segment.mounts.length}`);
-    if ((segment.pets || []).length) bits.push(`Pets ${segment.pets.length}`);
-    if ((segment.toys || []).length) bits.push(`Toys ${segment.toys.length}`);
-    if ((segment.housingItems || []).length) bits.push(`Housing items ${segment.housingItems.length}`);
-    if (segment.housingXP) bits.push(`Housing XP ${signed(segment.housingXP)}`);
-    if ((segment.housingLevelUps || []).length) bits.push(`Housing levels ${segment.housingLevelUps.length}`);
-    if ((segment.reputation || []).length) bits.push(`Rep ${repText(segment.reputation)}`);
-    return bits.map(escapeHtml).join(" · ");
-  };
-
-  host.innerHTML = order.map((day) => {
-    const rows = byDay.get(day).map((segment) => {
-      const dot = `<span class="dot" style="background:${CLASS_COLORS[segment.classFile] || "var(--text-muted)"}"></span>`;
-      return `<div class="tl-row">
-        <div class="tl-time" title="Segment start and end">${escapeHtml(clock(segment.startedAt))}<br>– ${escapeHtml(clock(segment.endedAt))}</div>
-        <div class="tl-body">
-          <div class="tl-head">
-            <span>${dot}${escapeHtml(segment.character)}${segment.level == null ? "" : ` <span class="muted">Level ${escapeHtml(segment.level)}</span>`}</span>
-            <span class="tl-where">${escapeHtml(segment.instance)}</span>
-            <span class="badge">${escapeHtml(locationType(segment))}</span>
-            ${segment.difficulty ? `<span class="muted">${escapeHtml(segment.difficulty)}</span>` : ""}
-            <span class="muted">${escapeHtml(duration(segment.seconds))}</span>
-          </div>
-          <div class="tl-activities">
-            ${(segment.activities || []).map(activityChip).join("") ||
-              '<span class="muted">No activity recorded</span>'}
-            <button type="button" class="edit-activities" data-segment="${segment.segmentId}"
-              aria-label="Edit activities for ${escapeHtml(segment.character)} in ${escapeHtml(segment.instance)}">
-              Edit activities
-            </button>
-          </div>
-          <div class="tl-stats">${stats(segment)}</div>
-          ${chips(segment)}
-        </div>
-      </div>`;
-    }).join("");
-    return `<div class="tl-day">${escapeHtml(day)}</div>${rows}`;
-  }).join("");
-
-  host.querySelectorAll(".edit-activities").forEach((button) => {
-    button.addEventListener("click", () => openEditor(Number(button.dataset.segment)));
-  });
-}
-
-drawTimeline();
-
-/* ---------- the table ---------- */
-
-const COLUMNS = [
-  {
-    key: "day", title: "Started – ended",
-    cell: (s) => `${escapeHtml(s.day)} <span class="muted">${escapeHtml(clock(s.startedAt))} – ${escapeHtml(clock(s.endedAt))}</span>`,
-    sort: (s) => s.endedAt,
-  },
-  {
-    key: "character", title: "Character", sort: (s) => s.character,
-    cell: (s) => `<span class="dot" style="background:${CLASS_COLORS[s.classFile] || "var(--text-muted)"}"></span>${escapeHtml(s.character)}` +
-      (s.level == null ? "" : ` <span class="muted">Level ${escapeHtml(s.level)}</span>`),
-  },
-  { key: "instance", title: "Location", cell: (s) => escapeHtml(s.instance), sort: (s) => s.instance },
-  {
-    key: "activities", title: "Activity", cell: (s) => activityCell(s.activities),
-    sort: (s) => activityText(s.activities),
-  },
-  { key: "type", title: "Type", cell: (s) => `<span class="badge">${escapeHtml(locationType(s))}</span>`, sort: (s) => locationType(s) },
-  { key: "difficulty", title: "Difficulty", cell: (s) => escapeHtml(s.difficulty) || '<span class="muted">—</span>', sort: (s) => s.difficulty },
-  { key: "seconds", title: "Time", num: true, cell: (s) => duration(s.seconds), sort: (s) => s.seconds },
-  { key: "lootValue", title: "Loot value", num: true, cell: (s) => `<span class="gold">${escapeHtml(gold(s.lootValue))}</span>`, sort: (s) => s.lootValue },
-  { key: "goldDiff", title: "Gold Δ", num: true, cell: (s) => `<span class="${s.goldDiff < 0 ? "loss" : "gold"}">${escapeHtml(signedGold(s.goldDiff))}</span>`, sort: (s) => s.goldDiff },
-  { key: "achievements", title: "Achievements", cell: (s) => achievementCell(s.achievements), sort: (s) => (s.achievements || []).length },
-  { key: "levelUps", title: "Level ups", cell: (s) => levelUpCell(s.levelUps), sort: (s) => (s.levelUps || []).length },
-  { key: "currencies", title: "Currency", cell: (s) => currencyCell(s.currencies), sort: (s) => (s.currencies || []).reduce((total, gain) => total + gain.amount, 0) },
-  { key: "mounts", title: "Mounts", cell: (s) => collectionCell(s.mounts), sort: (s) => (s.mounts || []).length },
-  { key: "pets", title: "Pets", cell: (s) => collectionCell(s.pets), sort: (s) => (s.pets || []).length },
-  { key: "quests", title: "Quests", cell: (s) => questCell(s.quests), sort: (s) => (s.quests || []).length },
-  { key: "reputation", title: "Reputation", cell: (s) => repCell(s.reputation), sort: (s) => (s.reputation || []).reduce((total, gain) => total + gain.amount, 0) },
-  { key: "toys", title: "Toys", cell: (s) => collectionCell(s.toys), sort: (s) => (s.toys || []).length },
-  { key: "transmogs", title: "Transmog", cell: (s) => transmogCell(s.transmogs), sort: (s) => (s.transmogs || []).length },
-  { key: "housingItems", title: "Housing items", cell: (s) => housingCell(s.housingItems), sort: (s) => (s.housingItems || []).length },
-  { key: "housingXP", title: "Housing XP", num: true, cell: (s) => (s.housingXP ? signed(s.housingXP) : '<span class="muted">—</span>'), sort: (s) => s.housingXP || 0 },
-  { key: "housingLevelUps", title: "Housing levels", cell: (s) => levelUpCell(s.housingLevelUps), sort: (s) => (s.housingLevelUps || []).length },
-].filter((column) => {
-  if (column.key === "housingXP") return SEGMENTS.some((segment) => (segment.housingXP || 0) !== 0);
-  // Activity is always offered: it is the one column a user can fill in themselves, so
-  // hiding it while empty would hide the feature from whoever most needs to find it.
-  if (column.key === "activities") return true;
-  const optional = ["achievements", "levelUps", "currencies", "mounts", "pets", "quests",
-    "reputation", "toys", "transmogs", "housingItems", "housingLevelUps"];
-  return !optional.includes(column.key) || SEGMENTS.some((segment) => (segment[column.key] || []).length);
-});
-
-let sortKey = "day";
-let ascending = false;
-
-function options(select, values, allLabel) {
-  select.innerHTML = [`<option value="">${allLabel}</option>`]
-    .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)).join("");
-}
-
-options($("character"), [...new Set(SEGMENTS.map((s) => s.character))].sort(), "All characters");
-options($("day"), [...new Set(SEGMENTS.map((s) => s.day))].sort().reverse(), "All days");
-
-function visible() {
-  const term = $("search").value.trim().toLowerCase();
-  const character = $("character").value;
-  const day = $("day").value;
-
-  const rows = SEGMENTS.filter((segment) =>
-    (!character || segment.character === character) &&
-    (!day || segment.day === day) &&
-    (!term || `${segment.instance} ${segment.character} ${segment.difficulty}`.toLowerCase().includes(term)));
-
-  const column = COLUMNS.find((entry) => entry.key === sortKey) || COLUMNS[0];
-  return rows.sort((left, right) => {
-    const a = column.sort(left), b = column.sort(right);
-    if (a === b) return left.id < right.id ? -1 : 1;
-    return (a > b ? 1 : -1) * (ascending ? 1 : -1);
-  });
-}
-
-function draw() {
-  const rows = visible();
-
-  $("head").innerHTML = COLUMNS.map((column) => {
-    const arrow = column.key === sortKey ? `<span class="arrow">${ascending ? "▲" : "▼"}</span>` : "";
-    return `<th data-key="${column.key}"${column.num ? ' class="num"' : ""}>${escapeHtml(column.title)} ${arrow}</th>`;
-  }).join("");
-
-  $("head").querySelectorAll("th").forEach((cell) => {
-    cell.addEventListener("click", () => {
-      const key = cell.dataset.key;
-      if (key === sortKey) ascending = !ascending;
-      else { sortKey = key; ascending = false; }
-      draw();
-    });
-  });
-
-  $("rows").innerHTML = rows.map((segment) =>
-    `<tr>${COLUMNS.map((column) => `<td${column.num ? ' class="num"' : ""}>${column.cell(segment)}</td>`).join("")}</tr>`).join("");
-
-  $("count").textContent = `${rows.length} of ${SEGMENTS.length} segments`;
-  const empty = $("empty");
-  empty.hidden = rows.length > 0;
-  empty.textContent = SEGMENTS.length ? "No segments match those filters." : "No segments collected yet.";
-}
-
-["search", "character", "day"].forEach((id) => $(id).addEventListener("input", draw));
-draw();
-
-/* ---------- editing a segment's activities ---------- */
-
-// Rows are keyed by activity id; a row the user has just added has none yet, so it carries a
-// negative draft id until it is saved. That is what lets the same rendering code draw a row
-// that exists in the database and one that does not.
-let editing = null;
-let draftSequence = 0;
-
-const editorDialog = $("activity-editor");
-const editorStatus = $("activity-editor-status");
-
-// Rows are rebuilt from whatever the backend last returned, so what the dialog shows is
-// always what was stored — an edit that failed leaves the old value on screen rather than
-// the optimistic one the user typed.
-function segmentById(segmentId) {
-  return SEGMENTS.find((segment) => segment.segmentId === segmentId);
-}
-
-function kindOptions(selected) {
-  const values = [...new Set([...KNOWN_KINDS, selected].filter(Boolean))].sort();
-  return values.map((kind) =>
-    `<option value="${escapeHtml(kind)}"${kind === selected ? " selected" : ""}>` +
-    `${escapeHtml(activityLabel(kind))}</option>`).join("");
-}
-
-// The label sits beside its control rather than wrapping it: a wrapping label takes its
-// accessible name from its whole text content, which for a select would swallow every
-// option ("Beat the timer UnknownYesNo") and leave the field unaddressable by its name.
-function fieldInput(row, field) {
-  const value = fieldValue(row, field);
-  const id = `field-${row.rowId}-${field.key}`;
-  const control = field.type === "boolean"
-    ? `<select id="${id}" data-field="${escapeHtml(field.key)}">
-        <option value=""${value === "" ? " selected" : ""}>Unknown</option>
-        <option value="yes"${value === "yes" ? " selected" : ""}>Yes</option>
-        <option value="no"${value === "no" ? " selected" : ""}>No</option>
-      </select>`
-    : `<input id="${id}" data-field="${escapeHtml(field.key)}"
-        type="${field.type === "number" ? "number" : "text"}"
-        value="${escapeHtml(value)}">`;
-  return `<div class="field">
-    <label for="${id}">${escapeHtml(field.label)}</label>${control}
-  </div>`;
-}
-
-function drawEditor() {
-  const segment = segmentById(editing.segmentId);
-  $("activity-editor-title").textContent = `Activities — ${segment.instance}`;
-  $("activity-editor-sub").textContent =
-    `${segment.character} · ${segment.day} · ${duration(segment.seconds)}`;
-
-  $("activity-editor-list").innerHTML = editing.rows.map((row) => `
-    <div class="editor-row" data-row="${row.rowId}">
-      <div class="row-head">
-        <select data-role="kind" aria-label="Activity kind">${kindOptions(row.kind)}</select>
-        <button type="button" data-role="remove"
-          aria-label="Remove ${escapeHtml(activityLabel(row.kind))}">Remove</button>
-      </div>
-      <div class="editor-fields">
-        ${activityFields(row.kind).map((field) => fieldInput(row, field)).join("") ||
-          '<span class="muted">Chronie has no fields for this kind; it will be saved by name.</span>'}
-      </div>
-    </div>`).join("") || '<div class="muted">No activities on this segment yet.</div>';
-
-  $("activity-editor-list").querySelectorAll(".editor-row").forEach((element) => {
-    const row = editing.rows.find((entry) => String(entry.rowId) === element.dataset.row);
-    // Changing the kind swaps the whole field set, so the values typed so far are captured
-    // before the redraw; anything the new kind also has survives the switch.
-    element.querySelector('[data-role="kind"]').addEventListener("change", (event) => {
-      row.metadata = collectRow(element, row.kind);
-      row.kind = event.target.value;
-      row.dirty = true;
-      drawEditor();
-    });
-    element.querySelector('[data-role="remove"]').addEventListener("click", () => removeRow(row));
-    element.querySelectorAll("[data-field]").forEach((input) => {
-      input.addEventListener("input", () => { row.dirty = true; });
-      input.addEventListener("change", () => { row.dirty = true; });
-    });
-  });
-}
-
-function collectRow(element, kind) {
-  const values = {};
-  element.querySelectorAll("[data-field]").forEach((input) => {
-    values[input.dataset.field] = input.value;
-  });
-  return parseMetadata(kind, values);
-}
-
-/** Saves every row the user actually touched, then repaints from what came back. */
-async function saveRows() {
-  for (const row of editing.rows) {
-    if (!row.dirty) continue;
-    const element = $("activity-editor-list").querySelector(`[data-row="${row.rowId}"]`);
-    const metadata = element ? collectRow(element, row.kind) : row.metadata || {};
-    const payload = row.id === undefined
-      ? await desktop.addActivity(editing.segmentId, row.kind, metadata)
-      : await desktop.updateActivity(row.id, row.kind, metadata);
-    applyDashboard(payload);
-  }
-}
-
-async function runEdit(action) {
-  editorStatus.textContent = "";
-  try {
-    await action();
-    loadRows();
-    drawEditor();
-  } catch (error) {
-    editorStatus.textContent = message(error);
-  }
-}
-
-function removeRow(row) {
-  // A draft the user added and changed their mind about was never stored, so it is simply
-  // forgotten; anything else has to be deleted where it lives.
-  if (row.id === undefined) {
-    editing.rows = editing.rows.filter((entry) => entry !== row);
-    drawEditor();
-    return;
-  }
-  runEdit(async () => applyDashboard(await desktop.deleteActivity(row.id)));
-}
-
-/** Folds a fresh dashboard onto the segments already on screen and repaints what changed. */
-function applyDashboard(payload) {
-  const byId = new Map((payload.segments || []).map((segment) => [segment.segmentId, segment]));
-  SEGMENTS.forEach((segment) => {
-    const next = byId.get(segment.segmentId);
-    if (next) segment.activities = next.activities || [];
-  });
-  drawTimeline();
-  draw();
-}
-
-function loadRows() {
-  const segment = segmentById(editing.segmentId) || {};
-  editing.rows = (segment.activities || []).map((activity) => ({
-    rowId: activity.id,
-    id: activity.id,
-    kind: activity.kind,
-    metadata: activity.metadata || {},
-    dirty: false,
-  }));
-}
-
-function openEditor(segmentId) {
-  editing = { segmentId, rows: [] };
-  loadRows();
-  editorStatus.textContent = "";
-  drawEditor();
-  editorDialog.showModal();
-}
-
-$("activity-add").addEventListener("click", () => {
-  draftSequence -= 1;
-  editing.rows.push({
-    rowId: draftSequence,
-    kind: KNOWN_KINDS[0] || "mythic_plus",
-    metadata: {},
-    dirty: true,
-  });
-  drawEditor();
-});
-
-$("activity-reset").addEventListener("click", () =>
-  runEdit(async () => applyDashboard(await desktop.resetActivities(editing.segmentId))));
-
-$("activity-close").addEventListener("click", async () => {
-  editorStatus.textContent = "";
-  try {
-    await saveRows();
-    editorDialog.close();
-  } catch (error) {
-    editorStatus.textContent = message(error);
-  }
-});
-
-const settings = await desktop.settings();
-$("wow-path").value = settings.wowPath || "";
-$("last-sync").textContent = settings.lastSync
-  ? `Last background sync: ${new Date(settings.lastSync).toLocaleString()}`
-  : "No successful sync yet.";
-
-function show(view) {
-  const setup = view === "setup";
-  $("setup-view").hidden = !setup;
-  $("segments-view").hidden = setup;
-  $("settings-tab").classList.toggle("primary", setup);
-  $("segments-tab").classList.toggle("primary", !setup);
-}
-
-$("settings-tab").addEventListener("click", () => show("setup"));
-$("segments-tab").addEventListener("click", () => show("segments"));
-
-async function run(button, action, success) {
-  button.disabled = true;
-  $("setup-status").textContent = "";
-  try {
-    const result = await action();
-    $("setup-status").textContent = success(result);
-    return result;
-  } catch (error) {
-    $("setup-status").textContent = message(error);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-$("browse-path").addEventListener("click", async () => {
-  const selected = await desktop.chooseWowPath();
-  if (selected) $("wow-path").value = selected;
-});
-$("save-path").addEventListener("click", (event) =>
-  run(event.currentTarget, () => desktop.saveWowPath($("wow-path").value.trim()), () => "Game folder saved."));
-$("sync-now").addEventListener("click", async (event) => {
-  const result = await run(event.currentTarget, desktop.syncNow,
-    (sync) => `Sync complete: ${sync.segmentCount} segments, ${sync.added} new.`);
-  if (result && !globalThis.__Chronie_E2E__) setTimeout(() => window.location.reload(), 800);
-});
-$("install-addon").addEventListener("click", (event) =>
-  run(event.currentTarget, desktop.installAddon,
-    (result) => `Addon ${result.version} installed. Use /reload in game to load it.`));
-$("check-update").addEventListener("click", (event) =>
-  run(event.currentTarget, desktop.checkForAppUpdate,
-    (result) => result.updated ? `Chronie ${result.version} is ready; restart to finish.` : "Chronie is up to date."));
-
-if (!globalThis.__Chronie_E2E__) {
-  const segmentSignature = JSON.stringify(SEGMENTS.map((segment) => [segment.id, segment.endedAt]));
-  setInterval(async () => {
-    const next = await desktop.dashboard();
-    const nextSignature = JSON.stringify((next.segments || []).map((segment) => [segment.id, segment.endedAt]));
-    if (nextSignature !== segmentSignature) window.location.reload();
-  }, 30_000);
-}
-</script>
+<script type="module" src="/src/app.js"></script>
 </body>
 </html>
