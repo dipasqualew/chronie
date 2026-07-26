@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - "apps/desktop/**"
+      # The addon is compiled into the app and installed from it, so a change to the addon
+      # only reaches anybody's game folder by way of a new desktop build.
+      - "apps/addon/**"
       - "package.json"
       - "bun.lock"
       - ".github/workflows/dev-release.yml"
