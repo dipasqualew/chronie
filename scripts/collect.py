@@ -251,6 +251,67 @@ def default_output_dir() -> Path:
     return Path(os.path.expanduser("~/.local/share/wdp-wow"))
 
 
+def _num(key: str):
+    """A field read as an integer, defaulting to zero when absent or falsy."""
+    return lambda event: int(event.get(key) or 0)
+
+
+def _text(key: str):
+    """A field read as a string. Only used for keys the presence check guarantees."""
+    return lambda event: str(event.get(key) or "")
+
+
+def _flag(key: str):
+    """A field read as a boolean."""
+    return lambda event: bool(event.get(key))
+
+
+def _name_or_id(event: dict) -> str:
+    """A collection entry's localised name, falling back to its id when unnamed."""
+    return str(event.get("name") or event["id"])
+
+
+# The shape of every list a session record carries, declared once so a new event type is
+# a single entry rather than another near-identical cleaning loop. Each entry is
+# (required_key, required_fields, optional_fields): a member is kept only when required_key
+# is present, its required fields are always emitted, and an optional field is emitted only
+# when the source carried it. This mirrors ns.sessionEventSpecs on the addon side, but is
+# deliberately the report's own narrower view — fields the report never renders (a
+# transmog's sourceID, a quest's first-completion flags) are dropped here on purpose.
+EVENT_SPECS: dict[str, tuple] = {
+    "reputation": ("faction", [("faction", _text("faction")), ("amount", _num("amount"))], []),
+    "currencies": ("name", [("id", _num("id")), ("name", _text("name")), ("amount", _num("amount"))], []),
+    "achievements": ("name", [("id", _num("id")), ("name", _text("name")), ("at", _num("at"))], []),
+    "levelUps": ("level", [("level", _num("level")), ("at", _num("at"))], []),
+    "transmogs": ("id", [("id", _num("id")), ("at", _num("at"))], []),
+    "quests": ("id", [("id", _num("id")), ("at", _num("at"))], []),
+    "housingLevelUps": ("level", [("level", _num("level")), ("at", _num("at"))], []),
+    "housingItems": (
+        "id",
+        [("id", _num("id")), ("name", _name_or_id), ("at", _num("at")), ("warbandFirst", _flag("warbandFirst"))],
+        [],
+    ),
+    "mounts": ("id", [("id", _num("id")), ("name", _name_or_id), ("at", _num("at"))], [("guid", _text("guid"))]),
+    "pets": ("id", [("id", _num("id")), ("name", _name_or_id), ("at", _num("at"))], [("guid", _text("guid"))]),
+    "toys": ("id", [("id", _num("id")), ("name", _name_or_id), ("at", _num("at"))], [("guid", _text("guid"))]),
+}
+
+
+def _clean_list(events, spec: tuple) -> list[dict]:
+    """Cleans one list of session events against its EVENT_SPECS entry."""
+    required, fields, optional = spec
+    cleaned = []
+    for event in events or []:
+        if not isinstance(event, dict) or not event.get(required):
+            continue
+        entry = {name: convert(event) for name, convert in fields}
+        for name, convert in optional:
+            if event.get(name):
+                entry[name] = convert(event)
+        cleaned.append(entry)
+    return cleaned
+
+
 def normalise(record: dict) -> dict | None:
     """Keeps a session only if it carries the identity the report is built around:
     who was on, where they were, and when it ended. A session is one character's
@@ -260,84 +321,7 @@ def normalise(record: dict) -> dict | None:
     if not record.get("id") or not record.get("character") or not record.get("endedAt"):
         return None
 
-    reputation = []
-    for gain in record.get("reputation") or []:
-        if isinstance(gain, dict) and gain.get("faction"):
-            reputation.append({"faction": str(gain["faction"]), "amount": int(gain.get("amount") or 0)})
-
-    currencies = []
-    for gain in record.get("currencies") or []:
-        if isinstance(gain, dict) and gain.get("name"):
-            currencies.append({
-                "id": int(gain.get("id") or 0),
-                "name": str(gain["name"]),
-                "amount": int(gain.get("amount") or 0),
-            })
-
-    achievements = []
-    for event in record.get("achievements") or []:
-        if isinstance(event, dict) and event.get("name"):
-            achievements.append({
-                "id": int(event.get("id") or 0),
-                "name": str(event["name"]),
-                "at": int(event.get("at") or 0),
-            })
-
-    level_ups = []
-    for event in record.get("levelUps") or []:
-        if isinstance(event, dict) and event.get("level"):
-            level_ups.append({
-                "level": int(event["level"]),
-                "at": int(event.get("at") or 0),
-            })
-
-    transmogs = []
-    for event in record.get("transmogs") or []:
-        if isinstance(event, dict) and event.get("id"):
-            transmogs.append({
-                "id": int(event["id"]),
-                "at": int(event.get("at") or 0),
-            })
-
-    quests = []
-    for event in record.get("quests") or []:
-        if isinstance(event, dict) and event.get("id"):
-            quests.append({
-                "id": int(event["id"]),
-                "at": int(event.get("at") or 0),
-            })
-
-    housing_items = []
-    for event in record.get("housingItems") or []:
-        if isinstance(event, dict) and event.get("id"):
-            housing_items.append({
-                "id": int(event["id"]),
-                "name": str(event.get("name") or event["id"]),
-                "at": int(event.get("at") or 0),
-                "warbandFirst": bool(event.get("warbandFirst")),
-            })
-
-    housing_level_ups = []
-    for event in record.get("housingLevelUps") or []:
-        if isinstance(event, dict) and event.get("level"):
-            housing_level_ups.append({
-                "level": int(event["level"]),
-                "at": int(event.get("at") or 0),
-            })
-
-    def collections(key: str) -> list[dict]:
-        cleaned = []
-        for event in record.get(key) or []:
-            if isinstance(event, dict) and event.get("id"):
-                entry = {
-                    "id": int(event["id"]),
-                    "name": str(event.get("name") or event["id"]),
-                    "at": int(event.get("at") or 0),
-                }
-                if event.get("guid"):
-                    entry["guid"] = str(event["guid"])
-                cleaned.append(entry)
-        return cleaned
+    lists = {key: _clean_list(record.get(key), spec) for key, spec in EVENT_SPECS.items()}
 
     ended = int(record["endedAt"])
     started = int(record.get("startedAt") or ended)
@@ -356,20 +340,20 @@ def normalise(record: dict) -> dict | None:
         "seconds": int(record.get("seconds") or max(ended - started, 0)),
         "lootValue": int(record.get("lootValue") or 0),
         "goldDiff": int(record.get("goldDiff") or 0),
-        "transmogs": transmogs,
+        "transmogs": lists["transmogs"],
         "currencyTotal": int(record.get("currencyTotal") or 0),
         "reputationTotal": int(record.get("reputationTotal") or 0),
-        "currencies": currencies,
-        "reputation": reputation,
-        "achievements": achievements,
-        "levelUps": level_ups,
-        "mounts": collections("mounts"),
-        "pets": collections("pets"),
-        "quests": quests,
-        "toys": collections("toys"),
-        "housingItems": housing_items,
+        "currencies": lists["currencies"],
+        "reputation": lists["reputation"],
+        "achievements": lists["achievements"],
+        "levelUps": lists["levelUps"],
+        "mounts": lists["mounts"],
+        "pets": lists["pets"],
+        "quests": lists["quests"],
+        "toys": lists["toys"],
+        "housingItems": lists["housingItems"],
         "housingXP": int(record.get("housingXP") or 0),
-        "housingLevelUps": housing_level_ups,
+        "housingLevelUps": lists["housingLevelUps"],
     }
 
 

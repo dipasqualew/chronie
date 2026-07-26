@@ -55,7 +55,6 @@ local addonName, ns = ...
 ---@return table
 function ns.main(env)
     local logger = ns.newLogger({ sink = env.print, prefix = "|cff33ff99" .. addonName .. "|r:" })
-    local greeter = ns.newGreeter({ template = "Hello World, %s!" })
     local dispatcher = ns.newEventDispatcher({ createFrame = env.createFrame })
 
     local scanner = ns.newLockoutScanner({
@@ -348,7 +347,6 @@ function ns.main(env)
     minimapButton.show()
 
     dispatcher.on("PLAYER_LOGIN", function()
-        logger.info(greeter.greet(env.unitName("player")))
         -- Recorded even when this character has no lockouts at all, so it can still be
         -- listed as available for instances its siblings are saved to.
         local class, classFile = env.unitClass("player")
@@ -383,15 +381,23 @@ function ns.main(env)
     -- only written to disk on the way out, so an unfiled session would never be exported.
     dispatcher.on("PLAYER_LOGOUT", sessionTracker.flush)
 
-    dispatcher.on("PLAYER_MONEY", function()
+    -- Every one of these events folds something into the running tally and then wants the
+    -- results panel redrawn. Wrapping the subscription keeps that redraw in one place, so a
+    -- handler body states only the change it makes and can never forget to refresh.
+    local function onTallyEvent(event, handler)
+        dispatcher.on(event, function(...)
+            handler(...)
+            refreshResults()
+        end)
+    end
+
+    onTallyEvent("PLAYER_MONEY", function()
         tally.money(env.getMoney())
-        refreshResults()
     end)
-    dispatcher.on("CHAT_MSG_LOOT", function(message)
+    onTallyEvent("CHAT_MSG_LOOT", function(message)
         tally.loot(message)
-        refreshResults()
     end)
-    dispatcher.on("TRANSMOG_COLLECTION_SOURCE_ADDED", function(sourceID)
+    onTallyEvent("TRANSMOG_COLLECTION_SOURCE_ADDED", function(sourceID)
         local info = env.transmogSourceInfo(sourceID)
         if info and info.itemID then
             tally.transmog({
@@ -402,69 +408,57 @@ function ns.main(env)
                 at = env.now(),
             })
         end
-        refreshResults()
     end)
-    dispatcher.on("CHAT_MSG_COMBAT_FACTION_CHANGE", function(message)
+    onTallyEvent("CHAT_MSG_COMBAT_FACTION_CHANGE", function(message)
         tally.reputation(message)
-        refreshResults()
     end)
     -- The client hands the signed change straight to the event, so a spend arrives as a
     -- negative and only the localised name has to be looked up.
-    dispatcher.on("CURRENCY_DISPLAY_UPDATE", function(currencyType, _, change)
+    onTallyEvent("CURRENCY_DISPLAY_UPDATE", function(currencyType, _, change)
         tally.currency(currencyType, change, env.currencyInfo(currencyType))
-        refreshResults()
     end)
     -- Item-based currencies — vendor tokens, crest-like items and the like — never fire
     -- CURRENCY_DISPLAY_UPDATE; their quantity lives in item counts. Recounting each tracked
     -- item on every batched bag change and folding the difference in tracks both gains and
     -- spends. Because the count spans every storage the character can reach, including the
     -- warband bank, a deposit or withdrawal nets to zero and is never miscounted as either.
-    dispatcher.on("BAG_UPDATE_DELTA", function()
+    onTallyEvent("BAG_UPDATE_DELTA", function()
         for _, itemID in ipairs(currencyItems.ids()) do
             tally.currencyItem(itemID, env.ownedItemCount(itemID), env.itemName(itemID))
         end
-        refreshResults()
     end)
-    dispatcher.on("ACHIEVEMENT_EARNED", function(id, alreadyEarned)
+    onTallyEvent("ACHIEVEMENT_EARNED", function(id, alreadyEarned)
         tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
-        refreshResults()
     end)
-    dispatcher.on("PLAYER_LEVEL_UP", function(level)
+    onTallyEvent("PLAYER_LEVEL_UP", function(level)
         tally.levelUp(level, env.now())
-        refreshResults()
     end)
-    dispatcher.on("NEW_MOUNT_ADDED", function(id)
+    onTallyEvent("NEW_MOUNT_ADDED", function(id)
         tally.mount(id, env.mountInfo(id), env.now())
-        refreshResults()
     end)
-    dispatcher.on("NEW_PET_ADDED", function(guid)
+    onTallyEvent("NEW_PET_ADDED", function(guid)
         local speciesID, name = env.petInfo(guid)
         tally.pet(speciesID, name, env.now(), guid)
-        refreshResults()
     end)
-    dispatcher.on("NEW_TOY_ADDED", function(id)
+    onTallyEvent("NEW_TOY_ADDED", function(id)
         tally.toy(id, env.toyInfo(id), env.now())
-        refreshResults()
     end)
     -- Housing decor is warband-wide, so the owned count decides first-time from duplicate:
     -- one copy means this session collected it for the whole warband, more is an extra.
-    dispatcher.on("HOUSING_DECOR_ADDED", function(id)
+    onTallyEvent("HOUSING_DECOR_ADDED", function(id)
         local name, quantity = env.housingItemInfo(id)
         tally.housingItem(id, name, env.now(), (quantity or 1) <= 1)
-        refreshResults()
     end)
     -- The client hands the experience gained straight to the event, the way currency does.
-    dispatcher.on("HOUSING_XP_GAINED", function(amount)
+    onTallyEvent("HOUSING_XP_GAINED", function(amount)
         tally.housingXP(amount)
-        refreshResults()
     end)
-    dispatcher.on("HOUSING_LEVEL_UP", function(level)
+    onTallyEvent("HOUSING_LEVEL_UP", function(level)
         tally.housingLevelUp(level, env.now())
-        refreshResults()
     end)
     dispatcher.on("QUEST_ACCEPTED", snapshotQuest)
     dispatcher.on("QUEST_LOG_UPDATE", snapshotActiveQuests)
-    dispatcher.on("QUEST_TURNED_IN", function(id)
+    onTallyEvent("QUEST_TURNED_IN", function(id)
         local baseline = questBaselines[id]
         local characterFirst, accountFirst
         if baseline then
@@ -479,7 +473,6 @@ function ns.main(env)
             accountFirst
         )
         questBaselines[id] = nil
-        refreshResults()
     end)
 
     env.registerSlash({ "/wdp" }, router.dispatch)

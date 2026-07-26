@@ -91,108 +91,10 @@ function ns.newSessionLog(deps)
         return dropped
     end
 
-    ---Copies the reputation list so a later mutation of the live tally cannot reach
-    ---back into a record that has already been filed.
-    ---@param gains ReputationGain[]?
-    ---@return ReputationGain[]
-    local function copyReputation(gains)
-        local copy = {}
-        for index, gain in ipairs(gains or {}) do
-            copy[index] = { faction = gain.faction, amount = gain.amount }
-        end
-        return copy
-    end
-
-    ---@param gains CurrencyGain[]?
-    ---@return CurrencyGain[]
-    local function copyCurrencies(gains)
-        local copy = {}
-        for index, gain in ipairs(gains or {}) do
-            copy[index] = { id = gain.id, name = gain.name, amount = gain.amount }
-        end
-        return copy
-    end
-
-    ---@param earned AchievementEvent[]?
-    ---@return AchievementEvent[]
-    local function copyAchievements(earned)
-        local copy = {}
-        for index, event in ipairs(earned or {}) do
-            copy[index] = { id = event.id, name = event.name, at = event.at }
-            if event.accountFirst ~= nil then
-                copy[index].accountFirst = event.accountFirst and true or false
-            end
-        end
-        return copy
-    end
-
-    ---@param events LevelUpEvent[]?
-    ---@return LevelUpEvent[]
-    local function copyLevelUps(events)
-        local copy = {}
-        for index, event in ipairs(events or {}) do
-            copy[index] = { level = event.level, at = event.at }
-        end
-        return copy
-    end
-
-    ---@param events HousingItemEvent[]?
-    ---@return HousingItemEvent[]
-    local function copyHousingItems(events)
-        local copy = {}
-        for index, event in ipairs(events or {}) do
-            copy[index] = {
-                id = event.id,
-                name = event.name,
-                at = event.at,
-                warbandFirst = event.warbandFirst and true or false,
-            }
-        end
-        return copy
-    end
-
-    ---@param completed QuestEvent[]?
-    ---@return QuestEvent[]
-    local function copyQuests(completed)
-        local copy = {}
-        for index, event in ipairs(completed or {}) do
-            copy[index] = { id = event.id, at = event.at }
-            for _, key in ipairs({ "name", "characterFirst", "accountFirst" }) do
-                if event[key] ~= nil then
-                    copy[index][key] = event[key]
-                end
-            end
-        end
-        return copy
-    end
-
-    ---@param events TransmogEvent[]?
-    ---@return TransmogEvent[]
-    local function copyTransmogs(events)
-        local copy = {}
-        for index, event in ipairs(events or {}) do
-            copy[index] = { id = event.id, at = event.at }
-            for _, key in ipairs({ "sourceID", "appearanceID", "newAppearance" }) do
-                if event[key] ~= nil then
-                    copy[index][key] = event[key]
-                end
-            end
-        end
-        return copy
-    end
-
-    ---@param events CollectionEvent[]?
-    ---@return CollectionEvent[]
-    local function copyCollection(events)
-        local copy = {}
-        for index, event in ipairs(events or {}) do
-            copy[index] = { id = event.id, name = event.name, at = event.at }
-            if event.guid then
-                copy[index].guid = event.guid
-            end
-        end
-        return copy
-    end
+    -- Every list a record carries is copied out of the live tally through the one shared
+    -- schema (ns.sessionEventSpecs / ns.copyEventList), so a filed record shares no table
+    -- with the tally and can never be reached by a later mutation of it.
+    local specs = ns.sessionEventSpecs
 
     return {
         prune = prune,
@@ -222,20 +124,20 @@ function ns.newSessionLog(deps)
                 seconds = math.max(endedAt - startedAt, 0),
                 lootValue = summary.lootValue or 0,
                 goldDiff = summary.goldDiff or 0,
-                transmogs = copyTransmogs(summary.transmogs),
+                transmogs = ns.copyEventList(specs.transmogs, summary.transmogs),
                 currencyTotal = summary.currencyTotal or 0,
                 reputationTotal = summary.reputationTotal or 0,
-                currencies = copyCurrencies(summary.currencies),
-                reputation = copyReputation(summary.reputation),
-                achievements = copyAchievements(summary.achievements),
-                levelUps = copyLevelUps(summary.levelUps),
-                mounts = copyCollection(summary.mounts),
-                pets = copyCollection(summary.pets),
-                quests = copyQuests(summary.quests),
-                toys = copyCollection(summary.toys),
-                housingItems = copyHousingItems(summary.housingItems),
+                currencies = ns.copyEventList(specs.currencies, summary.currencies),
+                reputation = ns.copyEventList(specs.reputation, summary.reputation),
+                achievements = ns.copyEventList(specs.achievements, summary.achievements),
+                levelUps = ns.copyEventList(specs.levelUps, summary.levelUps),
+                mounts = ns.copyEventList(specs.mounts, summary.mounts),
+                pets = ns.copyEventList(specs.pets, summary.pets),
+                quests = ns.copyEventList(specs.quests, summary.quests),
+                toys = ns.copyEventList(specs.toys, summary.toys),
+                housingItems = ns.copyEventList(specs.housingItems, summary.housingItems),
                 housingXP = summary.housingXP or 0,
-                housingLevelUps = copyLevelUps(summary.housingLevelUps),
+                housingLevelUps = ns.copyEventList(specs.housingLevelUps, summary.housingLevelUps),
             }
 
             local replaced = false

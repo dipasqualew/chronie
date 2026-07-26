@@ -1,0 +1,30 @@
+name: check
+
+# The same gate humans run locally (./scripts/check.sh): luacheck, busted, then the
+# collector's unittest suite. Runs on every push and pull request so the "zero warnings,
+# zero failures" rule is enforced, not just remembered.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # WoW runs Lua 5.1; the rocks have to be built against it to match game semantics.
+      - name: Install Lua 5.1 and LuaRocks
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 liblua5.1-0-dev luarocks
+
+      - name: Install luacheck and busted
+        run: |
+          sudo luarocks install luacheck
+          sudo luarocks install busted
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run checks
+        run: ./scripts/check.sh

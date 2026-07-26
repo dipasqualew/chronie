@@ -586,85 +586,27 @@ function ns.newSessionTally(deps)
                 return left.id < right.id
             end)
 
-            local achievements = {}
-            for index, earned in ipairs(session.achievements) do
-                achievements[index] = { id = earned.id, name = earned.name, at = earned.at }
-                if earned.accountFirst ~= nil then
-                    achievements[index].accountFirst = earned.accountFirst
-                end
-            end
-
-            local levelUps = {}
-            for index, event in ipairs(session.levelUps) do
-                levelUps[index] = { level = event.level, at = event.at }
-            end
-
-            local housingLevelUps = {}
-            for index, event in ipairs(session.housingLevelUps) do
-                housingLevelUps[index] = { level = event.level, at = event.at }
-            end
-
-            local housingItems = {}
-            for index, event in ipairs(session.housingItems) do
-                housingItems[index] = {
-                    id = event.id,
-                    name = event.name,
-                    at = event.at,
-                    warbandFirst = event.warbandFirst,
-                }
-            end
-
-            local transmogs = {}
-            for index, event in ipairs(session.transmogs) do
-                transmogs[index] = { id = event.id, at = event.at }
-                for _, key in ipairs({ "sourceID", "appearanceID", "newAppearance" }) do
-                    if event[key] ~= nil then
-                        transmogs[index][key] = event[key]
-                    end
-                end
-            end
-
-            local quests = {}
-            for index, event in ipairs(session.quests) do
-                quests[index] = { id = event.id, at = event.at }
-                for _, key in ipairs({ "name", "characterFirst", "accountFirst" }) do
-                    if event[key] ~= nil then
-                        quests[index][key] = event[key]
-                    end
-                end
-            end
-
-            local function copyCollection(events)
-                local copy = {}
-                for index, event in ipairs(events) do
-                    copy[index] = { id = event.id, name = event.name, at = event.at }
-                    if event.guid then
-                        copy[index].guid = event.guid
-                    end
-                end
-                return copy
-            end
-
+            local specs = ns.sessionEventSpecs
             return {
                 active = session.active,
                 lootValue = session.itemValue,
                 goldLooted = session.goldLooted,
                 itemValue = session.itemValue,
                 goldDiff = session.latestMoney - session.openingMoney,
-                transmogs = transmogs,
+                transmogs = ns.copyEventList(specs.transmogs, session.transmogs),
                 currencyTotal = currencyTotal,
                 currencies = currencies,
                 reputationTotal = reputationTotal,
                 reputation = reputation,
-                achievements = achievements,
-                levelUps = levelUps,
-                mounts = copyCollection(session.mounts),
-                pets = copyCollection(session.pets),
-                quests = quests,
-                toys = copyCollection(session.toys),
-                housingItems = housingItems,
+                achievements = ns.copyEventList(specs.achievements, session.achievements),
+                levelUps = ns.copyEventList(specs.levelUps, session.levelUps),
+                mounts = ns.copyEventList(specs.mounts, session.mounts),
+                pets = ns.copyEventList(specs.pets, session.pets),
+                quests = ns.copyEventList(specs.quests, session.quests),
+                toys = ns.copyEventList(specs.toys, session.toys),
+                housingItems = ns.copyEventList(specs.housingItems, session.housingItems),
                 housingXP = session.housingXP,
-                housingLevelUps = housingLevelUps,
+                housingLevelUps = ns.copyEventList(specs.housingLevelUps, session.housingLevelUps),
             }
         end,
     }

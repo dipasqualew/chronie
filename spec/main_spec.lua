@@ -18,7 +18,6 @@ describe("addon integration", function()
         it("populates the namespace with every constructor", function()
             local ns = loader.load()
 
-            assert.is_function(ns.newGreeter)
             assert.is_function(ns.newLogger)
             assert.is_function(ns.newEventDispatcher)
             assert.is_function(ns.newLockoutScanner)
@@ -41,31 +40,21 @@ describe("addon integration", function()
     end)
 
     describe("PLAYER_LOGIN", function()
-        it("greets the player once the login event fires", function()
+        it("stays silent when the login event fires", function()
             local _, recorded = boot({ playerName = "Thrall" })
 
             recorded.frame:fire("PLAYER_LOGIN")
 
-            assert.equal(1, #recorded.lines)
-            assert.is_truthy(recorded.lines[1]:find("Hello World, Thrall!", 1, true))
+            assert.same({}, recorded.lines)
         end)
 
-        it("prefixes the greeting with the addon name", function()
-            local _, recorded = boot({ playerName = "Thrall", addonName = "wdp-wow" })
-
-            recorded.frame:fire("PLAYER_LOGIN")
-
-            assert.equal("|cff33ff99wdp-wow|r: Hello World, Thrall!", recorded.lines[1])
-        end)
-
-        -- Login asks twice on purpose: once for the greeting, once more to build the
-        -- "Name-Realm" key the roster is written under.
-        it("asks the environment for the player unit, once to greet and once to identify", function()
+        -- The player unit is read to build the "Name-Realm" key the roster is written under.
+        it("asks the environment for the player unit to identify the character", function()
             local _, recorded = boot({ playerName = "Thrall" })
 
             recorded.frame:fire("PLAYER_LOGIN")
 
-            assert.same({ "player", "player" }, recorded.unitsAsked)
+            assert.same({ "player" }, recorded.unitsAsked)
         end)
 
         it("asks the environment for the player's class and level", function()
@@ -89,14 +78,6 @@ describe("addon integration", function()
             local _, recorded = boot({ playerName = "Thrall" })
 
             assert.same({}, recorded.lines)
-        end)
-
-        it("greets a stranger when the unit name is unknown", function()
-            local _, recorded = boot({ playerName = nil })
-
-            recorded.frame:fire("PLAYER_LOGIN")
-
-            assert.equal("|cff33ff99wdp-wow|r: Hello World, stranger!", recorded.lines[1])
         end)
 
         it("ignores unrelated events", function()
