@@ -13,22 +13,23 @@ local _, ns = ...
 ---@field onRefreshRequested fun() Asks the client for fresh lockout data.
 ---@field tooltip table Global GameTooltip.
 ---@field onCharacterSelected fun(character: string) Drill down into one character.
----@field onInstanceSelected fun(row: LockoutRow) Drill down into one instance+difficulty.
+---@field onActivitySelected fun(row: LockoutRow) Drill down into one activity.
 ---@field classDisplay ClassDisplay
 ---@field expansions ExpansionIndex
 
 local COLUMNS = {
     { key = "character", title = "Character", width = 160, sortable = true },
-    { key = "expansion", title = "Expansion", width = 80, sortable = false },
-    { key = "instance", title = "Raid / Dungeon", width = 210, sortable = true },
-    { key = "difficulty", title = "Difficulty", width = 140, sortable = false },
+    { key = "expansion", title = "Expansion", width = 70, sortable = false },
+    { key = "activity", title = "Activity", width = 200, sortable = true },
+    { key = "difficulty", title = "Difficulty", width = 130, sortable = false },
+    { key = "period", title = "Resets", width = 70, sortable = false },
     { key = "expiry", title = "Expires", width = 180, sortable = false },
 }
 
 local ROW_HEIGHT = 16
 local PADDING = 12
 local HEADER_Y = -52
-local WIDTH = 820
+local WIDTH = 870
 local HEIGHT = 440
 
 local EXPIRED_COLOR = { 0.45, 0.45, 0.45 }
@@ -40,8 +41,14 @@ local ALIVE_COLOR = { 0.1, 1, 0.1 }
 local CHARACTER_COLUMN = 1
 ---Index of the "Expansion" column.
 local EXPANSION_COLUMN = 2
----Index of the "Raid / Dungeon" column, whose cell owns the boss-list tooltip.
-local INSTANCE_COLUMN = 3
+---Index of the "Activity" column, whose cell owns the boss-list tooltip.
+local ACTIVITY_COLUMN = 3
+---Index of the "Difficulty" column.
+local DIFFICULTY_COLUMN = 4
+---Index of the "Resets" column, holding the activity's own cadence.
+local PERIOD_COLUMN = 5
+---Index of the "Expires" column.
+local EXPIRY_COLUMN = 6
 
 ---@param deps LockoutWindowDeps
 ---@return LockoutWindow
@@ -82,7 +89,7 @@ function ns.newLockoutWindow(deps)
 
         local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         hint:SetPoint("TOP", 0, -32)
-        hint:SetText("Click a character or an instance for details")
+        hint:SetText("Click an activity to see who is still free, or a character for its own locks")
 
         local close = createFrame("Button", nil, frame, "UIPanelCloseButton")
         close:SetPoint("TOPRIGHT", -6, -6)
@@ -104,11 +111,11 @@ function ns.newLockoutWindow(deps)
 
         local tooltip = deps.tooltip
         tooltip:SetOwner(anchor, "ANCHOR_RIGHT")
-        tooltip:AddLine(row.instance)
+        tooltip:AddLine(row.activity)
 
-        local expansion = expansions.abbreviationFor(row.instance)
+        local expansion = expansions.abbreviationFor(row.activity)
         if expansion ~= "" then
-            tooltip:AddLine(expansion, expansions.colorOf(row.instance))
+            tooltip:AddLine(expansion, expansions.colorOf(row.activity))
         end
 
         tooltip:AddLine(
@@ -170,14 +177,14 @@ function ns.newLockoutWindow(deps)
                     return button
                 end
 
-                local instanceCell = cellButton(INSTANCE_COLUMN)
-                instanceCell:SetScript("OnEnter", function(self)
+                local activityCell = cellButton(ACTIVITY_COLUMN)
+                activityCell:SetScript("OnEnter", function(self)
                     showTooltip(self, widget.row)
                 end)
-                instanceCell:SetScript("OnLeave", hideTooltip)
-                instanceCell:SetScript("OnClick", function()
+                activityCell:SetScript("OnLeave", hideTooltip)
+                activityCell:SetScript("OnClick", function()
                     if widget.row then
-                        deps.onInstanceSelected(widget.row)
+                        deps.onActivitySelected(widget.row)
                     end
                 end)
 
@@ -198,10 +205,11 @@ function ns.newLockoutWindow(deps)
             local color = expired and EXPIRED_COLOR or ACTIVE_COLOR
 
             widget.texts[CHARACTER_COLUMN]:SetText(classDisplay.label(row.classFile, row.character))
-            widget.texts[EXPANSION_COLUMN]:SetText(expansions.abbreviationFor(row.instance))
-            widget.texts[INSTANCE_COLUMN]:SetText(row.instance)
-            widget.texts[4]:SetText(row.difficulty)
-            widget.texts[5]:SetText(lockoutTable.formatExpiry(row))
+            widget.texts[EXPANSION_COLUMN]:SetText(expansions.abbreviationFor(row.activity))
+            widget.texts[ACTIVITY_COLUMN]:SetText(row.activity)
+            widget.texts[DIFFICULTY_COLUMN]:SetText(row.difficulty)
+            widget.texts[PERIOD_COLUMN]:SetText(lockoutTable.periodLabel(row))
+            widget.texts[EXPIRY_COLUMN]:SetText(lockoutTable.formatExpiry(row))
 
             for _, text in ipairs(widget.texts) do
                 text:SetTextColor(color[1], color[2], color[3])
@@ -211,7 +219,7 @@ function ns.newLockoutWindow(deps)
             -- matters: an expired row stays uniformly grey so it reads as background.
             if not expired then
                 widget.texts[CHARACTER_COLUMN]:SetTextColor(classDisplay.colorOf(row.classFile))
-                widget.texts[EXPANSION_COLUMN]:SetTextColor(expansions.colorOf(row.instance))
+                widget.texts[EXPANSION_COLUMN]:SetTextColor(expansions.colorOf(row.activity))
             end
 
             widget.holder:Show()

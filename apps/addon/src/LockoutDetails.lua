@@ -8,17 +8,20 @@ local _, ns = ...
 ---@field level integer?
 ---@field lastSeen integer?
 
----One instance seen on any character. Difficulty is metadata rather than identity:
----being saved to a raid at one difficulty bars the others too, so grouping per
----difficulty would report a locked character as available at the sibling size.
----@class InstanceDescriptor
----@field key string Identity: the instance name alone.
----@field instance string
+---One lockable activity, stripped of whoever happens to be locked to it. Difficulty is
+---metadata rather than identity: being saved to a raid at one difficulty bars the others
+---too, so grouping per difficulty would report a locked character as available at the
+---sibling size.
+---@class ActivityDescriptor
+---@field key string Identity: the activity's own key.
+---@field activity string Localised name.
+---@field kind "raid"|"dungeon"|"world_boss"
+---@field period "daily"|"weekly"|"unknown"
 ---@field difficultyId integer? Difficulty of the row this was derived from, if any.
 ---@field difficulty string Difficulty of the row this was derived from; "" when unknown.
 ---@field isRaid boolean
 
----How far through an instance a character is.
+---How far through an activity a character is.
 ---@class LockoutStatus
 ---@field state "available"|"partial"|"locked"
 ---@field killed integer
@@ -41,9 +44,9 @@ local _, ns = ...
 
 ---@class LockoutDetails
 ---@field statusOf fun(row: LockoutRow?): LockoutStatus
----@field descriptorOf fun(row: LockoutRow): InstanceDescriptor
----@field instances fun(rows: LockoutRow[]): InstanceDescriptor[]
----@field forInstance fun(descriptor: InstanceDescriptor, roster: RosterEntry[], rows: LockoutRow[]): DetailSpec
+---@field descriptorOf fun(row: LockoutRow): ActivityDescriptor
+---@field activities fun(rows: LockoutRow[]): ActivityDescriptor[]
+---@field forActivity fun(descriptor: ActivityDescriptor, roster: RosterEntry[], rows: LockoutRow[]): DetailSpec
 ---@field forCharacter fun(character: string, rows: LockoutRow[]): DetailSpec
 
 ---@class LockoutDetailsDeps
@@ -79,21 +82,22 @@ local COLORS = {
 ---Available first, then whatever is still worth running, then dead weight.
 local STATE_RANK = { available = 1, partial = 2, locked = 3 }
 
+---Which section of a character's drill-down an activity belongs in.
+local SECTION_OF_KIND = { raid = "raids", dungeon = "dungeons", world_boss = "worldBosses" }
+
+local PERIOD_PREFIX = { daily = "Daily", weekly = "Weekly" }
+
 local NONE = "—"
 
----@param instance string
----@return string
-local function keyOf(instance)
-    return instance
-end
-
----The instance a lockout row belongs to, stripped of the character that owns it.
+---The activity a lockout row belongs to, stripped of the character that owns it.
 ---@param row LockoutRow
----@return InstanceDescriptor
+---@return ActivityDescriptor
 local function descriptorOf(row)
     return {
-        key = keyOf(row.instance),
-        instance = row.instance,
+        key = row.key,
+        activity = row.activity,
+        kind = row.kind or (row.isRaid and "raid" or "dungeon"),
+        period = row.period or "unknown",
         difficultyId = row.difficultyId,
         difficulty = row.difficulty or "",
         isRaid = row.isRaid and true or false,
@@ -110,7 +114,8 @@ function ns.newLockoutDetails(deps)
 
     ---An absent or lapsed lockout both mean the character is free to go in.
     ---A lockout with no recorded bosses counts as fully locked: we cannot prove
-    ---anything is left, so the safe reading is that nothing is.
+    ---anything is left, so the safe reading is that nothing is. That is also exactly
+    ---right for a world boss, which is locked outright or not at all.
     ---@param row LockoutRow?
     ---@return LockoutStatus
     local function statusOf(row)
@@ -164,11 +169,11 @@ function ns.newLockoutDetails(deps)
     end
 
     ---@param rows LockoutRow[]
-    ---@return table<string, LockoutRow> indexed by character .. "\1" .. instance key
+    ---@return table<string, LockoutRow> indexed by character .. "\1" .. activity key
     local function indexRows(rows)
         local index = {}
         for _, row in ipairs(rows) do
-            local key = row.character .. "\1" .. keyOf(row.instance)
+            local key = row.character .. "\1" .. row.key
             index[key] = moreBinding(index[key], row)
         end
         return index
@@ -211,8 +216,8 @@ function ns.newLockoutDetails(deps)
     end
 
     ---@param rows LockoutRow[]
-    ---@return InstanceDescriptor[]
-    local function instances(rows)
+    ---@return ActivityDescriptor[]
+    local function activities(rows)
         local seen = {}
         local list = {}
 
@@ -225,7 +230,7 @@ function ns.newLockoutDetails(deps)
         end
 
         table.sort(list, function(left, right)
-            return left.instance < right.instance
+            return left.activity < right.activity
         end)
 
         return list
@@ -234,15 +239,15 @@ function ns.newLockoutDetails(deps)
     return {
         statusOf = statusOf,
         descriptorOf = descriptorOf,
-        instances = instances,
+        activities = activities,
 
-        ---Every known character measured against one instance, across all of its
+        ---Every known character measured against one activity, across all of its
         ---difficulties: a save at any difficulty locks the character out of the rest.
-        ---@param descriptor InstanceDescriptor
+        ---@param descriptor ActivityDescriptor
         ---@param roster RosterEntry[]
         ---@param rows LockoutRow[]
         ---@return DetailSpec
-        forInstance = function(descriptor, roster, rows)
+        forActivity = function(descriptor, roster, rows)
             local index = indexRows(rows)
             local entries = {}
 
@@ -269,10 +274,16 @@ function ns.newLockoutDetails(deps)
 
             sortByState(entries)
 
-            local title = descriptor.instance
-            local tag = expansions.tagFor(descriptor.instance)
+            -- The cadence leads the title because it is the fact that belongs to the
+            -- activity itself rather than to any one character's save of it.
+            local title = descriptor.activity
+            local tag = expansions.tagFor(descriptor.activity)
             if tag ~= "" then
                 title = tag .. " " .. title
+            end
+            local period = PERIOD_PREFIX[descriptor.period]
+            if period then
+                title = period .. " — " .. title
             end
 
             return {
@@ -294,15 +305,15 @@ function ns.newLockoutDetails(deps)
             }
         end,
 
-        ---One character measured against every instance any character has seen,
-        ---split into raids and dungeons. The roster is not consulted: an instance is
-        ---only "known" because some character is saved to it, so `rows` is the universe.
+        ---One character measured against every activity any character has seen, split by
+        ---kind. The roster is not consulted: an activity is only "known" because some
+        ---character is saved to it, so `rows` is the universe.
         ---@param character string
         ---@param rows LockoutRow[]
         ---@return DetailSpec
         forCharacter = function(character, rows)
             local index = indexRows(rows)
-            local raids, dungeons = {}, {}
+            local buckets = { raids = {}, dungeons = {}, worldBosses = {} }
             local classFile
 
             for _, row in ipairs(rows) do
@@ -312,15 +323,15 @@ function ns.newLockoutDetails(deps)
                 end
             end
 
-            for _, descriptor in ipairs(instances(rows)) do
+            for _, descriptor in ipairs(activities(rows)) do
                 local row = index[character .. "\1" .. descriptor.key]
                 local status = statusOf(row)
                 local entry = {
                     state = status.state,
-                    sortKey = descriptor.instance,
+                    sortKey = descriptor.activity,
                     cells = {
-                        ICONS[status.state] .. " " .. descriptor.instance,
-                        expansions.tagFor(descriptor.instance),
+                        ICONS[status.state] .. " " .. descriptor.activity,
+                        expansions.tagFor(descriptor.activity),
                         -- The difficulty this character is saved to, not the one the
                         -- descriptor happened to be built from.
                         (row and row.difficulty ~= "" and row.difficulty) or NONE,
@@ -331,15 +342,12 @@ function ns.newLockoutDetails(deps)
                     color = COLORS[status.state],
                 }
 
-                local bucket = descriptor.isRaid and raids or dungeons
+                local bucket = buckets[SECTION_OF_KIND[descriptor.kind] or "dungeons"]
                 bucket[#bucket + 1] = entry
             end
 
-            sortByState(raids)
-            sortByState(dungeons)
-
             local columns = {
-                { title = "Instance", width = 190 },
+                { title = "Activity", width = 190 },
                 { title = "Expansion", width = 80 },
                 { title = "Difficulty", width = 120 },
                 { title = "Status", width = 90 },
@@ -347,12 +355,24 @@ function ns.newLockoutDetails(deps)
                 { title = "Resets", width = 190 },
             }
 
+            local sections = {}
+            for _, section in ipairs({
+                { key = "raids", heading = "Raids", empty = "No raids recorded yet." },
+                { key = "dungeons", heading = "Dungeons", empty = "No dungeons recorded yet." },
+                { key = "worldBosses", heading = "World bosses", empty = "No world bosses recorded yet." },
+            }) do
+                sortByState(buckets[section.key])
+                sections[#sections + 1] = {
+                    heading = section.heading,
+                    columns = columns,
+                    rows = buckets[section.key],
+                    empty = section.empty,
+                }
+            end
+
             return {
                 title = classDisplay.decorate(classFile, character),
-                sections = {
-                    { heading = "Raids", columns = columns, rows = raids, empty = "No raids recorded yet." },
-                    { heading = "Dungeons", columns = columns, rows = dungeons, empty = "No dungeons recorded yet." },
-                },
+                sections = sections,
             }
         end,
     }

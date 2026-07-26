@@ -8,15 +8,19 @@ describe("ns.newLockoutScanner", function()
 
     ---@param entries table[]? saved instances as the client would report them
     ---@param now integer? the fixed instant the scan happens at
+    ---@param worldBosses table[]? saved world bosses as the client would report them
     ---@return table scanner, table calls indexes the scanner asked about
     ---@return table encounterCalls (instanceIndex, encounterIndex) pairs it asked about
-    local function newScanner(entries, now)
+    local function newScanner(entries, now, worldBosses)
         local getNumSavedInstances, getSavedInstanceInfo, calls, getSavedInstanceEncounterInfo, encounterCalls =
             fake.newSavedInstances(entries)
+        local getNumSavedWorldBosses, getSavedWorldBossInfo = fake.newSavedWorldBosses(worldBosses)
         local scanner = ns.newLockoutScanner({
             getNumSavedInstances = getNumSavedInstances,
             getSavedInstanceInfo = getSavedInstanceInfo,
             getSavedInstanceEncounterInfo = getSavedInstanceEncounterInfo,
+            getNumSavedWorldBosses = getNumSavedWorldBosses,
+            getSavedWorldBossInfo = getSavedWorldBossInfo,
             now = fake.newClock(now or NOW).now,
         })
         return scanner, calls, encounterCalls
@@ -119,8 +123,8 @@ describe("ns.newLockoutScanner", function()
             local lockouts = scanner.scan()
 
             assert.equal(2, #lockouts)
-            assert.equal("Naxxramas", lockouts[1].instance)
-            assert.equal("Karazhan", lockouts[2].instance)
+            assert.equal("Naxxramas", lockouts[1].activity)
+            assert.equal("Karazhan", lockouts[2].activity)
         end)
     end)
 
@@ -138,12 +142,15 @@ describe("ns.newLockoutScanner", function()
             }, NOW)
 
             assert.same({
-                instance = "Ulduar",
+                key = "instance\0Ulduar",
+                activity = "Ulduar",
+                kind = "raid",
                 difficultyId = 4,
                 difficulty = "25 Player (Heroic)",
                 maxPlayers = 25,
                 isRaid = true,
                 expiry = NOW + 3600,
+                resetSeconds = 3600,
                 encounters = {},
             }, scanner.scan()[1])
         end)
@@ -179,7 +186,7 @@ describe("ns.newLockoutScanner", function()
             assert.has_no.errors(function()
                 lockouts = scanner.scan()
             end)
-            assert.equal("Ulduar", lockouts[1].instance)
+            assert.equal("Ulduar", lockouts[1].activity)
         end)
 
         it("normalises a truthy isRaid to boolean true", function()
@@ -391,6 +398,105 @@ describe("ns.newLockoutScanner", function()
             scanner.scan()
 
             assert.same({ { instance = 2, encounter = 1 } }, encounterCalls)
+        end)
+    end)
+
+    describe("world bosses", function()
+        it("reads a saved world boss as its own activity", function()
+            local scanner = newScanner({}, NOW, {
+                { name = "Doomwalker", worldBossID = 17711, reset = 4 * 86400 },
+            })
+
+            assert.same({
+                {
+                    key = "worldboss\0" .. 17711,
+                    activity = "Doomwalker",
+                    kind = "world_boss",
+                    difficultyId = 0,
+                    difficulty = "",
+                    maxPlayers = 0,
+                    isRaid = false,
+                    expiry = NOW + 4 * 86400,
+                    resetSeconds = 4 * 86400,
+                    encounters = {},
+                },
+            }, scanner.scan())
+        end)
+
+        -- The numeric id is what makes a world boss the same activity on a German client
+        -- as on an English one, so it is preferred over the name wherever it exists.
+        it("keys on the world boss id rather than its localised name", function()
+            local scanner = newScanner({}, NOW, {
+                { name = "Doomwalker", worldBossID = 17711, reset = 100 },
+            })
+            local german = newScanner({}, NOW, {
+                { name = "Schicksalsschreiter", worldBossID = 17711, reset = 100 },
+            })
+
+            assert.equal(german.scan()[1].key, scanner.scan()[1].key)
+        end)
+
+        it("falls back to the name when the client reports no id", function()
+            local scanner = newScanner({}, NOW, { { name = "Doomwalker", reset = 100 } })
+
+            assert.equal("worldboss\0Doomwalker", scanner.scan()[1].key)
+        end)
+
+        it("lists world bosses after the instances of the same scan", function()
+            local scanner = newScanner(
+                { { name = "Ulduar", reset = 3600, isRaid = true } },
+                NOW,
+                { { name = "Doomwalker", worldBossID = 17711, reset = 100 } }
+            )
+
+            assert.same({ "Ulduar", "Doomwalker" }, {
+                scanner.scan()[1].activity,
+                scanner.scan()[2].activity,
+            })
+        end)
+
+        it("anchors a world boss to the same instant as the instances beside it", function()
+            local scanner = newScanner(
+                { { name = "Ulduar", reset = 100 } },
+                NOW,
+                { { name = "Doomwalker", worldBossID = 17711, reset = 100 } }
+            )
+
+            local lockouts = scanner.scan()
+
+            assert.equal(lockouts[1].expiry, lockouts[2].expiry)
+        end)
+
+        it("skips a world boss whose reset has already lapsed", function()
+            local scanner = newScanner({}, NOW, {
+                { name = "Doomwalker", worldBossID = 17711, reset = 0 },
+            })
+
+            assert.same({}, scanner.scan())
+        end)
+
+        it("skips a world boss the client cannot name", function()
+            local scanner = newScanner({}, NOW, { { name = nil, worldBossID = 17711, reset = 100 } })
+
+            assert.same({}, scanner.scan())
+        end)
+
+        -- A client build without the world-boss API is a client with no world bosses, not
+        -- a reason to lose the instance lockouts scanned in the same pass.
+        it("still scans instances on a client that does not expose world bosses", function()
+            local getNumSavedInstances, getSavedInstanceInfo = fake.newSavedInstances({
+                { name = "Ulduar", reset = 3600, isRaid = true },
+            })
+            local scanner = ns.newLockoutScanner({
+                getNumSavedInstances = getNumSavedInstances,
+                getSavedInstanceInfo = getSavedInstanceInfo,
+                now = fake.newClock(NOW).now,
+            })
+
+            local lockouts = scanner.scan()
+
+            assert.equal(1, #lockouts)
+            assert.equal("Ulduar", lockouts[1].activity)
         end)
     end)
 end)

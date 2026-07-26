@@ -184,11 +184,11 @@ describe("addon integration", function()
         local NOW = 1700000000
 
         ---@param rows LockoutRow[]
-        ---@return table<string, boolean> a set of "character|instance"
+        ---@return table<string, boolean> a set of "character|activity"
         local function identities(rows)
             local set = {}
             for _, row in ipairs(rows) do
-                set[row.character .. "|" .. row.instance] = true
+                set[row.character .. "|" .. row.activity] = true
             end
             return set
         end
@@ -209,7 +209,7 @@ describe("addon integration", function()
             local rows = app.store.all()
             assert.equal(1, #rows)
             assert.equal("Thrall-Ragnaros", rows[1].character)
-            assert.equal("Ulduar", rows[1].instance)
+            assert.equal("Ulduar", rows[1].activity)
         end)
 
         it("stores the expiry as an absolute time, not the raw seconds-remaining", function()
@@ -329,6 +329,40 @@ describe("addon integration", function()
             }, identities(secondApp.store.all()))
         end)
 
+        it("captures world bosses alongside the instance saves of the same scan", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = NOW,
+                savedInstances = { { name = "Ulduar", reset = 3600, difficultyId = 4, isRaid = true } },
+                savedWorldBosses = { { name = "Doomwalker", worldBossID = 17711, reset = 4 * 86400 } },
+            })
+
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            assert.same({
+                ["Thrall-Ragnaros|Ulduar"] = true,
+                ["Thrall-Ragnaros|Doomwalker"] = true,
+            }, identities(app.store.all()))
+        end)
+
+        it("files a world boss as its own kind of activity, resetting weekly", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = NOW,
+                savedInstances = {},
+                savedWorldBosses = { { name = "Doomwalker", worldBossID = 17711, reset = 4 * 86400 } },
+            })
+
+            recorded.frame:fire("UPDATE_INSTANCE_INFO")
+
+            local row = app.store.all()[1]
+            assert.equal("world_boss", row.kind)
+            assert.equal("weekly", row.period)
+            assert.equal(NOW + 4 * 86400, row.expiry)
+        end)
+
         it("falls back to a placeholder identity when the client has no names yet", function()
             local app, recorded = boot({
                 playerName = nil,
@@ -364,7 +398,7 @@ describe("addon integration", function()
 
             recorded.frame:fire("UPDATE_INSTANCE_INFO")
 
-            local stored = recorded.db.characters["Thrall-Ragnaros"]["Molten Core\0" .. 4]
+            local stored = recorded.db.characters["Thrall-Ragnaros"]["instance\0Molten Core\0" .. 4]
             assert.same({
                 { name = "Lucifron", killed = true },
                 { name = "Magmadar", killed = false },
@@ -415,7 +449,7 @@ describe("addon integration", function()
                 { name = "Lucifron", killed = true },
                 { name = "Ragnaros", killed = false },
             }, byCharacter["Thrall-Ragnaros"].encounters)
-            assert.equal("Molten Core", byCharacter["Thrall-Ragnaros"].instance)
+            assert.equal("Molten Core", byCharacter["Thrall-Ragnaros"].activity)
             -- Jaina's own lockout genuinely has no bosses to report.
             assert.same({}, byCharacter["Jaina-Draenor"].encounters)
         end)
@@ -757,7 +791,7 @@ describe("addon integration", function()
         ---The invisible hit areas laid over a single row's cells, in the order the
         ---window creates them: the instance cell first, then the character cell.
         ---@param recorded table
-        ---@return table instanceCell, table characterCell
+        ---@return table activityCell, table characterCell
         local function rowCells(recorded)
             local holders = {}
             for _, frame in ipairs(recorded.frames) do
@@ -802,30 +836,32 @@ describe("addon integration", function()
         it("opens neither detail window until a cell is clicked", function()
             local app = opened()
 
-            assert.is_false(app.instanceWindow.isShown())
+            assert.is_false(app.activityWindow.isShown())
             assert.is_false(app.characterWindow.isShown())
         end)
 
-        it("opens the instance detail window when the instance cell is clicked", function()
+        it("opens the activity detail window when the activity cell is clicked", function()
             local app, recorded = opened()
-            local instanceCell = rowCells(recorded)
+            local activityCell = rowCells(recorded)
 
-            instanceCell:run("OnClick")
+            activityCell:run("OnClick")
 
-            assert.is_true(app.instanceWindow.isShown())
+            assert.is_true(app.activityWindow.isShown())
             assert.is_false(app.characterWindow.isShown())
         end)
 
-        it("titles the instance detail window with the instance, which covers every difficulty", function()
+        it("titles the activity detail window with the activity, which covers every difficulty", function()
             local app, recorded = opened()
-            local instanceCell = rowCells(recorded)
+            local activityCell = rowCells(recorded)
 
-            instanceCell:run("OnClick")
+            activityCell:run("OnClick")
 
-            assert.is_true(app.instanceWindow.isShown())
+            assert.is_true(app.activityWindow.isShown())
+            -- An hour left is all the client has said so far, so the cadence still reads
+            -- as daily: the title reports what has been observed, not what is assumed.
             assert.is_true(contains(
-                textsOf(recorded, "ChronieInstanceDetailWindow"),
-                "Ulduar"
+                textsOf(recorded, "ChronieActivityDetailWindow"),
+                "Daily — Ulduar"
             ))
         end)
 
@@ -836,7 +872,7 @@ describe("addon integration", function()
             characterCell:run("OnClick")
 
             assert.is_true(app.characterWindow.isShown())
-            assert.is_false(app.instanceWindow.isShown())
+            assert.is_false(app.activityWindow.isShown())
         end)
 
         it("titles the character detail window with the clicked character", function()
@@ -854,14 +890,14 @@ describe("addon integration", function()
 
         it("gives the two detail windows separate frames and Escape-close entries", function()
             local _, recorded = opened()
-            local instanceCell, characterCell = rowCells(recorded)
+            local activityCell, characterCell = rowCells(recorded)
 
-            instanceCell:run("OnClick")
+            activityCell:run("OnClick")
             characterCell:run("OnClick")
 
             assert.same({
                 "ChronieLockoutWindow",
-                "ChronieInstanceDetailWindow",
+                "ChronieActivityDetailWindow",
                 "ChronieCharacterDetailWindow",
             }, recorded.specialFrames)
         end)
@@ -870,11 +906,11 @@ describe("addon integration", function()
     describe("the lockout window's callbacks in isolation", function()
         ---Builds a window with fake deps only, so the click handlers can be driven
         ---without booting the whole addon.
-        ---@return table window, table frames, table selections `{ instances, characters }`
+        ---@return table window, table frames, table selections `{ activities, characters }`
         local function newWindow()
             local ns = loader.load()
             local createFrame, frames = fake.newCreateFrame()
-            local selections = { instances = {}, characters = {} }
+            local selections = { activities = {}, characters = {} }
 
             local function newClassDisplay()
                 local classColor, classIconCoords = fake.newClassLook()
@@ -889,7 +925,10 @@ describe("addon integration", function()
                     return {
                         {
                             character = "Thrall-Ragnaros",
-                            instance = "Ulduar",
+                            key = "instance\0Ulduar",
+                            activity = "Ulduar",
+                            kind = "raid",
+                            period = "weekly",
                             difficulty = "25 Player",
                             difficultyId = 4,
                             isRaid = true,
@@ -906,10 +945,10 @@ describe("addon integration", function()
                 tooltip = fake.newTooltip(),
                 classDisplay = newClassDisplay(),
                 -- An empty journal: these tests are about click routing, and no
-                -- instance having an expansion keeps the cells out of the way.
+                -- activity having an expansion keeps the cells out of the way.
                 expansions = ns.newExpansionIndex(fake.newEncounterJournal()),
-                onInstanceSelected = function(row)
-                    selections.instances[#selections.instances + 1] = row
+                onActivitySelected = function(row)
+                    selections.activities[#selections.activities + 1] = row
                 end,
                 onCharacterSelected = function(character)
                     selections.characters[#selections.characters + 1] = character
@@ -919,7 +958,7 @@ describe("addon integration", function()
         end
 
         ---@param frames table[]
-        ---@return table instanceCell, table characterCell
+        ---@return table activityCell, table characterCell
         local function rowCells(frames)
             local cells = {}
             for _, frame in ipairs(frames) do
@@ -931,16 +970,16 @@ describe("addon integration", function()
             return cells[1], cells[2]
         end
 
-        it("hands the clicked row to onInstanceSelected", function()
+        it("hands the clicked row to onActivitySelected", function()
             local window, frames, selections = newWindow()
             window.toggle()
-            local instanceCell = rowCells(frames)
+            local activityCell = rowCells(frames)
 
-            instanceCell:run("OnClick")
+            activityCell:run("OnClick")
 
-            assert.equal(1, #selections.instances)
-            assert.equal("Ulduar", selections.instances[1].instance)
-            assert.equal(4, selections.instances[1].difficultyId)
+            assert.equal(1, #selections.activities)
+            assert.equal("Ulduar", selections.activities[1].activity)
+            assert.equal(4, selections.activities[1].difficultyId)
         end)
 
         it("hands only the character name to onCharacterSelected", function()
@@ -958,7 +997,7 @@ describe("addon integration", function()
 
             window.toggle()
 
-            assert.same({}, selections.instances)
+            assert.same({}, selections.activities)
             assert.same({}, selections.characters)
         end)
     end)
