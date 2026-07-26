@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format.js";
+import { dayLabel, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
 
 describe("gold", () => {
-  it.each([
+  it.each<[number, string]>([
     [0, "0c"],
     [45, "45c"],
     [1234, "12s 34c"],
@@ -30,7 +30,7 @@ describe("signedGold", () => {
 });
 
 describe("duration", () => {
-  it.each([
+  it.each<[number, string]>([
     [0, "0s"],
     [45, "45s"],
     [900, "15m"],
@@ -98,7 +98,7 @@ describe("escapeHtml", () => {
 });
 
 describe("plural", () => {
-  it.each([
+  it.each<[number, string]>([
     [1, "1 quest"],
     [3, "3 quests"],
   ])("counts %i as %s", (count, expected) => {

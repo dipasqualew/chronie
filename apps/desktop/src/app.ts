@@ -7,19 +7,25 @@
  * page hoped a write did.
  */
 
-import { desktop, message } from "./bridge.js";
-import { activityFields, activityLabel, fieldValue, parseMetadata } from "./activities.js";
-import { buildSessions } from "./sessions.js";
-import { createDetails } from "./details.js";
-import { createSegmentModal } from "./segmentModal.js";
-import { createTimeline } from "./timeline.js";
-import { duration, escapeHtml, plural } from "./format.js";
-import { installTooltip } from "./ui.js";
+import { desktop, message } from "./bridge";
+import { activityFields, activityLabel, fieldValue, parseMetadata } from "./activities";
+import type { ActivityField } from "./activities";
+import { buildSessions } from "./sessions";
+import { createDetails } from "./details";
+import { createSegmentModal } from "./segmentModal";
+import { createTimeline } from "./timeline";
+import { duration, escapeHtml, plural } from "./format";
+import type { ActivityMetadata, DashboardPayload, Segment } from "./types";
+import { installTooltip } from "./ui";
 
-const $ = (id) => document.getElementById(id);
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`The window is missing #${id}.`);
+  return element as T;
+};
 
 const PAYLOAD = await desktop.dashboard();
-const SEGMENTS = PAYLOAD.segments || [];
+const SEGMENTS: Segment[] = PAYLOAD.segments || [];
 // Kinds the backend can guess at, plus any the user has already invented, so the editor's
 // picker offers what this history actually contains rather than only what the app ships with.
 const KNOWN_KINDS = [...new Set([
@@ -32,7 +38,7 @@ installTooltip();
 /* ---------- the three views ---------- */
 
 const modal = createSegmentModal({
-  dialog: $("segment-detail"),
+  dialog: $<HTMLDialogElement>("segment-detail"),
   onEditActivities: (segmentId) => openEditor(segmentId),
 });
 
@@ -44,13 +50,15 @@ const timeline = createTimeline({
 const details = createDetails({
   elements: {
     head: $("head"), rows: $("rows"), empty: $("empty"), count: $("count"),
-    search: $("search"), character: $("character"), day: $("day"),
+    search: $<HTMLInputElement>("search"),
+    character: $<HTMLSelectElement>("character"),
+    day: $<HTMLSelectElement>("day"),
   },
   onOpenSegment: (segmentId, order) => modal.open(segmentId, order),
 });
 
 /** Redraws every view from `SEGMENTS`, including a detail modal left open over the top. */
-function repaint() {
+function repaint(): void {
   const sessions = buildSessions(SEGMENTS);
   $("timeline-meta").textContent = SEGMENTS.length
     ? [
@@ -65,9 +73,9 @@ function repaint() {
   modal.refresh(SEGMENTS);
 }
 
-const VIEWS = ["timeline", "details", "setup"];
+const VIEWS = ["timeline", "details", "setup"] as const;
 
-function show(view) {
+function show(view: string): void {
   for (const name of VIEWS) {
     $(`${name}-view`).hidden = name !== view;
     const tab = $(`${name}-tab`);
@@ -80,18 +88,40 @@ VIEWS.forEach((name) => $(`${name}-tab`).addEventListener("click", () => show(na
 
 /* ---------- editing a segment's activities ---------- */
 
+interface EditorRow {
+  /** Keys the row's markup. A row the user has just added carries a negative draft id. */
+  rowId: number;
+  /** Absent until the row has been stored, which is what tells an add from an update. */
+  id?: number;
+  kind: string;
+  metadata: ActivityMetadata;
+  dirty: boolean;
+}
+
+interface EditorState {
+  segmentId: number;
+  rows: EditorRow[];
+}
+
 // Rows are keyed by activity id; a row the user has just added has none yet, so it carries a
 // negative draft id until it is saved. That is what lets the same rendering code draw a row
 // that exists in the database and one that does not.
-let editing = null;
+let editing: EditorState | null = null;
 let draftSequence = 0;
 
-const editorDialog = $("activity-editor");
+/** The segment the editor is open on; nothing below is reachable with the dialog closed. */
+function editor(): EditorState {
+  if (!editing) throw new Error("No segment is being edited.");
+  return editing;
+}
+
+const editorDialog = $<HTMLDialogElement>("activity-editor");
 const editorStatus = $("activity-editor-status");
 
-const segmentById = (segmentId) => SEGMENTS.find((segment) => segment.segmentId === segmentId);
+const segmentById = (segmentId: number): Segment | undefined =>
+  SEGMENTS.find((segment) => segment.segmentId === segmentId);
 
-function kindOptions(selected) {
+function kindOptions(selected: string): string {
   const values = [...new Set([...KNOWN_KINDS, selected].filter(Boolean))].sort();
   return values.map((kind) =>
     `<option value="${escapeHtml(kind)}"${kind === selected ? " selected" : ""}>` +
@@ -101,7 +131,7 @@ function kindOptions(selected) {
 // The label sits beside its control rather than wrapping it: a wrapping label takes its
 // accessible name from its whole text content, which for a select would swallow every
 // option ("Beat the timer UnknownYesNo") and leave the field unaddressable by its name.
-function fieldInput(row, field) {
+function fieldInput(row: EditorRow, field: ActivityField): string {
   const value = fieldValue(row, field);
   const id = `field-${row.rowId}-${field.key}`;
   const control = field.type === "boolean"
@@ -118,13 +148,15 @@ function fieldInput(row, field) {
   </div>`;
 }
 
-function drawEditor() {
-  const segment = segmentById(editing.segmentId);
+function drawEditor(): void {
+  const state = editor();
+  const segment = segmentById(state.segmentId);
+  if (!segment) return;
   $("activity-editor-title").textContent = `Activities — ${segment.instance}`;
   $("activity-editor-sub").textContent =
     `${segment.character} · ${segment.day} · ${duration(segment.seconds)}`;
 
-  $("activity-editor-list").innerHTML = editing.rows.map((row) => `
+  $("activity-editor-list").innerHTML = state.rows.map((row) => `
     <div class="editor-row" data-row="${row.rowId}">
       <div class="row-head">
         <select data-role="kind" aria-label="Activity kind">${kindOptions(row.kind)}</select>
@@ -137,46 +169,50 @@ function drawEditor() {
       </div>
     </div>`).join("") || '<div class="muted">No activities on this segment yet.</div>';
 
-  $("activity-editor-list").querySelectorAll(".editor-row").forEach((element) => {
-    const row = editing.rows.find((entry) => String(entry.rowId) === element.dataset.row);
+  $("activity-editor-list").querySelectorAll<HTMLElement>(".editor-row").forEach((element) => {
+    const row = state.rows.find((entry) => String(entry.rowId) === element.dataset.row);
+    if (!row) return;
     // Changing the kind swaps the whole field set, so the values typed so far are captured
     // before the redraw; anything the new kind also has survives the switch.
-    element.querySelector('[data-role="kind"]').addEventListener("change", (event) => {
+    element.querySelector<HTMLSelectElement>('[data-role="kind"]')?.addEventListener("change", (event) => {
       row.metadata = collectRow(element, row.kind);
-      row.kind = event.target.value;
+      row.kind = (event.target as HTMLSelectElement).value;
       row.dirty = true;
       drawEditor();
     });
-    element.querySelector('[data-role="remove"]').addEventListener("click", () => removeRow(row));
-    element.querySelectorAll("[data-field]").forEach((input) => {
+    element.querySelector<HTMLButtonElement>('[data-role="remove"]')
+      ?.addEventListener("click", () => removeRow(row));
+    element.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-field]").forEach((input) => {
       input.addEventListener("input", () => { row.dirty = true; });
       input.addEventListener("change", () => { row.dirty = true; });
     });
   });
 }
 
-function collectRow(element, kind) {
-  const values = {};
-  element.querySelectorAll("[data-field]").forEach((input) => {
-    values[input.dataset.field] = input.value;
+function collectRow(element: Element, kind: string): ActivityMetadata {
+  const values: Record<string, string> = {};
+  element.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-field]").forEach((input) => {
+    const key = input.dataset.field;
+    if (key !== undefined) values[key] = input.value;
   });
   return parseMetadata(kind, values);
 }
 
 /** Saves every row the user actually touched, then repaints from what came back. */
-async function saveRows() {
-  for (const row of editing.rows) {
+async function saveRows(): Promise<void> {
+  const state = editor();
+  for (const row of state.rows) {
     if (!row.dirty) continue;
     const element = $("activity-editor-list").querySelector(`[data-row="${row.rowId}"]`);
     const metadata = element ? collectRow(element, row.kind) : row.metadata || {};
     const payload = row.id === undefined
-      ? await desktop.addActivity(editing.segmentId, row.kind, metadata)
+      ? await desktop.addActivity(state.segmentId, row.kind, metadata)
       : await desktop.updateActivity(row.id, row.kind, metadata);
     applyDashboard(payload);
   }
 }
 
-async function runEdit(action) {
+async function runEdit(action: () => Promise<void>): Promise<void> {
   editorStatus.textContent = "";
   try {
     await action();
@@ -187,19 +223,21 @@ async function runEdit(action) {
   }
 }
 
-function removeRow(row) {
+function removeRow(row: EditorRow): void {
+  const state = editor();
   // A draft the user added and changed their mind about was never stored, so it is simply
   // forgotten; anything else has to be deleted where it lives.
   if (row.id === undefined) {
-    editing.rows = editing.rows.filter((entry) => entry !== row);
+    state.rows = state.rows.filter((entry) => entry !== row);
     drawEditor();
     return;
   }
-  runEdit(async () => applyDashboard(await desktop.deleteActivity(row.id)));
+  const activityId = row.id;
+  void runEdit(async () => applyDashboard(await desktop.deleteActivity(activityId)));
 }
 
 /** Folds a fresh dashboard onto the segments already on screen and repaints what changed. */
-function applyDashboard(payload) {
+function applyDashboard(payload: DashboardPayload): void {
   const byId = new Map((payload.segments || []).map((segment) => [segment.segmentId, segment]));
   SEGMENTS.forEach((segment) => {
     const next = byId.get(segment.segmentId);
@@ -208,9 +246,10 @@ function applyDashboard(payload) {
   repaint();
 }
 
-function loadRows() {
-  const segment = segmentById(editing.segmentId) || {};
-  editing.rows = (segment.activities || []).map((activity) => ({
+function loadRows(): void {
+  const state = editor();
+  const segment = segmentById(state.segmentId);
+  state.rows = (segment?.activities || []).map((activity) => ({
     rowId: activity.id,
     id: activity.id,
     kind: activity.kind,
@@ -219,7 +258,7 @@ function loadRows() {
   }));
 }
 
-function openEditor(segmentId) {
+function openEditor(segmentId: number): void {
   editing = { segmentId, rows: [] };
   loadRows();
   editorStatus.textContent = "";
@@ -229,7 +268,7 @@ function openEditor(segmentId) {
 
 $("activity-add").addEventListener("click", () => {
   draftSequence -= 1;
-  editing.rows.push({
+  editor().rows.push({
     rowId: draftSequence,
     kind: KNOWN_KINDS[0] || "mythic_plus",
     metadata: {},
@@ -239,7 +278,7 @@ $("activity-add").addEventListener("click", () => {
 });
 
 $("activity-reset").addEventListener("click", () =>
-  runEdit(async () => applyDashboard(await desktop.resetActivities(editing.segmentId))));
+  void runEdit(async () => applyDashboard(await desktop.resetActivities(editor().segmentId))));
 
 $("activity-close").addEventListener("click", async () => {
   editorStatus.textContent = "";
@@ -254,12 +293,16 @@ $("activity-close").addEventListener("click", async () => {
 /* ---------- setup ---------- */
 
 const settings = await desktop.settings();
-$("wow-path").value = settings.wowPath || "";
+$<HTMLInputElement>("wow-path").value = settings.wowPath || "";
 $("last-sync").textContent = settings.lastSync
   ? `Last background sync: ${new Date(settings.lastSync).toLocaleString()}`
   : "No successful sync yet.";
 
-async function run(button, action, success) {
+async function run<T>(
+  button: HTMLButtonElement,
+  action: () => Promise<T>,
+  success: (result: T) => string,
+): Promise<T | undefined> {
   button.disabled = true;
   $("setup-status").textContent = "";
   try {
@@ -268,27 +311,31 @@ async function run(button, action, success) {
     return result;
   } catch (error) {
     $("setup-status").textContent = message(error);
+    return undefined;
   } finally {
     button.disabled = false;
   }
 }
 
+const pressed = (event: Event): HTMLButtonElement => event.currentTarget as HTMLButtonElement;
+
 $("browse-path").addEventListener("click", async () => {
   const selected = await desktop.chooseWowPath();
-  if (selected) $("wow-path").value = selected;
+  if (selected) $<HTMLInputElement>("wow-path").value = selected;
 });
 $("save-path").addEventListener("click", (event) =>
-  run(event.currentTarget, () => desktop.saveWowPath($("wow-path").value.trim()), () => "Game folder saved."));
+  void run(pressed(event), () => desktop.saveWowPath($<HTMLInputElement>("wow-path").value.trim()),
+    () => "Game folder saved."));
 $("sync-now").addEventListener("click", async (event) => {
-  const result = await run(event.currentTarget, desktop.syncNow,
+  const result = await run(pressed(event), desktop.syncNow,
     (sync) => `Sync complete: ${sync.segmentCount} segments, ${sync.added} new.`);
   if (result && !globalThis.__Chronie_E2E__) setTimeout(() => window.location.reload(), 800);
 });
 $("install-addon").addEventListener("click", (event) =>
-  run(event.currentTarget, desktop.installAddon,
+  void run(pressed(event), desktop.installAddon,
     (result) => `Addon ${result.version} installed. Use /reload in game to load it.`));
 $("check-update").addEventListener("click", (event) =>
-  run(event.currentTarget, desktop.checkForAppUpdate,
+  void run(pressed(event), desktop.checkForAppUpdate,
     (result) => result.updated ? `Chronie ${result.version} is ready; restart to finish.` : "Chronie is up to date."));
 
 /* ---------- go ---------- */

@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // The repository's own tooling. It runs under Bun, never in a browser, so no DOM.
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["*.ts"]
+}

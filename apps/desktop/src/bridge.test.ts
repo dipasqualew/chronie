@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { message } from "./bridge.js";
+import { message } from "./bridge";
 
 describe("message", () => {
   it("extracts an Error message", () => {

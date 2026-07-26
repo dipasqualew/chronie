@@ -9,6 +9,12 @@
     "dev": "bun run --cwd apps/desktop tauri dev",
     "build": "bun run --cwd apps/desktop tauri build",
     "test": "bun run --cwd apps/desktop test",
-    "test:e2e": "bun run --cwd apps/desktop test:e2e"
+    "test:e2e": "bun run --cwd apps/desktop test:e2e",
+    "typecheck": "tsc -p apps/desktop && tsc -p scripts",
+    "ci:wait": "bun run scripts/wait-for-ci.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.9.2"
   }
 }

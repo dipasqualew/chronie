@@ -6,14 +6,29 @@
  * through the table's current order rather than through a play session.
  */
 
-import { clock, duration, escapeHtml, gold, signed, signedGold } from "./format.js";
-import { activityText, classDot, locationType } from "./ui.js";
+import { clock, duration, escapeHtml, gold, signed, signedGold } from "./format";
+import type { OpenSegment } from "./timeline";
+import { eventsOf } from "./types";
+import type {
+  AchievementEvent,
+  CollectibleEvent,
+  CurrencyGain,
+  EventListKey,
+  EventOf,
+  HousingItemEvent,
+  LevelUpEvent,
+  QuestEvent,
+  ReputationGain,
+  Segment,
+  TransmogEvent,
+} from "./types";
+import { activityText, classDot, locationType } from "./ui";
 
 /**
  * A compact cell that names the first couple of entries and counts the rest, with the
  * full list in the title attribute so nothing is lost to the abbreviation.
  */
-function listCell(entries, asText) {
+function listCell<T>(entries: T[] | undefined, asText: (items: T[]) => string): string {
   const list = entries || [];
   if (list.length === 0) return '<span class="muted">—</span>';
   const shown = asText(list.slice(0, 2));
@@ -21,22 +36,75 @@ function listCell(entries, asText) {
   return `<span title="${escapeHtml(asText(list))}">${escapeHtml(shown)}</span>${rest}`;
 }
 
-const repText = (gains) =>
+const repText = (gains?: ReputationGain[]): string =>
   (gains || []).map((gain) => `${gain.faction} +${gain.amount.toLocaleString()}`).join(", ");
-const currencyText = (gains) =>
+const currencyText = (gains?: CurrencyGain[]): string =>
   (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}`).join(", ");
-const achievementText = (earned) =>
+const achievementText = (earned?: AchievementEvent[]): string =>
   (earned || []).map((event) => `${event.name} (${event.accountFirst ? "account first" : "character first"})`).join(", ");
-const levelUpText = (events) => (events || []).map((event) => `Level ${event.level}`).join(", ");
-const collectionText = (events) => (events || []).map((event) => event.name).join(", ");
-const housingText = (events) =>
+const levelUpText = (events?: LevelUpEvent[]): string =>
+  (events || []).map((event) => `Level ${event.level}`).join(", ");
+const collectionText = (events?: CollectibleEvent[]): string =>
+  (events || []).map((event) => event.name).join(", ");
+const housingText = (events?: HousingItemEvent[]): string =>
   (events || []).map((event) => `${event.name} (${event.warbandFirst ? "warband first" : "additional"})`).join(", ");
-const transmogText = (events) => (events || []).map((event) =>
+const transmogText = (events?: TransmogEvent[]): string => (events || []).map((event) =>
   `${event.name || `Item ${event.id}`} (${event.newAppearance === true
     ? "new" : event.newAppearance === false ? "variant" : "unknown"})`).join(", ");
-const questText = (events) => (events || []).map((event) => event.name || `Quest ${event.id}`).join(", ");
+const questText = (events?: QuestEvent[]): string =>
+  (events || []).map((event) => event.name || `Quest ${event.id}`).join(", ");
 
-const ALL_COLUMNS = [
+/** Cells are compared against others from their own column, so both sides always match. */
+type SortValue = string | number;
+
+interface Column {
+  key: string;
+  title: string;
+  num?: boolean;
+  /** Kept even when this history has nothing to put in it. */
+  always?: boolean;
+  /** Dropped unless some segment has something in it. */
+  optional?: boolean;
+  /** A rule of its own for whether the column has earned its place. */
+  when?: (segments: Segment[]) => boolean;
+  cell: (segment: Segment) => string;
+  sort: (segment: Segment) => SortValue;
+  /** Set on the event-list columns; what `columnsFor` asks to find out whether they are empty. */
+  events?: (segment: Segment) => unknown[];
+}
+
+interface EventColumnSpec<K extends EventListKey> {
+  key: K;
+  title: string;
+  text: (events?: Array<EventOf<K>>) => string;
+  num?: boolean;
+  always?: boolean;
+  optional?: boolean;
+  when?: (segments: Segment[]) => boolean;
+  sort?: (segment: Segment) => SortValue;
+}
+
+/**
+ * An event-list column reads and sorts the same way every time, so it is declared by its
+ * formatter alone and the rest is filled in here. The key is tied to the formatter's event
+ * type, so a column pointed at the wrong list will not compile.
+ */
+function eventColumn<K extends EventListKey>(spec: EventColumnSpec<K>): Column {
+  const events = (segment: Segment): Array<EventOf<K>> => eventsOf(segment, spec.key);
+  return {
+    key: spec.key,
+    title: spec.title,
+    num: spec.num,
+    always: spec.always,
+    optional: spec.optional,
+    when: spec.when,
+    events,
+    cell: (segment) => listCell(events(segment), spec.text),
+    sort: spec.sort ?? ((segment) => events(segment).length),
+  };
+}
+
+const ALL_COLUMNS: Column[] = [
   {
     key: "day",
     title: "Started – ended",
@@ -75,65 +143,80 @@ const ALL_COLUMNS = [
     key: "goldDiff", title: "Gold Δ", num: true, sort: (s) => s.goldDiff,
     cell: (s) => `<span class="${s.goldDiff < 0 ? "loss" : "gold"}">${escapeHtml(signedGold(s.goldDiff))}</span>`,
   },
-  { key: "achievements", title: "Achievements", text: achievementText, optional: true },
-  { key: "levelUps", title: "Level ups", text: levelUpText, optional: true },
-  {
+  eventColumn({ key: "achievements", title: "Achievements", text: achievementText, optional: true }),
+  eventColumn({ key: "levelUps", title: "Level ups", text: levelUpText, optional: true }),
+  eventColumn({
     key: "currencies", title: "Currency", text: currencyText, optional: true,
     sort: (s) => (s.currencies || []).reduce((total, gain) => total + gain.amount, 0),
-  },
-  { key: "mounts", title: "Mounts", text: collectionText, optional: true },
-  { key: "pets", title: "Pets", text: collectionText, optional: true },
-  { key: "quests", title: "Quests", text: questText, optional: true },
-  {
+  }),
+  eventColumn({ key: "mounts", title: "Mounts", text: collectionText, optional: true }),
+  eventColumn({ key: "pets", title: "Pets", text: collectionText, optional: true }),
+  eventColumn({ key: "quests", title: "Quests", text: questText, optional: true }),
+  eventColumn({
     key: "reputation", title: "Reputation", text: repText, optional: true,
     sort: (s) => (s.reputation || []).reduce((total, gain) => total + gain.amount, 0),
-  },
-  { key: "toys", title: "Toys", text: collectionText, optional: true },
-  { key: "transmogs", title: "Transmog", text: transmogText, optional: true },
-  { key: "housingItems", title: "Housing items", text: housingText, optional: true },
+  }),
+  eventColumn({ key: "toys", title: "Toys", text: collectionText, optional: true }),
+  eventColumn({ key: "transmogs", title: "Transmog", text: transmogText, optional: true }),
+  eventColumn({ key: "housingItems", title: "Housing items", text: housingText, optional: true }),
   {
     key: "housingXP", title: "Housing XP", num: true, sort: (s) => s.housingXP || 0,
     cell: (s) => (s.housingXP ? signed(s.housingXP) : '<span class="muted">—</span>'),
     when: (segments) => segments.some((segment) => (segment.housingXP || 0) !== 0),
   },
-  { key: "housingLevelUps", title: "Housing levels", text: levelUpText, optional: true },
-].map((column) => column.text
-  // An event-list column reads and sorts the same way every time, so it is declared by its
-  // formatter alone and the rest is filled in here.
-  ? {
-    cell: (segment) => listCell(segment[column.key], column.text),
-    sort: (segment) => (segment[column.key] || []).length,
-    ...column,
-  }
-  : column);
+  eventColumn({ key: "housingLevelUps", title: "Housing levels", text: levelUpText, optional: true }),
+];
 
 /**
  * Which columns this history justifies. A column for something the player has never done is
  * a column of dashes, so it is left out — except Activity, which is the one column a user
  * fills in themselves and so must be visible before it has anything in it.
  */
-function columnsFor(segments) {
+function columnsFor(segments: Segment[]): Column[] {
   return ALL_COLUMNS.filter((column) => {
     if (column.always) return true;
     if (column.when) return column.when(segments);
     if (!column.optional) return true;
-    return segments.some((segment) => (segment[column.key] || []).length);
+    return segments.some((segment) => (column.events?.(segment) ?? []).length > 0);
   });
 }
 
-/**
- * @param {object} options
- * @param {(segmentId: number, order: Array<object>) => void} options.onOpenSegment
- *   Given the segment to show and the rows in their current order, so the modal's next and
- *   previous follow whatever the reader had sorted and filtered to.
- */
-export function createDetails({ elements, onOpenSegment }) {
-  let segments = [];
-  let columns = [];
+/** Ordering within one column, where both values are always of the same kind. */
+function ascendingOrder(a: SortValue, b: SortValue): number {
+  const greater = typeof a === "number" && typeof b === "number" ? a > b : String(a) > String(b);
+  return greater ? 1 : -1;
+}
+
+export interface DetailsElements {
+  head: HTMLElement;
+  rows: HTMLElement;
+  empty: HTMLElement;
+  count: HTMLElement;
+  search: HTMLInputElement;
+  character: HTMLSelectElement;
+  day: HTMLSelectElement;
+}
+
+export interface DetailsOptions {
+  elements: DetailsElements;
+  /**
+   * Given the segment to show and the rows in their current order, so the modal's next and
+   * previous follow whatever the reader had sorted and filtered to.
+   */
+  onOpenSegment: OpenSegment;
+}
+
+export interface Details {
+  render: (segments: Segment[]) => void;
+}
+
+export function createDetails({ elements, onOpenSegment }: DetailsOptions): Details {
+  let segments: Segment[] = [];
+  let columns: Column[] = [];
   let sortKey = "day";
   let ascending = false;
 
-  function options(select, values, allLabel) {
+  function options(select: HTMLSelectElement, values: string[], allLabel: string): void {
     const kept = select.value;
     select.innerHTML = [`<option value="">${allLabel}</option>`]
       .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
@@ -141,7 +224,7 @@ export function createDetails({ elements, onOpenSegment }) {
     if (values.includes(kept)) select.value = kept;
   }
 
-  function visible() {
+  function visible(): Segment[] {
     const term = elements.search.value.trim().toLowerCase();
     const character = elements.character.value;
     const day = elements.day.value;
@@ -155,11 +238,11 @@ export function createDetails({ elements, onOpenSegment }) {
     return rows.sort((left, right) => {
       const a = column.sort(left), b = column.sort(right);
       if (a === b) return left.id < right.id ? -1 : 1;
-      return (a > b ? 1 : -1) * (ascending ? 1 : -1);
+      return ascendingOrder(a, b) * (ascending ? 1 : -1);
     });
   }
 
-  function draw() {
+  function draw(): void {
     const rows = visible();
 
     elements.head.innerHTML = columns.map((column) => {
@@ -169,9 +252,10 @@ export function createDetails({ elements, onOpenSegment }) {
       >${escapeHtml(column.title)} ${arrow}</th>`;
     }).join("");
 
-    elements.head.querySelectorAll("th").forEach((cell) => {
+    elements.head.querySelectorAll<HTMLTableCellElement>("th").forEach((cell) => {
       cell.addEventListener("click", () => {
         const key = cell.dataset.key;
+        if (key === undefined) return;
         if (key === sortKey) ascending = !ascending;
         else { sortKey = key; ascending = false; }
         draw();
@@ -184,9 +268,9 @@ export function createDetails({ elements, onOpenSegment }) {
 
     // Wired once per repaint on the table rather than per row: a long history is a lot of
     // rows, and the row a click lands in is right there on the event.
-    elements.rows.querySelectorAll("tr").forEach((row) => {
+    elements.rows.querySelectorAll<HTMLTableRowElement>("tr").forEach((row) => {
       row.addEventListener("click", (event) => {
-        if (event.target.closest("a")) return;
+        if (event.target instanceof Element && event.target.closest("a")) return;
         onOpenSegment(Number(row.dataset.segment), rows);
       });
     });
@@ -198,7 +282,7 @@ export function createDetails({ elements, onOpenSegment }) {
       : "No segments collected yet.";
   }
 
-  function render(next) {
+  function render(next: Segment[]): void {
     segments = next;
     columns = columnsFor(segments);
     options(elements.character, [...new Set(segments.map((s) => s.character))].sort(), "All characters");
@@ -206,7 +290,8 @@ export function createDetails({ elements, onOpenSegment }) {
     draw();
   }
 
-  ["search", "character", "day"].forEach((key) => elements[key].addEventListener("input", draw));
+  const FILTERS = ["search", "character", "day"] as const;
+  FILTERS.forEach((key) => elements[key].addEventListener("input", draw));
 
   return { render };
 }

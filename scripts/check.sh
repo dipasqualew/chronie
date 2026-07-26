@@ -14,6 +14,9 @@ busted --verbose
 echo "==> desktop backend"
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
+echo "==> typecheck"
+bun run typecheck
+
 echo "==> desktop frontend"
 bun run --cwd apps/desktop test
 bun run --cwd apps/desktop test:e2e

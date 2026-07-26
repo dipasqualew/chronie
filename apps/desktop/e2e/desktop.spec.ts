@@ -1,4 +1,7 @@
 import { expect, test as base } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+
+import type { E2EMock } from "../src/types";
 
 /**
  * The window addressed the way a user addresses it: by the names and roles on screen.
@@ -7,70 +10,76 @@ import { expect, test as base } from "@playwright/test";
  * reader will.
  */
 class SegmentDetail {
-  constructor(page) {
+  readonly page: Page;
+  readonly dialog: Locator;
+
+  constructor(page: Page) {
     this.page = page;
     this.dialog = page.locator("#segment-detail");
   }
 
   /** Opens the modal from the timeline row for a given character and location. */
-  async openFromTimeline(character, instance) {
+  async openFromTimeline(character: string, instance: string): Promise<void> {
     await this.page.getByRole("button", { name: new RegExp(`Open segment: ${character} in ${instance}`) }).click();
     await expect(this.dialog).toBeVisible();
   }
 
-  title() {
+  title(): Locator {
     return this.dialog.getByRole("heading", { level: 2 });
   }
 
-  position() {
+  position(): Locator {
     return this.dialog.locator(".detail-position");
   }
 
-  next() {
+  next(): Promise<void> {
     return this.dialog.getByRole("button", { name: "Next segment" }).click();
   }
 
-  previous() {
+  previous(): Promise<void> {
     return this.dialog.getByRole("button", { name: "Previous segment" }).click();
   }
 
-  async close() {
+  async close(): Promise<void> {
     await this.dialog.getByRole("button", { name: "Close segment" }).click();
     await expect(this.dialog).toBeHidden();
   }
 }
 
 class ActivityEditor {
-  constructor(page) {
+  readonly page: Page;
+  readonly dialog: Locator;
+
+  constructor(page: Page) {
     this.page = page;
     this.dialog = page.locator("#activity-editor");
   }
 
   /** The editor is only reachable through a segment's detail, which is where editing lives. */
-  async open() {
+  async open(): Promise<void> {
     await this.page.locator("#segment-detail").getByRole("button", { name: "Edit activities" }).click();
     await expect(this.dialog).toBeVisible();
   }
 
-  row(index) {
+  row(index: number): Locator {
     return this.dialog.getByRole("combobox", { name: "Activity kind" }).nth(index);
   }
 
-  field(label) {
+  field(label: string): Locator {
     return this.dialog.getByLabel(label, { exact: true });
   }
 
-  add() {
+  add(): Promise<void> {
     return this.dialog.getByRole("button", { name: "Add activity" }).click();
   }
 
-  async done() {
+  async done(): Promise<void> {
     await this.dialog.getByRole("button", { name: "Done" }).click();
     await expect(this.dialog).toBeHidden();
   }
 }
 
-const test = base.extend({
+const test = base.extend<{ detail: SegmentDetail; editor: ActivityEditor }>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
   },
@@ -84,7 +93,9 @@ const test = base.extend({
 const EVENING = 1785063600;
 const NIGHT_BEFORE = 1784977200;
 
-const mockDesktop = {
+// Typed as the real backend's answers, so a fixture that has drifted from what a command
+// actually returns fails the type check rather than the assertion three steps later.
+const mockDesktop: E2EMock = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
     knownActivityKinds: ["mythic_plus", "progress_raid", "legacy_raid", "levelling"],
@@ -206,8 +217,8 @@ const mockDesktop = {
   appUpdate: { updated: false, version: "0.1.0" },
 };
 
-const timeline = (page) => page.locator("#timeline");
-const sessions = (page) => page.locator("#timeline .session");
+const timeline = (page: Page): Locator => page.locator("#timeline");
+const sessions = (page: Page): Locator => page.locator("#timeline .session");
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {

@@ -8,31 +8,37 @@
  * game — goes through `escapeHtml` on the way in.
  */
 
-import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities.js";
-import { duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format.js";
+import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities";
+import type { PartialActivity } from "./activities";
+import { duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
+import type { Highlight } from "./sessions";
+import type { SessionCharacter } from "./sessions";
+import type { Segment } from "./types";
 
 /** The client's own class colours, so a character reads the same here as in game. */
-export const CLASS_COLORS = {
+export const CLASS_COLORS: Record<string, string> = {
   DEATHKNIGHT: "#c41e3a", DEMONHUNTER: "#a330c9", DRUID: "#ff7c0a", EVOKER: "#33937f",
   HUNTER: "#aad372", MAGE: "#3fc7eb", MONK: "#00ff98", PALADIN: "#f48cba",
   PRIEST: "#ffffff", ROGUE: "#fff468", SHAMAN: "#0070dd", WARLOCK: "#8788ee",
   WARRIOR: "#c69b6d",
 };
 
-export const classColor = (classFile) => CLASS_COLORS[classFile] || "var(--text-muted)";
+export const classColor = (classFile?: string | null): string =>
+  CLASS_COLORS[classFile ?? ""] || "var(--text-muted)";
 
 /** "DEATHKNIGHT" is how the game files it and not how anyone says it. */
-export function className(classFile) {
+export function className(classFile?: string | null): string {
   if (!classFile) return "Unknown class";
-  const spaced = { DEATHKNIGHT: "Death Knight", DEMONHUNTER: "Demon Hunter" }[classFile];
-  return spaced || classFile.charAt(0) + classFile.slice(1).toLowerCase();
+  const spaced: Record<string, string> = { DEATHKNIGHT: "Death Knight", DEMONHUNTER: "Demon Hunter" };
+  return spaced[classFile] || classFile.charAt(0) + classFile.slice(1).toLowerCase();
 }
 
 /** "none" for open world, else "instance"; used as a small badge on each segment. */
-export const isInstance = (segment) => !!segment.instanceType && segment.instanceType !== "none";
-export const locationType = (segment) => (isInstance(segment) ? "instance" : "world");
+export const isInstance = (segment: Segment): boolean =>
+  !!segment.instanceType && segment.instanceType !== "none";
+export const locationType = (segment: Segment): string => (isInstance(segment) ? "instance" : "world");
 
-export const classDot = (classFile) =>
+export const classDot = (classFile?: string | null): string =>
   `<span class="dot" style="background:${classColor(classFile)}"></span>`;
 
 /**
@@ -41,7 +47,7 @@ export const classDot = (classFile) =>
  * Focusable and named, so the detail is reachable without a mouse: the circle is the only
  * place a session says which characters were involved, and that must not be hover-only.
  */
-export function characterCircle(character) {
+export function characterCircle(character: SessionCharacter): string {
   const parts = [
     `${className(character.classFile)}${character.level == null ? "" : ` · level ${character.level}`}`,
     `${duration(character.seconds)} played`,
@@ -62,10 +68,11 @@ export function characterCircle(character) {
 /* ---------- highlights ---------- */
 
 /** How a running total reads: copper as gold, everything else as a signed count. */
-export function highlightValue(entry) {
-  if (entry.kind === "gold") return signedGold(entry.value);
-  if (entry.kind === "loot") return gold(entry.value);
-  return signed(entry.value);
+export function highlightValue(entry: Highlight): string {
+  const value = entry.value ?? 0;
+  if (entry.kind === "gold") return signedGold(value);
+  if (entry.kind === "loot") return gold(value);
+  return signed(value);
 }
 
 /**
@@ -73,7 +80,7 @@ export function highlightValue(entry) {
  * button, because clicking it should take you to where it happened; one summed across a
  * whole evening has nowhere to go and stays a plain chip.
  */
-export function highlightChip(entry) {
+export function highlightChip(entry: Highlight): string {
   const open = entry.segmentId != null;
   const tag = open ? "button" : "span";
   const detail = entry.detail
@@ -88,13 +95,22 @@ export function highlightChip(entry) {
 }
 
 /** A running total, drawn quieter than a milestone because it is context, not news. */
-export function tallyItem(entry) {
-  const tone = entry.kind === "gold" && entry.value < 0 ? " loss" : (entry.kind === "gold" ? " gold" : "");
+export function tallyItem(entry: Highlight): string {
+  const tone = entry.kind === "gold" && (entry.value ?? 0) < 0
+    ? " loss"
+    : (entry.kind === "gold" ? " gold" : "");
   return `<span class="tally">
     <span class="tally-icon" aria-hidden="true">${entry.icon}</span>
     <span class="tally-label">${escapeHtml(entry.label)}</span>
     <span class="tally-value${tone}">${escapeHtml(highlightValue(entry))}</span>
   </span>`;
+}
+
+export interface HighlightListOptions {
+  /** Caps the chips on a crowded session; the remainder is counted rather than lost. */
+  limit?: number;
+  /** False for the detail modal, which lists every milestone in full a few lines down. */
+  milestones?: boolean;
 }
 
 /**
@@ -104,12 +120,15 @@ export function tallyItem(entry) {
  * `milestones: false` is for the detail modal, which lists every one of them in full a few
  * lines further down — repeating them as chips first would only make the same page longer.
  */
-export function highlightList(entries, { limit = Infinity, milestones: withChips = true } = {}) {
+export function highlightList(
+  entries: Highlight[],
+  { limit = Infinity, milestones: withChips = true }: HighlightListOptions = {},
+): string {
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
   const tallies = entries.filter((entry) => entry.family === "tally");
   const shown = milestones.slice(0, limit);
   const hidden = milestones.length - shown.length;
-  const parts = [];
+  const parts: string[] = [];
   if (shown.length) {
     parts.push(`<div class="hl-row">${shown.map(highlightChip).join("")}` +
       (hidden > 0 ? `<span class="hl hl-more">+${hidden} more</span>` : "") +
@@ -127,7 +146,7 @@ export function highlightList(entries, { limit = Infinity, milestones: withChips
  * A guess the backend was unsure about is drawn with a dashed border and says so in its
  * tooltip, so the eye can tell "Chronie thinks" apart from "I said so" at a glance.
  */
-export function activityChip(activity) {
+export function activityChip(activity: PartialActivity): string {
   const detail = activitySummary(activity);
   const guess = isUncertain(activity);
   const title = activity.source === "manual"
@@ -139,7 +158,7 @@ export function activityChip(activity) {
     "</span>";
 }
 
-export const activityText = (activities) =>
+export const activityText = (activities?: PartialActivity[]): string =>
   (activities || []).map((activity) => {
     const detail = activitySummary(activity);
     return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
@@ -147,37 +166,43 @@ export const activityText = (activities) =>
 
 /* ---------- the floating tooltip ---------- */
 
-let tooltip = null;
+let tooltip: HTMLElement | null = null;
+
+/** The nearest thing carrying a tip, for an event that may have fired on the document. */
+function hostOf(target: EventTarget | null): HTMLElement | null {
+  return target instanceof Element ? target.closest<HTMLElement>("[data-tip]") : null;
+}
 
 /**
  * Wires the one floating tooltip to everything carrying `data-tip`, by delegation, so
  * repainting a view never has to re-attach anything. The tip's value is trusted HTML built
  * by the caller — every one of them escapes what came from the game first.
  */
-export function installTooltip() {
+export function installTooltip(): void {
   tooltip = document.getElementById("tooltip");
-  const show = (event) => {
-    const host = event.target.closest?.("[data-tip]");
-    if (!host) return hide();
-    tooltip.innerHTML = host.dataset.tip;
+  const hide = (): void => { if (tooltip) tooltip.style.opacity = "0"; };
+  const show = (event: Event): void => {
+    const host = hostOf(event.target);
+    if (!host || !tooltip) return hide();
+    tooltip.innerHTML = host.dataset.tip ?? "";
     tooltip.style.opacity = "1";
     const box = tooltip.getBoundingClientRect();
-    const anchor = event.clientX ? { x: event.clientX, y: event.clientY } : anchorOf(host);
+    // Focus has no pointer position of its own, so the tip is hung off the element instead.
+    const pointer = event as MouseEvent;
+    const anchor = pointer.clientX ? { x: pointer.clientX, y: pointer.clientY } : anchorOf(host);
     tooltip.style.left = `${Math.max(Math.min(anchor.x + 14, window.innerWidth - box.width - 8), 8)}px`;
     tooltip.style.top = `${Math.max(anchor.y - box.height - 12, 8)}px`;
   };
-  const hide = () => { if (tooltip) tooltip.style.opacity = "0"; };
   document.addEventListener("mousemove", show);
   document.addEventListener("mouseleave", hide);
-  // Focus has no pointer position of its own, so the tip is hung off the element instead.
   document.addEventListener("focusin", (event) => {
-    if (event.target.closest?.("[data-tip]")) show(event);
+    if (hostOf(event.target)) show(event);
   });
   document.addEventListener("focusout", hide);
   document.addEventListener("scroll", hide, true);
 }
 
-function anchorOf(host) {
+function anchorOf(host: HTMLElement): { x: number; y: number } {
   const box = host.getBoundingClientRect();
   return { x: box.left + box.width / 2, y: box.top };
 }

@@ -58,11 +58,29 @@ archive installation:
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-Addon checks still use Lua 5.1 semantics:
+Addon checks still use Lua 5.1 semantics. `./scripts/check.sh` runs all of the above
+plus luacheck, busted and the TypeScript type check:
 
 ```sh
 ./scripts/check.sh
+bun run typecheck
 ```
+
+The desktop frontend and this repository's scripts are TypeScript. Nothing compiles
+them ahead of time — Vite, Vitest and Bun strip the types — so `bun run typecheck` is
+what actually reads them.
+
+After pushing a branch, wait for its CI rather than guessing at it:
+
+```sh
+bun run ci:wait                  # the branch currently checked out
+bun run ci:wait some-branch
+```
+
+`scripts/wait-for-ci.ts` blocks until every workflow run for the branch's head commit
+has finished, prints the failed jobs, their annotations and their error lines, and exits
+non-zero if anything was not green. It uses the `gh` CLI when one is installed and the
+GitHub REST API with `GH_TOKEN`/`GITHUB_TOKEN` when one is not.
 
 ## Rolling development updates
 

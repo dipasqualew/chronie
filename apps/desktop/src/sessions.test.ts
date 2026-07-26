@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { SESSION_GAP_SECONDS, buildSessions, charactersIn, highlights } from "./sessions.js";
+import { SESSION_GAP_SECONDS, buildSessions, charactersIn, highlights } from "./sessions";
+import type { Session } from "./sessions";
+import type { Segment } from "./types";
 
 const HOUR = 3600;
 const BASE = 1_785_000_000;
@@ -7,7 +9,7 @@ const BASE = 1_785_000_000;
 let nextSegmentId = 0;
 
 /** A segment with only the fields a test cares about; everything else stays empty. */
-function segment(overrides = {}) {
+function segment(overrides: Partial<Segment> = {}): Segment {
   nextSegmentId += 1;
   const startedAt = overrides.startedAt ?? BASE;
   const seconds = overrides.seconds ?? 600;
@@ -44,8 +46,8 @@ function segment(overrides = {}) {
   };
 }
 
-const labels = (session) => session.highlights.map((entry) => entry.label);
-const kinds = (session) => session.highlights.map((entry) => entry.kind);
+const labels = (session: Session): string[] => session.highlights.map((entry) => entry.label);
+const kinds = (session: Session): string[] => session.highlights.map((entry) => entry.kind);
 
 describe("buildSessions", () => {
   it("keeps segments separated by less than the gap in one session", () => {
@@ -200,8 +202,8 @@ describe("highlights", () => {
     ]);
 
     const transmog = session.highlights.find((entry) => entry.kind === "transmog");
-    expect(transmog.label).toBe("2 new appearances");
-    expect(transmog.detail).toBe("+1 variant");
+    expect(transmog?.label).toBe("2 new appearances");
+    expect(transmog?.detail).toBe("+1 variant");
   });
 
   it("still reports a session that only turned up variants", () => {
@@ -240,7 +242,7 @@ describe("highlights", () => {
     const only = segment({ mounts: [{ id: 11, name: "Clockwork Glider" }] });
     const [session] = buildSessions([only]);
 
-    expect(session.highlights.find((entry) => entry.kind === "mount").segmentId).toBe(only.segmentId);
+    expect(session.highlights.find((entry) => entry.kind === "mount")?.segmentId).toBe(only.segmentId);
   });
 
   // Sending a click to whichever segment happened to be first would be a lie about where
@@ -252,8 +254,8 @@ describe("highlights", () => {
     ]);
 
     const quests = session.highlights.find((entry) => entry.kind === "quest");
-    expect(quests.label).toBe("2 quests");
-    expect(quests.segmentId).toBeNull();
+    expect(quests?.label).toBe("2 quests");
+    expect(quests?.segmentId).toBeNull();
   });
 
   it("says nothing at all about a quiet segment", () => {

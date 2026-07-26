@@ -8,7 +8,7 @@
  */
 
 /** Copper as the game writes it: gold, silver, copper, dropping the units that are noise. */
-export function gold(copper) {
+export function gold(copper?: number | null): string {
   const total = Math.max(Math.round(copper || 0), 0);
   const g = Math.floor(total / 10000);
   const s = Math.floor((total % 10000) / 100);
@@ -19,15 +19,16 @@ export function gold(copper) {
 }
 
 /** A net difference keeps its sign, so a segment that ended down on gold reads as a loss. */
-export function signedGold(copper) {
+export function signedGold(copper?: number | null): string {
   const value = Math.round(copper || 0);
   return value < 0 ? `-${gold(-value)}` : gold(value);
 }
 
 /** A wallet change worth mentioning at all: exactly zero is not news. */
-export const isLoss = (copper) => Math.round(copper || 0) < 0;
+export const isLoss = (copper?: number | null): boolean => Math.round(copper || 0) < 0;
 
-export const signed = (amount) => `${amount >= 0 ? "+" : ""}${Number(amount || 0).toLocaleString()}`;
+export const signed = (amount: number): string =>
+  `${amount >= 0 ? "+" : ""}${Number(amount || 0).toLocaleString()}`;
 
 /**
  * A span of play, always carrying its units.
@@ -37,7 +38,7 @@ export const signed = (amount) => `${amount >= 0 ? "+" : ""}${Number(amount || 0
  * below the hour because a keystone is won and lost in them, and dropped above it because
  * nobody reads an evening to the second.
  */
-export function duration(seconds) {
+export function duration(seconds?: number | null): string {
   const total = Math.max(Math.round(seconds || 0), 0);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -47,21 +48,21 @@ export function duration(seconds) {
   return `${s}s`;
 }
 
-export const clock = (epoch) =>
+export const clock = (epoch?: number | null): string =>
   new Date((epoch || 0) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /**
  * A day as a person names it. Today and yesterday get their own words because a play
  * session that just happened is the one the eye is looking for.
  *
- * @param {string} day ISO `YYYY-MM-DD`, as the collector stores it.
- * @param {Date} [now] The moment to reckon "today" from; injected so the tests can pin it.
+ * @param day ISO `YYYY-MM-DD`, as the collector stores it.
+ * @param now The moment to reckon "today" from; injected so the tests can pin it.
  */
-export function dayLabel(day, now = new Date()) {
+export function dayLabel(day: string, now: Date = new Date()): string {
   const date = new Date(`${day}T00:00:00`);
   if (Number.isNaN(date.getTime())) return String(day ?? "");
   const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Math.round((midnight - date) / 86_400_000);
+  const days = Math.round((midnight.getTime() - date.getTime()) / 86_400_000);
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   const sameYear = date.getFullYear() === now.getFullYear();
@@ -78,15 +79,23 @@ export function dayLabel(day, now = new Date()) {
  * "Aster-Vale"; the realm suffix is a poor second letter, so only a real given-name break
  * contributes one.
  */
-export function initials(name) {
+export function initials(name?: string | null): string {
   const bare = String(name || "").split("-")[0];
   return bare.slice(0, 2).toUpperCase() || "?";
 }
 
-export function escapeHtml(text) {
-  return String(text ?? "").replace(/[&<>"]/g, (char) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[char]));
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+};
+
+/** Takes anything a view might interpolate — a name, a level, a rounded percentage. */
+export function escapeHtml(text: unknown): string {
+  return String(text ?? "").replace(/[&<>"]/g, (char) => HTML_ESCAPES[char] ?? char);
 }
 
 /** Pluralises by count without the "1 items" tell. */
-export const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+export const plural = (count: number, one: string, many = `${one}s`): string =>
+  `${count} ${count === 1 ? one : many}`;

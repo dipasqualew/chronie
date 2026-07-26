@@ -12,23 +12,72 @@
  * is what lets the grouping rule and the "what mattered" rule be tested without a browser.
  */
 
+import { eventsOf } from "./types";
+import type {
+  AchievementEvent,
+  CollectibleEvent,
+  EventListKey,
+  EventOf,
+  HousingItemEvent,
+  LevelUpEvent,
+  QuestEvent,
+  Segment,
+  TransmogEvent,
+} from "./types";
+
 /** The gap that ends a play session. Five minutes is long enough to cover a loading screen. */
 export const SESSION_GAP_SECONDS = 300;
+
+export interface SessionCharacter {
+  name: string;
+  classFile?: string | null;
+  level: number | null;
+  seconds: number;
+  segmentCount: number;
+  lootValue: number;
+  goldDiff: number;
+  places: string[];
+}
+
+export interface Session {
+  id: string;
+  startedAt: number;
+  endedAt: number;
+  day: string;
+  /** Time the addon was actually recording. */
+  playedSeconds: number;
+  /** How much of the evening the session took up, recording or not. */
+  spanSeconds: number;
+  segments: Segment[];
+  characters: SessionCharacter[];
+  totals: {
+    lootValue: number;
+    goldDiff: number;
+    housingXP: number;
+  };
+  highlights: Highlight[];
+}
+
+/** The totals a session sums straight off its segments. */
+type NumericSegmentKey = "lootValue" | "goldDiff" | "housingXP";
 
 /**
  * Folds segments into play sessions, newest session first.
  *
- * @param {Array<object>} segments Segments in any order; the collector hands them over newest first.
- * @param {number} [gapSeconds] Silence that ends a session.
- * @returns {Array<object>} Sessions, each with its segments in the order they happened.
+ * @param segments Segments in any order; the collector hands them over newest first.
+ * @param gapSeconds Silence that ends a session.
+ * @returns Sessions, each with its segments in the order they happened.
  */
-export function buildSessions(segments, gapSeconds = SESSION_GAP_SECONDS) {
+export function buildSessions(
+  segments?: Segment[] | null,
+  gapSeconds: number = SESSION_GAP_SECONDS,
+): Session[] {
   const ordered = [...(segments || [])].sort(
     (left, right) => (left.startedAt || 0) - (right.startedAt || 0) || (left.endedAt || 0) - (right.endedAt || 0),
   );
 
-  const groups = [];
-  let open = null;
+  const groups: Segment[][] = [];
+  let open: Segment[] | null = null;
   // The frontier is the latest end seen so far, not the previous segment's end: two
   // characters can overlap, and a short segment nested inside a long one must not make the
   // session look like it ended early and split the evening in half.
@@ -47,7 +96,7 @@ export function buildSessions(segments, gapSeconds = SESSION_GAP_SECONDS) {
   return groups.map(summarise).reverse();
 }
 
-function summarise(segments) {
+function summarise(segments: Segment[]): Session {
   const startedAt = Math.min(...segments.map((segment) => segment.startedAt || 0));
   const endedAt = Math.max(...segments.map((segment) => segment.endedAt || 0));
   return {
@@ -70,16 +119,17 @@ function summarise(segments) {
   };
 }
 
-const sum = (segments, key) => segments.reduce((total, segment) => total + (segment[key] || 0), 0);
+const sum = (segments: Segment[], key: NumericSegmentKey): number =>
+  segments.reduce((total, segment) => total + (segment[key] || 0), 0);
 
 /**
  * Who played, busiest first. A session's identity on screen is its cast, so each entry
  * carries enough for the circle's tooltip without going back to the segments.
  */
-export function charactersIn(segments) {
-  const byName = new Map();
+export function charactersIn(segments: Segment[]): SessionCharacter[] {
+  const byName = new Map<string, SessionCharacter>();
   for (const segment of segments) {
-    const found = byName.get(segment.character) || {
+    const found: SessionCharacter = byName.get(segment.character) || {
       name: segment.character,
       classFile: segment.classFile,
       level: null,
@@ -104,6 +154,54 @@ export function charactersIn(segments) {
 
 /* ---------- what mattered ---------- */
 
+export type HighlightKind =
+  | "achievement" | "levelUp" | "mount" | "toy" | "pet" | "transmog"
+  | "housingLevel" | "housingItem" | "quest"
+  | "gold" | "loot" | "currency" | "reputation" | "housingXP";
+
+/**
+ * `milestone` entries are the things a player would tell someone about and get a chip each;
+ * `tally` entries are the running numbers giving those things context.
+ */
+export type HighlightFamily = "milestone" | "tally";
+
+/** Whatever the highlight was built from, kept so a caller can look past the summary. */
+export type HighlightItem =
+  | AchievementEvent | LevelUpEvent | CollectibleEvent
+  | TransmogEvent | QuestEvent | HousingItemEvent;
+
+interface HighlightStyle {
+  rank: number;
+  family: HighlightFamily;
+  icon: string;
+}
+
+/** What the builders below push: everything but the styling, which is filled in from `KINDS`. */
+interface HighlightSeed {
+  kind: HighlightKind;
+  label: string;
+  detail?: string;
+  count?: number;
+  items?: HighlightItem[];
+  /** Orders within a family; the bigger achievement of two leads. */
+  weight?: number;
+  /** A running total's number, on the tallies only. */
+  value?: number;
+  /** The segment this came from, when it came from exactly one. */
+  segmentId?: number | null;
+}
+
+export interface Highlight extends HighlightStyle {
+  kind: HighlightKind;
+  label: string;
+  detail: string;
+  count: number;
+  items: HighlightItem[];
+  weight?: number;
+  value?: number;
+  segmentId?: number | null;
+}
+
 /**
  * The order the session's achievements are read in, and how each is drawn.
  *
@@ -111,7 +209,7 @@ export function charactersIn(segments) {
  * achievement, a level — and get a chip each. `tally` entries are the running numbers that
  * give those things context, and share a single quiet strip. Rank orders within a family.
  */
-const KINDS = {
+const KINDS: Record<HighlightKind, HighlightStyle> = {
   achievement: { rank: 1, family: "milestone", icon: "🏆" },
   levelUp: { rank: 2, family: "milestone", icon: "⬆️" },
   mount: { rank: 3, family: "milestone", icon: "🐎" },
@@ -135,16 +233,15 @@ const KINDS = {
  * detail modal and a whole evening on the timeline — the difference between "this run" and
  * "this session" should be the input, not a second implementation.
  *
- * @param {Array<object>} segments
- * @returns {Array<object>} Highlights carrying enough to render and to navigate back to
- *   the segment they came from, where they came from exactly one.
+ * @returns Highlights carrying enough to render and to navigate back to the segment they
+ *   came from, where they came from exactly one.
  */
-export function highlights(segments) {
+export function highlights(segments: Segment[]): Highlight[] {
   const list = [...collectibles(segments), ...aggregates(segments)];
   return list
     .map((entry) => ({
       count: 1,
-      items: [],
+      items: [] as HighlightItem[],
       detail: "",
       ...entry,
       ...KINDS[entry.kind],
@@ -153,10 +250,12 @@ export function highlights(segments) {
 }
 
 /** The things that happened once and are worth naming individually. */
-function collectibles(segments) {
-  const out = [];
-  const each = (key, visit) =>
-    segments.forEach((segment) => (segment[key] || []).forEach((event) => visit(event, segment)));
+function collectibles(segments: Segment[]): HighlightSeed[] {
+  const out: HighlightSeed[] = [];
+  const each = <K extends EventListKey>(
+    key: K,
+    visit: (event: EventOf<K>, segment: Segment) => void,
+  ): void => segments.forEach((segment) => eventsOf(segment, key).forEach((event) => visit(event, segment)));
 
   each("achievements", (event, segment) =>
     out.push({
@@ -171,9 +270,15 @@ function collectibles(segments) {
 
   // A character that gained three levels in an evening is one line reading "Level 12", not
   // three competing for the same space; the levels below the last are implied by the count.
-  const levels = new Map();
+  interface LevelRun {
+    count: number;
+    level: number;
+    segmentId: number | null;
+    items: LevelUpEvent[];
+  }
+  const levels = new Map<string, LevelRun>();
   each("levelUps", (event, segment) => {
-    const found = levels.get(segment.character) || { count: 0, level: 0, segmentId: null, items: [] };
+    const found: LevelRun = levels.get(segment.character) || { count: 0, level: 0, segmentId: null, items: [] };
     found.count += 1;
     found.items.push(event);
     if (event.level >= found.level) {
@@ -194,7 +299,7 @@ function collectibles(segments) {
     });
   }
 
-  const collection = (key, kind, noun) =>
+  const collection = (key: "mounts" | "toys" | "pets", kind: HighlightKind, noun: string): void =>
     each(key, (event, segment) =>
       out.push({
         kind,
@@ -218,15 +323,21 @@ function collectibles(segments) {
   return out;
 }
 
+/** An event paired with the segment it was recorded in. */
+interface Sourced<T> {
+  event: T;
+  segment: Segment;
+}
+
 /** The things that only mean something added up. */
-function aggregates(segments) {
-  const out = [];
-  const from = (key) => segments.flatMap((segment) =>
-    (segment[key] || []).map((event) => ({ event, segment })));
+function aggregates(segments: Segment[]): HighlightSeed[] {
+  const out: HighlightSeed[] = [];
+  const from = <K extends EventListKey>(key: K): Array<Sourced<EventOf<K>>> =>
+    segments.flatMap((segment) => eventsOf(segment, key).map((event) => ({ event, segment })));
 
   // A source segment is only offered when every entry came from the same one: sending a
   // click somewhere arbitrary is worse than not offering the click at all.
-  const only = (entries) => {
+  const only = (entries: Array<Sourced<unknown>>): number | null => {
     const ids = new Set(entries.map(({ segment }) => segment.segmentId));
     return ids.size === 1 ? entries[0].segment.segmentId : null;
   };
@@ -291,10 +402,10 @@ function aggregates(segments) {
 
   // Currencies and reputations are named things earned repeatedly across an evening; each
   // name is one line carrying its total, rather than one line per segment that touched it.
-  for (const [name, amount] of totalsByName(segments, "currencies", (event) => event.name)) {
+  for (const [name, amount] of totalsByName(segments, (segment) => segment.currencies, (event) => event.name)) {
     out.push({ kind: "currency", label: name, value: amount, weight: Math.abs(amount) });
   }
-  for (const [faction, amount] of totalsByName(segments, "reputation", (event) => event.faction)) {
+  for (const [faction, amount] of totalsByName(segments, (segment) => segment.reputation, (event) => event.faction)) {
     out.push({ kind: "reputation", label: faction, value: amount, weight: Math.abs(amount) });
   }
 
@@ -306,10 +417,14 @@ function aggregates(segments) {
   return out;
 }
 
-function totalsByName(segments, key, name) {
-  const totals = new Map();
+function totalsByName<T extends { amount: number }>(
+  segments: Segment[],
+  gains: (segment: Segment) => T[] | undefined,
+  name: (event: T) => string,
+): Array<[string, number]> {
+  const totals = new Map<string, number>();
   for (const segment of segments) {
-    for (const event of segment[key] || []) {
+    for (const event of gains(segment) || []) {
       totals.set(name(event), (totals.get(name(event)) || 0) + (event.amount || 0));
     }
   }

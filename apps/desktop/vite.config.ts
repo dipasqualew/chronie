@@ -1,4 +1,6 @@
-import { defineConfig } from "vite";
+// `vitest/config` rather than `vite`, so the `test` block below is type checked rather
+// than tolerated as an unknown key.
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   clearScreen: false,
@@ -13,6 +15,6 @@ export default defineConfig({
     sourcemap: Boolean(process.env.TAURI_DEBUG),
   },
   test: {
-    include: ["src/**/*.test.js"],
+    include: ["src/**/*.test.ts"],
   },
 });

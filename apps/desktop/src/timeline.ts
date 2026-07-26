@@ -7,27 +7,38 @@
  * evening" to "which pull, exactly".
  */
 
-import { clock, dayLabel, duration, escapeHtml, plural } from "./format.js";
+import { clock, dayLabel, duration, escapeHtml, plural } from "./format";
+import type { Session } from "./sessions";
+import type { Segment } from "./types";
 import {
   activityChip, characterCircle, classColor, classDot, highlightList, locationType,
-} from "./ui.js";
+} from "./ui";
 
 /** Milestone chips beyond this are counted rather than drawn; a session card is a summary. */
 const CHIP_LIMIT = 10;
 
 /**
- * @param {object} options
- * @param {HTMLElement} options.host Where the spine is drawn.
- * @param {(segmentId: number, order: Array<object>) => void} options.onOpenSegment
- *   Given the segment to show and the session it belongs to, so the detail modal's next and
- *   previous walk that evening rather than the whole of recorded history.
+ * Given the segment to show and the session it belongs to, so the detail modal's next and
+ * previous walk that evening rather than the whole of recorded history.
  */
-export function createTimeline({ host, onOpenSegment }) {
+export type OpenSegment = (segmentId: number, order: Segment[]) => void;
+
+export interface TimelineOptions {
+  /** Where the spine is drawn. */
+  host: HTMLElement;
+  onOpenSegment: OpenSegment;
+}
+
+export interface Timeline {
+  render: (sessions: Session[]) => void;
+}
+
+export function createTimeline({ host, onOpenSegment }: TimelineOptions): Timeline {
   // Which sessions the user has opened, kept across repaints: an activity edit redraws the
   // whole view, and having it fold back up under the cursor would be maddening.
-  const expanded = new Set();
+  const expanded = new Set<string>();
 
-  function render(sessions) {
+  function render(sessions: Session[]): void {
     if (!sessions.length) {
       host.innerHTML = `<div class="empty">
         <p class="empty-title">No play sessions yet</p>
@@ -37,7 +48,7 @@ export function createTimeline({ host, onOpenSegment }) {
       return;
     }
 
-    let lastDay = null;
+    let lastDay: string | null = null;
     host.innerHTML = `<div class="spine">${sessions.map((session) => {
       const label = dayLabel(session.day);
       const divider = label === lastDay ? "" : `<div class="spine-day"><span>${escapeHtml(label)}</span></div>`;
@@ -45,9 +56,10 @@ export function createTimeline({ host, onOpenSegment }) {
       return divider + card(session, expanded.has(session.id));
     }).join("")}</div>`;
 
-    host.querySelectorAll("[data-toggle-session]").forEach((button) => {
+    host.querySelectorAll<HTMLElement>("[data-toggle-session]").forEach((button) => {
       button.addEventListener("click", () => {
         const id = button.dataset.toggleSession;
+        if (id === undefined) return;
         if (expanded.has(id)) expanded.delete(id);
         else expanded.add(id);
         render(sessions);
@@ -56,9 +68,9 @@ export function createTimeline({ host, onOpenSegment }) {
     // Both a highlight chip and a segment row open the modal, and both sit inside their
     // session's article — which is where the list to navigate comes from.
     const byId = new Map(sessions.map((session) => [session.id, session]));
-    host.querySelectorAll("[data-open-segment]").forEach((button) => {
+    host.querySelectorAll<HTMLElement>("[data-open-segment]").forEach((button) => {
       button.addEventListener("click", () => {
-        const session = byId.get(button.closest("[data-session]")?.dataset.session);
+        const session = byId.get(button.closest<HTMLElement>("[data-session]")?.dataset.session ?? "");
         onOpenSegment(Number(button.dataset.openSegment), session?.segments || []);
       });
     });
@@ -67,7 +79,7 @@ export function createTimeline({ host, onOpenSegment }) {
   return { render };
 }
 
-function card(session, open) {
+function card(session: Session, open: boolean): string {
   const cast = session.characters;
   // The spine's node takes the colour of whoever played most, which makes an evening on
   // one character recognisable from the shape of the page alone.
@@ -99,7 +111,7 @@ function card(session, open) {
   </article>`;
 }
 
-function segmentRow(segment) {
+function segmentRow(segment: Segment): string {
   const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
   return `<li>
     <button type="button" class="seg" data-open-segment="${segment.segmentId}"

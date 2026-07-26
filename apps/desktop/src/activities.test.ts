@@ -6,9 +6,15 @@ import {
   fieldValue,
   isUncertain,
   parseMetadata,
-} from "./activities.js";
+} from "./activities";
+import type { ActivityField, PartialActivity } from "./activities";
+import type { ActivityMetadata, ActivitySource } from "./types";
 
-const activity = (kind, metadata, extra = {}) => ({
+const activity = (
+  kind: string,
+  metadata: ActivityMetadata,
+  extra: PartialActivity = {},
+): PartialActivity => ({
   kind,
   metadata,
   source: "inferred",
@@ -21,7 +27,7 @@ describe("activityLabel", () => {
     expect(activityLabel("mythic_plus")).toBe("Mythic+ run");
   });
 
-  it.each([
+  it.each<[string | undefined, string]>([
     ["transmog_farm", "Transmog farm"],
     ["pet-battles", "Pet battles"],
     ["", "Activity"],
@@ -65,7 +71,7 @@ describe("activitySummary", () => {
     expect(summary).not.toContain("depleted");
   });
 
-  it.each([
+  it.each<[number, string]>([
     [1, "1 boss"],
     [3, "3 bosses"],
     [0, "0 bosses"],
@@ -98,7 +104,7 @@ describe("activitySummary", () => {
 });
 
 describe("isUncertain", () => {
-  it.each([
+  it.each<[ActivitySource, number, boolean]>([
     ["inferred", 0.5, true],
     ["inferred", 0.9, false],
     ["inferred", 1, false],
@@ -122,7 +128,7 @@ describe("parseMetadata", () => {
 
   // Clearing a field has to mean "I do not know", never "zero" — a stored 0 would claim a
   // +0 key or a raid where nothing died, both of which are assertions the user never made.
-  it.each([["keystoneLevel"], ["upgrades"], ["durationSeconds"]])(
+  it.each<[string]>([["keystoneLevel"], ["upgrades"], ["durationSeconds"]])(
     "drops %s entirely when it is cleared",
     (key) => {
       expect(parseMetadata("mythic_plus", { [key]: "" })).toEqual({});
@@ -149,8 +155,8 @@ describe("parseMetadata", () => {
 });
 
 describe("fieldValue", () => {
-  const timed = { key: "timed", type: "boolean" };
-  const level = { key: "keystoneLevel", type: "number" };
+  const timed: ActivityField = { key: "timed", label: "Beat the timer", type: "boolean" };
+  const level: ActivityField = { key: "keystoneLevel", label: "Keystone level", type: "number" };
 
   it("renders a boolean as a yes/no choice", () => {
     expect(fieldValue({ metadata: { timed: true } }, timed)).toBe("yes");
