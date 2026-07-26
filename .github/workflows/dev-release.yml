@@ -63,7 +63,7 @@ jobs:
       - name: Test desktop experience
         working-directory: apps/desktop
         run: |
-          bun --bun x playwright install chromium
+          node node_modules/@playwright/test/cli.js install chromium
           bun run test:e2e
 
       - name: Test backend

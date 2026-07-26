@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --bun x vite",
-    "build": "bun --bun x vite build",
-    "preview": "bun --bun x vite preview",
+    "dev": "bun x vite",
+    "build": "bun x vite build",
+    "preview": "bun x vite preview",
     "tauri": "tauri",
-    "test": "bun --bun x vitest run",
-    "test:e2e": "bun --bun x playwright test"
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "test:e2e": "node node_modules/@playwright/test/cli.js test"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0"
