@@ -38,7 +38,7 @@ describe("ns.newReportCommand", function()
             local text = ns.newReportCommand().lines()[1].text
 
             assert.equal(
-                'python "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Interface\\AddOns\\wdp-wow' ..
+                'python "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Interface\\AddOns\\chronie' ..
                 '\\scripts\\collect.py" --watch',
                 text
             )
@@ -70,9 +70,9 @@ describe("ns.newReportCommand", function()
         end)
 
         it("uses the addon path it was given", function()
-            local lines = ns.newReportCommand({ addonPath = "D:\\wow\\Interface\\AddOns\\wdp-wow" }).lines()
+            local lines = ns.newReportCommand({ addonPath = "D:\\wow\\Interface\\AddOns\\chronie" }).lines()
 
-            assert.is_truthy(joined(lines):find("D:\\wow\\Interface\\AddOns\\wdp-wow\\scripts\\collect.py", 1, true))
+            assert.is_truthy(joined(lines):find("D:\\wow\\Interface\\AddOns\\chronie\\scripts\\collect.py", 1, true))
         end)
 
         it("uses the output path it was given", function()

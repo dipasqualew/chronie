@@ -215,7 +215,7 @@ function ns.main(env)
     })
 
     -- Read straight off the saved variables so a player on a non-default install can
-    -- fix the paths in wdp-wow.lua without touching addon code.
+    -- fix the paths in chronie.lua without touching addon code.
     local reportCommand = ns.newReportCommand(env.db.report)
 
     local reportWindow = ns.newReportWindow({
@@ -519,7 +519,7 @@ if CreateFrame then
         end
         self:UnregisterAllEvents()
 
-        WdpWowDB = WdpWowDB or {}
+        ChronieDB = ChronieDB or {}
 
         ---Collects the client's globals into a list, dropping any this client build
         ---does not define so a missing template never becomes a nil hole.
@@ -677,7 +677,7 @@ if CreateFrame then
             specialFrames = UISpecialFrames,
             tooltip = GameTooltip,
             minimap = Minimap,
-            db = WdpWowDB,
+            db = ChronieDB,
         })
     end)
 end

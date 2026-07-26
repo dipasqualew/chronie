@@ -18,7 +18,7 @@ local _, ns = ...
 ---@field outputPath string? Where the collector writes its report.
 
 local DEFAULT_PYTHON = "python"
-local DEFAULT_ADDON_PATH = "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Interface\\AddOns\\wdp-wow"
+local DEFAULT_ADDON_PATH = "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Interface\\AddOns\\chronie"
 local DEFAULT_OUTPUT_PATH = "%LOCALAPPDATA%\\wdp-wow"
 
 ---@param deps ReportCommandDeps?

@@ -351,7 +351,7 @@ pub fn account_files(wow_path: &Path) -> Vec<PathBuf> {
         return files;
     };
     for entry in accounts.flatten() {
-        let path = entry.path().join("SavedVariables").join("wdp-wow.lua");
+        let path = entry.path().join("SavedVariables").join("chronie.lua");
         if path.is_file() {
             files.push(path);
         }
@@ -425,7 +425,7 @@ pub fn collect(
     for path in account_files(wow_path) {
         let text = fs::read_to_string(&path)
             .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-        let Some(saved) = read_saved_variable(&text, "WdpWowDB")? else {
+        let Some(saved) = read_saved_variable(&text, "ChronieDB")? else {
             continue;
         };
         let Some(sessions) = saved.get("sessions").and_then(Value::as_array) else {
@@ -501,8 +501,8 @@ mod tests {
     fn reads_nested_saved_variables_without_game_runtime() {
         let parsed = read_saved_variable(
             r#"Other = { 1 }
-WdpWowDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["score"] = -2.5 } } }"#,
-            "WdpWowDB",
+ChronieDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["score"] = -2.5 } } }"#,
+            "ChronieDB",
         ).unwrap().unwrap();
         assert_eq!(parsed["sessions"][0]["id"], "synthetic-1");
         assert_eq!(parsed["sessions"][0]["enabled"], true);
@@ -512,7 +512,7 @@ WdpWowDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["sc
     #[test]
     fn reports_bad_lua_with_a_line_number() {
         let error =
-            read_saved_variable("WdpWowDB = {\n  {\n nonsense nonsense", "WdpWowDB").unwrap_err();
+            read_saved_variable("ChronieDB = {\n  {\n nonsense nonsense", "ChronieDB").unwrap_err();
         assert!(error.contains("line 3"), "{error}");
     }
 
@@ -538,10 +538,10 @@ WdpWowDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["sc
         fs::create_dir_all(&saved).unwrap();
         let now = 2_000_000_000_i64;
         fs::write(
-            saved.join("wdp-wow.lua"),
+            saved.join("chronie.lua"),
             format!(
                 r#"
-WdpWowDB = {{ ["sessions"] = {{
+ChronieDB = {{ ["sessions"] = {{
   {{ ["id"] = "kept", ["character"] = "Aster-Vale", ["instance"] = "Glass Caverns",
      ["endedAt"] = {now}, ["lootValue"] = 1200 }},
   {{ ["id"] = "old", ["character"] = "Brin-Vale", ["endedAt"] = {} }}

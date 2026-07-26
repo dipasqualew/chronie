@@ -25,7 +25,7 @@ silence a problem by deleting or weakening the test that found it.
 ## Structure
 
 Every file under `apps/addon/src/` is loaded by the client in the order listed in
-`apps/addon/wdp-wow.toc`; a file missing from the .toc fails the test suite as well as the
+`apps/addon/chronie.toc`; a file missing from the .toc fails the test suite as well as the
 game. Modules are `ns.newThing(deps)` factories returning a table of closures.
 
 `apps/addon/Main.lua` is the only place allowed to touch WoW globals. It collects them into

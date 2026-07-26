@@ -986,15 +986,15 @@ describe("addon integration", function()
             end
 
             for _, path in ipairs(srcFiles()) do
-                assert.is_true(listed[path] == true, path .. " is missing from wdp-wow.toc")
+                assert.is_true(listed[path] == true, path .. " is missing from chronie.toc")
             end
-            assert.is_true(listed["Main.lua"] == true, "Main.lua is missing from wdp-wow.toc")
+            assert.is_true(listed["Main.lua"] == true, "Main.lua is missing from chronie.toc")
         end)
 
         it("lists no file that does not exist on disk", function()
             for _, path in ipairs(loader.tocFiles()) do
                 local handle = io.open(ROOT .. path, "r")
-                assert.is_truthy(handle, path .. " is listed in wdp-wow.toc but does not exist")
+                assert.is_truthy(handle, path .. " is listed in chronie.toc but does not exist")
                 handle:close()
             end
         end)
@@ -1754,7 +1754,7 @@ describe("addon integration", function()
             recorded.slashRegistrations[1].handler("nonsense")
 
             assert.equal(
-                "|cff33ff99wdp-wow|r: usage: /wdp locks | results | sessions | currency | report",
+                "|cff33ff99chronie|r: usage: /wdp locks | results | sessions | currency | report",
                 recorded.lines[1]
             )
         end)
@@ -1819,12 +1819,12 @@ describe("addon integration", function()
             local _, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
-                db = { report = { python = "py -3", addonPath = "D:\\wow\\AddOns\\wdp-wow" } },
+                db = { report = { python = "py -3", addonPath = "D:\\wow\\AddOns\\chronie" } },
             })
 
             recorded.slashRegistrations[1].handler("report")
 
-            assert.equal('py -3 "D:\\wow\\AddOns\\wdp-wow\\scripts\\collect.py" --watch', commands(recorded)[1])
+            assert.equal('py -3 "D:\\wow\\AddOns\\chronie\\scripts\\collect.py" --watch', commands(recorded)[1])
         end)
 
         it("stays lazy until the slash is used", function()

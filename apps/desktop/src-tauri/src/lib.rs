@@ -166,14 +166,14 @@ fn extract_addon(archive: &[u8], destination: &Path) -> Result<(), String> {
         std::io::copy(&mut entry, &mut file).map_err(|error| error.to_string())?;
         file.flush().map_err(|error| error.to_string())?;
     }
-    if !destination.join("wdp-wow.toc").is_file() {
-        return Err("The downloaded repository did not contain apps/addon/wdp-wow.toc.".into());
+    if !destination.join("chronie.toc").is_file() {
+        return Err("The downloaded repository did not contain apps/addon/chronie.toc.".into());
     }
     Ok(())
 }
 
 fn addon_version(path: &Path) -> String {
-    fs::read_to_string(path.join("wdp-wow.toc"))
+    fs::read_to_string(path.join("chronie.toc"))
         .ok()
         .and_then(|text| {
             text.lines()
@@ -189,12 +189,12 @@ fn replace_addon(archive: &[u8], wow_path: &Path) -> Result<InstallResult, Strin
         return Err(format!("AddOns folder not found at {}.", addons.display()));
     }
     let staging = tempfile::Builder::new()
-        .prefix(".wdp-wow-install-")
+        .prefix(".chronie-install-")
         .tempdir_in(&addons)
         .map_err(|error| error.to_string())?;
     extract_addon(archive, staging.path())?;
-    let target = addons.join("wdp-wow");
-    let backup = addons.join(".wdp-wow-backup");
+    let target = addons.join("chronie");
+    let backup = addons.join(".chronie-backup");
     if backup.exists() {
         fs::remove_dir_all(&backup).map_err(|error| error.to_string())?;
     }
@@ -210,6 +210,10 @@ fn replace_addon(archive: &[u8], wow_path: &Path) -> Result<InstallResult, Strin
     }
     if backup.exists() {
         fs::remove_dir_all(backup).map_err(|error| error.to_string())?;
+    }
+    let legacy_target = addons.join("wdp-wow");
+    if legacy_target.exists() {
+        fs::remove_dir_all(legacy_target).map_err(|error| error.to_string())?;
     }
     Ok(InstallResult {
         version: addon_version(&target),
@@ -395,7 +399,7 @@ mod tests {
         let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         archive
-            .start_file("repo/apps/addon/wdp-wow.toc", options)
+            .start_file("repo/apps/addon/chronie.toc", options)
             .unwrap();
         archive.write_all(b"## Version: 9.8.7\nMain.lua").unwrap();
         archive
@@ -411,10 +415,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let wow = temp.path().join("_retail_");
         fs::create_dir_all(wow.join("Interface/AddOns")).unwrap();
+        fs::create_dir_all(wow.join("Interface/AddOns/wdp-wow")).unwrap();
         let result = replace_addon(&bytes, &wow).unwrap();
 
         assert_eq!(result.version, "9.8.7");
-        assert!(wow.join("Interface/AddOns/wdp-wow/Main.lua").is_file());
-        assert!(!wow.join("Interface/AddOns/wdp-wow/private.txt").exists());
+        assert!(wow.join("Interface/AddOns/chronie/Main.lua").is_file());
+        assert!(!wow.join("Interface/AddOns/chronie/private.txt").exists());
+        assert!(!wow.join("Interface/AddOns/wdp-wow").exists());
     }
 }

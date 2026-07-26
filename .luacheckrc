@@ -62,7 +62,7 @@ read_globals = {
 
 
 globals = {
-    "WdpWowDB", -- SavedVariables
+    "ChronieDB", -- SavedVariables
     "SlashCmdList",
 }
 

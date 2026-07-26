@@ -7,7 +7,7 @@ addon for you.
 
 ## Repository layout
 
-- `apps/addon` — the Lua addon shipped into `Interface/AddOns/wdp-wow`
+- `apps/addon` — the Lua addon shipped into `Interface/AddOns/chronie`
 - `apps/desktop` — the Bun/Vite frontend and Rust/Tauri desktop application
 - `scripts` — repository-wide setup, checks, and the Windows bootstrap installer
 
@@ -28,7 +28,8 @@ with Windows and stays in the system tray when its window is closed.
 
 Open **Setup**, choose either the World of Warcraft folder or its `_retail_`
 folder, then select **Install or update addon**. That button downloads the public
-`main` branch and installs only `apps/addon`. Select **Sync now** after `/reload`
+`main` branch, installs only `apps/addon` as `Interface/AddOns/chronie`, and
+removes the legacy `wdp-wow` add-on folder. Select **Sync now** after `/reload`
 or logging out; WDP also checks SavedVariables every 30 seconds in the background.
 
 ## Development

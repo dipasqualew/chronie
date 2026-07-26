@@ -1,9 +1,9 @@
 ## Interface: 120005
-## Title: wdp-wow
+## Title: Chronie
 ## Notes: Cross-character lockouts and per-zone session/event history. /wdp locks
 ## Author: wdp
 ## Version: 0.7.0
-## SavedVariables: WdpWowDB
+## SavedVariables: ChronieDB
 
 src/Logger.lua
 src/EventDispatcher.lua

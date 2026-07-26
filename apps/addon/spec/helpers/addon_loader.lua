@@ -4,7 +4,7 @@
 local loader = {}
 
 local ROOT = (debug.getinfo(1, "S").source:match("@(.*/)") or "./") .. "../../"
-local TOC = ROOT .. "wdp-wow.toc"
+local TOC = ROOT .. "chronie.toc"
 
 ---@return string[] relative file paths, in load order
 function loader.tocFiles()
@@ -27,7 +27,7 @@ function loader.load(addonName)
     for _, relative in ipairs(loader.tocFiles()) do
         local path = ROOT .. relative
         local chunk = assert(loadfile(path), "cannot load " .. path)
-        chunk(addonName or "wdp-wow", ns)
+        chunk(addonName or "chronie", ns)
     end
     return ns
 end
