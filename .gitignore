@@ -1,3 +1,4 @@
+.claude/worktrees/
 .luarocks/
 __pycache__/
 luacov.*
