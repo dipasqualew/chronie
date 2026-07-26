@@ -14,17 +14,46 @@ Reason about the addon from this repository's source and from the fakes in
 by looking at live game data, ask for the relevant snippet rather than going to
 find it.
 
-## Git workflow
+## All work happens on a pull request
 
-Work on a branch. `main` is not a working branch: commit to a branch named for the
-change, push that branch, and leave `main` alone unless you are explicitly asked to
-merge. Do not open a PR unless explicitly asked.
+`main` is not a working branch. Commit to a branch named for the change, push it,
+and open a pull request against `main` as the first thing you do after that first
+push — not as a last step once the work is already finished:
+
+```sh
+git switch -c some-change
+git push -u origin some-change
+gh pr create --fill
+```
+
+The pull request is not paperwork, it is the mechanism. It is what runs the CI
+you are about to wait on, it is where the diff, the checks and the reasoning sit
+together, and it is what a human reads if they want to read anything. Work that
+is not on an open pull request is work nobody can see. Never commit to `main`,
+never push to `main`, and never merge a branch locally and push the result.
+
+Merge it yourself when you are happy with it. Green CI and a change you would
+defend is enough — you do not need the human to approve it, and you should not
+stop to ask:
+
+```sh
+gh pr merge --squash --delete-branch
+```
+
+The reason to leave a pull request unmerged is lack of clarity, not size or
+risk. Leave it open, say plainly why, and hand back when a human might
+reasonably read the change differently than you did: the request was ambiguous
+and you picked one reading, you went beyond what was asked, you worked around a
+problem rather than fixing it, or you are not confident the result is what was
+actually wanted. Then the open pull request _is_ the review request — describe
+the specific question you want answered in it. Anything else — an ordinary
+change, green CI, nothing left open — you merge.
 
 ## Work ends when CI is green
 
-Pushing is not finishing. A change is finished when every workflow the push
-triggered has concluded successfully on the branch you pushed, and the only way
-to know that is to wait for it:
+Pushing is not finishing, and neither is opening the pull request. A change is
+finished when every workflow the pull request triggered has concluded
+successfully, and the only way to know that is to wait for it:
 
 ```sh
 bun run ci:wait                  # the branch currently checked out
@@ -39,12 +68,22 @@ everything went green. It uses the `gh` CLI when there is one and the GitHub RES
 API with `GH_TOKEN`/`GITHUB_TOKEN` when there is not, so it works in a sandbox
 without `gh` installed.
 
+It keys on the head commit, so it covers every run the pull request has,
+whichever event started it. `gh pr checks <number> --watch` tells you the same
+thing GitHub's own page does; `ci:wait` is the one that tells you why a run is
+red.
+
 Run it after every push and read what it prints. A red run is a task, not a
-report: fix it, push again, wait again. Do not hand off while the script is still
-running, while it has exited non-zero, or without having run it at all — and do
-not offer a local `./scripts/check.sh` run in its place, because the local run
-cannot see the browser suite's downloads, the Linux build dependencies, or the
-Windows release job.
+report: fix it, push to the same branch, wait again — the pull request stays
+open through all of it. Do not hand off while the script is still running, while
+it has exited non-zero, or without having run it at all — and do not offer a
+local `./scripts/check.sh` run in its place, because the local run cannot see
+the browser suite's downloads, the Linux build dependencies, or the Windows
+release job.
+
+CI is something you reach through the pull request and nowhere else. Do not push
+a branch that has no pull request open on it just to get a run, and do not go
+reading runs that no pull request accounts for.
 
 ## Checks
 
