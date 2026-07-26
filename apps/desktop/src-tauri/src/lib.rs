@@ -15,6 +15,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
+    utils::config::PluginConfig,
     AppHandle, Manager, State, WebviewWindow,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
@@ -23,6 +24,8 @@ use tauri_plugin_updater::UpdaterExt;
 
 const REPOSITORY_ARCHIVE: &str =
     "https://github.com/dipasqualew/chronie/archive/refs/heads/main.zip";
+
+const UPDATER_PLUGIN: &str = "updater";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +37,10 @@ struct Settings {
 struct AppState {
     data_dir: PathBuf,
     settings: Mutex<Settings>,
+    /// False in builds shipped without signing keys, where the release pipeline strips
+    /// `plugins.updater` from the config. Touching the updater then panics, so every
+    /// caller has to check this first.
+    updater_configured: bool,
 }
 
 impl AppState {
@@ -232,7 +239,15 @@ async fn install_addon(state: State<'_, AppState>) -> Result<InstallResult, Stri
 }
 
 #[tauri::command]
-async fn check_for_app_update(app: AppHandle) -> Result<AppUpdateResult, String> {
+async fn check_for_app_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AppUpdateResult, String> {
+    if !state.updater_configured {
+        return Err(
+            "This build has no update endpoint; download the latest release manually.".into(),
+        );
+    }
     let Some(update) = app
         .updater()
         .map_err(|error| error.to_string())?
@@ -324,15 +339,59 @@ fn start_background_sync(app: AppHandle) {
     });
 }
 
+/// Whether the shipped config carries a block the updater plugin can actually load.
+/// Tauri hands a plugin `null` when its key is absent and treats a deserialization failure
+/// as fatal, so registering the plugin against a missing or malformed block kills the
+/// process during startup. Pure, so the rule is testable without a running app.
+fn updater_configured(plugins: &PluginConfig) -> bool {
+    plugins.0.get(UPDATER_PLUGIN).is_some_and(|config| {
+        serde_json::from_value::<tauri_plugin_updater::Config>(config.clone()).is_ok()
+    })
+}
+
+/// Where a startup failure gets recorded. The window and tray do not exist yet when
+/// `Builder::run` fails, so a file is the only channel that survives a double click.
+fn startup_error_log() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Chronie")
+        .join("startup-error.log")
+}
+
+fn report_startup_failure(message: &str) {
+    let path = startup_error_log();
+    eprintln!("Chronie failed to start: {message}");
+    eprintln!("Recorded in {}", path.display());
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let stamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| file.write_all(format!("[{stamp}] {message}\n").as_bytes()));
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let context = tauri::generate_context!();
+    // The rolling dev release strips `plugins.updater` from the shipped config whenever no
+    // signing key is available. Registering the plugin regardless makes Tauri fail while
+    // deserializing the absent config, which aborts startup before a window or tray exists
+    // and looks exactly like the process never launched.
+    let updater_configured = updater_configured(&context.config().plugins);
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--background"]),
-        ))
-        .setup(|app| {
+        ));
+    if updater_configured {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+    let result = builder
+        .setup(move |app| {
             let data_dir = app.path().app_data_dir()?;
             let database_path = data_dir.join("chronie.sqlite3");
             collector::initialize(&database_path).map_err(std::io::Error::other)?;
@@ -343,12 +402,15 @@ pub fn run() {
             let state = AppState {
                 settings: Mutex::new(load_settings(&data_dir.join("settings.json"))),
                 data_dir,
+                updater_configured,
             };
             app.manage(state);
             setup_tray(app.handle())?;
             let _ = app.autolaunch().enable();
             start_background_sync(app.handle().clone());
-            start_automatic_updates(app.handle().clone());
+            if updater_configured {
+                start_automatic_updates(app.handle().clone());
+            }
             if std::env::args().any(|argument| argument == "--background") {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
@@ -371,14 +433,58 @@ pub fn run() {
             install_addon,
             check_for_app_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Chronie");
+        .run(context);
+    if let Err(error) = result {
+        report_startup_failure(&error.to_string());
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::io::Write;
+
+    fn plugins(value: Value) -> PluginConfig {
+        PluginConfig(serde_json::from_value(value).unwrap())
+    }
+
+    #[test]
+    fn registers_the_updater_only_against_a_loadable_config() {
+        let valid = json!({
+            "endpoints": ["https://example.com/latest.json"],
+            "pubkey": "dW50cnVzdGVk",
+        });
+        let cases = [
+            // The dev release drops the whole block when it has no signing key.
+            (json!({}), false),
+            (json!({ "updater": Value::Null }), false),
+            // A block Tauri cannot deserialize is just as fatal as a missing one.
+            (
+                json!({ "updater": { "endpoints": ["https://example.com/l.json"] } }),
+                false,
+            ),
+            (
+                json!({ "updater": { "endpoints": "not-a-list", "pubkey": "dW50cnVzdGVk" } }),
+                false,
+            ),
+            (json!({ "updater": valid }), true),
+        ];
+        for (config, expected) in cases {
+            assert_eq!(
+                updater_configured(&plugins(config.clone())),
+                expected,
+                "unexpected verdict for {config}"
+            );
+        }
+    }
+
+    #[test]
+    fn ships_a_config_the_updater_can_load() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert!(updater_configured(&plugins(config["plugins"].clone())));
+    }
 
     #[test]
     fn rejects_archive_traversal() {
