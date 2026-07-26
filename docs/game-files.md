@@ -108,6 +108,14 @@ the name is column 5 and columns 1 through 5 are the ones the reader has to be t
 patch that reorders them shows *empty* names rather than wrong ones, because the detail view
 falls back to the item's id; that is the symptom to look for.
 
+Which is what this prints, all five columns side by side, and is what settles it:
+
+```sh
+cargo run --example dump_items -- "<install>" 19019 6948
+```
+
+Column 5 should read "Thunderfury, Blessed Blade of the Windseeker" and "Hearthstone".
+
 It is also the largest thing this app reads. `transmog.rs` keeps nothing from it: the rows
 are walked once per set opened and only the dozen names that set needs become strings, so the
 63 MB is transient and no cache has to be invalidated when the player patches the game.
@@ -250,7 +258,8 @@ than failing:
 
 Measured on 12.0.5.67: 13,736 declared rows, 13,732 readable, 3,846 distinct icons, 243
 categories. `cargo run --example dump_achievements -- "<install>"` prints the lot for a
-handful of ids and is what to run after a patch.
+handful of ids and is what to run after a patch — as `dump_items` is for `ItemSparse` and
+`dump_transmog` for the chain above.
 
 ## Regenerating the fixtures
 

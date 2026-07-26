@@ -35,7 +35,10 @@ const ITEM_APPEARANCE: u32 = 982462;
 pub const ITEM_DISPLAY_INFO: u32 = 1266429;
 /// Every item in the game and what it is called. 63 MB of it, and the only table here whose
 /// records vary in length.
-const ITEM_SPARSE: u32 = 1572924;
+///
+/// Public for `examples/dump_items`, which is how the column positions below get checked
+/// against a real install after a patch.
+pub const ITEM_SPARSE: u32 = 1572924;
 
 /// Columns of `TransmogSet`, in the order the file stores them.
 mod set_column {
@@ -82,7 +85,7 @@ mod appearance_column {
 /// **These positions are the community's and were not read off an install**, unlike the chain
 /// above them. A patch that reorders the table shows empty names rather than wrong ones,
 /// because the view falls back to the item's id.
-mod item_column {
+pub mod item_column {
     /// What the item is called.
     pub const NAME: usize = 5;
     /// Every column of the table that holds text, in the order it holds them: the item's
