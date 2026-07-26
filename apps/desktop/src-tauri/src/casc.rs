@@ -27,10 +27,17 @@ pub trait GameFiles {
     fn read(&self, fdid: u32) -> Result<Vec<u8>, String>;
 }
 
-/// Game files as a directory of `<fdid>.db2`, which is how the tests supply them.
+/// Game files as a directory of `<fdid>.<ext>`, which is how the tests supply them.
+///
+/// The client addresses everything it owns by number and says nothing about what kind of
+/// file it is, so the extension here is naming for a human reading the fixture directory
+/// rather than something a caller knows. A read tries each of them.
 pub struct DirFiles {
     dir: PathBuf,
 }
+
+/// The kinds of file the fixtures hold: the game's tables, and the textures they point at.
+const FIXTURE_EXTENSIONS: [&str; 2] = ["db2", "blp"];
 
 impl DirFiles {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
@@ -40,8 +47,20 @@ impl DirFiles {
 
 impl GameFiles for DirFiles {
     fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
-        let path = self.dir.join(format!("{fdid}.db2"));
-        std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))
+        let mut error = String::new();
+        for extension in FIXTURE_EXTENSIONS {
+            let path = self.dir.join(format!("{fdid}.{extension}"));
+            match std::fs::read(&path) {
+                Ok(bytes) => return Ok(bytes),
+                // Only one of the names can be the one that was meant, and nothing here
+                // knows which, so the first is what a failure is reported against.
+                Err(problem) if error.is_empty() => {
+                    error = format!("{}: {problem}", path.display());
+                }
+                Err(_) => {}
+            }
+        }
+        Err(error)
     }
 }
 

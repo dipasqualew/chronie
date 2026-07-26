@@ -216,6 +216,13 @@ small levels — compute them (`ceil(w/4) × ceil(h/4)` blocks, 8 bytes for BC1,
 BC2/BC3). Compositing only ever needs level 0, which sidesteps most of this. `BC5` (format
 11) is used for normal maps and is not needed; fail cleanly rather than guessing.
 
+**`wow-blp` 0.3 reads the palette red-first**, so red and blue come back swapped — and only
+for encoding 1, since its uncompressed path reads the same bytes blue-first correctly.
+`src-tauri/src/icons.rs` puts them back and is the only place that should: everything that
+decodes a texture goes through `png_of`. Verified against the synthetic textures
+`scripts/make-transmog-fixtures.ts` writes, which paint each quadrant a colour whose three
+channels all differ so that a swap cannot pass unnoticed.
+
 ## Crates
 
 | Crate | Licence | Use |

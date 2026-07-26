@@ -70,6 +70,7 @@ const details = createDetails({
 const transmogDetail = createTransmogModal({
   dialog: $<HTMLDialogElement>("transmog-detail"),
   load: (setId) => desktop.transmogSetItems(setId),
+  loadIcons: (iconFileDataIds) => desktop.transmogIcons(iconFileDataIds),
 });
 
 const transmog = createTransmog({
