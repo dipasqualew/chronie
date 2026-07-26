@@ -7,6 +7,11 @@ on:
   push:
   pull_request:
 
+# Only the newest commit on a ref is worth checking; superseded runs just queue behind it.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -33,12 +38,26 @@ jobs:
           sudo luarocks install luacheck
           sudo luarocks install busted
 
+      # Without this the whole dependency tree (tauri, reqwest, bundled SQLite) is
+      # recompiled from scratch on every push.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: desktop-debug
+          cache-on-failure: true
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.13"
 
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
       - name: Install browser test dependencies
         run: node apps/desktop/node_modules/@playwright/test/cli.js install --with-deps chromium
