@@ -46,7 +46,6 @@ function segment(overrides: Partial<Segment> = {}): Segment {
   };
 }
 
-const labels = (session: Session): string[] => session.highlights.map((entry) => entry.label);
 const kinds = (session: Session): string[] => session.highlights.map((entry) => entry.kind);
 
 describe("buildSessions", () => {
@@ -153,7 +152,35 @@ describe("highlights", () => {
     expect(kinds(session).slice(0, 3)).toEqual(["achievement", "mount", "gold"]);
   });
 
-  it("puts an account first ahead of a character first", () => {
+  // Twelve achievements is one thing to read — "it was that kind of evening" — and twelve
+  // things to look at afterwards. The summary says the first; its entries hold the second.
+  it("counts a kind into one summary rather than naming every one of them", () => {
+    const [session] = buildSessions([
+      segment({
+        achievements: [
+          { id: 1, name: "Just Me", accountFirst: false },
+          { id: 2, name: "Warband First", accountFirst: true },
+          { id: 3, name: "Also Just Me", accountFirst: false },
+        ],
+      }),
+    ]);
+
+    const earned = session.highlights.filter((entry) => entry.kind === "achievement");
+    expect(earned).toHaveLength(1);
+    expect(earned[0]).toMatchObject({ label: "3 achievements", detail: "1 account first", count: 3 });
+  });
+
+  it("names the one thing rather than counting it, when there is only one", () => {
+    const [session] = buildSessions([
+      segment({ achievements: [{ id: 1, name: "Into the Light", accountFirst: true }] }),
+    ]);
+
+    expect(session.highlights[0]).toMatchObject({ label: "Into the Light", detail: "account first" });
+  });
+
+  // An account first is the rare one, so it leads the list a summary comes apart into: the
+  // reader opening twelve achievements wants the notable one at the top of them.
+  it("puts an account first ahead of a character first inside the summary", () => {
     const [session] = buildSessions([
       segment({
         achievements: [
@@ -163,12 +190,12 @@ describe("highlights", () => {
       }),
     ]);
 
-    expect(labels(session).slice(0, 2)).toEqual(["Warband First", "Just Me"]);
-    expect(session.highlights[0].detail).toBe("account first");
+    expect(session.highlights[0].items.map((item) => item.label)).toEqual(["Warband First", "Just Me"]);
+    expect(session.highlights[0].items[0].detail).toBe("account first");
   });
 
   // Three level ups in an evening is one story — "I got to 12" — not three chips fighting
-  // for the same row.
+  // for the same row. The levels passed through on the way are in the list, not the chip.
   it("collapses a character's level ups into the level they reached", () => {
     const [session] = buildSessions([
       segment({ startedAt: BASE, levelUps: [{ level: 10 }, { level: 11 }] }),
@@ -177,17 +204,62 @@ describe("highlights", () => {
 
     const levels = session.highlights.filter((entry) => entry.kind === "levelUp");
     expect(levels).toHaveLength(1);
-    expect(levels[0]).toMatchObject({ label: "Level 12", count: 3 });
-    expect(levels[0].detail).toContain("+3 levels");
+    expect(levels[0]).toMatchObject({ label: "3 levels", detail: "now 12", count: 3 });
+    expect(levels[0].items.map((item) => item.label)).toEqual(["Level 10", "Level 11", "Level 12"]);
   });
 
-  it("keeps each character's levelling separate", () => {
+  // The card names the cast a line above the summary, and a segment row names its one
+  // character in its own heading; repeating it on the chip only takes up the row.
+  it("names the character on a summary only where somebody else played too", () => {
+    const alone = buildSessions([segment({ levelUps: [{ level: 12 }] })]);
+    const shared = buildSessions([
+      segment({ startedAt: BASE, character: "Aster-Vale", levelUps: [{ level: 11 }, { level: 12 }] }),
+      segment({ startedAt: BASE + 700, character: "Brin-Hearth" }),
+    ]);
+
+    expect(alone[0].highlights[0]).toMatchObject({ label: "Level 12", detail: "" });
+    expect(shared[0].highlights[0]).toMatchObject({ label: "2 levels", detail: "Aster-Vale now 12" });
+  });
+
+  // With an alt in the evening too there is no single "now 12" to report, and the number of
+  // characters is both all that fits and all that is meant.
+  it("says how many characters levelled when it was more than one", () => {
     const [session] = buildSessions([
       segment({ startedAt: BASE, character: "Aster-Vale", levelUps: [{ level: 12 }] }),
       segment({ startedAt: BASE + 700, character: "Brin-Hearth", levelUps: [{ level: 8 }] }),
     ]);
 
-    expect(session.highlights.filter((entry) => entry.kind === "levelUp")).toHaveLength(2);
+    const levels = session.highlights.filter((entry) => entry.kind === "levelUp");
+    expect(levels).toHaveLength(1);
+    expect(levels[0]).toMatchObject({ label: "2 levels", detail: "2 characters" });
+    expect(levels[0].items.map((item) => item.character)).toEqual(["Aster-Vale", "Brin-Hearth"]);
+  });
+
+  // A summary is only worth reading if it can be taken apart again, and taking it apart
+  // means knowing when each thing happened and which run to open to see the rest of it.
+  it("keeps the time, the character and the segment of everything it counted", () => {
+    const first = segment({ startedAt: BASE, mounts: [{ id: 11, name: "Clockwork Glider", at: BASE + 60 }] });
+    const second = segment({
+      startedAt: BASE + 700, character: "Brin-Hearth",
+      mounts: [{ id: 12, name: "Dust Strider", at: BASE + 800 }],
+    });
+    const [session] = buildSessions([first, second]);
+
+    expect(session.highlights.find((entry) => entry.kind === "mount")).toMatchObject({
+      label: "2 mounts",
+      items: [
+        { label: "Clockwork Glider", detail: "", at: BASE + 60, character: "Aster-Vale", segmentId: first.segmentId },
+        { label: "Dust Strider", detail: "", at: BASE + 800, character: "Brin-Hearth", segmentId: second.segmentId },
+      ],
+    });
+  });
+
+  // A mount the client had not loaded the name of is still a mount, and a summary that
+  // dropped it would be counting one thing and listing none.
+  it("falls back to the id for a thing the game never named", () => {
+    const [session] = buildSessions([segment({ mounts: [{ id: 11 }, { id: 12 }] })]);
+
+    expect(session.highlights[0].items.map((item) => item.label)).toEqual(["Mount 11", "Mount 12"]);
   });
 
   it("counts new appearances apart from the variants of things already owned", () => {

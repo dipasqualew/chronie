@@ -10,7 +10,7 @@
 
 import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities";
 import type { PartialActivity } from "./activities";
-import { duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
+import { clock, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
 import type { Highlight } from "./sessions";
 import type { SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
@@ -76,22 +76,47 @@ export function highlightValue(entry: Highlight): string {
 }
 
 /**
- * One thing worth remembering. A highlight that came from a single known segment is a
- * button, because clicking it should take you to where it happened; one summed across a
- * whole evening has nowhere to go and stays a plain chip.
+ * One thing worth remembering, or one summary of several.
+ *
+ * A summary that stands for a single thing takes you straight to the segment it happened
+ * in, because that is the only place left to go. One that stands for twelve unfolds into
+ * the twelve instead — the count is what a session card is for, and the names are what the
+ * reader came back for.
+ *
+ * @param scope Namespaces the panel's id, so two sessions on screen do not share one.
  */
-export function highlightChip(entry: Highlight): string {
-  const open = entry.segmentId != null;
-  const tag = open ? "button" : "span";
-  const detail = entry.detail
-    ? ` <span class="detail">${escapeHtml(entry.detail)}</span>`
-    : "";
-  return `<${tag} class="hl hl-${escapeHtml(entry.kind)}"${open
-    ? ` type="button" data-open-segment="${entry.segmentId}"`
-    : ""}>` +
-    `<span class="hl-icon" aria-hidden="true">${entry.icon}</span>` +
-    `<span class="hl-label">${escapeHtml(entry.label)}</span>${detail}` +
-    `</${tag}>`;
+export function highlightChip(entry: Highlight, { scope, expanded, interactive }: ChipOptions): string {
+  const detail = entry.detail ? ` <span class="detail">${escapeHtml(entry.detail)}</span>` : "";
+  const body = `<span class="hl-icon" aria-hidden="true">${entry.icon}</span>` +
+    `<span class="hl-label">${escapeHtml(entry.label)}</span>${detail}`;
+  if (!interactive) return `<span class="hl hl-${escapeHtml(entry.kind)}">${body}</span>`;
+  if (entry.segmentId != null) {
+    return `<button type="button" class="hl hl-${escapeHtml(entry.kind)}"
+      data-open-segment="${entry.segmentId}">${body}</button>`;
+  }
+  const open = expanded === entry.kind;
+  return `<button type="button" class="hl hl-${escapeHtml(entry.kind)}${open ? " open" : ""}"
+    data-unfold="${escapeHtml(entry.kind)}" aria-expanded="${open}"
+    aria-controls="${escapeHtml(panelId(scope, entry.kind))}"
+    >${body}<span class="hl-caret" aria-hidden="true">${open ? "▾" : "▸"}</span></button>`;
+}
+
+const panelId = (scope: string, kind: string): string => `hl-${scope}-${kind}`;
+
+/**
+ * What a summary unfolds into: every thing it counted, newest information first, each one a
+ * way back to the segment it was recorded in.
+ */
+export function highlightPanel(entry: Highlight, scope: string): string {
+  const rows = entry.items.map((item) => {
+    const meta = [item.detail, item.character, item.at == null ? "" : clock(item.at)].filter(Boolean);
+    return `<li><button type="button" class="hl-item" data-open-segment="${item.segmentId}"
+      aria-label="Open the segment ${escapeHtml(item.label)} was recorded in">
+      <span class="hl-item-name">${escapeHtml(item.label)}</span>
+      <span class="hl-item-meta">${escapeHtml(meta.join(" · "))}</span>
+    </button></li>`;
+  }).join("");
+  return `<ul class="hl-panel" id="${escapeHtml(panelId(scope, entry.kind))}">${rows}</ul>`;
 }
 
 /** A running total, drawn quieter than a milestone because it is context, not news. */
@@ -106,33 +131,55 @@ export function tallyItem(entry: Highlight): string {
   </span>`;
 }
 
+interface ChipOptions {
+  scope: string;
+  expanded?: string | null;
+  interactive?: boolean;
+}
+
 export interface HighlightListOptions {
-  /** Caps the chips on a crowded session; the remainder is counted rather than lost. */
-  limit?: number;
+  /**
+   * Namespaces the ids of any panels drawn, so two sessions on screen do not collide.
+   * Required whenever `interactive`, and ignored otherwise.
+   */
+  scope?: string;
   /** False for the detail modal, which lists every milestone in full a few lines down. */
   milestones?: boolean;
+  /** False on a segment row, where the numbers would drown the two things that happened. */
+  tallies?: boolean;
+  /** The kind whose things are unfolded beneath the chips, when one is. */
+  expanded?: string | null;
+  /** False inside a segment row, which is itself one button and can hold no others. */
+  interactive?: boolean;
 }
 
 /**
- * Draws a set of highlights: the milestones as chips, the totals as a quiet strip beneath.
- * `limit` caps the chips on a crowded session, with the remainder counted rather than lost.
+ * Draws a set of highlights: the milestones as summary chips, the totals as a quiet strip
+ * beneath, and — where the reader has asked for one — the things behind a summary.
+ *
+ * There is no cap, because there is nothing left to cap: a summary per kind is nine chips
+ * at the very most, however long the evening was.
  *
  * `milestones: false` is for the detail modal, which lists every one of them in full a few
  * lines further down — repeating them as chips first would only make the same page longer.
  */
 export function highlightList(
   entries: Highlight[],
-  { limit = Infinity, milestones: withChips = true }: HighlightListOptions = {},
+  {
+    scope = "", milestones: withChips = true, tallies: withTallies = true,
+    expanded = null, interactive = true,
+  }: HighlightListOptions = {},
 ): string {
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
-  const tallies = entries.filter((entry) => entry.family === "tally");
-  const shown = milestones.slice(0, limit);
-  const hidden = milestones.length - shown.length;
+  const tallies = withTallies ? entries.filter((entry) => entry.family === "tally") : [];
   const parts: string[] = [];
-  if (shown.length) {
-    parts.push(`<div class="hl-row">${shown.map(highlightChip).join("")}` +
-      (hidden > 0 ? `<span class="hl hl-more">+${hidden} more</span>` : "") +
-      "</div>");
+  if (milestones.length) {
+    parts.push(`<div class="hl-row">${milestones
+      .map((entry) => highlightChip(entry, { scope, expanded, interactive })).join("")}</div>`);
+    const unfolded = interactive
+      ? milestones.find((entry) => entry.kind === expanded && entry.segmentId == null)
+      : undefined;
+    if (unfolded) parts.push(highlightPanel(unfolded, scope));
   }
   if (tallies.length) {
     parts.push(`<div class="tally-row">${tallies.map(tallyItem).join("")}</div>`);

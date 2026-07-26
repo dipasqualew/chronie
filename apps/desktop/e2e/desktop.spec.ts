@@ -637,12 +637,62 @@ test("stitches segments into play sessions and leads with what happened", async 
 
   await test.step("the achievements lead and the running totals follow", async () => {
     const first = sessions(page).first();
-    await expect(first).toContainText("Into the Light");
+    await expect(first).toContainText("2 achievements");
     await expect(first).toContainText("Clockwork Glider");
-    await expect(first).toContainText("Level 12");
     await expect(first).toContainText("Glass Token");
     await expect(first).toContainText("3g 29s");
   });
+
+  // Two achievements and two characters' levelling that evening, so the card says how much
+  // of each there was rather than picking one of them to name and dropping the rest.
+  await test.step("what happened several times is counted, not listed", async () => {
+    const first = sessions(page).first();
+    await expect(first).toContainText("2 levels");
+    await expect(first).not.toContainText("Into the Light");
+    await expect(first).not.toContainText("Level 12");
+  });
+});
+
+/**
+ * The card is a summary and stays one: it says an evening had two levels in it, and the
+ * reader who wants to know which two asks for them. That is the whole shape of the view —
+ * nothing is a list until somebody has asked for a list.
+ */
+test("unfolds a summary into the things it counted, and folds it back up", async ({ page, detail }) => {
+  const first = sessions(page).first();
+  const levels = first.getByRole("button", { name: /2 levels/ });
+
+  await expect(levels).toHaveAttribute("aria-expanded", "false");
+  await levels.click();
+  await expect(levels).toHaveAttribute("aria-expanded", "true");
+  await expect(first).toContainText("Level 12");
+  await expect(first).toContainText("Level 9");
+
+  await test.step("one of them goes to the segment it was recorded in", async () => {
+    await first.getByRole("button", { name: /Open the segment Level 9 was recorded in/ }).click();
+    await expect(detail.title()).toHaveText("Copperwood Depths");
+    await detail.close();
+  });
+
+  await test.step("and the card goes back to being a summary", async () => {
+    await levels.click();
+    await expect(levels).toHaveAttribute("aria-expanded", "false");
+    await expect(first).not.toContainText("Level 12");
+  });
+});
+
+// A segment reads the same way its session does, and clicking it is how its summary comes
+// apart — the modal below is the list, so the row itself needs no controls of its own.
+test("summarises each segment the same way, once the session is opened", async ({ page }) => {
+  const first = sessions(page).first();
+  await first.getByRole("button", { name: "2 segments" }).click();
+
+  const row = first.getByRole("button", { name: /Open segment: Aster-Vale in Glass Caverns/ });
+  await expect(row).toContainText("2 achievements");
+  await expect(row).toContainText("Clockwork Glider");
+  await expect(row).toContainText("Level 12");
+  // The running totals belong to the evening, not to a row inside it.
+  await expect(row).not.toContainText("Glass Token");
 });
 
 test("digs from a session down into a single segment and back out again", async ({ page, detail }) => {
@@ -984,3 +1034,4 @@ test("drives setup, sync, addon installation, and app update checks", async ({ p
   await page.getByRole("button", { name: "Check for app update" }).click();
   await expect(page.locator("#setup-status")).toHaveText("Chronie is up to date.");
 });
+
