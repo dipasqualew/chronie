@@ -19,6 +19,8 @@ read_globals = {
     "GetNumSavedInstances",
     "GetSavedInstanceInfo",
     "GetSavedInstanceEncounterInfo",
+    "GetNumSavedWorldBosses",
+    "GetSavedWorldBossInfo",
     "GameTooltip",
     "RequestRaidInfo",
     "RAID_CLASS_COLORS",

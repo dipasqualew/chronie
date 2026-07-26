@@ -17,13 +17,13 @@ describe("ns.newLockoutTable", function()
     end
 
     ---@param character string
-    ---@param instance string
+    ---@param activity string
     ---@param difficulty string?
     ---@return LockoutRow
-    local function row(character, instance, difficulty)
+    local function row(character, activity, difficulty)
         return {
             character = character,
-            instance = instance,
+            activity = activity,
             difficulty = difficulty or "25 Player",
             difficultyId = 4,
             maxPlayers = 25,
@@ -66,34 +66,34 @@ describe("ns.newLockoutTable", function()
             assert.same({ "Thrall", "Sylvanas", "Jaina" }, pluck(sorted, "character"))
         end)
 
-        it("orders by instance ascending", function()
+        it("orders by activity ascending", function()
             local lockoutTable = newTable()
             local rows = { row("A", "Ulduar"), row("A", "Karazhan"), row("A", "Naxxramas") }
 
-            local sorted = lockoutTable.sort(rows, "instance", true)
+            local sorted = lockoutTable.sort(rows, "activity", true)
 
-            assert.same({ "Karazhan", "Naxxramas", "Ulduar" }, pluck(sorted, "instance"))
+            assert.same({ "Karazhan", "Naxxramas", "Ulduar" }, pluck(sorted, "activity"))
         end)
 
-        it("orders by instance descending", function()
+        it("orders by activity descending", function()
             local lockoutTable = newTable()
             local rows = { row("A", "Ulduar"), row("A", "Karazhan"), row("A", "Naxxramas") }
 
-            local sorted = lockoutTable.sort(rows, "instance", false)
+            local sorted = lockoutTable.sort(rows, "activity", false)
 
-            assert.same({ "Ulduar", "Naxxramas", "Karazhan" }, pluck(sorted, "instance"))
+            assert.same({ "Ulduar", "Naxxramas", "Karazhan" }, pluck(sorted, "activity"))
         end)
 
-        it("breaks a character tie on instance", function()
+        it("breaks a character tie on activity", function()
             local lockoutTable = newTable()
             local rows = { row("Thrall", "Ulduar"), row("Thrall", "Karazhan") }
 
             local sorted = lockoutTable.sort(rows, "character", true)
 
-            assert.same({ "Karazhan", "Ulduar" }, pluck(sorted, "instance"))
+            assert.same({ "Karazhan", "Ulduar" }, pluck(sorted, "activity"))
         end)
 
-        it("breaks a character and instance tie on difficulty", function()
+        it("breaks a character and activity tie on difficulty", function()
             local lockoutTable = newTable()
             local rows = {
                 row("Thrall", "Ulduar", "25 Player"),
@@ -105,11 +105,11 @@ describe("ns.newLockoutTable", function()
             assert.same({ "10 Player", "25 Player" }, pluck(sorted, "difficulty"))
         end)
 
-        it("breaks an instance tie on character", function()
+        it("breaks an activity tie on character", function()
             local lockoutTable = newTable()
             local rows = { row("Thrall", "Ulduar"), row("Jaina", "Ulduar") }
 
-            local sorted = lockoutTable.sort(rows, "instance", true)
+            local sorted = lockoutTable.sort(rows, "activity", true)
 
             assert.same({ "Jaina", "Thrall" }, pluck(sorted, "character"))
         end)
@@ -120,7 +120,7 @@ describe("ns.newLockoutTable", function()
 
             local sorted = lockoutTable.sort(rows, "character", false)
 
-            assert.same({ "Ulduar", "Karazhan" }, pluck(sorted, "instance"))
+            assert.same({ "Ulduar", "Karazhan" }, pluck(sorted, "activity"))
         end)
 
         it("produces the same order however the input was shuffled", function()
@@ -346,6 +346,46 @@ describe("ns.newLockoutTable", function()
 
         it("reports missing data when the encounter list is empty", function()
             assert.equal(NO_DATA, summarise({}))
+        end)
+
+        -- A world boss has no boss list to be missing: being on the client's saved list is
+        -- itself the kill, so an empty list there is the whole answer rather than a gap.
+        it("calls an empty world boss defeated rather than missing", function()
+            local lockoutTable = newTable()
+            local entry = row("Thrall", "Doomwalker")
+            entry.kind = "world_boss"
+            entry.encounters = {}
+
+            assert.equal("Defeated", lockoutTable.encounterSummary(entry))
+        end)
+    end)
+
+    describe("periodLabel", function()
+        ---@param period string?
+        ---@return string
+        local function label(period)
+            local lockoutTable = newTable()
+            local entry = row("Thrall", "Ulduar")
+            entry.period = period
+            return lockoutTable.periodLabel(entry)
+        end
+
+        it("names a daily reset", function()
+            assert.equal("Daily", label("daily"))
+        end)
+
+        it("names a weekly reset", function()
+            assert.equal("Weekly", label("weekly"))
+        end)
+
+        -- The cadence is learned across scans, so there is a window where the honest
+        -- answer is that we do not know yet. Guessing one of the two would be worse.
+        it("says nothing while the cadence is still unknown", function()
+            assert.equal("—", label("unknown"))
+        end)
+
+        it("says nothing when the row carries no cadence at all", function()
+            assert.equal("—", label(nil))
         end)
     end)
 end)

@@ -13,6 +13,8 @@ local addonName, ns = ...
 ---@field getNumSavedInstances fun(): integer
 ---@field getSavedInstanceInfo fun(index: integer): ...
 ---@field getSavedInstanceEncounterInfo fun(instanceIndex: integer, encounterIndex: integer): ...
+---@field getNumSavedWorldBosses fun(): integer? Absent on clients without world bosses.
+---@field getSavedWorldBossInfo fun(index: integer): ... Name, worldBossID, seconds remaining.
 ---@field requestRaidInfo fun()
 ---@field classColor fun(classFile: string): (number?, number?, number?)
 ---@field classIconCoords table<string, number[]> Global CLASS_ICON_TCOORDS.
@@ -64,6 +66,8 @@ function ns.main(env)
         getNumSavedInstances = env.getNumSavedInstances,
         getSavedInstanceInfo = env.getSavedInstanceInfo,
         getSavedInstanceEncounterInfo = env.getSavedInstanceEncounterInfo,
+        getNumSavedWorldBosses = env.getNumSavedWorldBosses,
+        getSavedWorldBossInfo = env.getSavedWorldBossInfo,
         now = env.now,
     })
     local store = ns.newLockoutStore({ db = env.db, now = env.now })
@@ -88,11 +92,11 @@ function ns.main(env)
         expansions = expansions,
     })
 
-    local instanceWindow = ns.newDetailWindow({
+    local activityWindow = ns.newDetailWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
-        name = "ChronieInstanceDetailWindow",
+        name = "ChronieActivityDetailWindow",
     })
 
     local characterWindow = ns.newDetailWindow({
@@ -270,8 +274,8 @@ function ns.main(env)
         classDisplay = classDisplay,
         expansions = expansions,
 
-        onInstanceSelected = function(row)
-            instanceWindow.show(details.forInstance(details.descriptorOf(row), store.characters(), store.all()))
+        onActivitySelected = function(row)
+            activityWindow.show(details.forActivity(details.descriptorOf(row), store.characters(), store.all()))
         end,
 
         onCharacterSelected = function(character)
@@ -555,7 +559,7 @@ function ns.main(env)
 
     return {
         window = window,
-        instanceWindow = instanceWindow,
+        activityWindow = activityWindow,
         characterWindow = characterWindow,
         details = details,
         store = store,
@@ -624,6 +628,10 @@ if CreateFrame then
             getNumSavedInstances = GetNumSavedInstances,
             getSavedInstanceInfo = GetSavedInstanceInfo,
             getSavedInstanceEncounterInfo = GetSavedInstanceEncounterInfo,
+            -- Not every client build exposes the world-boss list; the scanner treats a
+            -- missing pair as "this client has no world bosses" rather than erroring.
+            getNumSavedWorldBosses = GetNumSavedWorldBosses,
+            getSavedWorldBossInfo = GetSavedWorldBossInfo,
             requestRaidInfo = RequestRaidInfo,
             classColor = function(classFile)
                 local color = RAID_CLASS_COLORS[classFile]

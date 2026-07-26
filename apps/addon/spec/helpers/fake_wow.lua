@@ -362,6 +362,34 @@ function fake.newSavedInstances(entries)
     return getNumSavedInstances, getSavedInstanceInfo, calls, getSavedInstanceEncounterInfo, encounterCalls
 end
 
+---A fake `GetSavedWorldBossInfo` pair. Each entry accepts `{ name, worldBossID, reset }`,
+---where `reset` is SECONDS REMAINING exactly as the real API reports it. Any field may be
+---omitted so tests can exercise the degrade-to-default paths.
+---@param entries table[]?
+---@return fun(): integer getNumSavedWorldBosses
+---@return fun(index: integer): ... getSavedWorldBossInfo
+---@return table calls indexes the addon asked about, in order
+function fake.newSavedWorldBosses(entries)
+    entries = entries or {}
+    local calls = {}
+
+    local function getNumSavedWorldBosses()
+        return #entries
+    end
+
+    local function getSavedWorldBossInfo(index)
+        calls[#calls + 1] = index
+        local entry = entries[index]
+        if not entry then
+            return nil
+        end
+        -- name, worldBossID, reset
+        return entry.name, entry.worldBossID, entry.reset
+    end
+
+    return getNumSavedWorldBosses, getSavedWorldBossInfo, calls
+end
+
 ---A stand-in for the global GameTooltip that records the lines it was asked to draw.
 ---@return table tooltip, table recorded `{ owner, anchor, lines, shown, hidden }`
 function fake.newTooltip()
@@ -520,7 +548,8 @@ end
 ---
 ---`options.db` may be shared between two `newEnv` calls to model two characters on
 ---one account writing into the same SavedVariables table.
----@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db,
+---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances,
+---  savedWorldBosses, db,
 ---  tiers, money, instanceType, instanceName, difficultyId, difficultyName, itemPrices,
 ---  transmogSources, currencies, achievements, mounts, pets, toys, housingItems, activeQuests,
 ---  questStates, lootFormats, factionFormats }`
@@ -546,6 +575,8 @@ function fake.newEnv(options)
     local formatDate, formatDateCalls = fake.newFormatDate()
     local getNumSavedInstances, getSavedInstanceInfo, savedInstanceCalls,
         getSavedInstanceEncounterInfo, encounterCalls = fake.newSavedInstances(options.savedInstances)
+    local getNumSavedWorldBosses, getSavedWorldBossInfo, worldBossCalls =
+        fake.newSavedWorldBosses(options.savedWorldBosses)
     local tooltip, tooltipRecorded = fake.newTooltip()
     local journal, journalRecorded = fake.newEncounterJournal(options.tiers)
     local classColor, classIconCoords = fake.newClassLook()
@@ -616,6 +647,8 @@ function fake.newEnv(options)
         getNumSavedInstances = getNumSavedInstances,
         getSavedInstanceInfo = getSavedInstanceInfo,
         getSavedInstanceEncounterInfo = getSavedInstanceEncounterInfo,
+        getNumSavedWorldBosses = getNumSavedWorldBosses,
+        getSavedWorldBossInfo = getSavedWorldBossInfo,
         tooltip = tooltip,
         requestRaidInfo = function()
             raidInfoRequests = raidInfoRequests + 1
@@ -768,6 +801,7 @@ function fake.newEnv(options)
         slashRegistrations = slashRegistrations,
         tooltip = tooltipRecorded,
         savedInstanceCalls = savedInstanceCalls,
+        worldBossCalls = worldBossCalls,
         encounterCalls = encounterCalls,
         journal = journalRecorded,
         ---Drive the wallet the addon reads through env.getMoney.

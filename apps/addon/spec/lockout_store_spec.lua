@@ -21,11 +21,14 @@ describe("ns.newLockoutStore", function()
         return store, db
     end
 
+    ---Lockouts as the scanner hands them over. The activity key and kind follow from the
+    ---activity name unless a test says otherwise, so a test only has to name what it is
+    ---about.
     ---@param overrides table?
     ---@return Lockout
     local function lockout(overrides)
         local row = {
-            instance = "Ulduar",
+            activity = "Ulduar",
             difficultyId = 4,
             difficulty = "25 Player",
             maxPlayers = 25,
@@ -35,15 +38,17 @@ describe("ns.newLockoutStore", function()
         for key, value in pairs(overrides or {}) do
             row[key] = value
         end
+        row.key = row.key or ("instance\0" .. row.activity)
+        row.kind = row.kind or (row.isRaid and "raid" or "dungeon")
         return row
     end
 
     ---@param rows LockoutRow[]
-    ---@return table<string, boolean> a set of "character|instance|difficultyId"
+    ---@return table<string, boolean> a set of "character|activity|difficultyId"
     local function identities(rows)
         local set = {}
         for _, row in ipairs(rows) do
-            set[row.character .. "|" .. row.instance .. "|" .. tostring(row.difficultyId)] = true
+            set[row.character .. "|" .. row.activity .. "|" .. tostring(row.difficultyId)] = true
         end
         return set
     end
@@ -347,8 +352,8 @@ describe("ns.newLockoutStore", function()
             local store = newStore()
 
             store.save("Thrall-Ragnaros", {
-                lockout({ instance = "Ulduar" }),
-                lockout({ instance = "Naxxramas" }),
+                lockout({ activity = "Ulduar" }),
+                lockout({ activity = "Naxxramas" }),
             })
 
             assert.equal(2, #store.all())
@@ -356,20 +361,20 @@ describe("ns.newLockoutStore", function()
 
         it("replaces the saved character's previous data", function()
             local store = newStore()
-            store.save("Thrall-Ragnaros", { lockout({ instance = "Ulduar" }) })
+            store.save("Thrall-Ragnaros", { lockout({ activity = "Ulduar" }) })
 
-            store.save("Thrall-Ragnaros", { lockout({ instance = "Naxxramas" }) })
+            store.save("Thrall-Ragnaros", { lockout({ activity = "Naxxramas" }) })
 
             local rows = store.all()
             assert.equal(1, #rows)
-            assert.equal("Naxxramas", rows[1].instance)
+            assert.equal("Naxxramas", rows[1].activity)
         end)
 
         it("leaves other characters untouched when one is saved", function()
             local store = newStore()
-            store.save("Jaina-Ragnaros", { lockout({ instance = "Karazhan" }) })
+            store.save("Jaina-Ragnaros", { lockout({ activity = "Karazhan" }) })
 
-            store.save("Thrall-Ragnaros", { lockout({ instance = "Ulduar" }) })
+            store.save("Thrall-Ragnaros", { lockout({ activity = "Ulduar" }) })
 
             assert.same({
                 ["Jaina-Ragnaros|Karazhan|4"] = true,
@@ -379,8 +384,8 @@ describe("ns.newLockoutStore", function()
 
         it("empties only that character when it is saved with no lockouts", function()
             local store = newStore()
-            store.save("Jaina-Ragnaros", { lockout({ instance = "Karazhan" }) })
-            store.save("Thrall-Ragnaros", { lockout({ instance = "Ulduar" }) })
+            store.save("Jaina-Ragnaros", { lockout({ activity = "Karazhan" }) })
+            store.save("Thrall-Ragnaros", { lockout({ activity = "Ulduar" }) })
 
             store.save("Thrall-Ragnaros", {})
 
@@ -452,7 +457,10 @@ describe("ns.newLockoutStore", function()
 
             assert.same({
                 character = "Thrall-Ragnaros",
-                instance = "Ulduar",
+                key = "instance\0Ulduar",
+                activity = "Ulduar",
+                kind = "raid",
+                period = "weekly",
                 difficultyId = 4,
                 difficulty = "25 Player",
                 maxPlayers = 25,
@@ -464,9 +472,9 @@ describe("ns.newLockoutStore", function()
 
         it("flattens several characters into one list", function()
             local store = newStore()
-            store.save("Thrall-Ragnaros", { lockout({ instance = "Ulduar" }) })
-            store.save("Jaina-Ragnaros", { lockout({ instance = "Karazhan" }) })
-            store.save("Sylvanas-Draenor", { lockout({ instance = "Naxxramas" }) })
+            store.save("Thrall-Ragnaros", { lockout({ activity = "Ulduar" }) })
+            store.save("Jaina-Ragnaros", { lockout({ activity = "Karazhan" }) })
+            store.save("Sylvanas-Draenor", { lockout({ activity = "Naxxramas" }) })
 
             assert.equal(3, #store.all())
         end)
@@ -474,10 +482,10 @@ describe("ns.newLockoutStore", function()
         it("returns a flat array with no holes", function()
             local store = newStore()
             store.save("Thrall-Ragnaros", {
-                lockout({ instance = "Ulduar" }),
-                lockout({ instance = "Karazhan" }),
+                lockout({ activity = "Ulduar" }),
+                lockout({ activity = "Karazhan" }),
             })
-            store.save("Jaina-Ragnaros", { lockout({ instance = "Naxxramas" }) })
+            store.save("Jaina-Ragnaros", { lockout({ activity = "Naxxramas" }) })
 
             local rows = store.all()
             for index = 1, 3 do
@@ -507,9 +515,9 @@ describe("ns.newLockoutStore", function()
             local store = newStore()
             store.save("Thrall-Ragnaros", { lockout() })
 
-            store.all()[1].instance = "Tampered"
+            store.all()[1].activity = "Tampered"
 
-            assert.equal("Ulduar", store.all()[1].instance)
+            assert.equal("Ulduar", store.all()[1].activity)
         end)
     end)
 
@@ -548,9 +556,9 @@ describe("ns.newLockoutStore", function()
 
         it("does not mix legacy and tracked rows up", function()
             local store = newStore()
-            store.save("Thrall-Ragnaros", { lockout({ instance = "Ulduar" }) })
+            store.save("Thrall-Ragnaros", { lockout({ activity = "Ulduar" }) })
             store.save("Jaina-Ragnaros", {
-                lockout({ instance = "Karazhan", encounters = { { name = "Attumen", killed = true } } }),
+                lockout({ activity = "Karazhan", encounters = { { name = "Attumen", killed = true } } }),
             })
 
             local byCharacter = {}
@@ -660,18 +668,18 @@ describe("ns.newLockoutStore", function()
             local store, db = newStore({ now = NOW })
 
             store.save("Thrall-Ragnaros", {
-                lockout({ instance = "Ulduar", expiry = NOW + 3600 }),
-                lockout({ instance = "Naxxramas", expiry = NOW - WEEK - 1 }),
+                lockout({ activity = "Ulduar", expiry = NOW + 3600 }),
+                lockout({ activity = "Naxxramas", expiry = NOW - WEEK - 1 }),
             })
             store.all()
 
             local rows = store.all()
             assert.equal(1, #rows)
-            assert.equal("Ulduar", rows[1].instance)
+            assert.equal("Ulduar", rows[1].activity)
 
             local names = {}
             for _, stored in pairs(db.characters["Thrall-Ragnaros"]) do
-                names[#names + 1] = stored.instance
+                names[#names + 1] = stored.activity
             end
             assert.same({ "Ulduar" }, names)
         end)
@@ -680,13 +688,13 @@ describe("ns.newLockoutStore", function()
             local store = newStore({ now = NOW, staleAfterSeconds = 60 })
 
             store.save("Thrall-Ragnaros", {
-                lockout({ instance = "Ulduar", expiry = NOW - 30 }),
-                lockout({ instance = "Naxxramas", expiry = NOW - 61 }),
+                lockout({ activity = "Ulduar", expiry = NOW - 30 }),
+                lockout({ activity = "Naxxramas", expiry = NOW - 61 }),
             })
 
             local rows = store.all()
             assert.equal(1, #rows)
-            assert.equal("Ulduar", rows[1].instance)
+            assert.equal("Ulduar", rows[1].activity)
         end)
 
         it("prunes stale entries across every character", function()
@@ -698,6 +706,184 @@ describe("ns.newLockoutStore", function()
 
             assert.is_nil(next(db.characters["Thrall-Ragnaros"]))
             assert.is_nil(next(db.characters["Jaina-Ragnaros"]))
+        end)
+    end)
+
+    describe("what is stored against the activity rather than the save", function()
+        it("records the activity the first time anybody is locked to it", function()
+            local store, db = newStore()
+
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            assert.is_table(db.activities["instance\0Ulduar"])
+            assert.equal("Ulduar", db.activities["instance\0Ulduar"].activity)
+            assert.equal("raid", db.activities["instance\0Ulduar"].kind)
+        end)
+
+        it("lists an activity once however many characters are locked to it", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", { lockout() })
+            store.save("Jaina-Ragnaros", { lockout() })
+
+            local activities = store.activities()
+
+            assert.equal(1, #activities)
+            assert.equal("Ulduar", activities[1].activity)
+        end)
+
+        -- The point of storing it against the activity: the cadence outlives the save it
+        -- was learned from, so it is still there once nobody is locked to it at all.
+        it("keeps the activity after the lockout that taught us about it is gone", function()
+            local store = newStore()
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            store.save("Thrall-Ragnaros", {})
+
+            assert.same({}, store.all())
+            assert.equal(1, #store.activities())
+        end)
+
+        describe("how often an activity resets", function()
+            ---@param overrides table
+            ---@return string
+            local function periodOf(overrides)
+                local store = newStore()
+                store.save("Thrall-Ragnaros", { lockout(overrides) })
+                return store.activities()[1].period
+            end
+
+            it("resets a raid weekly", function()
+                assert.equal("weekly", periodOf({ isRaid = true }))
+            end)
+
+            it("resets a dungeon daily", function()
+                assert.equal("daily", periodOf({ activity = "Deadmines", isRaid = false }))
+            end)
+
+            it("resets a world boss weekly, like the raid it stands in for", function()
+                assert.equal("weekly", periodOf({
+                    activity = "Doomwalker",
+                    key = "worldboss\0" .. 17711,
+                    kind = "world_boss",
+                    isRaid = false,
+                }))
+            end)
+
+            -- The cadence follows from what the activity is, so it cannot drift between
+            -- scans, however long a particular lockout happened to have left.
+            it("says the same thing however much time a scan caught the lock with", function()
+                local store = newStore()
+                store.save("Thrall-Ragnaros", { lockout({ expiry = NOW + 60 }) })
+                assert.equal("weekly", store.activities()[1].period)
+
+                store.save("Thrall-Ragnaros", { lockout({ expiry = NOW + WEEK }) })
+
+                assert.equal("weekly", store.activities()[1].period)
+            end)
+
+            it("puts the cadence on every row of that activity", function()
+                local store = newStore()
+                store.save("Thrall-Ragnaros", { lockout() })
+
+                assert.equal("weekly", store.all()[1].period)
+            end)
+
+            it("writes the cadence into the db, so a reader need not derive it", function()
+                local store, db = newStore()
+
+                store.save("Thrall-Ragnaros", { lockout() })
+
+                assert.equal("weekly", db.activities["instance\0Ulduar"].period)
+            end)
+        end)
+
+        it("keeps a world boss apart from an instance of the same name", function()
+            local store = newStore()
+
+            store.save("Thrall-Ragnaros", {
+                lockout({ activity = "Doomwalker", key = "instance\0Doomwalker" }),
+                lockout({
+                    activity = "Doomwalker",
+                    key = "worldboss\0" .. 17711,
+                    kind = "world_boss",
+                    difficultyId = 0,
+                    isRaid = false,
+                }),
+            })
+
+            assert.equal(2, #store.all())
+            assert.equal(2, #store.activities())
+        end)
+
+        it("carries the kind through onto the row", function()
+            local store = newStore()
+
+            store.save("Thrall-Ragnaros", {
+                lockout({
+                    activity = "Doomwalker",
+                    key = "worldboss\0" .. 17711,
+                    kind = "world_boss",
+                    isRaid = false,
+                }),
+            })
+
+            assert.equal("world_boss", store.all()[1].kind)
+        end)
+    end)
+
+    describe("saves written before activities were recorded", function()
+        -- A populated SavedVariables file from an earlier build names the instance
+        -- `instance` and has no activity table at all. Those rows must still read back.
+        it("reads a pre-activity lockout's name off the lockout itself", function()
+            local db = {
+                characters = {
+                    ["Thrall-Ragnaros"] = {
+                        ["Ulduar\0" .. 4] = {
+                            instance = "Ulduar",
+                            difficultyId = 4,
+                            difficulty = "25 Player",
+                            maxPlayers = 25,
+                            isRaid = true,
+                            expiry = NOW + 3600,
+                        },
+                    },
+                },
+            }
+            local store = newStore({ db = db })
+
+            local row = store.all()[1]
+
+            assert.equal("Ulduar", row.activity)
+            assert.equal("instance\0Ulduar", row.key)
+            assert.equal("raid", row.kind)
+            -- Readable as a raid, so readable as weekly: nothing about the cadence needed
+            -- the activity table to have existed when the save was written.
+            assert.equal("weekly", row.period)
+        end)
+
+        it("groups a pre-activity row with a freshly scanned one for the same raid", function()
+            local db = {
+                characters = {
+                    ["Jaina-Ragnaros"] = {
+                        ["Ulduar\0" .. 4] = {
+                            instance = "Ulduar",
+                            difficultyId = 4,
+                            difficulty = "25 Player",
+                            isRaid = true,
+                            expiry = NOW + 3600,
+                        },
+                    },
+                },
+            }
+            local store = newStore({ db = db })
+            store.save("Thrall-Ragnaros", { lockout() })
+
+            local keys = {}
+            for _, row in ipairs(store.all()) do
+                keys[row.key] = true
+            end
+
+            assert.same({ ["instance\0Ulduar"] = true }, keys)
         end)
     end)
 end)

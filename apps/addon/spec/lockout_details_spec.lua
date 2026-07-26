@@ -28,7 +28,7 @@ describe("ns.newLockoutDetails", function()
         return MAGE_ICON .. " " .. MAGE_CODE .. name .. "|r"
     end
 
-    ---By default the journal is empty, so no instance has an expansion and the
+    ---By default the journal is empty, so no activity has an expansion and the
     ---expansion cells stay blank; a test that cares passes `tiers`.
     ---@param options table? `{ now = integer?, tiers = table[]? }`
     ---@return table details, table clock
@@ -56,12 +56,15 @@ describe("ns.newLockoutDetails", function()
     local WOTLK_TAG = "|cff73c7f2WotLK|r"
     local CLASSIC_TAG = "|cffc7b88cClassic|r"
 
+    ---Rows as the store hands them out: the activity key, kind and cadence are derived
+    ---from the activity name unless a test says otherwise, so a test only has to name the
+    ---one thing it is about.
     ---@param overrides table?
     ---@return LockoutRow
     local function newRow(overrides)
         local row = {
             character = "Thrall-Ragnaros",
-            instance = "Ulduar",
+            activity = "Ulduar",
             difficultyId = 4,
             difficulty = "25 Player",
             maxPlayers = 25,
@@ -72,6 +75,9 @@ describe("ns.newLockoutDetails", function()
         for key, value in pairs(overrides or {}) do
             row[key] = value
         end
+        row.key = row.key or ("instance\0" .. row.activity)
+        row.kind = row.kind or (row.isRaid and "raid" or "dungeon")
+        row.period = row.period or "weekly"
         return row
     end
 
@@ -242,19 +248,21 @@ describe("ns.newLockoutDetails", function()
     end)
 
     describe("descriptorOf", function()
-        it("derives the instance identity from the row", function()
+        it("derives the activity identity from the row", function()
             local details = newDetails()
 
             assert.same({
-                key = "Ulduar",
-                instance = "Ulduar",
+                key = "instance\0Ulduar",
+                activity = "Ulduar",
+                kind = "raid",
+                period = "weekly",
                 difficultyId = 4,
                 difficulty = "25 Player",
                 isRaid = true,
             }, details.descriptorOf(newRow()))
         end)
 
-        it("keys on the instance alone, so both difficulties share one identity", function()
+        it("keys on the activity alone, so both difficulties share one identity", function()
             local details = newDetails()
 
             local tenPlayer = details.descriptorOf(newRow({ difficultyId = 3, difficulty = "10 Player" }))
@@ -295,13 +303,13 @@ describe("ns.newLockoutDetails", function()
         end)
     end)
 
-    describe("instances", function()
-        ---@param descriptors InstanceDescriptor[]
-        ---@return string[] the instance of each descriptor, in order
+    describe("activities", function()
+        ---@param descriptors ActivityDescriptor[]
+        ---@return string[] the name of each descriptor, in order
         local function identities(descriptors)
             local list = {}
             for index, descriptor in ipairs(descriptors) do
-                list[index] = descriptor.instance
+                list[index] = descriptor.activity
             end
             return list
         end
@@ -309,13 +317,13 @@ describe("ns.newLockoutDetails", function()
         it("returns nothing for an empty list of rows", function()
             local details = newDetails()
 
-            assert.same({}, details.instances({}))
+            assert.same({}, details.activities({}))
         end)
 
-        it("collapses the same instance and difficulty seen on two characters", function()
+        it("collapses the same activity and difficulty seen on two characters", function()
             local details = newDetails()
 
-            local descriptors = details.instances({
+            local descriptors = details.activities({
                 newRow({ character = "Thrall-Ragnaros" }),
                 newRow({ character = "Jaina-Draenor" }),
             })
@@ -323,10 +331,10 @@ describe("ns.newLockoutDetails", function()
             assert.same({ "Ulduar" }, identities(descriptors))
         end)
 
-        it("collapses two difficulties of one instance into a single entry", function()
+        it("collapses two difficulties of one activity into a single entry", function()
             local details = newDetails()
 
-            local descriptors = details.instances({
+            local descriptors = details.activities({
                 newRow({ difficultyId = 4, difficulty = "25 Player" }),
                 newRow({ difficultyId = 3, difficulty = "10 Player" }),
             })
@@ -334,25 +342,25 @@ describe("ns.newLockoutDetails", function()
             assert.same({ "Ulduar" }, identities(descriptors))
         end)
 
-        it("orders by instance name first", function()
+        it("orders by activity name first", function()
             local details = newDetails()
 
-            local descriptors = details.instances({
-                newRow({ instance = "Ulduar" }),
-                newRow({ instance = "Karazhan" }),
-                newRow({ instance = "Naxxramas" }),
+            local descriptors = details.activities({
+                newRow({ activity = "Ulduar" }),
+                newRow({ activity = "Karazhan" }),
+                newRow({ activity = "Naxxramas" }),
             })
 
             assert.same({ "Karazhan", "Naxxramas", "Ulduar" }, identities(descriptors))
         end)
 
-        it("orders by instance when the same instance appears at several difficulties", function()
+        it("orders by activity when the same activity appears at several difficulties", function()
             local details = newDetails()
 
-            local descriptors = details.instances({
-                newRow({ instance = "Ulduar", difficultyId = 4 }),
-                newRow({ instance = "Karazhan", difficultyId = 3 }),
-                newRow({ instance = "Ulduar", difficultyId = 3 }),
+            local descriptors = details.activities({
+                newRow({ activity = "Ulduar", difficultyId = 4 }),
+                newRow({ activity = "Karazhan", difficultyId = 3 }),
+                newRow({ activity = "Ulduar", difficultyId = 3 }),
             })
 
             assert.same({ "Karazhan", "Ulduar" }, identities(descriptors))
@@ -361,20 +369,20 @@ describe("ns.newLockoutDetails", function()
         it("carries the descriptor fields through", function()
             local details = newDetails()
 
-            local descriptors = details.instances({ newRow({ isRaid = false }) })
+            local descriptors = details.activities({ newRow({ isRaid = false }) })
 
             assert.equal("25 Player", descriptors[1].difficulty)
             assert.is_false(descriptors[1].isRaid)
         end)
     end)
 
-    describe("forInstance", function()
+    describe("forActivity", function()
         ---@param details table
         ---@param rows LockoutRow[]
         ---@param names string[]
         ---@return DetailSpec
         local function specFor(details, rows, names)
-            return details.forInstance(details.descriptorOf(newRow()), roster(names), rows)
+            return details.forActivity(details.descriptorOf(newRow()), roster(names), rows)
         end
 
         it("lists every roster character exactly once", function()
@@ -389,7 +397,7 @@ describe("ns.newLockoutDetails", function()
             assert.equal(3, #spec.sections[1].rows)
         end)
 
-        it("shows a character with no lockout for this instance as available", function()
+        it("shows a character with no lockout for this activity as available", function()
             local details = newDetails()
 
             local spec = specFor(details, {}, { "Jaina-Draenor" })
@@ -463,11 +471,11 @@ describe("ns.newLockoutDetails", function()
             assert.same({ READY .. " Jaina-Draenor" }, column(spec.sections[1].rows, 1))
         end)
 
-        it("ignores a lockout for a different instance on the same character", function()
+        it("ignores a lockout for a different activity on the same character", function()
             local details = newDetails()
 
             local spec = specFor(details, {
-                newRow({ character = "Thrall-Ragnaros", instance = "Karazhan" }),
+                newRow({ character = "Thrall-Ragnaros", activity = "Karazhan" }),
             }, { "Thrall-Ragnaros" })
 
             assert.equal("Available", spec.sections[1].rows[1].cells[2])
@@ -558,30 +566,46 @@ describe("ns.newLockoutDetails", function()
             end
         end)
 
-        it("titles the panel with the instance alone, since it covers every difficulty", function()
+        it("titles the panel with the activity alone, since it covers every difficulty", function()
             local details = newDetails()
 
-            assert.equal("Ulduar", specFor(details, {}, {}).title)
+            assert.equal("Weekly — Ulduar", specFor(details, {}, {}).title)
         end)
 
         it("titles the panel the same whichever difficulty the descriptor came from", function()
             local details = newDetails()
             local descriptor = details.descriptorOf(newRow({ difficultyId = 3, difficulty = "10 Player" }))
 
-            assert.equal("Ulduar", details.forInstance(descriptor, {}, {}).title)
+            assert.equal("Weekly — Ulduar", details.forActivity(descriptor, {}, {}).title)
+        end)
+
+        -- The cadence leads the title because it is the one fact on the panel that belongs
+        -- to the activity rather than to any character's save of it.
+        it("leads the title with the cadence the activity resets on", function()
+            local details = newDetails()
+            local descriptor = details.descriptorOf(newRow({ period = "daily" }))
+
+            assert.equal("Daily — Ulduar", details.forActivity(descriptor, {}, {}).title)
+        end)
+
+        it("says nothing about the cadence while it is still unknown", function()
+            local details = newDetails()
+            local descriptor = details.descriptorOf(newRow({ period = "unknown" }))
+
+            assert.equal("Ulduar", details.forActivity(descriptor, {}, {}).title)
         end)
 
         it("prefixes the title with the expansion tag once the journal places it", function()
             local details = newDetails({ tiers = TIERS })
 
-            assert.equal(WOTLK_TAG .. " Ulduar", specFor(details, {}, {}).title)
+            assert.equal("Weekly — " .. WOTLK_TAG .. " Ulduar", specFor(details, {}, {}).title)
         end)
 
-        it("leaves the title unprefixed for an instance the journal never lists", function()
+        it("leaves the title unprefixed for an activity the journal never lists", function()
             local details = newDetails({ tiers = TIERS })
-            local descriptor = details.descriptorOf(newRow({ instance = "Karazhan" }))
+            local descriptor = details.descriptorOf(newRow({ activity = "Karazhan" }))
 
-            assert.equal("Karazhan", details.forInstance(descriptor, {}, {}).title)
+            assert.equal("Weekly — Karazhan", details.forActivity(descriptor, {}, {}).title)
         end)
 
         -- The cell colour already carries the lockout state, so the class has to be
@@ -705,8 +729,8 @@ describe("ns.newLockoutDetails", function()
             local details = newDetails()
 
             local spec = details.forCharacter("Thrall-Ragnaros", {
-                newRow({ character = "Thrall-Ragnaros", instance = "Ulduar" }),
-                newRow({ character = "Thrall-Ragnaros", instance = "Karazhan", classFile = "MAGE" }),
+                newRow({ character = "Thrall-Ragnaros", activity = "Ulduar" }),
+                newRow({ character = "Thrall-Ragnaros", activity = "Karazhan", classFile = "MAGE" }),
             })
 
             assert.equal(asMage("Thrall-Ragnaros"), spec.title)
@@ -716,8 +740,8 @@ describe("ns.newLockoutDetails", function()
             local details = newDetails()
 
             local spec = details.forCharacter("Thrall-Ragnaros", {
-                newRow({ instance = "Ulduar", isRaid = true }),
-                newRow({ instance = "Deadmines", isRaid = false }),
+                newRow({ activity = "Ulduar", isRaid = true }),
+                newRow({ activity = "Deadmines", isRaid = false }),
             })
 
             assert.same({ "Raids", "Dungeons" }, { spec.sections[1].heading, spec.sections[2].heading })
@@ -725,9 +749,9 @@ describe("ns.newLockoutDetails", function()
             assert.same({ NOT_READY .. " Deadmines" }, column(sectionNamed(spec, "Dungeons").rows, 1))
         end)
 
-        -- The whole point of the feature: an instance an alt is saved to must show up
+        -- The whole point of the feature: an activity an alt is saved to must show up
         -- on every other character too, marked as still runnable.
-        it("shows an instance only an alt is locked to as available", function()
+        it("shows an activity only an alt is locked to as available", function()
             local details = newDetails()
 
             local spec = details.forCharacter("Jaina-Draenor", {
@@ -746,22 +770,22 @@ describe("ns.newLockoutDetails", function()
             }, sectionNamed(spec, "Raids").rows[1].cells)
         end)
 
-        it("tags each instance with its expansion", function()
+        it("tags each activity with its expansion", function()
             local details = newDetails({ tiers = TIERS })
 
             local spec = details.forCharacter("Thrall-Ragnaros", {
-                newRow({ instance = "Ulduar", isRaid = true }),
-                newRow({ instance = "Deadmines", isRaid = false }),
+                newRow({ activity = "Ulduar", isRaid = true }),
+                newRow({ activity = "Deadmines", isRaid = false }),
             })
 
             assert.same({ WOTLK_TAG }, column(sectionNamed(spec, "Raids").rows, 2))
             assert.same({ CLASSIC_TAG }, column(sectionNamed(spec, "Dungeons").rows, 2))
         end)
 
-        it("leaves the expansion blank for an instance the journal never lists", function()
+        it("leaves the expansion blank for an activity the journal never lists", function()
             local details = newDetails({ tiers = TIERS })
 
-            local spec = details.forCharacter("Thrall-Ragnaros", { newRow({ instance = "Karazhan" }) })
+            local spec = details.forCharacter("Thrall-Ragnaros", { newRow({ activity = "Karazhan" }) })
 
             assert.equal("", sectionNamed(spec, "Raids").rows[1].cells[2])
         end)
@@ -770,9 +794,9 @@ describe("ns.newLockoutDetails", function()
             local details = newDetails()
 
             local spec = details.forCharacter("Thrall-Ragnaros", {
-                newRow({ instance = "Locked Halls", encounters = bosses({ true }) }),
-                newRow({ instance = "Partial Keep", encounters = bosses({ true, false }) }),
-                newRow({ character = "Jaina-Draenor", instance = "Free Citadel" }),
+                newRow({ activity = "Locked Halls", encounters = bosses({ true }) }),
+                newRow({ activity = "Partial Keep", encounters = bosses({ true, false }) }),
+                newRow({ character = "Jaina-Draenor", activity = "Free Citadel" }),
             })
 
             assert.same({ "Available", "Partial", "Locked" }, column(sectionNamed(spec, "Raids").rows, 4))
@@ -782,9 +806,9 @@ describe("ns.newLockoutDetails", function()
             local details = newDetails()
 
             local spec = details.forCharacter("Thrall-Ragnaros", {
-                newRow({ character = "Jaina-Draenor", instance = "Ulduar" }),
-                newRow({ character = "Jaina-Draenor", instance = "Karazhan" }),
-                newRow({ character = "Jaina-Draenor", instance = "Naxxramas" }),
+                newRow({ character = "Jaina-Draenor", activity = "Ulduar" }),
+                newRow({ character = "Jaina-Draenor", activity = "Karazhan" }),
+                newRow({ character = "Jaina-Draenor", activity = "Naxxramas" }),
             })
 
             assert.same({
@@ -816,7 +840,7 @@ describe("ns.newLockoutDetails", function()
                     reset = true,
                 },
                 {
-                    name = "shows nothing for an instance that has reset",
+                    name = "shows nothing for an activity that has reset",
                     row = { expiry = NOW - 1, encounters = bosses({ true, true }) },
                     progress = NONE,
                     reset = false,
@@ -851,9 +875,9 @@ describe("ns.newLockoutDetails", function()
             local details = newDetails()
 
             local spec = details.forCharacter("Thrall-Ragnaros", {
-                newRow({ instance = "Locked Halls", encounters = bosses({ true }) }),
-                newRow({ instance = "Partial Keep", encounters = bosses({ true, false }) }),
-                newRow({ character = "Jaina-Draenor", instance = "Free Citadel" }),
+                newRow({ activity = "Locked Halls", encounters = bosses({ true }) }),
+                newRow({ activity = "Partial Keep", encounters = bosses({ true, false }) }),
+                newRow({ character = "Jaina-Draenor", activity = "Free Citadel" }),
             })
 
             local colors = {}
@@ -890,7 +914,7 @@ describe("ns.newLockoutDetails", function()
             local spec = details.forCharacter("Thrall-Ragnaros", {})
 
             assert.same(
-                { "Instance", "Expansion", "Difficulty", "Status", "Bosses", "Resets" },
+                { "Activity", "Expansion", "Difficulty", "Status", "Bosses", "Resets" },
                 columnTitles(spec.sections[1])
             )
             assert.same(spec.sections[1].columns, spec.sections[2].columns)
