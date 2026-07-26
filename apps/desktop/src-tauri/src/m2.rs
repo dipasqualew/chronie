@@ -43,6 +43,7 @@ mod field {
 
 /// Where the fields this module reads sit inside one `M2SkinSection`, in bytes.
 mod section_field {
+    pub const GEOSET: usize = 0;
     pub const LEVEL: usize = 2;
     pub const INDEX_START: usize = 8;
     pub const INDEX_COUNT: usize = 10;
@@ -88,8 +89,14 @@ pub struct Vertex {
 pub enum Paint {
     /// A texture of the model's own, as a FileDataID out of `TXID`.
     File(u32),
-    /// Whatever the item supplies — the appearance's own material.
-    Item,
+    /// Whatever the caller supplies, carrying the texture type that asked for it.
+    ///
+    /// An item's model only ever asks for the one thing, so its callers can ignore the type.
+    /// A character's cannot: **type 1 is the composited body atlas**, and 6, 19 and 20 are the
+    /// hair, the eyes and the jewellery, each with a texture of its own. Painting hair with the
+    /// body atlas is exactly as wrong as painting it with nothing and far harder to notice, so
+    /// the type travels with the part rather than being flattened away here.
+    Supplied(u32),
 }
 
 /// How a part is composited, which is the one material property a still render needs.
@@ -106,6 +113,12 @@ pub enum Blend {
 pub struct Part {
     /// Indices into [`Mesh::vertices`], three to a triangle.
     pub indices: Vec<u32>,
+    /// Which geoset the part belongs to, as `group × 100 + value`.
+    ///
+    /// Zero on every part of an item's own model, which is drawn whole. On a character it is
+    /// what says whether the part is drawn at all — the body holds every variant of every
+    /// group at once, and all but one of each group is somebody else's trousers.
+    pub geoset: u16,
     pub paint: Paint,
     pub blend: Blend,
     /// Set by material flag `0x04`. Cloaks and plumes are single-sided sheets and vanish from
@@ -255,6 +268,7 @@ impl Model {
                 .unwrap_or((0, 0));
             parts.push(Part {
                 indices,
+                geoset: read_u16(section, section_field::GEOSET)?,
                 paint: self.paint(read_u16(batch, batch_field::TEXTURE_COMBO)? as usize),
                 blend: match blending {
                     0 => Blend::Opaque,
@@ -274,12 +288,17 @@ impl Model {
     /// What paints the batch that names this entry of the texture combo list.
     ///
     /// Two indirections rather than one: the batch names a slot in `textureCombos`, which
-    /// names the model's texture. A combo the model does not have is the item's own texture,
-    /// which is also what every non-zero texture type means.
+    /// names the model's texture. A texture type of zero is a file of the model's own and
+    /// everything else is the caller's business, carried across as the type that asked.
+    ///
+    /// A combo the model does not declare, and a type-zero texture with no `TXID` behind it,
+    /// are both a model saying nothing this can resolve. Both come back as type zero, which is
+    /// a type no caller supplies — an item's model has one texture and hands it over whatever
+    /// was asked for, and a character's paints only the types it actually composited.
     fn paint(&self, combo: usize) -> Paint {
         let texture = match self.texture_combos.get(combo) {
             Some(index) => *index as usize,
-            None => return Paint::Item,
+            None => return Paint::Supplied(0),
         };
         match self.texture_kinds.get(texture) {
             Some(0) => self
@@ -287,8 +306,9 @@ impl Model {
                 .get(texture)
                 .copied()
                 .filter(|id| *id != 0)
-                .map_or(Paint::Item, Paint::File),
-            _ => Paint::Item,
+                .map_or(Paint::Supplied(0), Paint::File),
+            Some(kind) => Paint::Supplied(*kind),
+            None => Paint::Supplied(0),
         }
     }
 }
@@ -424,6 +444,9 @@ mod tests {
     /// to hold the `level` field to account.
     const WEAPON: u32 = 140004;
     const WEAPON_SKIN: u32 = 141004;
+    /// The character body, which is the only fixture with geosets and several texture types.
+    const CHARACTER: u32 = 1_000_764;
+    const CHARACTER_SKIN: u32 = 1_000_765;
 
     fn model(fdid: u32) -> Model {
         Model::parse(&fixture_files().read(fdid).unwrap()).unwrap()
@@ -505,8 +528,32 @@ mod tests {
 
         // The shoulder's mesh leaves its texture to the item, so it names no file at all.
         let shoulder = mesh(140002, 141002);
-        assert_eq!(shoulder.parts[0].paint, Paint::Item);
+        assert_eq!(shoulder.parts[0].paint, Paint::Supplied(2));
         assert_eq!(model(140002).texture_file_data_ids(), Vec::<u32>::new());
+    }
+
+    // Which *type* asked is the difference between a body and its hair. An item's model has
+    // one texture and any type does for it; a character declares several, and a reader that
+    // flattened them all to "the caller's problem" would have no way to tell the atlas it
+    // composited from the two it did not.
+    #[test]
+    fn says_which_texture_type_a_supplied_paint_was_asked_for_by() {
+        let body = mesh(CHARACTER, CHARACTER_SKIN);
+        let types: Vec<Paint> = body.parts.iter().map(|part| part.paint).collect();
+        // Every part but the hair is the composited body atlas, which is type 1.
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 10);
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 1);
+    }
+
+    // The geoset is what says whether a part of a body is drawn at all, and it is the one
+    // field of a skin section an item's model has no use for.
+    #[test]
+    fn reads_the_geoset_each_part_of_a_body_belongs_to() {
+        let body = mesh(CHARACTER, CHARACTER_SKIN);
+        let geosets: Vec<u16> = body.parts.iter().map(|part| part.geoset).collect();
+        assert_eq!(geosets, vec![0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 101, 2101]);
+        // An item is drawn whole, and says so by belonging to no geoset.
+        assert!(mesh(HELM, HELM_SKIN).parts.iter().all(|part| part.geoset == 0));
     }
 
     // Blend mode and two-sidedness are the two material properties a still picture needs: one

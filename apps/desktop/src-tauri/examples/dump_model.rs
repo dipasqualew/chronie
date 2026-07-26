@@ -1,18 +1,22 @@
-//! Writes one appearance's model out as a `.glb`, either from a real install or the fixtures.
+//! Writes a model out as a `.glb`, either from a real install or the fixtures.
 //!
 //! Two jobs. Against an install it is how a model is checked against the real thing, which
-//! the test suite deliberately never touches. Against the fixtures it regenerates
-//! `apps/desktop/fixtures/transmog/helm.glb`, which is the file the browser tests load into
-//! three.js — so what the window is shown to render is what this converter actually writes,
-//! rather than a hand-made stand-in for it.
+//! the test suite deliberately never touches. Against the fixtures it regenerates the `.glb`s
+//! the browser tests load into three.js — so what the window is shown to render is what these
+//! converters actually write, rather than a hand-made stand-in for it.
+//!
+//! The model to write is either an `ItemDisplayInfo` id or the word `character`, which is the
+//! bare body every appearance is worn on.
 //!
 //! ```sh
 //! cargo run --example dump_model -- "/Applications/World of Warcraft" 900001 helm.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog 900001 \
 //!     apps/desktop/fixtures/transmog/helm.glb
+//! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog character \
+//!     apps/desktop/fixtures/transmog/character.glb
 //! ```
 
-use chronie_desktop_lib::{casc, models};
+use chronie_desktop_lib::{casc, character, models};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -30,20 +34,25 @@ fn main() {
         }
     };
 
-    let display: u32 = args
-        .next()
-        .and_then(|id| id.parse().ok())
-        .unwrap_or_else(|| usage());
+    let what = args.next().unwrap_or_else(|| usage());
     let out = args.next().unwrap_or_else(|| usage());
 
-    let glb = match models::glb_of(files.as_ref(), display) {
+    // No base skin: see `character::Atlas::base` for what is missing and why.
+    let written = if what == "character" {
+        character::glb_of(files.as_ref(), None).map(Some)
+    } else {
+        let display: u32 = what.parse().unwrap_or_else(|_| usage());
+        models::glb_of(files.as_ref(), display)
+    };
+
+    let glb = match written {
         Ok(Some(glb)) => glb,
         Ok(None) => {
-            eprintln!("Display {display} has no model to show.");
+            eprintln!("{what} has no model to show.");
             std::process::exit(1);
         }
         Err(error) => {
-            eprintln!("Could not read display {display}: {error}");
+            eprintln!("Could not read {what}: {error}");
             std::process::exit(1);
         }
     };
@@ -55,6 +64,8 @@ fn main() {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: dump_model <wow install> | --fixtures <dir>  <displayInfoID>  <out.glb>");
+    eprintln!(
+        "usage: dump_model <wow install> | --fixtures <dir>  <displayInfoID> | character  <out.glb>"
+    );
     std::process::exit(2)
 }

@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat, RgbaImage};
 use serde_json::{json, Value};
 use wow_blp::convert::blp_to_image;
 use wow_blp::parser::parse_blp;
@@ -47,6 +47,20 @@ pub fn data_url(kind: &str, bytes: &[u8]) -> String {
 /// on a model a few hundred, so anything far beyond that is a lookup that landed somewhere
 /// unintended, and re-encoding it would cost more than everything around it put together.
 pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
+    let decoded = pixels_of(blp, largest)?;
+    let mut png = Vec::new();
+    DynamicImage::ImageRgba8(decoded)
+        .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+        .map_err(|error| format!("would not re-encode: {error}"))?;
+    Ok(png)
+}
+
+/// The same texture as pixels rather than as a picture, for whoever is going to composite it.
+///
+/// Everything BLP-specific is here rather than in [`png_of`], because the model work needs the
+/// pixels themselves — a texture blitted into the character's body atlas is never encoded on
+/// its own — and the palette trap below has to be dodged exactly once.
+pub fn pixels_of(blp: &[u8], largest: u32) -> Result<RgbaImage, String> {
     let parsed = parse_blp(blp).map_err(|error| format!("not a texture this build can read: {error}"))?;
     let decoded = blp_to_image(&parsed, 0).map_err(|error| format!("would not decode: {error}"))?;
     let (width, height) = (decoded.width(), decoded.height());
@@ -61,22 +75,13 @@ pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
     // so red and blue arrive swapped for that one encoding, and only that one. The fixtures
     // paint each quadrant a colour whose channels all differ, which is what holds this to
     // account rather than leaving it to be noticed by eye.
-    let corrected = match decoded {
-        DynamicImage::ImageRgb8(_) | DynamicImage::ImageRgba8(_) if is_palettized(blp) => {
-            let mut rgba = decoded.into_rgba8();
-            for pixel in rgba.pixels_mut() {
-                pixel.0.swap(0, 2);
-            }
-            DynamicImage::ImageRgba8(rgba)
+    let mut rgba = decoded.into_rgba8();
+    if is_palettized(blp) {
+        for pixel in rgba.pixels_mut() {
+            pixel.0.swap(0, 2);
         }
-        other => DynamicImage::ImageRgba8(other.into_rgba8()),
-    };
-
-    let mut png = Vec::new();
-    corrected
-        .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
-        .map_err(|error| format!("would not re-encode: {error}"))?;
-    Ok(png)
+    }
+    Ok(rgba)
 }
 
 /// Whether a texture keeps its colours in a palette, which is the encoding whose entries are

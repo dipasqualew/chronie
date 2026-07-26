@@ -1,7 +1,7 @@
 /**
  * Writes the game-file fixtures the transmog tests read: the DB2 tables that describe a set,
- * the BLP icons its appearances name, and the M2 models and skin profiles behind the four
- * slots that have geometry of their own.
+ * the BLP icons its appearances name, the M2 models and skin profiles behind the four slots
+ * that have geometry of their own, and the character body the rest of a set is drawn on.
  *
  * The tables below have exactly the shape the game's own do — same columns, same storage per
  * column, same bit offsets — and content that is entirely invented. Nothing here is copied
@@ -640,6 +640,17 @@ interface ModelPart {
    * the one it lives in is 16 bits wide.
    */
   level: number;
+  /**
+   * Which geoset the submesh belongs to, as `group × 100 + value`. Only a character model has
+   * these: an item's own mesh is drawn whole, and its submeshes all say zero.
+   */
+  geoset?: number;
+  /**
+   * Which entry of the texture combo list the batch reaches its texture through. Zero unless
+   * the model declares several textures and its parts want different ones — which a body
+   * does, because its skin and its hair are supplied separately.
+   */
+  combo?: number;
 }
 
 interface ModelSpec {
@@ -810,7 +821,9 @@ function writeSkin(model: ModelSpec): Uint8Array {
 
   const sections = new Bytes();
   for (const { part, start } of submeshes) {
-    sections.u16(0); // skinSectionId: the geoset, which nothing on an item's own model reads
+    // skinSectionId: the geoset. Zero on every submesh of an item's own model, and what
+    // decides which parts of a body are drawn.
+    sections.u16(part.geoset ?? 0);
     sections.u16(part.level);
     sections.u16(part.cube * 8); // vertexStart
     sections.u16(8); // vertexCount
@@ -835,10 +848,10 @@ function writeSkin(model: ModelSpec): Uint8Array {
     batches.u16(part.material);
     batches.u16(layer);
     batches.u16(1); // textureCount
-    // Combo zero, and the combo list is written backwards — so on the helm, which declares
-    // two textures, this reaches the second. A reader that took the combo index for a texture
-    // index would land on the first, which is the slot the item fills.
-    batches.u16(0);
+    // The combo list is written backwards, so combo zero reaches the *last* texture the model
+    // declares. A reader that took the combo index for a texture index would land on the
+    // first one instead, which on the helm is the slot the item fills.
+    batches.u16(part.combo ?? 0);
     batches.u16(0); // textureCoordComboIndex
     batches.u16(0); // textureWeightComboIndex
     batches.u16(0); // textureTransformComboIndex
@@ -949,6 +962,65 @@ const models: ModelSpec[] = [
 ];
 
 /**
+ * The character everything is worn on, under the FileDataID the retail client keeps
+ * `humanfemale_hd.m2` at.
+ *
+ * A body is not a bigger item model — it is the three things an item model never exercises,
+ * and the fixture exists to hold each of them:
+ *
+ * - **Geosets.** Nine of the eleven cubes are a group's variants, of which exactly one is what
+ *   a body with nothing on it draws. Every group here has a `…01` — bare arms, bare legs, bare
+ *   feet, no helm — beside the variant an item would switch on instead. A reader that drew all
+ *   of them would put two pairs of legs in the same trousers, which is what doubled geometry
+ *   and z-fighting look like from the outside.
+ * - **The `level` trap, on a part that has to be there.** The head sits past the first 64k of
+ *   the index list, and it is one of the parts a bare body draws — so a reader that ignores
+ *   the level does not merely draw something spare, it draws the head from the wrong vertices.
+ *   That is the missing limb.
+ * - **A texture the caller supplies.** The body's skin is M2 texture **type 1**, which is the
+ *   composited atlas rather than a file the model names. The hair beside it is type 6, and is
+ *   the reason type 1 has to be told from "not a file": painting hair with the body atlas
+ *   would be as wrong as painting it with nothing, and much harder to notice.
+ *
+ * Nothing here is copied from the game. It is eleven cubes with the game's own numbering on
+ * them.
+ */
+const characterModel: ModelSpec = {
+  fileDataId: 1000764,
+  skinFileDataId: 1000765,
+  cubes: 11,
+  // Written backwards into the combo list, so combo 1 reaches the skin and combo 0 the hair.
+  textures: [
+    { kind: 1, fileDataId: 0 }, // the composited body atlas
+    { kind: 6, fileDataId: 0 }, // the hair, which this app composites nothing for
+  ],
+  materials: [
+    [0, 0], // the body: opaque
+    [0x04, 1], // the hair: alpha tested and two-sided, which is what a hair sheet is
+  ],
+  parts: [
+    // The skin, which is the one geoset with no group of its own.
+    { cube: 0, from: 0, count: 36, material: 0, level: 0, geoset: 0, combo: 1 },
+    // Group 8, sleeves: bare arms, and the variant a chestpiece would switch on.
+    { cube: 1, from: 0, count: 36, material: 0, level: 0, geoset: 801, combo: 1 },
+    { cube: 2, from: 0, count: 36, material: 0, level: 0, geoset: 802, combo: 1 },
+    // Group 11, pants.
+    { cube: 3, from: 0, count: 36, material: 0, level: 0, geoset: 1101, combo: 1 },
+    { cube: 4, from: 0, count: 36, material: 0, level: 0, geoset: 1104, combo: 1 },
+    // Group 20, feet: bare feet, and boots.
+    { cube: 5, from: 0, count: 36, material: 0, level: 0, geoset: 2001, combo: 1 },
+    { cube: 6, from: 0, count: 36, material: 0, level: 0, geoset: 2002, combo: 1 },
+    // Group 27, helm: no helm, and a helm.
+    { cube: 7, from: 0, count: 36, material: 0, level: 0, geoset: 2701, combo: 1 },
+    { cube: 8, from: 0, count: 36, material: 0, level: 0, geoset: 2702, combo: 1 },
+    // Group 1, hair — the one part painted with something other than the body atlas.
+    { cube: 9, from: 0, count: 36, material: 1, level: 0, geoset: 101, combo: 0 },
+    // Group 21, the skull, past the first 64k indices.
+    { cube: 10, from: 0, count: 36, material: 0, level: 1, geoset: 2101, combo: 1 },
+  ],
+};
+
+/**
  * The icons `ItemAppearance` names, one per encoding the client ships.
  *
  * Which set a given one lands in is worth reading off `itemAppearance` above: sets 201 and
@@ -983,6 +1055,14 @@ const icons: IconSpec[] = [
     fileDataId: 150005, encoding: Encoding.dxt, alphaBits: 8,
     alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
   },
+  // The character's own skin, which is what the body atlas is built on top of. Opaque
+  // throughout, unlike the item textures above: a base with a transparent corner would leave
+  // a quarter of the body see-through, and the four quadrant colours are what says the whole
+  // 2048 × 1024 atlas was covered by it rather than a corner of it.
+  {
+    fileDataId: 160001, encoding: Encoding.dxt, alphaBits: 0,
+    alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
+  },
 ];
 
 
@@ -1005,7 +1085,7 @@ emit("transmog", {
   raw: [
     // Every model is a pair: the geometry, and the skin profile that says which of it is
     // drawn in which batch.
-    ...models.flatMap((model) => [
+    ...[...models, characterModel].flatMap((model) => [
       { fileDataId: model.fileDataId, extension: "m2", bytes: writeModel(model) },
       { fileDataId: model.skinFileDataId, extension: "skin", bytes: writeSkin(model) },
     ]),
