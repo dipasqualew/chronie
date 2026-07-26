@@ -2008,7 +2008,8 @@ ChronieDB = { ["segments"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["s
             format!(
                 r#"
 ChronieDB = {{ ["segments"] = {{
-  {{ ["id"] = "kept", ["character"] = "Aster-Vale", ["instance"] = "Glass Caverns",
+  {{ ["id"] = "kept", ["character"] = "Aster-Vale", ["classFile"] = "MAGE",
+     ["instance"] = "Glass Caverns",
      ["endedAt"] = {now}, ["lootValue"] = 1200,
      ["transmogs"] = {{
        {{ ["id"] = 19019, ["sourceID"] = 11, ["appearanceID"] = 22,
@@ -2033,6 +2034,9 @@ ChronieDB = {{ ["segments"] = {{
 
         let payload = dashboard(&database).unwrap();
         assert_eq!(payload["segments"][0]["id"], "kept");
+        // The class is filed against the character and read back through the join, which is
+        // the only route it has to the window that colours the cast by it.
+        assert_eq!(payload["segments"][0]["classFile"], "MAGE");
         assert_eq!(
             payload["segments"][0]["transmogs"][0]["newAppearance"],
             true
