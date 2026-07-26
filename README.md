@@ -1,7 +1,7 @@
-# WDP
+# Chronie
 
-WDP is a small World of Warcraft addon plus a Windows desktop companion. The
-addon records sessions in SavedVariables. The desktop app collects those records
+Chronie is a small World of Warcraft addon plus a Windows desktop companion. The
+addon records segments in SavedVariables. The desktop app collects those records
 in the background, displays the seven-day report, and installs or updates the
 addon for you.
 
@@ -23,14 +23,14 @@ open PowerShell and run:
 irm https://raw.githubusercontent.com/dipasqualew/chronie/main/scripts/install.ps1 | iex
 ```
 
-The installer is per-user and does not require administrator access. WDP starts
+The installer is per-user and does not require administrator access. Chronie starts
 with Windows and stays in the system tray when its window is closed.
 
 Open **Setup**, choose either the World of Warcraft folder or its `_retail_`
 folder, then select **Install or update addon**. That button downloads the public
-`main` branch, installs only `apps/addon` as `Interface/AddOns/chronie`, and
-removes the legacy `wdp-wow` add-on folder. Select **Sync now** after `/reload`
-or logging out; WDP also checks SavedVariables every 30 seconds in the background.
+`main` branch and installs only `apps/addon` as `Interface/AddOns/chronie`.
+Select **Sync now** after `/reload` or logging out; Chronie also checks
+SavedVariables every 30 seconds in the background.
 
 ## Development
 
@@ -71,8 +71,8 @@ Successive builds replace its assets instead of creating a long list of releases
 Each build gets an increasing `0.1.<run number>` version, allowing Tauri to detect
 it as newer.
 
-Before running it for the first time, authenticate GitHub CLI with `gh auth
-login`, then run:
+The workflow always publishes a Windows installer. To additionally publish signed
+automatic-update artifacts, authenticate GitHub CLI with `gh auth login`, then run:
 
 ```powershell
 .\scripts\setup-signing.ps1

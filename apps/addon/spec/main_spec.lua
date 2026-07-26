@@ -472,11 +472,11 @@ describe("addon integration", function()
     end)
 
     describe("the slash command", function()
-        it("registers a handler under /wdp", function()
+        it("registers a handler under /chronie", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             assert.equal(1, #recorded.slashRegistrations)
-            assert.same({ "/wdp" }, recorded.slashRegistrations[1].tokens)
+            assert.same({ "/chronie" }, recorded.slashRegistrations[1].tokens)
             assert.is_function(recorded.slashRegistrations[1].handler)
         end)
 
@@ -486,15 +486,15 @@ describe("addon integration", function()
             recorded.slashRegistrations[1].handler("nonsense")
 
             assert.equal(1, #recorded.lines)
-            assert.is_truthy(recorded.lines[1]:find("usage: /wdp locks", 1, true))
+            assert.is_truthy(recorded.lines[1]:find("usage: /chronie locks", 1, true))
         end)
 
-        it("prints usage when /wdp is typed bare", function()
+        it("prints usage when /chronie is typed bare", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("")
 
-            assert.is_truthy(recorded.lines[1]:find("usage: /wdp locks", 1, true))
+            assert.is_truthy(recorded.lines[1]:find("usage: /chronie locks", 1, true))
         end)
 
         it("has locks wired up out of the box, so it never reaches onUnknown", function()
@@ -659,7 +659,7 @@ describe("addon integration", function()
         local function rowCellsOf(recorded)
             local scrollChild
             for _, frame in ipairs(recorded.frames) do
-                if frame.parent and frame.parent.frameName == "WdpWowLockoutScroll" then
+                if frame.parent and frame.parent.frameName == "ChronieLockoutScroll" then
                     scrollChild = frame
                     break
                 end
@@ -824,7 +824,7 @@ describe("addon integration", function()
 
             assert.is_true(app.instanceWindow.isShown())
             assert.is_true(contains(
-                textsOf(recorded, "WdpWowInstanceDetailWindow"),
+                textsOf(recorded, "ChronieInstanceDetailWindow"),
                 "Ulduar"
             ))
         end)
@@ -847,7 +847,7 @@ describe("addon integration", function()
 
             assert.is_true(app.characterWindow.isShown())
             assert.is_true(contains(
-                textsOf(recorded, "WdpWowCharacterDetailWindow"),
+                textsOf(recorded, "ChronieCharacterDetailWindow"),
                 "Thrall-Ragnaros"
             ))
         end)
@@ -860,9 +860,9 @@ describe("addon integration", function()
             characterCell:run("OnClick")
 
             assert.same({
-                "WdpWowLockoutWindow",
-                "WdpWowInstanceDetailWindow",
-                "WdpWowCharacterDetailWindow",
+                "ChronieLockoutWindow",
+                "ChronieInstanceDetailWindow",
+                "ChronieCharacterDetailWindow",
             }, recorded.specialFrames)
         end)
     end)
@@ -1006,7 +1006,7 @@ describe("addon integration", function()
         end)
     end)
 
-    describe("the current session panel", function()
+    describe("the current segment panel", function()
         ---@param itemID integer
         ---@return string a self-loot chat line's item link
         local function link(itemID)
@@ -1016,11 +1016,11 @@ describe("addon integration", function()
         it("stays lazy until a zone is entered or the slash is used", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
-            -- Only the event dispatcher's frame exists; the session panel is lazy.
+            -- Only the event dispatcher's frame exists; the segment panel is lazy.
             assert.equal(2, #recorded.frames)
         end)
 
-        -- Every zone is a session now, so the panel comes up in the open world too — the
+        -- Every zone is a segment now, so the panel comes up in the open world too — the
         -- current breakdown is always on show, not only inside instances.
         it("shows the panel on entering the open world", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", instanceType = nil })
@@ -1057,7 +1057,7 @@ describe("addon integration", function()
             recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            -- A fresh world session is open, so the tally is active and the panel stays on.
+            -- A fresh world segment is open, so the tally is active and the panel stays on.
             assert.is_true(app.tally.isActive())
             assert.is_true(app.resultsWindow.isShown())
         end)
@@ -1206,7 +1206,7 @@ describe("addon integration", function()
             assert.same({ { level = 3, at = 1700000000 } }, app.tally.summary().housingLevelUps)
         end)
 
-        -- The open world is a tracked session now, so a loot line out there counts just
+        -- The open world is a tracked segment now, so a loot line out there counts just
         -- as it would inside an instance.
         it("tracks loot fired out in the open world", function()
             local app, recorded = boot({
@@ -1318,7 +1318,7 @@ describe("addon integration", function()
             recorded.setCursorItem(5001)
             local slot
             for _, frame in ipairs(recorded.frames) do
-                if frame.parent and frame.parent.frameName == "WdpWowCurrencyWindow"
+                if frame.parent and frame.parent.frameName == "ChronieCurrencyWindow"
                     and frame.frameType == "Button" and frame.template == "BackdropTemplate" then
                     slot = frame
                 end
@@ -1442,7 +1442,7 @@ describe("addon integration", function()
             assert.is_nil(quest.accountFirst)
         end)
 
-        it("registers the events that feed the session panel", function()
+        it("registers the events that feed the segment panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             assert.equal(1, recorded.frame.registered.PLAYER_MONEY)
@@ -1465,7 +1465,7 @@ describe("addon integration", function()
         end)
     end)
 
-    describe("recording sessions", function()
+    describe("recording segments", function()
         local NOW = 1700000000
 
         ---Boot a character standing in the default fake instance, ready to zone.
@@ -1482,7 +1482,7 @@ describe("addon integration", function()
             return app, recorded
         end
 
-        ---Give the open session an event, the way a coin pickup would, so it is not
+        ---Give the open segment an event, the way a coin pickup would, so it is not
         ---dropped as empty when it closes.
         ---@param recorded table
         ---@param amount integer
@@ -1491,13 +1491,13 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_MONEY")
         end
 
-        it("writes nothing while the session is still under way", function()
+        it("writes nothing while the segment is still under way", function()
             local _, recorded = inside()
 
-            assert.same({}, recorded.db.sessions)
+            assert.same({}, recorded.db.segments)
         end)
 
-        it("files the session into the db on the way back out to the world", function()
+        it("files the segment into the db on the way back out to the world", function()
             local _, recorded = inside({
                 class = "Warrior",
                 classFile = "WARRIOR",
@@ -1510,8 +1510,8 @@ describe("addon integration", function()
             recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.equal(1, #recorded.db.sessions)
-            local record = recorded.db.sessions[1]
+            assert.equal(1, #recorded.db.segments)
+            local record = recorded.db.segments[1]
             assert.equal("Thrall-Ragnaros", record.character)
             assert.equal("Deadmines", record.instance)
             assert.equal("Normal", record.difficulty)
@@ -1520,7 +1520,7 @@ describe("addon integration", function()
             assert.equal(1800, record.seconds)
         end)
 
-        -- A session that saw nothing — a load screen straight back out — leaves no trace.
+        -- A segment that saw nothing — a load screen straight back out — leaves no trace.
         it("drops an empty visit rather than filing it", function()
             local _, recorded = inside()
 
@@ -1528,10 +1528,10 @@ describe("addon integration", function()
             recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.same({}, recorded.db.sessions)
+            assert.same({}, recorded.db.segments)
         end)
 
-        it("carries the session's takings onto the filed record", function()
+        it("carries the segment's takings onto the filed record", function()
             local _, recorded = inside({ money = 0, itemPrices = { [4242] = 60 } })
 
             earn(recorded, 2500)
@@ -1542,7 +1542,7 @@ describe("addon integration", function()
             recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            local record = recorded.db.sessions[1]
+            local record = recorded.db.segments[1]
             -- Loot value is inventory intake only; the wallet is reported separately.
             assert.equal(120, record.lootValue)
             assert.equal(2500, record.goldDiff)
@@ -1560,10 +1560,10 @@ describe("addon integration", function()
             recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.equal(2, #recorded.db.sessions)
+            assert.equal(2, #recorded.db.segments)
         end)
 
-        it("starts a new outdoor session after a seamless taxi zone change", function()
+        it("starts a new outdoor segment after a seamless taxi zone change", function()
             local _, recorded = inside({
                 instanceName = "Dragonblight",
                 instanceType = "none",
@@ -1584,32 +1584,32 @@ describe("addon integration", function()
             )
             recorded.frame:fire("PLAYER_LOGOUT")
 
-            assert.equal(2, #recorded.db.sessions)
-            assert.equal("Dragonblight", recorded.db.sessions[1].instance)
-            assert.equal(40, recorded.db.sessions[1].lootValue)
-            assert.equal("Borean Tundra", recorded.db.sessions[2].instance)
-            assert.equal(75, recorded.db.sessions[2].lootValue)
+            assert.equal(2, #recorded.db.segments)
+            assert.equal("Dragonblight", recorded.db.segments[1].instance)
+            assert.equal(40, recorded.db.segments[1].lootValue)
+            assert.equal("Borean Tundra", recorded.db.segments[2].instance)
+            assert.equal(75, recorded.db.segments[2].lootValue)
         end)
 
-        -- SavedVariables only reach disk when the client shuts down, so a session that
+        -- SavedVariables only reach disk when the client shuts down, so a segment that
         -- is still open at logout has to be filed there or it is lost outright.
-        it("files the open session when the player logs out inside the instance", function()
+        it("files the open segment when the player logs out inside the instance", function()
             local _, recorded = inside({ money = 0 })
             earn(recorded, 300)
 
             recorded.frame:fire("PLAYER_LOGOUT")
 
-            assert.equal(1, #recorded.db.sessions)
-            assert.equal("Deadmines", recorded.db.sessions[1].instance)
+            assert.equal(1, #recorded.db.segments)
+            assert.equal("Deadmines", recorded.db.segments[1].instance)
         end)
 
-        it("files nothing at logout when the open session saw nothing", function()
+        it("files nothing at logout when the open segment saw nothing", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", instanceType = nil })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             recorded.frame:fire("PLAYER_LOGOUT")
 
-            assert.same({}, recorded.db.sessions)
+            assert.same({}, recorded.db.segments)
         end)
 
         it("registers the logout event that flushes the visit", function()
@@ -1618,7 +1618,7 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.PLAYER_LOGOUT)
         end)
 
-        it("keeps both characters' sessions in one shared db", function()
+        it("keeps both characters' segments in one shared db", function()
             local db = {}
             local _, first = inside({ db = db, money = 0 })
             earn(first, 500)
@@ -1630,61 +1630,61 @@ describe("addon integration", function()
             second.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
             second.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.equal(2, #db.sessions)
+            assert.equal(2, #db.segments)
         end)
     end)
 
-    describe("the /wdp sessions slash command", function()
+    describe("the /chronie segments slash command", function()
         it("opens from the minimap button", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             for _, frame in ipairs(recorded.frames) do
-                if frame.frameName == "WdpWowMinimapButton" then
+                if frame.frameName == "ChronieMinimapButton" then
                     frame:run("OnClick")
                 end
             end
 
-            assert.is_true(app.sessionWindow.isShown())
+            assert.is_true(app.segmentWindow.isShown())
         end)
 
-        it("opens the session window on the first call and closes it on the second", function()
+        it("opens the segment window on the first call and closes it on the second", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
-            recorded.slashRegistrations[1].handler("sessions")
-            assert.is_true(app.sessionWindow.isShown())
+            recorded.slashRegistrations[1].handler("segments")
+            assert.is_true(app.segmentWindow.isShown())
 
-            recorded.slashRegistrations[1].handler("sessions")
-            assert.is_false(app.sessionWindow.isShown())
+            recorded.slashRegistrations[1].handler("segments")
+            assert.is_false(app.segmentWindow.isShown())
         end)
 
         it("titles the window with the retention window", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
-            recorded.slashRegistrations[1].handler("sessions")
+            recorded.slashRegistrations[1].handler("segments")
 
             local titles = {}
             for _, frame in ipairs(recorded.frames) do
-                if frame.frameName == "WdpWowSessionWindow" then
+                if frame.frameName == "ChronieSegmentWindow" then
                     for index, fontString in ipairs(frame.fontStrings) do
                         titles[index] = fontString.text
                     end
                 end
             end
-            assert.equal("Sessions — last 7 days", titles[1])
+            assert.equal("Segments — last 7 days", titles[1])
         end)
 
         it("stays lazy until the slash is used", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
             assert.equal(2, #recorded.frames)
 
-            recorded.slashRegistrations[1].handler("sessions")
+            recorded.slashRegistrations[1].handler("segments")
 
             assert.is_true(#recorded.frames > 1)
         end)
 
         it("filters the table and its totals as character, day, and location are edited", function()
             local db = {
-                sessions = {
+                segments = {
                     {
                         id = "a",
                         character = "Thrall-Ragnaros",
@@ -1716,7 +1716,7 @@ describe("addon integration", function()
                 },
             }
             local _, recorded = boot({ db = db, now = 1100 })
-            recorded.slashRegistrations[1].handler("sessions")
+            recorded.slashRegistrations[1].handler("segments")
 
             local edits = {}
             for _, frame in ipairs(recorded.frames) do
@@ -1748,19 +1748,19 @@ describe("addon integration", function()
             assert.is_nil(visible["Deadmines"])
         end)
 
-        it("names sessions, currency and report in the usage text", function()
+        it("names segments, currency and report in the usage text", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("nonsense")
 
             assert.equal(
-                "|cff33ff99chronie|r: usage: /wdp locks | results | sessions | currency | report",
+                "|cff33ff99chronie|r: usage: /chronie locks | results | segments | currency | report",
                 recorded.lines[1]
             )
         end)
     end)
 
-    describe("the /wdp report slash command", function()
+    describe("the /chronie report slash command", function()
         ---@param recorded table
         ---@return string[] the text every edit box in the report window carries
         local function commands(recorded)
@@ -1837,16 +1837,16 @@ describe("addon integration", function()
         end)
     end)
 
-    describe("the /wdp results slash command", function()
+    describe("the /chronie results slash command", function()
         it("names results in the usage text for an unknown subcommand", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("nonsense")
 
-            assert.is_truthy(recorded.lines[1]:find("usage: /wdp locks | results", 1, true))
+            assert.is_truthy(recorded.lines[1]:find("usage: /chronie locks | results", 1, true))
         end)
 
-        it("opens the panel on the first /wdp results", function()
+        it("opens the panel on the first /chronie results", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("results")
@@ -1854,7 +1854,7 @@ describe("addon integration", function()
             assert.is_true(app.resultsWindow.isShown())
         end)
 
-        it("closes the panel on a second /wdp results", function()
+        it("closes the panel on a second /chronie results", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("results")

@@ -12,7 +12,7 @@ const DAY_SECONDS: i64 = 86_400;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Database {
-    pub sessions: Vec<Value>,
+    pub segments: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -20,7 +20,7 @@ pub struct Database {
 pub struct SyncResult {
     pub added: usize,
     pub dropped: usize,
-    pub session_count: usize,
+    pub segment_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -360,8 +360,8 @@ pub fn account_files(wow_path: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn normalized(mut session: Value) -> Option<Value> {
-    let object = session.as_object_mut()?;
+fn normalized(mut segment: Value) -> Option<Value> {
+    let object = segment.as_object_mut()?;
     if !object.get("id").is_some_and(Value::is_string)
         || !object.get("character").is_some_and(Value::is_string)
         || !object.get("endedAt").is_some_and(Value::is_number)
@@ -405,7 +405,7 @@ fn normalized(mut session: Value) -> Option<Value> {
             object.insert(key.into(), Value::Array(Vec::new()));
         }
     }
-    Some(session)
+    Some(segment)
 }
 
 pub fn load_database(path: &Path) -> Database {
@@ -428,14 +428,14 @@ pub fn collect(
         let Some(saved) = read_saved_variable(&text, "ChronieDB")? else {
             continue;
         };
-        let Some(sessions) = saved.get("sessions").and_then(Value::as_array) else {
+        let Some(segments) = saved.get("segments").and_then(Value::as_array) else {
             continue;
         };
-        incoming.extend(sessions.iter().cloned().filter_map(normalized));
+        incoming.extend(segments.iter().cloned().filter_map(normalized));
     }
     let mut database = load_database(database_path);
     let mut by_id: HashMap<String, Value> = database
-        .sessions
+        .segments
         .into_iter()
         .filter_map(|value| {
             let id = value.get("id")?.as_str()?.to_string();
@@ -446,7 +446,7 @@ pub fn collect(
     for value in incoming {
         let id = value["id"]
             .as_str()
-            .expect("normalized session id")
+            .expect("normalized segment id")
             .to_string();
         if !by_id.contains_key(&id) {
             added += 1;
@@ -467,7 +467,7 @@ pub fn collect(
             value,
         );
     }
-    database.sessions = ordered.into_values().collect();
+    database.segments = ordered.into_values().collect();
     if let Some(parent) = database_path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -479,7 +479,7 @@ pub fn collect(
     Ok(SyncResult {
         added,
         dropped,
-        session_count: database.sessions.len(),
+        segment_count: database.segments.len(),
     })
 }
 
@@ -488,7 +488,7 @@ pub fn dashboard(database_path: &Path) -> Value {
     serde_json::json!({
         "generatedAt": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         "retainDays": 7,
-        "sessions": database.sessions,
+        "segments": database.segments,
     })
 }
 
@@ -501,12 +501,12 @@ mod tests {
     fn reads_nested_saved_variables_without_game_runtime() {
         let parsed = read_saved_variable(
             r#"Other = { 1 }
-ChronieDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["score"] = -2.5 } } }"#,
+ChronieDB = { ["segments"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["score"] = -2.5 } } }"#,
             "ChronieDB",
         ).unwrap().unwrap();
-        assert_eq!(parsed["sessions"][0]["id"], "synthetic-1");
-        assert_eq!(parsed["sessions"][0]["enabled"], true);
-        assert_eq!(parsed["sessions"][0]["score"], -2.5);
+        assert_eq!(parsed["segments"][0]["id"], "synthetic-1");
+        assert_eq!(parsed["segments"][0]["enabled"], true);
+        assert_eq!(parsed["segments"][0]["score"], -2.5);
     }
 
     #[test]
@@ -531,7 +531,7 @@ ChronieDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["s
     }
 
     #[test]
-    fn collects_merges_and_expires_synthetic_sessions() {
+    fn collects_merges_and_expires_synthetic_segments() {
         let temp = tempfile::tempdir().unwrap();
         let wow = temp.path().join("_retail_");
         let saved = wow.join("WTF/Account/TEST/SavedVariables");
@@ -541,7 +541,7 @@ ChronieDB = { ["sessions"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["s
             saved.join("chronie.lua"),
             format!(
                 r#"
-ChronieDB = {{ ["sessions"] = {{
+ChronieDB = {{ ["segments"] = {{
   {{ ["id"] = "kept", ["character"] = "Aster-Vale", ["instance"] = "Glass Caverns",
      ["endedAt"] = {now}, ["lootValue"] = 1200 }},
   {{ ["id"] = "old", ["character"] = "Brin-Vale", ["endedAt"] = {} }}
@@ -550,10 +550,10 @@ ChronieDB = {{ ["sessions"] = {{
             ),
         )
         .unwrap();
-        let database = temp.path().join("data/sessions.json");
+        let database = temp.path().join("data/segments.json");
         let result = collect(&wow, &database, 7, now).unwrap();
         assert_eq!(result.added, 2);
         assert_eq!(result.dropped, 1);
-        assert_eq!(load_database(&database).sessions[0]["id"], "kept");
+        assert_eq!(load_database(&database).segments[0]["id"], "kept");
     }
 }

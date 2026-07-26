@@ -19,7 +19,7 @@ local _, ns = ...
 
 local DEFAULT_PYTHON = "python"
 local DEFAULT_ADDON_PATH = "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Interface\\AddOns\\chronie"
-local DEFAULT_OUTPUT_PATH = "%LOCALAPPDATA%\\wdp-wow"
+local DEFAULT_OUTPUT_PATH = "%LOCALAPPDATA%\\chronie"
 
 ---@param deps ReportCommandDeps?
 ---@return ReportCommand

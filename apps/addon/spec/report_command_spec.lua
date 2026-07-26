@@ -54,7 +54,7 @@ describe("ns.newReportCommand", function()
         end)
 
         it("sends the player to the report under LOCALAPPDATA", function()
-            assert.equal("%LOCALAPPDATA%\\wdp-wow\\report.html", ns.newReportCommand().lines()[3].text)
+            assert.equal("%LOCALAPPDATA%\\chronie\\report.html", ns.newReportCommand().lines()[3].text)
         end)
 
         it("treats an empty deps table as no deps at all", function()

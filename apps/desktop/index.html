@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wdp-wow — sessions</title>
+<title>Chronie — segments</title>
 <style>
   :root {
     color-scheme: light;
@@ -185,15 +185,15 @@
 <body>
 <div class="wrap">
   <nav class="appbar" aria-label="Application">
-    <span class="brand">WDP</span>
-    <button id="sessions-tab" class="primary" type="button">Sessions</button>
+    <span class="brand">Chronie</span>
+    <button id="segments-tab" class="primary" type="button">Segments</button>
     <button id="settings-tab" type="button">Setup</button>
   </nav>
 
   <section id="setup-view" hidden>
     <div class="panel setup">
       <h1>Setup</h1>
-      <p class="sub">Choose the game’s <strong>_retail_</strong> folder. WDP will sync sessions and manage the addon from there.</p>
+      <p class="sub">Choose the game’s <strong>_retail_</strong> folder. Chronie will sync segments and manage the addon from there.</p>
       <div class="setup-grid">
         <label>Game folder
           <span class="path-row">
@@ -213,9 +213,9 @@
     </div>
   </section>
 
-  <main id="sessions-view">
+  <main id="segments-view">
   <header>
-    <h1>Sessions</h1>
+    <h1>Segments</h1>
     <div class="sub" id="meta"></div>
   </header>
 
@@ -223,24 +223,24 @@
 
   <section class="panel chart">
     <h2>Loot value per day</h2>
-    <div class="sub">Vendor value of items added to inventory, by the day the session ended.</div>
+    <div class="sub">Vendor value of items added to inventory, by the day the segment ended.</div>
     <svg id="chart" viewBox="0 0 900 220" role="img" aria-label="Loot value per day"></svg>
   </section>
 
   <section class="panel timeline-panel">
     <div class="table-head">
       <h2>Timeline</h2>
-      <div class="sub">Every session as it happened, newest first, across characters.</div>
+      <div class="sub">Every segment as it happened, newest first, across characters.</div>
     </div>
     <div id="timeline" class="timeline"></div>
   </section>
 
   <section class="panel">
     <div class="table-head">
-      <h2>Every session</h2>
+      <h2>Every segment</h2>
       <div class="sub">Click a column to sort.</div>
       <div class="controls">
-        <input id="search" type="search" placeholder="Filter location or character…" aria-label="Filter sessions">
+        <input id="search" type="search" placeholder="Filter location or character…" aria-label="Filter segments">
         <select id="character" aria-label="Character"></select>
         <select id="day" aria-label="Day"></select>
         <span class="count" id="count"></span>
@@ -261,7 +261,7 @@
 import { desktop, message } from "/src/bridge.js";
 
 const PAYLOAD = await desktop.dashboard();
-const SESSIONS = PAYLOAD.sessions || [];
+const SEGMENTS = PAYLOAD.segments || [];
 
 // The client's own class colours, so a character reads the same here as in game.
 const CLASS_COLORS = {
@@ -281,16 +281,16 @@ function gold(copper) {
   return `${c}c`;
 }
 
-// A net difference keeps its sign, so a session that ended down on gold reads as a loss.
+// A net difference keeps its sign, so a segment that ended down on gold reads as a loss.
 function signedGold(copper) {
   const value = Math.round(copper || 0);
   if (value < 0) return `-${gold(-value)}`;
   return gold(value);
 }
 
-// "none" for open world, else "instance"; used as a small badge on each session.
-const isInstance = (session) => !!session.instanceType && session.instanceType !== "none";
-const locationType = (session) => (isInstance(session) ? "instance" : "world");
+// "none" for open world, else "instance"; used as a small badge on each segment.
+const isInstance = (segment) => !!segment.instanceType && segment.instanceType !== "none";
+const locationType = (segment) => (isInstance(segment) ? "instance" : "world");
 
 function duration(seconds) {
   const total = Math.max(Math.round(seconds || 0), 0);
@@ -355,27 +355,27 @@ function escapeHtml(text) {
 
 /* ---------- header + tiles ---------- */
 
-const totals = SESSIONS.reduce((acc, session) => {
-  acc.lootValue += session.lootValue || 0;
-  acc.goldDiff += session.goldDiff || 0;
-  acc.seconds += session.seconds || 0;
-  acc.transmogs += (session.transmogs || []).length;
-  acc.appearances += (session.transmogs || []).filter((event) => event.newAppearance).length;
-  acc.variants += (session.transmogs || []).filter((event) => event.newAppearance === false).length;
-  acc.achievements += (session.achievements || []).length;
-  acc.levelUps += (session.levelUps || []).length;
-  acc.mounts += (session.mounts || []).length;
-  acc.pets += (session.pets || []).length;
-  acc.quests += (session.quests || []).length;
-  acc.toys += (session.toys || []).length;
-  acc.housingItems += (session.housingItems || []).length;
-  acc.housingWarband += (session.housingItems || []).filter((event) => event.warbandFirst).length;
-  acc.housingXP += session.housingXP || 0;
-  acc.housingLevelUps += (session.housingLevelUps || []).length;
-  (session.reputation || []).forEach((gain) => {
+const totals = SEGMENTS.reduce((acc, segment) => {
+  acc.lootValue += segment.lootValue || 0;
+  acc.goldDiff += segment.goldDiff || 0;
+  acc.seconds += segment.seconds || 0;
+  acc.transmogs += (segment.transmogs || []).length;
+  acc.appearances += (segment.transmogs || []).filter((event) => event.newAppearance).length;
+  acc.variants += (segment.transmogs || []).filter((event) => event.newAppearance === false).length;
+  acc.achievements += (segment.achievements || []).length;
+  acc.levelUps += (segment.levelUps || []).length;
+  acc.mounts += (segment.mounts || []).length;
+  acc.pets += (segment.pets || []).length;
+  acc.quests += (segment.quests || []).length;
+  acc.toys += (segment.toys || []).length;
+  acc.housingItems += (segment.housingItems || []).length;
+  acc.housingWarband += (segment.housingItems || []).filter((event) => event.warbandFirst).length;
+  acc.housingXP += segment.housingXP || 0;
+  acc.housingLevelUps += (segment.housingLevelUps || []).length;
+  (segment.reputation || []).forEach((gain) => {
     acc.reputation[gain.faction] = (acc.reputation[gain.faction] || 0) + gain.amount;
   });
-  (session.currencies || []).forEach((gain) => {
+  (segment.currencies || []).forEach((gain) => {
     acc.currencies[gain.name] = (acc.currencies[gain.name] || 0) + gain.amount;
   });
   return acc;
@@ -403,16 +403,16 @@ const completedTotals = {
   "Housing levels": totals.housingLevelUps,
 };
 
-$("meta").textContent = SESSIONS.length
-  ? `${SESSIONS.length} sessions over the last ${PAYLOAD.retainDays} days` +
+$("meta").textContent = SEGMENTS.length
+  ? `${SEGMENTS.length} segments over the last ${PAYLOAD.retainDays} days` +
     (PAYLOAD.generatedAt ? ` · collected ${new Date(PAYLOAD.generatedAt).toLocaleString()}` : "")
   : "Nothing collected yet — play for a bit, then log out or /reload so the game writes its saved variables.";
 
 $("tiles").innerHTML = [
-  { label: "Sessions", value: SESSIONS.length, foot: `${new Set(SESSIONS.map((s) => s.character)).size} characters` },
+  { label: "Segments", value: SEGMENTS.length, foot: `${new Set(SEGMENTS.map((s) => s.character)).size} characters` },
   { label: "Loot value", value: gold(totals.lootValue), foot: "items entering inventory" },
   { label: "Net gold", value: signedGold(totals.goldDiff), foot: "wallet change", cls: totals.goldDiff < 0 ? "loss" : "gold" },
-  { label: "Time played", value: duration(totals.seconds), foot: "across every session" },
+  { label: "Time played", value: duration(totals.seconds), foot: "across every segment" },
   {
     label: "New transmog",
     value: totals.appearances,
@@ -468,16 +468,16 @@ const hideTooltip = () => { tooltip.style.opacity = "0"; };
 function drawChart() {
   const svg = $("chart");
   const byDay = new Map();
-  SESSIONS.forEach((session) => {
-    const bucket = byDay.get(session.day) || { gold: 0, runs: 0 };
-    bucket.gold += session.lootValue || 0;
+  SEGMENTS.forEach((segment) => {
+    const bucket = byDay.get(segment.day) || { gold: 0, runs: 0 };
+    bucket.gold += segment.lootValue || 0;
     bucket.runs += 1;
-    byDay.set(session.day, bucket);
+    byDay.set(segment.day, bucket);
   });
 
   // Every day in the window, so a blank day reads as a gap rather than vanishing.
   const days = [];
-  const last = SESSIONS.length ? new Date(`${[...byDay.keys()].sort().pop()}T00:00:00`) : new Date();
+  const last = SEGMENTS.length ? new Date(`${[...byDay.keys()].sort().pop()}T00:00:00`) : new Date();
   for (let back = PAYLOAD.retainDays - 1; back >= 0; back -= 1) {
     const date = new Date(last);
     date.setDate(date.getDate() - back);
@@ -518,7 +518,7 @@ function drawChart() {
 
   svg.querySelectorAll(".bar-group").forEach((group) => {
     const move = (event) => showTooltip(event,
-      `<b>${escapeHtml(group.dataset.day)}</b>${escapeHtml(gold(Number(group.dataset.gold)))} · ${group.dataset.runs} session(s)`);
+      `<b>${escapeHtml(group.dataset.day)}</b>${escapeHtml(gold(Number(group.dataset.gold)))} · ${group.dataset.runs} segment(s)`);
     group.addEventListener("mousemove", move);
     group.addEventListener("mouseleave", hideTooltip);
   });
@@ -528,84 +528,84 @@ drawChart();
 
 /* ---------- the timeline ---------- */
 
-// Sessions arrive newest first from the collector; the timeline groups them by day and
+// Segments arrive newest first from the collector; the timeline groups them by day and
 // lays each one out as a moment — who, where, and what it yielded — across characters.
 function drawTimeline() {
   const host = $("timeline");
-  if (SESSIONS.length === 0) {
-    host.innerHTML = '<div class="empty">No sessions collected yet.</div>';
+  if (SEGMENTS.length === 0) {
+    host.innerHTML = '<div class="empty">No segments collected yet.</div>';
     return;
   }
 
   const byDay = new Map();
   const order = [];
-  SESSIONS.forEach((session) => {
-    if (!byDay.has(session.day)) {
-      byDay.set(session.day, []);
-      order.push(session.day);
+  SEGMENTS.forEach((segment) => {
+    if (!byDay.has(segment.day)) {
+      byDay.set(segment.day, []);
+      order.push(segment.day);
     }
-    byDay.get(session.day).push(session);
+    byDay.get(segment.day).push(segment);
   });
 
-  const chips = (session) => {
+  const chips = (segment) => {
     const parts = [];
-    if ((session.currencies || []).length) parts.push(`<span class="chip">${escapeHtml(currencyText(session.currencies))}</span>`);
-    (session.achievements || []).forEach((event) => {
+    if ((segment.currencies || []).length) parts.push(`<span class="chip">${escapeHtml(currencyText(segment.currencies))}</span>`);
+    (segment.achievements || []).forEach((event) => {
       parts.push(`<span class="chip achv">🏆 ${escapeHtml(event.name)} · ${escapeHtml(achievementScope(event))}</span>`);
     });
-    (session.levelUps || []).forEach((event) => {
+    (segment.levelUps || []).forEach((event) => {
       parts.push(`<span class="chip">⬆️ Level ${escapeHtml(event.level)}</span>`);
     });
     ["mounts", "pets", "toys"].forEach((key) => {
-      (session[key] || []).forEach((event) => {
+      (segment[key] || []).forEach((event) => {
         parts.push(`<span class="chip">${escapeHtml(event.name)}</span>`);
       });
     });
-    (session.transmogs || []).forEach((event) => {
+    (segment.transmogs || []).forEach((event) => {
       parts.push(`<span class="chip">${transmogLink(event)}</span>`);
     });
-    (session.quests || []).forEach((event) => {
+    (segment.quests || []).forEach((event) => {
       parts.push(`<span class="chip">${questLink(event)}</span>`);
     });
-    (session.housingItems || []).forEach((event) => {
+    (segment.housingItems || []).forEach((event) => {
       parts.push(`<span class="chip">🏠 ${escapeHtml(event.name)} · ${escapeHtml(housingScope(event))}</span>`);
     });
-    (session.housingLevelUps || []).forEach((event) => {
+    (segment.housingLevelUps || []).forEach((event) => {
       parts.push(`<span class="chip">⬆️ Housing Level ${escapeHtml(event.level)}</span>`);
     });
     return parts.length ? `<div class="tl-extras">${parts.join("")}</div>` : "";
   };
 
-  const stats = (session) => {
-    const bits = [`Loot value ${gold(session.lootValue)}`];
-    if (session.goldDiff) bits.push(`Gold ${signedGold(session.goldDiff)}`);
-    if ((session.transmogs || []).length) bits.push(`Transmog ${session.transmogs.length}`);
-    if ((session.levelUps || []).length) bits.push(`Level ups ${session.levelUps.length}`);
-    if ((session.mounts || []).length) bits.push(`Mounts ${session.mounts.length}`);
-    if ((session.pets || []).length) bits.push(`Pets ${session.pets.length}`);
-    if ((session.toys || []).length) bits.push(`Toys ${session.toys.length}`);
-    if ((session.housingItems || []).length) bits.push(`Housing items ${session.housingItems.length}`);
-    if (session.housingXP) bits.push(`Housing XP ${signed(session.housingXP)}`);
-    if ((session.housingLevelUps || []).length) bits.push(`Housing levels ${session.housingLevelUps.length}`);
-    if ((session.reputation || []).length) bits.push(`Rep ${repText(session.reputation)}`);
+  const stats = (segment) => {
+    const bits = [`Loot value ${gold(segment.lootValue)}`];
+    if (segment.goldDiff) bits.push(`Gold ${signedGold(segment.goldDiff)}`);
+    if ((segment.transmogs || []).length) bits.push(`Transmog ${segment.transmogs.length}`);
+    if ((segment.levelUps || []).length) bits.push(`Level ups ${segment.levelUps.length}`);
+    if ((segment.mounts || []).length) bits.push(`Mounts ${segment.mounts.length}`);
+    if ((segment.pets || []).length) bits.push(`Pets ${segment.pets.length}`);
+    if ((segment.toys || []).length) bits.push(`Toys ${segment.toys.length}`);
+    if ((segment.housingItems || []).length) bits.push(`Housing items ${segment.housingItems.length}`);
+    if (segment.housingXP) bits.push(`Housing XP ${signed(segment.housingXP)}`);
+    if ((segment.housingLevelUps || []).length) bits.push(`Housing levels ${segment.housingLevelUps.length}`);
+    if ((segment.reputation || []).length) bits.push(`Rep ${repText(segment.reputation)}`);
     return bits.map(escapeHtml).join(" · ");
   };
 
   host.innerHTML = order.map((day) => {
-    const rows = byDay.get(day).map((session) => {
-      const dot = `<span class="dot" style="background:${CLASS_COLORS[session.classFile] || "var(--text-muted)"}"></span>`;
+    const rows = byDay.get(day).map((segment) => {
+      const dot = `<span class="dot" style="background:${CLASS_COLORS[segment.classFile] || "var(--text-muted)"}"></span>`;
       return `<div class="tl-row">
-        <div class="tl-time" title="Session start and end">${escapeHtml(clock(session.startedAt))}<br>– ${escapeHtml(clock(session.endedAt))}</div>
+        <div class="tl-time" title="Segment start and end">${escapeHtml(clock(segment.startedAt))}<br>– ${escapeHtml(clock(segment.endedAt))}</div>
         <div class="tl-body">
           <div class="tl-head">
-            <span>${dot}${escapeHtml(session.character)}${session.level == null ? "" : ` <span class="muted">Level ${escapeHtml(session.level)}</span>`}</span>
-            <span class="tl-where">${escapeHtml(session.instance)}</span>
-            <span class="badge">${escapeHtml(locationType(session))}</span>
-            ${session.difficulty ? `<span class="muted">${escapeHtml(session.difficulty)}</span>` : ""}
-            <span class="muted">${escapeHtml(duration(session.seconds))}</span>
+            <span>${dot}${escapeHtml(segment.character)}${segment.level == null ? "" : ` <span class="muted">Level ${escapeHtml(segment.level)}</span>`}</span>
+            <span class="tl-where">${escapeHtml(segment.instance)}</span>
+            <span class="badge">${escapeHtml(locationType(segment))}</span>
+            ${segment.difficulty ? `<span class="muted">${escapeHtml(segment.difficulty)}</span>` : ""}
+            <span class="muted">${escapeHtml(duration(segment.seconds))}</span>
           </div>
-          <div class="tl-stats">${stats(session)}</div>
-          ${chips(session)}
+          <div class="tl-stats">${stats(segment)}</div>
+          ${chips(segment)}
         </div>
       </div>`;
     }).join("");
@@ -647,10 +647,10 @@ const COLUMNS = [
   { key: "housingXP", title: "Housing XP", num: true, cell: (s) => (s.housingXP ? signed(s.housingXP) : '<span class="muted">—</span>'), sort: (s) => s.housingXP || 0 },
   { key: "housingLevelUps", title: "Housing levels", cell: (s) => levelUpCell(s.housingLevelUps), sort: (s) => (s.housingLevelUps || []).length },
 ].filter((column) => {
-  if (column.key === "housingXP") return SESSIONS.some((session) => (session.housingXP || 0) !== 0);
+  if (column.key === "housingXP") return SEGMENTS.some((segment) => (segment.housingXP || 0) !== 0);
   const optional = ["achievements", "levelUps", "currencies", "mounts", "pets", "quests",
     "reputation", "toys", "transmogs", "housingItems", "housingLevelUps"];
-  return !optional.includes(column.key) || SESSIONS.some((session) => (session[column.key] || []).length);
+  return !optional.includes(column.key) || SEGMENTS.some((segment) => (segment[column.key] || []).length);
 });
 
 let sortKey = "day";
@@ -661,18 +661,18 @@ function options(select, values, allLabel) {
     .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)).join("");
 }
 
-options($("character"), [...new Set(SESSIONS.map((s) => s.character))].sort(), "All characters");
-options($("day"), [...new Set(SESSIONS.map((s) => s.day))].sort().reverse(), "All days");
+options($("character"), [...new Set(SEGMENTS.map((s) => s.character))].sort(), "All characters");
+options($("day"), [...new Set(SEGMENTS.map((s) => s.day))].sort().reverse(), "All days");
 
 function visible() {
   const term = $("search").value.trim().toLowerCase();
   const character = $("character").value;
   const day = $("day").value;
 
-  const rows = SESSIONS.filter((session) =>
-    (!character || session.character === character) &&
-    (!day || session.day === day) &&
-    (!term || `${session.instance} ${session.character} ${session.difficulty}`.toLowerCase().includes(term)));
+  const rows = SEGMENTS.filter((segment) =>
+    (!character || segment.character === character) &&
+    (!day || segment.day === day) &&
+    (!term || `${segment.instance} ${segment.character} ${segment.difficulty}`.toLowerCase().includes(term)));
 
   const column = COLUMNS.find((entry) => entry.key === sortKey) || COLUMNS[0];
   return rows.sort((left, right) => {
@@ -699,13 +699,13 @@ function draw() {
     });
   });
 
-  $("rows").innerHTML = rows.map((session) =>
-    `<tr>${COLUMNS.map((column) => `<td${column.num ? ' class="num"' : ""}>${column.cell(session)}</td>`).join("")}</tr>`).join("");
+  $("rows").innerHTML = rows.map((segment) =>
+    `<tr>${COLUMNS.map((column) => `<td${column.num ? ' class="num"' : ""}>${column.cell(segment)}</td>`).join("")}</tr>`).join("");
 
-  $("count").textContent = `${rows.length} of ${SESSIONS.length} sessions`;
+  $("count").textContent = `${rows.length} of ${SEGMENTS.length} segments`;
   const empty = $("empty");
   empty.hidden = rows.length > 0;
-  empty.textContent = SESSIONS.length ? "No sessions match those filters." : "No sessions collected yet.";
+  empty.textContent = SEGMENTS.length ? "No segments match those filters." : "No segments collected yet.";
 }
 
 ["search", "character", "day"].forEach((id) => $(id).addEventListener("input", draw));
@@ -720,13 +720,13 @@ $("last-sync").textContent = settings.lastSync
 function show(view) {
   const setup = view === "setup";
   $("setup-view").hidden = !setup;
-  $("sessions-view").hidden = setup;
+  $("segments-view").hidden = setup;
   $("settings-tab").classList.toggle("primary", setup);
-  $("sessions-tab").classList.toggle("primary", !setup);
+  $("segments-tab").classList.toggle("primary", !setup);
 }
 
 $("settings-tab").addEventListener("click", () => show("setup"));
-$("sessions-tab").addEventListener("click", () => show("sessions"));
+$("segments-tab").addEventListener("click", () => show("segments"));
 
 async function run(button, action, success) {
   button.disabled = true;
@@ -750,22 +750,22 @@ $("save-path").addEventListener("click", (event) =>
   run(event.currentTarget, () => desktop.saveWowPath($("wow-path").value.trim()), () => "Game folder saved."));
 $("sync-now").addEventListener("click", async (event) => {
   const result = await run(event.currentTarget, desktop.syncNow,
-    (sync) => `Sync complete: ${sync.sessionCount} sessions, ${sync.added} new.`);
-  if (result && !globalThis.__WDP_E2E__) setTimeout(() => window.location.reload(), 800);
+    (sync) => `Sync complete: ${sync.segmentCount} segments, ${sync.added} new.`);
+  if (result && !globalThis.__Chronie_E2E__) setTimeout(() => window.location.reload(), 800);
 });
 $("install-addon").addEventListener("click", (event) =>
   run(event.currentTarget, desktop.installAddon,
     (result) => `Addon ${result.version} installed. Use /reload in game to load it.`));
 $("check-update").addEventListener("click", (event) =>
   run(event.currentTarget, desktop.checkForAppUpdate,
-    (result) => result.updated ? `WDP ${result.version} is ready; restart to finish.` : "WDP is up to date."));
+    (result) => result.updated ? `Chronie ${result.version} is ready; restart to finish.` : "Chronie is up to date."));
 
-if (!globalThis.__WDP_E2E__) {
-  const sessionSignature = JSON.stringify(SESSIONS.map((session) => [session.id, session.endedAt]));
+if (!globalThis.__Chronie_E2E__) {
+  const segmentSignature = JSON.stringify(SEGMENTS.map((segment) => [segment.id, segment.endedAt]));
   setInterval(async () => {
     const next = await desktop.dashboard();
-    const nextSignature = JSON.stringify((next.sessions || []).map((session) => [session.id, session.endedAt]));
-    if (nextSignature !== sessionSignature) window.location.reload();
+    const nextSignature = JSON.stringify((next.segments || []).map((segment) => [segment.id, segment.endedAt]));
+    if (nextSignature !== segmentSignature) window.location.reload();
   }, 30_000);
 }
 </script>

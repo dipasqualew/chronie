@@ -1,14 +1,14 @@
 local _, ns = ...
 
----A running tally of the events that happen to one character during one session:
+---A running tally of the events that happen to one character during one segment:
 ---a continuous stay in a single location, whether an instance or an open-world zone.
 ---Pure logic; the only WoW-shaped things it touches arrive as injected seams (item
 ---prices, transmog collection queries) or as raw chat strings it parses itself.
 ---
----The tracker owns the session's boundaries and drives begin()/leave(); this module
+---The tracker owns the segment's boundaries and drives begin()/leave(); this module
 ---only accumulates whatever lands between them.
----@class SessionTally
----@field begin fun(money: integer?, currencyItemCounts: table<integer, integer>?) Start a fresh session,
+---@class SegmentTally
+---@field begin fun(money: integer?, currencyItemCounts: table<integer, integer>?) Start a fresh segment,
 ---anchoring the money baseline and, optionally, the owned-count baseline of each tracked currency item.
 ---@field leave fun() Stop tallying; the totals survive for one last summary() read.
 ---@field money fun(current: integer) Fold the current wallet total into loot and net diff.
@@ -16,7 +16,7 @@ local _, ns = ...
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
 ---@field currencyItem fun(itemID: integer, total: integer, name: string?) Fold an item-based currency's
----owned total into the same per-currency tallies, as a change from its session baseline.
+---owned total into the same per-currency tallies, as a change from its segment baseline.
 ---@field achievement fun(id: integer, name: string?, at: integer, accountFirst: boolean?)
 ---Append an earned achievement.
 ---@field levelUp fun(level: integer, at: integer) Append a level gained.
@@ -28,11 +28,11 @@ local _, ns = ...
 ---@field toy fun(id: integer, name: string?, at: integer) Append a newly collected toy.
 ---@field housingItem fun(id: integer, name: string?, at: integer, warbandFirst: boolean?)
 ---Append a collected housing item.
----@field housingXP fun(amount: integer) Fold a housing experience gain into the session total.
+---@field housingXP fun(amount: integer) Fold a housing experience gain into the segment total.
 ---@field housingLevelUp fun(level: integer, at: integer) Append a housing level gained.
 ---@field isActive fun(): boolean
----@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
----@field summary fun(): SessionSummary
+---@field hasEvents fun(): boolean Whether anything worth keeping happened this segment.
+---@field summary fun(): SegmentSummary
 
 ---@class ReputationGain
 ---@field faction string
@@ -41,7 +41,7 @@ local _, ns = ...
 ---@class CurrencyGain
 ---@field id integer
 ---@field name string
----@field amount integer Net change over the session; may be negative.
+---@field amount integer Net change over the segment; may be negative.
 
 ---@class AchievementEvent
 ---@field id integer
@@ -79,12 +79,12 @@ local _, ns = ...
 ---@field at integer When it was collected.
 ---@field warbandFirst boolean True when the warband had never collected it; false for a duplicate.
 
----@class SessionSummary
+---@class SegmentSummary
 ---@field active boolean
 ---@field lootValue integer Vendor value of items entering the inventory, in copper.
 ---@field goldLooted integer Copper picked up as money.
 ---@field itemValue integer Summed vendor value of looted items, in copper.
----@field goldDiff integer Net wallet change over the session, in copper; may be negative.
+---@field goldDiff integer Net wallet change over the segment, in copper; may be negative.
 ---@field transmogs TransmogEvent[] Newly collected transmog items, in acquisition order.
 ---@field currencyTotal integer Summed absolute-signed currency change across every currency.
 ---@field currencies CurrencyGain[] Per-currency totals, sorted by name.
@@ -97,10 +97,10 @@ local _, ns = ...
 ---@field quests QuestEvent[] Quests completed, in completion order.
 ---@field toys CollectionEvent[] Toys collected, in acquisition order.
 ---@field housingItems HousingItemEvent[] Housing items collected, in acquisition order.
----@field housingXP integer Housing experience gained over the session.
+---@field housingXP integer Housing experience gained over the segment.
 ---@field housingLevelUps LevelUpEvent[] Housing levels gained, in the order they were.
 
----@class SessionTallyDeps
+---@class SegmentTallyDeps
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
 ---@field factionFormats string[]? Reputation-increase message templates.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
@@ -176,7 +176,7 @@ end
 
 ---Formats a copper amount the way the client does, dropping the higher denominations
 ---that would only ever read as zero. Always shows copper so an empty haul reads "0c".
----A negative amount keeps its sign, so a session that lost gold reads "-1g 0s 0c".
+---A negative amount keeps its sign, so a segment that lost gold reads "-1g 0s 0c".
 ---@param copper integer?
 ---@return string
 function ns.formatMoney(copper)
@@ -201,54 +201,54 @@ function ns.formatMoney(copper)
     return sign .. table.concat(parts, " ")
 end
 
----@param deps SessionTallyDeps
----@return SessionTally
-function ns.newSessionTally(deps)
+---@param deps SegmentTallyDeps
+---@return SegmentTally
+function ns.newSegmentTally(deps)
     deps = deps or {}
     local itemSellPrice = deps.itemSellPrice or function() return 0 end
 
     local lootPatterns = compileAll(deps.lootFormats)
     local factionPatterns = compileAll(deps.factionFormats)
 
-    local session = {}
+    local segment = {}
 
-    ---Wipes the tally clean for a fresh session, anchoring the money baselines so only
+    ---Wipes the tally clean for a fresh segment, anchoring the money baselines so only
     ---coin gained from here on is counted, and the net diff runs from this wallet total.
-    ---Item-based currencies get the same treatment: their owned counts at session start
+    ---Item-based currencies get the same treatment: their owned counts at segment start
     ---become the baselines every later update is measured against, so currency held before
-    ---the session is never counted as gained.
+    ---the segment is never counted as gained.
     ---@param money integer?
     ---@param currencyItemCounts table<integer, integer>?
     local function begin(money, currencyItemCounts)
         money = money or 0
-        session.active = true
-        session.moneyBaseline = money
-        session.openingMoney = money
-        session.latestMoney = money
-        session.goldLooted = 0
-        session.itemValue = 0
-        session.transmogs = {}
-        session.reputation = {}
-        session.currencies = {}
-        session.currencyItemCounts = {}
+        segment.active = true
+        segment.moneyBaseline = money
+        segment.openingMoney = money
+        segment.latestMoney = money
+        segment.goldLooted = 0
+        segment.itemValue = 0
+        segment.transmogs = {}
+        segment.reputation = {}
+        segment.currencies = {}
+        segment.currencyItemCounts = {}
         if currencyItemCounts then
             for itemID, count in pairs(currencyItemCounts) do
-                session.currencyItemCounts[itemID] = count
+                segment.currencyItemCounts[itemID] = count
             end
         end
-        session.achievements = {}
-        session.levelUps = {}
-        session.mounts = {}
-        session.pets = {}
-        session.quests = {}
-        session.toys = {}
-        session.housingItems = {}
-        session.housingXP = 0
-        session.housingLevelUps = {}
+        segment.achievements = {}
+        segment.levelUps = {}
+        segment.mounts = {}
+        segment.pets = {}
+        segment.quests = {}
+        segment.toys = {}
+        segment.housingItems = {}
+        segment.housingXP = 0
+        segment.housingLevelUps = {}
     end
 
     begin(0)
-    session.active = false
+    segment.active = false
 
     ---Runs `message` through a list of compiled templates, returning the first match's
     ---captures split into the single number and the last string it carried.
@@ -280,58 +280,58 @@ function ns.newSessionTally(deps)
 
         ---@param current integer
         money = function(current)
-            if not session.active then
+            if not segment.active then
                 return
             end
             current = current or 0
-            local delta = current - session.moneyBaseline
-            session.moneyBaseline = current
-            session.latestMoney = current
+            local delta = current - segment.moneyBaseline
+            segment.moneyBaseline = current
+            segment.latestMoney = current
             -- Only gains are loot; a repair or vendor sale merely re-anchors the loot
             -- baseline, but it still moves the net diff below the opening wallet.
             if delta > 0 then
-                session.goldLooted = session.goldLooted + delta
+                segment.goldLooted = segment.goldLooted + delta
             end
         end,
 
         ---@param message string
         loot = function(message)
-            if not session.active then
+            if not segment.active then
                 return
             end
             local link, quantity = parse(message, lootPatterns)
             local itemID = link and link:match("Hitem:(%d+)")
             if itemID then
                 local price = itemSellPrice(tonumber(itemID)) or 0
-                session.itemValue = session.itemValue + price * (quantity or 1)
+                segment.itemValue = segment.itemValue + price * (quantity or 1)
             end
         end,
 
         ---@param message string
         reputation = function(message)
-            if not session.active then
+            if not segment.active then
                 return
             end
             local faction, amount = parse(message, factionPatterns)
             if faction and amount then
-                session.reputation[faction] = (session.reputation[faction] or 0) + amount
+                segment.reputation[faction] = (segment.reputation[faction] or 0) + amount
             end
         end,
 
         ---Folds a currency change into the per-currency total. The change may be
         ---negative (spending), and the running total is kept even when it nets to zero
-        ---so the session still remembers the currency was touched.
+        ---so the segment still remembers the currency was touched.
         ---@param currencyType integer
         ---@param change integer
         ---@param name string?
         currency = function(currencyType, change, name)
-            if not session.active or not currencyType or not change or change == 0 then
+            if not segment.active or not currencyType or not change or change == 0 then
                 return
             end
-            local entry = session.currencies[currencyType]
+            local entry = segment.currencies[currencyType]
             if not entry then
                 entry = { id = currencyType, name = name or tostring(currencyType), amount = 0 }
-                session.currencies[currencyType] = entry
+                segment.currencies[currencyType] = entry
             end
             -- A later update may carry the name the first one lacked.
             if name and name ~= "" then
@@ -346,19 +346,19 @@ function ns.newSessionTally(deps)
         ---reach — bags, both banks and the warband bank — so moving the item in or out of
         ---a bank leaves it unchanged and records no phantom gain or spend; only a real
         ---acquisition or spend shifts it. The recorded change is the difference from the
-        ---last total seen, seeded by begin() to the count held when the session opened.
+        ---last total seen, seeded by begin() to the count held when the segment opened.
         ---@param itemID integer
         ---@param total integer
         ---@param name string?
         currencyItem = function(itemID, total, name)
-            if not session.active or not itemID or not total then
+            if not segment.active or not itemID or not total then
                 return
             end
-            local baseline = session.currencyItemCounts[itemID]
-            session.currencyItemCounts[itemID] = total
-            -- No baseline means the item was not tracked when the session opened, so tracking
-            -- began mid-session: adopt the current total as the baseline and count nothing, or
-            -- holdings that predate the choice to track would be booked as this session's gain.
+            local baseline = segment.currencyItemCounts[itemID]
+            segment.currencyItemCounts[itemID] = total
+            -- No baseline means the item was not tracked when the segment opened, so tracking
+            -- began mid-segment: adopt the current total as the baseline and count nothing, or
+            -- holdings that predate the choice to track would be booked as this segment's gain.
             -- begin() seeds every already-tracked item, so those never take this path.
             if baseline == nil then
                 return
@@ -370,10 +370,10 @@ function ns.newSessionTally(deps)
             -- Keyed apart from real currencies: an item ID and a currency type are
             -- separate namespaces that could otherwise collide on the same number.
             local key = "item:" .. itemID
-            local entry = session.currencies[key]
+            local entry = segment.currencies[key]
             if not entry then
                 entry = { id = itemID, name = name or tostring(itemID), amount = 0 }
-                session.currencies[key] = entry
+                segment.currencies[key] = entry
             end
             if name and name ~= "" then
                 entry.name = name
@@ -386,7 +386,7 @@ function ns.newSessionTally(deps)
         ---@param at integer
         ---@param accountFirst boolean?
         achievement = function(id, name, at, accountFirst)
-            if not session.active or not id then
+            if not segment.active or not id then
                 return
             end
             local event = {
@@ -397,14 +397,14 @@ function ns.newSessionTally(deps)
             if accountFirst ~= nil then
                 event.accountFirst = accountFirst and true or false
             end
-            session.achievements[#session.achievements + 1] = event
+            segment.achievements[#segment.achievements + 1] = event
         end,
 
         ---@param level integer
         ---@param at integer
         levelUp = function(level, at)
-            if session.active and level then
-                session.levelUps[#session.levelUps + 1] = { level = level, at = at }
+            if segment.active and level then
+                segment.levelUps[#segment.levelUps + 1] = { level = level, at = at }
             end
         end,
 
@@ -412,8 +412,8 @@ function ns.newSessionTally(deps)
         ---@param name string?
         ---@param at integer
         mount = function(id, name, at)
-            if session.active and id then
-                session.mounts[#session.mounts + 1] = {
+            if segment.active and id then
+                segment.mounts[#segment.mounts + 1] = {
                     id = id,
                     name = name or tostring(id),
                     at = at,
@@ -426,7 +426,7 @@ function ns.newSessionTally(deps)
         ---@param at integer
         ---@param guid string?
         pet = function(id, name, at, guid)
-            if session.active and id then
+            if segment.active and id then
                 local event = {
                     id = id,
                     name = name or tostring(id),
@@ -435,7 +435,7 @@ function ns.newSessionTally(deps)
                 if guid then
                     event.guid = guid
                 end
-                session.pets[#session.pets + 1] = event
+                segment.pets[#segment.pets + 1] = event
             end
         end,
 
@@ -445,7 +445,7 @@ function ns.newSessionTally(deps)
         ---@param characterFirst boolean?
         ---@param accountFirst boolean?
         quest = function(id, at, name, characterFirst, accountFirst)
-            if not session.active or not id then
+            if not segment.active or not id then
                 return
             end
             local event = { id = id, at = at }
@@ -458,15 +458,15 @@ function ns.newSessionTally(deps)
             if accountFirst ~= nil then
                 event.accountFirst = accountFirst and true or false
             end
-            session.quests[#session.quests + 1] = event
+            segment.quests[#segment.quests + 1] = event
         end,
 
         ---@param id integer
         ---@param name string?
         ---@param at integer
         toy = function(id, name, at)
-            if session.active and id then
-                session.toys[#session.toys + 1] = {
+            if segment.active and id then
+                segment.toys[#segment.toys + 1] = {
                     id = id,
                     name = name or tostring(id),
                     at = at,
@@ -482,8 +482,8 @@ function ns.newSessionTally(deps)
         ---@param at integer
         ---@param warbandFirst boolean?
         housingItem = function(id, name, at, warbandFirst)
-            if session.active and id then
-                session.housingItems[#session.housingItems + 1] = {
+            if segment.active and id then
+                segment.housingItems[#segment.housingItems + 1] = {
                     id = id,
                     name = name or tostring(id),
                     at = at,
@@ -492,19 +492,19 @@ function ns.newSessionTally(deps)
             end
         end,
 
-        ---Folds a housing experience gain into the running session total.
+        ---Folds a housing experience gain into the running segment total.
         ---@param amount integer
         housingXP = function(amount)
-            if session.active and amount and amount ~= 0 then
-                session.housingXP = session.housingXP + amount
+            if segment.active and amount and amount ~= 0 then
+                segment.housingXP = segment.housingXP + amount
             end
         end,
 
         ---@param level integer
         ---@param at integer
         housingLevelUp = function(level, at)
-            if session.active and level then
-                session.housingLevelUps[#session.housingLevelUps + 1] = { level = level, at = at }
+            if segment.active and level then
+                segment.housingLevelUps[#segment.housingLevelUps + 1] = { level = level, at = at }
             end
         end,
 
@@ -513,7 +513,7 @@ function ns.newSessionTally(deps)
             if type(event) == "number" then
                 event = { id = event, at = at }
             end
-            if not session.active or not event or not event.id then
+            if not segment.active or not event or not event.id then
                 return
             end
             local copy = { id = event.id, at = event.at }
@@ -526,46 +526,46 @@ function ns.newSessionTally(deps)
             if event.newAppearance ~= nil then
                 copy.newAppearance = event.newAppearance and true or false
             end
-            session.transmogs[#session.transmogs + 1] = copy
+            segment.transmogs[#segment.transmogs + 1] = copy
         end,
 
-        ---Ends the session without waiting for a zone change. The tally is left intact
+        ---Ends the segment without waiting for a zone change. The tally is left intact
         ---so a caller can still read summary() and hasEvents() off it; begin() wipes it.
         leave = function()
-            session.active = false
+            segment.active = false
         end,
 
         isActive = function()
-            return session.active
+            return segment.active
         end,
 
-        ---Whether the session accrued anything worth persisting. An empty stroll through
-        ---a zone leaves every counter at rest, and such a session is dropped on close.
+        ---Whether the segment accrued anything worth persisting. An empty stroll through
+        ---a zone leaves every counter at rest, and such a segment is dropped on close.
         ---@return boolean
         hasEvents = function()
-            local lootValue = session.itemValue
-            local goldDiff = session.latestMoney - session.openingMoney
+            local lootValue = segment.itemValue
+            local goldDiff = segment.latestMoney - segment.openingMoney
             return lootValue ~= 0
                 or goldDiff ~= 0
-                or #session.transmogs > 0
-                or next(session.currencies) ~= nil
-                or next(session.reputation) ~= nil
-                or #session.achievements > 0
-                or #session.levelUps > 0
-                or #session.mounts > 0
-                or #session.pets > 0
-                or #session.quests > 0
-                or #session.toys > 0
-                or #session.housingItems > 0
-                or session.housingXP ~= 0
-                or #session.housingLevelUps > 0
+                or #segment.transmogs > 0
+                or next(segment.currencies) ~= nil
+                or next(segment.reputation) ~= nil
+                or #segment.achievements > 0
+                or #segment.levelUps > 0
+                or #segment.mounts > 0
+                or #segment.pets > 0
+                or #segment.quests > 0
+                or #segment.toys > 0
+                or #segment.housingItems > 0
+                or segment.housingXP ~= 0
+                or #segment.housingLevelUps > 0
         end,
 
-        ---@return SessionSummary
+        ---@return SegmentSummary
         summary = function()
             local reputation = {}
             local reputationTotal = 0
-            for faction, amount in pairs(session.reputation) do
+            for faction, amount in pairs(segment.reputation) do
                 reputation[#reputation + 1] = { faction = faction, amount = amount }
                 reputationTotal = reputationTotal + amount
             end
@@ -575,7 +575,7 @@ function ns.newSessionTally(deps)
 
             local currencies = {}
             local currencyTotal = 0
-            for _, entry in pairs(session.currencies) do
+            for _, entry in pairs(segment.currencies) do
                 currencies[#currencies + 1] = { id = entry.id, name = entry.name, amount = entry.amount }
                 currencyTotal = currencyTotal + entry.amount
             end
@@ -586,27 +586,27 @@ function ns.newSessionTally(deps)
                 return left.id < right.id
             end)
 
-            local specs = ns.sessionEventSpecs
+            local specs = ns.segmentEventSpecs
             return {
-                active = session.active,
-                lootValue = session.itemValue,
-                goldLooted = session.goldLooted,
-                itemValue = session.itemValue,
-                goldDiff = session.latestMoney - session.openingMoney,
-                transmogs = ns.copyEventList(specs.transmogs, session.transmogs),
+                active = segment.active,
+                lootValue = segment.itemValue,
+                goldLooted = segment.goldLooted,
+                itemValue = segment.itemValue,
+                goldDiff = segment.latestMoney - segment.openingMoney,
+                transmogs = ns.copyEventList(specs.transmogs, segment.transmogs),
                 currencyTotal = currencyTotal,
                 currencies = currencies,
                 reputationTotal = reputationTotal,
                 reputation = reputation,
-                achievements = ns.copyEventList(specs.achievements, session.achievements),
-                levelUps = ns.copyEventList(specs.levelUps, session.levelUps),
-                mounts = ns.copyEventList(specs.mounts, session.mounts),
-                pets = ns.copyEventList(specs.pets, session.pets),
-                quests = ns.copyEventList(specs.quests, session.quests),
-                toys = ns.copyEventList(specs.toys, session.toys),
-                housingItems = ns.copyEventList(specs.housingItems, session.housingItems),
-                housingXP = session.housingXP,
-                housingLevelUps = ns.copyEventList(specs.housingLevelUps, session.housingLevelUps),
+                achievements = ns.copyEventList(specs.achievements, segment.achievements),
+                levelUps = ns.copyEventList(specs.levelUps, segment.levelUps),
+                mounts = ns.copyEventList(specs.mounts, segment.mounts),
+                pets = ns.copyEventList(specs.pets, segment.pets),
+                quests = ns.copyEventList(specs.quests, segment.quests),
+                toys = ns.copyEventList(specs.toys, segment.toys),
+                housingItems = ns.copyEventList(specs.housingItems, segment.housingItems),
+                housingXP = segment.housingXP,
+                housingLevelUps = ns.copyEventList(specs.housingLevelUps, segment.housingLevelUps),
             }
         end,
     }

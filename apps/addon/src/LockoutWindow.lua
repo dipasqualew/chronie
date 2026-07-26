@@ -57,7 +57,7 @@ function ns.newLockoutWindow(deps)
     local frame, scrollChild
 
     local function buildFrame()
-        frame = createFrame("Frame", "WdpWowLockoutWindow", deps.uiParent, "BackdropTemplate")
+        frame = createFrame("Frame", "ChronieLockoutWindow", deps.uiParent, "BackdropTemplate")
         frame:SetSize(WIDTH, HEIGHT)
         frame:SetPoint("CENTER")
         frame:SetFrameStrata("DIALOG")
@@ -88,7 +88,7 @@ function ns.newLockoutWindow(deps)
         close:SetPoint("TOPRIGHT", -6, -6)
 
         -- Escape closes the window, as players expect from any panel.
-        table.insert(deps.specialFrames, "WdpWowLockoutWindow")
+        table.insert(deps.specialFrames, "ChronieLockoutWindow")
 
         return frame
     end
@@ -269,7 +269,7 @@ function ns.newLockoutWindow(deps)
     end
 
     local function buildScroll()
-        local scroll = createFrame("ScrollFrame", "WdpWowLockoutScroll", frame, "UIPanelScrollFrameTemplate")
+        local scroll = createFrame("ScrollFrame", "ChronieLockoutScroll", frame, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", PADDING + 8, HEADER_Y - ROW_HEIGHT - 4)
         scroll:SetPoint("BOTTOMRIGHT", -(PADDING + 24), PADDING + 4)
 

@@ -3,7 +3,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $keyDirectory = Join-Path $root ".tauri"
-$privateKey = Join-Path $keyDirectory "wdp.key"
+$privateKey = Join-Path $keyDirectory "chronie.key"
 $publicKey = "$privateKey.pub"
 
 New-Item -ItemType Directory -Force -Path $keyDirectory | Out-Null

@@ -4,7 +4,7 @@ local fake = require("fake_wow")
 describe("ns.newResultsWindow", function()
     local ns = loader.load()
 
-    local NAME = "WdpWowTestResultsWindow"
+    local NAME = "ChronieTestResultsWindow"
 
     ---Build the window with fake frames and deps, recording what it loads and saves.
     ---`loadPoint` returns whatever the test planted, so both the default and the
@@ -52,7 +52,7 @@ describe("ns.newResultsWindow", function()
     end
 
     ---@param overrides table?
-    ---@return SessionSummary
+    ---@return SegmentSummary
     local function summary(overrides)
         local base = {
             active = true,

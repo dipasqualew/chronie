@@ -89,17 +89,17 @@ function ns.main(env)
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
-        name = "WdpWowInstanceDetailWindow",
+        name = "ChronieInstanceDetailWindow",
     })
 
     local characterWindow = ns.newDetailWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
-        name = "WdpWowCharacterDetailWindow",
+        name = "ChronieCharacterDetailWindow",
     })
 
-    local tally = ns.newSessionTally({
+    local tally = ns.newSegmentTally({
         lootFormats = env.lootSelfFormats,
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
@@ -122,7 +122,7 @@ function ns.main(env)
     local resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
-        name = "WdpWowResultsWindow",
+        name = "ChronieResultsWindow",
         formatMoney = ns.formatMoney,
         loadPoint = function()
             local saved = env.db.resultsWindow
@@ -145,19 +145,19 @@ function ns.main(env)
         return (env.unitName("player") or "?") .. "-" .. (env.realmName() or "?")
     end
 
-    local sessionLog = ns.newSessionLog({
+    local segmentLog = ns.newSegmentLog({
         db = env.db,
         now = env.now,
         formatDate = env.formatDate,
     })
 
-    local sessionTracker = ns.newSessionTracker({
+    local segmentTracker = ns.newSegmentTracker({
         tally = tally,
-        sessionLog = sessionLog,
+        segmentLog = segmentLog,
         now = env.now,
         instanceInfo = env.instanceInfo,
         getMoney = env.getMoney,
-        -- Snapshot every tracked currency item's owned total as the session opens, so the
+        -- Snapshot every tracked currency item's owned total as the segment opens, so the
         -- tally measures later changes against what was held on arrival rather than zero.
         currencyItemCounts = function()
             local counts = {}
@@ -176,17 +176,17 @@ function ns.main(env)
         end,
     })
 
-    local sessionWindow = ns.newDetailWindow({
+    local segmentWindow = ns.newDetailWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
-        name = "WdpWowSessionWindow",
+        name = "ChronieSegmentWindow",
     })
 
-    local sessionDetailWindow = ns.newResultsWindow({
+    local segmentDetailWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
-        name = "WdpWowSessionDetailWindow",
+        name = "ChronieSegmentDetailWindow",
         title = function(record)
             return record.character .. " — " .. record.instance
         end,
@@ -205,12 +205,12 @@ function ns.main(env)
         itemName = env.itemName,
     })
 
-    local sessionTable = ns.newSessionTable({
+    local segmentTable = ns.newSegmentTable({
         classDisplay = classDisplay,
         formatMoney = ns.formatMoney,
-        onSessionSelected = function(record)
-            sessionDetailWindow.update(record)
-            sessionDetailWindow.show()
+        onSegmentSelected = function(record)
+            segmentDetailWindow.update(record)
+            segmentDetailWindow.show()
         end,
     })
 
@@ -222,14 +222,14 @@ function ns.main(env)
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
-        name = "WdpWowReportWindow",
+        name = "ChronieReportWindow",
     })
 
     local currencyWindow = ns.newCurrencyWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         specialFrames = env.specialFrames,
-        name = "WdpWowCurrencyWindow",
+        name = "ChronieCurrencyWindow",
         items = currencyItems,
         getCursorItem = env.getCursorItem,
         clearCursor = env.clearCursor,
@@ -281,7 +281,7 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /wdp locks | results | sessions | currency | report")
+            logger.info("usage: /chronie locks | results | segments | currency | report")
         end,
     })
     router.add("locks", window.toggle)
@@ -293,34 +293,34 @@ function ns.main(env)
             resultsWindow.show()
         end
     end)
-    local sessionFilters = { character = "", day = "", location = "" }
-    local function sessionSpec()
-        local all = sessionLog.all()
-        local filtered = sessionTable.filter(all, sessionFilters)
-        local spec = sessionTable.spec(filtered)
+    local segmentFilters = { character = "", day = "", location = "" }
+    local function segmentSpec()
+        local all = segmentLog.all()
+        local filtered = segmentTable.filter(all, segmentFilters)
+        local spec = segmentTable.spec(filtered)
         if #all > 0 and #filtered == 0 then
-            spec.sections[1].empty = "No sessions match those filters."
+            spec.sections[1].empty = "No segments match those filters."
         end
         spec.filters = {
-            { key = "character", label = "Character", value = sessionFilters.character },
-            { key = "day", label = "Day", value = sessionFilters.day },
-            { key = "location", label = "Location", value = sessionFilters.location },
+            { key = "character", label = "Character", value = segmentFilters.character },
+            { key = "day", label = "Day", value = segmentFilters.day },
+            { key = "location", label = "Location", value = segmentFilters.location },
         }
         spec.onFilterChanged = function(key, value)
-            sessionFilters[key] = value
-            sessionWindow.show(sessionSpec())
+            segmentFilters[key] = value
+            segmentWindow.show(segmentSpec())
         end
         return spec
     end
 
-    local function toggleSessions()
-        if sessionWindow.isShown() then
-            sessionWindow.hide()
+    local function toggleSegments()
+        if segmentWindow.isShown() then
+            segmentWindow.hide()
         else
-            sessionWindow.show(sessionSpec())
+            segmentWindow.show(segmentSpec())
         end
     end
-    router.add("sessions", toggleSessions)
+    router.add("segments", toggleSegments)
     router.add("currency", currencyWindow.toggle)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
@@ -341,7 +341,7 @@ function ns.main(env)
             env.db.minimapButton = { point = point, x = x, y = y }
         end,
         onClick = function()
-            sessionWindow.show(sessionSpec())
+            segmentWindow.show(segmentSpec())
         end,
     })
     minimapButton.show()
@@ -366,20 +366,20 @@ function ns.main(env)
     -- Both events matter: PLAYER_ENTERING_WORLD covers load screens, while
     -- ZONE_CHANGED_NEW_AREA covers seamless outdoor boundaries such as a taxi flight
     -- between two neighbouring zones. Duplicate notifications are harmless because the
-    -- tracker keeps the current session when the location identity has not changed.
-    local function syncSession()
+    -- tracker keeps the current segment when the location identity has not changed.
+    local function syncSegment()
         env.requestRaidInfo()
         snapshotActiveQuests()
-        sessionTracker.sync()
+        segmentTracker.sync()
         resultsWindow.update(tally.summary())
         resultsWindow.show()
     end
-    dispatcher.on("PLAYER_ENTERING_WORLD", syncSession)
-    dispatcher.on("ZONE_CHANGED_NEW_AREA", syncSession)
+    dispatcher.on("PLAYER_ENTERING_WORLD", syncSegment)
+    dispatcher.on("ZONE_CHANGED_NEW_AREA", syncSegment)
 
-    -- Logging out or reloading is the last chance to file a session: SavedVariables are
-    -- only written to disk on the way out, so an unfiled session would never be exported.
-    dispatcher.on("PLAYER_LOGOUT", sessionTracker.flush)
+    -- Logging out or reloading is the last chance to file a segment: SavedVariables are
+    -- only written to disk on the way out, so an unfiled segment would never be exported.
+    dispatcher.on("PLAYER_LOGOUT", segmentTracker.flush)
 
     -- Every one of these events folds something into the running tally and then wants the
     -- results panel redrawn. Wrapping the subscription keeps that redraw in one place, so a
@@ -444,7 +444,7 @@ function ns.main(env)
         tally.toy(id, env.toyInfo(id), env.now())
     end)
     -- Housing decor is warband-wide, so the owned count decides first-time from duplicate:
-    -- one copy means this session collected it for the whole warband, more is an extra.
+    -- one copy means this segment collected it for the whole warband, more is an extra.
     onTallyEvent("HOUSING_DECOR_ADDED", function(id)
         local name, quantity = env.housingItemInfo(id)
         tally.housingItem(id, name, env.now(), (quantity or 1) <= 1)
@@ -475,7 +475,7 @@ function ns.main(env)
         questBaselines[id] = nil
     end)
 
-    env.registerSlash({ "/wdp" }, router.dispatch)
+    env.registerSlash({ "/chronie" }, router.dispatch)
 
     return {
         window = window,
@@ -488,11 +488,11 @@ function ns.main(env)
         logger = logger,
         tally = tally,
         resultsWindow = resultsWindow,
-        sessionLog = sessionLog,
-        sessionTracker = sessionTracker,
-        sessionTable = sessionTable,
-        sessionWindow = sessionWindow,
-        sessionDetailWindow = sessionDetailWindow,
+        segmentLog = segmentLog,
+        segmentTracker = segmentTracker,
+        segmentTable = segmentTable,
+        segmentWindow = segmentWindow,
+        segmentDetailWindow = segmentDetailWindow,
         minimapButton = minimapButton,
         reportCommand = reportCommand,
         reportWindow = reportWindow,
@@ -505,9 +505,9 @@ end
 if CreateFrame then
     local function registerSlash(tokens, handler)
         for index, token in ipairs(tokens) do
-            _G["SLASH_WDPWOW" .. index] = token
+            _G["SLASH_CHRONIE" .. index] = token
         end
-        SlashCmdList["WDPWOW"] = handler
+        SlashCmdList["CHRONIE"] = handler
     end
 
     -- SavedVariables only exist once the addon's variables have loaded.

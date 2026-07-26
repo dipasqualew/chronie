@@ -55,7 +55,7 @@ function ns.newReportWindow(deps)
 
         local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         title:SetPoint("TOP", 0, -14)
-        title:SetText("Session Report")
+        title:SetText("Segment Report")
 
         local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         hint:SetPoint("TOP", 0, -34)

@@ -39,5 +39,5 @@ module is where the tests earn their keep.
 Python collector, watches SavedVariables, persists a seven-day database, and
 installs the addon. Its frontend replaces the standalone HTML report.
 
-The addon's only job in that pipeline is writing `db.sessions`; everything
+The addon's only job in that pipeline is writing `db.segments`; everything
 downstream reads the file the client dumps at logout.

@@ -4,7 +4,7 @@ local fake = require("fake_wow")
 describe("ns.newDetailWindow", function()
     local ns = loader.load()
 
-    local NAME = "WdpWowTestDetailWindow"
+    local NAME = "ChronieTestDetailWindow"
 
     local WHITE = { 1, 1, 1 }
 

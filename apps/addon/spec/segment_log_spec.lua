@@ -1,19 +1,19 @@
 local loader = require("addon_loader")
 local fake = require("fake_wow")
 
-describe("ns.newSessionLog", function()
+describe("ns.newSegmentLog", function()
     local ns = loader.load()
 
     local NOW = 1700000000
     local DAY = 24 * 60 * 60
 
     ---@param options table? `{ db, clock, retainDays }`
-    ---@return SessionLog log, table db, table clock
+    ---@return SegmentLog log, table db, table clock
     local function newLog(options)
         options = options or {}
         local db = options.db or {}
         local clock = options.clock or fake.newClock(NOW)
-        local log = ns.newSessionLog({
+        local log = ns.newSegmentLog({
             db = db,
             now = clock.now,
             formatDate = fake.newFormatDate(),
@@ -23,7 +23,7 @@ describe("ns.newSessionLog", function()
     end
 
     ---@param overrides table?
-    ---@return SessionVisit
+    ---@return SegmentVisit
     local function visit(overrides)
         local base = {
             character = "Thrall-Ragnaros",
@@ -63,16 +63,16 @@ describe("ns.newSessionLog", function()
     end
 
     it("is exported by the addon files", function()
-        assert.is_function(ns.newSessionLog)
+        assert.is_function(ns.newSegmentLog)
     end)
 
     describe("recording a visit", function()
-        it("writes every field of the record into db.sessions", function()
+        it("writes every field of the record into db.segments", function()
             local log, db = newLog()
 
             log.record(visit())
 
-            assert.equal(1, #db.sessions)
+            assert.equal(1, #db.segments)
             assert.same({
                 id = "Thrall-Ragnaros|" .. (NOW - 1800) .. "|Ulduar",
                 character = "Thrall-Ragnaros",
@@ -104,7 +104,7 @@ describe("ns.newSessionLog", function()
                 },
                 housingXP = 300,
                 housingLevelUps = { { level = 3, at = NOW - 30 } },
-            }, db.sessions[1])
+            }, db.segments[1])
         end)
 
         it("dates the record by the day the visit ended", function()
@@ -120,7 +120,7 @@ describe("ns.newSessionLog", function()
 
             local record = log.record(visit())
 
-            assert.equal(db.sessions[1], record)
+            assert.equal(db.segments[1], record)
         end)
 
         -- A clock that jumps backwards (a resync mid-visit) must not produce a
@@ -182,8 +182,8 @@ describe("ns.newSessionLog", function()
             log.record(visit())
             log.record(visit({ endedAt = NOW + 60, summary = { lootValue = 5000 } }))
 
-            assert.equal(1, #db.sessions)
-            assert.equal(5000, db.sessions[1].lootValue)
+            assert.equal(1, #db.segments)
+            assert.equal(5000, db.segments[1].lootValue)
         end)
 
         it("keeps two visits of the same instance apart by when they started", function()
@@ -192,7 +192,7 @@ describe("ns.newSessionLog", function()
             log.record(visit())
             log.record(visit({ startedAt = NOW - 100 }))
 
-            assert.equal(2, #db.sessions)
+            assert.equal(2, #db.segments)
         end)
 
         -- The tally handed over is the live one the addon keeps mutating, so the log
@@ -219,7 +219,7 @@ describe("ns.newSessionLog", function()
             assert.same({ { id = 1166, name = "Timewarped Badge", amount = 15 } }, record.currencies)
         end)
 
-        it("keeps transmog collection metadata needed by saved-session links", function()
+        it("keeps transmog collection metadata needed by saved-segment links", function()
             local log = newLog()
             local pending = visit()
             pending.summary.transmogs = {
@@ -316,7 +316,7 @@ describe("ns.newSessionLog", function()
             clock.advance(6 * DAY)
 
             assert.equal(0, log.prune())
-            assert.equal(1, #db.sessions)
+            assert.equal(1, #db.segments)
         end)
 
         it("drops a visit once it falls out of the window", function()
@@ -326,7 +326,7 @@ describe("ns.newSessionLog", function()
             clock.advance(7 * DAY + 1)
 
             assert.equal(1, log.prune())
-            assert.same({}, db.sessions)
+            assert.same({}, db.segments)
         end)
 
         it("honours a shorter window", function()
@@ -336,7 +336,7 @@ describe("ns.newSessionLog", function()
             clock.advance(2 * DAY + 1)
             log.prune()
 
-            assert.same({}, db.sessions)
+            assert.same({}, db.segments)
         end)
 
         it("prunes as a side effect of recording, so the file never grows unbounded", function()
@@ -348,7 +348,7 @@ describe("ns.newSessionLog", function()
             clock.advance(8 * DAY)
             log.record(visit({ startedAt = clock.now() - 60, endedAt = clock.now() }))
 
-            assert.equal(1, #db.sessions)
+            assert.equal(1, #db.segments)
         end)
 
         it("prunes as a side effect of reading", function()
@@ -358,7 +358,7 @@ describe("ns.newSessionLog", function()
             clock.advance(8 * DAY)
 
             assert.same({}, log.all())
-            assert.same({}, db.sessions)
+            assert.same({}, db.segments)
         end)
     end)
 
@@ -400,12 +400,12 @@ describe("ns.newSessionLog", function()
             local rows = log.all()
             rows[1] = nil
 
-            assert.equal(1, #db.sessions)
+            assert.equal(1, #db.segments)
         end)
     end)
 
     describe("a db shared by two characters", function()
-        it("adds to the sessions already in the file rather than replacing them", function()
+        it("adds to the segments already in the file rather than replacing them", function()
             local db = {}
             local first = newLog({ db = db })
             first.record(visit({ character = "Thrall-Ragnaros" }))
@@ -413,16 +413,16 @@ describe("ns.newSessionLog", function()
             local second = newLog({ db = db })
             second.record(visit({ character = "Jaina-Draenor" }))
 
-            assert.equal(2, #db.sessions)
+            assert.equal(2, #db.segments)
             assert.equal(2, #second.all())
         end)
 
-        it("creates the sessions table when the file has never seen one", function()
+        it("creates the segments table when the file has never seen one", function()
             local db = {}
 
             newLog({ db = db })
 
-            assert.same({}, db.sessions)
+            assert.same({}, db.segments)
         end)
     end)
 end)

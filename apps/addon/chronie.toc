@@ -1,7 +1,7 @@
 ## Interface: 120005
 ## Title: Chronie
-## Notes: Cross-character lockouts and per-zone session/event history. /wdp locks
-## Author: wdp
+## Notes: Cross-character lockouts and per-zone segment/event history. /chronie locks
+## Author: chronie
 ## Version: 0.7.0
 ## SavedVariables: ChronieDB
 
@@ -16,13 +16,13 @@ src/LockoutDetails.lua
 src/SlashRouter.lua
 src/DetailWindow.lua
 src/LockoutWindow.lua
-src/SessionSchema.lua
-src/SessionTally.lua
+src/SegmentSchema.lua
+src/SegmentTally.lua
 src/ResultsWindow.lua
 src/MinimapButton.lua
-src/SessionLog.lua
-src/SessionTracker.lua
-src/SessionTable.lua
+src/SegmentLog.lua
+src/SegmentTracker.lua
+src/SegmentTable.lua
 src/CurrencyItems.lua
 src/CurrencyWindow.lua
 src/ReportCommand.lua

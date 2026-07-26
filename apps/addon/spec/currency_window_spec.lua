@@ -4,7 +4,7 @@ local fake = require("fake_wow")
 describe("ns.newCurrencyWindow", function()
     local ns = loader.load()
 
-    local NAME = "WdpWowTestCurrencyWindow"
+    local NAME = "ChronieTestCurrencyWindow"
 
     ---Build the window over a real CurrencyItems store and fake frames, with a drivable
     ---cursor so a drop can be simulated.

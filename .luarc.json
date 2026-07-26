@@ -3,7 +3,7 @@
     "runtime.version": "Lua 5.1",
     "runtime.special": { "LoadAddOn": "require" },
     "workspace.checkThirdParty": false,
-    "diagnostics.globals": ["CreateFrame", "UnitName", "WdpWowDB"],
+    "diagnostics.globals": ["CreateFrame", "UnitName", "ChronieDB"],
     "diagnostics.libraryFiles": "Disable",
     "type.castNumberToInteger": true
 }

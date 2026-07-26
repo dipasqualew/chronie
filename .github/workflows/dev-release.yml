@@ -37,17 +37,24 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Set rolling version and updater key
+      - name: Set rolling version and release configuration
+        id: release-config
         shell: pwsh
         run: |
-          if (-not $env:TAURI_SIGNING_PUBLIC_KEY) {
-            throw "Set the TAURI_SIGNING_PUBLIC_KEY repository variable before publishing."
-          }
           $path = "apps/desktop/src-tauri/tauri.conf.json"
           $config = Get-Content $path -Raw | ConvertFrom-Json
           $config.version = "0.1.$env:GITHUB_RUN_NUMBER"
-          $config.plugins.updater.pubkey = $env:TAURI_SIGNING_PUBLIC_KEY
+          $signed = [bool]$env:TAURI_SIGNING_PUBLIC_KEY `
+            -and [bool]$env:TAURI_SIGNING_PRIVATE_KEY `
+            -and [bool]$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          if ($signed) {
+            $config.plugins.updater.pubkey = $env:TAURI_SIGNING_PUBLIC_KEY
+          } else {
+            $config.bundle.createUpdaterArtifacts = $false
+            $config.plugins.PSObject.Properties.Remove("updater")
+          }
           $config | ConvertTo-Json -Depth 20 | Set-Content $path
+          "signed=$($signed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Test frontend
         working-directory: apps/desktop
@@ -73,10 +80,6 @@ jobs:
           $bundle = "apps/desktop/src-tauri/target/release/bundle/nsis"
           $installer = Get-ChildItem $bundle -Filter "*-setup.exe" | Select-Object -First 1
           if (-not $installer) { throw "Tauri did not produce an NSIS installer." }
-          $updater = Get-ChildItem $bundle -Filter "*.nsis.zip" | Select-Object -First 1
-          if (-not $updater) { throw "Tauri did not produce an NSIS updater bundle." }
-          $signaturePath = "$($updater.FullName).sig"
-          if (-not (Test-Path $signaturePath)) { throw "Tauri did not sign the updater artifact." }
 
           git tag --force dev $env:GITHUB_SHA
           git push --force origin refs/tags/dev
@@ -90,18 +93,27 @@ jobs:
             gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
           }
 
-          $assetName = $updater.Name
-          $encodedName = [Uri]::EscapeDataString($assetName)
-          $latest = @{
-            version = $version
-            notes = "Rolling development build from $env:GITHUB_SHA"
-            pub_date = (Get-Date).ToUniversalTime().ToString("o")
-            platforms = @{
-              "windows-x86_64" = @{
-                signature = (Get-Content $signaturePath -Raw).Trim()
-                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/dev/$encodedName"
+          $assets = @($installer.FullName)
+          if ("${{ steps.release-config.outputs.signed }}" -eq "true") {
+            $updater = Get-ChildItem $bundle -Filter "*.nsis.zip" | Select-Object -First 1
+            if (-not $updater) { throw "Tauri did not produce an NSIS updater bundle." }
+            $signaturePath = "$($updater.FullName).sig"
+            if (-not (Test-Path $signaturePath)) { throw "Tauri did not sign the updater artifact." }
+
+            $assetName = $updater.Name
+            $encodedName = [Uri]::EscapeDataString($assetName)
+            $latest = @{
+              version = $version
+              notes = "Rolling development build from $env:GITHUB_SHA"
+              pub_date = (Get-Date).ToUniversalTime().ToString("o")
+              platforms = @{
+                "windows-x86_64" = @{
+                  signature = (Get-Content $signaturePath -Raw).Trim()
+                  url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/dev/$encodedName"
+                }
               }
             }
+            $latest | ConvertTo-Json -Depth 8 | Set-Content latest.json
+            $assets += $updater.FullName, $signaturePath, "latest.json"
           }
-          $latest | ConvertTo-Json -Depth 8 | Set-Content latest.json
-          gh release upload dev $installer.FullName $updater.FullName $signaturePath latest.json --clobber
+          gh release upload dev $assets --clobber

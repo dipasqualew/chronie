@@ -1,6 +1,6 @@
 local loader = require("addon_loader")
 
-describe("ns.newSessionTally", function()
+describe("ns.newSegmentTally", function()
     local ns = loader.load()
 
     describe("transmog appearance classification", function()
@@ -26,11 +26,11 @@ describe("ns.newSessionTally", function()
     ---Build the tally directly with fake seams, mirroring how lockout_store_spec builds
     ---the store: no frames, no Main, just the pure module and injected dependencies.
     ---@param options table? `{ prices, lootFormats, factionFormats }`
-    ---@return SessionTally
+    ---@return SegmentTally
     local function newTally(options)
         options = options or {}
         local prices = options.prices or {}
-        return ns.newSessionTally({
+        return ns.newSegmentTally({
             lootFormats = options.lootFormats or LOOT_FORMATS,
             factionFormats = options.factionFormats or FACTION_FORMATS,
             itemSellPrice = function(itemID)
@@ -49,11 +49,11 @@ describe("ns.newSessionTally", function()
     end
 
     it("is exported by the addon files", function()
-        assert.is_function(ns.newSessionTally)
+        assert.is_function(ns.newSegmentTally)
     end)
 
-    describe("beginning and leaving a session", function()
-        it("starts inactive before any session is begun", function()
+    describe("beginning and leaving a segment", function()
+        it("starts inactive before any segment is begun", function()
             local tally = newTally()
 
             assert.is_false(tally.isActive())
@@ -67,7 +67,7 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.isActive())
         end)
 
-        it("keeps the totals for display when the session is left", function()
+        it("keeps the totals for display when the segment is left", function()
             local tally = newTally()
             tally.begin(100)
             tally.money(600)
@@ -79,7 +79,7 @@ describe("ns.newSessionTally", function()
             assert.equal(500, summary.goldLooted)
         end)
 
-        it("wipes the previous session's tally when a new one begins", function()
+        it("wipes the previous segment's tally when a new one begins", function()
             local tally = newTally()
             tally.begin(100)
             tally.money(600)
@@ -121,7 +121,7 @@ describe("ns.newSessionTally", function()
             assert.equal(100, tally.summary().goldLooted)
         end)
 
-        it("sums several positive deltas across the session", function()
+        it("sums several positive deltas across the segment", function()
             local tally = newTally()
             tally.begin(0)
 
@@ -158,8 +158,8 @@ describe("ns.newSessionTally", function()
         end)
 
         -- Unlike gold looted, the net diff goes below the opening wallet: a repair the
-        -- player never earned back leaves the session down on the day.
-        it("goes negative when the session ends poorer than it began", function()
+        -- player never earned back leaves the segment down on the day.
+        it("goes negative when the segment ends poorer than it began", function()
             local tally = newTally()
             tally.begin(1000)
 
@@ -371,7 +371,7 @@ describe("ns.newSessionTally", function()
     end)
 
     describe("currency items", function()
-        it("records a gain when the owned total rises above the session baseline", function()
+        it("records a gain when the owned total rises above the segment baseline", function()
             local tally = newTally()
             tally.begin(0, { [5001] = 40 })
 
@@ -400,7 +400,7 @@ describe("ns.newSessionTally", function()
             assert.same({}, tally.summary().currencies)
         end)
 
-        -- Tracking an item mid-session leaves it unseeded by begin(); the first sight then
+        -- Tracking an item mid-segment leaves it unseeded by begin(); the first sight then
         -- only anchors the baseline, so holdings that predate the choice are not booked.
         it("adopts an unseeded item's first total as its baseline, counting nothing", function()
             local tally = newTally()
@@ -676,7 +676,7 @@ describe("ns.newSessionTally", function()
     end)
 
     describe("housing experience", function()
-        it("sums housing experience gains over the session", function()
+        it("sums housing experience gains over the segment", function()
             local tally = newTally()
             tally.begin(0)
 
@@ -724,7 +724,7 @@ describe("ns.newSessionTally", function()
     end)
 
     describe("hasEvents", function()
-        it("is false for a session where nothing happened", function()
+        it("is false for a segment where nothing happened", function()
             local tally = newTally()
             tally.begin(1000)
 
@@ -779,7 +779,7 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
-        -- Merely holding currency items when the session opens is not an event; only a
+        -- Merely holding currency items when the segment opens is not an event; only a
         -- change against that baseline is, so the baseline alone must leave hasEvents false.
         it("stays false when currency items are only baselined", function()
             local tally = newTally()
@@ -836,7 +836,7 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
-        -- A currency that is earned then wholly spent nets to zero, but the session did
+        -- A currency that is earned then wholly spent nets to zero, but the segment did
         -- see the currency move, so it is still worth keeping.
         it("stays true for a currency that nets back to zero", function()
             local tally = newTally()
@@ -868,7 +868,7 @@ describe("ns.newSessionTally", function()
             assert.equal(400, summary.lootValue)
         end)
 
-        it("hands back empty lists on a fresh session", function()
+        it("hands back empty lists on a fresh segment", function()
             local tally = newTally()
             tally.begin(0)
 
@@ -967,7 +967,7 @@ describe("ns.formatMoney", function()
         assert.equal("0c", ns.formatMoney(0.4))
     end)
 
-    -- A session can end down on gold; the sign has to survive the format so a loss does
+    -- A segment can end down on gold; the sign has to survive the format so a loss does
     -- not read as a gain.
     it("keeps the sign of a negative amount", function()
         assert.equal("-1g 0s 0c", ns.formatMoney(-10000))

@@ -18,7 +18,7 @@ function ns.newMinimapButton(deps)
     local button
 
     local function build()
-        button = deps.createFrame("Button", "WdpWowMinimapButton", deps.minimap)
+        button = deps.createFrame("Button", "ChronieMinimapButton", deps.minimap)
         button:SetSize(32, 32)
         local point, x, y
         if deps.loadPoint then
@@ -52,8 +52,8 @@ function ns.newMinimapButton(deps)
         button:SetScript("OnClick", deps.onClick)
         button:SetScript("OnEnter", function(self)
             deps.tooltip:SetOwner(self, "ANCHOR_LEFT")
-            deps.tooltip:AddLine("wdp sessions", 1, 0.82, 0)
-            deps.tooltip:AddLine("Click to open session history", 1, 1, 1)
+            deps.tooltip:AddLine("chronie segments", 1, 0.82, 0)
+            deps.tooltip:AddLine("Click to open segment history", 1, 1, 1)
             deps.tooltip:AddLine("Drag to move", 0.7, 0.7, 0.7)
             deps.tooltip:Show()
         end)

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-const mock = globalThis.__WDP_E2E__;
+const mock = globalThis.__Chronie_E2E__;
 
 export const desktop = {
   dashboard: () => mock ? Promise.resolve(structuredClone(mock.dashboard)) : invoke("dashboard"),

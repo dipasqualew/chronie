@@ -7,19 +7,19 @@ local _, ns = ...
 ---@field difficultyId integer?
 ---@field difficulty string? Localised difficulty name.
 
----Owns the lifecycle of a session: when it starts, when it ends, and what identity it
----is filed under. A session is one character's continuous stay in one location — any
----zone, instance or open world. The running tally itself lives in SessionTally; this
----only decides the boundaries, drops sessions that saw nothing, and hands the rest to
+---Owns the lifecycle of a segment: when it starts, when it ends, and what identity it
+---is filed under. A segment is one character's continuous stay in one location — any
+---zone, instance or open world. The running tally itself lives in SegmentTally; this
+---only decides the boundaries, drops segments that saw nothing, and hands the rest to
 ---the log.
----@class SessionTracker
----@field sync fun(): boolean Reconcile with the current zone. True while a session is open.
----@field flush fun(): SessionRecord? File the open session early, e.g. on logout.
----@field current fun(): table? The open session's descriptor, or nil.
+---@class SegmentTracker
+---@field sync fun(): boolean Reconcile with the current zone. True while a segment is open.
+---@field flush fun(): SegmentRecord? File the open segment early, e.g. on logout.
+---@field current fun(): table? The open segment's descriptor, or nil.
 
----@class SessionTrackerDeps
----@field tally SessionTally
----@field sessionLog SessionLog
+---@class SegmentTrackerDeps
+---@field tally SegmentTally
+---@field segmentLog SegmentLog
 ---@field now fun(): integer
 ---@field instanceInfo fun(): InstanceInfo? The zone the player is in right now.
 ---@field getMoney fun(): integer
@@ -33,8 +33,8 @@ local _, ns = ...
 ---@return string
 local function identityOf(character, info)
     -- Difficulty is part of the identity: walking out of Heroic and back in on Mythic
-    -- is two sessions, even though the instance name never changed. Character is too, so
-    -- a relog into the same spot never folds two players' sessions into one.
+    -- is two segments, even though the instance name never changed. Character is too, so
+    -- a relog into the same spot never folds two players' segments into one.
     return table.concat({
         tostring(character or ""),
         tostring(info.name or ""),
@@ -42,20 +42,20 @@ local function identityOf(character, info)
     }, "\0")
 end
 
----@param deps SessionTrackerDeps
----@return SessionTracker
-function ns.newSessionTracker(deps)
+---@param deps SegmentTrackerDeps
+---@return SegmentTracker
+function ns.newSegmentTracker(deps)
     local tally = deps.tally
-    local sessionLog = deps.sessionLog
+    local segmentLog = deps.segmentLog
     local now = deps.now
 
     ---@type table?
     local current
 
-    ---Closes the open session. It reaches the log only if something actually happened
+    ---Closes the open segment. It reaches the log only if something actually happened
     ---in it — an empty stroll through a zone leaves no record. Either way the tally is
-    ---wiped so the next session cannot inherit this one's totals.
-    ---@return SessionRecord?
+    ---wiped so the next segment cannot inherit this one's totals.
+    ---@return SegmentRecord?
     local function finish()
         if not current then
             return nil
@@ -63,7 +63,7 @@ function ns.newSessionTracker(deps)
 
         local kept
         if tally.hasEvents() then
-            kept = sessionLog.record({
+            kept = segmentLog.record({
                 character = current.character,
                 classFile = current.classFile,
                 level = current.level,
@@ -87,9 +87,9 @@ function ns.newSessionTracker(deps)
             return current
         end,
 
-        ---Called whenever the player finishes zoning. Ends the open session if the
+        ---Called whenever the player finishes zoning. Ends the open segment if the
         ---player has moved on, then opens one for wherever they are now. Every zone —
-        ---the open world included — gets a session; the empty ones simply never reach
+        ---the open world included — gets a segment; the empty ones simply never reach
         ---the log when they close.
         ---@return boolean active
         sync = function()
@@ -120,8 +120,8 @@ function ns.newSessionTracker(deps)
             return true
         end,
 
-        ---SavedVariables are only written when the client shuts the session down, so a
-        ---session still open at logout has to be filed here or it never reaches disk.
+        ---SavedVariables are only written when the client shuts the segment down, so a
+        ---segment still open at logout has to be filed here or it never reaches disk.
         ---An empty one is dropped the same as on any other close.
         flush = finish,
     }

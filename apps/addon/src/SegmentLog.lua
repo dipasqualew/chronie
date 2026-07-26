@@ -1,23 +1,23 @@
 local _, ns = ...
 
----One finished session, as it is written to SavedVariables and later exported. Flat
----and JSON-shaped on purpose: the collector script reads this table verbatim. A session
+---One finished segment, as it is written to SavedVariables and later exported. Flat
+---and JSON-shaped on purpose: the collector script reads this table verbatim. A segment
 ---is one character's continuous stay in one location — an instance or an open-world zone.
----@class SessionRecord
----@field id string Stable identity, so re-recording the same session overwrites it.
+---@class SegmentRecord
+---@field id string Stable identity, so re-recording the same segment overwrites it.
 ---@field character string "Name-Realm".
 ---@field classFile string? Non-localised class token of the character that ran it.
----@field level integer? Character level when the session started.
----@field day string "YYYY-MM-DD", the local day the session ended.
----@field instance string Location name — the zone or instance the session took place in.
+---@field level integer? Character level when the segment started.
+---@field day string "YYYY-MM-DD", the local day the segment ended.
+---@field instance string Location name — the zone or instance the segment took place in.
 ---@field difficulty string "" when the client never named one.
 ---@field instanceType string "party", "raid", "scenario", "none" (open world), ...
 ---@field difficultyId integer?
 ---@field startedAt integer
 ---@field endedAt integer
----@field seconds integer How long the session lasted.
+---@field seconds integer How long the segment lasted.
 ---@field lootValue integer Vendor value of items entering the inventory, in copper.
----@field goldDiff integer Net wallet change over the session, in copper; may be negative.
+---@field goldDiff integer Net wallet change over the segment, in copper; may be negative.
 ---@field transmogs TransmogEvent[]
 ---@field currencyTotal integer
 ---@field reputationTotal integer
@@ -30,11 +30,11 @@ local _, ns = ...
 ---@field quests QuestEvent[]
 ---@field toys CollectionEvent[]
 ---@field housingItems HousingItemEvent[]
----@field housingXP integer Housing experience gained over the session.
+---@field housingXP integer Housing experience gained over the segment.
 ---@field housingLevelUps LevelUpEvent[]
 
----What the tracker hands over when a session ends.
----@class SessionVisit
+---What the tracker hands over when a segment ends.
+---@class SegmentVisit
 ---@field character string
 ---@field classFile string?
 ---@field level integer?
@@ -44,15 +44,15 @@ local _, ns = ...
 ---@field difficultyId integer?
 ---@field startedAt integer
 ---@field endedAt integer
----@field summary SessionSummary
+---@field summary SegmentSummary
 
----A rolling log of finished sessions, capped at a window of recent days.
----@class SessionLog
----@field record fun(visit: SessionVisit): SessionRecord
----@field all fun(): SessionRecord[] Newest first, pruned to the retention window.
+---A rolling log of finished segments, capped at a window of recent days.
+---@class SegmentLog
+---@field record fun(visit: SegmentVisit): SegmentRecord
+---@field all fun(): SegmentRecord[] Newest first, pruned to the retention window.
 ---@field prune fun(): integer How many records were dropped.
 
----@class SessionLogDeps
+---@class SegmentLogDeps
 ---@field db table SavedVariables table; mutated in place so the client persists it.
 ---@field now fun(): integer
 ---@field formatDate fun(format: string, timestamp: integer): string Usually the global `date`.
@@ -61,15 +61,15 @@ local _, ns = ...
 local DAY = 24 * 60 * 60
 local DEFAULT_RETAIN_DAYS = 7
 
----@param deps SessionLogDeps
----@return SessionLog
-function ns.newSessionLog(deps)
+---@param deps SegmentLogDeps
+---@return SegmentLog
+function ns.newSegmentLog(deps)
     local db = deps.db
     local now = deps.now
     local formatDate = deps.formatDate
     local retainSeconds = (deps.retainDays or DEFAULT_RETAIN_DAYS) * DAY
 
-    db.sessions = db.sessions or {}
+    db.segments = db.segments or {}
 
     ---Drops everything that fell out of the retention window. Called on every read
     ---and every write, so the file the collector picks up is already trimmed.
@@ -79,7 +79,7 @@ function ns.newSessionLog(deps)
         local kept = {}
         local dropped = 0
 
-        for _, record in ipairs(db.sessions) do
+        for _, record in ipairs(db.segments) do
             if (record.endedAt or 0) >= cutoff then
                 kept[#kept + 1] = record
             else
@@ -87,23 +87,23 @@ function ns.newSessionLog(deps)
             end
         end
 
-        db.sessions = kept
+        db.segments = kept
         return dropped
     end
 
     -- Every list a record carries is copied out of the live tally through the one shared
-    -- schema (ns.sessionEventSpecs / ns.copyEventList), so a filed record shares no table
+    -- schema (ns.segmentEventSpecs / ns.copyEventList), so a filed record shares no table
     -- with the tally and can never be reached by a later mutation of it.
-    local specs = ns.sessionEventSpecs
+    local specs = ns.segmentEventSpecs
 
     return {
         prune = prune,
 
-        ---Files a finished session. Recording the same session twice — a flush on logout
+        ---Files a finished segment. Recording the same segment twice — a flush on logout
         ---after the zone change already filed it — replaces the record rather than
-        ---duplicating it, because the identity is the session, not the call.
-        ---@param visit SessionVisit
-        ---@return SessionRecord
+        ---duplicating it, because the identity is the segment, not the call.
+        ---@param visit SegmentVisit
+        ---@return SegmentRecord
         record = function(visit)
             local summary = visit.summary or {}
             local endedAt = visit.endedAt or now()
@@ -141,27 +141,27 @@ function ns.newSessionLog(deps)
             }
 
             local replaced = false
-            for index, existing in ipairs(db.sessions) do
+            for index, existing in ipairs(db.segments) do
                 if existing.id == record.id then
-                    db.sessions[index] = record
+                    db.segments[index] = record
                     replaced = true
                     break
                 end
             end
             if not replaced then
-                db.sessions[#db.sessions + 1] = record
+                db.segments[#db.segments + 1] = record
             end
 
             prune()
             return record
         end,
 
-        ---@return SessionRecord[]
+        ---@return SegmentRecord[]
         all = function()
             prune()
 
             local list = {}
-            for index, record in ipairs(db.sessions) do
+            for index, record in ipairs(db.segments) do
                 list[index] = record
             end
 

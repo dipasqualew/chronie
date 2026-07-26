@@ -1,17 +1,17 @@
 local loader = require("addon_loader")
 local fake = require("fake_wow")
 
-describe("ns.newSessionTable", function()
+describe("ns.newSegmentTable", function()
     local ns = loader.load()
 
-    ---@return SessionTable
+    ---@return SegmentTable
     local function newTable(options)
         options = options or {}
         local classColor, classIconCoords = fake.newClassLook()
-        return ns.newSessionTable({
+        return ns.newSegmentTable({
             classDisplay = ns.newClassDisplay({ classColor = classColor, classIconCoords = classIconCoords }),
             formatMoney = ns.formatMoney,
-            onSessionSelected = options.onSessionSelected,
+            onSegmentSelected = options.onSegmentSelected,
         })
     end
 
@@ -26,7 +26,7 @@ describe("ns.newSessionTable", function()
     end
 
     ---@param overrides table?
-    ---@return SessionRecord
+    ---@return SegmentRecord
     local function record(overrides)
         local base = {
             id = "Thrall-Ragnaros|1|Ulduar",
@@ -67,14 +67,14 @@ describe("ns.newSessionTable", function()
     end
 
     it("is exported by the addon files", function()
-        assert.is_function(ns.newSessionTable)
+        assert.is_function(ns.newSegmentTable)
     end)
 
     describe("the spec it builds", function()
         it("names the retention window in the title", function()
             local spec = newTable().spec({})
 
-            assert.equal("Sessions — last 7 days", spec.title)
+            assert.equal("Segments — last 7 days", spec.title)
         end)
 
         it("leads with a totals section", function()
@@ -88,7 +88,7 @@ describe("ns.newSessionTable", function()
 
             assert.equal(1, #spec.sections)
             assert.same({}, spec.sections[1].rows)
-            assert.equal("No sessions recorded yet.", spec.sections[1].empty)
+            assert.equal("No segments recorded yet.", spec.sections[1].empty)
         end)
 
         it("copes with being handed nothing at all", function()
@@ -106,11 +106,11 @@ describe("ns.newSessionTable", function()
         }
 
         it("filters by character, day, or location without case sensitivity", function()
-            local sessions = newTable()
+            local segments = newTable()
 
-            assert.equal(2, #sessions.filter(records, { character = "thrall" }))
-            assert.equal(2, #sessions.filter(records, { day = "07-24" }))
-            assert.equal(1, #sessions.filter(records, { location = "DEAD" }))
+            assert.equal(2, #segments.filter(records, { character = "thrall" }))
+            assert.equal(2, #segments.filter(records, { day = "07-24" }))
+            assert.equal(1, #segments.filter(records, { location = "DEAD" }))
         end)
 
         it("combines all active filters", function()
@@ -141,22 +141,22 @@ describe("ns.newSessionTable", function()
             assert.is_truthy(spec.sections[3].heading:find("2026-07-24", 1, true))
         end)
 
-        it("sums the day's sessions and loot into its heading", function()
+        it("sums the day's segments and loot into its heading", function()
             local spec = newTable().spec({
                 record({ lootValue = 15000 }),
                 record({ id = "b", lootValue = 5000 }),
             })
 
-            assert.equal("2026-07-25 — 2 sessions, 2g 0s 0c", spec.sections[2].heading)
+            assert.equal("2026-07-25 — 2 segments, 2g 0s 0c", spec.sections[2].heading)
         end)
 
-        it("says '1 session' rather than '1 sessions'", function()
+        it("says '1 segment' rather than '1 segments'", function()
             local spec = newTable().spec({ record({ lootValue = 0, goldDiff = 0 }) })
 
-            assert.equal("2026-07-25 — 1 session, 0c", spec.sections[2].heading)
+            assert.equal("2026-07-25 — 1 segment, 0c", spec.sections[2].heading)
         end)
 
-        it("renders a session as one line of cells", function()
+        it("renders a segment as one line of cells", function()
             local spec = newTable().spec({ record() })
 
             assert.same({
@@ -190,11 +190,11 @@ describe("ns.newSessionTable", function()
             assert.equal("—", spec.sections[2].rows[1].cells[8])
         end)
 
-        it("opens the selected session when its row is clicked", function()
+        it("opens the selected segment when its row is clicked", function()
             local selected
             local visit = record()
             local spec = newTable({
-                onSessionSelected = function(value)
+                onSegmentSelected = function(value)
                     selected = value
                 end,
             }).spec({ visit })
@@ -217,7 +217,7 @@ describe("ns.newSessionTable", function()
             assert.equal(2, #totals.rows)
             assert.same({
                 warrior("Thrall-Ragnaros"),
-                "2 sessions",
+                "2 segments",
                 "",
                 "40:00",
                 "2g 0s 0c",
@@ -241,7 +241,7 @@ describe("ns.newSessionTable", function()
             assert.is_truthy(totals.rows[2].cells[1]:find("Thrall-Ragnaros", 1, true))
         end)
 
-        it("sums a faction across sessions", function()
+        it("sums a faction across segments", function()
             local spec = newTable().spec({
                 record({ reputation = { { faction = "Argent Dawn", amount = 40 } } }),
                 record({ id = "b", reputation = { { faction = "Argent Dawn", amount = 60 } } }),
@@ -250,7 +250,7 @@ describe("ns.newSessionTable", function()
             assert.equal("+100", sectionFor(spec, "Totals").rows[1].cells[9])
         end)
 
-        it("sums a currency across sessions", function()
+        it("sums a currency across segments", function()
             local spec = newTable().spec({
                 record({ currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } } }),
                 record({ id = "b", currencies = { { id = 1166, name = "Timewarped Badge", amount = 5 } } }),
@@ -290,10 +290,10 @@ describe("ns.newSessionTable", function()
         end)
 
         it("sums reputation into one signed value", function()
-            local sessions = newTable()
+            local segments = newTable()
 
-            assert.equal("+40", sessions.formatReputation({ { faction = "Argent Dawn", amount = 40 } }))
-            assert.equal("+3", sessions.formatReputation({
+            assert.equal("+40", segments.formatReputation({ { faction = "Argent Dawn", amount = 40 } }))
+            assert.equal("+3", segments.formatReputation({
                 { faction = "A", amount = 1 },
                 { faction = "B", amount = 2 },
             }))

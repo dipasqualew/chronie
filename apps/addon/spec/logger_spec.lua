@@ -20,11 +20,11 @@ describe("ns.newLogger", function()
     end)
 
     it("sends prefix and message to the injected sink", function()
-        local logger, lines = newLoggerWithSpySink("|cff33ff99wdp-wow|r:")
+        local logger, lines = newLoggerWithSpySink("|cff33ff99chronie|r:")
 
         logger.info("Hello World, Thrall!")
 
-        assert.same({ "|cff33ff99wdp-wow|r: Hello World, Thrall!" }, lines)
+        assert.same({ "|cff33ff99chronie|r: Hello World, Thrall!" }, lines)
     end)
 
     it("writes nothing until info is called", function()

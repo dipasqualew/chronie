@@ -1,6 +1,6 @@
 local _, ns = ...
 
----A small, draggable HUD panel that renders the current session's SessionSummary.
+---A small, draggable HUD panel that renders the current segment's SegmentSummary.
 ---Deliberately thin: it lays out font strings and remembers where it was dragged, and
 ---nothing else.
 ---@class ResultsWindow
@@ -8,7 +8,7 @@ local _, ns = ...
 ---@field hide fun()
 ---@field toggle fun()
 ---@field isShown fun(): boolean
----@field update fun(summary: SessionSummary) Repaint; builds the frame on first use.
+---@field update fun(summary: SegmentSummary) Repaint; builds the frame on first use.
 
 ---@class ResultsWindowDeps
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
@@ -21,7 +21,7 @@ local _, ns = ...
 ---@field previewTransmog fun(itemID: integer)?
 ---@field openTransmogCollection fun(sourceID: integer)?
 ---@field itemName fun(itemID: integer): string?
----@field title string|fun(summary: SessionSummary): string?
+---@field title string|fun(summary: SegmentSummary): string?
 ---@field closable boolean?
 ---@field specialFrames string[]?
 ---@field frameStrata string?
@@ -71,7 +71,7 @@ function ns.newResultsWindow(deps)
         housingLevelUps = false,
     }
     local reviewedTransmogs = {}
-    local reviewedSessionKey
+    local reviewedSegmentKey
     local lastTransmogCount = 0
 
     local function build()
@@ -106,7 +106,7 @@ function ns.newResultsWindow(deps)
 
         title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         title:SetPoint("TOPLEFT", PADDING, -PADDING)
-        title:SetText(type(deps.title) == "string" and deps.title or "Current Session")
+        title:SetText(type(deps.title) == "string" and deps.title or "Current Segment")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
 
         if deps.closable then
@@ -143,10 +143,10 @@ function ns.newResultsWindow(deps)
         return row.label, row.value
     end
 
-    ---@param summary SessionSummary
+    ---@param summary SegmentSummary
     local function render(summary)
         if type(deps.title) == "function" then
-            title:SetText(deps.title(summary) or "Session Details")
+            title:SetText(deps.title(summary) or "Segment Details")
         end
         local y = -PADDING - LINE - 4
         local used = 0
@@ -425,18 +425,18 @@ function ns.newResultsWindow(deps)
     end
 
     return {
-        ---@param summary SessionSummary
+        ---@param summary SegmentSummary
         update = function(summary)
             if not frame then
                 build()
             end
-            local sessionKey = summary.id or summary.startedAt
+            local segmentKey = summary.id or summary.startedAt
             local transmogCount = #(summary.transmogs or {})
-            if (sessionKey and reviewedSessionKey and sessionKey ~= reviewedSessionKey)
+            if (segmentKey and reviewedSegmentKey and segmentKey ~= reviewedSegmentKey)
                 or transmogCount < lastTransmogCount then
                 reviewedTransmogs = {}
             end
-            reviewedSessionKey = sessionKey or reviewedSessionKey
+            reviewedSegmentKey = segmentKey or reviewedSegmentKey
             lastTransmogCount = transmogCount
             latest = summary
             render(summary)

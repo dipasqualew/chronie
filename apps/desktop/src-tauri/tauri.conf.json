@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WDP",
+  "productName": "Chronie",
   "version": "0.1.0",
-  "identifier": "dev.wdp.wow",
+  "identifier": "dev.chronie.wow",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "WDP",
+        "title": "Chronie",
         "width": 1240,
         "height": 820,
         "minWidth": 760,

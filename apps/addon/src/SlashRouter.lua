@@ -7,7 +7,7 @@ local _, ns = ...
 ---@class SlashRouterDeps
 ---@field onUnknown fun(subcommand: string) Called for anything unrouted, including "".
 
----Routes "/wdp <subcommand> <argument>". Registration with the client lives in
+---Routes "/chronie <subcommand> <argument>". Registration with the client lives in
 ---Main.lua; this half is pure string handling so it can be tested directly.
 ---@param deps SlashRouterDeps
 ---@return SlashRouter

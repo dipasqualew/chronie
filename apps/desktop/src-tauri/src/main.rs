@@ -1,3 +1,3 @@
 fn main() {
-    wdp_wow_desktop_lib::run();
+    chronie_desktop_lib::run();
 }

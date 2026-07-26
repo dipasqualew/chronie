@@ -1,12 +1,12 @@
 [package]
-name = "wdp-wow-desktop"
+name = "chronie-desktop"
 version = "0.1.0"
-description = "Background session collector and addon manager for wdp-wow"
-authors = ["wdp"]
+description = "Background segment collector and addon manager for chronie"
+authors = ["chronie"]
 edition = "2021"
 
 [lib]
-name = "wdp_wow_desktop_lib"
+name = "chronie_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

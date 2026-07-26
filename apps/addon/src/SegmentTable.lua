@@ -1,25 +1,25 @@
 local _, ns = ...
 
----Turns the session log into a DetailSpec: a totals section over the whole retention
+---Turns the segment log into a DetailSpec: a totals section over the whole retention
 ---window, then one section per day, newest first. Pure — it renders no widgets, so
 ---the shape of the report is testable without the frame API.
----@class SessionTable
----@field spec fun(records: SessionRecord[]): DetailSpec
+---@class SegmentTable
+---@field spec fun(records: SegmentRecord[]): DetailSpec
 ---@field formatDuration fun(seconds: integer): string
 ---@field formatReputation fun(gains: ReputationGain[]): string
 ---@field formatCurrencies fun(gains: CurrencyGain[]): string
----@field filter fun(records: SessionRecord[], filters: SessionFilters?): SessionRecord[]
+---@field filter fun(records: SegmentRecord[], filters: SegmentFilters?): SegmentRecord[]
 
----@class SessionFilters
+---@class SegmentFilters
 ---@field character string?
 ---@field day string?
 ---@field location string?
 
----@class SessionTableDeps
+---@class SegmentTableDeps
 ---@field classDisplay ClassDisplay
 ---@field formatMoney fun(copper: integer): string
 ---@field retainDays integer? Only used in the title. Default 7.
----@field onSessionSelected fun(record: SessionRecord)?
+---@field onSegmentSelected fun(record: SegmentRecord)?
 
 local ROW_COLOR = { 1, 1, 1 }
 local TOTAL_COLOR = { 1, 0.82, 0 }
@@ -41,7 +41,7 @@ local DAY_COLUMNS = {
 
 local TOTAL_COLUMNS = {
     { title = "Character", width = 148 },
-    { title = "Sessions", width = 150 },
+    { title = "Segments", width = 150 },
     { title = "", width = 80 },
     { title = "Time", width = 52 },
     { title = "Loot value", width = 92 },
@@ -83,14 +83,14 @@ end
 
 ---Folds a record into a running tally.
 ---@param tally table?
----@param record SessionRecord
+---@param record SegmentRecord
 ---@return table
 local function accumulate(tally, record)
     tally = tally or {
-        sessions = 0, seconds = 0, lootValue = 0, goldDiff = 0, transmog = 0,
+        segments = 0, seconds = 0, lootValue = 0, goldDiff = 0, transmog = 0,
         reputation = 0, reputationSeen = false, currency = 0, currencySeen = false,
     }
-    tally.sessions = tally.sessions + 1
+    tally.segments = tally.segments + 1
     tally.seconds = tally.seconds + (record.seconds or 0)
     tally.lootValue = tally.lootValue + (record.lootValue or 0)
     tally.goldDiff = tally.goldDiff + (record.goldDiff or 0)
@@ -115,9 +115,9 @@ local function normalise(value)
     return string.lower((value or ""):match("^%s*(.-)%s*$"))
 end
 
----@param records SessionRecord[]
----@param filters SessionFilters?
----@return SessionRecord[]
+---@param records SegmentRecord[]
+---@param filters SegmentFilters?
+---@return SegmentRecord[]
 local function filter(records, filters)
     filters = filters or {}
     local character = normalise(filters.character)
@@ -144,15 +144,15 @@ local function plural(count, noun)
     return count .. " " .. noun .. (count == 1 and "" or "s")
 end
 
----@param deps SessionTableDeps
----@return SessionTable
-function ns.newSessionTable(deps)
+---@param deps SegmentTableDeps
+---@return SegmentTable
+function ns.newSegmentTable(deps)
     local classDisplay = deps.classDisplay
     local formatMoney = deps.formatMoney
     local retainDays = deps.retainDays or 7
-    local onSessionSelected = deps.onSessionSelected
+    local onSegmentSelected = deps.onSegmentSelected
 
-    ---@param record SessionRecord
+    ---@param record SegmentRecord
     ---@return DetailRow
     local function rowOf(record)
         return {
@@ -168,14 +168,14 @@ function ns.newSessionTable(deps)
                 formatReputation(record.reputation),
             },
             color = ROW_COLOR,
-            onClick = onSessionSelected and function()
-                onSessionSelected(record)
+            onClick = onSegmentSelected and function()
+                onSegmentSelected(record)
             end or nil,
         }
     end
 
     ---One line per character, summed over every record in the window.
-    ---@param records SessionRecord[]
+    ---@param records SegmentRecord[]
     ---@return DetailRow[]
     local function totalRows(records)
         local byCharacter = {}
@@ -203,7 +203,7 @@ function ns.newSessionTable(deps)
             rows[index] = {
                 cells = {
                     classDisplay.decorate(tally.classFile, character),
-                    plural(tally.sessions, "session"),
+                    plural(tally.segments, "segment"),
                     "",
                     formatDuration(tally.seconds),
                     formatMoney(tally.lootValue),
@@ -225,7 +225,7 @@ function ns.newSessionTable(deps)
         formatCurrencies = formatCurrencies,
         filter = filter,
 
-        ---@param records SessionRecord[] Newest first, as SessionLog.all returns them.
+        ---@param records SegmentRecord[] Newest first, as SegmentLog.all returns them.
         ---@return DetailSpec
         spec = function(records)
             records = records or {}
@@ -235,7 +235,7 @@ function ns.newSessionTable(deps)
                     heading = "Totals",
                     columns = TOTAL_COLUMNS,
                     rows = totalRows(records),
-                    empty = "No sessions recorded yet.",
+                    empty = "No segments recorded yet.",
                 },
             }
 
@@ -260,7 +260,7 @@ function ns.newSessionTable(deps)
                     heading = string.format(
                         "%s — %s, %s",
                         day,
-                        plural(bucket.tally.sessions, "session"),
+                        plural(bucket.tally.segments, "segment"),
                         formatMoney(bucket.tally.lootValue)
                     ),
                     columns = DAY_COLUMNS,
@@ -269,7 +269,7 @@ function ns.newSessionTable(deps)
             end
 
             return {
-                title = "Sessions — last " .. retainDays .. " days",
+                title = "Segments — last " .. retainDays .. " days",
                 sections = sections,
             }
         end,

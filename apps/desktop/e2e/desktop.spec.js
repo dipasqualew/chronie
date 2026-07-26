@@ -4,7 +4,7 @@ const mockDesktop = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
     retainDays: 7,
-    sessions: [
+    segments: [
       {
         id: "synthetic-001",
         character: "Aster-Vale",
@@ -70,21 +70,21 @@ const mockDesktop = {
     lastSync: "2026-07-26T11:58:00Z",
   },
   chosenPath: "D:\\Games\\Example MMO",
-  syncResult: { sessionCount: 2, added: 1, dropped: 0 },
+  syncResult: { segmentCount: 2, added: 1, dropped: 0 },
   installResult: { version: "0.8.0-dev" },
   appUpdate: { updated: false, version: "0.1.0" },
 };
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {
-    window.__WDP_E2E__ = mock;
+    window.__Chronie_E2E__ = mock;
   }, mockDesktop);
   await page.goto("/");
 });
 
-test("renders a complete session dashboard from the injected datastore", async ({ page }) => {
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
-  await expect(page.locator("#meta")).toContainText("2 sessions");
+test("renders a complete segment dashboard from the injected datastore", async ({ page }) => {
+  await expect(page.getByRole("heading", { name: "Segments" })).toBeVisible();
+  await expect(page.locator("#meta")).toContainText("2 segments");
   await expect(page.locator("#tiles")).toContainText("29g 50s");
   await expect(page.locator("#timeline")).toContainText("Aster-Vale");
   await expect(page.locator("#timeline")).toContainText("Glass Caverns");
@@ -92,12 +92,12 @@ test("renders a complete session dashboard from the injected datastore", async (
   await expect(page.locator("#rows tr")).toHaveCount(2);
 });
 
-test("filters sessions by synthetic character and location", async ({ page }) => {
-  await page.getByLabel("Filter sessions").fill("copper");
+test("filters segments by synthetic character and location", async ({ page }) => {
+  await page.getByLabel("Filter segments").fill("copper");
   await expect(page.locator("#rows tr")).toHaveCount(1);
   await expect(page.locator("#rows")).toContainText("Brin-Hearth");
 
-  await page.getByLabel("Filter sessions").fill("");
+  await page.getByLabel("Filter segments").fill("");
   await page.getByLabel("Character").selectOption("Aster-Vale");
   await expect(page.locator("#rows tr")).toHaveCount(1);
   await expect(page.locator("#rows")).toContainText("Glass Caverns");
@@ -115,11 +115,11 @@ test("drives setup, sync, addon installation, and app update checks", async ({ p
   await expect(page.locator("#setup-status")).toHaveText("Game folder saved.");
 
   await page.getByRole("button", { name: "Sync now" }).click();
-  await expect(page.locator("#setup-status")).toContainText("2 sessions, 1 new");
+  await expect(page.locator("#setup-status")).toContainText("2 segments, 1 new");
 
   await page.getByRole("button", { name: "Install or update addon" }).click();
   await expect(page.locator("#setup-status")).toContainText("0.8.0-dev installed");
 
   await page.getByRole("button", { name: "Check for app update" }).click();
-  await expect(page.locator("#setup-status")).toHaveText("WDP is up to date.");
+  await expect(page.locator("#setup-status")).toHaveText("Chronie is up to date.");
 });

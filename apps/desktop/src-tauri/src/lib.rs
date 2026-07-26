@@ -42,7 +42,7 @@ impl AppState {
     }
 
     fn database_path(&self) -> PathBuf {
-        self.data_dir.join("sessions.json")
+        self.data_dir.join("segments.json")
     }
 
     fn save(&self, settings: &Settings) -> Result<(), String> {
@@ -211,10 +211,6 @@ fn replace_addon(archive: &[u8], wow_path: &Path) -> Result<InstallResult, Strin
     if backup.exists() {
         fs::remove_dir_all(backup).map_err(|error| error.to_string())?;
     }
-    let legacy_target = addons.join("wdp-wow");
-    if legacy_target.exists() {
-        fs::remove_dir_all(legacy_target).map_err(|error| error.to_string())?;
-    }
     Ok(InstallResult {
         version: addon_version(&target),
     })
@@ -289,7 +285,7 @@ fn show_window(app: &AppHandle) {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Open WDP", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Open Chronie", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
     let mut pixels = vec![0_u8; 16 * 16 * 4];
@@ -298,7 +294,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     }
     TrayIconBuilder::new()
         .icon(Image::new_owned(pixels, 16, 16))
-        .tooltip("WDP session sync")
+        .tooltip("Chronie segment sync")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_window(app),
@@ -338,16 +334,6 @@ pub fn run() {
         ))
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            let legacy_database = app
-                .path()
-                .local_data_dir()?
-                .join("wdp-wow")
-                .join("sessions.json");
-            let database = data_dir.join("sessions.json");
-            if !database.exists() && legacy_database.is_file() {
-                fs::create_dir_all(&data_dir)?;
-                fs::copy(legacy_database, database)?;
-            }
             let state = AppState {
                 settings: Mutex::new(load_settings(&data_dir.join("settings.json"))),
                 data_dir,
@@ -380,7 +366,7 @@ pub fn run() {
             check_for_app_update,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running WDP");
+        .expect("error while running Chronie");
 }
 
 #[cfg(test)]
@@ -415,12 +401,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let wow = temp.path().join("_retail_");
         fs::create_dir_all(wow.join("Interface/AddOns")).unwrap();
-        fs::create_dir_all(wow.join("Interface/AddOns/wdp-wow")).unwrap();
         let result = replace_addon(&bytes, &wow).unwrap();
 
         assert_eq!(result.version, "9.8.7");
         assert!(wow.join("Interface/AddOns/chronie/Main.lua").is_file());
         assert!(!wow.join("Interface/AddOns/chronie/private.txt").exists());
-        assert!(!wow.join("Interface/AddOns/wdp-wow").exists());
     }
 }

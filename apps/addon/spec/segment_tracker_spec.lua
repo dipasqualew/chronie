@@ -1,7 +1,7 @@
 local loader = require("addon_loader")
 local fake = require("fake_wow")
 
-describe("ns.newSessionTracker", function()
+describe("ns.newSegmentTracker", function()
     local ns = loader.load()
 
     local NOW = 1700000000
@@ -17,12 +17,12 @@ describe("ns.newSessionTracker", function()
         local zone = options.zone or { name = "Elwynn Forest", kind = "none" }
         local money = options.money or 0
 
-        local tally = ns.newSessionTally({})
-        local log = ns.newSessionLog({ db = db, now = clock.now, formatDate = fake.newFormatDate() })
+        local tally = ns.newSegmentTally({})
+        local log = ns.newSegmentLog({ db = db, now = clock.now, formatDate = fake.newFormatDate() })
 
-        local tracker = ns.newSessionTracker({
+        local tracker = ns.newSegmentTracker({
             tally = tally,
-            sessionLog = log,
+            segmentLog = log,
             now = clock.now,
             instanceInfo = function()
                 return zone
@@ -57,7 +57,7 @@ describe("ns.newSessionTracker", function()
                 money = value
             end,
             ---Bump the wallet and fold it in, the way PLAYER_MONEY would, so the open
-            ---session has an event and is not dropped on close.
+            ---segment has an event and is not dropped on close.
             earn = function(amount)
                 money = money + amount
                 tally.money(money)
@@ -71,18 +71,18 @@ describe("ns.newSessionTracker", function()
     local OTHER_WORLD = { name = "Westfall", kind = "none", difficultyId = 0 }
 
     it("is exported by the addon files", function()
-        assert.is_function(ns.newSessionTracker)
+        assert.is_function(ns.newSegmentTracker)
     end)
 
-    describe("opening a session", function()
-        it("opens a session out in the open world", function()
+    describe("opening a segment", function()
+        it("opens a segment out in the open world", function()
             local harness = newTracker({ zone = WORLD })
 
             assert.is_true(harness.tracker.sync())
             assert.equal("Elwynn Forest", harness.tracker.current().instance)
         end)
 
-        it("opens a session on entering an instance", function()
+        it("opens a segment on entering an instance", function()
             local harness = newTracker({ zone = DUNGEON })
 
             assert.is_true(harness.tracker.sync())
@@ -113,8 +113,8 @@ describe("ns.newSessionTracker", function()
         end)
 
         -- A load screen, a graveyard run and a summon all fire the same event inside
-        -- one zone; treating any of them as a new session would split the stay in two.
-        it("keeps one session across a second sync in the same zone", function()
+        -- one zone; treating any of them as a new segment would split the stay in two.
+        it("keeps one segment across a second sync in the same zone", function()
             local harness = newTracker({ zone = DUNGEON })
             harness.tracker.sync()
             local opened = harness.tracker.current()
@@ -127,8 +127,8 @@ describe("ns.newSessionTracker", function()
         end)
     end)
 
-    describe("dropping sessions that saw nothing", function()
-        it("files nothing when an empty world session closes", function()
+    describe("dropping segments that saw nothing", function()
+        it("files nothing when an empty world segment closes", function()
             local harness = newTracker({ zone = WORLD })
             harness.tracker.sync()
 
@@ -149,7 +149,7 @@ describe("ns.newSessionTracker", function()
             assert.same({}, harness.log.all())
         end)
 
-        it("keeps a world session once something happened in it", function()
+        it("keeps a world segment once something happened in it", function()
             local harness = newTracker({ zone = WORLD })
             harness.tracker.sync()
             harness.earn(500)
@@ -163,7 +163,7 @@ describe("ns.newSessionTracker", function()
         end)
     end)
 
-    describe("closing a session", function()
+    describe("closing a segment", function()
         it("files exactly one record on the way out of an instance that earned", function()
             local harness = newTracker({ zone = DUNGEON })
             harness.tracker.sync()
@@ -176,7 +176,7 @@ describe("ns.newSessionTracker", function()
             assert.equal(1, #harness.log.all())
         end)
 
-        it("carries the session's identity onto the record", function()
+        it("carries the segment's identity onto the record", function()
             local harness = newTracker({ zone = RAID, level = 41 })
             harness.tracker.sync()
             harness.earn(100)
@@ -228,7 +228,7 @@ describe("ns.newSessionTracker", function()
 
         -- The whole point of closing the tally: a portal from one dungeon into the next
         -- must not report the first one's haul twice.
-        it("starts the second session's tally from scratch", function()
+        it("starts the second segment's tally from scratch", function()
             local harness = newTracker({ zone = DUNGEON, money = 0 })
             harness.tracker.sync()
             harness.earn(4000)
@@ -248,7 +248,7 @@ describe("ns.newSessionTracker", function()
             assert.equal(0, rows[1].lootValue)
         end)
 
-        it("treats the same instance at another difficulty as a new session", function()
+        it("treats the same instance at another difficulty as a new segment", function()
             local harness = newTracker({ zone = DUNGEON })
             harness.tracker.sync()
             harness.earn(100)
@@ -263,7 +263,7 @@ describe("ns.newSessionTracker", function()
     end)
 
     describe("currency item baselines", function()
-        -- The tracker seeds the tally with what the character already owns when a session
+        -- The tracker seeds the tally with what the character already owns when a segment
         -- opens, so a bank move that leaves the total flat records nothing while a genuine
         -- gain above the baseline still counts.
         it("seeds the tally so currency held on arrival is not counted as gained", function()
@@ -277,7 +277,7 @@ describe("ns.newSessionTracker", function()
             assert.equal(12, harness.tally.summary().currencies[1].amount)
         end)
 
-        it("re-seeds the baseline for each new session", function()
+        it("re-seeds the baseline for each new segment", function()
             local counts = { [5001] = 40 }
             local harness = newTracker({ zone = DUNGEON, currencyItemCounts = counts })
             harness.tracker.sync()
@@ -288,7 +288,7 @@ describe("ns.newSessionTracker", function()
             harness.setZone(RAID)
             harness.tracker.sync()
 
-            -- The new session starts from 60; withdrawing back to that total records nothing.
+            -- The new segment starts from 60; withdrawing back to that total records nothing.
             harness.tally.currencyItem(5001, 60, "Bloody Token")
             assert.same({}, harness.tally.summary().currencies)
         end)
@@ -296,19 +296,19 @@ describe("ns.newSessionTracker", function()
 
     describe("a character change", function()
         -- Two characters can be standing in the same-named starting zone; a relog must
-        -- never fold the second player's stay into the first player's open session.
-        it("closes the session and opens a fresh one for the new character", function()
+        -- never fold the second player's stay into the first player's open segment.
+        it("closes the segment and opens a fresh one for the new character", function()
             local db = {}
             local clock = fake.newClock(NOW)
             local zone = { name = "Elwynn Forest", kind = "none", difficultyId = 0 }
             local character = "Thrall-Ragnaros"
             local money = 0
 
-            local tally = ns.newSessionTally({})
-            local log = ns.newSessionLog({ db = db, now = clock.now, formatDate = fake.newFormatDate() })
-            local tracker = ns.newSessionTracker({
+            local tally = ns.newSegmentTally({})
+            local log = ns.newSegmentLog({ db = db, now = clock.now, formatDate = fake.newFormatDate() })
+            local tracker = ns.newSegmentTracker({
                 tally = tally,
-                sessionLog = log,
+                segmentLog = log,
                 now = clock.now,
                 instanceInfo = function() return zone end,
                 getMoney = function() return money end,
@@ -330,7 +330,7 @@ describe("ns.newSessionTracker", function()
     end)
 
     describe("flushing at logout", function()
-        it("files the session that is still open when it earned", function()
+        it("files the segment that is still open when it earned", function()
             local harness = newTracker({ zone = DUNGEON })
             harness.tracker.sync()
             harness.earn(120)
@@ -343,7 +343,7 @@ describe("ns.newSessionTracker", function()
             assert.equal(1, #harness.log.all())
         end)
 
-        it("drops the open session at logout when nothing happened", function()
+        it("drops the open segment at logout when nothing happened", function()
             local harness = newTracker({ zone = WORLD })
             harness.tracker.sync()
 
@@ -362,8 +362,8 @@ describe("ns.newSessionTracker", function()
         end)
 
         -- Reloading the UI flushes and then re-syncs from the same spot: the player is
-        -- still standing in the dungeon, so a fresh session has to open.
-        it("opens a new session when the player syncs again after a flush", function()
+        -- still standing in the dungeon, so a fresh segment has to open.
+        it("opens a new segment when the player syncs again after a flush", function()
             local harness = newTracker({ zone = DUNGEON })
             harness.tracker.sync()
             harness.earn(50)
