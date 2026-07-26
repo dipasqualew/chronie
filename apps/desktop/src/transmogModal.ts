@@ -6,9 +6,10 @@
  * backend walks on demand — so this is the one view that asks for something after the page
  * has loaded, and the one that has a loading state and a failure to draw.
  *
- * There are no names here yet, only ids and a way through to Wowhead. That is deliberate:
- * item names live in a table the DB2 reader cannot open yet, and a row that says which slot
- * it fills, shows the game's own picture of it and links out is worth opening a set for.
+ * A row is named by the item the appearance belongs to, which comes out of a fifth table the
+ * backend reads for it. The game withholds the items of content it has not shipped, like
+ * everything else along that chain, so a row can arrive without one — and then says which
+ * item it is instead, because an id and a link out is still worth opening a set for.
  *
  * The icons arrive after the rows do. Decoding a set's worth of textures takes longer than
  * reading the tables that named them, and a list of slots is worth looking at while that
@@ -51,7 +52,8 @@ export function slotName(displayType: number): string {
 /** One appearance as a row reads it, with everything the markup needs already decided. */
 export interface AppearanceRow {
   slot: string;
-  /** What names the row. An id until item names arrive, and a plain apology before that. */
+  /** What names the row: the item's own name, its id where the game gives none, and a plain
+   * apology where the appearance itself is withheld. */
   label: string;
   itemId: number;
   appearanceId: number;
@@ -71,13 +73,17 @@ export interface AppearanceRow {
  *
  * An appearance the game withholds keeps its place rather than being dropped, because the
  * set's own count includes it and a list one shorter than the card promised reads as a bug.
+ * An item the game names nothing keeps its id for the same reason: a blank where a name
+ * should be reads as this app having lost it, and the id is what a reader can act on.
  */
 export function appearanceRows(payload: TransmogSetItemsPayload): AppearanceRow[] {
   return (payload.appearances || []).map((appearance: TransmogAppearance) => {
     const withheld = !appearance.itemId;
     return {
       slot: withheld ? "Unknown slot" : slotName(appearance.displayType),
-      label: withheld ? "The game keeps this appearance encrypted" : `Item ${appearance.itemId}`,
+      label: withheld
+        ? "The game keeps this appearance encrypted"
+        : appearance.name || `Item ${appearance.itemId}`,
       itemId: appearance.itemId,
       appearanceId: appearance.appearanceId,
       displayType: appearance.displayType,

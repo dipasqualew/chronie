@@ -10,8 +10,9 @@
  * halves of the format would leave the awkward halves of the reader untested: bit fields
  * that stop on no particular byte, palettes of distinct values, sparse maps of the rows that
  * differ from a default, ids kept beside the rows rather than in them, rows that are another
- * row under a second id, foreign keys that are in no column at all, and whole sections
- * Blizzard encrypted because they belong to content it has not shipped.
+ * row under a second id, foreign keys that are in no column at all, records that vary in
+ * length with their strings written inside them, and whole sections Blizzard encrypted
+ * because they belong to content it has not shipped.
  *
  * Which tables a given area of the game needs is not this file's business. That belongs to
  * the scripts beside it — `make-transmog-fixtures.ts`, `make-achievement-fixtures.ts` — one
@@ -76,11 +77,29 @@ export interface TableSpec {
   tableHash: number;
   /** Which column holds the row id, when it is stored inside the row. */
   idColumn: number;
-  /** Bit 2 is what the game sets on a table that keeps its ids beside the rows. */
+  /**
+   * Bit 0 is what the game sets on a table whose records vary in length, and bit 2 on one
+   * that keeps its ids beside the rows.
+   */
   flags: number;
+  /** How wide one record is. Zero for a table whose records vary, which says so per record. */
   recordSize: number;
+  /**
+   * The columns holding text, for a table whose records vary in length.
+   *
+   * Such a table writes its strings into the record rather than into a block of its own, so
+   * how long a row is depends on what is in it — and nothing in the file says which columns
+   * those are. Ignored by a table of fixed-size records, which stores every string as an
+   * offset regardless.
+   */
+  textColumns?: number[];
   columns: ColumnSpec[];
   sections: SectionSpec[];
+}
+
+/** Whether a table's records vary in length, which is the flag that changes its whole layout. */
+function isVariable(table: TableSpec): boolean {
+  return (table.flags & 1) !== 0;
 }
 
 /* ---------- writing one out ---------- */
@@ -125,6 +144,17 @@ export class Bytes {
 
   zeros(count: number): void {
     for (let i = 0; i < count; i += 1) this.parts.push(0);
+  }
+
+  /**
+   * Rewrites four bytes already written.
+   *
+   * A section of variable-length records has to say where in the file its records start and
+   * end, and that is not known until everything in front of them has been written — so the
+   * header leaves room and comes back for it.
+   */
+  patchU32(at: number, value: number): void {
+    for (let byte = 0; byte < 4; byte += 1) this.parts[at + byte] = (value >>> (byte * 8)) & 0xff;
   }
 
   toBuffer(): Uint8Array {
@@ -198,13 +228,59 @@ function packRow(
   return record;
 }
 
+/**
+ * Lays one row of a variable-length table out: its columns end to end, strings and all.
+ *
+ * Nothing is bitpacked here — the game does not pack a table it cannot address by arithmetic
+ * — so every column is a whole number of bytes and a string is simply the text and a NUL.
+ * Which is what makes the record as long as its contents, and the offset map necessary.
+ */
+function packVariableRow(
+  table: TableSpec,
+  values: Array<number | string | number[]>,
+): Uint8Array {
+  const record = new Bytes();
+  const text = new Set(table.textColumns ?? []);
+
+  table.columns.forEach((column, index) => {
+    // A sparse column keeps its values in a map at the top of the file, not in the row.
+    if (column.storage === Storage.common) return;
+
+    const raw = values[index];
+    if (text.has(index)) {
+      record.bytes(new TextEncoder().encode(String(raw ?? "")));
+      record.u8(0);
+      return;
+    }
+    if (column.storage !== Storage.plain) {
+      throw new Error(`Column ${index} varies in length and cannot be packed as a bit field.`);
+    }
+
+    const elements = Array.isArray(raw) ? raw : [Number(raw ?? 0)];
+    const width = column.sizeBits / 8 / elements.length;
+    if (!Number.isInteger(width)) {
+      throw new Error(`Column ${index} cannot hold ${elements.length} elements in ${column.sizeBits} bits.`);
+    }
+    for (const element of elements) {
+      // Anything above four bytes wide is written as a word and then zeroes: the values here
+      // fit, and the point of such a column is the room it takes rather than what is in it.
+      for (let byte = 0; byte < width; byte += 1) {
+        record.u8(byte < 4 ? element >>> (byte * 8) : 0);
+      }
+    }
+  });
+  return record.toBuffer();
+}
+
 export function writeTable(table: TableSpec): Uint8Array {
   const columnCount = table.columns.length;
+  const variable = isVariable(table);
 
   // Every section's rows come first in the file, then its strings, and a string offset is
   // written as the distance from the column holding it to the string — counted in a space
   // that runs across every section. So the layout has to be settled before a row can be
-  // packed.
+  // packed. A table of variable-length records has no string block at all: the text is in
+  // the record, and where a record is comes out of the offset map instead.
   const totalRows = table.sections.reduce((sum, section) => sum + section.rows.length, 0);
   const rowAreaSize = totalRows * table.recordSize;
 
@@ -215,13 +291,15 @@ export function writeTable(table: TableSpec): Uint8Array {
   for (const section of table.sections) {
     const blob = new Bytes();
     const offsets = new Map<string, number>();
-    blob.u8(0);
-    for (const row of section.rows) {
-      for (const value of row) {
-        if (typeof value !== "string" || offsets.has(value)) continue;
-        offsets.set(value, blob.length);
-        blob.bytes(new TextEncoder().encode(value));
-        blob.u8(0);
+    if (!variable) {
+      blob.u8(0);
+      for (const row of section.rows) {
+        for (const value of row) {
+          if (typeof value !== "string" || offsets.has(value)) continue;
+          offsets.set(value, blob.length);
+          blob.bytes(new TextEncoder().encode(value));
+          blob.u8(0);
+        }
       }
     }
     sectionStrings.push({ blob, offsets, base: stringsBase });
@@ -235,6 +313,10 @@ export function writeTable(table: TableSpec): Uint8Array {
     const strings = sectionStrings[sectionIndex]!;
     const rows: Uint8Array[] = [];
     section.rows.forEach((values, rowIndex) => {
+      if (variable) {
+        rows.push(packVariableRow(table, values));
+        return;
+      }
       const stringOffsets = new Map<number, number>();
       table.columns.forEach((column, columnIndex) => {
         const value = values[columnIndex];
@@ -295,17 +377,22 @@ export function writeTable(table: TableSpec): Uint8Array {
   out.u32(palette.length);
   out.u32(table.sections.length);
 
-  // Section headers. `file_offset` is not read back, so it is left at zero.
+  // Section headers. Where a section's records begin and end is only worth stating when they
+  // vary in length, and is only known once everything in front of them has been written — so
+  // those two words are left blank and filled in below.
+  const placeRecords: Array<{ at: number; end: number }> = [];
   table.sections.forEach((section, sectionIndex) => {
     out.u64(section.key);
-    out.u32(0);
+    placeRecords.push({ at: out.length, end: 0 });
+    out.u32(0); // file offset
     out.u32(section.rows.length);
     out.u32(sectionStrings[sectionIndex]!.blob.length);
+    placeRecords[sectionIndex]!.end = out.length;
     out.u32(0); // offset records end
     out.u32((section.idList?.length ?? 0) * 4);
     // A relationship block is a count, the range it spans, and then its pairs.
     out.u32(section.relationships ? 12 + section.relationships.length * 8 : 0);
-    out.u32(0); // offset map entries
+    out.u32(variable ? section.rows.length : 0); // offset map entries
     out.u32(section.copies?.length ?? 0);
   });
 
@@ -341,16 +428,32 @@ export function writeTable(table: TableSpec): Uint8Array {
 
   table.sections.forEach((section, sectionIndex) => {
     const encrypted = section.key !== 0n;
+    const place = placeRecords[sectionIndex]!;
+    out.patchU32(place.at, out.length);
+    // Where each record of a variable-length section starts, as the file counts positions,
+    // and how long it is. Gathered while the records go down and written out below.
+    const map: Array<[number, number]> = [];
     for (const row of packed[sectionIndex]!) {
+      map.push([out.length, row.length]);
       // An encrypted section arrives as zeroes, because only Blizzard holds the key.
       out.bytes(encrypted ? new Uint8Array(row.length) : row);
     }
+    out.patchU32(place.end, out.length);
+
     const strings = sectionStrings[sectionIndex]!;
     out.bytes(encrypted ? new Uint8Array(strings.blob.length) : strings.blob.toBuffer());
     for (const id of section.idList ?? []) out.u32(encrypted ? 0 : id);
     for (const [newId, copied] of section.copies ?? []) {
       out.u32(newId);
       out.u32(copied);
+    }
+    // The offset map, which is what makes records of different lengths addressable at all.
+    // An encrypted section reserves it and writes it as zeroes, like everything else it holds.
+    if (variable) {
+      for (const [at, size] of map) {
+        out.u32(encrypted ? 0 : at);
+        out.u16(encrypted ? 0 : size);
+      }
     }
     // The relationship map. An encrypted section still reserves the full block and writes
     // it as zeroes, which is what makes a count of zero the ordinary case there.
@@ -363,6 +466,11 @@ export function writeTable(table: TableSpec): Uint8Array {
         out.u32(encrypted ? 0 : foreign);
         out.u32(encrypted ? 0 : record);
       }
+    }
+    // The row ids a second time, which every table of variable-length records carries beside
+    // the list above and which agrees with it throughout.
+    if (variable) {
+      for (const id of section.idList ?? []) out.u32(encrypted ? 0 : id);
     }
   });
 

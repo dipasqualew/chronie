@@ -447,20 +447,20 @@ const mockDesktop: E2EMock = {
       withheldCount: 0,
       appearances: [
         {
-          modifiedAppearanceId: 71001, itemId: 30001, appearanceId: 80001,
+          modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
           displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         // The set names the same appearance twice, which is why the card counts four.
         {
-          modifiedAppearanceId: 71001, itemId: 30001, appearanceId: 80001,
+          modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
           displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
-          modifiedAppearanceId: 71002, itemId: 30002, appearanceId: 80002,
+          modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle", appearanceId: 80002,
           displayType: 1, displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
         },
         {
-          modifiedAppearanceId: 71003, itemId: 30003, appearanceId: 80003,
+          modifiedAppearanceId: 71003, itemId: 30003, name: "Tideglass Robe", appearanceId: 80003,
           displayType: 2, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
         },
       ],
@@ -471,11 +471,12 @@ const mockDesktop: E2EMock = {
       withheldCount: 0,
       appearances: [
         {
-          modifiedAppearanceId: 71004, itemId: 30004, appearanceId: 80004,
+          modifiedAppearanceId: 71004, itemId: 30004, name: "Tideglass Sandals",
+          appearanceId: 80004,
           displayType: 5, displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
         },
         {
-          modifiedAppearanceId: 71005, itemId: 30005, appearanceId: 80005,
+          modifiedAppearanceId: 71005, itemId: 30005, name: "Tideglass Gloves", appearanceId: 80005,
           displayType: 7, displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
         },
       ],
@@ -487,25 +488,29 @@ const mockDesktop: E2EMock = {
       withheldCount: 0,
       appearances: [
         {
-          modifiedAppearanceId: 71006, itemId: 30006, appearanceId: 80006,
+          modifiedAppearanceId: 71006, itemId: 30006, name: "Emberforge Helm", appearanceId: 80006,
           displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
-          modifiedAppearanceId: 71007, itemId: 30007, appearanceId: 80007,
+          modifiedAppearanceId: 71007, itemId: 30007, name: "Emberforge Pauldrons",
+          appearanceId: 80007,
           displayType: 1, displayInfoId: 900009, iconFileDataId: 130002, hasModel: true,
         },
         {
-          modifiedAppearanceId: 71008, itemId: 30008, appearanceId: 80008,
+          modifiedAppearanceId: 71008, itemId: 30008, name: "Emberforge Breastplate",
+          appearanceId: 80008,
           displayType: 2, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
         },
         {
-          modifiedAppearanceId: 71009, itemId: 30009, appearanceId: 80009,
+          modifiedAppearanceId: 71009, itemId: 30009, name: "Emberforge Greaves",
+          appearanceId: 80009,
           displayType: 4, displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
         },
         // A weapon: the other half of what the game gives geometry to, and the half whose
         // display type the community definitions do not pin down well enough to name.
         {
-          modifiedAppearanceId: 71010, itemId: 30010, appearanceId: 80010,
+          modifiedAppearanceId: 71010, itemId: 30010, name: "Emberforge Bulwark",
+          appearanceId: 80010,
           displayType: 11, displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
       ],
@@ -518,11 +523,11 @@ const mockDesktop: E2EMock = {
       withheldCount: 1,
       appearances: [
         {
-          modifiedAppearanceId: 71011, itemId: 30011, appearanceId: 80011,
+          modifiedAppearanceId: 71011, itemId: 30011, name: "", appearanceId: 80011,
           displayType: 2, displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
         },
         {
-          modifiedAppearanceId: 71012, itemId: 0, appearanceId: 0,
+          modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0,
           displayType: 0, displayInfoId: 0, iconFileDataId: 0, hasModel: false,
         },
       ],
@@ -896,16 +901,21 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.rows()).toHaveCount(4);
   });
 
+  // The names come out of a fifth table, the one whose records vary in length — so a row
+  // reading as an item rather than as a number is what says that reader works end to end.
   await test.step("every appearance says which slot it fills and leads to the item", async () => {
     await expect(transmogDetail.rows()).toContainText(["Head", "Head", "Shoulder", "Chest"]);
-    await expect(transmogDetail.link("Item 30002"))
+    await expect(transmogDetail.rows()).toContainText([
+      "Tideglass Crown", "Tideglass Crown", "Tideglass Mantle", "Tideglass Robe",
+    ]);
+    await expect(transmogDetail.link("Tideglass Mantle"))
       .toHaveAttribute("href", "https://www.wowhead.com/item=30002");
-    await expect(transmogDetail.link("Item 30003"))
+    await expect(transmogDetail.link("Tideglass Robe"))
       .toHaveAttribute("href", "https://www.wowhead.com/item=30003");
 
     // The dialog is inside the same window as everything else, so a link out of it has to
     // reach the reader's browser the way the segment detail's links do.
-    await transmogDetail.link("Item 30002").click();
+    await transmogDetail.link("Tideglass Mantle").click();
     await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30002");
     await expect(transmogDetail.named("Tideglass Regalia")).toBeVisible();
   });
@@ -938,7 +948,7 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
     await expect(transmogDetail.note()).toHaveText("Choose an appearance to see it up close.");
 
-    await transmogDetail.pick("Head", "Item 30001");
+    await transmogDetail.pick("Head", "Tideglass Crown");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
     await expect(transmogDetail.canvas()).toBeVisible();
     await expect(transmogDetail.note()).toHaveText("Drag to turn it.");
@@ -949,7 +959,7 @@ test("shows the game's transmog sets by collection and filters them", async ({
   });
 
   await test.step("picking one the game paints onto the character shows its icon instead", async () => {
-    await transmogDetail.pick("Chest", "Item 30003");
+    await transmogDetail.pick("Chest", "Tideglass Robe");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
     await expect(transmogDetail.note())
       .toHaveText("The game paints this slot onto the character, so it has no model of its own.");
@@ -960,7 +970,7 @@ test("shows the game's transmog sets by collection and filters them", async ({
   // The tables say this shoulder has a model and the install holds no file for it, which is
   // the third case: not an armour slot, not a model, and still not an error.
   await test.step("a model this install does not hold falls back to the icon", async () => {
-    await transmogDetail.pick("Shoulder", "Item 30002");
+    await transmogDetail.pick("Shoulder", "Tideglass Mantle");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
     await expect(transmogDetail.note()).toHaveText("This install holds no model for it.");
   });
@@ -990,6 +1000,10 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.rows()).toHaveCount(2);
     await expect(transmogDetail.says("2 appearances · 1 the game keeps encrypted")).toBeVisible();
     await expect(transmogDetail.says("The game keeps this appearance encrypted")).toBeVisible();
+    // The other row got as far as an item and no further: the game encrypts that item's own
+    // row too, so it is named by its id rather than left as a blank beside a slot.
+    await expect(transmogDetail.link("Item 30011"))
+      .toHaveAttribute("href", "https://www.wowhead.com/item=30011");
 
     // One row names a texture this install does not hold and the other names none at all,
     // so neither has a picture to show — and both still keep the frame, so the list reads as
@@ -1007,7 +1021,7 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.named("Emberforge Plate")).toBeVisible();
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
 
-    await transmogDetail.pick("Weapon or shield", "Item 30010");
+    await transmogDetail.pick("Weapon or shield", "Emberforge Bulwark");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
     await expect(transmogDetail.canvas()).toBeVisible();
     await transmogDetail.close();
