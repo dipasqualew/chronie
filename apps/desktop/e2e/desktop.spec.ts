@@ -79,12 +79,64 @@ class ActivityEditor {
   }
 }
 
-const test = base.extend<{ detail: SegmentDetail; editor: ActivityEditor }>({
+/**
+ * The transmog view, which reads the installed game rather than the addon's history.
+ *
+ * A collection is a level-3 heading and a set a level-4 one, so the whole view is reachable
+ * by heading the way a screen reader walks it.
+ */
+class TransmogView {
+  readonly page: Page;
+  readonly view: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.view = page.locator("#transmog-view");
+  }
+
+  /** The tab loads the game's tables the first time it is opened, and not before. */
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Transmog" }).click();
+    await expect(this.view.getByRole("heading", { name: "Transmog", level: 1 })).toBeVisible();
+  }
+
+  collections(): Locator {
+    return this.view.getByRole("heading", { level: 3 });
+  }
+
+  sets(): Locator {
+    return this.view.getByRole("heading", { level: 4 });
+  }
+
+  /** The card a set is shown on, found by the set's own heading. */
+  card(name: string): Locator {
+    return this.view
+      .getByRole("article")
+      .filter({ has: this.page.getByRole("heading", { name, exact: true }) });
+  }
+
+  search(): Locator {
+    return this.view.getByLabel("Filter transmog sets");
+  }
+
+  expansion(): Locator {
+    return this.view.getByLabel("Expansion");
+  }
+
+  klass(): Locator {
+    return this.view.getByLabel("Class");
+  }
+}
+
+const test = base.extend<{ detail: SegmentDetail; editor: ActivityEditor; transmog: TransmogView }>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
   },
   editor: async ({ page }, use) => {
     await use(new ActivityEditor(page));
+  },
+  transmog: async ({ page }, use) => {
+    await use(new TransmogView(page));
   },
 });
 
@@ -204,6 +256,35 @@ const mockDesktop: E2EMock = {
         toys: [{ id: 13, name: "Pocket Orrery", at: NIGHT_BEFORE + 850 }],
         housingItems: [{ id: 14, name: "Carved Reading Chair", at: NIGHT_BEFORE + 860, warbandFirst: true }],
         housingLevelUps: [{ level: 2, at: NIGHT_BEFORE + 870 }],
+      },
+    ],
+  },
+  // The same invented sets the backend fixtures hold, so the two halves of the transmog
+  // view are exercised against one story rather than two.
+  transmog: {
+    readCount: 4,
+    declaredCount: 6,
+    withheldCount: 2,
+    sets: [
+      {
+        id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire", groupId: 3,
+        classMask: 0, expansionId: 5, parentId: 0, flags: 0, uiOrder: 15,
+        patchIntroduced: 110000, itemCount: 2,
+      },
+      {
+        id: 203, name: "Emberforge Plate", group: "Emberforge Armory", groupId: 2,
+        classMask: 0x0023, expansionId: 4, parentId: 0, flags: 2, uiOrder: 5,
+        patchIntroduced: 100300, itemCount: 4,
+      },
+      {
+        id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe", groupId: 1,
+        classMask: 0x0190, expansionId: 3, parentId: 0, flags: 1, uiOrder: 5,
+        patchIntroduced: 100200, itemCount: 4,
+      },
+      {
+        id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe", groupId: 1,
+        classMask: 0x0e08, expansionId: 3, parentId: 201, flags: 1, uiOrder: 10,
+        patchIntroduced: 100200, itemCount: 2,
       },
     ],
   },
@@ -347,6 +428,63 @@ test("lists every segment on the details view and filters it", async ({ page, de
     await page.locator("#rows tr").first().click();
     await expect(detail.title()).toHaveText("Glass Caverns");
     await expect(detail.position()).toHaveText("1 of 1");
+  });
+});
+
+test("shows the game's transmog sets by collection and filters them", async ({ transmog }) => {
+  await transmog.open();
+
+  await test.step("every set arrives under the collection it belongs to", async () => {
+    await expect(transmog.collections()).toHaveText([
+      "Duskwoven Attire · 1 set",
+      "Emberforge Armory · 1 set",
+      "Tideglass Wardrobe · 2 sets",
+    ]);
+    await expect(transmog.sets()).toHaveCount(4);
+    await expect(transmog.view.getByText("4 sets shown")).toBeVisible();
+  });
+
+  await test.step("a card says who the set is for and where it came from", async () => {
+    const card = transmog.card("Tideglass Regalia");
+    await expect(card).toContainText("Cloth");
+    await expect(card).toContainText("Cataclysm");
+    await expect(card).toContainText("Patch 10.2.0");
+    await expect(card).toContainText("4 appearances");
+    // A set for nobody in particular is for everybody, and says so.
+    await expect(transmog.card("Duskwoven Shroud")).toContainText("Any class");
+  });
+
+  // Coming up short is expected — the game encrypts what it has not released — so the view
+  // has to say so rather than quietly show fewer sets than the game holds.
+  await test.step("the sets the game keeps encrypted are accounted for", async () => {
+    await expect(transmog.view.getByText("2 sets the game keeps encrypted")).toBeVisible();
+  });
+
+  await test.step("the search reaches the collection as well as the set", async () => {
+    await transmog.search().fill("tideglass");
+    await expect(transmog.sets()).toHaveText(["Tideglass Regalia", "Tideglass Hide"]);
+    await expect(transmog.collections()).toHaveCount(1);
+    await transmog.search().fill("");
+    await expect(transmog.sets()).toHaveCount(4);
+  });
+
+  await test.step("expansion and class narrow it together", async () => {
+    await transmog.expansion().selectOption({ label: "Cataclysm" });
+    await expect(transmog.sets()).toHaveCount(2);
+
+    await transmog.klass().selectOption({ label: "Priest" });
+    await expect(transmog.sets()).toHaveText(["Tideglass Regalia"]);
+  });
+
+  await test.step("a set no class owns survives a class filter", async () => {
+    await transmog.expansion().selectOption({ label: "All expansions" });
+    await expect(transmog.sets()).toHaveText(["Duskwoven Shroud", "Tideglass Regalia"]);
+  });
+
+  await test.step("a filter that matches nothing says so", async () => {
+    await transmog.search().fill("nothing like it");
+    await expect(transmog.view.getByText("Nothing matches")).toBeVisible();
+    await expect(transmog.sets()).toHaveCount(0);
   });
 });
 

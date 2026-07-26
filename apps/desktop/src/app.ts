@@ -14,6 +14,7 @@ import { buildSessions } from "./sessions";
 import { createDetails } from "./details";
 import { createSegmentModal } from "./segmentModal";
 import { createTimeline } from "./timeline";
+import { createTransmog } from "./transmog";
 import { duration, escapeHtml, plural } from "./format";
 import type { ActivityMetadata, DashboardPayload, Segment } from "./types";
 import { installTooltip } from "./ui";
@@ -57,6 +58,31 @@ const details = createDetails({
   onOpenSegment: (segmentId, order) => modal.open(segmentId, order),
 });
 
+const transmog = createTransmog({
+  meta: $("transmog-meta"),
+  search: $<HTMLInputElement>("transmog-search"),
+  expansion: $<HTMLSelectElement>("transmog-expansion"),
+  klass: $<HTMLSelectElement>("transmog-class"),
+  list: $("transmog-list"),
+  empty: $("transmog-empty"),
+  count: $("transmog-count"),
+});
+
+// The sets come out of the game's own files, which costs a second and a few hundred
+// megabytes to read, so the view asks for them the first time it is opened and keeps them.
+let transmogLoad: Promise<void> | null = null;
+
+function loadTransmog(): void {
+  if (transmogLoad) return;
+  transmog.status("Reading the game's transmog tables…");
+  transmogLoad = desktop.transmogSets()
+    .then((payload) => transmog.render(payload))
+    .catch((error) => {
+      transmogLoad = null;
+      transmog.status(message(error));
+    });
+}
+
 /** Redraws every view from `SEGMENTS`, including a detail modal left open over the top. */
 function repaint(): void {
   const sessions = buildSessions(SEGMENTS);
@@ -73,7 +99,7 @@ function repaint(): void {
   modal.refresh(SEGMENTS);
 }
 
-const VIEWS = ["timeline", "details", "setup"] as const;
+const VIEWS = ["timeline", "details", "transmog", "setup"] as const;
 
 function show(view: string): void {
   for (const name of VIEWS) {
@@ -82,6 +108,7 @@ function show(view: string): void {
     tab.classList.toggle("primary", name === view);
     tab.setAttribute("aria-current", name === view ? "page" : "false");
   }
+  if (view === "transmog") loadTransmog();
 }
 
 VIEWS.forEach((name) => $(`${name}-tab`).addEventListener("click", () => show(name)));

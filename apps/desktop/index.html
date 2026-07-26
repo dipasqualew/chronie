@@ -275,6 +275,36 @@
   }
   tbody tr:hover .row-open { text-decoration: underline; text-underline-offset: 3px; }
 
+  /* ---------- transmog ---------- */
+
+  .mog-list { padding: 0 16px 16px; }
+  .mog-group + .mog-group { margin-top: 22px; }
+  .mog-group h3 {
+    font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-secondary); margin: 0 0 9px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .mog-group h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .mog-grid {
+    display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  }
+  .mog-card {
+    border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px;
+    background: var(--surface-2); display: flex; flex-direction: column; gap: 8px;
+  }
+  .mog-card h4 {
+    margin: 0; font-size: 13.5px; font-weight: 600; line-height: 1.35;
+    /* Set names run long and the cards have to stay on a grid, so let them wrap twice. */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .mog-facts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .mog-foot {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-top: auto; font-size: 12px; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ---------- setup ---------- */
 
   .setup { padding: 18px; }
@@ -355,6 +385,7 @@
     <span class="brand">Chronie</span>
     <button id="timeline-tab" class="primary" type="button">Timeline</button>
     <button id="details-tab" type="button">Details</button>
+    <button id="transmog-tab" type="button">Transmog</button>
     <button id="setup-tab" type="button">Setup</button>
   </nav>
 
@@ -385,6 +416,26 @@
         <tbody id="rows"></tbody>
       </table></div>
       <div class="empty" id="empty" hidden></div>
+    </section>
+  </section>
+
+  <section id="transmog-view" hidden>
+    <header class="view-head">
+      <h1>Transmog</h1>
+      <div class="sub" id="transmog-meta"></div>
+    </header>
+    <section class="panel">
+      <div class="table-head">
+        <div class="controls">
+          <input id="transmog-search" type="search" placeholder="Filter set or collection…"
+            aria-label="Filter transmog sets">
+          <select id="transmog-expansion" aria-label="Expansion"></select>
+          <select id="transmog-class" aria-label="Class"></select>
+          <span class="count" id="transmog-count"></span>
+        </div>
+      </div>
+      <div id="transmog-list" class="mog-list"></div>
+      <div class="empty" id="transmog-empty" hidden></div>
     </section>
   </section>
 

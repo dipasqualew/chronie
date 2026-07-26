@@ -9,6 +9,7 @@ import type {
   Segment,
   Settings,
   SyncResult,
+  TransmogPayload,
 } from "./types";
 
 const mock = globalThis.__Chronie_E2E__;
@@ -22,6 +23,10 @@ type Apply = (activities: Activity[], nextId: number) => void;
 export const desktop = {
   dashboard: (): Promise<DashboardPayload> =>
     mock ? Promise.resolve(structuredClone(mock.dashboard)) : invoke<DashboardPayload>("dashboard"),
+  // Reading the game's own tables takes about a second and a couple of hundred megabytes
+  // of transient memory, so the window asks only when the view is first opened.
+  transmogSets: (): Promise<TransmogPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.transmog)) : invoke<TransmogPayload>("transmog_sets"),
   settings: (): Promise<Settings> =>
     mock ? Promise.resolve(structuredClone(mock.settings)) : invoke<Settings>("settings"),
   chooseWowPath: (): Promise<string | null> =>
