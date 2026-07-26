@@ -29,7 +29,9 @@ const TRANSMOG_SET_ITEM: u32 = 1376212;
 const TRANSMOG_SET_GROUP: u32 = 1576116;
 const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
 const ITEM_APPEARANCE: u32 = 982462;
-const ITEM_DISPLAY_INFO: u32 = 1266429;
+/// Shared with `models`, which reaches the same table by a different question: this module
+/// asks whether a display has geometry, that one asks what it is.
+pub const ITEM_DISPLAY_INFO: u32 = 1266429;
 
 /// Columns of `TransmogSet`, in the order the file stores them.
 mod set_column {
@@ -68,16 +70,20 @@ mod appearance_column {
 }
 
 /// Columns of `ItemDisplayInfo`.
-mod display_column {
+pub mod display_column {
     /// A fixed-size array of two, not a scalar. Shoulders keep a model in each slot, and a
     /// reader that stops at the first element reports half of them as having no geometry.
     pub const MODEL_RESOURCES_ID: usize = 10;
+    /// The same shape, and parallel to it: slot `i`'s model is painted with slot `i`'s
+    /// material. This is the texture an item's own model uses, and not the one armour is
+    /// drawn on the body with — that comes out of `ItemDisplayInfoMaterialRes`.
+    pub const MATERIAL_RESOURCES_ID: usize = 11;
 }
 
 /// How many model slots `ModelResourcesID` holds, and how wide one of them is. The file
 /// records only the column's total width, so the caller supplies the element size.
-const MODEL_SLOTS: usize = 2;
-const MODEL_SLOT_BITS: u32 = 32;
+pub const MODEL_SLOTS: usize = 2;
+pub const MODEL_SLOT_BITS: u32 = 32;
 
 /// One transmog set, as the window shows it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

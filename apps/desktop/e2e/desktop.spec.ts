@@ -1,6 +1,10 @@
 import { expect, test as base } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { E2EMock } from "../src/types";
 
 /**
@@ -194,6 +198,44 @@ class TransmogDetail {
     return this.dialog.locator(".mog-icon img");
   }
 
+  /**
+   * Picks a row, which is what fills the preview above the list.
+   *
+   * The first of its name, because a set naming one appearance twice has two rows that are
+   * the same appearance — and picking either of them is picking the same thing.
+   */
+  pick(slot: string, label: string): Promise<void> {
+    return this.dialog.getByRole("button", { name: `Preview ${slot}: ${label}` }).first().click();
+  }
+
+  /**
+   * The preview pane, which says what it is showing in an attribute: nothing yet, a model on
+   * the stage, or a still picture for an appearance that has none.
+   */
+  preview(): Locator {
+    return this.dialog.locator(".mog-preview");
+  }
+
+  /** The pane a model is put on, which says how much geometry it ended up holding. */
+  stage(): Locator {
+    return this.dialog.locator(".mog-stage");
+  }
+
+  /** The canvas the model is drawn on, which only exists once one has been shown. */
+  canvas(): Locator {
+    return this.dialog.locator(".mog-stage canvas");
+  }
+
+  /** The still picture, shown for the slots the game paints onto the character. */
+  stillPicture(): Locator {
+    return this.dialog.locator(".mog-still img");
+  }
+
+  /** Whatever the pane says about what it is showing, which is a live region. */
+  note(): Locator {
+    return this.dialog.locator(".mog-note");
+  }
+
   /** Anything the dialog says in its own words: where the set sits, what it holds. */
   says(text: string): Locator {
     return this.dialog.getByText(text);
@@ -359,7 +401,7 @@ const mockDesktop: E2EMock = {
       {
         id: 203, name: "Emberforge Plate", group: "Emberforge Armory", groupId: 2,
         classMask: 0x0023, expansionId: 4, parentId: 0, flags: 2, uiOrder: 5,
-        patchIntroduced: 100300, itemCount: 4,
+        patchIntroduced: 100300, itemCount: 5,
       },
       {
         id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe", groupId: 1,
@@ -419,7 +461,7 @@ const mockDesktop: E2EMock = {
     // The set whose appearances span several slots, which is what the list is grouped by.
     203: {
       setId: 203,
-      readCount: 4,
+      readCount: 5,
       withheldCount: 0,
       appearances: [
         {
@@ -437,6 +479,12 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71009, itemId: 30009, appearanceId: 80009,
           displayType: 4, displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
+        },
+        // A weapon: the other half of what the game gives geometry to, and the half whose
+        // display type the community definitions do not pin down well enough to name.
+        {
+          modifiedAppearanceId: 71010, itemId: 30010, appearanceId: 80010,
+          displayType: 11, displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
       ],
     },
@@ -473,6 +521,14 @@ const mockDesktop: E2EMock = {
     130006: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
       + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
   },
+  // The models, as the backend hands them over: a `.glb` in a data URL, keyed by the display
+  // the appearance named. 900002 is missing on purpose — a shoulder the tables say has a
+  // model and this install holds no file for, which is a row that has to fall back to its
+  // icon rather than show an error.
+  transmogModels: {
+    900001: fixtureModel(),
+    900007: fixtureModel(),
+  },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
@@ -483,6 +539,21 @@ const mockDesktop: E2EMock = {
   appUpdate: { updated: false, version: "0.1.0" },
   openedUrls: [],
 };
+
+/**
+ * The `.glb` the backend's own converter writes for the fixture helm, as the data URL a
+ * command would answer with.
+ *
+ * Written by `cargo run --example dump_model`, and held to what the converter currently
+ * produces by a test in `models.rs`. Using the real output rather than a hand-made stand-in
+ * is the point: this is the only place anything reads the glTF this app writes, so it is the
+ * only place that can say three.js accepts it.
+ */
+function fixtureModel(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const glb = readFileSync(join(here, "..", "fixtures", "transmog", "helm.glb"));
+  return `data:model/gltf-binary;base64,${glb.toString("base64")}`;
+}
 
 const timeline = (page: Page): Locator => page.locator("#timeline");
 const sessions = (page: Page): Locator => page.locator("#timeline .session");
@@ -745,6 +816,40 @@ test("shows the game's transmog sets by collection and filters them", async ({
     expect(widths).toEqual([8, 8, 8, 8]);
   });
 
+  // Only heads, shoulders, weapons and shields have geometry of their own. The pane is where
+  // that difference shows: a helm is a model to turn around, a chestpiece is its icon and a
+  // sentence saying why, and neither of them is an error.
+  await test.step("picking an appearance with a model shows it in 3D", async () => {
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
+    await expect(transmogDetail.note()).toHaveText("Choose an appearance to see it up close.");
+
+    await transmogDetail.pick("Head", "Item 30001");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
+    await expect(transmogDetail.canvas()).toBeVisible();
+    await expect(transmogDetail.note()).toHaveText("Drag to turn it.");
+
+    // Geometry rather than merely a canvas: an empty scene and a helm draw the same blank
+    // rectangle, so what says the file was read is the stage saying what it is holding.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "8");
+  });
+
+  await test.step("picking one the game paints onto the character shows its icon instead", async () => {
+    await transmogDetail.pick("Chest", "Item 30003");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
+    await expect(transmogDetail.note())
+      .toHaveText("The game paints this slot onto the character, so it has no model of its own.");
+    await expect(transmogDetail.stillPicture()).toBeVisible();
+    await expect(transmogDetail.canvas()).toBeHidden();
+  });
+
+  // The tables say this shoulder has a model and the install holds no file for it, which is
+  // the third case: not an armour slot, not a model, and still not an error.
+  await test.step("a model this install does not hold falls back to the icon", async () => {
+    await transmogDetail.pick("Shoulder", "Item 30002");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
+    await expect(transmogDetail.note()).toHaveText("This install holds no model for it.");
+  });
+
   await test.step("closing a set hands back the grid the reader left", async () => {
     // A window short enough that the grid has somewhere to scroll to, so that the position
     // being kept is a fact about the app rather than about there being nothing to scroll.
@@ -776,6 +881,20 @@ test("shows the game's transmog sets by collection and filters them", async ({
     // a column of icons with two blanks rather than as two rows that lost their indent.
     await expect(transmogDetail.iconFrames()).toHaveCount(2);
     await expect(transmogDetail.icons()).toHaveCount(0);
+    await transmogDetail.close();
+  });
+
+  // Weapons are the other half of what the game gives a model to, and they arrive through a
+  // second dialog opening — so this is also what says the pane survives being reused.
+  await test.step("a weapon in another set gets a model of its own", async () => {
+    await transmog.klass().selectOption("");
+    await transmog.card("Emberforge Plate").click();
+    await expect(transmogDetail.named("Emberforge Plate")).toBeVisible();
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
+
+    await transmogDetail.pick("Weapon or shield", "Item 30010");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
+    await expect(transmogDetail.canvas()).toBeVisible();
     await transmogDetail.close();
   });
 });

@@ -379,6 +379,29 @@
     /* Icons are stored at 64 pixels and shown at half that, which bilinear scaling suits. */
     object-fit: cover;
   }
+  /* The picture and the slot are one button: picking a row is what fills the pane above. */
+  .mog-pick {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    padding: 2px; margin: 0; border: 0; border-radius: 8px; background: none; cursor: pointer;
+  }
+  .mog-pick[aria-pressed="true"] { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+  /* The pane the picked appearance is shown in. It keeps its height whatever it is showing,
+     so picking down a list does not make the rows below jump about. */
+  .mog-preview {
+    flex: none; display: grid; justify-items: center; gap: 6px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+  }
+  .mog-preview[data-state="empty"] .mog-still { display: none; }
+  .mog-stage { width: 100%; height: 240px; }
+  .mog-stage canvas { display: block; width: 100%; height: 100%; }
+  .mog-still img {
+    display: block; width: 96px; height: 96px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    /* The game stores an icon at 64 pixels; shown larger, its own edges are the point. */
+    image-rendering: pixelated;
+  }
+  .mog-note { text-align: center; margin: 0; }
 
   #activity-editor { width: min(560px, 92vw); }
   .dialog-body { padding: 18px; }
@@ -524,6 +547,14 @@
     <div class="detail-nav">
       <button type="button" data-role="close" aria-label="Close set">Close</button>
     </div>
+  </div>
+  <!-- The preview sits above the list and outside the part that is redrawn, because the 3D
+       pane holds a graphics context and rebuilding it per set would hand out a new one each
+       time. Its state says what it is showing: nothing yet, a model, or a picture. -->
+  <div class="mog-preview" data-state="empty">
+    <div class="mog-stage" hidden></div>
+    <div class="mog-still"></div>
+    <p class="mog-note muted" role="status"></p>
   </div>
   <div class="detail-body"></div>
 </dialog>
