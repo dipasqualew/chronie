@@ -857,11 +857,9 @@ describe("addon integration", function()
             activityCell:run("OnClick")
 
             assert.is_true(app.activityWindow.isShown())
-            -- An hour left is all the client has said so far, so the cadence still reads
-            -- as daily: the title reports what has been observed, not what is assumed.
             assert.is_true(contains(
                 textsOf(recorded, "ChronieActivityDetailWindow"),
-                "Daily — Ulduar"
+                "Weekly — Ulduar"
             ))
         end)
 

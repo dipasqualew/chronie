@@ -150,7 +150,6 @@ describe("ns.newLockoutScanner", function()
                 maxPlayers = 25,
                 isRaid = true,
                 expiry = NOW + 3600,
-                resetSeconds = 3600,
                 encounters = {},
             }, scanner.scan()[1])
         end)
@@ -417,7 +416,6 @@ describe("ns.newLockoutScanner", function()
                     maxPlayers = 0,
                     isRaid = false,
                     expiry = NOW + 4 * 86400,
-                    resetSeconds = 4 * 86400,
                     encounters = {},
                 },
             }, scanner.scan())

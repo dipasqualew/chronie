@@ -19,7 +19,6 @@ local _, ns = ...
 ---@field maxPlayers integer
 ---@field isRaid boolean
 ---@field expiry integer Absolute unix time the lockout resets.
----@field resetSeconds integer Span the client reported; the only evidence of the cadence.
 ---@field encounters Encounter[] Boss list in journal order.
 
 ---@class LockoutScanner
@@ -59,8 +58,7 @@ end
 ---
 ---`reset` from both APIs is SECONDS REMAINING, not a timestamp. It is only meaningful
 ---relative to the moment of the scan, so it is converted to an absolute expiry here — that
----conversion is the whole reason cross-character data works at all. The raw span is kept
----beside it, because it is the only evidence of how often the activity resets.
+---conversion is the whole reason cross-character data works at all.
 ---@param deps LockoutScannerDeps
 ---@return LockoutScanner
 function ns.newLockoutScanner(deps)
@@ -112,7 +110,6 @@ function ns.newLockoutScanner(deps)
                     maxPlayers = maxPlayers or 0,
                     isRaid = isRaid and true or false,
                     expiry = scannedAt + reset,
-                    resetSeconds = reset,
                     encounters = readEncounters(index, numEncounters),
                 }
             end
@@ -143,7 +140,6 @@ function ns.newLockoutScanner(deps)
                     maxPlayers = 0,
                     isRaid = false,
                     expiry = scannedAt + reset,
-                    resetSeconds = reset,
                     encounters = {},
                 }
             end

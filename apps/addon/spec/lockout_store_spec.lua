@@ -5,7 +5,6 @@ describe("ns.newLockoutStore", function()
     local ns = loader.load()
 
     local NOW = 1700000000
-    local HOUR = 3600
     local WEEK = 7 * 24 * 60 * 60
 
     ---@param options table? `{ db = table?, now = integer?, staleAfterSeconds = integer?, clock = table? }`
@@ -24,7 +23,7 @@ describe("ns.newLockoutStore", function()
 
     ---Lockouts as the scanner hands them over. The activity key and kind follow from the
     ---activity name unless a test says otherwise, so a test only has to name what it is
-    ---about; `resetSeconds` defaults to a week, which is what a raid save reports.
+    ---about.
     ---@param overrides table?
     ---@return Lockout
     local function lockout(overrides)
@@ -35,7 +34,6 @@ describe("ns.newLockoutStore", function()
             maxPlayers = 25,
             isRaid = true,
             expiry = NOW + 3600,
-            resetSeconds = WEEK,
         }
         for key, value in pairs(overrides or {}) do
             row[key] = value
@@ -468,7 +466,6 @@ describe("ns.newLockoutStore", function()
                 maxPlayers = 25,
                 isRaid = true,
                 expiry = NOW + 3600,
-                resetSeconds = WEEK,
                 encounters = {},
             }, store.all()[1])
         end)
@@ -713,8 +710,6 @@ describe("ns.newLockoutStore", function()
     end)
 
     describe("what is stored against the activity rather than the save", function()
-        local DAY = 24 * 60 * 60
-
         it("records the activity the first time anybody is locked to it", function()
             local store, db = newStore()
 
@@ -748,77 +743,57 @@ describe("ns.newLockoutStore", function()
             assert.equal(1, #store.activities())
         end)
 
-        describe("working out the reset cadence", function()
-            it("calls a lock with a day or less left daily", function()
+        describe("how often an activity resets", function()
+            ---@param overrides table
+            ---@return string
+            local function periodOf(overrides)
                 local store = newStore()
+                store.save("Thrall-Ragnaros", { lockout(overrides) })
+                return store.activities()[1].period
+            end
 
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = DAY }) })
-
-                assert.equal("daily", store.activities()[1].period)
+            it("resets a raid weekly", function()
+                assert.equal("weekly", periodOf({ isRaid = true }))
             end)
 
-            it("calls a lock with more than a day left weekly", function()
+            it("resets a dungeon daily", function()
+                assert.equal("daily", periodOf({ activity = "Deadmines", isRaid = false }))
+            end)
+
+            it("resets a world boss weekly, like the raid it stands in for", function()
+                assert.equal("weekly", periodOf({
+                    activity = "Doomwalker",
+                    key = "worldboss\0" .. 17711,
+                    kind = "world_boss",
+                    isRaid = false,
+                }))
+            end)
+
+            -- The cadence follows from what the activity is, so it cannot drift between
+            -- scans, however long a particular lockout happened to have left.
+            it("says the same thing however much time a scan caught the lock with", function()
                 local store = newStore()
-
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = DAY + 1 }) })
-
+                store.save("Thrall-Ragnaros", { lockout({ expiry = NOW + 60 }) })
                 assert.equal("weekly", store.activities()[1].period)
-            end)
 
-            it("says nothing about an activity it has never seen a reset for", function()
-                local store = newStore()
-                local unmeasured = lockout()
-                unmeasured.resetSeconds = nil
-
-                store.save("Thrall-Ragnaros", { unmeasured })
-
-                assert.equal("unknown", store.activities()[1].period)
-            end)
-
-            -- The client only says how long is LEFT, so a scan that caught a weekly lock on
-            -- its last day sees a day. The next scan that catches it fresh has to be able to
-            -- correct that, and no scan may ever talk it back down.
-            it("widens the cadence when a later scan sees a longer span", function()
-                local store = newStore()
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = HOUR }) })
-                assert.equal("daily", store.activities()[1].period)
-
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = WEEK }) })
-
-                assert.equal("weekly", store.activities()[1].period)
-            end)
-
-            it("never narrows the cadence when a later scan sees a shorter span", function()
-                local store = newStore()
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = WEEK }) })
-
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = HOUR }) })
-
-                assert.equal("weekly", store.activities()[1].period)
-            end)
-
-            it("learns the cadence from whichever character saw the longest span", function()
-                local store = newStore()
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = HOUR }) })
-
-                store.save("Jaina-Ragnaros", { lockout({ resetSeconds = WEEK }) })
+                store.save("Thrall-Ragnaros", { lockout({ expiry = NOW + WEEK }) })
 
                 assert.equal("weekly", store.activities()[1].period)
             end)
 
             it("puts the cadence on every row of that activity", function()
                 local store = newStore()
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = WEEK }) })
+                store.save("Thrall-Ragnaros", { lockout() })
 
                 assert.equal("weekly", store.all()[1].period)
             end)
 
-            it("leaves an extended lockout weekly rather than unrecognised", function()
-                local store = newStore()
+            it("writes the cadence into the db, so a reader need not derive it", function()
+                local store, db = newStore()
 
-                store.save("Thrall-Ragnaros", { lockout({ resetSeconds = 2 * WEEK }) })
+                store.save("Thrall-Ragnaros", { lockout() })
 
-                assert.equal("weekly", store.activities()[1].period)
+                assert.equal("weekly", db.activities["instance\0Ulduar"].period)
             end)
         end)
 
@@ -881,7 +856,9 @@ describe("ns.newLockoutStore", function()
             assert.equal("Ulduar", row.activity)
             assert.equal("instance\0Ulduar", row.key)
             assert.equal("raid", row.kind)
-            assert.equal("unknown", row.period)
+            -- Readable as a raid, so readable as weekly: nothing about the cadence needed
+            -- the activity table to have existed when the save was written.
+            assert.equal("weekly", row.period)
         end)
 
         it("groups a pre-activity row with a freshly scanned one for the same raid", function()

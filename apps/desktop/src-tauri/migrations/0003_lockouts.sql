@@ -16,13 +16,12 @@ CREATE TABLE lockout_activities (
     source_key     TEXT NOT NULL,
     name           TEXT NOT NULL,
     kind           TEXT NOT NULL CHECK (kind IN ('raid', 'dungeon', 'world_boss')),
-    -- How often the activity resets, and the evidence behind it. The client only ever
-    -- reports how long is LEFT, so the addon widens the observed span towards the true
-    -- period across scans and writes its reading of it out; the raw seconds come along so
-    -- a claimed cadence can always be checked against what was actually seen.
+    -- How often the activity resets: raids weekly, dungeons daily, world bosses weekly.
+    -- Stored rather than derived from `kind` on the way out, because the rule is expected to
+    -- grow past what the kind alone can say, and this column will not have to change when
+    -- it does.
     reset_period   TEXT NOT NULL DEFAULT 'unknown'
                    CHECK (reset_period IN ('daily', 'weekly', 'unknown')),
-    reset_seconds  INTEGER NOT NULL DEFAULT 0,
     first_seen_at  INTEGER NOT NULL,
     last_seen_at   INTEGER NOT NULL,
     UNIQUE (account_id, source_key)

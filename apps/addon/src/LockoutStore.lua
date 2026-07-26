@@ -14,7 +14,6 @@ local _, ns = ...
 ---@field kind "raid"|"dungeon"|"world_boss"
 ---@field isRaid boolean
 ---@field period "daily"|"weekly"|"unknown"
----@field periodSeconds integer Longest reset span ever observed for this activity.
 
 ---What we know about a character outside of its lockouts.
 ---@class CharacterInfo
@@ -34,8 +33,20 @@ local _, ns = ...
 ---@field now fun(): integer
 ---@field staleAfterSeconds integer? Drop lockouts this long past expiry. Default 7 days.
 
-local DAY = 24 * 60 * 60
-local DEFAULT_STALE_AFTER = 7 * DAY
+local DEFAULT_STALE_AFTER = 7 * 24 * 60 * 60
+
+---How often each kind of activity resets. Raids are weekly and dungeons are daily; a world
+---boss goes with the raids. This is deliberately a flat rule about the kind of thing an
+---activity is rather than anything read off a particular lockout — the client never states
+---a cadence, and working one out from how long a lock happened to have left is a guess that
+---is wrong for as long as it takes to be corrected.
+local PERIOD_OF_KIND = { raid = "weekly", dungeon = "daily", world_boss = "weekly" }
+
+---@param kind string?
+---@return "daily"|"weekly"|"unknown"
+local function cadenceOf(kind)
+    return PERIOD_OF_KIND[kind] or "unknown"
+end
 
 ---Where one character's save of an activity is filed.
 ---
@@ -59,26 +70,6 @@ local function activityKeyOf(lockout, slot)
     return lockout.key or ("instance\0" .. (lockout.instance or slot))
 end
 
----How often an activity resets, from the longest span the client has ever reported for it.
----
----The client only ever says how long is *left*, which is at most one full period, so the
----longest span seen converges on the true cadence from below and never overshoots. That
----makes the guess monotone: a lockout first caught with hours left reads as daily, and the
----next scan that catches it fresh corrects it to weekly for good.
----@param periodSeconds integer?
----@return "daily"|"weekly"|"unknown"
-local function cadenceOf(periodSeconds)
-    if not periodSeconds or periodSeconds <= 0 then
-        return "unknown"
-    end
-    if periodSeconds <= DAY then
-        return "daily"
-    end
-    -- Everything longer is weekly rather than unknown: an extended raid lockout runs past
-    -- seven days without becoming a different kind of thing.
-    return "weekly"
-end
-
 ---@param deps LockoutStoreDeps
 ---@return LockoutStore
 function ns.newLockoutStore(deps)
@@ -90,9 +81,9 @@ function ns.newLockoutStore(deps)
     -- Kept beside `characters` rather than inside it: lockout entries are replaced
     -- wholesale on every scan, and roster facts must outlive that.
     db.roster = db.roster or {}
-    -- What is true of the activity itself. Also never replaced wholesale, because the reset
-    -- cadence is learned across scans, and a character with nothing saved would otherwise
-    -- throw away what earlier scans worked out.
+    -- What is true of the activity itself. Also never replaced wholesale: an activity nobody
+    -- is currently locked to is still an activity, and forgetting it every quiet week would
+    -- mean the drill-down could not offer it at all.
     db.activities = db.activities or {}
 
     ---Saves written before lockouts were filed under activities name the instance
@@ -112,19 +103,16 @@ function ns.newLockoutStore(deps)
         return lockout.kind or (lockout.isRaid and "raid" or "dungeon")
     end
 
-    ---Files what this scan says about the activity, widening the observed reset span
-    ---rather than replacing it.
+    ---Files what this scan says about the activity itself.
     ---@param lockout Lockout
     local function recordActivity(lockout)
         local record = db.activities[lockout.key] or {}
         record.activity = lockout.activity or record.activity
         record.kind = lockout.kind or record.kind
         record.isRaid = lockout.isRaid and true or false
-        record.periodSeconds = math.max(record.periodSeconds or 0, lockout.resetSeconds or 0)
-        -- Written out beside the evidence rather than left to be recomputed. The client is
-        -- the only thing that can observe a cadence, so the addon owning the reading keeps
-        -- the desktop app from having to reimplement the same rule against stale numbers.
-        record.period = cadenceOf(record.periodSeconds)
+        -- Written out rather than left to be recomputed, so the file says plainly how often
+        -- the activity resets instead of making every reader derive it again.
+        record.period = cadenceOf(record.kind)
         record.lastSeen = now()
         db.activities[lockout.key] = record
     end
@@ -188,13 +176,13 @@ function ns.newLockoutStore(deps)
             local list = {}
 
             for key, record in pairs(db.activities) do
+                local kind = record.kind or (record.isRaid and "raid" or "dungeon")
                 list[#list + 1] = {
                     key = key,
                     activity = record.activity or key,
-                    kind = record.kind or (record.isRaid and "raid" or "dungeon"),
+                    kind = kind,
                     isRaid = record.isRaid and true or false,
-                    period = cadenceOf(record.periodSeconds),
-                    periodSeconds = record.periodSeconds or 0,
+                    period = cadenceOf(kind),
                 }
             end
 
@@ -245,19 +233,19 @@ function ns.newLockoutStore(deps)
                     else
                         local key = activityKeyOf(lockout, slot)
                         local record = db.activities[key] or {}
+                        local kind = kindOf(lockout)
                         rows[#rows + 1] = {
                             character = character,
                             classFile = classFile,
                             key = key,
                             activity = activityNameOf(record, lockout, key),
-                            kind = kindOf(lockout),
-                            period = cadenceOf(record.periodSeconds),
+                            kind = kind,
+                            period = cadenceOf(kind),
                             difficultyId = lockout.difficultyId,
                             difficulty = lockout.difficulty,
                             maxPlayers = lockout.maxPlayers,
                             isRaid = lockout.isRaid,
                             expiry = lockout.expiry,
-                            resetSeconds = lockout.resetSeconds,
                             encounters = lockout.encounters or {},
                         }
                     end

@@ -629,13 +629,18 @@ fn lockout_kind(record: &Value, fallback: &Value) -> &'static str {
     }
 }
 
-/// The addon's reading of how often the activity resets. It owns that reading because the
-/// client is the only thing that can observe a cadence at all.
-fn lockout_period(record: &Value) -> &'static str {
+/// How often the activity resets, as the addon recorded it. A save written before the addon
+/// stated a cadence falls back to the kind, which is the same flat rule the addon applies:
+/// raids weekly, dungeons daily, world bosses weekly.
+fn lockout_period(record: &Value, kind: &str) -> &'static str {
     match optional_text(record, "period") {
         Some("daily") => "daily",
         Some("weekly") => "weekly",
-        _ => "unknown",
+        _ => match kind {
+            "dungeon" => "daily",
+            "raid" | "world_boss" => "weekly",
+            _ => "unknown",
+        },
     }
 }
 
@@ -651,35 +656,29 @@ fn upsert_lockout_activity(
         .or_else(|| optional_text(fallback, "activity"))
         .or_else(|| optional_text(fallback, "instance"))
         .unwrap_or(source_key);
-    let reset_seconds = optional_integer(record, "periodSeconds")
-        .or_else(|| optional_integer(fallback, "resetSeconds"))
-        .unwrap_or(0);
+    let kind = lockout_kind(record, fallback);
     transaction
         .execute(
             "INSERT INTO lockout_activities (
-                 account_id, source_key, name, kind, reset_period, reset_seconds,
+                 account_id, source_key, name, kind, reset_period,
                  first_seen_at, last_seen_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
              ON CONFLICT(account_id, source_key) DO UPDATE SET
                  name = excluded.name,
                  kind = excluded.kind,
-                 -- Both of these only ever widen. The addon works a cadence out from how
-                 -- long a lock had left when it happened to look, so a scan that caught an
-                 -- activity late knows less than one that caught it fresh, and must not be
-                 -- allowed to talk the answer back down.
+                 -- An 'unknown' never overwrites a cadence already worked out: a file that
+                 -- could not say is not the same as one saying the answer changed.
                  reset_period = CASE
                      WHEN excluded.reset_period = 'unknown' THEN lockout_activities.reset_period
                      ELSE excluded.reset_period
                  END,
-                 reset_seconds = MAX(excluded.reset_seconds, lockout_activities.reset_seconds),
                  last_seen_at = excluded.last_seen_at",
             params![
                 account_id,
                 source_key,
                 name,
-                lockout_kind(record, fallback),
-                lockout_period(record),
-                reset_seconds,
+                kind,
+                lockout_period(record, kind),
                 now
             ],
         )
@@ -2385,6 +2384,17 @@ ChronieDB = {{ ["segments"] = {{
         rows
     }
 
+    fn cadence_of(database: &Path, name: &str) -> String {
+        open_database(database)
+            .unwrap()
+            .query_row(
+                "SELECT reset_period FROM lockout_activities WHERE name = ?1",
+                [name],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
     fn count_of(database: &Path, table: &str) -> i64 {
         open_database(database)
             .unwrap()
@@ -2399,9 +2409,9 @@ ChronieDB = {{ ["segments"] = {{
     const ULDUAR_AND_DOOMWALKER: &str = r#"
 ["activities"] = {
   ["instance\0Ulduar"] = { ["activity"] = "Ulduar", ["kind"] = "raid",
-     ["isRaid"] = true, ["period"] = "weekly", ["periodSeconds"] = 604800 },
+     ["isRaid"] = true, ["period"] = "weekly" },
   ["worldboss\00017711"] = { ["activity"] = "Doomwalker", ["kind"] = "world_boss",
-     ["isRaid"] = false, ["period"] = "weekly", ["periodSeconds"] = 500000 },
+     ["isRaid"] = false, ["period"] = "weekly" },
 },
 ["roster"] = {
   ["Aster-Vale"] = { ["classFile"] = "MAGE", ["level"] = 80 },
@@ -2556,7 +2566,7 @@ ChronieDB = {{ ["segments"] = {{
         fs::write(
             wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
             r#"ChronieDB = { ["activities"] = { ["instance\0Ulduar"] = { ["activity"] = "Ulduar",
-                 ["kind"] = "raid", ["period"] = "weekly", ["periodSeconds"] = 604800 } },
+                 ["kind"] = "raid", ["period"] = "weekly" } },
                  ["characters"] = { ["Aster-Vale"] = { } } }"#,
         )
         .unwrap();
@@ -2566,10 +2576,9 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(count_of(&database, "lockout_activities"), 2);
     }
 
-    /// The addon works a cadence out from how long a lock had left when it happened to
-    /// look, so a file that saw less than an earlier one must not talk the answer back down.
+    /// A cadence already worked out is not unlearned by a file that could not state one.
     #[test]
-    fn never_lets_a_less_certain_reading_narrow_a_cadence() {
+    fn keeps_a_known_cadence_when_a_later_file_cannot_state_one() {
         let temp = tempfile::tempdir().unwrap();
         let database = collect_lockouts(temp.path(), ULDUAR_AND_DOOMWALKER, 2_000_000_000);
 
@@ -2577,23 +2586,33 @@ ChronieDB = {{ ["segments"] = {{
         fs::write(
             wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
             r#"ChronieDB = { ["activities"] = { ["instance\0Ulduar"] = { ["activity"] = "Ulduar",
-                 ["kind"] = "raid", ["period"] = "unknown", ["periodSeconds"] = 0 } } }"#,
+                 ["kind"] = "raid" } } }"#,
         )
         .unwrap();
         collect(&wow, &database, 2_000_300_000).unwrap();
 
-        let (period, seconds): (String, i64) = open_database(&database)
-            .unwrap()
-            .query_row(
-                "SELECT reset_period, reset_seconds FROM lockout_activities
-                 WHERE source_key = 'instance' || char(0) || 'Ulduar'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
+        assert_eq!(cadence_of(&database, "Ulduar"), "weekly");
+    }
 
-        assert_eq!(period, "weekly");
-        assert_eq!(seconds, 604_800);
+    /// The cadence follows from the kind, so a save that never stated one still lands on the
+    /// right answer rather than on 'unknown'.
+    #[test]
+    fn reads_a_cadence_off_the_kind_when_the_addon_did_not_state_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = collect_lockouts(
+            temp.path(),
+            r#"
+["activities"] = {
+  ["instance\0Ulduar"] = { ["activity"] = "Ulduar", ["kind"] = "raid" },
+  ["instance\0Deadmines"] = { ["activity"] = "Deadmines", ["kind"] = "dungeon" },
+  ["worldboss\00017711"] = { ["activity"] = "Doomwalker", ["kind"] = "world_boss" },
+}"#,
+            2_000_000_000,
+        );
+
+        assert_eq!(cadence_of(&database, "Ulduar"), "weekly");
+        assert_eq!(cadence_of(&database, "Deadmines"), "daily");
+        assert_eq!(cadence_of(&database, "Doomwalker"), "weekly");
     }
 
     /// A file from before activities were recorded separately names only the instance. It
