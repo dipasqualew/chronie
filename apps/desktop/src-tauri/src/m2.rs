@@ -84,7 +84,7 @@ pub struct Vertex {
 /// A model names the textures it owns and leaves the rest to whoever is drawing it: a helm's
 /// mesh says "the item's own texture goes here" without knowing which item it is on. Those
 /// are the entries with a non-zero type, and `ItemDisplayInfo` is what answers them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Paint {
     /// A texture of the model's own, as a FileDataID out of `TXID`.
     File(u32),

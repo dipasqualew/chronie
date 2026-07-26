@@ -17,9 +17,9 @@ use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
+use crate::glb;
 use crate::icons::{data_url, png_of};
 use crate::m2::{Model, Paint};
-use crate::glb;
 use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
 
 /// `ModelFileData` — every `.m2` the client owns, keyed by the resource that names it.
@@ -47,16 +47,27 @@ const LARGEST_TEXTURE: u32 = 2048;
 /// What does fail is a model that is there and cannot be read, because that is this app being
 /// wrong about the format rather than the install being short of a file.
 pub fn model_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Value, String> {
+    Ok(match glb_of(files, display_info_id)? {
+        Some(glb) => json!({
+            "displayInfoId": display_info_id,
+            "model": data_url("model/gltf-binary", &glb),
+        }),
+        None => json!({ "displayInfoId": display_info_id, "model": Value::Null }),
+    })
+}
+
+/// The same, as the `.glb` bytes themselves — which is what `dump_model` writes to a file.
+pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<u8>>, String> {
     let Some((model_resource, material_resource)) = resources(files, display_info_id)? else {
-        return Ok(nothing(display_info_id));
+        return Ok(None);
     };
 
     let Some(model_file) = file_named(files, MODEL_FILE_DATA, MODEL_RESOURCES_ID, model_resource)?
     else {
-        return Ok(nothing(display_info_id));
+        return Ok(None);
     };
     let Ok(bytes) = files.read(model_file) else {
-        return Ok(nothing(display_info_id));
+        return Ok(None);
     };
 
     let model = Model::parse(&bytes)?;
@@ -83,11 +94,7 @@ pub fn model_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Value, St
         // the shape of a helm is most of what a reader opened it for.
         files.read(texture).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
     })?;
-
-    Ok(json!({
-        "displayInfoId": display_info_id,
-        "model": data_url("model/gltf-binary", &glb),
-    }))
+    Ok(Some(glb))
 }
 
 /// What a display says it is drawn with: a model resource, and the material that paints it.
@@ -129,11 +136,6 @@ fn file_named(
         .filter(|row| row.number(column) == resource)
         .map(|row| row.id())
         .min())
-}
-
-/// The answer for an appearance with no model to show.
-fn nothing(display_info_id: u32) -> Value {
-    json!({ "displayInfoId": display_info_id, "model": Value::Null })
 }
 
 #[cfg(test)]
@@ -283,6 +285,29 @@ mod tests {
         // Display 900011 names one that is there and holds no MD21 chunk.
         let error = model_of(&fixture_files(), 900_011).unwrap_err();
         assert!(error.contains("MD21"), "{error}");
+    }
+
+    // The browser tests load `helm.glb` into three.js, which is the only place anything
+    // actually reads what this module writes. That is worth nothing if the file has drifted
+    // from what the converter now produces, so this is what ties the two together:
+    //
+    //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
+    //         900001 apps/desktop/fixtures/transmog/helm.glb
+    #[test]
+    fn writes_the_glb_the_browser_tests_load() {
+        let committed = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("fixtures")
+                .join("transmog")
+                .join("helm.glb"),
+        )
+        .expect("the fixture glb is committed");
+        assert_eq!(
+            glb_of(&fixture_files(), HELM).unwrap(),
+            Some(committed),
+            "helm.glb is stale; regenerate it with the dump_model example"
+        );
     }
 
     #[test]

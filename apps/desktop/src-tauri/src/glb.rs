@@ -19,7 +19,7 @@ use crate::m2::{Blend, Mesh, Paint};
 
 /// The container's own numbers: the magic a `.glb` starts with, the version it declares, and
 /// the two chunk kinds it holds.
-const GLB_MAGIC: u32 = 0x4674_6c67;
+const GLB_MAGIC: u32 = 0x4654_6c67;
 const GLB_VERSION: u32 = 2;
 const CHUNK_JSON: u32 = 0x4e4f_534a;
 const CHUNK_BIN: u32 = 0x004e_4942;
@@ -103,14 +103,12 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
                         uri: None,
                         extensions: None,
                         extras: Default::default(),
-                        name: None,
                     });
                     root.push(gltf_json::Texture {
                         sampler: Some(sampler),
                         source: image,
                         extensions: None,
                         extras: Default::default(),
-                        name: None,
                     })
                 });
                 painted.insert(part.paint, made);
@@ -181,7 +179,6 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
         primitives,
         extensions: None,
         extras: Default::default(),
-        name: None,
         weights: None,
     });
     let node = root.push(gltf_json::Node {
@@ -192,7 +189,6 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
         nodes: vec![node],
         extensions: None,
         extras: Default::default(),
-        name: None,
     });
     root.scene = Some(scene);
 
@@ -203,7 +199,6 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
         uri: None,
         extensions: None,
         extras: Default::default(),
-        name: None,
     });
 
     let json = root
@@ -249,7 +244,6 @@ impl Binary {
             target: target.map(Valid),
             extensions: None,
             extras: Default::default(),
-            name: None,
         })
     }
 
@@ -281,7 +275,6 @@ fn accessor(
         sparse: None,
         extensions: None,
         extras: Default::default(),
-        name: None,
     }
 }
 
