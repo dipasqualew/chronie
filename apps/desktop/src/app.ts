@@ -16,6 +16,7 @@ import { createSegmentModal } from "./segmentModal";
 import { createTimeline } from "./timeline";
 import { createTransmog } from "./transmog";
 import { duration, escapeHtml, plural } from "./format";
+import { installExternalLinks } from "./links";
 import type { ActivityMetadata, DashboardPayload, Segment } from "./types";
 import { installTooltip } from "./ui";
 
@@ -35,6 +36,13 @@ const KNOWN_KINDS = [...new Set([
 ])].sort();
 
 installTooltip();
+// Every link the window draws is a link out of it, and the window is the wrong place for a
+// web page. A url the backend will not open is a dead link on screen, so it is worth saying.
+installExternalLinks({
+  root: document,
+  open: desktop.openUrl,
+  onFailure: (url, error) => console.error(`Chronie could not open ${url}: ${message(error)}`),
+});
 
 /* ---------- the three views ---------- */
 

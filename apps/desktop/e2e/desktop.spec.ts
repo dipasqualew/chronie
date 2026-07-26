@@ -32,6 +32,11 @@ class SegmentDetail {
     return this.dialog.locator(".detail-position");
   }
 
+  /** A link out of the window, named by the text it shows. */
+  linkTo(name: string): Locator {
+    return this.dialog.getByRole("link", { name });
+  }
+
   next(): Promise<void> {
     return this.dialog.getByRole("button", { name: "Next segment" }).click();
   }
@@ -296,10 +301,20 @@ const mockDesktop: E2EMock = {
   syncResult: { segmentCount: 3, added: 1, updated: 1 },
   installResult: { version: "0.8.0-dev" },
   appUpdate: { updated: false, version: "0.1.0" },
+  openedUrls: [],
 };
 
 const timeline = (page: Page): Locator => page.locator("#timeline");
 const sessions = (page: Page): Locator => page.locator("#timeline .session");
+
+/**
+ * The urls the window has asked the operating system to open, in the order it asked.
+ *
+ * A real browser opening is the one outcome a browser test cannot see, so this stands in for
+ * it: the app has done its part when it has handed the url over.
+ */
+const openedUrls = (page: Page): Promise<string[]> =>
+  page.evaluate(() => window.__Chronie_E2E__?.openedUrls ?? []);
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {
@@ -358,6 +373,15 @@ test("digs from a session down into a single segment and back out again", async 
     await detail.previous();
     await expect(detail.title()).toHaveText("Glass Caverns");
     await expect(detail.dialog.getByRole("button", { name: "Previous segment" })).toBeDisabled();
+  });
+
+  // The window is not a browser and cannot become one: a link has to be handed out to the
+  // real one. Following it in place would leave the reader stranded on a web page.
+  await test.step("a quest goes out to the reader's own browser", async () => {
+    await detail.linkTo("Quest 81").click();
+    await expect.poll(() => openedUrls(page)).toEqual(["https://www.wowhead.com/quest=81"]);
+    await expect(detail.title()).toHaveText("Glass Caverns");
+    expect(page.url()).toContain("127.0.0.1:4399");
   });
 
   await detail.close();

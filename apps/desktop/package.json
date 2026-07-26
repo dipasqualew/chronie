@@ -12,7 +12,8 @@
     "test:e2e": "node node_modules/@playwright/test/cli.js test"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.8.0"
+    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-opener": "^2.5.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
