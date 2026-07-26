@@ -685,6 +685,12 @@ test("shows the game's transmog sets by collection and filters them", async ({
       .toHaveAttribute("href", "https://www.wowhead.com/item=30002");
     await expect(transmogDetail.link("Item 30003"))
       .toHaveAttribute("href", "https://www.wowhead.com/item=30003");
+
+    // The dialog is inside the same window as everything else, so a link out of it has to
+    // reach the reader's browser the way the segment detail's links do.
+    await transmogDetail.link("Item 30002").click();
+    await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30002");
+    await expect(transmogDetail.named("Tideglass Regalia")).toBeVisible();
   });
 
   await test.step("closing a set hands back the grid the reader left", async () => {
