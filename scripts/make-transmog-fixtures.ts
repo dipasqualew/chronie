@@ -27,6 +27,8 @@ const FILE_DATA_ID = {
   transmogSet: 1376213,
   transmogSetItem: 1376212,
   transmogSetGroup: 1576116,
+  itemDisplayInfo: 1266429,
+  itemDisplayInfoMaterialRes: 1280614,
 } as const;
 
 /** How a column was stored, using the file format's own numbering. */
@@ -51,6 +53,8 @@ interface ColumnSpec {
   default?: number;
   /** The distinct values a palette column indexes into. */
   palette?: number[];
+  /** How many values one palette index names, for a column stored as runs. */
+  arrayCount?: number;
   /** The rows a sparse column does list, as id to value. */
   common?: Map<number, number>;
 }
@@ -58,12 +62,20 @@ interface ColumnSpec {
 interface SectionSpec {
   /** Nonzero marks the section encrypted, and its rows are then written as zeroes. */
   key: bigint;
-  /** One entry per row: the value for each column, with strings given as strings. */
-  rows: Array<Array<number | string>>;
+  /**
+   * One entry per row: the value for each column. Strings are given as strings, and a
+   * column holding a fixed-size array is given as an array of its elements.
+   */
+  rows: Array<Array<number | string | number[]>>;
   /** Row ids, when the table keeps them beside the rows rather than inside them. */
   idList?: number[];
   /** Rows that are another row under a second id, as `[new id, row copied]`. */
   copies?: Array<[number, number]>;
+  /**
+   * The foreign key each record belongs to, as `[foreign id, record index]`, for a table
+   * that keeps one outside the row entirely. The record index counts within the section.
+   */
+  relationships?: Array<[number, number]>;
 }
 
 interface TableSpec {
@@ -209,6 +221,107 @@ const transmogSetItem: TableSpec = {
   ],
 };
 
+/**
+ * `ItemDisplayInfo` — how one appearance is drawn, and the table of array columns.
+ *
+ * The game keeps a set's two model slots, its six geoset groups and its two model types as
+ * fixed-size arrays inside single columns, stored two different ways: the first two plainly,
+ * elements laid end to end, and the last as a palette of whole runs. Reading either as one
+ * number gets the first element and quietly loses the rest, so the fixture gives every one
+ * of them a distinguishable tail.
+ */
+const itemDisplayInfo: TableSpec = {
+  fileDataId: FILE_DATA_ID.itemDisplayInfo,
+  layoutHash: 0x9f3ab8a9,
+  tableHash: 0x71c40e52,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 37,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // Flags
+    { storage: Storage.plain, offsetBits: 32, sizeBits: 64 }, // ModelResourcesID[2]
+    { storage: Storage.plain, offsetBits: 96, sizeBits: 192 }, // GeosetGroup[6]
+    {
+      storage: Storage.indexedArray,
+      offsetBits: 288,
+      sizeBits: 3,
+      arrayCount: 2,
+      // Three runs of two: no model, a one-handed model, a two-handed one.
+      palette: [0, 0, 1, 0, 2, 3],
+    }, // ModelType[2]
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        // A helm: one model slot, and the two geoset groups a helm drives.
+        [1, [41001, 0], [27, 21, 0, 0, 0, 0], [1, 0]],
+        // Shoulders: both model slots used, left and right.
+        [0, [41002, 41003], [26, 0, 0, 0, 0, 0], [2, 3]],
+        // A chestpiece: no model at all, and five geoset groups it does drive.
+        [16, [0, 0], [8, 10, 13, 22, 28, 0], [0, 0]],
+      ],
+      idList: [900001, 900002, 900003],
+    },
+  ],
+};
+
+/**
+ * `ItemDisplayInfoMaterialRes` — which texture goes on which part of the body.
+ *
+ * This is the table that forces the relationship map to be read. Its rows say only "this
+ * material, on this section of the body"; which appearance they belong to is not a column
+ * of the row at all, and lives in a block of its own beside them. A reader that skipped
+ * that block would have the rows and no way to tell whose they are.
+ */
+const itemDisplayInfoMaterialRes: TableSpec = {
+  fileDataId: FILE_DATA_ID.itemDisplayInfoMaterialRes,
+  layoutHash: 0x4a2b91c7,
+  tableHash: 0x6d18f3a0,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.bitpacked, offsetBits: 0, sizeBits: 5 }, // ComponentSection
+    { storage: Storage.bitpacked, offsetBits: 5, sizeBits: 22 }, // MaterialResourcesID
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Section numbers are the game's own: 0 arms upper, 1 arms lower, 2 hands,
+      // 3 torso upper, 4 torso lower, 5 legs upper, 6 legs lower, 7 feet.
+      rows: [
+        [3, 52001],
+        [0, 52002],
+        [4, 52003],
+        [5, 52004],
+        [6, 52005],
+        [7, 52006],
+        [2, 52007],
+      ],
+      idList: [1, 2, 3, 4, 5, 6, 7],
+      // The chestpiece owns four of these, the boots two and the gloves one — and the
+      // display they belong to is only ever written here.
+      relationships: [
+        [900003, 0],
+        [900003, 1],
+        [900003, 2],
+        [900002, 3],
+        [900002, 4],
+        [900001, 5],
+        [900003, 6],
+      ],
+    },
+    {
+      // Encrypted, so the block is reserved at full size and written as zeroes.
+      key: 0x3ab8c17d5e920f44n,
+      rows: [[3, 52900]],
+      idList: [8],
+      relationships: [[900900, 0]],
+    },
+  ],
+};
+
 /* ---------- writing one out ---------- */
 
 /** A growable little-endian byte buffer. */
@@ -254,15 +367,54 @@ class Bytes {
 /** Lays one row's columns into `recordSize` bytes, at the bit offsets the table declares. */
 function packRow(
   table: TableSpec,
-  values: Array<number | string>,
+  values: Array<number | string | number[]>,
   stringOffsets: Map<number, number>,
 ): Uint8Array {
   const record = new Uint8Array(table.recordSize);
+
+  /** Bit fields ignore byte boundaries, so a value goes in a bit at a time. */
+  const write = (offsetBits: number, sizeBits: number, value: number): void => {
+    for (let bit = 0; bit < sizeBits; bit += 1) {
+      if (((value >>> bit) & 1) === 0) continue;
+      const at = offsetBits + bit;
+      record[at >>> 3] |= 1 << (at & 7);
+    }
+  };
+
   table.columns.forEach((column, index) => {
     // A sparse column keeps its values in a map at the top of the file, not in the row.
     if (column.storage === Storage.common) return;
 
     const raw = values[index];
+
+    if (Array.isArray(raw)) {
+      // A palette column of runs keeps the elements out in the palette and only the run
+      // number in the row, so the row has to name which run holds exactly these values.
+      if (column.storage === Storage.indexedArray) {
+        const count = column.arrayCount ?? raw.length;
+        const palette = column.palette ?? [];
+        let run = -1;
+        for (let at = 0; at * count + count <= palette.length; at += 1) {
+          if (raw.every((value, element) => palette[at * count + element] === value)) {
+            run = at;
+            break;
+          }
+        }
+        if (run < 0) throw new Error(`Column ${index} has no palette run for [${raw}].`);
+        write(column.offsetBits, column.sizeBits, run);
+        return;
+      }
+
+      // A plainly stored array lays its elements end to end across the column's own width,
+      // which is the layout `ItemDisplayInfo` uses for its model slots and geoset groups.
+      const elementBits = column.sizeBits / raw.length;
+      if (!Number.isInteger(elementBits)) {
+        throw new Error(`Column ${index} cannot hold ${raw.length} elements in ${column.sizeBits} bits.`);
+      }
+      raw.forEach((element, at) => write(column.offsetBits + at * elementBits, elementBits, element));
+      return;
+    }
+
     let value: number;
     if (typeof raw === "string") {
       value = stringOffsets.get(index) ?? 0;
@@ -273,13 +425,7 @@ function packRow(
     } else {
       value = raw;
     }
-
-    // Bit fields ignore byte boundaries, so write the value a bit at a time.
-    for (let bit = 0; bit < column.sizeBits; bit += 1) {
-      if (((value >>> bit) & 1) === 0) continue;
-      const at = column.offsetBits + bit;
-      record[at >>> 3] |= 1 << (at & 7);
-    }
+    write(column.offsetBits, column.sizeBits, value);
   });
   return record;
 }
@@ -389,7 +535,8 @@ function writeTable(table: TableSpec): Uint8Array {
     out.u32(sectionStrings[sectionIndex]!.blob.length);
     out.u32(0); // offset records end
     out.u32((section.idList?.length ?? 0) * 4);
-    out.u32(0); // relationship data size
+    // A relationship block is a count, the range it spans, and then its pairs.
+    out.u32(section.relationships ? 12 + section.relationships.length * 8 : 0);
     out.u32(0); // offset map entries
     out.u32(section.copies?.length ?? 0);
   });
@@ -414,7 +561,8 @@ function writeTable(table: TableSpec): Uint8Array {
     out.u32(column.storage);
     out.u32(column.storage === Storage.common ? (column.default ?? 0) : column.offsetBits);
     out.u32(column.sizeBits);
-    out.u32(0);
+    // The last word is how many values one palette index names, for a column of runs.
+    out.u32(column.arrayCount ?? 0);
   }
 
   out.bytes(palette.toBuffer());
@@ -436,6 +584,18 @@ function writeTable(table: TableSpec): Uint8Array {
       out.u32(newId);
       out.u32(copied);
     }
+    // The relationship map. An encrypted section still reserves the full block and writes
+    // it as zeroes, which is what makes a count of zero the ordinary case there.
+    if (section.relationships) {
+      const keys = section.relationships.map(([foreign]) => foreign);
+      out.u32(encrypted ? 0 : section.relationships.length);
+      out.u32(encrypted ? 0 : Math.min(...keys));
+      out.u32(encrypted ? 0 : Math.max(...keys));
+      for (const [foreign, record] of section.relationships) {
+        out.u32(encrypted ? 0 : foreign);
+        out.u32(encrypted ? 0 : record);
+      }
+    }
   });
 
   return out.toBuffer();
@@ -444,7 +604,13 @@ function writeTable(table: TableSpec): Uint8Array {
 /* ---------- go ---------- */
 
 mkdirSync(OUT, { recursive: true });
-for (const table of [transmogSet, transmogSetGroup, transmogSetItem]) {
+for (const table of [
+  transmogSet,
+  transmogSetGroup,
+  transmogSetItem,
+  itemDisplayInfo,
+  itemDisplayInfoMaterialRes,
+]) {
   const bytes = writeTable(table);
   const path = join(OUT, `${table.fileDataId}.db2`);
   writeFileSync(path, bytes);

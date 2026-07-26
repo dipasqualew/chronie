@@ -74,6 +74,9 @@ struct Section {
     strings_base: usize,
     /// Row ids, when the table keeps them beside the rows rather than inside them.
     id_list: Vec<u32>,
+    /// The foreign key each record belongs to, for a table that keeps one outside the row.
+    /// Indexed by the record's position in this section; zero where the table keeps none.
+    foreign_ids: Vec<u32>,
 }
 
 /// A parsed DB2 table.
@@ -260,6 +263,7 @@ impl Db2 {
             }
             at += raw.copy_count * 8;
             at += raw.offset_map_count * 6;
+            let foreign_ids = read_relationship_map(&data, at, raw.relationship_size, raw.rows)?;
             at += raw.relationship_size;
             at += raw.offset_map_count * 4;
 
@@ -271,6 +275,7 @@ impl Db2 {
                 strings_size: raw.strings_size,
                 strings_base,
                 id_list,
+                foreign_ids,
             });
             strings_base += raw.strings_size;
         }
@@ -350,6 +355,55 @@ impl Db2 {
     }
 }
 
+/// Reads the block tying each record to a foreign key that is not a column of the row.
+///
+/// Most foreign keys are duplicated into the row and can just be read as a column, but a
+/// table can instead keep one only here — `ItemDisplayInfoMaterialRes` says which item
+/// display a texture belongs to this way and nowhere else, so a reader that skipped this
+/// block would have its rows and no way to tell whose they are.
+///
+/// The block is a count, the lowest and highest key it mentions, and then pairs of the key
+/// and the record it belongs to. That record number counts within the section rather than
+/// across the table, and is not a row id.
+///
+/// An encrypted section still reserves the block at full size but writes it as zeroes, so a
+/// count of zero is ordinary and means only that this section has no readable relationships.
+fn read_relationship_map(
+    data: &[u8],
+    at: usize,
+    size: usize,
+    rows: usize,
+) -> Result<Vec<u32>, String> {
+    let mut foreign_ids = vec![0u32; rows];
+    if size < 12 {
+        return Ok(foreign_ids);
+    }
+    let word = |offset: usize| -> Result<u32, String> {
+        data.get(offset..offset + 4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .ok_or_else(|| "The table ends inside its relationship map.".to_string())
+    };
+
+    let count = word(at)? as usize;
+    if count == 0 {
+        return Ok(foreign_ids);
+    }
+    if 12 + count * 8 > size {
+        return Err("The relationship map claims more entries than it has room for.".into());
+    }
+    for entry in 0..count {
+        let pair = at + 12 + entry * 8;
+        let foreign = word(pair)?;
+        let record = word(pair + 4)? as usize;
+        // A record number past the section's rows is not something to fail the whole table
+        // over; the row it would name simply keeps its zero.
+        if let Some(slot) = foreign_ids.get_mut(record) {
+            *slot = foreign;
+        }
+    }
+    Ok(foreign_ids)
+}
+
 impl Row<'_> {
     /// The row's id, from wherever this table keeps it.
     pub fn id(&self) -> u32 {
@@ -403,6 +457,66 @@ impl Row<'_> {
         }
     }
 
+    /// The foreign key this row belongs to, for a table that keeps one outside the row.
+    ///
+    /// Zero when the table keeps no such key, and also when the row is in a section that
+    /// arrived encrypted — neither is distinguishable from a genuine zero, and neither is
+    /// worth an error, because a caller joining on this simply finds nothing.
+    pub fn foreign_id(&self) -> u32 {
+        self.table.sections[self.section]
+            .foreign_ids
+            .get(self.index)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Reads one element of a column holding a fixed-size array.
+    ///
+    /// [`Row::number`] reads such a column as its first element, which is the right answer
+    /// often enough that it is the default, but `ItemDisplayInfo` keeps a set's geoset
+    /// groups and its two model slots this way and the later elements are the point.
+    ///
+    /// The file does not record how many elements a plainly stored array has — only its
+    /// total width — so the caller gives the width of one element. That is the `<32>` in
+    /// the community's column definitions, and keeping it with the caller is the same
+    /// bargain the rest of this module makes about which column means what.
+    pub fn element(&self, column: usize, index: usize, element_bits: u32) -> u32 {
+        let Some(info) = self.table.columns.get(column) else {
+            return 0;
+        };
+        match info.storage {
+            // A palette column of runs already knows its own element count, so it needs no
+            // help placing one: the index names the run, and this picks out of it.
+            Storage::IndexedArray => {
+                let run = self.bits(info) as usize * info.array_count.max(1) as usize;
+                if index >= info.array_count.max(1) as usize {
+                    return 0;
+                }
+                info.palette.get(run + index).copied().unwrap_or(0)
+            }
+            Storage::Plain => {
+                if element_bits == 0 {
+                    return 0;
+                }
+                let start = info.offset_bits + index as u32 * element_bits;
+                // Reading past the column's own width would quietly return the next
+                // column's bytes, which is worse than admitting there is no such element.
+                if start + element_bits > info.offset_bits + info.size_bits {
+                    return 0;
+                }
+                self.plain_at(start, element_bits)
+            }
+            // Every other storage holds one value per row, so only the first element exists.
+            _ => {
+                if index == 0 {
+                    self.number(column)
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
     /// Reads a column that holds a string.
     ///
     /// The row stores a distance rather than a position: the offset counts forward from
@@ -449,8 +563,12 @@ impl Row<'_> {
     }
 
     fn plain(&self, info: &Column) -> u32 {
-        let at = self.row_start() + (info.offset_bits / 8) as usize;
-        let width = (info.size_bits as usize / 8).clamp(1, 4);
+        self.plain_at(info.offset_bits, info.size_bits)
+    }
+
+    fn plain_at(&self, offset_bits: u32, size_bits: u32) -> u32 {
+        let at = self.row_start() + (offset_bits / 8) as usize;
+        let width = (size_bits as usize / 8).clamp(1, 4);
         let Some(bytes) = self.table.data.get(at..at + width) else {
             return 0;
         };
@@ -502,6 +620,26 @@ mod tests {
     const TRANSMOG_SET: u32 = 1376213;
     const TRANSMOG_SET_ITEM: u32 = 1376212;
     const TRANSMOG_SET_GROUP: u32 = 1576116;
+    const ITEM_DISPLAY_INFO: u32 = 1266429;
+    const ITEM_DISPLAY_INFO_MATERIAL_RES: u32 = 1280614;
+
+    /// Columns of `ItemDisplayInfo`, which is the table of fixed-size arrays.
+    mod display {
+        /// Plainly stored arrays, elements laid end to end inside one column.
+        pub const MODEL_RESOURCES_ID: usize = 1;
+        pub const GEOSET_GROUP: usize = 2;
+        /// A palette of whole runs rather than of single values.
+        pub const MODEL_TYPE: usize = 3;
+        /// Not an array at all, which is the case that has to keep working.
+        pub const FLAGS: usize = 0;
+    }
+
+    /// Columns of `ItemDisplayInfoMaterialRes`. Which appearance a row belongs to is not
+    /// among them — that is the whole point of the table.
+    mod material {
+        pub const COMPONENT_SECTION: usize = 0;
+        pub const MATERIAL_RESOURCES_ID: usize = 1;
+    }
 
     /// Columns of `TransmogSet`, and the storage each one is written in.
     mod set {
@@ -687,9 +825,150 @@ mod tests {
 
     // Every prefix of a real table, so a file cut off anywhere is a message rather than a
     // panic — including the rows a header that survived the cut still promises.
+    // Reading an array column as one number gets its first element, which is what every
+    // caller that does not know better will do, so it has to stay true.
+    #[test]
+    fn reads_an_array_column_as_its_first_element() {
+        let table = table(ITEM_DISPLAY_INFO);
+        let first: Vec<u32> = table
+            .rows()
+            .map(|row| row.number(display::MODEL_RESOURCES_ID))
+            .collect();
+        assert_eq!(first, vec![41001, 41002, 0]);
+    }
+
+    // The elements past the first are the reason this exists: a shoulder set keeps a model
+    // in both slots and a chestpiece drives five geoset groups, none of which is readable
+    // from the first element alone.
+    #[test]
+    fn reads_every_element_of_a_plainly_stored_array() {
+        let table = table(ITEM_DISPLAY_INFO);
+        let models: Vec<Vec<u32>> = table
+            .rows()
+            .map(|row| {
+                (0..2)
+                    .map(|at| row.element(display::MODEL_RESOURCES_ID, at, 32))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(models, vec![vec![41001, 0], vec![41002, 41003], vec![0, 0]]);
+
+        let geosets: Vec<Vec<u32>> = table
+            .rows()
+            .map(|row| {
+                (0..6)
+                    .map(|at| row.element(display::GEOSET_GROUP, at, 32))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            geosets,
+            vec![
+                vec![27, 21, 0, 0, 0, 0],
+                vec![26, 0, 0, 0, 0, 0],
+                vec![8, 10, 13, 22, 28, 0],
+            ]
+        );
+    }
+
+    // A palette column of runs keeps only the run number in the row, so its elements come
+    // out of the palette rather than out of the record.
+    #[test]
+    fn reads_every_element_of_a_palette_of_runs() {
+        let table = table(ITEM_DISPLAY_INFO);
+        let types: Vec<Vec<u32>> = table
+            .rows()
+            .map(|row| {
+                (0..2)
+                    .map(|at| row.element(display::MODEL_TYPE, at, 32))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(types, vec![vec![1, 0], vec![2, 3], vec![0, 0]]);
+    }
+
+    #[test]
+    fn reads_a_column_that_is_not_an_array_as_its_only_element() {
+        let table = table(ITEM_DISPLAY_INFO);
+        let flags: Vec<u32> = table
+            .rows()
+            .map(|row| row.element(display::FLAGS, 0, 32))
+            .collect();
+        assert_eq!(flags, vec![1, 0, 16]);
+        // Asking past the end says so rather than running into the next column.
+        for row in table.rows() {
+            assert_eq!(row.element(display::FLAGS, 1, 32), 0);
+            assert_eq!(row.element(display::MODEL_RESOURCES_ID, 2, 32), 0);
+            assert_eq!(row.element(display::MODEL_TYPE, 2, 32), 0);
+        }
+    }
+
+    // `ItemDisplayInfoMaterialRes` says which body section a texture covers but not whose
+    // texture it is; that lives in a block beside the rows and nowhere else.
+    #[test]
+    fn ties_a_row_to_the_foreign_key_kept_outside_it() {
+        let table = table(ITEM_DISPLAY_INFO_MATERIAL_RES);
+        let joined: Vec<(u32, u32, u32)> = table
+            .rows()
+            .map(|row| {
+                (
+                    row.foreign_id(),
+                    row.number(material::COMPONENT_SECTION),
+                    row.number(material::MATERIAL_RESOURCES_ID),
+                )
+            })
+            .collect();
+        assert_eq!(
+            joined,
+            vec![
+                (900003, 3, 52001),
+                (900003, 0, 52002),
+                (900003, 4, 52003),
+                (900002, 5, 52004),
+                (900002, 6, 52005),
+                (900001, 7, 52006),
+                (900003, 2, 52007),
+            ]
+        );
+
+        // Which is what lets a caller ask the question it actually has: what covers this
+        // appearance, and where does each piece of it go.
+        let mut sections: Vec<u32> = table
+            .rows()
+            .filter(|row| row.foreign_id() == 900003)
+            .map(|row| row.number(material::COMPONENT_SECTION))
+            .collect();
+        sections.sort_unstable();
+        assert_eq!(sections, vec![0, 2, 3, 4]);
+    }
+
+    // A table that keeps no such block is not broken, it simply has no foreign key.
+    #[test]
+    fn says_nothing_for_a_table_that_keeps_no_relationship_map() {
+        for row in table(TRANSMOG_SET).rows() {
+            assert_eq!(row.foreign_id(), 0);
+        }
+    }
+
+    // The encrypted section reserves the block at full size but arrives as zeroes, so its
+    // rows are skipped like any other encrypted row rather than joining against nothing.
+    #[test]
+    fn leaves_out_the_relationships_of_a_section_it_cannot_decrypt() {
+        let table = table(ITEM_DISPLAY_INFO_MATERIAL_RES);
+        assert_eq!(table.declared_rows(), 8);
+        assert_eq!(table.rows().count(), 7);
+        assert!(table.rows().all(|row| row.foreign_id() != 900900));
+    }
+
     #[test]
     fn refuses_a_truncated_table_without_panicking() {
-        for fdid in [TRANSMOG_SET, TRANSMOG_SET_ITEM, TRANSMOG_SET_GROUP] {
+        for fdid in [
+            TRANSMOG_SET,
+            TRANSMOG_SET_ITEM,
+            TRANSMOG_SET_GROUP,
+            ITEM_DISPLAY_INFO,
+            ITEM_DISPLAY_INFO_MATERIAL_RES,
+        ] {
             let whole = fixture_files().read(fdid).unwrap();
             for length in 0..whole.len() {
                 let Ok(table) = Db2::parse(whole[..length].to_vec()) else {
@@ -697,9 +976,13 @@ mod tests {
                 };
                 for row in table.rows() {
                     row.id();
+                    row.foreign_id();
                     for column in 0..16 {
                         row.number(column);
                         row.text(column);
+                        for at in 0..8 {
+                            row.element(column, at, 32);
+                        }
                     }
                 }
             }
