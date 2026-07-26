@@ -182,7 +182,27 @@
   button.hl:hover { border-color: var(--series-1); background: var(--series-1-soft); }
   .hl-icon { font-size: 13px; line-height: 1; }
   .hl .detail { color: var(--text-muted); }
-  .hl-more { color: var(--text-muted); background: transparent; border-style: dashed; }
+  .hl-caret { font-size: 9px; color: var(--text-muted); margin-left: 1px; }
+  .hl.open { border-color: var(--series-1); background: var(--series-1-soft); }
+  .hl.open .hl-caret { color: var(--text-secondary); }
+
+  /* What a summary unfolds into. Capped and scrolled rather than allowed to run: a session
+     with sixty quests in it should still be a card, not a page. */
+  .hl-panel {
+    list-style: none; margin: 8px 0 0; padding: 6px;
+    max-height: 232px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2);
+    display: grid; gap: 1px;
+  }
+  .hl-item {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+    width: 100%; text-align: left; padding: 4px 8px;
+    border: none; border-radius: 6px; background: transparent;
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .hl-item:hover { background: var(--surface-1); }
+  .hl-item-name { color: var(--text-primary); }
+  .hl-item-meta { margin-left: auto; font-size: 11px; color: var(--text-muted); }
   /* A tint for the three that are genuinely rare, so an evening with one is visible from
      across the room; everything else stays neutral or the tinting means nothing. */
   .hl-achievement { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, var(--surface-1)); }
@@ -220,6 +240,12 @@
   .seg-who { font-weight: 550; }
   .seg-where { color: var(--text-secondary); }
   .seg-activities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; font-size: 11px; }
+  /* The same summary as the session's, a size down: on a segment row it is the supporting
+     line, and drawn at full size it would compete with the place and the character. */
+  .seg-summary { display: block; margin-top: 5px; }
+  .seg-summary .hl-row { gap: 4px; }
+  .seg-summary .hl { font-size: 11px; padding: 2px 8px 2px 7px; }
+  .seg-summary .hl-icon { font-size: 11px; }
   .seg-dur { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
 
   /* ---------- chips and badges ---------- */

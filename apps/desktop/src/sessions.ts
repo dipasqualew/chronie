@@ -13,17 +13,7 @@
  */
 
 import { eventsOf } from "./types";
-import type {
-  AchievementEvent,
-  CollectibleEvent,
-  EventListKey,
-  EventOf,
-  HousingItemEvent,
-  LevelUpEvent,
-  QuestEvent,
-  Segment,
-  TransmogEvent,
-} from "./types";
+import type { EventListKey, EventOf, Segment } from "./types";
 
 /** The gap that ends a play session. Five minutes is long enough to cover a loading screen. */
 export const SESSION_GAP_SECONDS = 300;
@@ -160,15 +150,28 @@ export type HighlightKind =
   | "gold" | "loot" | "currency" | "reputation" | "housingXP";
 
 /**
- * `milestone` entries are the things a player would tell someone about and get a chip each;
- * `tally` entries are the running numbers giving those things context.
+ * `milestone` entries are the things a player would tell someone about; `tally` entries are
+ * the running numbers giving those things context.
  */
 export type HighlightFamily = "milestone" | "tally";
 
-/** Whatever the highlight was built from, kept so a caller can look past the summary. */
-export type HighlightItem =
-  | AchievementEvent | LevelUpEvent | CollectibleEvent
-  | TransmogEvent | QuestEvent | HousingItemEvent;
+/**
+ * One of the things a milestone summarises, with the way back to where it happened.
+ *
+ * A summary is only worth reading if it can be taken apart again — "12 achievements" says
+ * what kind of evening it was, and these say which twelve.
+ */
+export interface HighlightEntry {
+  /** What the thing is called: an achievement's name, "Level 12", a mount. */
+  label: string;
+  /** The quieter half of the line, when there is one: "account first", "variant". */
+  detail: string;
+  /** When it happened, where the game recorded a time. */
+  at: number | null;
+  /** Who it happened to, which is the thing a session-wide summary loses. */
+  character: string;
+  segmentId: number;
+}
 
 interface HighlightStyle {
   rank: number;
@@ -182,24 +185,29 @@ interface HighlightSeed {
   label: string;
   detail?: string;
   count?: number;
-  items?: HighlightItem[];
+  items?: HighlightEntry[];
   /** Orders within a family; the bigger achievement of two leads. */
   weight?: number;
   /** A running total's number, on the tallies only. */
   value?: number;
-  /** The segment this came from, when it came from exactly one. */
-  segmentId?: number | null;
 }
 
 export interface Highlight extends HighlightStyle {
   kind: HighlightKind;
   label: string;
   detail: string;
+  /** How many things the summary stands for; one for a tally, which stands for itself. */
   count: number;
-  items: HighlightItem[];
+  items: HighlightEntry[];
   weight?: number;
   value?: number;
-  segmentId?: number | null;
+  /**
+   * Where to go when the summary is of exactly one thing, and null when it is of several.
+   * A chip that stands for twelve achievements has no single segment to open, so it opens
+   * its own list instead — sending the click to whichever came first would be a lie about
+   * where the rest of them came from.
+   */
+  segmentId: number | null;
 }
 
 /**
@@ -227,100 +235,33 @@ const KINDS: Record<HighlightKind, HighlightStyle> = {
 };
 
 /**
- * What the given segments amount to, best first.
+ * What the given segments amount to, best first — one summary per kind, never one per thing.
+ *
+ * An evening that turned up twelve achievements is one line reading "12 achievements", not
+ * twelve lines competing for the same row: the count is what tells you what kind of evening
+ * it was, and the twelve names are what you go looking for afterwards. So every summary
+ * carries its `items`, and the view is free to unfold them where the reader asks.
  *
  * Takes an array rather than a session so the same summary can describe one segment in the
  * detail modal and a whole evening on the timeline — the difference between "this run" and
  * "this session" should be the input, not a second implementation.
- *
- * @returns Highlights carrying enough to render and to navigate back to the segment they
- *   came from, where they came from exactly one.
  */
 export function highlights(segments: Segment[]): Highlight[] {
-  const list = [...collectibles(segments), ...aggregates(segments)];
+  const list = [...milestones(segments), ...tallies(segments)];
   return list
-    .map((entry) => ({
-      count: 1,
-      items: [] as HighlightItem[],
-      detail: "",
-      ...entry,
-      ...KINDS[entry.kind],
-    }))
+    .map((entry) => {
+      const items = entry.items || [];
+      return {
+        count: items.length || 1,
+        detail: "",
+        ...entry,
+        items,
+        // One thing has somewhere to go; a summary of several does not.
+        segmentId: items.length === 1 ? items[0].segmentId : null,
+        ...KINDS[entry.kind],
+      };
+    })
     .sort((left, right) => left.rank - right.rank || (right.weight || 0) - (left.weight || 0));
-}
-
-/** The things that happened once and are worth naming individually. */
-function collectibles(segments: Segment[]): HighlightSeed[] {
-  const out: HighlightSeed[] = [];
-  const each = <K extends EventListKey>(
-    key: K,
-    visit: (event: EventOf<K>, segment: Segment) => void,
-  ): void => segments.forEach((segment) => eventsOf(segment, key).forEach((event) => visit(event, segment)));
-
-  each("achievements", (event, segment) =>
-    out.push({
-      kind: "achievement",
-      label: event.name || `Achievement ${event.id}`,
-      detail: event.accountFirst ? "account first" : "character first",
-      // An account first is rarer than a character first, so it leads when both landed.
-      weight: event.accountFirst ? 2 : 1,
-      segmentId: segment.segmentId,
-      items: [event],
-    }));
-
-  // A character that gained three levels in an evening is one line reading "Level 12", not
-  // three competing for the same space; the levels below the last are implied by the count.
-  interface LevelRun {
-    count: number;
-    level: number;
-    segmentId: number | null;
-    items: LevelUpEvent[];
-  }
-  const levels = new Map<string, LevelRun>();
-  each("levelUps", (event, segment) => {
-    const found: LevelRun = levels.get(segment.character) || { count: 0, level: 0, segmentId: null, items: [] };
-    found.count += 1;
-    found.items.push(event);
-    if (event.level >= found.level) {
-      found.level = event.level;
-      found.segmentId = segment.segmentId;
-    }
-    levels.set(segment.character, found);
-  });
-  for (const [character, found] of levels) {
-    out.push({
-      kind: "levelUp",
-      label: `Level ${found.level}`,
-      detail: found.count > 1 ? `${character} · +${found.count} levels` : character,
-      weight: found.level,
-      count: found.count,
-      segmentId: found.segmentId,
-      items: found.items,
-    });
-  }
-
-  const collection = (key: "mounts" | "toys" | "pets", kind: HighlightKind, noun: string): void =>
-    each(key, (event, segment) =>
-      out.push({
-        kind,
-        label: event.name || `${noun} ${event.id}`,
-        segmentId: segment.segmentId,
-        items: [event],
-      }));
-  collection("mounts", "mount", "Mount");
-  collection("toys", "toy", "Toy");
-  collection("pets", "pet", "Pet");
-
-  each("housingLevelUps", (event, segment) =>
-    out.push({
-      kind: "housingLevel",
-      label: `Housing level ${event.level}`,
-      weight: event.level,
-      segmentId: segment.segmentId,
-      items: [event],
-    }));
-
-  return out;
 }
 
 /** An event paired with the segment it was recorded in. */
@@ -329,66 +270,167 @@ interface Sourced<T> {
   segment: Segment;
 }
 
-/** The things that only mean something added up. */
-function aggregates(segments: Segment[]): HighlightSeed[] {
+/**
+ * How a summary reads: the thing itself when it stands for one, the count when it stands
+ * for several. "Clockwork Glider" is worth more of the row than "1 mount" ever is, and the
+ * one thing it names is a click away from the run it came from either way.
+ */
+const counted = (items: HighlightEntry[], plural: string): string =>
+  (items.length === 1 ? items[0].label : `${items.length} ${plural}`);
+
+/**
+ * The things a player would tell someone about, one summary each.
+ *
+ * Every kind is folded the same way — count them, say what is notable about the set, keep
+ * every one of them as an entry — so the only thing that varies between kinds is the
+ * wording, which is the part worth reading here.
+ */
+function milestones(segments: Segment[]): HighlightSeed[] {
   const out: HighlightSeed[] = [];
   const from = <K extends EventListKey>(key: K): Array<Sourced<EventOf<K>>> =>
     segments.flatMap((segment) => eventsOf(segment, key).map((event) => ({ event, segment })));
+  // Who is on screen already: one segment is one character, and so is an evening that never
+  // hopped alts. Naming them on a summary that sits directly under their name says nothing.
+  const cast = new Set(segments.map((segment) => segment.character));
 
-  // A source segment is only offered when every entry came from the same one: sending a
-  // click somewhere arbitrary is worse than not offering the click at all.
-  const only = (entries: Array<Sourced<unknown>>): number | null => {
-    const ids = new Set(entries.map(({ segment }) => segment.segmentId));
-    return ids.size === 1 ? entries[0].segment.segmentId : null;
+  const entry = <T extends { at?: number | null }>(
+    { event, segment }: Sourced<T>,
+    label: string,
+    detail = "",
+  ): HighlightEntry => ({
+    label,
+    detail,
+    at: event.at ?? null,
+    character: segment.character,
+    segmentId: segment.segmentId,
+  });
+
+  const achievements = from("achievements");
+  if (achievements.length) {
+    const first = achievements.filter(({ event }) => event.accountFirst);
+    // An account first is rarer than a character first, so it leads the list the summary
+    // unfolds into — the reader opening twelve achievements wants the notable one on top.
+    const items = [...first, ...achievements.filter(({ event }) => !event.accountFirst)]
+      .map((sourced) => entry(sourced, sourced.event.name || `Achievement ${sourced.event.id}`,
+        sourced.event.accountFirst ? "account first" : "character first"));
+    out.push({
+      kind: "achievement",
+      label: counted(items, "achievements"),
+      detail: items.length === 1
+        ? items[0].detail
+        : (first.length ? `${first.length} account first` : "character firsts"),
+      weight: first.length * 100 + items.length,
+      items,
+    });
+  }
+
+  const levelUps = from("levelUps");
+  if (levelUps.length) {
+    const items = levelUps.map((sourced) => entry(sourced, `Level ${sourced.event.level}`));
+    // The level a character finished on is the story, not the ones passed through on the
+    // way; with an alt in the evening too, the count is all that fits and all that is meant.
+    const reached = new Map<string, number>();
+    for (const { event, segment } of levelUps) {
+      reached.set(segment.character, Math.max(reached.get(segment.character) ?? 0, event.level));
+    }
+    const [[who, top]] = [...reached];
+    // Several characters levelling has no single "now 12" to report; one has, and says so —
+    // naming them only where somebody else played too, because a segment row and a
+    // one-character evening have both said the name already a line above.
+    const reach = `${cast.size > 1 ? `${who} ` : ""}now ${top}`;
+    out.push({
+      kind: "levelUp",
+      label: counted(items, "levels"),
+      detail: reached.size > 1
+        ? `${reached.size} characters`
+        : (items.length === 1 ? (cast.size > 1 ? who : "") : reach),
+      weight: Math.max(...reached.values()),
+      items,
+    });
+  }
+
+  const collection = (key: "mounts" | "toys" | "pets", kind: HighlightKind, noun: string, plural: string): void => {
+    const found = from(key);
+    if (!found.length) return;
+    const items = found.map((sourced) =>
+      entry(sourced, sourced.event.name || `${noun} ${sourced.event.id}`));
+    out.push({ kind, label: counted(items, plural), weight: items.length, items });
   };
+  collection("mounts", "mount", "Mount", "mounts");
+  collection("toys", "toy", "Toy", "toys");
+  collection("pets", "pet", "Pet", "pets");
 
   const transmogs = from("transmogs");
   const fresh = transmogs.filter(({ event }) => event.newAppearance === true);
   const variants = transmogs.filter(({ event }) => event.newAppearance === false);
   if (fresh.length || variants.length) {
     // A brand new appearance is the collection growing; a variant is a colour of something
-    // already owned. Leading with whichever actually happened keeps the chip honest.
-    const leading = fresh.length ? fresh : variants;
+    // already owned. Leading with whichever actually happened keeps the chip honest, and
+    // the list holds both, because "which of these were new" is the question it answers.
+    const items = [...fresh, ...variants].map((sourced) =>
+      entry(sourced, sourced.event.name || `Item ${sourced.event.id}`,
+        sourced.event.newAppearance ? "new appearance" : "variant of one owned"));
     out.push({
       kind: "transmog",
       label: fresh.length ? `${fresh.length} new appearance${fresh.length === 1 ? "" : "s"}` : "New transmog source",
       detail: fresh.length && variants.length
         ? `+${variants.length} variant${variants.length === 1 ? "" : "s"}`
         : (fresh.length ? "" : `${variants.length} variant${variants.length === 1 ? "" : "s"}`),
-      count: leading.length,
+      count: (fresh.length ? fresh : variants).length,
       weight: fresh.length * 10 + variants.length,
-      segmentId: only(leading),
-      items: leading.map(({ event }) => event),
+      items,
+    });
+  }
+
+  const housingLevels = from("housingLevelUps");
+  if (housingLevels.length) {
+    const items = housingLevels.map((sourced) => entry(sourced, `Housing level ${sourced.event.level}`));
+    const top = Math.max(...housingLevels.map(({ event }) => event.level));
+    out.push({
+      kind: "housingLevel",
+      label: items.length === 1 ? items[0].label : `${items.length} housing levels`,
+      detail: items.length === 1 ? "" : `now level ${top}`,
+      weight: top,
+      items,
     });
   }
 
   const housing = from("housingItems");
   if (housing.length) {
     const warband = housing.filter(({ event }) => event.warbandFirst);
+    const items = housing.map((sourced) =>
+      entry(sourced, sourced.event.name || `Decor ${sourced.event.id}`,
+        sourced.event.warbandFirst ? "warband first" : "already known"));
     out.push({
       kind: "housingItem",
-      label: `${housing.length} decor`,
+      label: counted(items, "decor"),
       detail: warband.length ? `${warband.length} warband first` : "already known",
-      count: housing.length,
-      weight: warband.length * 10 + housing.length,
-      segmentId: only(housing),
-      items: housing.map(({ event }) => event),
+      weight: warband.length * 100 + housing.length,
+      items,
     });
   }
 
   const quests = from("quests");
   if (quests.length) {
     const first = quests.filter(({ event }) => event.accountFirst);
+    const items = quests.map((sourced) =>
+      entry(sourced, sourced.event.name || `Quest ${sourced.event.id}`,
+        sourced.event.accountFirst ? "account first" : ""));
     out.push({
       kind: "quest",
-      label: `${quests.length} quest${quests.length === 1 ? "" : "s"}`,
+      label: counted(items, "quests"),
       detail: first.length ? `${first.length} account first` : "",
-      count: quests.length,
       weight: quests.length,
-      segmentId: only(quests),
-      items: quests.map(({ event }) => event),
+      items,
     });
   }
+
+  return out;
+}
+
+/** The running numbers that give the milestones context; they stand for themselves. */
+function tallies(segments: Segment[]): HighlightSeed[] {
+  const out: HighlightSeed[] = [];
 
   const goldDiff = sum(segments, "goldDiff");
   if (goldDiff !== 0) {

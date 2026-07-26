@@ -1,21 +1,21 @@
 /**
  * The timeline: play sessions down a spine, newest first.
  *
- * This is the view that answers "what have I been doing", so a session leads with the
- * things that happened — an achievement, a mount, a level — and keeps the segments that
- * produced them folded away behind a count. Opening one is how you get from "a good
- * evening" to "which pull, exactly".
+ * This is the view that answers "what have I been doing", and the answer is a summary at
+ * every level. A session leads with what kind of evening it was — twelve achievements, two
+ * mounts, four levels — rather than with twelve achievements; each of those unfolds into
+ * what it counted when the reader asks; and the segments that produced them stay folded
+ * away behind a count, each one summarised the same way. Nothing on this page is a list
+ * until somebody has asked for a list.
  */
 
 import { clock, dayLabel, duration, escapeHtml, plural } from "./format";
+import { highlights } from "./sessions";
 import type { Session } from "./sessions";
 import type { Segment } from "./types";
 import {
   activityChip, characterCircle, classColor, classDot, highlightList, locationType,
 } from "./ui";
-
-/** Milestone chips beyond this are counted rather than drawn; a session card is a summary. */
-const CHIP_LIMIT = 10;
 
 /**
  * Given the segment to show and the session it belongs to, so the detail modal's next and
@@ -34,9 +34,12 @@ export interface Timeline {
 }
 
 export function createTimeline({ host, onOpenSegment }: TimelineOptions): Timeline {
-  // Which sessions the user has opened, kept across repaints: an activity edit redraws the
-  // whole view, and having it fold back up under the cursor would be maddening.
+  // What the user has opened, kept across repaints: an activity edit redraws the whole
+  // view, and having it fold back up under the cursor would be maddening.
   const expanded = new Set<string>();
+  // At most one summary is unfolded per session — opening a second closes the first — so a
+  // card never grows two lists at once and the page stays the length the reader expects.
+  const unfolded = new Map<string, string>();
 
   function render(sessions: Session[]): void {
     if (!sessions.length) {
@@ -53,8 +56,12 @@ export function createTimeline({ host, onOpenSegment }: TimelineOptions): Timeli
       const label = dayLabel(session.day);
       const divider = label === lastDay ? "" : `<div class="spine-day"><span>${escapeHtml(label)}</span></div>`;
       lastDay = label;
-      return divider + card(session, expanded.has(session.id));
+      return divider + card(session, expanded.has(session.id), unfolded.get(session.id) ?? null);
     }).join("")}</div>`;
+
+    /** The session an element sits in, which is how every click below knows its context. */
+    const sessionOf = (element: HTMLElement): string =>
+      element.closest<HTMLElement>("[data-session]")?.dataset.session ?? "";
 
     host.querySelectorAll<HTMLElement>("[data-toggle-session]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -65,12 +72,23 @@ export function createTimeline({ host, onOpenSegment }: TimelineOptions): Timeli
         render(sessions);
       });
     });
-    // Both a highlight chip and a segment row open the modal, and both sit inside their
-    // session's article — which is where the list to navigate comes from.
+    host.querySelectorAll<HTMLElement>("[data-unfold]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = sessionOf(button);
+        const kind = button.dataset.unfold;
+        if (kind === undefined) return;
+        if (unfolded.get(id) === kind) unfolded.delete(id);
+        else unfolded.set(id, kind);
+        render(sessions);
+      });
+    });
+    // A summary chip, one of the things it unfolded into, and a segment row all open the
+    // modal, and all three sit inside their session's article — which is where the list to
+    // navigate comes from.
     const byId = new Map(sessions.map((session) => [session.id, session]));
     host.querySelectorAll<HTMLElement>("[data-open-segment]").forEach((button) => {
       button.addEventListener("click", () => {
-        const session = byId.get(button.closest<HTMLElement>("[data-session]")?.dataset.session ?? "");
+        const session = byId.get(sessionOf(button));
         onOpenSegment(Number(button.dataset.openSegment), session?.segments || []);
       });
     });
@@ -79,7 +97,7 @@ export function createTimeline({ host, onOpenSegment }: TimelineOptions): Timeli
   return { render };
 }
 
-function card(session: Session, open: boolean): string {
+function card(session: Session, open: boolean, unfolded: string | null): string {
   const cast = session.characters;
   // The spine's node takes the colour of whoever played most, which makes an evening on
   // one character recognisable from the shape of the page alone.
@@ -99,7 +117,7 @@ function card(session: Session, open: boolean): string {
           <span class="session-elapsed">played · ${escapeHtml(duration(session.spanSeconds))} elapsed</span>
         </div>
       </header>
-      ${highlightList(session.highlights, { limit: CHIP_LIMIT }) ||
+      ${highlightList(session.highlights, { scope: session.id, expanded: unfolded }) ||
         '<p class="session-quiet">A quiet session — nothing new to show for it.</p>'}
       <button type="button" class="session-toggle" data-toggle-session="${escapeHtml(session.id)}"
         aria-expanded="${open}">
@@ -111,8 +129,17 @@ function card(session: Session, open: boolean): string {
   </article>`;
 }
 
+/**
+ * A segment summarised the same way its session is, and clickable for the same reason: the
+ * detail modal it opens is where the summary comes apart, so the chips here stay inert —
+ * they are what the row says, not another thing to press inside a thing to press.
+ *
+ * The running totals are left off. On one segment they are four more numbers beside two
+ * things that actually happened, and the modal has them a click away.
+ */
 function segmentRow(segment: Segment): string {
   const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
+  const summary = highlightList(highlights([segment]), { tallies: false, interactive: false });
   return `<li>
     <button type="button" class="seg" data-open-segment="${segment.segmentId}"
       aria-label="Open segment: ${escapeHtml(label)}">
@@ -126,6 +153,7 @@ function segmentRow(segment: Segment): string {
         </span>
         <span class="seg-activities">${(segment.activities || []).map(activityChip).join("") ||
           '<span class="muted">No activity recorded</span>'}</span>
+        ${summary ? `<span class="seg-summary">${summary}</span>` : ""}
       </span>
       <span class="seg-dur">${escapeHtml(duration(segment.seconds))}</span>
     </button>
