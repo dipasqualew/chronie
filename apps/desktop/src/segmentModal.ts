@@ -6,10 +6,12 @@
  * the next one in whatever the reader was already looking at.
  */
 
+import { achievementIds, achievementLine } from "./achievements";
+import type { AchievementBook } from "./achievements";
 import { highlights } from "./sessions";
 import { clock, dayLabel, duration, escapeHtml, plural, signed } from "./format";
 import { eventsOf } from "./types";
-import type { EventListKey, EventOf, Segment } from "./types";
+import type { AchievementEvent, EventListKey, EventOf, Segment } from "./types";
 import { activityChip, classDot, className, highlightList, locationType } from "./ui";
 
 const wowhead = (kind: string, id: number, text: string): string =>
@@ -54,11 +56,54 @@ function section<K extends SectionKey>(spec: SectionSpec<K>): Section {
 }
 
 /**
+ * The achievements, drawn from what the game says about them rather than only from what the
+ * segment recorded.
+ *
+ * This is the one section whose contents are not in the segment. A row starts as the name
+ * the addon caught — which is what the app showed before the game's tables were being read
+ * at all — and fills in as the lookup comes back: what had to be done, what it granted,
+ * where it sits, what it was worth, and the picture the game shows beside it.
+ */
+function achievements(book: AchievementBook): Section {
+  return {
+    title: "Achievements",
+    render: (segment) => {
+      const events = eventsOf(segment, "achievements");
+      if (!events.length) return "";
+      return `<section class="detail-section">
+        <h3>Achievements</h3>
+        <ul class="earned">${events.map((event) => earned(event, book)).join("")}</ul>
+      </section>`;
+    },
+  };
+}
+
+function earned(event: AchievementEvent, book: AchievementBook): string {
+  const line = achievementLine(event, book.detail(event.id));
+  const icon = book.icon(event.id);
+  const facts = [line.category, line.worth, line.side && `${line.side} only`, line.first]
+    .filter(Boolean)
+    .map((fact) => `<span class="chip">${escapeHtml(fact)}</span>`);
+  // The icon is decorative: the row names the achievement beside it, and a picture that
+  // announced itself as well would have a screen reader read every row twice. The frame is
+  // drawn whether or not there is anything in it yet, so the column never goes ragged.
+  return `<li class="earned-item">
+    <span class="earned-icon">${icon ? `<img src="${icon}" alt="">` : ""}</span>
+    <div>
+      <p class="earned-name">🏆 ${wowhead("achievement", event.id, line.title)} ${at(event)}</p>
+      ${line.description ? `<p class="earned-what">${escapeHtml(line.description)}</p>` : ""}
+      ${line.reward ? `<p class="earned-reward">${escapeHtml(line.reward)}</p>` : ""}
+      <p class="earned-facts">${facts.join("")}</p>
+    </div>
+  </li>`;
+}
+
+/**
  * Every list of events a segment can carry, and how each one reads in full. The table
  * columns abbreviate; this is the place that does not, because it is where someone comes
  * when the abbreviation was not enough.
  */
-const SECTIONS: Section[] = [
+const sections = (book: AchievementBook): Section[] => [
   section({
     key: "encounters",
     title: "Encounters",
@@ -66,12 +111,7 @@ const SECTIONS: Section[] = [
       `<span class="${event.success ? "ok" : "loss"}">${event.success ? "killed" : "wipe"}</span>` +
       (event.groupSize ? ` <span class="muted">${escapeHtml(plural(event.groupSize, "player"))}</span>` : ""),
   }),
-  section({
-    key: "achievements",
-    title: "Achievements",
-    line: (event) => `🏆 ${escapeHtml(event.name || `Achievement ${event.id}`)} ` +
-      `<span class="muted">${event.accountFirst ? "account first" : "character first"}</span>`,
-  }),
+  achievements(book),
   section({ key: "levelUps", title: "Level ups", line: (event) => `⬆️ Level ${escapeHtml(event.level)}` }),
   section({ key: "mounts", title: "Mounts", line: (event) => `🐎 ${escapeHtml(event.name || `Mount ${event.id}`)}` }),
   section({ key: "pets", title: "Pets", line: (event) => `🐾 ${escapeHtml(event.name || `Pet ${event.id}`)}` }),
@@ -118,6 +158,11 @@ const SECTIONS: Section[] = [
 export interface SegmentModalOptions {
   dialog: HTMLDialogElement;
   onEditActivities: (segmentId: number) => void;
+  /**
+   * What the game says about the achievements a segment names. Injected so the modal is
+   * drivable without a backend, and asked only for the segment on screen.
+   */
+  achievements: AchievementBook;
 }
 
 export interface SegmentModal {
@@ -134,7 +179,9 @@ function part<T extends Element = HTMLElement>(dialog: HTMLDialogElement, select
   return found;
 }
 
-export function createSegmentModal({ dialog, onEditActivities }: SegmentModalOptions): SegmentModal {
+export function createSegmentModal(
+  { dialog, onEditActivities, achievements: book }: SegmentModalOptions,
+): SegmentModal {
   // The list is held rather than copied out of, so that a repaint after an edit finds the
   // same neighbours the reader was navigating a moment ago.
   let order: Segment[] = [];
@@ -176,9 +223,19 @@ export function createSegmentModal({ dialog, onEditActivities }: SegmentModalOpt
     part<HTMLButtonElement>(dialog, '[data-role="prev"]').disabled = index === 0;
     part<HTMLButtonElement>(dialog, '[data-role="next"]').disabled = index >= order.length - 1;
     part(dialog, ".detail-title").textContent = segment.instance;
-    part(dialog, ".detail-body").innerHTML = body(segment);
+    part(dialog, ".detail-body").innerHTML = body(segment, book);
     dialog.querySelector("[data-edit-activities]")
       ?.addEventListener("click", () => onEditActivities(segment.segmentId));
+
+    // The lookup runs after the segment is on screen, because reading the game's own files
+    // takes about a second and everything else about the segment is already in hand. Each
+    // half of it — the words, then the pictures — redraws when it lands, and only if the
+    // reader is still on the segment that asked: they may well have stepped on to the next.
+    const wanted = achievementIds(segment);
+    if (!wanted.length) return;
+    void book.learn(wanted, () => {
+      if (dialog.open && current()?.segmentId === segment.segmentId) draw();
+    });
   }
 
   part(dialog, '[data-role="prev"]').addEventListener("click", () => step(-1));
@@ -194,7 +251,7 @@ export function createSegmentModal({ dialog, onEditActivities }: SegmentModalOpt
   return { open, refresh, current, isOpen: () => dialog.open };
 }
 
-function body(segment: Segment): string {
+function body(segment: Segment, book: AchievementBook): string {
   const facts = [
     `${escapeHtml(dayLabel(segment.day))} · ${escapeHtml(clock(segment.startedAt))} – ${escapeHtml(clock(segment.endedAt))}`,
     escapeHtml(duration(segment.seconds)),
@@ -219,7 +276,7 @@ function body(segment: Segment): string {
     <div class="detail-highlights">${
       highlightList(highlights([segment]), { milestones: false }) ||
       '<p class="muted">Nothing was gained or collected in this segment.</p>'}</div>
-    ${SECTIONS.map((entry) => entry.render(segment)).join("")}
+    ${sections(book).map((entry) => entry.render(segment)).join("")}
   `;
 }
 

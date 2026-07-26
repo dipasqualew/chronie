@@ -2,15 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type {
+  AchievementDetail,
+  AchievementDetailsPayload,
   Activity,
   ActivityMetadata,
   AppUpdateResult,
   DashboardPayload,
+  IconsPayload,
   InstallResult,
   Segment,
   Settings,
   SyncResult,
-  TransmogIconsPayload,
   TransmogPayload,
   TransmogSetItemsPayload,
 } from "./types";
@@ -35,12 +37,17 @@ export const desktop = {
   transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> => mock
     ? Promise.resolve(structuredClone(mock.transmogItems[setId] ?? emptySet(setId)))
     : invoke<TransmogSetItemsPayload>("transmog_set_items", { setId }),
-  // The icons a set's rows need, asked for once the rows are drawn. The backend keeps every
-  // texture it has decoded, so this is answered from memory for everything a neighbouring
-  // set already showed — which is most of a collection.
-  transmogIcons: (iconFileDataIds: number[]): Promise<TransmogIconsPayload> => mock
+  // What the game says about a list of achievements the segments named. The backend keeps
+  // every one it has looked up, so a reader walking a history of them pays for each once.
+  achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock
+    ? Promise.resolve({ achievements: mockAchievements(ids) })
+    : invoke<AchievementDetailsPayload>("achievement_details", { ids }),
+  // The pictures a list of rows needs, asked for once the rows are drawn. The backend keeps
+  // every texture it has decoded, so this is answered from memory for everything a
+  // neighbouring set or an earlier segment already showed.
+  gameIcons: (iconFileDataIds: number[]): Promise<IconsPayload> => mock
     ? Promise.resolve({ icons: mockIcons(iconFileDataIds) })
-    : invoke<TransmogIconsPayload>("transmog_icons", { iconFileDataIds }),
+    : invoke<IconsPayload>("game_icons", { iconFileDataIds }),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {
@@ -107,8 +114,19 @@ function mockIcons(wanted: number[]): Record<string, string> {
   if (!mock) throw new Error("The end-to-end mock is not installed.");
   const found: Record<string, string> = {};
   for (const id of wanted) {
-    const url = mock.transmogIcons[id];
+    const url = mock.gameIcons[id];
     if (url) found[String(id)] = url;
+  }
+  return found;
+}
+
+/** The achievements the e2e mock can describe among those asked for, keyed the same way. */
+function mockAchievements(wanted: number[]): Record<string, AchievementDetail> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, AchievementDetail> = {};
+  for (const id of wanted) {
+    const detail = mock.achievementDetails[id];
+    if (detail) found[String(id)] = detail;
   }
   return found;
 }

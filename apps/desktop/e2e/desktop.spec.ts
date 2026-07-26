@@ -37,6 +37,23 @@ class SegmentDetail {
     return this.dialog.getByRole("link", { name });
   }
 
+  /** One row per achievement the segment recorded, in the order they were earned. */
+  achievements(): Locator {
+    return this.dialog.locator(".earned-item");
+  }
+
+  /**
+   * The pictures that have arrived in those rows.
+   *
+   * Not an accessibility locator, and deliberately: the row names the achievement beside the
+   * picture, so the picture carries no alternative text and is not in the accessibility tree
+   * at all. Giving it one to make it selectable would have a screen reader read every row
+   * twice.
+   */
+  achievementIcons(): Locator {
+    return this.dialog.locator(".earned-icon img");
+  }
+
   next(): Promise<void> {
     return this.dialog.getByRole("button", { name: "Next segment" }).click();
   }
@@ -301,7 +318,12 @@ const mockDesktop: E2EMock = {
         transmogs: [{ id: 101, at: EVENING + 1400, newAppearance: true }],
         currencies: [{ id: 7, name: "Glass Token", amount: 4 }],
         reputation: [{ faction: "Cavern Cartographers", amount: 25 }],
-        achievements: [{ id: 9, name: "Into the Light", at: EVENING + 1400, accountFirst: false }],
+        achievements: [
+          { id: 9, name: "Into the Light", at: EVENING + 1400, accountFirst: false },
+          // One the install can say nothing about, which is what an achievement earned on a
+          // build newer than the one on disk looks like: the addon's own name and no more.
+          { id: 77, name: "Quiet Ascent", at: EVENING + 1450, accountFirst: true },
+        ],
         levelUps: [{ level: 12, at: EVENING + 1500 }],
         mounts: [{ id: 11, name: "Clockwork Glider", at: EVENING + 1600 }],
         pets: [],
@@ -463,7 +485,7 @@ const mockDesktop: E2EMock = {
   // set 205 names it and the install holds no such file, which is the case a row has to
   // survive rather than break on. So is the icon the tables give appearance 71012, which is
   // no icon at all.
-  transmogIcons: {
+  gameIcons: {
     130001: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
       + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
     130002: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
@@ -472,6 +494,23 @@ const mockDesktop: E2EMock = {
       + "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
     130006: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
       + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+    250001: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
+      + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+  },
+  // What the game says about the achievements those segments name. 77 is deliberately absent:
+  // an install can only describe the achievements it has, and a row still has to draw.
+  achievementDetails: {
+    9: {
+      id: 9,
+      title: "Into the Light",
+      description: "Reach the lighthouse at the end of the pier.",
+      reward: "Reward: Title & the lamplighter's coat",
+      category: ["Chronicles", "Tideglass Deeps"],
+      categoryId: 10,
+      points: 25,
+      iconFileDataId: 250001,
+      faction: -1,
+    },
   },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
@@ -544,6 +583,28 @@ test("digs from a session down into a single segment and back out again", async 
   await expect(detail.dialog).toContainText("The Curator");
   await expect(detail.dialog).toContainText("+14");
 
+  // The segment carries an id and a name; everything else about an achievement is read out
+  // of the installed game after the segment is already on screen.
+  await test.step("an achievement fills in with what the game says about it", async () => {
+    const earned = detail.achievements();
+    await expect(earned).toHaveCount(2);
+    await expect(earned.first()).toContainText("Reach the lighthouse at the end of the pier.");
+    await expect(earned.first()).toContainText("Chronicles › Tideglass Deeps");
+    await expect(earned.first()).toContainText("25 points");
+    await expect(earned.first()).toContainText("Reward: Title & the lamplighter's coat");
+    await expect(detail.achievementIcons()).toHaveCount(1);
+  });
+
+  // An install can only describe the achievements it has, and a row still has to draw: what
+  // is left is the name the addon caught at the moment it was earned, which is what the
+  // window showed before it was reading the game's tables at all.
+  await test.step("an achievement the game says nothing about keeps what the addon knew", async () => {
+    const unknown = detail.achievements().nth(1);
+    await expect(unknown).toContainText("Quiet Ascent");
+    await expect(unknown).toContainText("account first");
+    await expect(unknown).not.toContainText("points");
+  });
+
   await test.step("next and previous walk the play session, not all of history", async () => {
     await detail.next();
     await expect(detail.title()).toHaveText("Copperwood Depths");
@@ -557,9 +618,13 @@ test("digs from a session down into a single segment and back out again", async 
 
   // The window is not a browser and cannot become one: a link has to be handed out to the
   // real one. Following it in place would leave the reader stranded on a web page.
-  await test.step("a quest goes out to the reader's own browser", async () => {
+  await test.step("a quest and an achievement go out to the reader's own browser", async () => {
     await detail.linkTo("Quest 81").click();
-    await expect.poll(() => openedUrls(page)).toEqual(["https://www.wowhead.com/quest=81"]);
+    await detail.linkTo("Into the Light").click();
+    await expect.poll(() => openedUrls(page)).toEqual([
+      "https://www.wowhead.com/quest=81",
+      "https://www.wowhead.com/achievement=9",
+    ]);
     await expect(detail.title()).toHaveText("Glass Caverns");
     expect(page.url()).toContain("127.0.0.1:4399");
   });

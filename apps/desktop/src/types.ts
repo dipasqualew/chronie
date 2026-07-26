@@ -235,16 +235,49 @@ export interface TransmogSetItemsPayload {
 }
 
 /**
- * The pictures for a set's appearances, decoded out of the game's own textures.
+ * The pictures for a list of things, decoded out of the game's own textures.
  *
- * Keyed by the FileDataID the appearance named, and holding a PNG as a `data:` URL, which is
- * how a picture reaches a window that has no origin to load one from. An icon this install
- * cannot show — a texture it never downloaded, or one belonging to content the game keeps
- * encrypted — is simply absent, because a row with no icon and a row whose icon has not
- * arrived draw the same placeholder.
+ * Keyed by the FileDataID whatever named them named them by — an appearance, an achievement
+ * — and holding a PNG as a `data:` URL, which is how a picture reaches a window that has no
+ * origin to load one from. An icon this install cannot show — a texture it never downloaded,
+ * or one belonging to content the game keeps encrypted — is simply absent, because a row
+ * with no icon and a row whose icon has not arrived draw the same placeholder.
  */
-export interface TransmogIconsPayload {
+export interface IconsPayload {
   icons: Record<string, string>;
+}
+
+/* ---------- achievements, as the game describes them ---------- */
+
+/**
+ * One achievement in the words and pictures the game shows it with.
+ *
+ * The addon records an id and whatever name the client had loaded at the time; this is the
+ * rest, read out of the installed game rather than out of any segment. An achievement the
+ * install says nothing about has none of this, which is why every reader of it starts by
+ * asking whether there is one.
+ */
+export interface AchievementDetail {
+  id: number;
+  title: string;
+  /** What has to be done to earn it, as one sentence. */
+  description: string;
+  /** What earning it grants — a title, a mount, a tabard. Empty for most of them. */
+  reward: string;
+  /** The tree it is filed under, outermost first. Empty when the game withholds it. */
+  category: string[];
+  categoryId: number;
+  /** What it is worth. Zero is an answer: a feat of strength is worth nothing. */
+  points: number;
+  /** The picture beside it, as a FileDataID to be asked for through `gameIcons`. */
+  iconFileDataId: number;
+  /** `0` Horde, `1` Alliance, `-1` both — which nearly every achievement is. */
+  faction: number;
+}
+
+export interface AchievementDetailsPayload {
+  /** Keyed by the id the segment named, and holding only what this install can describe. */
+  achievements: Record<string, AchievementDetail>;
 }
 
 export interface Settings {
@@ -277,9 +310,12 @@ export interface E2EMock {
   transmog: TransmogPayload;
   /** What each set is made of, keyed by set id, as opening one asks for. */
   transmogItems: Record<number, TransmogSetItemsPayload>;
-  /** The decoded icons, keyed the way the appearances name them. An id absent from here is
-   * an icon the install cannot show, which is a row the real backend answers nothing for. */
-  transmogIcons: Record<number, string>;
+  /** The decoded icons, keyed the way whatever named them named them. An id absent from here
+   * is an icon the install cannot show, which is a row the real backend answers nothing for. */
+  gameIcons: Record<number, string>;
+  /** What the game says about each achievement, keyed by id. An id absent from here is one
+   * the install can say nothing about, which the real backend also answers nothing for. */
+  achievementDetails: Record<number, AchievementDetail>;
   settings: Settings;
   chosenPath: string;
   syncResult: SyncResult;

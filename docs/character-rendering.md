@@ -220,8 +220,8 @@ BC2/BC3). Compositing only ever needs level 0, which sidesteps most of this. `BC
 for encoding 1, since its uncompressed path reads the same bytes blue-first correctly.
 `src-tauri/src/icons.rs` puts them back and is the only place that should: everything that
 decodes a texture goes through `png_of`. Verified against the synthetic textures
-`scripts/make-transmog-fixtures.ts` writes, which paint each quadrant a colour whose three
-channels all differ so that a swap cannot pass unnoticed.
+`scripts/db2-fixtures.ts` writes, which paint each quadrant a colour whose three channels
+all differ so that a swap cannot pass unnoticed.
 
 ## Crates
 

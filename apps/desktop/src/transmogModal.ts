@@ -20,7 +20,7 @@ import { escapeHtml, plural } from "./format";
 import { classLabel, expansionName, patchName } from "./transmog";
 import type {
   TransmogAppearance,
-  TransmogIconsPayload,
+  IconsPayload,
   TransmogSet,
   TransmogSetItemsPayload,
 } from "./types";
@@ -107,7 +107,7 @@ export interface TransmogModalOptions {
   /** Asks the backend what a set is made of. Injected so the modal is drivable without one. */
   load: (setId: number) => Promise<TransmogSetItemsPayload>;
   /** Asks the backend for the pictures those rows need, decoded out of the game's textures. */
-  loadIcons: (iconFileDataIds: number[]) => Promise<TransmogIconsPayload>;
+  loadIcons: (iconFileDataIds: number[]) => Promise<IconsPayload>;
 }
 
 export interface TransmogModal {

@@ -358,6 +358,24 @@
   .detail-section p { margin: 0; }
   .detail-section a { color: var(--series-1); }
 
+  /* An achievement carries more than a line: the game's own sentence for it, what it
+     granted, where it sits and what it was worth. So it is a row rather than a bullet. */
+  .earned { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .earned-item { display: flex; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+  .earned-item:hover { background: var(--surface-2); }
+  /* Drawn before the lookup comes back, and left empty for the achievements this install
+     has nothing to show for — so the column of icons never goes ragged. */
+  .earned-icon {
+    flex: none; width: 32px; height: 32px; border-radius: 6px; margin-top: 1px;
+    border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+  }
+  .earned-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .detail-section .earned-what { color: var(--text-secondary); margin: 2px 0 0; }
+  .detail-section .earned-reward { color: var(--gold); font-size: 12px; margin: 2px 0 0; }
+  .detail-section .earned-facts {
+    display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 0;
+  }
+
   #transmog-detail { width: min(560px, 94vw); max-height: 86vh; }
   #transmog-detail[open] { display: flex; flex-direction: column; }
   .mog-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
