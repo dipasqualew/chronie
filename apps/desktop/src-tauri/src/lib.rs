@@ -468,6 +468,9 @@ pub fn run() {
     let updater_configured = updater_configured(&context.config().plugins);
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // The webview cannot open a window of its own, so a link in the page reaches the
+        // user's browser only by being handed to the operating system from here.
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--background"]),

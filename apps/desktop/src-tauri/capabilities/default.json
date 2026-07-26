@@ -3,5 +3,11 @@
   "identifier": "default",
   "description": "Main desktop window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*.wowhead.com/*" }]
+    }
+  ]
 }

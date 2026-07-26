@@ -237,6 +237,8 @@ export interface E2EMock {
   syncResult: SyncResult;
   installResult: InstallResult;
   appUpdate: AppUpdateResult;
+  /** Where a link handed to the operating system is recorded instead, in the order asked. */
+  openedUrls: string[];
 }
 
 /**

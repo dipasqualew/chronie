@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type {
   Activity,
@@ -27,6 +28,15 @@ export const desktop = {
   // of transient memory, so the window asks only when the view is first opened.
   transmogSets: (): Promise<TransmogPayload> =>
     mock ? Promise.resolve(structuredClone(mock.transmog)) : invoke<TransmogPayload>("transmog_sets"),
+  // Links leave the app entirely: the backend asks the operating system to open them, which
+  // is the only way a page in a Tauri window reaches the reader's browser.
+  openUrl: (url: string): Promise<void> => {
+    if (mock) {
+      mock.openedUrls.push(url);
+      return Promise.resolve();
+    }
+    return openUrl(url);
+  },
   settings: (): Promise<Settings> =>
     mock ? Promise.resolve(structuredClone(mock.settings)) : invoke<Settings>("settings"),
   chooseWowPath: (): Promise<string | null> =>
