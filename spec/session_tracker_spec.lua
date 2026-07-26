@@ -30,6 +30,9 @@ describe("ns.newSessionTracker", function()
             getMoney = function()
                 return money
             end,
+            currencyItemCounts = options.currencyItemCounts and function()
+                return options.currencyItemCounts
+            end or nil,
             character = function()
                 return options.character or "Thrall-Ragnaros"
             end,
@@ -256,6 +259,38 @@ describe("ns.newSessionTracker", function()
             assert.equal(1, #harness.log.all())
             assert.equal("Normal", harness.log.all()[1].difficulty)
             assert.equal("Mythic", harness.tracker.current().difficulty)
+        end)
+    end)
+
+    describe("currency item baselines", function()
+        -- The tracker seeds the tally with what the character already owns when a session
+        -- opens, so a bank move that leaves the total flat records nothing while a genuine
+        -- gain above the baseline still counts.
+        it("seeds the tally so currency held on arrival is not counted as gained", function()
+            local harness = newTracker({ zone = DUNGEON, currencyItemCounts = { [5001] = 40 } })
+            harness.tracker.sync()
+
+            harness.tally.currencyItem(5001, 40, "Bloody Token")
+            assert.same({}, harness.tally.summary().currencies)
+
+            harness.tally.currencyItem(5001, 52, "Bloody Token")
+            assert.equal(12, harness.tally.summary().currencies[1].amount)
+        end)
+
+        it("re-seeds the baseline for each new session", function()
+            local counts = { [5001] = 40 }
+            local harness = newTracker({ zone = DUNGEON, currencyItemCounts = counts })
+            harness.tracker.sync()
+            harness.tally.currencyItem(5001, 60, "Bloody Token") -- a real gain keeps the visit on file
+
+            harness.clock.advance(600)
+            counts[5001] = 60
+            harness.setZone(RAID)
+            harness.tracker.sync()
+
+            -- The new session starts from 60; withdrawing back to that total records nothing.
+            harness.tally.currencyItem(5001, 60, "Bloody Token")
+            assert.same({}, harness.tally.summary().currencies)
         end)
     end)
 

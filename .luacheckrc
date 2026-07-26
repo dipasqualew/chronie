@@ -28,6 +28,7 @@ read_globals = {
     "GetMoney",
     "GetInstanceInfo",
     "GetItemInfo",
+    "C_Item",
     "C_TransmogCollection",
     "C_CurrencyInfo",
     "C_QuestLog",

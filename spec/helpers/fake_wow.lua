@@ -433,6 +433,7 @@ end
 ---  questStates, lootFormats, factionFormats }`
 ---  `housingItems` maps an id to `{ name, quantity }`, quantity being the warband-owned count.
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
+---  `currencyItems` maps an item id to `{ name, count }`, count being the grand total owned.
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -470,6 +471,9 @@ function fake.newEnv(options)
     local pets = options.pets or {}
     local toyNames = options.toys or {}
     local housingItems = options.housingItems or {}
+    -- Maps an item ID to `{ name, count }`, count being the grand total the character owns
+    -- across every store — bags and every bank — the way ownedItemCount reports it.
+    local currencyItems = options.currencyItems or {}
     local activeQuests = options.activeQuests or {}
     local questStates = options.questStates or {}
 
@@ -540,6 +544,18 @@ function fake.newEnv(options)
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]
         end,
+        currencyItemIDs = function()
+            local ids = {}
+            for id in pairs(currencyItems) do
+                ids[#ids + 1] = id
+            end
+            table.sort(ids)
+            return ids
+        end,
+        ownedItemCount = function(itemID)
+            local item = currencyItems[itemID]
+            return item and item.count or 0
+        end,
         achievementInfo = function(id)
             return achievementNames[id]
         end,
@@ -579,6 +595,10 @@ function fake.newEnv(options)
         previewTransmog = function() end,
         openTransmogCollection = function() end,
         itemName = function(itemID)
+            local currencyItem = currencyItems[itemID]
+            if currencyItem and currencyItem.name then
+                return currencyItem.name
+            end
             local source = itemPrices[itemID]
             return source and ("Item " .. itemID)
         end,
@@ -615,6 +635,18 @@ function fake.newEnv(options)
         ---@param value integer
         setMoney = function(value)
             money = value
+        end,
+        ---Drive the grand-total owned count the addon reads through env.ownedItemCount,
+        ---as looting, spending or moving a currency item between stores would.
+        ---@param itemID integer
+        ---@param count integer
+        setItemCount = function(itemID, count)
+            local item = currencyItems[itemID]
+            if item then
+                item.count = count
+            else
+                currencyItems[itemID] = { count = count }
+            end
         end,
         ---Drive the instance type the addon reads through env.instanceInfo. Passing
         ---nil models zoning out into the open world.

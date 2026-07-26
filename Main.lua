@@ -29,6 +29,9 @@ local addonName, ns = ...
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
+---@field currencyItemIDs fun(): integer[] Item IDs tracked as item-based currencies.
+---@field ownedItemCount fun(itemID: integer): integer Grand total owned across bags and every bank,
+---the warband bank included, so internal transfers leave it unchanged.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
 ---@field mountInfo fun(id: integer): string? Localised name of a mount.
 ---@field petInfo fun(guid: string): (integer?, string?) Battle pet species ID and localised name.
@@ -153,6 +156,15 @@ function ns.main(env)
         now = env.now,
         instanceInfo = env.instanceInfo,
         getMoney = env.getMoney,
+        -- Snapshot every tracked currency item's owned total as the session opens, so the
+        -- tally measures later changes against what was held on arrival rather than zero.
+        currencyItemCounts = function()
+            local counts = {}
+            for _, itemID in ipairs(env.currencyItemIDs()) do
+                counts[itemID] = env.ownedItemCount(itemID)
+            end
+            return counts
+        end,
         character = currentCharacter,
         classFile = function()
             local _, classFile = env.unitClass("player")
@@ -378,6 +390,17 @@ function ns.main(env)
         tally.currency(currencyType, change, env.currencyInfo(currencyType))
         refreshResults()
     end)
+    -- Item-based currencies — vendor tokens, crest-like items and the like — never fire
+    -- CURRENCY_DISPLAY_UPDATE; their quantity lives in item counts. Recounting each tracked
+    -- item on every batched bag change and folding the difference in tracks both gains and
+    -- spends. Because the count spans every storage the character can reach, including the
+    -- warband bank, a deposit or withdrawal nets to zero and is never miscounted as either.
+    dispatcher.on("BAG_UPDATE_DELTA", function()
+        for _, itemID in ipairs(env.currencyItemIDs()) do
+            tally.currencyItem(itemID, env.ownedItemCount(itemID), env.itemName(itemID))
+        end
+        refreshResults()
+    end)
     dispatcher.on("ACHIEVEMENT_EARNED", function(id, alreadyEarned)
         tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
         refreshResults()
@@ -478,6 +501,9 @@ if CreateFrame then
         self:UnregisterAllEvents()
 
         WdpWowDB = WdpWowDB or {}
+        -- Seeded empty so the list of item-based currencies to watch is discoverable in
+        -- the SavedVariables file: a player drops the item IDs they treat as currency here.
+        WdpWowDB.currencyItems = WdpWowDB.currencyItems or {}
 
         ---Collects the client's globals into a list, dropping any this client build
         ---does not define so a missing template never becomes a nil hole.
@@ -569,6 +595,28 @@ if CreateFrame then
                 end
                 local info = C_CurrencyInfo.GetCurrencyInfo(currencyType)
                 return info and info.name
+            end,
+            -- The tracked set is data, not code: a player lists the item IDs of whatever
+            -- they treat as currency in WdpWowDB.currencyItems and it is picked up here,
+            -- so shifting a patch's currencies never means editing the addon.
+            currencyItemIDs = function()
+                local ids = {}
+                local seen = {}
+                for _, itemID in ipairs(WdpWowDB.currencyItems or {}) do
+                    if type(itemID) == "number" and not seen[itemID] then
+                        seen[itemID] = true
+                        ids[#ids + 1] = itemID
+                    end
+                end
+                return ids
+            end,
+            -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
+            -- store the character owns, so moving the item between them never shifts the total.
+            ownedItemCount = function(itemID)
+                if not itemID then
+                    return 0
+                end
+                return C_Item.GetItemCount(itemID, true, false, true, true) or 0
             end,
             achievementInfo = function(id)
                 return (select(2, GetAchievementInfo(id)))

@@ -8,12 +8,15 @@ local _, ns = ...
 ---The tracker owns the session's boundaries and drives begin()/leave(); this module
 ---only accumulates whatever lands between them.
 ---@class SessionTally
----@field begin fun(money: integer?) Start a fresh session, anchoring the money baseline.
+---@field begin fun(money: integer?, currencyItemCounts: table<integer, integer>?) Start a fresh session,
+---anchoring the money baseline and, optionally, the owned-count baseline of each tracked currency item.
 ---@field leave fun() Stop tallying; the totals survive for one last summary() read.
 ---@field money fun(current: integer) Fold the current wallet total into loot and net diff.
 ---@field loot fun(message: string) Add a self-loot chat line's vendor value.
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
 ---@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
+---@field currencyItem fun(itemID: integer, total: integer, name: string?) Fold an item-based currency's
+---owned total into the same per-currency tallies, as a change from its session baseline.
 ---@field achievement fun(id: integer, name: string?, at: integer, accountFirst: boolean?)
 ---Append an earned achievement.
 ---@field levelUp fun(level: integer, at: integer) Append a level gained.
@@ -211,8 +214,12 @@ function ns.newSessionTally(deps)
 
     ---Wipes the tally clean for a fresh session, anchoring the money baselines so only
     ---coin gained from here on is counted, and the net diff runs from this wallet total.
+    ---Item-based currencies get the same treatment: their owned counts at session start
+    ---become the baselines every later update is measured against, so currency held before
+    ---the session is never counted as gained.
     ---@param money integer?
-    local function begin(money)
+    ---@param currencyItemCounts table<integer, integer>?
+    local function begin(money, currencyItemCounts)
         money = money or 0
         session.active = true
         session.moneyBaseline = money
@@ -223,6 +230,12 @@ function ns.newSessionTally(deps)
         session.transmogs = {}
         session.reputation = {}
         session.currencies = {}
+        session.currencyItemCounts = {}
+        if currencyItemCounts then
+            for itemID, count in pairs(currencyItemCounts) do
+                session.currencyItemCounts[itemID] = count
+            end
+        end
         session.achievements = {}
         session.levelUps = {}
         session.mounts = {}
@@ -321,6 +334,40 @@ function ns.newSessionTally(deps)
                 session.currencies[currencyType] = entry
             end
             -- A later update may carry the name the first one lacked.
+            if name and name ~= "" then
+                entry.name = name
+            end
+            entry.amount = entry.amount + change
+        end,
+
+        ---Folds an item-based currency into the same per-currency tallies as a real
+        ---currency, but driven by the item's grand total owned right now rather than a
+        ---signed event. The total is expected to span every storage the character can
+        ---reach — bags, both banks and the warband bank — so moving the item in or out of
+        ---a bank leaves it unchanged and records no phantom gain or spend; only a real
+        ---acquisition or spend shifts it. The recorded change is the difference from the
+        ---last total seen, seeded by begin() to the count held when the session opened.
+        ---@param itemID integer
+        ---@param total integer
+        ---@param name string?
+        currencyItem = function(itemID, total, name)
+            if not session.active or not itemID or not total then
+                return
+            end
+            local baseline = session.currencyItemCounts[itemID] or 0
+            session.currencyItemCounts[itemID] = total
+            local change = total - baseline
+            if change == 0 then
+                return
+            end
+            -- Keyed apart from real currencies: an item ID and a currency type are
+            -- separate namespaces that could otherwise collide on the same number.
+            local key = "item:" .. itemID
+            local entry = session.currencies[key]
+            if not entry then
+                entry = { id = itemID, name = name or tostring(itemID), amount = 0 }
+                session.currencies[key] = entry
+            end
             if name and name ~= "" then
                 entry.name = name
             end

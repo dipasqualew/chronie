@@ -370,6 +370,87 @@ describe("ns.newSessionTally", function()
         end)
     end)
 
+    describe("currency items", function()
+        it("records a gain when the owned total rises above the session baseline", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 40 })
+
+            tally.currencyItem(5001, 55, "Bloody Token")
+
+            assert.same({ { id = 5001, name = "Bloody Token", amount = 15 } }, tally.summary().currencies)
+        end)
+
+        it("records a spend when the owned total falls below the baseline", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 40 })
+
+            tally.currencyItem(5001, 25, "Bloody Token")
+
+            assert.equal(-15, tally.summary().currencies[1].amount)
+        end)
+
+        -- Depositing into or withdrawing from the bank moves the item between stores the
+        -- grand total already spans, so the total is flat and nothing should be recorded.
+        it("records nothing when a bank move leaves the total unchanged", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 40 })
+
+            tally.currencyItem(5001, 40, "Bloody Token")
+
+            assert.same({}, tally.summary().currencies)
+        end)
+
+        it("treats the first total of an unseeded item as the whole gain", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.currencyItem(5001, 12, "Bloody Token")
+
+            assert.equal(12, tally.summary().currencies[1].amount)
+        end)
+
+        it("accumulates a run of gains and spends from the baseline", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 10 })
+
+            tally.currencyItem(5001, 20, "Bloody Token")
+            tally.currencyItem(5001, 15, "Bloody Token")
+
+            assert.equal(5, tally.summary().currencies[1].amount)
+        end)
+
+        it("folds item and real currencies into one sorted list", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 0 })
+
+            tally.currency(1, 7, "Honor")
+            tally.currencyItem(5001, 3, "Bloody Token")
+
+            assert.same({
+                { id = 5001, name = "Bloody Token", amount = 3 },
+                { id = 1, name = "Honor", amount = 7 },
+            }, tally.summary().currencies)
+        end)
+
+        it("upgrades a placeholder name when a later update names the item", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 0 })
+            tally.currencyItem(5001, 5, nil)
+
+            tally.currencyItem(5001, 8, "Bloody Token")
+
+            assert.equal("Bloody Token", tally.summary().currencies[1].name)
+        end)
+
+        it("ignores currency items while inactive", function()
+            local tally = newTally()
+
+            tally.currencyItem(5001, 20, "Bloody Token")
+
+            assert.same({}, tally.summary().currencies)
+        end)
+    end)
+
     describe("achievements earned", function()
         it("appends an achievement with its identity and time", function()
             local tally = newTally()
@@ -676,6 +757,23 @@ describe("ns.newSessionTally", function()
             tally.currency(1166, 15, "Timewarped Badge")
 
             assert.is_true(tally.hasEvents())
+        end)
+
+        it("is true once a currency item is gained", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 40 })
+            tally.currencyItem(5001, 45, "Bloody Token")
+
+            assert.is_true(tally.hasEvents())
+        end)
+
+        -- Merely holding currency items when the session opens is not an event; only a
+        -- change against that baseline is, so the baseline alone must leave hasEvents false.
+        it("stays false when currency items are only baselined", function()
+            local tally = newTally()
+            tally.begin(0, { [5001] = 40 })
+
+            assert.is_false(tally.hasEvents())
         end)
 
         it("is true once an achievement is earned", function()

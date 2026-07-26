@@ -23,6 +23,7 @@ local _, ns = ...
 ---@field now fun(): integer
 ---@field instanceInfo fun(): InstanceInfo? The zone the player is in right now.
 ---@field getMoney fun(): integer
+---@field currencyItemCounts fun(): table<integer, integer>? Owned count of each tracked currency item.
 ---@field character fun(): string "Name-Realm" of the character running it.
 ---@field classFile fun(): string?
 ---@field level fun(): integer?
@@ -101,7 +102,8 @@ function ns.newSessionTracker(deps)
             end
 
             if not current then
-                tally.begin(deps.getMoney())
+                local currencyItemCounts = deps.currencyItemCounts and deps.currencyItemCounts() or nil
+                tally.begin(deps.getMoney(), currencyItemCounts)
                 current = {
                     identity = identity,
                     character = character,

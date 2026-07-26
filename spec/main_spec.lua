@@ -1257,6 +1257,55 @@ describe("addon integration", function()
             )
         end)
 
+        it("records an item-based currency gain when its owned count rises", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setItemCount(5001, 55)
+            recorded.frame:fire("BAG_UPDATE_DELTA")
+
+            assert.same(
+                { { id = 5001, name = "Bloody Token", amount = 15 } },
+                app.tally.summary().currencies
+            )
+        end)
+
+        it("records an item-based currency spend when its owned count falls", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setItemCount(5001, 12)
+            recorded.frame:fire("BAG_UPDATE_DELTA")
+
+            assert.equal(-28, app.tally.summary().currencies[1].amount)
+        end)
+
+        -- Depositing to (or withdrawing from) the warband bank moves the item between
+        -- stores the owned count already spans, so the total is flat and nothing records.
+        it("does not miscount a bank deposit as a currency change", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                currencyItems = { [5001] = { name = "Bloody Token", count = 40 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("BAG_UPDATE_DELTA")
+
+            assert.same({}, app.tally.summary().currencies)
+        end)
+
         it("records an achievement from the achievement event, named through the seam", function()
             local app, recorded = boot({
                 playerName = "Thrall",
@@ -1370,6 +1419,7 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.CHAT_MSG_COMBAT_FACTION_CHANGE)
             assert.equal(1, recorded.frame.registered.TRANSMOG_COLLECTION_SOURCE_ADDED)
             assert.equal(1, recorded.frame.registered.CURRENCY_DISPLAY_UPDATE)
+            assert.equal(1, recorded.frame.registered.BAG_UPDATE_DELTA)
             assert.equal(1, recorded.frame.registered.ACHIEVEMENT_EARNED)
             assert.equal(1, recorded.frame.registered.PLAYER_LEVEL_UP)
             assert.equal(1, recorded.frame.registered.NEW_MOUNT_ADDED)
