@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
-    io::{Cursor, Write},
-    path::{Component, Path, PathBuf},
+    io::Write,
+    path::{Path, PathBuf},
     sync::Mutex,
     time::Duration,
 };
@@ -26,8 +26,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_updater::UpdaterExt;
 
-const REPOSITORY_ARCHIVE: &str =
-    "https://github.com/dipasqualew/chronie/archive/refs/heads/main.zip";
+include!(concat!(env!("OUT_DIR"), "/bundled_addon.rs"));
 
 const UPDATER_PLUGIN: &str = "updater";
 
@@ -241,57 +240,39 @@ fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value
     load_dashboard(&state.database_path())
 }
 
-fn safe_archive_path(path: &str) -> Option<PathBuf> {
-    let marker = "/apps/addon/";
-    let relative = path.split_once(marker)?.1;
-    let parsed = Path::new(relative);
-    if parsed.as_os_str().is_empty()
-        || parsed
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
-    {
-        return None;
-    }
-    Some(parsed.to_path_buf())
-}
-
-fn extract_addon(archive: &[u8], destination: &Path) -> Result<(), String> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(archive)).map_err(|error| error.to_string())?;
-    for index in 0..zip.len() {
-        let mut entry = zip.by_index(index).map_err(|error| error.to_string())?;
-        let Some(relative) = safe_archive_path(entry.name()) else {
-            continue;
-        };
+/// Lays the shipped addon out under `destination`.
+fn stage_addon(destination: &Path) -> Result<(), String> {
+    for (relative, contents) in BUNDLED_ADDON {
         let output = destination.join(relative);
-        if entry.is_dir() {
-            fs::create_dir_all(&output).map_err(|error| error.to_string())?;
-            continue;
-        }
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        let mut file = fs::File::create(&output).map_err(|error| error.to_string())?;
-        std::io::copy(&mut entry, &mut file).map_err(|error| error.to_string())?;
-        file.flush().map_err(|error| error.to_string())?;
-    }
-    if !destination.join("chronie.toc").is_file() {
-        return Err("The downloaded repository did not contain apps/addon/chronie.toc.".into());
+        fs::write(&output, contents).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
 
-fn addon_version(path: &Path) -> String {
-    fs::read_to_string(path.join("chronie.toc"))
-        .ok()
+/// The version in the shipped addon's .toc, which is the version any install this app
+/// performs ends up with — the file is read out of the binary, not off the game folder.
+fn bundled_addon_version() -> String {
+    BUNDLED_ADDON
+        .iter()
+        .find(|(relative, _)| *relative == "chronie.toc")
+        .and_then(|(_, contents)| std::str::from_utf8(contents).ok())
         .and_then(|text| {
             text.lines()
                 .find_map(|line| line.strip_prefix("## Version:").map(str::trim))
-                .map(str::to_string)
         })
-        .unwrap_or_else(|| "development".into())
+        .unwrap_or("development")
+        .to_string()
 }
 
-fn replace_addon(archive: &[u8], wow_path: &Path) -> Result<InstallResult, String> {
+/// Swaps the game's copy of the addon for the one this build ships.
+///
+/// The new copy is assembled beside the old one and moved into place in a single rename, so
+/// the game never sees a folder holding half of one version and half of another — and the old
+/// copy is only deleted once its replacement is standing.
+fn replace_addon(wow_path: &Path) -> Result<InstallResult, String> {
     let addons = wow_path.join("Interface").join("AddOns");
     if !addons.is_dir() {
         return Err(format!("AddOns folder not found at {}.", addons.display()));
@@ -300,7 +281,7 @@ fn replace_addon(archive: &[u8], wow_path: &Path) -> Result<InstallResult, Strin
         .prefix(".chronie-install-")
         .tempdir_in(&addons)
         .map_err(|error| error.to_string())?;
-    extract_addon(archive, staging.path())?;
+    stage_addon(staging.path())?;
     let target = addons.join("chronie");
     let backup = addons.join(".chronie-backup");
     if backup.exists() {
@@ -314,29 +295,28 @@ fn replace_addon(archive: &[u8], wow_path: &Path) -> Result<InstallResult, Strin
         if backup.exists() {
             let _ = fs::rename(&backup, &target);
         }
-        return Err(format!("Could not activate the downloaded addon: {error}"));
+        return Err(format!("Could not activate the staged addon: {error}"));
     }
     if backup.exists() {
         fs::remove_dir_all(backup).map_err(|error| error.to_string())?;
     }
     Ok(InstallResult {
-        version: addon_version(&target),
+        version: bundled_addon_version(),
     })
 }
 
-#[tauri::command]
-async fn install_addon(state: State<'_, AppState>) -> Result<InstallResult, String> {
+/// Installs the shipped addon into the configured game folder.
+fn install_bundled_addon(state: &AppState) -> Result<InstallResult, String> {
     let wow_path = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings)?
     };
-    let response = reqwest::get(REPOSITORY_ARCHIVE)
-        .await
-        .map_err(|error| format!("Could not download the addon: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("GitHub returned an error: {error}"))?;
-    let archive = response.bytes().await.map_err(|error| error.to_string())?;
-    replace_addon(&archive, &wow_path)
+    replace_addon(&wow_path)
+}
+
+#[tauri::command]
+fn install_addon(state: State<'_, AppState>) -> Result<InstallResult, String> {
+    install_bundled_addon(&state)
 }
 
 #[tauri::command]
@@ -426,6 +406,29 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Reinstalls the shipped addon every time the app starts.
+///
+/// The app and the addon are two halves of one pipeline: the addon writes `db.segments` in
+/// the shape the collector expects to read. Leaving the game folder's copy to a button
+/// somebody has to remember to press means an app that has quietly updated itself in the
+/// background can end up reading a file an older addon wrote. Laying the shipped copy down on
+/// every launch removes the question — the installed addon is always the one this build came
+/// with.
+///
+/// Off the main thread, because it happens during setup and the window should not wait on the
+/// disk to appear. Failure is only logged: on a first run there is no game folder configured
+/// yet, which is the normal state rather than an error worth interrupting anyone over, and
+/// Setup's own button is still there for an explicit answer.
+fn install_addon_at_startup(app: AppHandle) {
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        match install_bundled_addon(&state) {
+            Ok(result) => eprintln!("Chronie installed addon {}.", result.version),
+            Err(error) => eprintln!("Chronie did not install its addon: {error}"),
+        }
+    });
+}
+
 fn start_background_sync(app: AppHandle) {
     std::thread::spawn(move || loop {
         let state = app.state::<AppState>();
@@ -511,6 +514,7 @@ pub fn run() {
             app.manage(state);
             setup_tray(app.handle())?;
             let _ = app.autolaunch().enable();
+            install_addon_at_startup(app.handle().clone());
             start_background_sync(app.handle().clone());
             if updater_configured {
                 start_automatic_updates(app.handle().clone());
@@ -554,10 +558,160 @@ pub fn run() {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::io::Write;
+
+    /// The addon's manifest as it sits in the tree, read again at compile time so the tests
+    /// judge the bundle against the source rather than against a copy of it written here.
+    const ADDON_TOC: &str = include_str!("../../../addon/chronie.toc");
 
     fn plugins(value: Value) -> PluginConfig {
         PluginConfig(serde_json::from_value(value).unwrap())
+    }
+
+    /// The files the .toc names, in the .toc's own order, read the way build.rs reads them.
+    fn files_listed_in_the_toc() -> Vec<String> {
+        ADDON_TOC
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.replace('\\', "/"))
+            .collect()
+    }
+
+    fn version_in_the_toc() -> String {
+        ADDON_TOC
+            .lines()
+            .find_map(|line| line.strip_prefix("## Version:"))
+            .expect("the addon's .toc should carry a version")
+            .trim()
+            .to_string()
+    }
+
+    fn bundled(relative: &str) -> &'static [u8] {
+        BUNDLED_ADDON
+            .iter()
+            .find(|(path, _)| *path == relative)
+            .unwrap_or_else(|| panic!("the bundle should carry {relative}"))
+            .1
+    }
+
+    /// A game folder the way `resolve_wow_path` hands one over: the `_retail_` directory.
+    fn game_folder(root: &Path) -> PathBuf {
+        let retail = root.join("_retail_");
+        fs::create_dir_all(retail.join("Interface").join("AddOns")).unwrap();
+        retail
+    }
+
+    fn addon_folder(retail: &Path) -> PathBuf {
+        retail.join("Interface").join("AddOns").join("chronie")
+    }
+
+    /// Every file under `root`, as sorted slash-separated paths relative to it.
+    fn tree(root: &Path) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in fs::read_dir(&directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let relative = path.strip_prefix(root).unwrap().to_string_lossy();
+                    found.push(relative.replace('\\', "/"));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn bundles_the_files_the_toc_lists_and_nothing_else() {
+        // Compared as sets: load order lives in the .toc the game reads, so the order the
+        // build script happens to emit rows in carries no meaning. What matters is that a
+        // file cannot go missing from the binary, and that nothing the .toc never named —
+        // the busted specs above all — can ride along into somebody's game folder.
+        let mut expected = files_listed_in_the_toc();
+        expected.push("chronie.toc".to_string());
+        expected.sort();
+        let mut bundled: Vec<String> = BUNDLED_ADDON
+            .iter()
+            .map(|(relative, _)| (*relative).to_string())
+            .collect();
+        bundled.sort();
+        assert_eq!(bundled, expected);
+        for (relative, contents) in BUNDLED_ADDON {
+            assert!(!relative.starts_with("spec/"), "{relative} is not part of the addon");
+            assert!(!contents.is_empty(), "{relative} was embedded empty");
+        }
+    }
+
+    #[test]
+    fn installs_the_shipped_addon_and_reports_its_version() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+
+        let result = replace_addon(&retail).unwrap();
+
+        assert_eq!(result.version, version_in_the_toc());
+        let installed = addon_folder(&retail);
+        assert!(installed.join("Main.lua").is_file());
+        assert!(!installed.join("spec").exists());
+        assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
+        let lua_modules = fs::read_dir(installed.join("src"))
+            .unwrap()
+            .filter(|entry| {
+                entry.as_ref().unwrap().path().extension().is_some_and(|kind| kind == "lua")
+            })
+            .count();
+        assert!(lua_modules > 0, "no Lua modules landed in src/");
+    }
+
+    #[test]
+    fn replaces_an_older_copy_rather_than_merging_with_it() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let installed = addon_folder(&retail);
+        let stale = installed.join("src").join("Removed.lua");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(&stale, b"-- a module this build no longer ships\n").unwrap();
+        fs::write(installed.join("chronie.toc"), b"## Version: 0.0.1-stale\n").unwrap();
+
+        replace_addon(&retail).unwrap();
+
+        assert!(!stale.exists(), "a file from the old copy survived the install");
+        assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
+        // The backup is the install's own scaffolding; leaving it behind would put a second
+        // copy of the addon in the folder the game scans.
+        assert!(!retail.join("Interface").join("AddOns").join(".chronie-backup").exists());
+    }
+
+    #[test]
+    fn installs_the_same_way_however_often_it_runs() {
+        // The app installs on every launch now, so a second run has to be a no-op rather
+        // than something that accumulates.
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let addons = retail.join("Interface").join("AddOns");
+
+        let first = replace_addon(&retail).unwrap();
+        let after_first = tree(&addons);
+        let second = replace_addon(&retail).unwrap();
+
+        assert_eq!(second.version, first.version);
+        assert_eq!(tree(&addons), after_first);
+    }
+
+    #[test]
+    fn refuses_a_game_folder_with_no_addons_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let bystander = root.path().join("WTF");
+        fs::create_dir_all(&bystander).unwrap();
+
+        let error = replace_addon(root.path()).unwrap_err();
+
+        assert!(error.contains("AddOns"), "unhelpful error: {error}");
+        assert_eq!(tree(root.path()), Vec::<String>::new());
+        assert!(bystander.is_dir(), "the failed install took the folder's contents with it");
     }
 
     #[test]
@@ -601,39 +755,5 @@ mod tests {
         if plugins.0.contains_key(UPDATER_PLUGIN) {
             assert!(updater_configured(&plugins));
         }
-    }
-
-    #[test]
-    fn rejects_archive_traversal() {
-        assert!(safe_archive_path("repo/apps/addon/../../outside").is_none());
-        assert!(safe_archive_path("repo/apps/addon/src/Good.lua").is_some());
-    }
-
-    #[test]
-    fn installs_only_the_addon_subdirectory() {
-        let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        let options = zip::write::SimpleFileOptions::default();
-        archive
-            .start_file("repo/apps/addon/chronie.toc", options)
-            .unwrap();
-        archive.write_all(b"## Version: 9.8.7\nMain.lua").unwrap();
-        archive
-            .start_file("repo/apps/addon/Main.lua", options)
-            .unwrap();
-        archive.write_all(b"-- synthetic addon").unwrap();
-        archive
-            .start_file("repo/apps/desktop/private.txt", options)
-            .unwrap();
-        archive.write_all(b"must not install").unwrap();
-        let bytes = archive.finish().unwrap().into_inner();
-
-        let temp = tempfile::tempdir().unwrap();
-        let wow = temp.path().join("_retail_");
-        fs::create_dir_all(wow.join("Interface/AddOns")).unwrap();
-        let result = replace_addon(&bytes, &wow).unwrap();
-
-        assert_eq!(result.version, "9.8.7");
-        assert!(wow.join("Interface/AddOns/chronie/Main.lua").is_file());
-        assert!(!wow.join("Interface/AddOns/chronie/private.txt").exists());
     }
 }
