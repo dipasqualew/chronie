@@ -168,6 +168,42 @@ export interface DashboardPayload {
   segments?: Segment[];
 }
 
+/* ---------- transmog ---------- */
+
+/**
+ * One transmog set, as the game's own tables describe it.
+ *
+ * This comes from the installed game files rather than from anything the addon collected,
+ * so it says what exists rather than what the player owns.
+ */
+export interface TransmogSet {
+  id: number;
+  name: string;
+  /** The collection the set belongs to, already resolved to its name. */
+  group: string;
+  groupId: number;
+  /** A bit per class, in the game's class order. Zero means the set is not class-specific. */
+  classMask: number;
+  expansionId: number;
+  /** The set this one is a variant of, or zero. */
+  parentId: number;
+  flags: number;
+  /** Where the set sits in the game's own ordering of its group. */
+  uiOrder: number;
+  /** The patch the set arrived in, written as major then two digits each of minor and patch. */
+  patchIntroduced: number;
+  itemCount: number;
+}
+
+export interface TransmogPayload {
+  sets: TransmogSet[];
+  readCount: number;
+  /** What the game's table says it holds, which is more than can be read. */
+  declaredCount: number;
+  /** Sets Blizzard encrypted because they belong to content it has not shipped. */
+  withheldCount: number;
+}
+
 export interface Settings {
   wowPath?: string | null;
   lastSync?: string | null;
@@ -195,6 +231,7 @@ export interface AppUpdateResult {
  */
 export interface E2EMock {
   dashboard: DashboardPayload;
+  transmog: TransmogPayload;
   settings: Settings;
   chosenPath: string;
   syncResult: SyncResult;

@@ -1,5 +1,8 @@
 mod activity;
+pub mod casc;
 mod collector;
+pub mod db2;
+pub mod transmog;
 
 use chrono::Utc;
 use collector::{dashboard as load_dashboard, SyncResult};
@@ -108,6 +111,30 @@ fn dashboard(state: State<'_, AppState>) -> Result<Value, String> {
     load_dashboard(&state.database_path())
 }
 
+/// The transmog sets the installed game knows about.
+///
+/// This reads the game's own files rather than anything the addon collected, so it needs
+/// the install itself and not just its `WTF` folder — `resolve_wow_path` lands on
+/// `_retail_`, and `Data/` is its sibling.
+/// Reading the game's storage means inflating a couple of hundred megabytes, so the work
+/// goes to a blocking thread. On the main thread it would freeze the window for as long as
+/// it took, and the view is opened by a click that should stay responsive.
+#[tauri::command]
+async fn transmog_sets(state: State<'_, AppState>) -> Result<Value, String> {
+    let retail = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        configured_wow_path(&settings)?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let install = retail
+            .parent()
+            .ok_or("The game folder has no parent to look for Data in.")?;
+        transmog::sets(&casc::CascFiles::open(install)?)
+    })
+    .await
+    .map_err(|error| format!("Reading the game's files did not finish: {error}"))?
+}
+
 #[tauri::command]
 fn settings(state: State<'_, AppState>) -> Result<Settings, String> {
     state
@@ -117,8 +144,15 @@ fn settings(state: State<'_, AppState>) -> Result<Settings, String> {
         .map_err(|_| "Settings lock failed.".to_string())
 }
 
+/// Asks the user for the game folder.
+///
+/// This has to be `async`. Tauri runs a synchronous command on the main thread, and the
+/// folder picker blocks until the user answers it — on the main thread that is the event
+/// loop the picker itself needs, so the whole window locks up with the dialog on screen.
+/// An async command runs off the main thread, which is what the dialog plugin's own
+/// documentation calls for.
 #[tauri::command]
-fn choose_wow_path(window: WebviewWindow) -> Option<String> {
+async fn choose_wow_path(window: WebviewWindow) -> Option<String> {
     window
         .dialog()
         .file()
@@ -477,6 +511,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dashboard,
+            transmog_sets,
             settings,
             choose_wow_path,
             save_wow_path,
