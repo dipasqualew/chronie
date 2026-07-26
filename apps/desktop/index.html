@@ -393,7 +393,7 @@ const completedTotals = {
   "Level ups": totals.levelUps,
   Currency: Object.keys(totals.currencies).length,
   Mounts: totals.mounts,
-  "New transmog": totals.transmogs,
+  "New transmog": totals.appearances,
   Pets: totals.pets,
   Quests: totals.quests,
   Reputation: Object.keys(totals.reputation).length,
@@ -404,7 +404,7 @@ const completedTotals = {
 };
 
 $("meta").textContent = SEGMENTS.length
-  ? `${SEGMENTS.length} segments over the last ${PAYLOAD.retainDays} days` +
+  ? `${SEGMENTS.length} segments across all recorded history` +
     (PAYLOAD.generatedAt ? ` · collected ${new Date(PAYLOAD.generatedAt).toLocaleString()}` : "")
   : "Nothing collected yet — play for a bit, then log out or /reload so the game writes its saved variables.";
 
@@ -418,7 +418,7 @@ $("tiles").innerHTML = [
     value: totals.appearances,
     foot: `${totals.variants} variants` +
       (totals.transmogs > totals.appearances + totals.variants
-        ? ` · ${totals.transmogs - totals.appearances - totals.variants} legacy unknown`
+        ? ` · ${totals.transmogs - totals.appearances - totals.variants} unknown`
         : ""),
   },
   {
@@ -431,19 +431,19 @@ $("tiles").innerHTML = [
     value: topFaction ? topFaction[1].toLocaleString() : "0",
     foot: topFaction ? topFaction[0] : "none earned",
   },
-  { label: "Achievements", value: totals.achievements, foot: "earned this window" },
-  { label: "Level ups", value: totals.levelUps, foot: "gained this window" },
-  { label: "Mounts", value: totals.mounts, foot: "collected this window" },
-  { label: "Pets", value: totals.pets, foot: "collected this window" },
-  { label: "Quests", value: totals.quests, foot: "completed this window" },
-  { label: "Toys", value: totals.toys, foot: "collected this window" },
+  { label: "Achievements", value: totals.achievements, foot: "earned in recorded history" },
+  { label: "Level ups", value: totals.levelUps, foot: "gained in recorded history" },
+  { label: "Mounts", value: totals.mounts, foot: "collected in recorded history" },
+  { label: "Pets", value: totals.pets, foot: "collected in recorded history" },
+  { label: "Quests", value: totals.quests, foot: "completed in recorded history" },
+  { label: "Toys", value: totals.toys, foot: "collected in recorded history" },
   {
     label: "Housing items",
     value: totals.housingItems,
     foot: `${totals.housingWarband} warband first · ${totals.housingItems - totals.housingWarband} extra`,
   },
-  { label: "Housing XP", value: totals.housingXP.toLocaleString(), foot: "gained this window" },
-  { label: "Housing levels", value: totals.housingLevelUps, foot: "gained this window" },
+  { label: "Housing XP", value: totals.housingXP.toLocaleString(), foot: "gained in recorded history" },
+  { label: "Housing levels", value: totals.housingLevelUps, foot: "gained in recorded history" },
 ].filter((tile) => !(tile.label in completedTotals) || completedTotals[tile.label] > 0).map((tile) => `<div class="panel tile">
     <div class="label">${escapeHtml(tile.label)}</div>
     <div class="value${tile.cls ? " " + tile.cls : ""}">${escapeHtml(tile.value)}</div>
@@ -475,14 +475,14 @@ function drawChart() {
     byDay.set(segment.day, bucket);
   });
 
-  // Every day in the window, so a blank day reads as a gap rather than vanishing.
+  // Include every day between the first and last stored segment so gaps remain visible.
   const days = [];
-  const last = SEGMENTS.length ? new Date(`${[...byDay.keys()].sort().pop()}T00:00:00`) : new Date();
-  for (let back = PAYLOAD.retainDays - 1; back >= 0; back -= 1) {
-    const date = new Date(last);
-    date.setDate(date.getDate() - back);
+  const sortedDays = [...byDay.keys()].sort();
+  const first = SEGMENTS.length ? new Date(`${sortedDays[0]}T00:00:00`) : new Date();
+  const last = SEGMENTS.length ? new Date(`${sortedDays.at(-1)}T00:00:00`) : new Date();
+  for (const date = new Date(first); date <= last; date.setDate(date.getDate() + 1)) {
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    days.push({ key, date, ...(byDay.get(key) || { gold: 0, runs: 0 }) });
+    days.push({ key, date: new Date(date), ...(byDay.get(key) || { gold: 0, runs: 0 }) });
   }
 
   const W = 900, H = 220, PAD_L = 58, PAD_R = 8, PAD_T = 12, PAD_B = 28;

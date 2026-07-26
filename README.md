@@ -2,8 +2,8 @@
 
 Chronie is a small World of Warcraft addon plus a Windows desktop companion. The
 addon records segments in SavedVariables. The desktop app collects those records
-in the background, displays the seven-day report, and installs or updates the
-addon for you.
+in the background, stores permanent history in an embedded SQLite database,
+displays the report, and installs or updates the addon for you.
 
 ## Repository layout
 
@@ -51,7 +51,7 @@ bun run test:e2e
 
 The E2E suite injects a fake desktop bridge and a synthetic datastore. It does
 not need an installed game, network access, or real character/location names.
-The Rust test suite exercises SavedVariables parsing, retention, and safe addon
+The Rust test suite exercises SavedVariables parsing, permanent SQLite persistence, and safe addon
 archive installation:
 
 ```sh

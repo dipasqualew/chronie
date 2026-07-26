@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 const mockDesktop = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
-    retainDays: 7,
     segments: [
       {
         id: "synthetic-001",
@@ -70,7 +69,7 @@ const mockDesktop = {
     lastSync: "2026-07-26T11:58:00Z",
   },
   chosenPath: "D:\\Games\\Example MMO",
-  syncResult: { segmentCount: 2, added: 1, dropped: 0 },
+  syncResult: { segmentCount: 2, added: 1, updated: 1 },
   installResult: { version: "0.8.0-dev" },
   appUpdate: { updated: false, version: "0.1.0" },
 };

@@ -42,7 +42,7 @@ impl AppState {
     }
 
     fn database_path(&self) -> PathBuf {
-        self.data_dir.join("segments.json")
+        self.data_dir.join("chronie.sqlite3")
     }
 
     fn save(&self, settings: &Settings) -> Result<(), String> {
@@ -88,7 +88,7 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings)?
     };
-    let result = collector::collect(&wow_path, &state.database_path(), 7, Utc::now().timestamp())?;
+    let result = collector::collect(&wow_path, &state.database_path(), Utc::now().timestamp())?;
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.last_sync = Some(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
     state.save(&settings)?;
@@ -96,7 +96,7 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
 }
 
 #[tauri::command]
-fn dashboard(state: State<'_, AppState>) -> Value {
+fn dashboard(state: State<'_, AppState>) -> Result<Value, String> {
     load_dashboard(&state.database_path())
 }
 
@@ -334,6 +334,12 @@ pub fn run() {
         ))
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            let database_path = data_dir.join("chronie.sqlite3");
+            collector::initialize(&database_path).map_err(std::io::Error::other)?;
+            let json_path = data_dir.join("segments.json");
+            if json_path.is_file() {
+                fs::remove_file(json_path)?;
+            }
             let state = AppState {
                 settings: Mutex::new(load_settings(&data_dir.join("settings.json"))),
                 data_dir,
