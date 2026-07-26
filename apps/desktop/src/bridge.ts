@@ -11,6 +11,7 @@ import type {
   Settings,
   SyncResult,
   TransmogPayload,
+  TransmogSetItemsPayload,
 } from "./types";
 
 const mock = globalThis.__Chronie_E2E__;
@@ -28,6 +29,11 @@ export const desktop = {
   // of transient memory, so the window asks only when the view is first opened.
   transmogSets: (): Promise<TransmogPayload> =>
     mock ? Promise.resolve(structuredClone(mock.transmog)) : invoke<TransmogPayload>("transmog_sets"),
+  // Opening a set walks four more of the game's tables, so it is asked for per set rather
+  // than loaded with the grid — a wardrobe's worth of joins nobody has clicked on is waste.
+  transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> => mock
+    ? Promise.resolve(structuredClone(mock.transmogItems[setId] ?? emptySet(setId)))
+    : invoke<TransmogSetItemsPayload>("transmog_set_items", { setId }),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {
@@ -79,6 +85,10 @@ export const desktop = {
   checkForAppUpdate: (): Promise<AppUpdateResult> =>
     mock ? Promise.resolve(mock.appUpdate) : invoke<AppUpdateResult>("check_for_app_update"),
 };
+
+/** A set the e2e mock says nothing about, which the real backend would answer for. */
+const emptySet = (setId: number): TransmogSetItemsPayload =>
+  ({ setId, appearances: [], readCount: 0, withheldCount: 0 });
 
 /** Drops the guess for a kind the user has just taken over, mirroring the backend's rule. */
 function dropInferred(activities: Activity[], kind: string): void {

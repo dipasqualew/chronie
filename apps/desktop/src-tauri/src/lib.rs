@@ -112,15 +112,31 @@ fn dashboard(state: State<'_, AppState>) -> Result<Value, String> {
 }
 
 /// The transmog sets the installed game knows about.
-///
-/// This reads the game's own files rather than anything the addon collected, so it needs
-/// the install itself and not just its `WTF` folder — `resolve_wow_path` lands on
-/// `_retail_`, and `Data/` is its sibling.
-/// Reading the game's storage means inflating a couple of hundred megabytes, so the work
-/// goes to a blocking thread. On the main thread it would freeze the window for as long as
-/// it took, and the view is opened by a click that should stay responsive.
 #[tauri::command]
 async fn transmog_sets(state: State<'_, AppState>) -> Result<Value, String> {
+    read_game_files(&state, transmog::sets).await
+}
+
+/// What one transmog set is made of, walked out of the same files.
+///
+/// The window already has the set from the grid, so only its id crosses over; everything a
+/// row shows is resolved here rather than assembled from two halves.
+#[tauri::command]
+async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<Value, String> {
+    read_game_files(&state, move |files| transmog::set_items(files, set_id)).await
+}
+
+/// Runs a read of the installed game's own files, off the main thread.
+///
+/// This reads the game's storage rather than anything the addon collected, so it needs the
+/// install itself and not just its `WTF` folder — `resolve_wow_path` lands on `_retail_`,
+/// and `Data/` is its sibling. Getting at it means inflating a couple of hundred megabytes,
+/// which on the main thread would freeze the window for as long as it took; the views that
+/// ask for this are opened by a click that should stay responsive.
+async fn read_game_files<F>(state: &State<'_, AppState>, read: F) -> Result<Value, String>
+where
+    F: FnOnce(&dyn casc::GameFiles) -> Result<Value, String> + Send + 'static,
+{
     let retail = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings)?
@@ -129,7 +145,7 @@ async fn transmog_sets(state: State<'_, AppState>) -> Result<Value, String> {
         let install = retail
             .parent()
             .ok_or("The game folder has no parent to look for Data in.")?;
-        transmog::sets(&casc::CascFiles::open(install)?)
+        read(&casc::CascFiles::open(install)?)
     })
     .await
     .map_err(|error| format!("Reading the game's files did not finish: {error}"))?
@@ -515,6 +531,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             dashboard,
             transmog_sets,
+            transmog_set_items,
             settings,
             choose_wow_path,
             save_wow_path,

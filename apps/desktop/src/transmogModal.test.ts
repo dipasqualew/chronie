@@ -1,0 +1,133 @@
+import { describe, expect, it } from "vitest";
+import { appearanceRows, appearanceSummary, slotName } from "./transmogModal";
+import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
+
+/** One appearance with only the fields a test cares about spelled out. */
+const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearance => ({
+  modifiedAppearanceId: 71001,
+  itemId: 30001,
+  appearanceId: 80001,
+  displayType: 0,
+  displayInfoId: 900001,
+  iconFileDataId: 130001,
+  hasModel: false,
+  ...fields,
+});
+
+/**
+ * A payload the backend could have answered with. `readCount` and `withheldCount` are given
+ * rather than derived, because the backend counts them and the rows are drawn from what it
+ * said as much as from the list itself.
+ */
+const payload = (
+  appearances: TransmogAppearance[],
+  counts: Partial<Pick<TransmogSetItemsPayload, "readCount" | "withheldCount">> = {},
+): TransmogSetItemsPayload => ({
+  setId: 201,
+  appearances,
+  readCount: appearances.length,
+  withheldCount: 0,
+  ...counts,
+});
+
+describe("slotName", () => {
+  // The eleven armour slots are the game's own numbering, in the order it numbers them.
+  it.each<[number, string]>([
+    [0, "Head"],
+    [1, "Shoulder"],
+    [2, "Chest"],
+    [3, "Waist"],
+    [4, "Legs"],
+    [5, "Feet"],
+    [6, "Wrist"],
+    [7, "Hands"],
+    [8, "Back"],
+    [9, "Tabard"],
+    [10, "Shirt"],
+  ])("reads display type %i as the %s slot", (displayType, expected) => {
+    expect(slotName(displayType)).toBe(expected);
+  });
+
+  // The definitions do not pin the weapon types down well enough to name one by one, so all
+  // four read the same rather than four guesses at which is which.
+  it.each<[number]>([[11], [12], [13], [15]])(
+    "calls display type %i a weapon or shield",
+    (displayType) => {
+      expect(slotName(displayType)).toBe("Weapon or shield");
+    },
+  );
+
+  // A slot from a patch newer than this build still has to render as something.
+  it("says which slot it was when it cannot name one", () => {
+    expect(slotName(14)).toBe("Slot 14");
+    expect(slotName(99)).toBe("Slot 99");
+  });
+});
+
+describe("appearanceRows", () => {
+  it("names the slot an appearance fills and the item it came from", () => {
+    expect(appearanceRows(payload([appearance({ displayType: 1, itemId: 30007, hasModel: true })])))
+      .toEqual([
+        {
+          slot: "Shoulder",
+          label: "Item 30007",
+          itemId: 30007,
+          appearanceId: 80001,
+          hasModel: true,
+          withheld: false,
+        },
+      ]);
+  });
+
+  // An appearance the game encrypts arrives with nothing but the id the set named it by, and
+  // its display type is zero for want of anything to read — which is the head slot, so
+  // labelling it by slot would be inventing one.
+  it("says nothing it cannot know about an appearance the game withholds", () => {
+    const withheld = appearance({ modifiedAppearanceId: 71012, itemId: 0, appearanceId: 0 });
+    expect(appearanceRows(payload([withheld])))
+      .toEqual([
+        {
+          slot: "Unknown slot",
+          label: "The game keeps this appearance encrypted",
+          itemId: 0,
+          appearanceId: 0,
+          hasModel: false,
+          withheld: true,
+        },
+      ]);
+  });
+
+  // The card counts every appearance the set names, so the withheld one keeps its place in
+  // the list rather than being dropped for being unnameable.
+  it("keeps a withheld appearance in the order the backend sorted it into", () => {
+    const rows = appearanceRows(payload(
+      [appearance({ displayType: 2, itemId: 30011 }), appearance({ itemId: 0, appearanceId: 0 })],
+      { readCount: 1, withheldCount: 1 },
+    ));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.withheld)).toEqual([false, true]);
+  });
+
+  it("has no rows to draw for a set the game lists nothing for", () => {
+    expect(appearanceRows(payload([]))).toEqual([]);
+  });
+});
+
+describe("appearanceSummary", () => {
+  it.each<[string, TransmogSetItemsPayload, string]>([
+    ["one appearance", payload([appearance()]), "1 appearance"],
+    ["several", payload([appearance(), appearance(), appearance()]), "3 appearances"],
+    [
+      "one of which the game withholds",
+      payload([appearance(), appearance()], { readCount: 1, withheldCount: 1 }),
+      "2 appearances · 1 the game keeps encrypted",
+    ],
+  ])("reads a set of %s", (_what, given, expected) => {
+    expect(appearanceSummary(given)).toBe(expected);
+  });
+
+  // A set with nothing under it is the one case the count is not worth printing at all.
+  it("says the game lists nothing rather than counting to zero", () => {
+    expect(appearanceSummary(payload([]))).toBe("The game lists no appearances for this set.");
+  });
+});

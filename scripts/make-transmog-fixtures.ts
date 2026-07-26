@@ -1,8 +1,8 @@
 /**
  * Writes the DB2 fixtures the transmog tests read.
  *
- * The game keeps its transmog sets in three WDC5 tables, and the reader that pulls them
- * apart has to cope with every way that format squeezes a column: bit fields that stop on
+ * The game describes its transmog sets across a chain of WDC5 tables, and the reader that
+ * pulls them apart has to cope with every way that format squeezes a column: bit fields that stop on
  * no particular byte, palettes of distinct values, sparse maps of the rows that differ from
  * a default, ids kept beside the rows rather than in them, rows that are another row under
  * a second id, and whole sections Blizzard encrypted because they belong to content it has
@@ -27,6 +27,8 @@ const FILE_DATA_ID = {
   transmogSet: 1376213,
   transmogSetItem: 1376212,
   transmogSetGroup: 1576116,
+  itemModifiedAppearance: 982457,
+  itemAppearance: 982462,
   itemDisplayInfo: 1266429,
   itemDisplayInfoMaterialRes: 1280614,
 } as const;
@@ -176,8 +178,10 @@ const transmogSetGroup: TableSpec = {
 /**
  * `TransmogSetItem` — one row per appearance, keyed to its set.
  *
- * Nothing reads the appearance ids yet; what the view wants is how many rows point at each
- * set, which is why the fixture gives the sets different-sized wardrobes.
+ * The sets get different-sized wardrobes because the grid counts these rows, and the
+ * appearance ids are the first hop of the chain the detail view walks. The game gives that
+ * column 19 bits, so every id here fits inside one — an id wider than the column reads back
+ * with its top bit gone and joins against nothing.
  */
 const transmogSetItem: TableSpec = {
   fileDataId: FILE_DATA_ID.transmogSetItem,
@@ -195,28 +199,138 @@ const transmogSetItem: TableSpec = {
     {
       key: 0n,
       rows: [
-        [201, 700001, 0],
-        [201, 700002, 0],
-        [201, 700003, 1],
-        [202, 700004, 0],
-        [202, 700005, 0],
-        [203, 700006, 0],
-        [203, 700007, 0],
-        [203, 700008, 0],
-        [203, 700009, 1],
-        [204, 700010, 0],
-        [205, 700011, 0],
-        [205, 700012, 0],
-        [206, 700013, 0],
+        [201, 71001, 0],
+        [201, 71002, 0],
+        [201, 71003, 1],
+        [202, 71004, 0],
+        [202, 71005, 0],
+        // Set 203 is the one whose appearances span several slots, which is what a detail
+        // view grouped by slot has to get right.
+        [203, 71006, 0],
+        [203, 71007, 0],
+        [203, 71008, 0],
+        [203, 71009, 1],
+        [204, 71010, 0],
+        // 71012 is only described in an encrypted section of `ItemModifiedAppearance`, so
+        // set 205 has two appearances and can only name one of them.
+        [205, 71011, 0],
+        [205, 71012, 0],
+        [206, 71013, 0],
       ],
       idList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-      // A fourteenth appearance for set 201, stored as row 1 again.
+      // A fourteenth appearance for set 201, stored as row 1 again — so the set holds the
+      // same appearance twice, and a detail view has to show four rows rather than three.
       copies: [[14, 1]],
     },
     {
       key: 0x91ce07b4a2d5f36en,
-      rows: [[900, 700900, 0]],
+      rows: [[900, 71900, 0]],
       idList: [15],
+    },
+  ],
+};
+
+/**
+ * `ItemModifiedAppearance` — the hop from an appearance of a set to an actual item.
+ *
+ * One row per way an item can look, keyed by the id `TransmogSetItem` points at, and
+ * carrying the item id and the `ItemAppearance` the look is described by. Its own id is
+ * stored inside the row rather than beside it, which is the other half of the pair with
+ * `ItemAppearance` below.
+ */
+const itemModifiedAppearance: TableSpec = {
+  fileDataId: FILE_DATA_ID.itemModifiedAppearance,
+  layoutHash: 0x1d3f70b2,
+  tableHash: 0x58a2ce19,
+  idColumn: 0,
+  flags: 0,
+  recordSize: 9,
+  columns: [
+    { storage: Storage.bitpackedSigned, offsetBits: 0, sizeBits: 20 }, // ID
+    { storage: Storage.bitpacked, offsetBits: 20, sizeBits: 20 }, // ItemID
+    { storage: Storage.indexed, offsetBits: 40, sizeBits: 2, palette: [0, 1, 3] }, // Modifier
+    { storage: Storage.bitpacked, offsetBits: 42, sizeBits: 20 }, // ItemAppearanceID
+    { storage: Storage.bitpacked, offsetBits: 62, sizeBits: 4 }, // OrderIndex
+    { storage: Storage.indexed, offsetBits: 66, sizeBits: 3, palette: [0, 1, 2, 3] }, // SourceType
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        [71001, 30001, 0, 80001, 0, 1],
+        [71002, 30002, 0, 80002, 1, 1],
+        [71003, 30003, 1, 80003, 2, 2],
+        [71004, 30004, 0, 80004, 0, 1],
+        [71005, 30005, 0, 80005, 1, 1],
+        [71006, 30006, 0, 80006, 0, 1],
+        [71007, 30007, 0, 80007, 1, 1],
+        [71008, 30008, 0, 80008, 2, 1],
+        [71009, 30009, 3, 80009, 3, 3],
+        [71010, 30010, 0, 80010, 0, 2],
+        [71011, 30011, 0, 80011, 0, 1],
+        [71013, 30013, 0, 80013, 0, 1],
+      ],
+    },
+    {
+      // Encrypted, so one of set 205's two appearances cannot be named at all.
+      key: 0x2f7a5cd0b1934e6an,
+      rows: [
+        [71012, 30012, 0, 80012, 1, 1],
+        [71900, 30900, 0, 80900, 0, 1],
+      ],
+    },
+  ],
+};
+
+/**
+ * `ItemAppearance` — what an appearance looks like: which slot, which display, which icon.
+ *
+ * The game keeps this table's ids beside the rows rather than in them, so a reader that
+ * only knows how to find an id inside a record cannot read it at all.
+ */
+const itemAppearance: TableSpec = {
+  fileDataId: FILE_DATA_ID.itemAppearance,
+  layoutHash: 0x8c14ba05,
+  tableHash: 0x40de7b31,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 8,
+  columns: [
+    { storage: Storage.bitpacked, offsetBits: 0, sizeBits: 5 }, // DisplayType
+    { storage: Storage.bitpacked, offsetBits: 5, sizeBits: 20 }, // ItemDisplayInfoID
+    { storage: Storage.plain, offsetBits: 32, sizeBits: 32 }, // DefaultIconFileDataID
+  ],
+  sections: [
+    {
+      key: 0n,
+      // DisplayType is the slot: 0 head, 1 shoulder, 2 chest, 4 legs, 5 feet, 7 hands,
+      // 10 shirt, 11 a weapon. Only head, shoulder and the weapons carry a model.
+      rows: [
+        [0, 900001, 130001],
+        [1, 900002, 130002],
+        [2, 900003, 130003],
+        [5, 900004, 130004],
+        [7, 900005, 130005],
+        [0, 900001, 130001],
+        [1, 900009, 130002],
+        [2, 900003, 130003],
+        [4, 900006, 130006],
+        [11, 900007, 130007],
+        // Its display is in an encrypted section of `ItemDisplayInfo`, so the row knows
+        // which slot it fills and nothing about how it is drawn.
+        [2, 900900, 130008],
+        // An appearance the table gives no icon at all.
+        [10, 900008, 0],
+      ],
+      idList: [80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013],
+    },
+    {
+      key: 0x6b02e9f43d78a1c5n,
+      rows: [
+        [3, 900004, 130009],
+        [0, 900001, 130010],
+      ],
+      idList: [80012, 80900],
     },
   ],
 };
@@ -224,11 +338,18 @@ const transmogSetItem: TableSpec = {
 /**
  * `ItemDisplayInfo` — how one appearance is drawn, and the table of array columns.
  *
- * The game keeps a set's two model slots, its six geoset groups and its two model types as
- * fixed-size arrays inside single columns, stored two different ways: the first two plainly,
- * elements laid end to end, and the last as a palette of whole runs. Reading either as one
- * number gets the first element and quietly loses the rest, so the fixture gives every one
- * of them a distinguishable tail.
+ * The game keeps a display's two model slots, its two material slots, its six geoset groups
+ * and its two model types as fixed-size arrays inside single columns, stored two different
+ * ways: the first four plainly, elements laid end to end, and the last as a palette of whole
+ * runs. Reading either as one number gets the first element and quietly loses the rest, so
+ * the fixture gives every one of them a distinguishable tail.
+ *
+ * **Two of the column positions below are the game's own and the rest are not.**
+ * `ModelResourcesID` at 10 and `ModelMaterialResourcesID` at 11 were read off a real install
+ * and are written down in `docs/game-files.md`; the columns before them are filler of the
+ * right shape, and `GeosetGroup` and `ModelType` sit where they do only so that something
+ * reads them. Nothing outside a test may depend on those two positions until they are
+ * verified the way 10 and 11 were.
  */
 const itemDisplayInfo: TableSpec = {
   fileDataId: FILE_DATA_ID.itemDisplayInfo,
@@ -236,14 +357,24 @@ const itemDisplayInfo: TableSpec = {
   tableHash: 0x71c40e52,
   idColumn: 0,
   flags: 4,
-  recordSize: 37,
+  recordSize: 57,
   columns: [
     { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // Flags
-    { storage: Storage.plain, offsetBits: 32, sizeBits: 64 }, // ModelResourcesID[2]
-    { storage: Storage.plain, offsetBits: 96, sizeBits: 192 }, // GeosetGroup[6]
+    { storage: Storage.bitpacked, offsetBits: 32, sizeBits: 10 }, // ItemVisual
+    { storage: Storage.bitpacked, offsetBits: 42, sizeBits: 10 }, // ParticleColorID
+    { storage: Storage.bitpacked, offsetBits: 52, sizeBits: 10 }, // ItemRangedDisplayInfoID
+    { storage: Storage.bitpacked, offsetBits: 62, sizeBits: 10 }, // OverrideSwooshSoundKitID
+    { storage: Storage.bitpacked, offsetBits: 72, sizeBits: 10 }, // SheatheTransformMatrixID
+    { storage: Storage.bitpacked, offsetBits: 82, sizeBits: 10 }, // StateSpellVisualKitID
+    { storage: Storage.bitpacked, offsetBits: 92, sizeBits: 10 }, // SheathedSpellVisualKitID
+    { storage: Storage.bitpacked, offsetBits: 102, sizeBits: 10 }, // UnsheathedSpellVisualKitID
+    { storage: Storage.indexed, offsetBits: 112, sizeBits: 3, palette: [0, 1, 2, 3] }, // HelmetGeosetVis
+    { storage: Storage.plain, offsetBits: 128, sizeBits: 64 }, // ModelResourcesID[2]
+    { storage: Storage.plain, offsetBits: 192, sizeBits: 64 }, // ModelMaterialResourcesID[2]
+    { storage: Storage.plain, offsetBits: 256, sizeBits: 192 }, // GeosetGroup[6]
     {
       storage: Storage.indexedArray,
-      offsetBits: 288,
+      offsetBits: 448,
       sizeBits: 3,
       arrayCount: 2,
       // Three runs of two: no model, a one-handed model, a two-handed one.
@@ -253,15 +384,36 @@ const itemDisplayInfo: TableSpec = {
   sections: [
     {
       key: 0n,
+      // Flags, then the eight scalars nothing reads, HelmetGeosetVis, and then the four
+      // arrays: models, materials, geoset groups, model types.
       rows: [
         // A helm: one model slot, and the two geoset groups a helm drives.
-        [1, [41001, 0], [27, 21, 0, 0, 0, 0], [1, 0]],
+        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [27, 21, 0, 0, 0, 0], [1, 0]],
         // Shoulders: both model slots used, left and right.
-        [0, [41002, 41003], [26, 0, 0, 0, 0, 0], [2, 3]],
+        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [26, 0, 0, 0, 0, 0], [2, 3]],
         // A chestpiece: no model at all, and five geoset groups it does drive.
-        [16, [0, 0], [8, 10, 13, 22, 28, 0], [0, 0]],
+        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [8, 10, 13, 22, 28, 0], [0, 0]],
+        // Boots, gloves and legs: armour, so no model either.
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [5, 20, 0, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [4, 23, 0, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [11, 9, 13, 0, 0, 0], [0, 0]],
+        // A weapon, which is geometry and nothing else.
+        [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [0, 0, 0, 0, 0, 0], [1, 0]],
+        // A shirt: nothing at all beyond its material.
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0, 0, 0, 0, 0], [0, 0]],
+        // Shoulders that keep their model in the second slot only, which is exactly what a
+        // reader that stops at element zero calls "no model at all".
+        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [26, 0, 0, 0, 0, 0], [2, 3]],
       ],
-      idList: [900001, 900002, 900003],
+      idList: [900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008, 900009],
+    },
+    {
+      // Encrypted, so an appearance pointing here knows its slot and nothing more.
+      key: 0x5d38af0c9e142b76n,
+      rows: [
+        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [27, 0, 0, 0, 0, 0], [1, 0]],
+      ],
+      idList: [900900],
     },
   ],
 };
@@ -608,6 +760,8 @@ for (const table of [
   transmogSet,
   transmogSetGroup,
   transmogSetItem,
+  itemModifiedAppearance,
+  itemAppearance,
   itemDisplayInfo,
   itemDisplayInfoMaterialRes,
 ]) {

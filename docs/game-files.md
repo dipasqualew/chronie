@@ -139,6 +139,12 @@ reading `number(10)` and `number(11)` appears to give two unrelated scalars — 
 element exists. 12,656 rows use both model slots; shoulders are the reason (a left and a
 right). Use `element()`.
 
+**Only 10 and 11 are verified positions in that table.** `GeosetGroup[6]` is read from
+column 12 and `ModelType[2]` from column 13 *in the fixtures*, which is where those two were
+put so that something exercises them; neither index was read off an install. Nothing outside
+a test may rely on them until they have been checked the way 10 and 11 were — which is work
+the character rendering needs done before it can pick geosets.
+
 For body-component textures — which is how armour is drawn — the path is different and
 does **not** go through `col11`:
 
@@ -175,13 +181,20 @@ rather than incidental, and why showing armour at all requires the character-ren
 work in [character-rendering.md](character-rendering.md).
 
 The `DisplayType` → slot naming above is from community definitions and was not
-independently verified; which values carry a model *was* verified.
+independently verified; which values carry a model *was* verified. The set detail view names
+0 through 10 from that list and calls 11, 12, 13 and 15 a "weapon or shield" between them,
+because the definitions do not say which of those is the main hand and which the off hand
+and four labelled guesses would read as fact.
 
 ## Regenerating the fixtures
 
 Tests never read the game. `scripts/make-transmog-fixtures.ts` writes real WDC5 files
 with entirely invented contents — same columns, same storage per column, same bit
-offsets as the game's own, so the awkward halves of the reader stay exercised:
+offsets as the game's own, so the awkward halves of the reader stay exercised. Every table
+on the chain above has one, and between them they hold each way a hop can fail: an
+appearance stored as a copy of another, an `ItemModifiedAppearance` row the game encrypts,
+an `ItemAppearance` whose display info is encrypted, one with no icon at all, and a display
+whose only model sits in the second slot:
 
 ```sh
 bun run scripts/make-transmog-fixtures.ts

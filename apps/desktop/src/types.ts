@@ -204,6 +204,36 @@ export interface TransmogPayload {
   withheldCount: number;
 }
 
+/**
+ * One appearance out of a set, followed through the game's tables as far as they go.
+ *
+ * Everything past the appearance the set itself names can be zero: a hop that lands in a
+ * section Blizzard encrypted reads as nothing at all, and the row still says as much as this
+ * install can answer rather than being dropped for being incomplete.
+ */
+export interface TransmogAppearance {
+  /** The `ItemModifiedAppearance` the set names, which is where the chain starts. */
+  modifiedAppearanceId: number;
+  itemId: number;
+  appearanceId: number;
+  /** Which slot it fills: 0 head, 1 shoulder, 2–10 the rest of the armour, 11 up weapons. */
+  displayType: number;
+  displayInfoId: number;
+  /** The game's icon for it, as a FileDataID, or zero when it names none. */
+  iconFileDataId: number;
+  /** Whether it has geometry of its own. Only heads, shoulders, weapons and shields do. */
+  hasModel: boolean;
+}
+
+export interface TransmogSetItemsPayload {
+  setId: number;
+  appearances: TransmogAppearance[];
+  /** Appearances that could be followed all the way to an item. */
+  readCount: number;
+  /** Appearances a hop of the chain arrives at encrypted, and so cannot be named. */
+  withheldCount: number;
+}
+
 export interface Settings {
   wowPath?: string | null;
   lastSync?: string | null;
@@ -232,6 +262,8 @@ export interface AppUpdateResult {
 export interface E2EMock {
   dashboard: DashboardPayload;
   transmog: TransmogPayload;
+  /** What each set is made of, keyed by set id, as opening one asks for. */
+  transmogItems: Record<number, TransmogSetItemsPayload>;
   settings: Settings;
   chosenPath: string;
   syncResult: SyncResult;

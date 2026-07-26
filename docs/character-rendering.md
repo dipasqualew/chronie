@@ -120,8 +120,11 @@ Armour-relevant groups (from
 27 helm      28 arm upper
 ```
 
-`ItemDisplayInfo.GeosetGroup[6]` says which values the item sets. The slot → group
-mapping (community):
+`ItemDisplayInfo.GeosetGroup[6]` says which values the item sets — **but which column of
+that table holds it has not been verified**, unlike the model and material slots beside it.
+See the note in [game-files.md](game-files.md#the-chain-verified); that is the first thing
+to settle before any of this can be read off a real install. The slot → group mapping
+(community):
 
 | Slot | `[0]` | `[1]` | `[2]` | `[3]` | `[4]` |
 |---|---|---|---|---|---|
