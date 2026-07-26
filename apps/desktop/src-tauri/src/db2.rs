@@ -620,16 +620,18 @@ mod tests {
     const TRANSMOG_SET: u32 = 1376213;
     const TRANSMOG_SET_ITEM: u32 = 1376212;
     const TRANSMOG_SET_GROUP: u32 = 1576116;
+    const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
+    const ITEM_APPEARANCE: u32 = 982462;
     const ITEM_DISPLAY_INFO: u32 = 1266429;
     const ITEM_DISPLAY_INFO_MATERIAL_RES: u32 = 1280614;
 
     /// Columns of `ItemDisplayInfo`, which is the table of fixed-size arrays.
     mod display {
         /// Plainly stored arrays, elements laid end to end inside one column.
-        pub const MODEL_RESOURCES_ID: usize = 1;
-        pub const GEOSET_GROUP: usize = 2;
+        pub const MODEL_RESOURCES_ID: usize = 10;
+        pub const GEOSET_GROUP: usize = 12;
         /// A palette of whole runs rather than of single values.
-        pub const MODEL_TYPE: usize = 3;
+        pub const MODEL_TYPE: usize = 13;
         /// Not an array at all, which is the case that has to keep working.
         pub const FLAGS: usize = 0;
     }
@@ -787,10 +789,9 @@ mod tests {
             assert_eq!(copy.number(column), original.number(column));
         }
         assert_eq!(copy.number(item::SET_ID), 201);
-        // The appearance id is only ever compared with the row it came from: the game gives
-        // that column 19 bits, so the fixture's six-digit ids are already wider than the
-        // column and read back with their top bit gone. Nothing downstream reads them.
-        assert_ne!(copy.number(item::APPEARANCE_ID), 0);
+        // The appearance id is the first hop of the chain the detail view walks, so the copy
+        // has to carry it intact rather than merely carry something.
+        assert_eq!(copy.number(item::APPEARANCE_ID), 71001);
 
         // The palette column still reads as a value rather than as its index.
         let flagged = rows.iter().find(|row| row.id() == 3).unwrap();
@@ -834,7 +835,9 @@ mod tests {
             .rows()
             .map(|row| row.number(display::MODEL_RESOURCES_ID))
             .collect();
-        assert_eq!(first, vec![41001, 41002, 0]);
+        // The last row is the one that keeps a model only in its second slot, and reading
+        // the column as one number is exactly how that gets missed.
+        assert_eq!(first, vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0]);
     }
 
     // The elements past the first are the reason this exists: a shoulder set keeps a model
@@ -851,7 +854,20 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert_eq!(models, vec![vec![41001, 0], vec![41002, 41003], vec![0, 0]]);
+        assert_eq!(
+            models,
+            vec![
+                vec![41001, 0],
+                vec![41002, 41003],
+                vec![0, 0],
+                vec![0, 0],
+                vec![0, 0],
+                vec![0, 0],
+                vec![41004, 0],
+                vec![0, 0],
+                vec![0, 41005],
+            ]
+        );
 
         let geosets: Vec<Vec<u32>> = table
             .rows()
@@ -867,6 +883,12 @@ mod tests {
                 vec![27, 21, 0, 0, 0, 0],
                 vec![26, 0, 0, 0, 0, 0],
                 vec![8, 10, 13, 22, 28, 0],
+                vec![5, 20, 0, 0, 0, 0],
+                vec![4, 23, 0, 0, 0, 0],
+                vec![11, 9, 13, 0, 0, 0],
+                vec![0, 0, 0, 0, 0, 0],
+                vec![0, 0, 0, 0, 0, 0],
+                vec![26, 0, 0, 0, 0, 0],
             ]
         );
     }
@@ -884,7 +906,20 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert_eq!(types, vec![vec![1, 0], vec![2, 3], vec![0, 0]]);
+        assert_eq!(
+            types,
+            vec![
+                vec![1, 0],
+                vec![2, 3],
+                vec![0, 0],
+                vec![0, 0],
+                vec![0, 0],
+                vec![0, 0],
+                vec![1, 0],
+                vec![0, 0],
+                vec![2, 3],
+            ]
+        );
     }
 
     #[test]
@@ -894,7 +929,7 @@ mod tests {
             .rows()
             .map(|row| row.element(display::FLAGS, 0, 32))
             .collect();
-        assert_eq!(flags, vec![1, 0, 16]);
+        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0]);
         // Asking past the end says so rather than running into the next column.
         for row in table.rows() {
             assert_eq!(row.element(display::FLAGS, 1, 32), 0);
@@ -966,6 +1001,8 @@ mod tests {
             TRANSMOG_SET,
             TRANSMOG_SET_ITEM,
             TRANSMOG_SET_GROUP,
+            ITEM_MODIFIED_APPEARANCE,
+            ITEM_APPEARANCE,
             ITEM_DISPLAY_INFO,
             ITEM_DISPLAY_INFO_MATERIAL_RES,
         ] {
