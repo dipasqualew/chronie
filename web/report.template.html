@@ -293,6 +293,10 @@ const questCell = (events) =>
   (events || []).length ? events.map(questLink).join(", ") : '<span class="muted">—</span>';
 const collectionText = (events) => (events || []).map((event) => event.name).join(", ");
 const collectionCell = (events) => listCell(events, collectionText);
+const housingScope = (event) => (event.warbandFirst ? "warband first" : "additional");
+const housingText = (events) =>
+  (events || []).map((event) => `${event.name} (${housingScope(event)})`).join(", ");
+const housingCell = (events) => listCell(events, housingText);
 
 function escapeHtml(text) {
   return String(text ?? "").replace(/[&<>"]/g, (char) =>
@@ -314,6 +318,10 @@ const totals = SESSIONS.reduce((acc, session) => {
   acc.pets += (session.pets || []).length;
   acc.quests += (session.quests || []).length;
   acc.toys += (session.toys || []).length;
+  acc.housingItems += (session.housingItems || []).length;
+  acc.housingWarband += (session.housingItems || []).filter((event) => event.warbandFirst).length;
+  acc.housingXP += session.housingXP || 0;
+  acc.housingLevelUps += (session.housingLevelUps || []).length;
   (session.reputation || []).forEach((gain) => {
     acc.reputation[gain.faction] = (acc.reputation[gain.faction] || 0) + gain.amount;
   });
@@ -324,6 +332,7 @@ const totals = SESSIONS.reduce((acc, session) => {
 }, {
   lootValue: 0, goldDiff: 0, seconds: 0, transmogs: 0, appearances: 0, variants: 0,
   achievements: 0, levelUps: 0, mounts: 0, pets: 0, quests: 0, toys: 0,
+  housingItems: 0, housingWarband: 0, housingXP: 0, housingLevelUps: 0,
   reputation: {}, currencies: {},
 });
 
@@ -339,6 +348,9 @@ const completedTotals = {
   Quests: totals.quests,
   Reputation: Object.keys(totals.reputation).length,
   Toys: totals.toys,
+  "Housing items": totals.housingItems,
+  "Housing XP": totals.housingXP,
+  "Housing levels": totals.housingLevelUps,
 };
 
 $("meta").textContent = SESSIONS.length
@@ -375,6 +387,13 @@ $("tiles").innerHTML = [
   { label: "Pets", value: totals.pets, foot: "collected this window" },
   { label: "Quests", value: totals.quests, foot: "completed this window" },
   { label: "Toys", value: totals.toys, foot: "collected this window" },
+  {
+    label: "Housing items",
+    value: totals.housingItems,
+    foot: `${totals.housingWarband} warband first · ${totals.housingItems - totals.housingWarband} extra`,
+  },
+  { label: "Housing XP", value: totals.housingXP.toLocaleString(), foot: "gained this window" },
+  { label: "Housing levels", value: totals.housingLevelUps, foot: "gained this window" },
 ].filter((tile) => !(tile.label in completedTotals) || completedTotals[tile.label] > 0).map((tile) => `<div class="panel tile">
     <div class="label">${escapeHtml(tile.label)}</div>
     <div class="value${tile.cls ? " " + tile.cls : ""}">${escapeHtml(tile.value)}</div>
@@ -498,6 +517,12 @@ function drawTimeline() {
     (session.quests || []).forEach((event) => {
       parts.push(`<span class="chip">${questLink(event)}</span>`);
     });
+    (session.housingItems || []).forEach((event) => {
+      parts.push(`<span class="chip">🏠 ${escapeHtml(event.name)} · ${escapeHtml(housingScope(event))}</span>`);
+    });
+    (session.housingLevelUps || []).forEach((event) => {
+      parts.push(`<span class="chip">⬆️ Housing Level ${escapeHtml(event.level)}</span>`);
+    });
     return parts.length ? `<div class="tl-extras">${parts.join("")}</div>` : "";
   };
 
@@ -509,6 +534,9 @@ function drawTimeline() {
     if ((session.mounts || []).length) bits.push(`Mounts ${session.mounts.length}`);
     if ((session.pets || []).length) bits.push(`Pets ${session.pets.length}`);
     if ((session.toys || []).length) bits.push(`Toys ${session.toys.length}`);
+    if ((session.housingItems || []).length) bits.push(`Housing items ${session.housingItems.length}`);
+    if (session.housingXP) bits.push(`Housing XP ${signed(session.housingXP)}`);
+    if ((session.housingLevelUps || []).length) bits.push(`Housing levels ${session.housingLevelUps.length}`);
     if ((session.reputation || []).length) bits.push(`Rep ${repText(session.reputation)}`);
     return bits.map(escapeHtml).join(" · ");
   };
@@ -565,8 +593,15 @@ const COLUMNS = [
   { key: "reputation", title: "Reputation", cell: (s) => repCell(s.reputation), sort: (s) => (s.reputation || []).reduce((total, gain) => total + gain.amount, 0) },
   { key: "toys", title: "Toys", cell: (s) => collectionCell(s.toys), sort: (s) => (s.toys || []).length },
   { key: "transmogs", title: "Transmog", cell: (s) => transmogCell(s.transmogs), sort: (s) => (s.transmogs || []).length },
-].filter((column) => !["achievements", "levelUps", "currencies", "mounts", "pets", "quests", "reputation", "toys", "transmogs"]
-  .includes(column.key) || SESSIONS.some((session) => (session[column.key] || []).length));
+  { key: "housingItems", title: "Housing items", cell: (s) => housingCell(s.housingItems), sort: (s) => (s.housingItems || []).length },
+  { key: "housingXP", title: "Housing XP", num: true, cell: (s) => (s.housingXP ? signed(s.housingXP) : '<span class="muted">—</span>'), sort: (s) => s.housingXP || 0 },
+  { key: "housingLevelUps", title: "Housing levels", cell: (s) => levelUpCell(s.housingLevelUps), sort: (s) => (s.housingLevelUps || []).length },
+].filter((column) => {
+  if (column.key === "housingXP") return SESSIONS.some((session) => (session.housingXP || 0) !== 0);
+  const optional = ["achievements", "levelUps", "currencies", "mounts", "pets", "quests",
+    "reputation", "toys", "transmogs", "housingItems", "housingLevelUps"];
+  return !optional.includes(column.key) || SESSIONS.some((session) => (session[column.key] || []).length);
+});
 
 let sortKey = "day";
 let ascending = false;

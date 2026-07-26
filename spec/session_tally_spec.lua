@@ -522,6 +522,114 @@ describe("ns.newSessionTally", function()
         end)
     end)
 
+    describe("housing items", function()
+        it("records a warband-first item with its identity, time and scope", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingItem(4001, "Sturdy Oak Chair", 5000, true)
+
+            assert.same({
+                { id = 4001, name = "Sturdy Oak Chair", at = 5000, warbandFirst = true },
+            }, tally.summary().housingItems)
+        end)
+
+        it("marks a duplicate item as not a warband first", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingItem(4001, "Sturdy Oak Chair", 5000, false)
+
+            assert.is_false(tally.summary().housingItems[1].warbandFirst)
+        end)
+
+        it("treats a missing scope as an additional copy", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingItem(4001, "Sturdy Oak Chair", 5000)
+
+            assert.is_false(tally.summary().housingItems[1].warbandFirst)
+        end)
+
+        it("falls back to the id when no name is given", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingItem(4001, nil, 5000, true)
+
+            assert.equal("4001", tally.summary().housingItems[1].name)
+        end)
+
+        it("keeps housing items in acquisition order", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingItem(1, "First", 100, true)
+            tally.housingItem(2, "Second", 200, false)
+
+            local items = tally.summary().housingItems
+            assert.equal("First", items[1].name)
+            assert.equal("Second", items[2].name)
+        end)
+
+        it("ignores housing items while inactive", function()
+            local tally = newTally()
+
+            tally.housingItem(4001, "Sturdy Oak Chair", 5000, true)
+
+            assert.same({}, tally.summary().housingItems)
+        end)
+    end)
+
+    describe("housing experience", function()
+        it("sums housing experience gains over the session", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingXP(120)
+            tally.housingXP(80)
+
+            assert.equal(200, tally.summary().housingXP)
+        end)
+
+        it("ignores a zero gain", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingXP(0)
+
+            assert.equal(0, tally.summary().housingXP)
+        end)
+
+        it("ignores housing experience while inactive", function()
+            local tally = newTally()
+
+            tally.housingXP(120)
+
+            assert.equal(0, tally.summary().housingXP)
+        end)
+    end)
+
+    describe("housing levels gained", function()
+        it("appends the new housing level and its time", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.housingLevelUp(3, 5000)
+
+            assert.same({ { level = 3, at = 5000 } }, tally.summary().housingLevelUps)
+        end)
+
+        it("ignores housing level ups while inactive", function()
+            local tally = newTally()
+
+            tally.housingLevelUp(3, 5000)
+
+            assert.same({}, tally.summary().housingLevelUps)
+        end)
+    end)
+
     describe("hasEvents", function()
         it("is false for a session where nothing happened", function()
             local tally = newTally()
@@ -594,6 +702,30 @@ describe("ns.newSessionTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
+        it("is true once a housing item is collected", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.housingItem(4001, "Sturdy Oak Chair", 100, true)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
+        it("is true once housing experience is gained", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.housingXP(50)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
+        it("is true once a housing level is gained", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.housingLevelUp(2, 100)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
         -- A currency that is earned then wholly spent nets to zero, but the session did
         -- see the currency move, so it is still worth keeping.
         it("stays true for a currency that nets back to zero", function()
@@ -640,6 +772,9 @@ describe("ns.newSessionTally", function()
             assert.same({}, summary.transmogs)
             assert.same({}, summary.quests)
             assert.same({}, summary.toys)
+            assert.same({}, summary.housingItems)
+            assert.equal(0, summary.housingXP)
+            assert.same({}, summary.housingLevelUps)
         end)
 
         it("carries every tally onto one summary table", function()
@@ -673,6 +808,9 @@ describe("ns.newSessionTally", function()
                 pets = {},
                 quests = { { id = 7848, at = 550 } },
                 toys = {},
+                housingItems = {},
+                housingXP = 0,
+                housingLevelUps = {},
             }, tally.summary())
         end)
     end)

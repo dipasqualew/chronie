@@ -33,6 +33,7 @@ local addonName, ns = ...
 ---@field mountInfo fun(id: integer): string? Localised name of a mount.
 ---@field petInfo fun(guid: string): (integer?, string?) Battle pet species ID and localised name.
 ---@field toyInfo fun(id: integer): string? Localised name of a toy.
+---@field housingItemInfo fun(id: integer): (string?, integer?) Localised name and warband-owned count.
 ---@field openAchievement fun(id: integer)
 ---@field previewTransmog fun(itemID: integer)
 ---@field openTransmogCollection fun(sourceID: integer)
@@ -398,6 +399,22 @@ function ns.main(env)
         tally.toy(id, env.toyInfo(id), env.now())
         refreshResults()
     end)
+    -- Housing decor is warband-wide, so the owned count decides first-time from duplicate:
+    -- one copy means this session collected it for the whole warband, more is an extra.
+    dispatcher.on("HOUSING_DECOR_ADDED", function(id)
+        local name, quantity = env.housingItemInfo(id)
+        tally.housingItem(id, name, env.now(), (quantity or 1) <= 1)
+        refreshResults()
+    end)
+    -- The client hands the experience gained straight to the event, the way currency does.
+    dispatcher.on("HOUSING_XP_GAINED", function(amount)
+        tally.housingXP(amount)
+        refreshResults()
+    end)
+    dispatcher.on("HOUSING_LEVEL_UP", function(level)
+        tally.housingLevelUp(level, env.now())
+        refreshResults()
+    end)
     dispatcher.on("QUEST_ACCEPTED", snapshotQuest)
     dispatcher.on("QUEST_LOG_UPDATE", snapshotActiveQuests)
     dispatcher.on("QUEST_TURNED_IN", function(id)
@@ -565,6 +582,16 @@ if CreateFrame then
             end,
             toyInfo = function(id)
                 return (select(2, C_ToyBox.GetToyInfo(id)))
+            end,
+            housingItemInfo = function(id)
+                if not id then
+                    return nil
+                end
+                local info = C_HousingCatalog.GetCatalogEntryInfo(id)
+                if not info then
+                    return nil
+                end
+                return info.name, info.numOwned
             end,
             openAchievement = function(id)
                 AchievementFrame_LoadUI()

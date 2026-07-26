@@ -307,6 +307,24 @@ def normalise(record: dict) -> dict | None:
                 "at": int(event.get("at") or 0),
             })
 
+    housing_items = []
+    for event in record.get("housingItems") or []:
+        if isinstance(event, dict) and event.get("id"):
+            housing_items.append({
+                "id": int(event["id"]),
+                "name": str(event.get("name") or event["id"]),
+                "at": int(event.get("at") or 0),
+                "warbandFirst": bool(event.get("warbandFirst")),
+            })
+
+    housing_level_ups = []
+    for event in record.get("housingLevelUps") or []:
+        if isinstance(event, dict) and event.get("level"):
+            housing_level_ups.append({
+                "level": int(event["level"]),
+                "at": int(event.get("at") or 0),
+            })
+
     def collections(key: str) -> list[dict]:
         cleaned = []
         for event in record.get(key) or []:
@@ -349,6 +367,9 @@ def normalise(record: dict) -> dict | None:
         "pets": collections("pets"),
         "quests": quests,
         "toys": collections("toys"),
+        "housingItems": housing_items,
+        "housingXP": int(record.get("housingXP") or 0),
+        "housingLevelUps": housing_level_ups,
     }
 
 

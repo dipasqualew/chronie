@@ -67,6 +67,8 @@ function ns.newResultsWindow(deps)
         pets = false,
         quests = false,
         toys = false,
+        housingItems = false,
+        housingLevelUps = false,
     }
     local reviewedTransmogs = {}
     local reviewedSessionKey
@@ -197,8 +199,11 @@ function ns.newResultsWindow(deps)
         local reputation = summary.reputation or {}
         local toys = summary.toys or {}
         local transmogs = summary.transmogs or {}
+        local housingItems = summary.housingItems or {}
+        local housingLevelUps = summary.housingLevelUps or {}
+        local housingXP = summary.housingXP or 0
         if #achievements + #currencies + #levelUps + #mounts + #pets + #quests
-            + #reputation + #toys + #transmogs > 0 then
+            + #reputation + #toys + #transmogs + #housingItems + #housingLevelUps + housingXP > 0 then
             line("------------------------", "", MUTED_COLOR)
         end
 
@@ -329,6 +334,47 @@ function ns.newResultsWindow(deps)
         end
 
         collection("Toys", "toys", toys)
+
+        if #housingItems > 0 then
+            local warband, additional = 0, 0
+            for _, event in ipairs(housingItems) do
+                if event.warbandFirst then
+                    warband = warband + 1
+                else
+                    additional = additional + 1
+                end
+            end
+            local housingValue = ACCOUNT_HEX .. warband .. " warband" .. COLOR_END
+                .. " / " .. CHARACTER_HEX .. additional .. " extra" .. COLOR_END
+            line(disclosure("Housing items", expanded.housingItems), housingValue, VALUE_COLOR, function()
+                expanded.housingItems = not expanded.housingItems
+                render(latest)
+            end, SUMMARY_VALUE_WIDTH)
+            if expanded.housingItems then
+                for _, event in ipairs(housingItems) do
+                    local scope = event.warbandFirst and "warband first" or "additional"
+                    local color = event.warbandFirst and ACCOUNT_COLOR or VARIANT_COLOR
+                    line("  " .. event.name, scope, color)
+                end
+            end
+        end
+
+        if housingXP > 0 then
+            line("Housing XP", "+" .. housingXP, REP_COLOR)
+        end
+
+        if #housingLevelUps > 0 then
+            line(disclosure("Housing levels", expanded.housingLevelUps), tostring(#housingLevelUps),
+                VALUE_COLOR, function()
+                    expanded.housingLevelUps = not expanded.housingLevelUps
+                    render(latest)
+                end)
+            if expanded.housingLevelUps then
+                for _, event in ipairs(housingLevelUps) do
+                    line("  Level " .. event.level, "reached", REP_COLOR)
+                end
+            end
+        end
 
         if #transmogs > 0 then
             local appearances = 0

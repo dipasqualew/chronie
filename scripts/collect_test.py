@@ -168,6 +168,9 @@ class NormaliseTest(unittest.TestCase):
             "transmogs": [{"id": 19019, "at": 175}],
             "quests": [{"id": 7848, "at": 180}],
             "toys": [{"id": 789, "name": "Katy's Stampwhistle", "at": 185}],
+            "housingItems": [{"id": 4001, "name": "Sturdy Oak Chair", "at": 190, "warbandFirst": True}],
+            "housingXP": 300,
+            "housingLevelUps": [{"level": 3, "at": 195}],
         }
         base.update(overrides)
         return base
@@ -192,6 +195,11 @@ class NormaliseTest(unittest.TestCase):
         }])
         self.assertEqual(cleaned["quests"], [{"id": 7848, "at": 180}])
         self.assertEqual(cleaned["toys"], [{"id": 789, "name": "Katy's Stampwhistle", "at": 185}])
+        self.assertEqual(cleaned["housingItems"], [
+            {"id": 4001, "name": "Sturdy Oak Chair", "at": 190, "warbandFirst": True},
+        ])
+        self.assertEqual(cleaned["housingXP"], 300)
+        self.assertEqual(cleaned["housingLevelUps"], [{"level": 3, "at": 195}])
 
     def test_defaults_the_new_totals_to_zero_when_absent(self):
         cleaned = collect.normalise({"id": "a", "character": "Thrall-Ragnaros", "endedAt": 200})
@@ -206,6 +214,9 @@ class NormaliseTest(unittest.TestCase):
         self.assertEqual(cleaned["pets"], [])
         self.assertEqual(cleaned["quests"], [])
         self.assertEqual(cleaned["toys"], [])
+        self.assertEqual(cleaned["housingItems"], [])
+        self.assertEqual(cleaned["housingXP"], 0)
+        self.assertEqual(cleaned["housingLevelUps"], [])
 
     def test_drops_a_record_with_no_identity(self):
         self.assertIsNone(collect.normalise(self.record(id=None)))
@@ -237,6 +248,23 @@ class NormaliseTest(unittest.TestCase):
         cleaned = collect.normalise(self.record(quests=[{"at": 5}, "junk"]))
 
         self.assertEqual(cleaned["quests"], [])
+
+    def test_drops_a_housing_item_with_no_id(self):
+        cleaned = collect.normalise(self.record(housingItems=[{"at": 5}, "junk"]))
+
+        self.assertEqual(cleaned["housingItems"], [])
+
+    def test_defaults_a_housing_item_scope_to_a_duplicate(self):
+        cleaned = collect.normalise(self.record(housingItems=[{"id": 4001, "at": 5}]))
+
+        self.assertEqual(cleaned["housingItems"], [
+            {"id": 4001, "name": "4001", "at": 5, "warbandFirst": False},
+        ])
+
+    def test_drops_a_housing_level_up_with_no_level(self):
+        cleaned = collect.normalise(self.record(housingLevelUps=[{"at": 5}, "junk"]))
+
+        self.assertEqual(cleaned["housingLevelUps"], [])
 
     def test_dates_a_record_the_addon_never_dated(self):
         cleaned = collect.normalise(self.record(day=None))

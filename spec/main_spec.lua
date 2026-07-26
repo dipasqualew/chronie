@@ -1164,6 +1164,65 @@ describe("addon integration", function()
             assert.same({ { id = 789, name = "Katy's Stampwhistle", at = 1000 } }, summary.toys)
         end)
 
+        it("records a housing item as a warband first when the warband owns just one", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "none",
+                housingItems = { [4001] = { name = "Sturdy Oak Chair", quantity = 1 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("HOUSING_DECOR_ADDED", 4001)
+
+            assert.same(
+                { { id = 4001, name = "Sturdy Oak Chair", at = 1000, warbandFirst = true } },
+                app.tally.summary().housingItems
+            )
+        end)
+
+        it("records a duplicate housing item as not a warband first", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "none",
+                housingItems = { [4001] = { name = "Sturdy Oak Chair", quantity = 2 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("HOUSING_DECOR_ADDED", 4001)
+
+            assert.is_false(app.tally.summary().housingItems[1].warbandFirst)
+        end)
+
+        it("sums housing experience from the housing xp event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "none",
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("HOUSING_XP_GAINED", 120)
+            recorded.frame:fire("HOUSING_XP_GAINED", 80)
+
+            assert.equal(200, app.tally.summary().housingXP)
+        end)
+
+        it("records a housing level from the housing level up event", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "none",
+                now = 1700000000,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("HOUSING_LEVEL_UP", 3)
+
+            assert.same({ { level = 3, at = 1700000000 } }, app.tally.summary().housingLevelUps)
+        end)
+
         -- The open world is a tracked session now, so a loot line out there counts just
         -- as it would inside an instance.
         it("tracks loot fired out in the open world", function()
@@ -1319,6 +1378,9 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.QUEST_ACCEPTED)
             assert.equal(1, recorded.frame.registered.QUEST_LOG_UPDATE)
             assert.equal(1, recorded.frame.registered.QUEST_TURNED_IN)
+            assert.equal(1, recorded.frame.registered.HOUSING_DECOR_ADDED)
+            assert.equal(1, recorded.frame.registered.HOUSING_XP_GAINED)
+            assert.equal(1, recorded.frame.registered.HOUSING_LEVEL_UP)
         end)
     end)
 

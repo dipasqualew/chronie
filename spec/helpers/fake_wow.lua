@@ -429,8 +429,9 @@ end
 ---one account writing into the same SavedVariables table.
 ---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances, db,
 ---  tiers, money, instanceType, instanceName, difficultyId, difficultyName, itemPrices,
----  transmogSources, currencies, achievements, mounts, pets, toys, activeQuests, questStates,
----  lootFormats, factionFormats }`
+---  transmogSources, currencies, achievements, mounts, pets, toys, housingItems, activeQuests,
+---  questStates, lootFormats, factionFormats }`
+---  `housingItems` maps an id to `{ name, quantity }`, quantity being the warband-owned count.
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
 ---@return table env, table recorded
 function fake.newEnv(options)
@@ -468,6 +469,7 @@ function fake.newEnv(options)
     local mountNames = options.mounts or {}
     local pets = options.pets or {}
     local toyNames = options.toys or {}
+    local housingItems = options.housingItems or {}
     local activeQuests = options.activeQuests or {}
     local questStates = options.questStates or {}
 
@@ -550,6 +552,13 @@ function fake.newEnv(options)
         end,
         toyInfo = function(id)
             return toyNames[id]
+        end,
+        housingItemInfo = function(id)
+            local item = housingItems[id]
+            if not item then
+                return nil
+            end
+            return item.name, item.quantity
         end,
         activeQuestIDs = function()
             local ids = {}

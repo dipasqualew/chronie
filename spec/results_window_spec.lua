@@ -71,6 +71,9 @@ describe("ns.newResultsWindow", function()
             pets = {},
             quests = {},
             toys = {},
+            housingItems = {},
+            housingXP = 0,
+            housingLevelUps = {},
         }
         for key, value in pairs(overrides or {}) do
             base[key] = value
@@ -334,6 +337,74 @@ describe("ns.newResultsWindow", function()
             end
 
             assert.equal("reached", valueFor(rowsOf(frames[1]), "  Level 42"))
+        end)
+
+        it("summarises housing items as warband firsts against extras while collapsed", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                housingItems = {
+                    { id = 1, name = "Sturdy Oak Chair", warbandFirst = true },
+                    { id = 2, name = "Sturdy Oak Chair", warbandFirst = false },
+                    { id = 3, name = "Iron Sconce", warbandFirst = true },
+                },
+            }))
+
+            local value = valueFor(rowsOf(frames[1]), "Housing items +")
+            assert.is_not_nil(value)
+            assert.truthy(value:find("2 warband"))
+            assert.truthy(value:find("1 extra"))
+        end)
+
+        it("expands housing items with their warband scope", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                housingItems = {
+                    { id = 1, name = "Sturdy Oak Chair", warbandFirst = true },
+                    { id = 2, name = "Iron Sconce", warbandFirst = false },
+                },
+            }))
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "Housing items +" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            local lines = rowsOf(frames[1])
+            assert.equal("warband first", valueFor(lines, "  Sturdy Oak Chair"))
+            assert.equal("additional", valueFor(lines, "  Iron Sconce"))
+        end)
+
+        it("hides housing experience until some was gained", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ housingXP = 0 }))
+
+            assert.is_nil(valueFor(rowsOf(frames[1]), "Housing XP"))
+        end)
+
+        it("renders the housing experience total when gained", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ housingXP = 250 }))
+
+            assert.equal("+250", valueFor(rowsOf(frames[1]), "Housing XP"))
+        end)
+
+        it("expands housing levels with the level reached", function()
+            local window, frames = newWindow()
+            window.update(summary({ housingLevelUps = { { level = 3, at = 5000 } } }))
+
+            assert.equal("1", valueFor(rowsOf(frames[1]), "Housing levels +"))
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.text == "Housing levels +" then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            assert.equal("reached", valueFor(rowsOf(frames[1]), "  Level 3"))
         end)
 
         it("shows completed category headings alphabetically after a divider", function()

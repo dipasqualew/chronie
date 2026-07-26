@@ -23,6 +23,10 @@ local _, ns = ...
 ---@field mount fun(id: integer, name: string?, at: integer) Append a newly collected mount.
 ---@field pet fun(id: integer, name: string?, at: integer, guid: string?) Append a newly collected battle pet.
 ---@field toy fun(id: integer, name: string?, at: integer) Append a newly collected toy.
+---@field housingItem fun(id: integer, name: string?, at: integer, warbandFirst: boolean?)
+---Append a collected housing item.
+---@field housingXP fun(amount: integer) Fold a housing experience gain into the session total.
+---@field housingLevelUp fun(level: integer, at: integer) Append a housing level gained.
 ---@field isActive fun(): boolean
 ---@field hasEvents fun(): boolean Whether anything worth keeping happened this session.
 ---@field summary fun(): SessionSummary
@@ -66,6 +70,12 @@ local _, ns = ...
 ---@field at integer When it was collected.
 ---@field guid string? Instance GUID, present for battle pets.
 
+---@class HousingItemEvent
+---@field id integer Housing catalog entry / item ID.
+---@field name string Localised housing item name.
+---@field at integer When it was collected.
+---@field warbandFirst boolean True when the warband had never collected it; false for a duplicate.
+
 ---@class SessionSummary
 ---@field active boolean
 ---@field lootValue integer Vendor value of items entering the inventory, in copper.
@@ -83,6 +93,9 @@ local _, ns = ...
 ---@field pets CollectionEvent[] Battle pets collected, in acquisition order.
 ---@field quests QuestEvent[] Quests completed, in completion order.
 ---@field toys CollectionEvent[] Toys collected, in acquisition order.
+---@field housingItems HousingItemEvent[] Housing items collected, in acquisition order.
+---@field housingXP integer Housing experience gained over the session.
+---@field housingLevelUps LevelUpEvent[] Housing levels gained, in the order they were.
 
 ---@class SessionTallyDeps
 ---@field lootFormats string[]? Self-loot message templates, most specific first.
@@ -216,6 +229,9 @@ function ns.newSessionTally(deps)
         session.pets = {}
         session.quests = {}
         session.toys = {}
+        session.housingItems = {}
+        session.housingXP = 0
+        session.housingLevelUps = {}
     end
 
     begin(0)
@@ -404,6 +420,40 @@ function ns.newSessionTally(deps)
             end
         end,
 
+        ---A single housing item collected. Whether it is the warband's first copy or a
+        ---duplicate is decided upstream and folded onto the event, mirroring how a quest
+        ---carries its first-completion scope.
+        ---@param id integer
+        ---@param name string?
+        ---@param at integer
+        ---@param warbandFirst boolean?
+        housingItem = function(id, name, at, warbandFirst)
+            if session.active and id then
+                session.housingItems[#session.housingItems + 1] = {
+                    id = id,
+                    name = name or tostring(id),
+                    at = at,
+                    warbandFirst = warbandFirst and true or false,
+                }
+            end
+        end,
+
+        ---Folds a housing experience gain into the running session total.
+        ---@param amount integer
+        housingXP = function(amount)
+            if session.active and amount and amount ~= 0 then
+                session.housingXP = session.housingXP + amount
+            end
+        end,
+
+        ---@param level integer
+        ---@param at integer
+        housingLevelUp = function(level, at)
+            if session.active and level then
+                session.housingLevelUps[#session.housingLevelUps + 1] = { level = level, at = at }
+            end
+        end,
+
         ---@param event TransmogEvent
         transmog = function(event, at)
             if type(event) == "number" then
@@ -452,6 +502,9 @@ function ns.newSessionTally(deps)
                 or #session.pets > 0
                 or #session.quests > 0
                 or #session.toys > 0
+                or #session.housingItems > 0
+                or session.housingXP ~= 0
+                or #session.housingLevelUps > 0
         end,
 
         ---@return SessionSummary
@@ -490,6 +543,21 @@ function ns.newSessionTally(deps)
             local levelUps = {}
             for index, event in ipairs(session.levelUps) do
                 levelUps[index] = { level = event.level, at = event.at }
+            end
+
+            local housingLevelUps = {}
+            for index, event in ipairs(session.housingLevelUps) do
+                housingLevelUps[index] = { level = event.level, at = event.at }
+            end
+
+            local housingItems = {}
+            for index, event in ipairs(session.housingItems) do
+                housingItems[index] = {
+                    id = event.id,
+                    name = event.name,
+                    at = event.at,
+                    warbandFirst = event.warbandFirst,
+                }
             end
 
             local transmogs = {}
@@ -540,6 +608,9 @@ function ns.newSessionTally(deps)
                 pets = copyCollection(session.pets),
                 quests = quests,
                 toys = copyCollection(session.toys),
+                housingItems = housingItems,
+                housingXP = session.housingXP,
+                housingLevelUps = housingLevelUps,
             }
         end,
     }

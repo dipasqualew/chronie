@@ -29,6 +29,9 @@ local _, ns = ...
 ---@field pets CollectionEvent[]
 ---@field quests QuestEvent[]
 ---@field toys CollectionEvent[]
+---@field housingItems HousingItemEvent[]
+---@field housingXP integer Housing experience gained over the session.
+---@field housingLevelUps LevelUpEvent[]
 
 ---What the tracker hands over when a session ends.
 ---@class SessionVisit
@@ -133,6 +136,21 @@ function ns.newSessionLog(deps)
         return copy
     end
 
+    ---@param events HousingItemEvent[]?
+    ---@return HousingItemEvent[]
+    local function copyHousingItems(events)
+        local copy = {}
+        for index, event in ipairs(events or {}) do
+            copy[index] = {
+                id = event.id,
+                name = event.name,
+                at = event.at,
+                warbandFirst = event.warbandFirst and true or false,
+            }
+        end
+        return copy
+    end
+
     ---@param completed QuestEvent[]?
     ---@return QuestEvent[]
     local function copyQuests(completed)
@@ -215,6 +233,9 @@ function ns.newSessionLog(deps)
                 pets = copyCollection(summary.pets),
                 quests = copyQuests(summary.quests),
                 toys = copyCollection(summary.toys),
+                housingItems = copyHousingItems(summary.housingItems),
+                housingXP = summary.housingXP or 0,
+                housingLevelUps = copyLevelUps(summary.housingLevelUps),
             }
 
             local replaced = false

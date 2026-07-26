@@ -34,6 +34,7 @@ read_globals = {
     "C_MountJournal",
     "C_PetJournal",
     "C_ToyBox",
+    "C_HousingCatalog",
     "GetAchievementInfo",
     "AchievementFrame_LoadUI",
     "AchievementFrame",

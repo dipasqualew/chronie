@@ -49,6 +49,11 @@ describe("ns.newSessionLog", function()
                 pets = {},
                 quests = { { id = 7848, at = NOW - 50 } },
                 toys = {},
+                housingItems = {
+                    { id = 4001, name = "Sturdy Oak Chair", at = NOW - 40, warbandFirst = true },
+                },
+                housingXP = 300,
+                housingLevelUps = { { level = 3, at = NOW - 30 } },
             },
         }
         for key, value in pairs(overrides or {}) do
@@ -94,6 +99,11 @@ describe("ns.newSessionLog", function()
                 pets = {},
                 quests = { { id = 7848, at = NOW - 50 } },
                 toys = {},
+                housingItems = {
+                    { id = 4001, name = "Sturdy Oak Chair", at = NOW - 40, warbandFirst = true },
+                },
+                housingXP = 300,
+                housingLevelUps = { { level = 3, at = NOW - 30 } },
             }, db.sessions[1])
         end)
 
@@ -140,6 +150,9 @@ describe("ns.newSessionLog", function()
             assert.same({}, record.pets)
             assert.same({}, record.quests)
             assert.same({}, record.toys)
+            assert.same({}, record.housingItems)
+            assert.equal(0, record.housingXP)
+            assert.same({}, record.housingLevelUps)
         end)
 
         it("stores an empty difficulty rather than a hole when the client named none", function()
@@ -267,6 +280,31 @@ describe("ns.newSessionLog", function()
                     accountFirst = false,
                 },
             }, record.quests)
+        end)
+
+        it("copies the housing item list and keeps the warband scope", function()
+            local log = newLog()
+            local pending = visit()
+
+            local record = log.record(pending)
+            pending.summary.housingItems[1].name = "Rewritten"
+            pending.summary.housingItems[2] = { id = 4002, name = "Extra", at = NOW, warbandFirst = false }
+
+            assert.same({
+                { id = 4001, name = "Sturdy Oak Chair", at = NOW - 40, warbandFirst = true },
+            }, record.housingItems)
+            assert.not_equal(pending.summary.housingItems[1], record.housingItems[1])
+        end)
+
+        it("copies the housing level-up list out of the caller's summary", function()
+            local log = newLog()
+            local pending = visit()
+
+            local record = log.record(pending)
+            pending.summary.housingLevelUps[1].level = 99
+            pending.summary.housingLevelUps[2] = { level = 4, at = NOW }
+
+            assert.same({ { level = 3, at = NOW - 30 } }, record.housingLevelUps)
         end)
     end)
 
