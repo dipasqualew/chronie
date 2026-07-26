@@ -6,8 +6,9 @@
 //! list for the window.
 //!
 //! Opening a set goes four hops further — `TransmogSetItem` → `ItemModifiedAppearance` →
-//! `ItemAppearance` → `ItemDisplayInfo` — which is what [`set_items`] walks. That chain is
-//! written down in `docs/game-files.md`, verified against a real install.
+//! `ItemAppearance` → `ItemDisplayInfo` — which is what [`set_items`] walks, with a fifth
+//! table, `ItemSparse`, asked what each item ended up being called. That chain is written
+//! down in `docs/game-files.md`, verified against a real install.
 //!
 //! The column numbers below are the layout the game has used since patch 12.0.0, and they
 //! are the one thing here that a game patch can invalidate. They come from the community's
@@ -15,7 +16,7 @@
 //! wrong values rather than fail, so [`sets`] checks the row count it ends up with against
 //! the count the file declares.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -32,6 +33,9 @@ const ITEM_APPEARANCE: u32 = 982462;
 /// Shared with `models`, which reaches the same table by a different question: this module
 /// asks whether a display has geometry, that one asks what it is.
 pub const ITEM_DISPLAY_INFO: u32 = 1266429;
+/// Every item in the game and what it is called. 63 MB of it, and the only table here whose
+/// records vary in length.
+const ITEM_SPARSE: u32 = 1572924;
 
 /// Columns of `TransmogSet`, in the order the file stores them.
 mod set_column {
@@ -67,6 +71,23 @@ mod appearance_column {
     pub const DISPLAY_TYPE: usize = 0;
     pub const DISPLAY_INFO_ID: usize = 1;
     pub const ICON_FILE_DATA_ID: usize = 2;
+}
+
+/// Columns of `ItemSparse`, whose records vary in length.
+///
+/// A column of such a table is only findable by walking the ones in front of it, and a string
+/// column is as long as the text in it — so the reader has to be told which columns those are
+/// before it can find any of them. `ItemSparse` opens with five.
+///
+/// **These positions are the community's and were not read off an install**, unlike the chain
+/// above them. A patch that reorders the table shows empty names rather than wrong ones,
+/// because the view falls back to the item's id.
+mod item_column {
+    /// What the item is called.
+    pub const NAME: usize = 5;
+    /// Every column of the table that holds text, in the order it holds them: the item's
+    /// description, its three alternate display names, and its name.
+    pub const TEXT: [usize; 5] = [1, 2, 3, 4, 5];
 }
 
 /// Columns of `ItemDisplayInfo`.
@@ -181,6 +202,9 @@ pub struct TransmogSetAppearance {
     /// The appearance the set itself names, which is where the chain starts.
     pub modified_appearance_id: u32,
     pub item_id: u32,
+    /// What the game calls the item, or empty when it does not say — because the item is in a
+    /// section this install cannot decrypt, or because the table holds no name for it.
+    pub name: String,
     pub appearance_id: u32,
     /// Which slot the appearance fills, as `ItemAppearance` numbers them: 0 head,
     /// 1 shoulder, 2 through 10 the rest of the armour, 11 upward weapons and shields.
@@ -267,6 +291,7 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
             TransmogSetAppearance {
                 modified_appearance_id,
                 item_id,
+                name: String::new(),
                 appearance_id,
                 display_type,
                 display_info_id,
@@ -287,7 +312,43 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
             appearance.modified_appearance_id,
         )
     });
+    name_items(files, &mut found)?;
     Ok(payload(set_id, found))
+}
+
+/// Fills in what the game calls each of a set's items, out of `ItemSparse`.
+///
+/// That table is every item in the game — 63 MB of it on a shipping build, an order of
+/// magnitude more than the rest of the chain put together — so nothing is kept from it beyond
+/// the dozen names a set actually needs. The rows are walked once and only the ones an
+/// appearance here belongs to are turned into text; the file itself is dropped on the way out.
+///
+/// An item the table says nothing about keeps an empty name rather than costing its row. The
+/// game encrypts the items of content it has not shipped, exactly as it does everywhere else
+/// along this chain, and a name is the least of what a row is worth opening a set for.
+fn name_items(
+    files: &dyn GameFiles,
+    appearances: &mut [TransmogSetAppearance],
+) -> Result<(), String> {
+    let wanted: HashSet<u32> = appearances
+        .iter()
+        .map(|appearance| appearance.item_id)
+        .filter(|item_id| *item_id != 0)
+        .collect();
+    if wanted.is_empty() {
+        return Ok(());
+    }
+
+    let items = Db2::parse_with_text_columns(files.read(ITEM_SPARSE)?, &item_column::TEXT)?;
+    let names: HashMap<u32, String> = items
+        .rows()
+        .filter(|row| wanted.contains(&row.id()))
+        .map(|row| (row.id(), row.text(item_column::NAME)))
+        .collect();
+    for appearance in appearances {
+        appearance.name = names.get(&appearance.item_id).cloned().unwrap_or_default();
+    }
+    Ok(())
 }
 
 /// The set's appearances as the window reads them, with the shortfall counted.
@@ -479,22 +540,26 @@ mod tests {
             opened["appearances"],
             json!([
                 {
-                    "modifiedAppearanceId": 71006, "itemId": 30006, "appearanceId": 80006,
+                    "modifiedAppearanceId": 71006, "itemId": 30006, "name": "Emberforge Helm",
+                    "appearanceId": 80006,
                     "displayType": 0, "displayInfoId": 900001, "iconFileDataId": 130001,
                     "hasModel": true,
                 },
                 {
-                    "modifiedAppearanceId": 71007, "itemId": 30007, "appearanceId": 80007,
+                    "modifiedAppearanceId": 71007, "itemId": 30007, "name": "Emberforge Pauldrons",
+                    "appearanceId": 80007,
                     "displayType": 1, "displayInfoId": 900009, "iconFileDataId": 130002,
                     "hasModel": true,
                 },
                 {
-                    "modifiedAppearanceId": 71008, "itemId": 30008, "appearanceId": 80008,
+                    "modifiedAppearanceId": 71008, "itemId": 30008,
+                    "name": "Emberforge Breastplate", "appearanceId": 80008,
                     "displayType": 2, "displayInfoId": 900003, "iconFileDataId": 130003,
                     "hasModel": false,
                 },
                 {
-                    "modifiedAppearanceId": 71009, "itemId": 30009, "appearanceId": 80009,
+                    "modifiedAppearanceId": 71009, "itemId": 30009, "name": "Emberforge Greaves",
+                    "appearanceId": 80009,
                     "displayType": 4, "displayInfoId": 900006, "iconFileDataId": 130006,
                     "hasModel": false,
                 },
@@ -540,14 +605,15 @@ mod tests {
             json!([
                 // The other one gets as far as its slot and then stops: its display info is
                 // encrypted too, so "no model" here is the absence of an answer rather than
-                // one.
+                // one. `ItemSparse` encrypts the item itself, so it goes unnamed as well.
                 {
-                    "modifiedAppearanceId": 71011, "itemId": 30011, "appearanceId": 80011,
+                    "modifiedAppearanceId": 71011, "itemId": 30011, "name": "",
+                    "appearanceId": 80011,
                     "displayType": 2, "displayInfoId": 900900, "iconFileDataId": 130008,
                     "hasModel": false,
                 },
                 {
-                    "modifiedAppearanceId": 71012, "itemId": 0, "appearanceId": 0,
+                    "modifiedAppearanceId": 71012, "itemId": 0, "name": "", "appearanceId": 0,
                     "displayType": 0, "displayInfoId": 0, "iconFileDataId": 0,
                     "hasModel": false,
                 },
@@ -566,17 +632,51 @@ mod tests {
     }
 
     // An appearance the table gives no icon still belongs to the set, and zero is the answer
-    // rather than a reason to leave it out.
+    // rather than a reason to leave it out. Its item is the one `ItemSparse` holds a row for
+    // and no name in, which is the other way a row can arrive unnamed.
     #[test]
     fn names_an_appearance_the_table_gives_no_icon() {
         assert_eq!(
             opened(206)["appearances"],
             json!([{
-                "modifiedAppearanceId": 71013, "itemId": 30013, "appearanceId": 80013,
+                "modifiedAppearanceId": 71013, "itemId": 30013, "name": "",
+                "appearanceId": 80013,
                 "displayType": 10, "displayInfoId": 900008, "iconFileDataId": 0,
                 "hasModel": false,
             }])
         );
+    }
+
+    // The fifth table of the chain, and the reason the reader learned to read records that
+    // vary in length: what the game actually calls each of a set's items.
+    #[test]
+    fn names_the_item_behind_every_appearance() {
+        let opened = opened(201);
+        let named: Vec<(&Value, &Value)> = opened["appearances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|appearance| (&appearance["itemId"], &appearance["name"]))
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                // The set names its first appearance twice, and both rows are named.
+                (&json!(30001), &json!("Tideglass Crown")),
+                (&json!(30001), &json!("Tideglass Crown")),
+                (&json!(30002), &json!("Tideglass Mantle")),
+                (&json!(30003), &json!("Tideglass Robe")),
+            ]
+        );
+    }
+
+    // `ItemSparse` is the largest file the app reads by an order of magnitude, and a set the
+    // install can say nothing about is not worth opening it for.
+    #[test]
+    fn does_not_read_the_item_table_for_a_set_it_can_name_nothing_in() {
+        let files = Noted::new();
+        set_items(&files, 900).unwrap();
+        assert!(!files.asked.into_inner().contains(&ITEM_SPARSE));
     }
 
     // Set 900 belongs to content the game has not shipped, so `TransmogSetItem` says nothing

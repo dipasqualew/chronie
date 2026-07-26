@@ -215,6 +215,8 @@ export interface TransmogAppearance {
   /** The `ItemModifiedAppearance` the set names, which is where the chain starts. */
   modifiedAppearanceId: number;
   itemId: number;
+  /** What the game calls the item, or empty where its table says nothing. */
+  name: string;
   appearanceId: number;
   /** Which slot it fills: 0 head, 1 shoulder, 2–10 the rest of the armour, 11 up weapons. */
   displayType: number;

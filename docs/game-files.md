@@ -35,9 +35,12 @@ needs to touch it.
 The format packs hard, and four of its habits have caused real trouble:
 
 **Rows are not always fixed-size.** A table with `flags & 0x1` stores variable-length
-records and an offset map instead of `record_size × rows`. `db2.rs` currently skips the
-offset map and assumes fixed records, so **it cannot read such a table at all**.
-`ItemSparse` is the one that matters — see the table below.
+records and an offset map instead of `record_size × rows`, and writes its strings *into* the
+record rather than into a block of its own. Nothing in the file says which columns hold those
+strings, and a reader that does not know cannot find any column behind the first of them — so
+the caller says: `Db2::parse_with_text_columns(bytes, &[…])`. Plain `Db2::parse` still reads
+such a table, but only as far as its first string. `ItemSparse` is the one that matters — see
+the table below.
 
 **A foreign key can live outside the row.** The community definitions mark these
 `$noninline,relation$`. They are not a column; they sit in a relationship block beside
@@ -87,20 +90,33 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `HelmetGeosetData` | 2821752 | fixed | yes |
 | `Achievement` | 1260179 | fixed | yes |
 | `Achievement_Category` | 1324299 | fixed | yes |
-| **`ItemSparse`** | **1572924** | **offset map** | **no — see below** |
+| `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` |
 
 ### ItemSparse
 
 Item *names* live here and nowhere smaller. Measured on 12.0.5.67: 63 MB decompressed,
 171,964 rows, `flags = 5`, 171,964 offset-map entries, 24 sections.
 
-`flags = 5` is bit 0 (offset map) and bit 2 (id list). `db2.rs` cannot read it until it
-grows variable-length record support. This is a format feature, not merely a large read —
-worth knowing before promising item names.
+`flags = 5` is bit 0 (offset map) and bit 2 (id list): variable-length records addressed
+through a map beside them, with the ids kept in a list of their own. Reading it needed the
+whole feature described above rather than merely a bigger read.
+
+**Its column positions are the community's and were not read off an install**, unlike the
+chains below. The table opens with `AllowableRace<64>` and then five strings —
+`Description_lang`, `Display3_lang`, `Display2_lang`, `Display1_lang`, `Display_lang` — so
+the name is column 5 and columns 1 through 5 are the ones the reader has to be told about. A
+patch that reorders them shows *empty* names rather than wrong ones, because the detail view
+falls back to the item's id; that is the symptom to look for.
+
+It is also the largest thing this app reads. `transmog.rs` keeps nothing from it: the rows
+are walked once per set opened and only the dozen names that set needs become strings, so the
+63 MB is transient and no cache has to be invalidated when the player patches the game.
 
 ## The chain, verified
 
-Every hop below was resolved on a real install with **zero unresolved lookups**.
+Every hop below was resolved on a real install with **zero unresolved lookups** — except the
+one into `ItemSparse`, which was added afterwards and whose column positions are the
+community's rather than this repository's, as its own section above says.
 
 ```
 TransmogSetItem
@@ -109,7 +125,7 @@ TransmogSetItem
      │
      ▼
 ItemModifiedAppearance            (id inline)
-  col1 = ItemID
+  col1 = ItemID  ────────────────▶ ItemSparse.col5 = Display_lang, the item's name
   col3 = ItemAppearanceID
      │
      ▼
@@ -252,9 +268,14 @@ bun run scripts/make-achievement-fixtures.ts
 Every table on the chains above has a fixture, and between them they hold each way a hop can
 fail: an appearance stored as a copy of another, an `ItemModifiedAppearance` row the game
 encrypts, an `ItemAppearance` whose display info is encrypted, one with no icon at all, a
-display whose only model sits in the second slot, an achievement filed under a category
-whose parent is encrypted, one filed under a category that is not in the tree at all, and
-one the game withholds entirely.
+display whose only model sits in the second slot, an item `ItemSparse` holds a row for and no
+name in, an achievement filed under a category whose parent is encrypted, one filed under a
+category that is not in the tree at all, and one the game withholds entirely.
+
+The `ItemSparse` fixture is the only one with variable-length records, and it is where that
+half of the reader is exercised: strings written into the record, records addressed through
+the offset map, numeric columns *behind* the strings that only a reader which walked them
+finds, and an encrypted section whose offset map arrives as zeroes along with its rows.
 
 The transmog script also writes the models: invented `.m2` files with the chunk layout the retail
 client uses, their `.skin` profiles, and the `.blp`s they are painted with. Between them they

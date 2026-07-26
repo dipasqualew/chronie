@@ -8,6 +8,11 @@
 //!
 //! It is deliberately schema-free. Which column means what belongs to the caller, because
 //! that is the part that changes between game patches; the shape of the file does not.
+//!
+//! Most tables lay every row out at the same size, one after another, and a table that does
+//! not — `ItemSparse`, which is where item names live — writes an offset map beside the rows
+//! saying where each one starts and how long it is, and puts its strings inside the records
+//! rather than in a block of their own. [`Db2::parse_with_text_columns`] reads those.
 
 use std::collections::HashMap;
 
@@ -67,6 +72,9 @@ struct Section {
     rows: usize,
     /// Where this section's rows start in the file.
     records_at: usize,
+    /// How much room they take, which for a table of variable-length records is the only
+    /// thing that says where the section's rows end.
+    records_size: usize,
     /// Where this section's strings start in the file.
     strings_at: usize,
     strings_size: usize,
@@ -77,6 +85,9 @@ struct Section {
     /// The foreign key each record belongs to, for a table that keeps one outside the row.
     /// Indexed by the record's position in this section; zero where the table keeps none.
     foreign_ids: Vec<u32>,
+    /// Where each record starts and how long it is, for a table of variable-length records.
+    /// Empty for the ordinary kind, whose records are all `record_size` bytes.
+    offsets: Vec<(usize, usize)>,
 }
 
 /// A parsed DB2 table.
@@ -91,6 +102,10 @@ pub struct Db2 {
     copies: Vec<(u32, u32)>,
     /// Total rows across every section, encrypted ones included, as the header counts them.
     total_rows: usize,
+    /// True when the records vary in length and are addressed through an offset map.
+    variable: bool,
+    /// The columns holding text written into the record, for such a table. In column order.
+    text_columns: Vec<usize>,
 }
 
 /// One row, addressed by column.
@@ -105,6 +120,11 @@ pub struct Row<'a> {
 /// The parts of a section header the parser needs before it can place the sections.
 struct RawSection {
     encrypted: bool,
+    /// Where the section's records sit in the file, as the file itself says. Only a table of
+    /// variable-length records needs it: its offset map is written in the same terms.
+    file_offset: usize,
+    /// Where those records end, which is the only statement of their total size.
+    records_end: usize,
     rows: usize,
     strings_size: usize,
     id_list_size: usize,
@@ -114,8 +134,23 @@ struct RawSection {
 }
 
 impl Db2 {
-    /// Parses a DB2 file.
+    /// Parses a DB2 file of fixed-size records, which is every table but one.
     pub fn parse(data: Vec<u8>) -> Result<Self, String> {
+        Self::parse_with_text_columns(data, &[])
+    }
+
+    /// Parses a DB2 file, told which of its columns hold text written into the record.
+    ///
+    /// A table of fixed-size records keeps its strings in a block of their own, and a column
+    /// holding one is an offset into it — which the reader can follow knowing nothing about
+    /// what the column means. A table of variable-size records writes the text into the
+    /// record instead, so a string is as long as the text in it and every column after one
+    /// moves. Nothing in the file says which columns those are, and a reader that does not
+    /// know cannot find any column past the first of them. So the caller says, which is the
+    /// same bargain the rest of this module makes about which column means what.
+    ///
+    /// Naming them for a table of fixed-size records changes nothing.
+    pub fn parse_with_text_columns(data: Vec<u8>, text_columns: &[usize]) -> Result<Self, String> {
         if data.len() < 204 || &data[0..4] != b"WDC5" {
             return Err("Not a WDC5 table; this build of the game is not supported.".into());
         }
@@ -131,6 +166,8 @@ impl Db2 {
         let total_rows = word(head)? as usize;
         let column_count = word(head + 4)? as usize;
         let record_size = word(head + 8)? as usize;
+        // Bit 0 says the records vary in length; bit 2 says the ids are kept beside them.
+        let variable = u16::from_le_bytes(data[head + 36..head + 38].try_into().unwrap()) & 1 != 0;
         let id_column =
             u16::from_le_bytes(data[head + 38..head + 40].try_into().unwrap()) as usize;
         let total_column_count = word(head + 40)? as usize;
@@ -154,6 +191,8 @@ impl Db2 {
                 .ok_or("The table ends inside its section headers.")?;
             raw_sections.push(RawSection {
                 encrypted: u64::from_le_bytes(header[0..8].try_into().unwrap()) != 0,
+                file_offset: u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize,
+                records_end: u32::from_le_bytes(header[20..24].try_into().unwrap()) as usize,
                 rows: u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize,
                 strings_size: u32::from_le_bytes(header[16..20].try_into().unwrap()) as usize,
                 id_list_size: u32::from_le_bytes(header[24..28].try_into().unwrap()) as usize,
@@ -239,7 +278,14 @@ impl Db2 {
         let mut strings_base = 0usize;
         for raw in &raw_sections {
             let records_at = at;
-            let strings_at = records_at + record_size * raw.rows;
+            // Records of one size take a row count's worth of room; records of many say where
+            // they end and nowhere else.
+            let records_size = if variable {
+                raw.records_end.saturating_sub(raw.file_offset)
+            } else {
+                record_size * raw.rows
+            };
+            let strings_at = records_at + records_size;
             at = strings_at + raw.strings_size;
 
             let id_list = data
@@ -262,20 +308,25 @@ impl Db2 {
                 }
             }
             at += raw.copy_count * 8;
+            let offsets = read_offset_map(&data, at, raw, records_at)?;
             at += raw.offset_map_count * 6;
             let foreign_ids = read_relationship_map(&data, at, raw.relationship_size, raw.rows)?;
             at += raw.relationship_size;
+            // The row ids again, for a table of variable-length records. Every such table the
+            // game ships also keeps the id list above, which is where the ids are taken from.
             at += raw.offset_map_count * 4;
 
             sections.push(Section {
                 encrypted: raw.encrypted,
                 rows: raw.rows,
                 records_at,
+                records_size,
                 strings_at,
                 strings_size: raw.strings_size,
                 strings_base,
                 id_list,
                 foreign_ids,
+                offsets,
             });
             strings_base += raw.strings_size;
         }
@@ -291,6 +342,8 @@ impl Db2 {
             sections,
             copies,
             total_rows,
+            variable,
+            text_columns: text_columns.to_vec(),
         })
     }
 
@@ -348,11 +401,43 @@ impl Db2 {
         if !section.encrypted {
             return false;
         }
-        let end = section.records_at + self.record_size * section.rows;
+        let end = section.records_at + section.records_size;
         self.data
             .get(section.records_at..end)
             .is_none_or(|rows| rows.iter().all(|byte| *byte == 0))
     }
+}
+
+/// Reads the map saying where each record of a variable-length table starts and ends.
+///
+/// The entries are a position and a length apiece, and the position is written the way the
+/// file itself counts — from its own front, in the same terms as the section's `file_offset`.
+/// That is rebased onto where the section's records actually turned out to be, so the parser's
+/// own walk of the file stays the thing that places everything.
+///
+/// A section that arrived encrypted has this block reserved and written as zeroes, like the
+/// rows it describes; its records are skipped rather than read from wherever a zero points.
+fn read_offset_map(
+    data: &[u8],
+    at: usize,
+    raw: &RawSection,
+    records_at: usize,
+) -> Result<Vec<(usize, usize)>, String> {
+    let mut offsets = Vec::with_capacity(raw.offset_map_count);
+    let entries = data
+        .get(at..at + raw.offset_map_count * 6)
+        .ok_or("The table ends inside its offset map.")?;
+    for entry in entries.chunks_exact(6) {
+        let position = u32::from_le_bytes(entry[0..4].try_into().unwrap()) as usize;
+        let size = u16::from_le_bytes(entry[4..6].try_into().unwrap()) as usize;
+        // A record before the section it is in is no record at all, and reading from where it
+        // says would be reading somebody else's row.
+        match position.checked_sub(raw.file_offset) {
+            Some(within) => offsets.push((records_at + within, size)),
+            None => offsets.push((data.len(), 0)),
+        }
+    }
+    Ok(offsets)
 }
 
 /// Reads the block tying each record to a foreign key that is not a column of the row.
@@ -423,16 +508,21 @@ impl Row<'_> {
         let Some(info) = self.table.columns.get(self.table.id_column) else {
             return 0;
         };
+        let Some(offset_bits) = self.column_bits(self.table.id_column) else {
+            return 0;
+        };
         match info.storage {
-            Storage::Plain => self.plain(info),
-            Storage::BitpackedSigned => sign_extend(self.bits(info), info.size_bits) as u32,
+            Storage::Plain => self.plain_at(offset_bits, info.size_bits),
+            Storage::BitpackedSigned => {
+                sign_extend(self.bits_at(offset_bits, info.size_bits), info.size_bits) as u32
+            }
             Storage::Indexed | Storage::IndexedArray => {
-                let index = self.bits(info) as usize;
+                let index = self.bits_at(offset_bits, info.size_bits) as usize;
                 info.palette.get(index).copied().unwrap_or(0)
             }
             // A table never keeps its ids in a sparse column, so anything else is a plain
             // bit field.
-            _ => self.bits(info) as u32,
+            _ => self.bits_at(offset_bits, info.size_bits) as u32,
         }
     }
 
@@ -441,17 +531,26 @@ impl Row<'_> {
         let Some(info) = self.table.columns.get(column) else {
             return 0;
         };
+        if info.storage == Storage::Common {
+            return *info.common.get(&self.stored_id()).unwrap_or(&info.default);
+        }
+        let Some(offset_bits) = self.column_bits(column) else {
+            return 0;
+        };
         match info.storage {
-            Storage::Plain => self.plain(info),
-            Storage::Common => *info.common.get(&self.stored_id()).unwrap_or(&info.default),
-            Storage::Bitpacked => self.bits(info) as u32,
-            Storage::BitpackedSigned => sign_extend(self.bits(info), info.size_bits) as u32,
+            Storage::Plain => self.plain_at(offset_bits, info.size_bits),
+            Storage::Common => unreachable!("a sparse column is answered above"),
+            Storage::Bitpacked => self.bits_at(offset_bits, info.size_bits) as u32,
+            Storage::BitpackedSigned => {
+                sign_extend(self.bits_at(offset_bits, info.size_bits), info.size_bits) as u32
+            }
             Storage::Indexed => {
-                let index = self.bits(info) as usize;
+                let index = self.bits_at(offset_bits, info.size_bits) as usize;
                 info.palette.get(index).copied().unwrap_or(0)
             }
             Storage::IndexedArray => {
-                let index = self.bits(info) as usize * info.array_count.max(1) as usize;
+                let index = self.bits_at(offset_bits, info.size_bits) as usize
+                    * info.array_count.max(1) as usize;
                 info.palette.get(index).copied().unwrap_or(0)
             }
         }
@@ -484,11 +583,15 @@ impl Row<'_> {
         let Some(info) = self.table.columns.get(column) else {
             return 0;
         };
+        let Some(offset_bits) = self.column_bits(column) else {
+            return 0;
+        };
         match info.storage {
             // A palette column of runs already knows its own element count, so it needs no
             // help placing one: the index names the run, and this picks out of it.
             Storage::IndexedArray => {
-                let run = self.bits(info) as usize * info.array_count.max(1) as usize;
+                let run = self.bits_at(offset_bits, info.size_bits) as usize
+                    * info.array_count.max(1) as usize;
                 if index >= info.array_count.max(1) as usize {
                     return 0;
                 }
@@ -498,13 +601,18 @@ impl Row<'_> {
                 if element_bits == 0 {
                     return 0;
                 }
-                let start = info.offset_bits + index as u32 * element_bits;
+                let Some(into) = u32::try_from(index)
+                    .ok()
+                    .and_then(|index| index.checked_mul(element_bits))
+                else {
+                    return 0;
+                };
                 // Reading past the column's own width would quietly return the next
                 // column's bytes, which is worse than admitting there is no such element.
-                if start + element_bits > info.offset_bits + info.size_bits {
+                if into.saturating_add(element_bits) > info.size_bits {
                     return 0;
                 }
-                self.plain_at(start, element_bits)
+                self.plain_at(offset_bits + into, element_bits)
             }
             // Every other storage holds one value per row, so only the first element exists.
             _ => {
@@ -519,9 +627,11 @@ impl Row<'_> {
 
     /// Reads a column that holds a string.
     ///
-    /// The row stores a distance rather than a position: the offset counts forward from
-    /// where the column itself sits, in a space that runs across every section's rows and
-    /// then every section's strings. Undoing that is the fiddly part.
+    /// Where the text is depends on how the table stores its rows. A table of variable-length
+    /// records writes it into the record, so it is simply there. Every other table keeps a
+    /// distance instead: the offset counts forward from where the column itself sits, in a
+    /// space that runs across every section's rows and then every section's strings. Undoing
+    /// that is the fiddly part.
     pub fn text(&self, column: usize) -> String {
         let table = self.table;
         let Some(info) = table.columns.get(column) else {
@@ -530,7 +640,14 @@ impl Row<'_> {
         if info.storage != Storage::Plain {
             return String::new();
         }
-        let offset = self.plain(info);
+        let Some(offset_bits) = self.column_bits(column) else {
+            return String::new();
+        };
+        if table.variable {
+            let (start, end) = self.record();
+            return read_c_string(&table.data, start + (offset_bits / 8) as usize, end);
+        }
+        let offset = self.plain_at(offset_bits, info.size_bits);
         if offset == 0 {
             return String::new();
         }
@@ -539,7 +656,7 @@ impl Row<'_> {
             .iter()
             .map(|earlier| table.record_size * earlier.rows)
             .sum();
-        let column_at = rows_before + self.index * table.record_size + (info.offset_bits / 8) as usize;
+        let column_at = rows_before + self.index * table.record_size + (offset_bits / 8) as usize;
         // Positions are counted from the end of the whole table's rows, which is what lets
         // an offset written into an early row still land inside the strings.
         let index = column_at as isize - (table.total_rows * table.record_size) as isize
@@ -552,18 +669,61 @@ impl Row<'_> {
         for section in &table.sections {
             if index < section.strings_base + section.strings_size {
                 let at = section.strings_at + (index - section.strings_base);
-                return read_c_string(&table.data, at);
+                let end = section.strings_at + section.strings_size;
+                return read_c_string(&table.data, at, end);
             }
         }
         String::new()
     }
 
-    fn row_start(&self) -> usize {
-        self.table.sections[self.section].records_at + self.index * self.table.record_size
+    /// Where this row's record starts and ends.
+    ///
+    /// A table of fixed-size records puts row `n` a row's width past row `n - 1`; one of
+    /// variable-size records says where each is. A row the offset map does not place is
+    /// pointed past the end of the file, so every read of it comes back empty rather than
+    /// coming back with somebody else's bytes.
+    fn record(&self) -> (usize, usize) {
+        let table = self.table;
+        let section = &table.sections[self.section];
+        if table.variable {
+            return match section.offsets.get(self.index) {
+                Some((at, size)) => (*at, at.saturating_add(*size)),
+                None => (table.data.len(), table.data.len()),
+            };
+        }
+        let at = section.records_at + self.index * table.record_size;
+        (at, at + table.record_size)
     }
 
-    fn plain(&self, info: &Column) -> u32 {
-        self.plain_at(info.offset_bits, info.size_bits)
+    /// Where a column starts inside this row, in bits.
+    ///
+    /// A fixed-size record puts every column where the file says it does. A variable-size one
+    /// cannot: an inline string is as long as the text in it, so everything behind it moves,
+    /// and the only way to find a column is to walk the ones in front of it.
+    fn column_bits(&self, column: usize) -> Option<u32> {
+        let table = self.table;
+        if !table.variable {
+            return table.columns.get(column).map(|info| info.offset_bits);
+        }
+        if column >= table.columns.len() {
+            return None;
+        }
+        let (start, end) = self.record();
+        let mut at = 0u32;
+        for (index, info) in table.columns.iter().enumerate().take(column) {
+            if !table.text_columns.contains(&index) {
+                at = at.checked_add(info.size_bits)?;
+                continue;
+            }
+            let text_at = start.checked_add((at / 8) as usize)?;
+            let length = u32::try_from(c_string_length(&table.data, text_at, end)).ok()?;
+            at = at.checked_add(length.checked_add(1)?.checked_mul(8)?)?;
+        }
+        Some(at)
+    }
+
+    fn row_start(&self) -> usize {
+        self.record().0
     }
 
     fn plain_at(&self, offset_bits: u32, size_bits: u32) -> u32 {
@@ -577,19 +737,24 @@ impl Row<'_> {
         u32::from_le_bytes(value)
     }
 
-    fn bits(&self, info: &Column) -> u64 {
-        let at = self.row_start() + (info.offset_bits / 8) as usize;
+    /// Reads a bit field, which can start and end anywhere.
+    ///
+    /// Eight bytes are taken however few of them the field needs, and however few of them
+    /// the record has left: a field can be the last thing in a record narrower than a word,
+    /// and the bytes past it belong to whatever comes next rather than to nobody.
+    fn bits_at(&self, offset_bits: u32, size_bits: u32) -> u64 {
+        let at = self.row_start() + (offset_bits / 8) as usize;
         let available = self.table.data.len().saturating_sub(at).min(8);
         if available == 0 {
             return 0;
         }
         let mut value = [0u8; 8];
         value[..available].copy_from_slice(&self.table.data[at..at + available]);
-        let raw = u64::from_le_bytes(value) >> (info.offset_bits % 8);
-        if info.size_bits >= 64 {
+        let raw = u64::from_le_bytes(value) >> (offset_bits % 8);
+        if size_bits >= 64 {
             raw
         } else {
-            raw & ((1u64 << info.size_bits) - 1)
+            raw & ((1u64 << size_bits) - 1)
         }
     }
 }
@@ -602,12 +767,23 @@ fn sign_extend(value: u64, bits: u32) -> i64 {
     ((value << shift) as i64) >> shift
 }
 
-fn read_c_string(data: &[u8], at: usize) -> String {
-    let Some(rest) = data.get(at..) else {
+/// How long the text at `at` is, stopping at a NUL or at `end`, whichever comes first.
+///
+/// The bound matters for a record with the text inside it: a record whose last string lost
+/// its terminator would otherwise read on into the next row.
+fn c_string_length(data: &[u8], at: usize, end: usize) -> usize {
+    let Some(rest) = data.get(at..end.min(data.len())) else {
+        return 0;
+    };
+    rest.iter().position(|byte| *byte == 0).unwrap_or(rest.len())
+}
+
+fn read_c_string(data: &[u8], at: usize, end: usize) -> String {
+    let length = c_string_length(data, at, end);
+    let Some(text) = data.get(at..at + length) else {
         return String::new();
     };
-    let end = rest.iter().position(|byte| *byte == 0).unwrap_or(rest.len());
-    String::from_utf8_lossy(&rest[..end]).into_owned()
+    String::from_utf8_lossy(text).into_owned()
 }
 
 #[cfg(test)]
@@ -624,6 +800,8 @@ mod tests {
     const ITEM_APPEARANCE: u32 = 982462;
     const ITEM_DISPLAY_INFO: u32 = 1266429;
     const ITEM_DISPLAY_INFO_MATERIAL_RES: u32 = 1280614;
+    /// The one table of variable-length records, which needs its text columns naming.
+    const ITEM_SPARSE: u32 = 1572924;
 
     /// Columns of `ItemDisplayInfo`, which is the table of fixed-size arrays.
     mod display {
@@ -672,8 +850,26 @@ mod tests {
 
     const GROUP_NAME: usize = 0;
 
+    /// Columns of `ItemSparse`, whose records are as long as the text written into them.
+    mod sparse {
+        /// Every column holding text, which is what a record has to be walked past.
+        pub const TEXT: [usize; 5] = [1, 2, 3, 4, 5];
+        pub const DESCRIPTION: usize = 1;
+        pub const NAME: usize = 5;
+        /// The three columns behind the strings, which only a reader that walked them finds.
+        pub const ITEM_LEVEL: usize = 6;
+        pub const QUALITY: usize = 7;
+        pub const INVENTORY_TYPE: usize = 8;
+    }
+
     fn table(fdid: u32) -> Db2 {
         Db2::parse(fixture_files().read(fdid).unwrap()).unwrap()
+    }
+
+    /// `ItemSparse`, read the way a caller that knows the table has to read it.
+    fn sparse_table() -> Db2 {
+        Db2::parse_with_text_columns(fixture_files().read(ITEM_SPARSE).unwrap(), &sparse::TEXT)
+            .unwrap()
     }
 
     fn ids(table: &Db2) -> Vec<u32> {
@@ -1001,6 +1197,115 @@ mod tests {
         assert!(table.rows().all(|row| row.foreign_id() != 900900));
     }
 
+    /* ---------- records that vary in length ---------- */
+
+    // A table whose records are all different sizes, addressed through the map beside them.
+    // Nothing about a row's position can be worked out by arithmetic here: rows one and two
+    // are the same shape and different lengths, because one of them has a description.
+    #[test]
+    fn addresses_a_record_of_variable_length_through_the_offset_map() {
+        let table = sparse_table();
+        let rows: Vec<(u32, String)> = table
+            .rows()
+            .map(|row| (row.id(), row.text(sparse::NAME)))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (30001, "Tideglass Crown".into()),
+                (30002, "Tideglass Mantle".into()),
+                (30003, "Tideglass Robe".into()),
+                (30004, "Tideglass Sandals".into()),
+                (30005, "Tideglass Gloves".into()),
+                (30006, "Emberforge Helm".into()),
+                (30007, "Emberforge Pauldrons".into()),
+                (30008, "Emberforge Breastplate".into()),
+                (30009, "Emberforge Greaves".into()),
+                (30010, "Emberforge Bulwark".into()),
+                // The row the table holds and puts no name in.
+                (30013, String::new()),
+            ]
+        );
+    }
+
+    // The strings are in the record rather than in a block of their own, and the columns
+    // behind them are only findable by walking past them — so reading a number out of one is
+    // what says the walk happened. A reader that trusted the offsets the file declares finds
+    // the level of a short-named item somewhere inside the name of another.
+    #[test]
+    fn reads_the_columns_behind_an_inline_string() {
+        let table = sparse_table();
+        let read: Vec<(String, u32, u32, u32)> = table
+            .rows()
+            .map(|row| {
+                (
+                    row.text(sparse::NAME),
+                    row.number(sparse::ITEM_LEVEL),
+                    row.number(sparse::QUALITY),
+                    row.number(sparse::INVENTORY_TYPE),
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            vec![
+                ("Tideglass Crown".into(), 447, 4, 1),
+                ("Tideglass Mantle".into(), 447, 4, 3),
+                ("Tideglass Robe".into(), 450, 4, 5),
+                ("Tideglass Sandals".into(), 447, 3, 8),
+                ("Tideglass Gloves".into(), 447, 3, 10),
+                ("Emberforge Helm".into(), 489, 4, 1),
+                ("Emberforge Pauldrons".into(), 489, 4, 3),
+                ("Emberforge Breastplate".into(), 502, 5, 5),
+                ("Emberforge Greaves".into(), 489, 4, 7),
+                ("Emberforge Bulwark".into(), 502, 5, 13),
+                (String::new(), 421, 1, 4),
+            ]
+        );
+    }
+
+    // One row carries a description and the rest carry an empty string, which is the case
+    // that makes the records different lengths in the first place.
+    #[test]
+    fn reads_every_inline_string_a_record_holds() {
+        let table = sparse_table();
+        let described: Vec<String> = table
+            .rows()
+            .map(|row| row.text(sparse::DESCRIPTION))
+            .filter(|text| !text.is_empty())
+            .collect();
+        assert_eq!(described, vec!["Woven from the glass the tide leaves behind."]);
+    }
+
+    // The encrypted section is written as zeroes like any other, offset map included — so its
+    // records point nowhere and its rows are skipped rather than read as empty names.
+    #[test]
+    fn skips_the_variable_records_of_a_section_it_cannot_decrypt() {
+        let table = sparse_table();
+        assert_eq!(table.rows().count(), 11);
+        assert_eq!(table.declared_rows(), 14);
+        for id in [30011, 30012, 30900] {
+            assert!(!table.rows().any(|row| row.id() == id), "{id} was decrypted");
+        }
+    }
+
+    // Naming no text columns is what every other table does, and a table that varies in length
+    // is then readable only as far as its first string — not a panic, and not somebody else's
+    // bytes either.
+    #[test]
+    fn reads_a_variable_table_no_further_than_its_first_string_when_told_of_none() {
+        let table = Db2::parse(fixture_files().read(ITEM_SPARSE).unwrap()).unwrap();
+        assert_eq!(table.rows().count(), 11);
+        assert_eq!(
+            table.rows().map(|row| row.id()).take(3).collect::<Vec<u32>>(),
+            vec![30001, 30002, 30003]
+        );
+        for row in table.rows() {
+            row.text(sparse::NAME);
+            row.number(sparse::ITEM_LEVEL);
+        }
+    }
+
     #[test]
     fn refuses_a_truncated_table_without_panicking() {
         for fdid in [
@@ -1011,10 +1316,12 @@ mod tests {
             ITEM_APPEARANCE,
             ITEM_DISPLAY_INFO,
             ITEM_DISPLAY_INFO_MATERIAL_RES,
+            ITEM_SPARSE,
         ] {
             let whole = fixture_files().read(fdid).unwrap();
             for length in 0..whole.len() {
-                let Ok(table) = Db2::parse(whole[..length].to_vec()) else {
+                let Ok(table) = Db2::parse_with_text_columns(whole[..length].to_vec(), &sparse::TEXT)
+                else {
                     continue;
                 };
                 for row in table.rows() {
@@ -1029,7 +1336,10 @@ mod tests {
                     }
                 }
             }
-            assert!(Db2::parse(whole[..whole.len() / 2].to_vec()).is_err());
+            assert!(
+                Db2::parse_with_text_columns(whole[..whole.len() / 2].to_vec(), &sparse::TEXT)
+                    .is_err()
+            );
         }
     }
 }

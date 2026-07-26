@@ -34,6 +34,7 @@ const FILE_DATA_ID = {
   itemAppearance: 982462,
   itemDisplayInfo: 1266429,
   itemDisplayInfoMaterialRes: 1280614,
+  itemSparse: 1572924,
   modelFileData: 1337833,
   textureFileData: 982459,
 } as const;
@@ -424,6 +425,90 @@ const itemDisplayInfoMaterialRes: TableSpec = {
       rows: [[3, 52900]],
       idList: [8],
       relationships: [[900900, 0]],
+    },
+  ],
+};
+
+/**
+ * `ItemSparse` — what an item is called, and the one table whose records vary in length.
+ *
+ * Every other table here lays each row out at the same width. This one writes its strings
+ * into the record, so a row is as long as the text in it, and where each row starts is said
+ * by an offset map beside them rather than by arithmetic. That is the shape the game's own
+ * `ItemSparse` has — 63 MB of it, one row per item in the game — and it is why item names
+ * needed the reader to grow a whole feature rather than merely a bigger read.
+ *
+ * The names are what the detail view shows. The columns after them are what says the reader
+ * walked the strings rather than trusted the offsets the file states: a reader that took a
+ * column's declared position would find the quality of an item whose name is short somewhere
+ * inside the name of the next one.
+ *
+ * **The column positions below are the community's rather than this repository's.** The five
+ * strings and their order are what [WoWDBDefs] lists for the shipping builds, and unlike the
+ * chains in `docs/game-files.md` none of it was read off an install — the columns after them
+ * are filler of the right shape. `Display_lang` reading as something other than a name is
+ * therefore the first thing to suspect if a patch ever empties the detail view's labels.
+ *
+ * [WoWDBDefs]: https://github.com/wowdev/WoWDBDefs
+ */
+const itemSparse: TableSpec = {
+  fileDataId: FILE_DATA_ID.itemSparse,
+  layoutHash: 0x0bd4e7a2,
+  tableHash: 0x2a7f9061,
+  // The ids are kept beside the rows, so no column holds one.
+  idColumn: 0,
+  // Bit 0: the records vary in length. Bit 2: the ids are in a list of their own.
+  flags: 5,
+  recordSize: 0,
+  textColumns: [1, 2, 3, 4, 5],
+  // The offsets are what the game writes for a table like this and what nothing reads: a
+  // record of variable length is walked from its front, and a column is wherever the columns
+  // in front of it left off.
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 64 }, // AllowableRace
+    { storage: Storage.plain, offsetBits: 64, sizeBits: 32 }, // Description_lang
+    { storage: Storage.plain, offsetBits: 96, sizeBits: 32 }, // Display3_lang
+    { storage: Storage.plain, offsetBits: 128, sizeBits: 32 }, // Display2_lang
+    { storage: Storage.plain, offsetBits: 160, sizeBits: 32 }, // Display1_lang
+    { storage: Storage.plain, offsetBits: 192, sizeBits: 32 }, // Display_lang
+    { storage: Storage.plain, offsetBits: 224, sizeBits: 32 }, // ItemLevel
+    { storage: Storage.plain, offsetBits: 256, sizeBits: 8 }, // OverallQualityID
+    { storage: Storage.plain, offsetBits: 264, sizeBits: 8 }, // InventoryType
+  ],
+  sections: [
+    {
+      key: 0n,
+      // AllowableRace, the four alternate display names the game almost never fills in, the
+      // name itself, and then the three numbers that have to survive the walk past them.
+      rows: [
+        [0, "", "", "", "", "Tideglass Crown", 447, 4, 1],
+        [0, "", "", "", "", "Tideglass Mantle", 447, 4, 3],
+        // The one item with a description, so that two rows of the same shape are still
+        // different lengths and the offset map is doing something.
+        [0, "Woven from the glass the tide leaves behind.", "", "", "", "Tideglass Robe", 450, 4, 5],
+        [0, "", "", "", "", "Tideglass Sandals", 447, 3, 8],
+        [0, "", "", "", "", "Tideglass Gloves", 447, 3, 10],
+        [0, "", "", "", "", "Emberforge Helm", 489, 4, 1],
+        [0, "", "", "", "", "Emberforge Pauldrons", 489, 4, 3],
+        [0, "", "", "", "", "Emberforge Breastplate", 502, 5, 5],
+        [0, "", "", "", "", "Emberforge Greaves", 489, 4, 7],
+        [0, "", "", "", "", "Emberforge Bulwark", 502, 5, 13],
+        // An item the game holds a row for and no name in it, which is what a reader has to
+        // fall back from rather than draw as a blank.
+        [0, "", "", "", "", "", 421, 1, 4],
+      ],
+      idList: [30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30013],
+    },
+    {
+      // Encrypted, so the items of the sets the game has not released cannot be named — and
+      // neither can 30011, whose appearance the readable tables do describe.
+      key: 0x4e91d2c73b05a86fn,
+      rows: [
+        [0, "", "", "", "", "Duskwoven Cowl", 528, 4, 1],
+        [0, "", "", "", "", "Duskwoven Wraps", 528, 4, 9],
+        [0, "", "", "", "", "Unreleased Trinket", 600, 5, 12],
+      ],
+      idList: [30011, 30012, 30900],
     },
   ],
 };
@@ -912,6 +997,7 @@ emit("transmog", {
     itemAppearance,
     itemDisplayInfo,
     itemDisplayInfoMaterialRes,
+    itemSparse,
     modelFileData,
     textureFileData,
   ],

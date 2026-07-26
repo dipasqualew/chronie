@@ -6,6 +6,7 @@ import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
 const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearance => ({
   modifiedAppearanceId: 71001,
   itemId: 30001,
+  name: "Tideglass Crown",
   appearanceId: 80001,
   displayType: 0,
   displayInfoId: 900001,
@@ -66,11 +67,13 @@ describe("slotName", () => {
 
 describe("appearanceRows", () => {
   it("names the slot an appearance fills and the item it came from", () => {
-    expect(appearanceRows(payload([appearance({ displayType: 1, itemId: 30007, hasModel: true })])))
+    expect(appearanceRows(payload([
+      appearance({ displayType: 1, itemId: 30007, name: "Emberforge Pauldrons", hasModel: true }),
+    ])))
       .toEqual([
         {
           slot: "Shoulder",
-          label: "Item 30007",
+          label: "Emberforge Pauldrons",
           itemId: 30007,
           appearanceId: 80001,
           displayType: 1,
@@ -87,7 +90,7 @@ describe("appearanceRows", () => {
   // labelling it by slot would be inventing one.
   it("says nothing it cannot know about an appearance the game withholds", () => {
     const withheld = appearance({
-      modifiedAppearanceId: 71012, itemId: 0, appearanceId: 0, iconFileDataId: 0,
+      modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0, iconFileDataId: 0,
     });
     expect(appearanceRows(payload([withheld])))
       .toEqual([
@@ -114,6 +117,14 @@ describe("appearanceRows", () => {
     ));
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.withheld)).toEqual([false, true]);
+  });
+
+  // The game holds a row for the item and no name in it, or holds no row this install can
+  // read. Either way the row is worth drawing, and the id is what a reader can act on: it is
+  // what the link out of the app is addressed by.
+  it("falls back to the item's id when the game names it nothing", () => {
+    const rows = appearanceRows(payload([appearance({ itemId: 30013, name: "" })]));
+    expect(rows.map((row) => row.label)).toEqual(["Item 30013"]);
   });
 
   it("has no rows to draw for a set the game lists nothing for", () => {
