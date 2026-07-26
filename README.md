@@ -117,3 +117,17 @@ That creates an ignored local signing key and configures
 
 The private key must never be committed. Stable releases can later use normal
 version tags while the rolling `dev` release remains available for prototyping.
+
+## Reference
+
+The desktop app reads the installed game's own files to show transmog sets. What it
+takes to get from a set to a renderable model — file ids, column indices, the traps,
+and which constants were verified against which build — is recorded in:
+
+- [`docs/game-files.md`](docs/game-files.md) — CASC, DB2/WDC5 quirks, and the table
+  chain from a transmog set to model and texture bytes.
+- [`docs/character-rendering.md`](docs/character-rendering.md) — showing an appearance
+  on a character: the composite atlas, geosets, M2/SKIN and BLP.
+
+These exist so that reading the local game install is never necessary; it is off
+limits for ordinary work.
