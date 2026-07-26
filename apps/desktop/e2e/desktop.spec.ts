@@ -131,9 +131,70 @@ class TransmogView {
   klass(): Locator {
     return this.view.getByLabel("Class");
   }
+
+  /** How far down the grid the reader has got, which opening and closing a set must not move. */
+  scrollOffset(): Promise<number> {
+    return this.page.evaluate(() => window.scrollY);
+  }
+
+  scrollToEnd(): Promise<void> {
+    return this.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  }
 }
 
-const test = base.extend<{ detail: SegmentDetail; editor: ActivityEditor; transmog: TransmogView }>({
+/**
+ * One set opened: the appearances the game says it is made of.
+ *
+ * The dialog answers to the name of the set it is showing and every appearance is a list
+ * item, so the whole thing is walkable without knowing a single class name.
+ */
+class TransmogDetail {
+  readonly page: Page;
+  readonly dialog: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.dialog = page.locator("#transmog-detail");
+  }
+
+  /** Opens a set the way a reader does: by clicking its name on the card. */
+  async open(name: string): Promise<void> {
+    await this.page.getByRole("button", { name, exact: true }).click();
+    await expect(this.named(name)).toBeVisible();
+  }
+
+  /** The dialog as a screen reader announces it, which is by the set it is showing. */
+  named(name: string): Locator {
+    return this.page.getByRole("dialog", { name });
+  }
+
+  /** One row per appearance the set names, in the order the backend sorted them. */
+  rows(): Locator {
+    return this.dialog.getByRole("listitem");
+  }
+
+  /** The way through to the item an appearance came from. */
+  link(label: string): Locator {
+    return this.dialog.getByRole("link", { name: label });
+  }
+
+  /** Anything the dialog says in its own words: where the set sits, what it holds. */
+  says(text: string): Locator {
+    return this.dialog.getByText(text);
+  }
+
+  async close(): Promise<void> {
+    await this.dialog.getByRole("button", { name: "Close set" }).click();
+    await expect(this.dialog).toBeHidden();
+  }
+}
+
+const test = base.extend<{
+  detail: SegmentDetail;
+  editor: ActivityEditor;
+  transmog: TransmogView;
+  transmogDetail: TransmogDetail;
+}>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
   },
@@ -142,6 +203,9 @@ const test = base.extend<{ detail: SegmentDetail; editor: ActivityEditor; transm
   },
   transmog: async ({ page }, use) => {
     await use(new TransmogView(page));
+  },
+  transmogDetail: async ({ page }, use) => {
+    await use(new TransmogDetail(page));
   },
 });
 
@@ -540,7 +604,11 @@ test("lists every segment on the details view and filters it", async ({ page, de
   });
 });
 
-test("shows the game's transmog sets by collection and filters them", async ({ transmog }) => {
+test("shows the game's transmog sets by collection and filters them", async ({
+  page,
+  transmog,
+  transmogDetail,
+}) => {
   await transmog.open();
 
   await test.step("every set arrives under the collection it belongs to", async () => {
@@ -594,6 +662,57 @@ test("shows the game's transmog sets by collection and filters them", async ({ t
     await transmog.search().fill("nothing like it");
     await expect(transmog.view.getByText("Nothing matches")).toBeVisible();
     await expect(transmog.sets()).toHaveCount(0);
+  });
+
+  // From here the grid is left as the filters above put it — the sets a priest can wear —
+  // because closing a set has to hand back exactly that.
+  await test.step("a set opens on what the game says it is made of", async () => {
+    await transmog.search().fill("");
+    await expect(transmog.card("Tideglass Regalia")).toContainText("4 appearances");
+
+    await transmogDetail.open("Tideglass Regalia");
+    await expect(transmogDetail.says("Tideglass Wardrobe · Cloth · Cataclysm · Patch 10.2.0"))
+      .toBeVisible();
+    // The set names one of its appearances twice, so a list agreeing with the card is four
+    // rows long rather than three.
+    await expect(transmogDetail.says("4 appearances")).toBeVisible();
+    await expect(transmogDetail.rows()).toHaveCount(4);
+  });
+
+  await test.step("every appearance says which slot it fills and leads to the item", async () => {
+    await expect(transmogDetail.rows()).toContainText(["Head", "Head", "Shoulder", "Chest"]);
+    await expect(transmogDetail.link("Item 30002"))
+      .toHaveAttribute("href", "https://www.wowhead.com/item=30002");
+    await expect(transmogDetail.link("Item 30003"))
+      .toHaveAttribute("href", "https://www.wowhead.com/item=30003");
+  });
+
+  await test.step("closing a set hands back the grid the reader left", async () => {
+    // A window short enough that the grid has somewhere to scroll to, so that the position
+    // being kept is a fact about the app rather than about there being nothing to scroll.
+    await page.setViewportSize({ width: 720, height: 360 });
+    await transmog.scrollToEnd();
+    const scrolled = await transmog.scrollOffset();
+    expect(scrolled).toBeGreaterThan(0);
+
+    await transmogDetail.close();
+    await expect(transmog.sets()).toHaveText(["Duskwoven Shroud", "Tideglass Regalia"]);
+    await expect(transmog.klass()).toHaveValue("4");
+    await expect(transmog.search()).toHaveValue("");
+    expect(await transmog.scrollOffset()).toBe(scrolled);
+    await page.setViewportSize({ width: 1280, height: 720 });
+  });
+
+  // The card promises two appearances and the game encrypts one of them outright, so the
+  // list has to hold a row it can say nothing about rather than come up a row short.
+  await test.step("an appearance the game withholds still takes a row and says so", async () => {
+    // Clicked on the card rather than on the name, because the whole card opens a set.
+    await transmog.card("Duskwoven Shroud").click();
+    await expect(transmogDetail.named("Duskwoven Shroud")).toBeVisible();
+    await expect(transmogDetail.rows()).toHaveCount(2);
+    await expect(transmogDetail.says("2 appearances · 1 the game keeps encrypted")).toBeVisible();
+    await expect(transmogDetail.says("The game keeps this appearance encrypted")).toBeVisible();
+    await transmogDetail.close();
   });
 });
 

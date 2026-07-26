@@ -300,12 +300,45 @@ fn payload(set_id: u32, appearances: Vec<TransmogSetAppearance>) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
 
     /// The three fixture tables joined, as the window would receive them.
     fn payload() -> Value {
         sets(&fixture_files()).unwrap()
+    }
+
+    /// One set opened, as the detail view would receive it.
+    fn opened(set_id: u32) -> Value {
+        set_items(&fixture_files(), set_id).unwrap()
+    }
+
+    /// Fixture files that remember what was asked of them.
+    ///
+    /// Which of the game's tables a read opens is part of the behaviour: the three past
+    /// `TransmogSetItem` are the expensive ones, and a set nothing can be said about is not
+    /// worth parsing them for.
+    struct Noted {
+        files: DirFiles,
+        asked: RefCell<Vec<u32>>,
+    }
+
+    impl Noted {
+        fn new() -> Self {
+            Self {
+                files: fixture_files(),
+                asked: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl GameFiles for Noted {
+        fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+            self.asked.borrow_mut().push(fdid);
+            self.files.read(fdid)
+        }
     }
 
     /// The sets out of a payload, still as JSON — which is the shape the window reads, so the
@@ -423,6 +456,141 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = sets(&DirFiles::new(temp.path())).unwrap_err();
         assert!(error.contains("1576116.db2"), "{error}");
+    }
+
+    /* ---------- opening one set ---------- */
+
+    // Four tables and three joins stand between a set and the items it is made of, and set 203
+    // is the one whose appearances land in different slots — so the whole payload is written
+    // out here, keys included, because it is the shape the detail view reads.
+    #[test]
+    fn walks_a_set_down_to_the_items_its_appearances_belong_to() {
+        let opened = opened(203);
+        assert_eq!(opened["setId"], 203);
+        assert_eq!(opened["readCount"], 4);
+        assert_eq!(opened["withheldCount"], 0);
+        assert_eq!(
+            opened["appearances"],
+            json!([
+                {
+                    "modifiedAppearanceId": 71006, "itemId": 30006, "appearanceId": 80006,
+                    "displayType": 0, "displayInfoId": 900001, "iconFileDataId": 130001,
+                    "hasModel": true,
+                },
+                {
+                    "modifiedAppearanceId": 71007, "itemId": 30007, "appearanceId": 80007,
+                    "displayType": 1, "displayInfoId": 900009, "iconFileDataId": 130002,
+                    "hasModel": true,
+                },
+                {
+                    "modifiedAppearanceId": 71008, "itemId": 30008, "appearanceId": 80008,
+                    "displayType": 2, "displayInfoId": 900003, "iconFileDataId": 130003,
+                    "hasModel": false,
+                },
+                {
+                    "modifiedAppearanceId": 71009, "itemId": 30009, "appearanceId": 80009,
+                    "displayType": 4, "displayInfoId": 900006, "iconFileDataId": 130006,
+                    "hasModel": false,
+                },
+            ])
+        );
+    }
+
+    // The game stores a set's fourteenth appearance as a copy of its first, and a reader that
+    // collapsed the two would open a set showing three rows under a card promising four.
+    #[test]
+    fn lists_an_appearance_twice_when_the_set_names_it_twice() {
+        let opened = opened(201);
+        let named: Vec<&Value> = opened["appearances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|appearance| &appearance["modifiedAppearanceId"])
+            .collect();
+        assert_eq!(
+            named,
+            vec![&json!(71001), &json!(71001), &json!(71002), &json!(71003)]
+        );
+
+        let grid = payload();
+        let counted = read_sets(&grid)
+            .into_iter()
+            .find(|set| set["id"] == 201)
+            .expect("the fixture holds set 201");
+        assert_eq!(opened["readCount"], counted["itemCount"]);
+    }
+
+    // Set 205 names two appearances and the game encrypts the `ItemModifiedAppearance` row of
+    // one of them, so nothing about it can be named — not its item, not even the slot it
+    // fills. It still gets a row, because a list one short of the count on the card reads as a
+    // bug rather than as a withheld appearance.
+    #[test]
+    fn keeps_a_row_for_an_appearance_a_hop_of_the_chain_withholds() {
+        let opened = opened(205);
+        assert_eq!(opened["readCount"], 1);
+        assert_eq!(opened["withheldCount"], 1);
+        assert_eq!(
+            opened["appearances"],
+            json!([
+                // The other one gets as far as its slot and then stops: its display info is
+                // encrypted too, so "no model" here is the absence of an answer rather than
+                // one.
+                {
+                    "modifiedAppearanceId": 71011, "itemId": 30011, "appearanceId": 80011,
+                    "displayType": 2, "displayInfoId": 900900, "iconFileDataId": 130008,
+                    "hasModel": false,
+                },
+                {
+                    "modifiedAppearanceId": 71012, "itemId": 0, "appearanceId": 0,
+                    "displayType": 0, "displayInfoId": 0, "iconFileDataId": 0,
+                    "hasModel": false,
+                },
+            ])
+        );
+    }
+
+    // `ItemDisplayInfo` gives a display two model slots, and shoulders are drawn from either.
+    // Display 900009 fills only the second, so reading the column with `Row::number` rather
+    // than `Row::element` would report a shoulder with geometry as flat texture.
+    #[test]
+    fn finds_a_model_kept_only_in_the_second_slot() {
+        let shoulder = opened(203)["appearances"][1].clone();
+        assert_eq!(shoulder["displayInfoId"], 900009);
+        assert_eq!(shoulder["hasModel"], json!(true));
+    }
+
+    // An appearance the table gives no icon still belongs to the set, and zero is the answer
+    // rather than a reason to leave it out.
+    #[test]
+    fn names_an_appearance_the_table_gives_no_icon() {
+        assert_eq!(
+            opened(206)["appearances"],
+            json!([{
+                "modifiedAppearanceId": 71013, "itemId": 30013, "appearanceId": 80013,
+                "displayType": 10, "displayInfoId": 900008, "iconFileDataId": 0,
+                "hasModel": false,
+            }])
+        );
+    }
+
+    // Set 900 belongs to content the game has not shipped, so `TransmogSetItem` says nothing
+    // about it and the three tables below it hold nothing worth the parse.
+    #[test]
+    fn opens_a_set_the_install_cannot_see_into_without_reading_further() {
+        let files = Noted::new();
+        let opened = set_items(&files, 900).unwrap();
+        assert_eq!(
+            opened,
+            json!({ "setId": 900, "readCount": 0, "withheldCount": 0, "appearances": [] })
+        );
+        assert_eq!(files.asked.into_inner(), vec![TRANSMOG_SET_ITEM]);
+    }
+
+    #[test]
+    fn says_so_when_the_chain_starts_at_a_table_that_is_not_there() {
+        let temp = tempfile::tempdir().unwrap();
+        let error = set_items(&DirFiles::new(temp.path()), 201).unwrap_err();
+        assert!(error.contains("1376212.db2"), "{error}");
     }
 }
 
