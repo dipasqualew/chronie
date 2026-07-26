@@ -6,12 +6,14 @@ cd "$(dirname "$0")/.."
 eval "$(luarocks --lua-version 5.1 path --bin 2>/dev/null || true)"
 
 echo "==> luacheck"
-luacheck src Main.lua spec
+luacheck apps/addon/src apps/addon/Main.lua apps/addon/spec
 
 echo "==> busted"
 busted --verbose
 
-# The collector runs outside the game, on whatever Python the gaming machine has,
-# so it is tested with the standard library and nothing else.
-echo "==> collector"
-python3 -m unittest discover --start-directory scripts --pattern "*_test.py"
+echo "==> desktop backend"
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+echo "==> desktop frontend"
+bun run --cwd apps/desktop test
+bun run --cwd apps/desktop test:e2e

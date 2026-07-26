@@ -1,24 +1,24 @@
-# Installs or updates wdp-wow into the retail AddOns folder. Idempotent.
-#   powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -RepoUrl <url>
-param(
-    [string]$RepoUrl = "",
-    [string]$WowPath = "C:\Program Files (x86)\World of Warcraft\_retail_"
-)
+# Installs the newest rolling WDP development build for the current Windows user.
+# Run from PowerShell:
+#   irm https://raw.githubusercontent.com/dipasqualew/chronie/main/scripts/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 
-$addons = Join-Path $WowPath "Interface\AddOns"
-if (-not (Test-Path $addons)) { throw "AddOns folder not found: $addons  (pass -WowPath)" }
+$repository = "dipasqualew/chronie"
+$release = Invoke-RestMethod `
+    -Headers @{ "User-Agent" = "wdp-installer"; "Accept" = "application/vnd.github+json" } `
+    -Uri "https://api.github.com/repos/$repository/releases/tags/dev"
+$installer = $release.assets | Where-Object {
+    $_.name -match "-setup\.exe$" -and $_.name -notmatch "\.sig$"
+} | Select-Object -First 1
 
-# Folder name must match wdp-wow.toc for the client to detect the addon.
-$target = Join-Path $addons "wdp-wow"
-
-if (Test-Path (Join-Path $target ".git")) {
-    Write-Host "==> updating $target"
-    git -C $target pull --ff-only
-} else {
-    if (-not $RepoUrl) { throw "not installed yet; pass -RepoUrl <clone url>" }
-    Write-Host "==> cloning into $target"
-    git clone $RepoUrl $target
+if (-not $installer) {
+    throw "The dev release does not contain a Windows installer yet."
 }
 
-Write-Host "==> done. Use /reload in game to pick up changes."
+$destination = Join-Path ([System.IO.Path]::GetTempPath()) $installer.name
+Write-Host "Downloading WDP $($release.name)..."
+Invoke-WebRequest -Uri $installer.browser_download_url -OutFile $destination
+Write-Host "Starting the installer..."
+Start-Process -FilePath $destination -Wait
+Remove-Item $destination -ErrorAction SilentlyContinue
+Write-Host "WDP is installed. Open it from the Start menu."

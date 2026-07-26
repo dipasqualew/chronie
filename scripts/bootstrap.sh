@@ -25,3 +25,4 @@ done
 
 echo "==> done. If busted/luacheck are not on PATH, add to your shell profile:"
 echo '    eval "$(luarocks --lua-version 5.1 path --bin)"'
+echo "    Install Rust from https://rustup.rs and Bun, then run: bun install"

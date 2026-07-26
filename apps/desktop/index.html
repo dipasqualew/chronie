@@ -65,6 +65,23 @@
   .wrap { max-width: 1180px; margin: 0 auto; }
 
   header { margin-bottom: 24px; }
+  .appbar { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
+  .appbar .brand { font-weight: 700; margin-right: auto; }
+  button {
+    font: inherit; color: var(--text-primary); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 7px; padding: 7px 11px; cursor: pointer;
+  }
+  button:hover { background: var(--surface-2); }
+  button.primary { color: white; background: var(--series-1); border-color: var(--series-1); }
+  button:disabled { cursor: wait; opacity: .65; }
+  .status { color: var(--text-secondary); min-height: 21px; }
+  .setup { padding: 18px; margin-bottom: 16px; }
+  .setup-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+  .setup label { color: var(--text-secondary); font-size: 12px; }
+  .path-row { display: flex; gap: 8px; margin-top: 5px; }
+  .path-row input { width: 100%; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  [hidden] { display: none !important; }
   h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
   .sub { color: var(--text-muted); font-size: 13px; }
 
@@ -167,6 +184,36 @@
 </head>
 <body>
 <div class="wrap">
+  <nav class="appbar" aria-label="Application">
+    <span class="brand">WDP</span>
+    <button id="sessions-tab" class="primary" type="button">Sessions</button>
+    <button id="settings-tab" type="button">Setup</button>
+  </nav>
+
+  <section id="setup-view" hidden>
+    <div class="panel setup">
+      <h1>Setup</h1>
+      <p class="sub">Choose the game’s <strong>_retail_</strong> folder. WDP will sync sessions and manage the addon from there.</p>
+      <div class="setup-grid">
+        <label>Game folder
+          <span class="path-row">
+            <input id="wow-path" type="text" placeholder="C:\Program Files (x86)\World of Warcraft\_retail_">
+            <button id="browse-path" type="button">Browse…</button>
+          </span>
+        </label>
+        <button id="save-path" class="primary" type="button">Save</button>
+      </div>
+      <div class="actions">
+        <button id="sync-now" type="button">Sync now</button>
+        <button id="install-addon" type="button">Install or update addon</button>
+        <button id="check-update" type="button">Check for app update</button>
+      </div>
+      <p id="setup-status" class="status" role="status"></p>
+      <p id="last-sync" class="sub"></p>
+    </div>
+  </section>
+
+  <main id="sessions-view">
   <header>
     <h1>Sessions</h1>
     <div class="sub" id="meta"></div>
@@ -205,12 +252,15 @@
     </table></div>
     <div class="empty" id="empty" hidden></div>
   </section>
+  </main>
 </div>
 
 <div id="tooltip" role="status"></div>
 
-<script>
-const PAYLOAD = /*__WDP_DATA__*/null || { generatedAt: null, retainDays: 7, sessions: [] };
+<script type="module">
+import { desktop, message } from "/src/bridge.js";
+
+const PAYLOAD = await desktop.dashboard();
 const SESSIONS = PAYLOAD.sessions || [];
 
 // The client's own class colours, so a character reads the same here as in game.
@@ -660,6 +710,64 @@ function draw() {
 
 ["search", "character", "day"].forEach((id) => $(id).addEventListener("input", draw));
 draw();
+
+const settings = await desktop.settings();
+$("wow-path").value = settings.wowPath || "";
+$("last-sync").textContent = settings.lastSync
+  ? `Last background sync: ${new Date(settings.lastSync).toLocaleString()}`
+  : "No successful sync yet.";
+
+function show(view) {
+  const setup = view === "setup";
+  $("setup-view").hidden = !setup;
+  $("sessions-view").hidden = setup;
+  $("settings-tab").classList.toggle("primary", setup);
+  $("sessions-tab").classList.toggle("primary", !setup);
+}
+
+$("settings-tab").addEventListener("click", () => show("setup"));
+$("sessions-tab").addEventListener("click", () => show("sessions"));
+
+async function run(button, action, success) {
+  button.disabled = true;
+  $("setup-status").textContent = "";
+  try {
+    const result = await action();
+    $("setup-status").textContent = success(result);
+    return result;
+  } catch (error) {
+    $("setup-status").textContent = message(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("browse-path").addEventListener("click", async () => {
+  const selected = await desktop.chooseWowPath();
+  if (selected) $("wow-path").value = selected;
+});
+$("save-path").addEventListener("click", (event) =>
+  run(event.currentTarget, () => desktop.saveWowPath($("wow-path").value.trim()), () => "Game folder saved."));
+$("sync-now").addEventListener("click", async (event) => {
+  const result = await run(event.currentTarget, desktop.syncNow,
+    (sync) => `Sync complete: ${sync.sessionCount} sessions, ${sync.added} new.`);
+  if (result && !globalThis.__WDP_E2E__) setTimeout(() => window.location.reload(), 800);
+});
+$("install-addon").addEventListener("click", (event) =>
+  run(event.currentTarget, desktop.installAddon,
+    (result) => `Addon ${result.version} installed. Use /reload in game to load it.`));
+$("check-update").addEventListener("click", (event) =>
+  run(event.currentTarget, desktop.checkForAppUpdate,
+    (result) => result.updated ? `WDP ${result.version} is ready; restart to finish.` : "WDP is up to date."));
+
+if (!globalThis.__WDP_E2E__) {
+  const sessionSignature = JSON.stringify(SESSIONS.map((session) => [session.id, session.endedAt]));
+  setInterval(async () => {
+    const next = await desktop.dashboard();
+    const nextSignature = JSON.stringify((next.sessions || []).map((session) => [session.id, session.endedAt]));
+    if (nextSignature !== sessionSignature) window.location.reload();
+  }, 30_000);
+}
 </script>
 </body>
 </html>

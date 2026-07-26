@@ -3,3 +3,10 @@ __pycache__/
 luacov.*
 *.swp
 .DS_Store
+node_modules/
+dist/
+target/
+playwright-report/
+test-results/
+apps/desktop/src-tauri/gen/
+.tauri/

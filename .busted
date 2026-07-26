@@ -1,6 +1,6 @@
 return {
     _all = {
-        ROOT = { "spec" },
-        lpath = "spec/?.lua;spec/helpers/?.lua",
+        ROOT = { "apps/addon/spec" },
+        lpath = "apps/addon/spec/?.lua;apps/addon/spec/helpers/?.lua",
     },
 }

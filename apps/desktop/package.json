@@ -1,0 +1,23 @@
+{
+  "name": "@wdp-wow/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --bun x vite",
+    "build": "bun --bun x vite build",
+    "preview": "bun --bun x vite preview",
+    "tauri": "tauri",
+    "test": "bun --bun x vitest run",
+    "test:e2e": "bun --bun x playwright test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@tauri-apps/cli": "^2.8.4",
+    "vite": "^7.1.2",
+    "vitest": "^3.2.4"
+  }
+}
