@@ -152,6 +152,62 @@ describe("highlights", () => {
     expect(kinds(session).slice(0, 3)).toEqual(["achievement", "mount", "gold"]);
   });
 
+  describe("equipment sets", () => {
+    const raidSet = {
+      setId: 3, name: "Raid", kind: "updated" as const, at: BASE + 60,
+      items: [{ slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 }],
+    };
+
+    it("names the set, what happened to it, and where the item level went", () => {
+      const [session] = buildSessions([segment({ equipsetChanges: [raidSet] })]);
+
+      const [chip] = session.highlights.filter((entry) => entry.kind === "equipset");
+      expect(chip).toMatchObject({ label: "Raid updated", detail: "1 slot, +16 ilvl", count: 1 });
+    });
+
+    // One change has somewhere to go; the chip opens the run it happened in.
+    it("points a single change at the segment it happened in", () => {
+      const [segmentOne] = [segment({ equipsetChanges: [raidSet] })];
+      const [session] = buildSessions([segmentOne]);
+
+      const [chip] = session.highlights.filter((entry) => entry.kind === "equipset");
+      expect(chip.segmentId).toBe(segmentOne.segmentId);
+    });
+
+    it("folds an evening of fiddling into one chip that says what shape it had", () => {
+      const [session] = buildSessions([
+        segment({
+          equipsetChanges: [
+            raidSet,
+            { setId: 4, name: "Mythic+", kind: "created", at: BASE + 90, items: [] },
+          ],
+        }),
+      ]);
+
+      const [chip] = session.highlights.filter((entry) => entry.kind === "equipset");
+      expect(chip).toMatchObject({
+        label: "2 equipment set changes",
+        detail: "1 edited, 1 created or deleted",
+        count: 2,
+        segmentId: null,
+      });
+      expect(chip.items.map((item) => item.label)).toEqual(["Raid updated", "Mythic+ created"]);
+    });
+
+    it("is a milestone rather than one of the running totals", () => {
+      const [session] = buildSessions([segment({ equipsetChanges: [raidSet] })]);
+
+      const [chip] = session.highlights.filter((entry) => entry.kind === "equipset");
+      expect(chip.family).toBe("milestone");
+    });
+
+    it("says nothing at all about a session where no set was touched", () => {
+      const [session] = buildSessions([segment()]);
+
+      expect(kinds(session)).not.toContain("equipset");
+    });
+  });
+
   // Twelve achievements is one thing to read — "it was that kind of evening" — and twelve
   // things to look at afterwards. The summary says the first; its entries hold the second.
   it("counts a kind into one summary rather than naming every one of them", () => {

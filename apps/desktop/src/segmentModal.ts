@@ -8,6 +8,7 @@
 
 import { achievementIds, achievementLine } from "./achievements";
 import type { AchievementBook } from "./achievements";
+import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
 import { highlights } from "./sessions";
 import { clock, dayLabel, duration, escapeHtml, plural, signed } from "./format";
 import { eventsOf } from "./types";
@@ -99,6 +100,48 @@ function earned(event: AchievementEvent, book: AchievementBook): string {
 }
 
 /**
+ * What happened to the character's equipment sets, slot by slot.
+ *
+ * This is the one section whose rows are lists of their own: a change is a set and the slots
+ * it moved, and the slots are the part somebody opens the modal for. The summary line above
+ * them says what the chip said; the rows underneath say which items, which is what the chip
+ * could not.
+ *
+ * A slot with nothing on one side is drawn as an em dash rather than left blank, so a slot
+ * that was cleared and a slot that was filled read as the two different things they are.
+ */
+function equipsets(): Section {
+  return {
+    title: "Equipment sets",
+    render: (segment) => {
+      const changes = eventsOf(segment, "equipsetChanges");
+      if (!changes.length) return "";
+      return `<section class="detail-section">
+        <h3>Equipment sets</h3>
+        <ul class="equipsets">${changes.map((change) => `<li class="equipset">
+          <p class="equipset-name">🎽 ${escapeHtml(equipsetTitle(change))}
+            <span class="muted">${escapeHtml(equipsetDetail(change))}</span> ${at(change)}</p>
+          ${(change.items || []).length === 0 ? "" : `<ul class="equipset-slots">${
+            (change.items || []).map((item) => {
+              const line = equipsetSlotLine(item);
+              return `<li>
+                <span class="equipset-slot">${escapeHtml(line.slot)}</span>
+                <span class="equipset-was">${line.previousItemId == null
+                  ? '<span class="muted">—</span>'
+                  : wowhead("item", line.previousItemId, line.before)}</span>
+                <span class="equipset-now">${line.itemId == null
+                  ? '<span class="muted">—</span>'
+                  : wowhead("item", line.itemId, line.after)}</span>
+              </li>`;
+            }).join("")
+          }</ul>`}
+        </li>`).join("")}</ul>
+      </section>`;
+    },
+  };
+}
+
+/**
  * Every list of events a segment can carry, and how each one reads in full. The table
  * columns abbreviate; this is the place that does not, because it is where someone comes
  * when the abbreviation was not enough.
@@ -126,6 +169,7 @@ const sections = (book: AchievementBook): Section[] => [
           ? '<span class="appearance-variant">variant of one owned</span>'
           : '<span class="muted">unknown</span>'),
   }),
+  equipsets(),
   section({
     key: "quests",
     title: "Quests",

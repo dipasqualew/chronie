@@ -402,6 +402,25 @@
     display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 0;
   }
 
+  /* A change to an equipment set is a set and the slots it moved, so it is a list holding
+     lists. The slot rows line up in three columns — where, what was there, what is now —
+     because scanning down "what replaced what" is the whole reason to open one. */
+  .equipsets { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .equipset { padding: 6px 8px; border-radius: 8px; }
+  .equipset:hover { background: var(--surface-2); }
+  .detail-section .equipset-name { margin: 0; }
+  .equipset-slots {
+    list-style: none; margin: 4px 0 0; padding: 0 0 0 22px;
+    font-size: 12.5px; color: var(--text-secondary);
+  }
+  .equipset-slots li {
+    display: grid; grid-template-columns: 84px 1fr 1fr; gap: 8px; align-items: baseline;
+  }
+  .equipset-slot { color: var(--text-secondary); }
+  /* The arrow is drawn rather than written so a screen reader is not made to say it on
+     every row; the two columns already read as before and after. */
+  .equipset-now::before { content: "→ "; color: var(--text-secondary); }
+
   #transmog-detail { width: min(560px, 94vw); max-height: 86vh; }
   #transmog-detail[open] { display: flex; flex-direction: column; }
   .mog-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

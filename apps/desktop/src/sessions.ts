@@ -12,6 +12,7 @@
  * is what lets the grouping rule and the "what mattered" rule be tested without a browser.
  */
 
+import { equipsetDetail, equipsetTitle } from "./equipsets";
 import { eventsOf } from "./types";
 import type { EventListKey, EventOf, Segment } from "./types";
 
@@ -146,7 +147,7 @@ export function charactersIn(segments: Segment[]): SessionCharacter[] {
 
 export type HighlightKind =
   | "achievement" | "levelUp" | "mount" | "toy" | "pet" | "transmog"
-  | "housingLevel" | "housingItem" | "quest"
+  | "housingLevel" | "housingItem" | "quest" | "equipset"
   | "gold" | "loot" | "currency" | "reputation" | "housingXP";
 
 /**
@@ -227,11 +228,12 @@ const KINDS: Record<HighlightKind, HighlightStyle> = {
   housingLevel: { rank: 7, family: "milestone", icon: "🏡" },
   housingItem: { rank: 8, family: "milestone", icon: "🪑" },
   quest: { rank: 9, family: "milestone", icon: "📜" },
-  gold: { rank: 10, family: "tally", icon: "💰" },
-  loot: { rank: 11, family: "tally", icon: "🎒" },
-  currency: { rank: 12, family: "tally", icon: "🪙" },
-  reputation: { rank: 13, family: "tally", icon: "🎖️" },
-  housingXP: { rank: 14, family: "tally", icon: "✨" },
+  equipset: { rank: 10, family: "milestone", icon: "🎽" },
+  gold: { rank: 11, family: "tally", icon: "💰" },
+  loot: { rank: 12, family: "tally", icon: "🎒" },
+  currency: { rank: 13, family: "tally", icon: "🪙" },
+  reputation: { rank: 14, family: "tally", icon: "🎖️" },
+  housingXP: { rank: 15, family: "tally", icon: "✨" },
 };
 
 /**
@@ -406,6 +408,28 @@ function milestones(segments: Segment[]): HighlightSeed[] {
       label: counted(items, "decor"),
       detail: warband.length ? `${warband.length} warband first` : "already known",
       weight: warband.length * 100 + housing.length,
+      items,
+    });
+  }
+
+  const equipsets = from("equipsetChanges");
+  if (equipsets.length) {
+    // Which set, what happened to it, and whether the character ended up better dressed —
+    // the three things a chip about an equipment set is worth reading for.
+    const items = equipsets.map((sourced) =>
+      entry(sourced, equipsetTitle(sourced.event), equipsetDetail(sourced.event)));
+    const edits = equipsets.filter(({ event }) => event.kind === "updated");
+    out.push({
+      kind: "equipset",
+      label: counted(items, "equipment set changes"),
+      // With one change the line already says what happened, so the quieter half carries
+      // the items. With several it carries the shape of the evening's fiddling instead.
+      detail: items.length === 1
+        ? items[0].detail
+        : `${edits.length ? `${edits.length} edited` : ""}${
+          edits.length && edits.length < items.length ? ", " : ""}${
+          edits.length < items.length ? `${items.length - edits.length} created or deleted` : ""}`,
+      weight: items.length,
       items,
     });
   }

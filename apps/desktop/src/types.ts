@@ -68,6 +68,49 @@ export interface ReputationGain {
   at?: number | null;
 }
 
+/**
+ * What one slot of an equipment set holds after a change, and what it replaced.
+ *
+ * The `previous*` half is not stored anywhere: the backend derives it from the row behind
+ * this one in the ledger — the last time the same character's same set had the same slot
+ * written — so there is exactly one place a slot's history is written down.
+ *
+ * A level and a name arrive when the item was on the character at the moment of the change,
+ * which is the ordinary case: saving a set saves what is equipped. A change only noticed at
+ * a later login has the id alone, and a row that says less is still a row.
+ */
+export interface EquipsetSlotChange {
+  /** Inventory slot id: 1 head, 2 neck, 3 shoulder, and so on to 19 tabard. */
+  slot: number;
+  /** What is in the slot now. Absent for a slot the change emptied. */
+  itemId?: number | null;
+  /** What that item is really worth, upgrades and all — not the base level of its id. */
+  itemLevel?: number | null;
+  itemName?: string | null;
+  previousItemId?: number | null;
+  previousItemLevel?: number | null;
+  previousItemName?: string | null;
+}
+
+/** A set that appeared, one that went away, or one whose items were edited. */
+export type EquipsetChangeKind = "created" | "deleted" | "updated";
+
+/**
+ * One thing that happened to one of the character's equipment sets.
+ *
+ * A rename is not one of them: the set is the same set holding the same items under a new
+ * label, and the new name simply travels on the next real change.
+ */
+export interface EquipsetChangeEvent {
+  /** The client's own id for the set, which survives a rename. Unique per character. */
+  setId: number;
+  name: string;
+  kind: EquipsetChangeKind;
+  at?: number | null;
+  /** The slots that changed, ascending. Empty when a set that held nothing came or went. */
+  items?: EquipsetSlotChange[];
+}
+
 export interface EncounterEvent {
   id: number;
   name?: string | null;
@@ -146,6 +189,7 @@ export interface Segment {
   keystone?: KeystoneRun | null;
   activities?: Activity[];
   encounters?: EncounterEvent[];
+  equipsetChanges?: EquipsetChangeEvent[];
   transmogs?: TransmogEvent[];
   currencies?: CurrencyGain[];
   reputation?: ReputationGain[];
