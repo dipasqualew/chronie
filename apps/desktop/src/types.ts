@@ -336,9 +336,36 @@ export interface AccountFaction {
   characters: CharacterStanding[];
 }
 
+/** What one character was last seen carrying. Mirrors a row of `character_gold`. */
+export interface GoldHolder {
+  character: string;
+  /** Copper, the unit the client counts in. */
+  total: number;
+  at?: number | null;
+}
+
+/**
+ * What the account is worth in gold.
+ *
+ * `warband` is the one pot every character shares, so it is added to the total once rather
+ * than per character. Null when no character has ever reported one — an account whose file
+ * predates the reading has not claimed to hold nothing, it has simply never been asked.
+ */
+export interface AccountGold {
+  characters: GoldHolder[];
+  /** The wallets alone, without the warband bank. */
+  wallets: number;
+  warband?: number | null;
+  warbandAt?: number | null;
+  total: number;
+  /** The eldest reading in the total, which is the weakest claim in it. */
+  oldest?: number | null;
+}
+
 export interface AccountHoldings {
   currencies: AccountCurrency[];
   factions: AccountFaction[];
+  gold?: AccountGold | null;
 }
 
 /* ---------- transmog ---------- */

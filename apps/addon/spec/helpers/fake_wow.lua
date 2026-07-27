@@ -13,6 +13,9 @@ local fake = {}
 ---
 ---Verified against https://warcraft.wiki.gg/wiki/Events (patch 12.0.5).
 fake.KNOWN_EVENTS = {
+    -- Read out of the 12.0.5.67823 client's own event table, where it sits beside
+    -- PLAYER_MONEY, and confirmed firing on a warband bank deposit on that build.
+    "ACCOUNT_MONEY",
     "ACHIEVEMENT_EARNED",
     "BAG_UPDATE_DELAYED",
     "BOSS_KILL",
@@ -656,9 +659,9 @@ end
 ---one account writing into the same SavedVariables table.
 ---@param options table? `{ playerName, realmName, class, classFile, level, now, savedInstances,
 ---  savedWorldBosses, db,
----  tiers, money, instanceType, instanceName, difficultyId, difficultyName, itemPrices,
----  transmogSources, currencies, achievements, mounts, pets, toys, housingItems, activeQuests,
----  questStates, lootFormats, factionFormats }`
+---  tiers, money, warbandMoney, instanceType, instanceName, difficultyId, difficultyName,
+---  itemPrices, transmogSources, currencies, achievements, mounts, pets, toys, housingItems,
+---  activeQuests, questStates, lootFormats, factionFormats }`
 ---  `housingItems` maps an id to `{ name, quantity }`, quantity being the warband-owned count.
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
 ---  `currencyItems` maps an item id to `{ name, count }`, count being the grand total owned.
@@ -696,6 +699,10 @@ function fake.newEnv(options)
     -- Mutable so a test can drive the wallet, the zone, and the collection across a
     -- sequence of events, the same way the client mutates them under the addon's feet.
     local money = options.money or 0
+    -- The one pot the whole account shares, which is not any character's. Non-zero by default
+    -- so a test that never mentions it still proves the pot reached SavedVariables — a zero
+    -- would be indistinguishable from the store having refused the reading.
+    local warbandMoney = options.warbandMoney or 500000
     local zone = {
         name = options.instanceName or "Deadmines",
         kind = options.instanceType,
@@ -810,6 +817,11 @@ function fake.newEnv(options)
         end,
         getMoney = function()
             return money
+        end,
+        -- The real seam guards C_Bank away and pcalls the read, so a client build without
+        -- warband banks answers nil here. `setWarbandMoney(nil)` models that build.
+        warbandMoney = function()
+            return warbandMoney
         end,
         instanceInfo = function()
             return {
@@ -1004,6 +1016,13 @@ function fake.newEnv(options)
         ---@param value integer
         setMoney = function(value)
             money = value
+        end,
+        ---Drive the warband bank's balance the addon reads through env.warbandMoney, as a
+        ---deposit under any of the account's characters would. Nil models a client build that
+        ---has no warband bank to ask.
+        ---@param value integer?
+        setWarbandMoney = function(value)
+            warbandMoney = value
         end,
         ---Drive the grand-total owned count the addon reads through env.ownedItemCount,
         ---as looting, spending or moving a currency item between stores would.

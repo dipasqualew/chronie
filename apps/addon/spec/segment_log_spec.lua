@@ -147,6 +147,20 @@ describe("ns.newSegmentLog", function()
             assert.is_nil(db.segments[1].keystone)
         end)
 
+        -- The log is a record of events and the wallet's balance is not one. The movement
+        -- belongs to the visit and is settled forever; what the character was left holding
+        -- goes stale the moment it is spent, and the holdings snapshot is where that lives.
+        -- Filed here it would be a balance dated to an evening in March, read forever after
+        -- as though it were still true.
+        it("keeps the wallet's balance out of the record, and the movement in it", function()
+            local log, db = newLog()
+
+            log.record(visit({ summary = { goldDiff = 1500, wallet = 125000 } }))
+
+            assert.equal(1500, db.segments[1].goldDiff)
+            assert.is_nil(db.segments[1].wallet)
+        end)
+
         it("carries a keystone run and its expansion onto the record", function()
             local log, db = newLog()
 

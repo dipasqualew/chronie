@@ -166,6 +166,19 @@ describe("buildCharacters against what the account holds", () => {
         characters: [{ character: "Brin-Hearth", total: 400, at: BASE }],
       },
     ],
+    // What the roster is sitting on: both wallets and the one pot they share, which is added
+    // to the account's worth once rather than once per character.
+    gold: {
+      characters: [
+        { character: "Aster-Vale", total: 125_000, at: BASE + 100 },
+        { character: "Brin-Hearth", total: 40_000, at: BASE },
+      ],
+      wallets: 165_000,
+      warband: 500_000,
+      warbandAt: BASE,
+      total: 665_000,
+      oldest: BASE,
+    },
     factions: [
       {
         faction: "Cavern Cartographers",
@@ -204,6 +217,31 @@ describe("buildCharacters against what the account holds", () => {
 
     expect(held.total).toBe(17_550);
     expect(held.accountTotal).toBe(30_000);
+  });
+
+  // The balance is the character's, the total is the account's, and the profile carries both
+  // because the interesting question is what this one is holding against what the roster has.
+  it("gives a character its own balance beside what the whole account is worth", () => {
+    expect(profileFor("Aster-Vale").gold).toEqual({
+      total: 125_000,
+      accountTotal: 665_000,
+      wallets: 165_000,
+      warband: 500_000,
+      at: BASE + 100,
+      oldest: BASE,
+    });
+  });
+
+  // The account's total is real and this character's share of it is simply unknown. A profile
+  // drawing an empty pocket would be inventing a reading nobody ever took.
+  it("says nothing about a character the account's gold has never included", () => {
+    expect(profileFor("Never-Read").gold).toBeNull();
+  });
+
+  it("says nothing about gold at all on a history that never reported any", () => {
+    const [profile] = buildCharacters(played("Aster-Vale", [{}]));
+
+    expect(profile.gold).toBeNull();
   });
 
   it("gives them the standings they have, furthest along first", () => {

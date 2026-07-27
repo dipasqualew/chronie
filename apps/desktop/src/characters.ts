@@ -34,6 +34,21 @@ export interface CharacterCurrency {
   at?: number | null;
 }
 
+/**
+ * What one character is carrying, against what the account is worth altogether.
+ *
+ * `accountTotal` includes the warband bank, because that is what the account can actually
+ * reach; `wallets` is the roster's own pockets, and the difference between the two is the pot.
+ */
+export interface CharacterGold {
+  total: number;
+  accountTotal: number;
+  wallets: number;
+  warband?: number | null;
+  at?: number | null;
+  oldest?: number | null;
+}
+
 /** Where one character stands with one faction, and whether anybody is ahead of them. */
 export interface CharacterFaction extends CharacterStanding {
   faction: string;
@@ -66,6 +81,8 @@ export interface CharacterProfile {
   places: string[];
   /** Their segments, newest first. */
   segments: Segment[];
+  /** What they are carrying, and what the account is worth. Null until one has been read. */
+  gold: CharacterGold | null;
   /** What they are holding, biggest first. Empty on a history collected before any report. */
   currencies: CharacterCurrency[];
   /** Where they stand, furthest along first. */
@@ -126,9 +143,31 @@ function profile(name: string, list: Segment[], holdings?: AccountHoldings): Cha
     goldDiff: segments.reduce((total, segment) => total + (segment.goldDiff || 0), 0),
     places: [...byPlace.entries()].sort((left, right) => right[1] - left[1]).map(([place]) => place),
     segments,
+    gold: goldOf(name, holdings),
     currencies: currenciesOf(name, holdings),
     factions: factionsOf(name, holdings),
     highlights: highlights(segments),
+  };
+}
+
+/**
+ * What this character is carrying, if it has ever said.
+ *
+ * Null rather than zero for a character the account has a gold reading for but which is not in
+ * it: the roster's total is real, this character's contribution to it is simply unknown, and a
+ * profile claiming an empty pocket would be inventing that.
+ */
+function goldOf(name: string, holdings?: AccountHoldings): CharacterGold | null {
+  const gold = holdings?.gold;
+  const held = gold?.characters.find((holder) => holder.character === name);
+  if (!gold || !held) return null;
+  return {
+    total: held.total,
+    accountTotal: gold.total,
+    wallets: gold.wallets,
+    warband: gold.warband,
+    at: held.at,
+    oldest: gold.oldest,
   };
 }
 

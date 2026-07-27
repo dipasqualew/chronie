@@ -533,6 +533,19 @@ const mockDesktop: E2EMock = {
     // these do I have, everywhere" and "has somebody already finished this grind" are
     // questions about the account.
     holdings: {
+      // Two wallets and the one pot the account shares. The pot is what makes the account's
+      // worth a different number from either wallet, which is the whole reason it is drawn.
+      gold: {
+        characters: [
+          { character: "Aster-Vale", total: 125000, at: EVENING },
+          { character: "Brin-Hearth", total: 400000, at: EVENING - 3 * 86400 },
+        ],
+        wallets: 525000,
+        warband: 1200000,
+        warbandAt: EVENING - 3 * 86400,
+        total: 1725000,
+        oldest: EVENING - 3 * 86400,
+      },
       currencies: [{
         id: 7,
         name: "Glass Token",
@@ -1330,6 +1343,18 @@ test("digs from a session down into a single segment and back out again", async 
       .toContainText("Brin-Hearth is further along: Revered");
   });
 
+  // The same split the character pane draws, in the place a reader meets one segment: what
+  // this hour did to the wallet is settled forever, and what the character is carrying is the
+  // latest reading of a wallet that has moved since. An unqualified balance beside a segment
+  // from March would read as though it were March's.
+  await test.step("the wallet's balance sits beside what the segment did to it", async () => {
+    await expect(detail.gainFor("is carrying")).toContainText("Aster is carrying 12g 50s");
+
+    const account = detail.gainFor("across the account");
+    await expect(account).toContainText("172g 50s across the account");
+    await expect(account).toContainText("120g 0s in the warband bank");
+  });
+
   // And when the client said nothing, the window says nothing: no empty bracket after the
   // gain, and no bar at the bottom of a track the character was never on.
   await test.step("and says none of it when the client never said", async () => {
@@ -1682,6 +1707,19 @@ test("gives every character a page of their own", async ({ page, roster }) => {
     const standing = roster.profile.getByRole("progressbar", { name: /Cavern Cartographers/ });
     await expect(standing).toHaveJSProperty("value", 4200);
     await expect(standing).toHaveJSProperty("max", 12000);
+  });
+
+  // Gold is the one number the pane says twice, and the two are different kinds of thing: the
+  // balance is what the addon last read off the client, the net is what every recorded segment
+  // did to it and knows nothing of the gold that was there before Chronie was installed.
+  await test.step("what they are carrying is drawn apart from what they earned", async () => {
+    await roster.pick("Brin-Hearth");
+    await expect(roster.stat("Wallet")).toHaveText("40g 0s");
+
+    // And under it, what the roster is worth: every wallet plus the one pot they all share,
+    // which is added once however many characters can reach it.
+    await expect(roster.profile).toContainText("172g 50s across the account");
+    await expect(roster.profile).toContainText("120g 0s in the warband bank");
   });
 });
 

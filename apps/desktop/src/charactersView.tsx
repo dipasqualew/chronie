@@ -16,7 +16,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { byDay, dayOf } from "./characters";
-import type { CharacterProfile } from "./characters";
+import type { CharacterGold, CharacterProfile } from "./characters";
 import { ago, dayLabel, duration, gold, initials, plural, signedGold } from "./format";
 import {
   HighlightList, SegmentButton, StandingBar, classProps, className, shownHighlights,
@@ -145,10 +145,17 @@ function Profile({ entry, unfolded, onUnfold, onOpenSegment }: ProfileProps): Re
       <Stat label="Days">{entry.dayCount}</Stat>
       <Stat label="First seen">{dayLabel(dayOf(entry.firstSeen))}</Stat>
       <Stat label="Looted"><span className="gold">{gold(entry.lootValue)}</span></Stat>
-      <Stat label="Wallet">
+      {/* The balance and the movement, in that order and never conflated: what the character
+          is carrying now is state the addon read off the client, where the net is the sum of
+          what every recorded segment did to it and knows nothing of the gold that was there
+          first. The balance is dropped rather than guessed on a character that has not
+          reported one. */}
+      {entry.gold ? <Stat label="Wallet"><span className="gold">{gold(entry.gold.total)}</span></Stat> : null}
+      <Stat label="Net">
         <span className={entry.goldDiff < 0 ? "loss" : "gold"}>{signedGold(entry.goldDiff)}</span>
       </Stat>
     </dl>
+    {entry.gold ? <AccountWorth held={entry.gold} /> : null}
     {where ? <p className="profile-where sub">Mostly in {where}</p> : null}
     <div className="profile-highlights">
       {shownHighlights(entry.highlights).length
@@ -176,6 +183,25 @@ function Profile({ entry, unfolded, onUnfold, onOpenSegment }: ProfileProps): Re
       ))}
     </section>
   </>;
+}
+
+/**
+ * What the account is worth in gold, under the wallet it belongs to.
+ *
+ * Only drawn when it says something the wallet above does not — a lone character with an empty
+ * warband bank is worth exactly what is in its pocket. The pot is named separately from the
+ * wallets because it answers a different question: not what the roster is sitting on, but what
+ * any one of them can reach from a bank.
+ */
+function AccountWorth({ held }: { held: CharacterGold }): ReactNode {
+  if (held.accountTotal === held.total) return null;
+  const pot = held.warband ? ` · ${gold(held.warband)} in the warband bank` : "";
+  const eldest = held.oldest ? ` · eldest read ${ago(held.oldest)}` : "";
+  return (
+    <p className="profile-where sub">
+      <span className="account-total">{gold(held.accountTotal)} across the account</span>{pot}{eldest}
+    </p>
+  );
 }
 
 /**

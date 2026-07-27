@@ -16,7 +16,7 @@ import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
 import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
 import { highlights } from "./sessions";
-import { ago, clock, dayLabel, duration, plural, signed } from "./format";
+import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
 import { eventsOf } from "./types";
 import type {
   AccountCurrency, AccountFaction, AccountHoldings, AchievementEvent, Segment,
@@ -187,6 +187,52 @@ function Reputation(
             <AccountStanding faction={byFaction.get(gain.faction)} character={segment.character} />
           </li>
         ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * What this segment did to the wallet, and what the wallet holds now.
+ *
+ * The two are different kinds of number and the wording has to keep them apart. The movement
+ * belongs to the segment and is settled forever; the balance is the addon's latest reading and
+ * belongs to the character rather than to this hour of its life. A segment from March shown
+ * beside an unqualified balance would read as though the balance were March's, so the balance
+ * says "now" and carries the age of the reading behind it.
+ */
+function Gold(
+  { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
+): ReactNode {
+  const account = holdings?.gold;
+  const held = account?.characters.find((holder) => holder.character === segment.character);
+  if (!segment.goldDiff && !segment.lootValue && !held) return null;
+  const who = segment.character.split("-")[0] || segment.character;
+  return (
+    <Section title="Gold">
+      <ul>
+        <li>
+          💰 <span className={isLoss(segment.goldDiff) ? "loss" : "gold"}>
+            {signedGold(segment.goldDiff)}
+          </span> <span className="muted">over the segment · {gold(segment.lootValue)} looted</span>
+        </li>
+        {held ? (
+          <li>
+            👛 {who} is carrying <strong>{gold(held.total)}</strong>
+            {held.at ? <span className="muted"> · read {ago(held.at)}</span> : null}
+          </li>
+        ) : null}
+        {/* Only when it is a different number from the wallet above: one character with an
+            empty warband bank is worth what is in its pocket, and saying it twice adds
+            nothing. */}
+        {account && account.total !== held?.total ? (
+          <li>
+            🏦 <span className="account-total">{gold(account.total)} across the account</span>
+            {account.warband ? (
+              <span className="muted"> · {gold(account.warband)} in the warband bank</span>
+            ) : null}
+          </li>
+        ) : null}
       </ul>
     </Section>
   );
@@ -520,6 +566,7 @@ export function SegmentModal(
             </Section>
             : null}
           <Lists segment={segment} book={book} />
+          <Gold segment={segment} holdings={holdings} />
           <Currencies segment={segment} holdings={holdings} />
           <Reputation segment={segment} holdings={holdings} />
         </> : null}
