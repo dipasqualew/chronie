@@ -28,8 +28,14 @@ function tauriCsp(): Plugin {
   const nonce = randomUUID();
   const csp = [
     "default-src 'self'",
-    "connect-src 'self' ipc: http://ipc.localhost ws: http://localhost:1420",
-    "img-src 'self' data:",
+    // `blob:` twice, and not as belt and braces. A `.glb` carries its pictures inside itself,
+    // and three.js hands each one to the browser as a `blob:` URL — through `fetch` where
+    // `createImageBitmap` exists and through an `<img>` where it does not. So the packaged app
+    // hits `connect-src` on Windows, where the webview is Chromium, and `img-src` on macOS and
+    // Linux, where it is WebKit and older than Safari 17. A policy naming only one of them
+    // ships a model with no colour on half the platforms and nothing to say why.
+    "connect-src 'self' ipc: http://ipc.localhost ws: http://localhost:1420 blob:",
+    "img-src 'self' data: blob:",
     `style-src 'self' 'unsafe-inline' 'nonce-${nonce}'`,
     `script-src 'self' 'unsafe-inline' 'nonce-${nonce}'`,
   ].join("; ");
