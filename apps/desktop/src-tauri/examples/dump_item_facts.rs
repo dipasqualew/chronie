@@ -32,7 +32,6 @@
 
 use std::collections::HashMap;
 
-use chronie_desktop_lib::casc::GameFiles;
 use chronie_desktop_lib::db2::Db2;
 use chronie_desktop_lib::items::{self, ARMOR, WEAPON};
 use chronie_desktop_lib::{casc, transmog};

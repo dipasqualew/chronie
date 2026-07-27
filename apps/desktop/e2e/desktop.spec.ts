@@ -2453,3 +2453,4 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
       .toContainText("Replaced this history with Study desktop's: 1204 segments");
   });
 });
+

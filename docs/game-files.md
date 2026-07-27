@@ -7,7 +7,8 @@ real install once, deliberately, and written down; going back to the install is 
 the questions it does not answer, and an answer found that way belongs here
 afterwards, marked with the build it came from.
 
-**Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26; the array
+**Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26; `Item` and the
+four `ItemSparse` columns beside the name against the same build on 2026-07-27; the array
 columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the same build on
 2026-07-27 — the two things this file used to carry on the community's say-so; the
 customization chain below against `12.0.5.67823` on 2026-07-27; and `ComponentModelFileData`,
@@ -98,6 +99,7 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `HelmetGeosetData` | 2821752 | fixed | yes, needs `foreign_id()` |
 | `Achievement` | 1260179 | fixed | yes |
 | `Achievement_Category` | 1324299 | fixed | yes |
+| `Item` | 841626 | fixed | yes |
 | `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` |
 
 ### ItemSparse
@@ -127,6 +129,53 @@ Column 5 should read "Thunderfury, Blessed Blade of the Windseeker" and "Hearths
 It is also the largest thing this app reads. `transmog.rs` keeps nothing from it: the rows
 are walked once per set opened and only the dozen names that set needs become strings, so the
 63 MB is transient and no cache has to be invalidated when the player patches the game.
+
+### Item, verified
+
+The small table beside `ItemSparse`, and the one that answers what a thing actually *is*.
+Measured on 12.0.5.67: 2 MB, 209,804 rows readable, 15 columns, ids kept in a list of their own
+rather than in a column. Every column below was read off that install with
+`examples/dump_item_facts`, which is what to run again after a patch:
+
+```sh
+cargo run --release --example dump_item_facts -- "<install>"
+```
+
+```
+Item                              (id in the id list)
+  col0 = ClassID                   2 weapon, 4 armour, and a dozen kinds nothing is worn from
+  col1 = SubclassID                for armour: 1 cloth, 2 leather, 3 mail, 4 plate, 5 cosmetic
+  col3 = InventoryType             the same number ItemSparse keeps, in the two-megabyte table
+  col6 = IconFileDataID  ─────────▶ a BLP icon, decoded through `icons`
+```
+
+Three checks, each of which a wrong column could not pass:
+
+- **`col3` agrees with `ItemSparse.InventoryType` on 100.00% of the 171,898 items both tables
+  hold.** That column was itself found rather than trusted (see below), so the two of them
+  agreeing is two independent readings of the same fact.
+- **94.91% of worn armour is filed under an armour subclass.** The remainder are the necks and
+  shirts, which the game files as miscellaneous — subclass 0 — and which the app deliberately
+  says nothing about rather than drawing a "Miscellaneous" chip on every ring in a history.
+- **The icons resolve.** Both the classic range (`134414` is the Hearthstone's) and the modern
+  one (`6331355`, on items added in 12.0) decode through `icons.rs`.
+
+### ItemSparse, the four columns beside the name
+
+`transmog.rs` reads the name and where a weapon is held; `items.rs` reads three more, and all of
+them were read off 12.0.5.67 with the same tool:
+
+| Column | Field | What says it is right |
+|---|---|---|
+| 52 | `AllowableClass` | `0xFFFF` on all but 29,455 items, and those are the class sets, the rogue poisons (mask 8) and the warlock grimoires (mask 256) |
+| 65 | `RequiredLevel` | 0 for a hearthstone, 17 for a level-22 green, and never above the cap |
+| 66 | `InventoryType` | found by `dump_inventory_types`; see below |
+| 67 | `OverallQualityID` | spans exactly 0..8, mostly common through epic, with 771 legendaries and 478 heirlooms in the whole game; Thunderfury reads legendary and the Hearthstone common |
+
+The class mask is `1 << (classID - 1)`, and a legacy item can carry bits above the thirteen
+classes the game has shipped — so a restriction is built by naming the classes that exist
+rather than by naming the bits that are set. A mask covering all thirteen is not a restriction
+however many spare bits travel with it.
 
 ## The chain, verified
 
@@ -523,8 +572,9 @@ than failing:
 
 Measured on 12.0.5.67: 13,736 declared rows, 13,732 readable, 3,846 distinct icons, 243
 categories. `cargo run --example dump_achievements -- "<install>"` prints the lot for a
-handful of ids and is what to run after a patch — as `dump_items` is for `ItemSparse`,
-`dump_transmog` for the chain above and `dump_customization` for the skin.
+handful of ids and is what to run after a patch — as `dump_items` is for `ItemSparse`'s
+strings, `dump_item_facts` for the rest of what an item is, `dump_transmog` for the chain
+above and `dump_customization` for the skin.
 
 ## Regenerating the fixtures
 
@@ -537,6 +587,7 @@ themselves are explained.
 ```sh
 bun run scripts/make-transmog-fixtures.ts
 bun run scripts/make-achievement-fixtures.ts
+bun run scripts/make-item-fixtures.ts
 ```
 
 Every table on the chains above has a fixture, and between them they hold each way a hop can
@@ -545,6 +596,16 @@ encrypts, an `ItemAppearance` whose display info is encrypted, one with no icon 
 display whose only model sits in the second slot, an item `ItemSparse` holds a row for and no
 name in, an achievement filed under a category whose parent is encrypted, one filed under a
 category that is not in the tree at all, and one the game withholds entirely.
+
+The item fixtures are a second, smaller pair of the same two tables, written for the question
+`items.rs` asks rather than the one `transmog.rs` asks: what a piece of gear *is*. `Item` is
+there in the storages the install uses — palettes for the class, the subclass and the slot,
+because a game with two hundred thousand items has twenty classes between them, and a signed
+24-bit field for the icon — and its ids sit in a list beside the rows. Between the two of them
+they hold an item the small table describes and the big one cannot name, an item the game
+withholds entirely, one restricted to three classes, one worn nowhere at all, and the
+`ItemSparse` columns at the positions the install keeps them at, so a reader that walked a
+variable-length record wrongly lands somewhere else.
 
 The customization tables are there too, and their fixture is built around the one way that
 chain goes wrong: the default choice paints four targets, every one of them resolves to a real
