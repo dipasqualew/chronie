@@ -16,14 +16,14 @@ export type Preview =
 /**
  * What the pane says about what it is showing, and why it is not showing something else.
  *
- * `painted` is the one that changed: the eight slots between the shoulders and the weapons
- * have no mesh of their own, and on a twelve-piece set that is most of the rows — so they are
- * shown the only way the game itself shows them, which is on a body. It is left here for the
- * case where that could not be produced either.
+ * The slots between the shoulders and the weapons have no mesh of their own, and on a
+ * twelve-piece set that is most of the rows. There used to be a sentence here explaining that
+ * absence to the reader; they are now shown the only way the game itself shows them, which is
+ * on a body, and `unpaintable` is all that is left of it — for the install that cannot manage
+ * even that.
  */
 export const REASONS = {
   worn: "Worn on the character. Drag to turn it.",
-  painted: "The game paints this slot onto the character, so it has no model of its own.",
   none: "The game gives this appearance no model.",
   withheld: "The game keeps this appearance encrypted.",
   absent: "This install holds no model for it.",
