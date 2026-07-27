@@ -628,12 +628,12 @@ fn models_of(
     }
     let models = ModelFiles::read(files)?;
 
-    let mut found = Vec::with_capacity(hangs.len());
+    let mut found: Vec<WornModel> = Vec::with_capacity(hangs.len());
     for hung in hangs {
         let Some(file) = models.file(hung.model, hung.slot) else {
             continue;
         };
-        found.push(WornModel {
+        let model = WornModel {
             attachment: hung.attachment,
             file,
             texture: match hung.material {
@@ -642,7 +642,19 @@ fn models_of(
                     .expect("an outfit naming a model material opened the texture table")
                     .named(resource),
             },
-        });
+        };
+        // The same mesh, the same picture and the same place on the body, twice. The game
+        // stores a set's repeated appearance as a copy of an earlier one — `TransmogSetItem`
+        // does it rather than write the row again — so an outfit can genuinely name one helm
+        // twice, and drawing it twice is two identical surfaces at one depth. That is the
+        // z-fighting an assembled outfit is supposed to be free of.
+        //
+        // Note what this is *not*: deduplicating by slot. Two pieces of one slot with anything
+        // different about them are both kept, and which of them owns a contested geoset group
+        // is the priority table's business rather than this list's.
+        if !found.contains(&model) {
+            found.push(model);
+        }
     }
     Ok(found)
 }
@@ -1047,6 +1059,7 @@ mod tests {
     const GLOVES: u32 = 900005;
     const SHIRT: u32 = 900008;
     const ROBE: u32 = 900012;
+    const LEGS: u32 = 900006;
     /// A display in a section the game encrypts, so nothing can be read about it.
     const WITHHELD: u32 = 900900;
 
@@ -1058,6 +1071,7 @@ mod tests {
     const SHIRT_SLOT: u32 = 2;
     const SHOULDER: u32 = 1;
     const BACK_SLOT: u32 = 9;
+    const LEGS_SLOT: u32 = 5;
     /// The three slots the game files a weapon or a shield under, and the whole of what they
     /// say: 11 is a sword and a two-hander alike, 13 a shield, 15 a thing held in an off hand.
     const WEAPON_SLOT: u32 = 11;
@@ -1406,5 +1420,248 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = of(&DirFiles::new(temp.path()), CHESTPIECE, CHEST, NOT_A_WEAPON).unwrap_err();
         assert!(error.contains("1280614.db2"), "{error}");
+    }
+
+    /* ---------- a whole outfit, and the arguments between its pieces ---------- */
+
+    /// An outfit, out of the fixture's own tables. Each piece is a display and the slot it
+    /// fills; nothing here is a weapon, so nothing needs the third number.
+    fn outfit(pieces: &[(u32, u32)]) -> Worn {
+        let pieces: Vec<Piece> = pieces
+            .iter()
+            .map(|(display_info_id, display_type)| Piece {
+                display_info_id: *display_info_id,
+                display_type: *display_type,
+                inventory_type: NOT_A_WEAPON,
+            })
+            .collect();
+        of_set(&fixture_files(), &pieces).unwrap()
+    }
+
+    // The acceptance, and the one contest this app's slot table can actually stage: a robe and
+    // a pair of legs both drive group 13, and the game's answer is that the chest owns it.
+    //
+    // The two values are what makes this a test rather than a coincidence. The robe asks for
+    // 1302, the skirt that hangs over the legs; the legs ask for 1301, which is the nothing
+    // that is there the rest of the time. And the legs are laid down *first*, because their
+    // slot composites below the chest's — so a reader that took the first claim, or the last,
+    // would answer 1301 and the skirt would simply not be there.
+    #[test]
+    fn gives_a_contested_group_to_the_slot_the_game_puts_first() {
+        for order in [
+            [(ROBE, CHEST), (LEGS, LEGS_SLOT)],
+            [(LEGS, LEGS_SLOT), (ROBE, CHEST)],
+        ] {
+            let dressed = outfit(&order);
+            assert_eq!(
+                dressed.geosets.iter().filter(|geoset| geoset.group == 13).count(),
+                1,
+                "a group with two values in it is two skirts on one pair of legs"
+            );
+            assert!(
+                dressed.geosets.contains(&Geoset { group: 13, geoset: 1302 }),
+                "the robe lost group 13 to the legs, given {order:?}: {:?}",
+                dressed.geosets
+            );
+        }
+    }
+
+    // And the other half of the same sentence: winning group 13 wins that group and nothing
+    // else. The legs keep every group the chest does not drive at all — a robe does not take
+    // the trousers away, it hangs over them.
+    #[test]
+    fn leaves_every_group_only_one_piece_drives_with_that_piece() {
+        let dressed = outfit(&[(ROBE, CHEST), (LEGS, LEGS_SLOT)]);
+        let switched: Vec<(u16, u16)> = dressed
+            .geosets
+            .iter()
+            .map(|geoset| (geoset.group, geoset.geoset))
+            .collect();
+        assert_eq!(
+            switched,
+            vec![
+                (11, 1104), // the legs' trousers, which nothing else claims
+                (9, 901),   // and their kneepads
+                (13, 1302), // the group the two of them fought over
+                (8, 802),   // the robe's sleeves
+                (10, 1001), // the chest it leaves bare
+                (22, 2201),
+                (28, 2801),
+            ]
+        );
+    }
+
+    // The whole table, stated as a pair of lists rather than as one contest. Every group this
+    // app's slots drive is in it, and the order inside a row is what decides an argument — so
+    // this is what a patch to either list has to be read against.
+    #[test]
+    fn says_which_slot_owns_each_group_two_slots_can_both_drive() {
+        // The three rows that can fire at all, given what the slots drive.
+        assert_eq!(owner(8, &[(3, 802), (2, 801)]), 802, "the chest beats the shirt");
+        assert_eq!(owner(8, &[(2, 801), (8, 803)]), 803, "and gloves beat both");
+        assert_eq!(owner(10, &[(2, 1001), (3, 1002)]), 1002);
+        assert_eq!(owner(13, &[(5, 1301), (3, 1302)]), 1302);
+        // A group only one slot drives is that slot's, whichever way round it is asked.
+        assert_eq!(owner(27, &[(0, 2702)]), 2702);
+        assert_eq!(owner(20, &[(6, 2002)]), 2002);
+        // And a group claimed by a slot the table does not list under it falls back to the
+        // claim rather than to nothing. Nothing in this app reaches it, and what it rules out
+        // is a group an item drives and nobody owns — which is a limb that goes missing.
+        assert_eq!(owner(13, &[(9, 1303)]), 1303);
+    }
+
+    /// [`owner_of`] as the test above reads it: the claims as `(slot, geoset)`.
+    fn owner(group: u16, claims: &[(u32, u16)]) -> u16 {
+        let claims: Vec<(u32, Geoset)> = claims
+            .iter()
+            .map(|(slot, geoset)| (*slot, Geoset { group, geoset: *geoset }))
+            .collect();
+        owner_of(group, &claims).geoset
+    }
+
+    // The draw order, on the one pair of fixture appearances that paint the same rectangle: a
+    // robe's lower legs and a pair of boots' both land in section 6, and boots composite below
+    // the chest. So the boots' picture goes down first and the robe's over it — whichever order
+    // the set happened to name the two in, which is what the second half of this reads.
+    #[test]
+    fn lays_the_pieces_down_in_the_order_their_slots_composite_in() {
+        for order in [
+            [(ROBE, CHEST), (BOOTS, FEET_SLOT)],
+            [(BOOTS, FEET_SLOT), (ROBE, CHEST)],
+        ] {
+            let painted = painted(&outfit(&order));
+            let boots = painted.iter().position(|(section, _)| *section == 7).expect("the feet");
+            let robe = painted.iter().position(|(section, _)| *section == 5).expect("the legs");
+            assert!(boots < robe, "given {order:?}: {painted:?}");
+
+            // And the two that overlap, in that order: 151010 is the boots' lower legs and
+            // 151008 the robe's, so the robe's is the one a reader ends up seeing.
+            let contested: Vec<u32> = painted
+                .iter()
+                .filter(|(section, _)| *section == 6)
+                .map(|(_, file)| *file)
+                .collect();
+            assert_eq!(contested, vec![151_010, 151_008], "given {order:?}");
+        }
+    }
+
+    // The layer table itself, at the places it is not the obvious order. A cape goes over
+    // everything and trousers go under everything, and neither is the order the slots are
+    // numbered in — which is what the app would fall back to if the table were dropped.
+    #[test]
+    fn stacks_the_slots_the_way_the_game_composites_them() {
+        let mut slots: Vec<u32> = (0..11).collect();
+        slots.sort_by_key(|slot| layer_of(*slot));
+        assert_eq!(slots, vec![2, 5, 0, 6, 1, 3, 10, 4, 7, 8, 9]);
+        // A weapon has no layer of its own and lands at the bottom, which costs nothing: it
+        // paints no part of the body, so it never shares a rectangle with anything.
+        assert_eq!(layer_of(WEAPON_SLOT), layer_of(SHIRT_SLOT));
+    }
+
+    // Everything with geometry keeps it, across the whole outfit: a helm on her head and a pad
+    // on each shoulder is three models from two pieces.
+    #[test]
+    fn hangs_the_geometry_of_every_piece_that_has_any() {
+        let dressed = outfit(&[(HELM_DISPLAY, HEAD), (SHOULDERS, SHOULDER), (CHESTPIECE, CHEST)]);
+        assert_eq!(
+            dressed.models,
+            vec![
+                WornModel { attachment: 11, file: 140_001, texture: Some(150_004) },
+                WornModel { attachment: 6, file: 140_002, texture: Some(150_002) },
+                WornModel { attachment: 5, file: 140_006, texture: Some(150_007) },
+            ]
+        );
+        // And what a helm takes away is taken away from the outfit, not from the helm.
+        assert_eq!(dressed.hidden, vec![0]);
+    }
+
+    // The game stores a set's repeated appearance as a copy of an earlier row rather than
+    // writing it again, so an outfit can genuinely name one helm twice. Hanging it twice is two
+    // identical surfaces at one depth, which is the z-fighting an assembled outfit is meant to
+    // be free of — and this is *not* a deduplication by slot, which would drop a second piece
+    // that had anything different about it.
+    #[test]
+    fn hangs_an_appearance_a_set_names_twice_once() {
+        let once = outfit(&[(HELM_DISPLAY, HEAD)]);
+        let twice = outfit(&[(HELM_DISPLAY, HEAD), (HELM_DISPLAY, HEAD)]);
+        assert_eq!(twice.models, once.models);
+        assert_eq!(twice.geosets, once.geosets);
+    }
+
+    // The arithmetic the whole restructure is for. Twelve appearances read one at a time is
+    // twelve parses of the four largest tables on this chain, and on a real install that is
+    // where showing a set stops being fast enough. Every table here is opened once or not at
+    // all, however many pieces the outfit holds.
+    #[test]
+    fn reads_each_of_the_games_tables_once_however_many_pieces_are_worn() {
+        let files = Noted::new();
+        of_set(
+            &files,
+            &[
+                Piece { display_info_id: HELM_DISPLAY, display_type: HEAD, inventory_type: 0 },
+                Piece { display_info_id: SHOULDERS, display_type: SHOULDER, inventory_type: 0 },
+                Piece { display_info_id: ROBE, display_type: CHEST, inventory_type: 0 },
+                Piece { display_info_id: LEGS, display_type: LEGS_SLOT, inventory_type: 0 },
+                Piece { display_info_id: BOOTS, display_type: FEET_SLOT, inventory_type: 0 },
+                Piece { display_info_id: GLOVES, display_type: HANDS, inventory_type: 0 },
+                Piece { display_info_id: CAPE, display_type: BACK_SLOT, inventory_type: 0 },
+            ],
+        )
+        .unwrap();
+
+        let mut opened = files.asked.into_inner();
+        opened.sort_unstable();
+        let mut once = opened.clone();
+        once.dedup();
+        assert_eq!(opened, once, "a table was parsed more than once for one outfit");
+
+        let mut wanted = vec![
+            ITEM_DISPLAY_INFO_MATERIAL_RES,
+            ITEM_DISPLAY_INFO,
+            TEXTURE_FILE_DATA,
+            COMPONENT_TEXTURE_FILE_DATA,
+            MODEL_FILE_DATA,
+            COMPONENT_MODEL_FILE_DATA,
+            HELMET_GEOSET_DATA,
+        ];
+        wanted.sort_unstable();
+        assert_eq!(once, wanted);
+    }
+
+    // And the other side of that: a table nothing in the outfit has a question for is not
+    // opened at all, which is what keeps a wardrobe of chestpieces off the model tables.
+    #[test]
+    fn opens_no_table_the_outfit_has_no_question_for() {
+        let files = Noted::new();
+        of_set(
+            &files,
+            &[Piece { display_info_id: CHESTPIECE, display_type: CHEST, inventory_type: 0 }],
+        )
+        .unwrap();
+        let opened = files.asked.into_inner();
+        assert!(!opened.contains(&MODEL_FILE_DATA), "{opened:?}");
+        assert!(!opened.contains(&HELMET_GEOSET_DATA), "{opened:?}");
+    }
+
+    /// Fixture files that remember which of the game's tables were parsed.
+    struct Noted {
+        files: DirFiles,
+        asked: std::cell::RefCell<Vec<u32>>,
+    }
+
+    impl Noted {
+        fn new() -> Self {
+            Self {
+                files: fixture_files(),
+                asked: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl GameFiles for Noted {
+        fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+            self.asked.borrow_mut().push(fdid);
+            self.files.read(fdid)
+        }
     }
 }

@@ -21,15 +21,16 @@
 //! - **The skin comes from the caller.** The body's texture is M2 type 1, the composited
 //!   2048 × 1024 atlas this module builds, rather than a file the model names.
 //!
-//! And then the point of all of it: **one appearance, worn.** What an item does to a body is
+//! And then the point of all of it: **a set of clothes, worn.** What an item does to a body is
 //! two things and no more — it paints textures into rectangles of that atlas, and it switches
 //! geoset variants on in place of the bare defaults. [`crate::worn`] reads both out of the
 //! game's tables; [`Atlas::wear`] and [`dressed`] are where they land on the character.
 //!
-//! One item at a time, which is what keeps this small. The two subsystems that make an
-//! assembled outfit hard — the priority table that arbitrates which of two items owns the
-//! sleeves, and the per-slot draw order that puts bracers over them — exist to settle
-//! arguments between items, and one item cannot argue with itself.
+//! Twelve items do the same two things twelve times over, and the arguments between them are
+//! settled before anything gets here: [`crate::worn::of_set`] hands over the textures already in
+//! draw order and at most one geoset per group, priority resolved. So both of the functions
+//! below stayed lists — [`Atlas::wear`] paints what it is given in the order it is given, and
+//! [`dressed`] finds one owner per group because there is one to find.
 
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
@@ -248,27 +249,25 @@ pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
-/// The same character with one appearance on it, or `null` when there is nothing to put there.
+/// The character wearing a set of clothes, or `null` when there is nothing to put on her.
 ///
-/// `null` is an ordinary answer, and it is the same one an appearance with no model of its own
-/// gives: the game encrypts the displays of content it has not shipped, and a slot whose only
-/// texture was painted for another body resolves to nothing. Either way the window keeps
-/// showing the icon it already has, rather than a bare body that pretends to be dressed.
-pub fn worn_model_of(
-    files: &dyn GameFiles,
-    display_info_id: u32,
-    display_type: u32,
-    inventory_type: u32,
-) -> Result<Value, String> {
-    let worn = crate::worn::of(files, display_info_id, display_type, inventory_type)?;
+/// One request for a whole outfit rather than one per piece, which is what the window asks now:
+/// a reader opens a set and sees the set, and taking a piece off is the same question asked
+/// again with one fewer piece in it.
+///
+/// `null` is an ordinary answer and means what it has always meant, only across the outfit
+/// rather than the item: the game encrypts the displays of content it has not shipped, and a
+/// slot whose only texture was painted for another body resolves to nothing. A set every one of
+/// whose pieces is one of those has nothing to show, and the window keeps the icons it has. An
+/// outfit of no pieces at all is the same answer arrived at the other way, and is what taking
+/// everything off comes to — the bare body is [`model_of`], and the window already holds it.
+pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Result<Value, String> {
+    let worn = crate::worn::of_set(files, pieces)?;
     if worn.is_empty() {
-        return Ok(serde_json::json!({ "displayInfoId": display_info_id, "model": Value::Null }));
+        return Ok(serde_json::json!({ "model": Value::Null }));
     }
     let glb = glb_of(files, Some(&worn))?;
-    Ok(serde_json::json!({
-        "displayInfoId": display_info_id,
-        "model": data_url("model/gltf-binary", &glb),
-    }))
+    Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
 /// The `.glb` bytes themselves — which is what `dump_model` writes to a file.
@@ -415,6 +414,13 @@ fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
 /// in it is the worst of those — a leg that is simply absent — and this turns it into the body
 /// as it was, which reads as an appearance that changed nothing.
 ///
+/// **An outfit does not lower that floor, and priority is what keeps it from doing so.** Two
+/// pieces claiming one group is settled before anything reaches here, so what arrives is still
+/// at most one value per group and the line above still reads it the same way. A winner whose
+/// value this body has nothing for leaves the group where a bare body had it, exactly as a
+/// single item's would; what it does not do is fall through to the piece that lost, because the
+/// game's answer to "who owns this group" is one item and not a queue.
+///
 /// And then the third thing, which only a helm does: **a group taken away rather than swapped.**
 /// `Worn::hidden` is the groups `HelmetGeosetData` says the helm covers — hair, ears, a beard —
 /// and every variant in them goes, because there is no variant of hair that fits under a helm.
@@ -509,9 +515,24 @@ mod tests {
         })
     }
 
+    /// The same three numbers as one piece of an outfit, which is what the window sends.
+    fn piece((display_info_id, display_type, inventory_type): Appearance) -> crate::worn::Piece {
+        crate::worn::Piece {
+            display_info_id,
+            display_type,
+            inventory_type,
+        }
+    }
+
     /// What the fixture's own tables say an appearance does to the body.
-    fn worn_of((display_info_id, display_type, inventory_type): Appearance) -> Worn {
-        crate::worn::of(&fixture_files(), display_info_id, display_type, inventory_type).unwrap()
+    fn worn_of(appearance: Appearance) -> Worn {
+        crate::worn::of_set(&fixture_files(), &[piece(appearance)]).unwrap()
+    }
+
+    /// And what they say a whole outfit does to it.
+    fn outfit_of(appearances: &[Appearance]) -> Worn {
+        let pieces: Vec<crate::worn::Piece> = appearances.iter().copied().map(piece).collect();
+        crate::worn::of_set(&fixture_files(), &pieces).unwrap()
     }
 
     /// The geosets a body ends up drawing, which is what the whole selection comes down to.
@@ -880,8 +901,7 @@ mod tests {
     // picture and still the same mesh.
     #[test]
     fn hands_the_window_a_body_with_one_appearance_on_it() {
-        let answer = worn_model_of(&fixture_files(), ROBE.0, ROBE.1, ROBE.2).unwrap();
-        assert_eq!(answer["displayInfoId"], ROBE.0);
+        let answer = worn_set_of(&fixture_files(), &[piece(ROBE)]).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -895,9 +915,12 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_an_appearance_it_cannot_read() {
         for display in [900_900, 404_040] {
-            let answer = worn_model_of(&fixture_files(), display, CHESTPIECE.1, 0).unwrap();
+            let answer = worn_set_of(&fixture_files(), &[piece((display, CHESTPIECE.1, 0))]).unwrap();
             assert_eq!(answer["model"], Value::Null, "display {display}");
         }
+        // And an outfit with nothing in it at all, which is what taking every piece off comes
+        // to: the same `null`, and the window falls back to the bare body it already holds.
+        assert_eq!(worn_set_of(&fixture_files(), &[]).unwrap()["model"], Value::Null);
     }
 
     /* ---------- wearing the four slots that have geometry ---------- */
@@ -1016,6 +1039,109 @@ mod tests {
         assert_eq!(drawn(&worn_mesh(&worn_of(ONE_HANDER))), drawn(&mesh()));
         let scene = worn_scene(ONE_HANDER);
         assert_eq!(scene["images"].as_array().unwrap().len(), 2);
+    }
+
+    /* ---------- wearing the whole set ---------- */
+
+    /// The fixture's remaining armour, which is what makes an outfit out of the pieces above.
+    const LEGS: Appearance = (900_006, 5, 0);
+
+    /// The atlas a whole outfit paints, over nothing — the same read as [`atlas_of`], one
+    /// question wider.
+    fn outfit_atlas(appearances: &[Appearance]) -> RgbaImage {
+        let files = fixture_files();
+        let mut atlas = Atlas::unpainted();
+        atlas.wear(&files, &outfit_of(appearances).textures);
+        image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
+    }
+
+    // The acceptance, from the far end of the pipe: a set on one body, with no doubled limbs and
+    // none missing. One part per group is what says so — the same count a bare body draws, less
+    // the hair the helm covers — and every part is a variant some piece of the set switched on
+    // rather than the default that was there before.
+    #[test]
+    fn dresses_the_character_in_the_whole_set_at_once() {
+        let dressed = worn_mesh(&outfit_of(&[HELM, SHOULDERS, CHESTPIECE, LEGS]));
+        assert_eq!(
+            drawn(&dressed),
+            vec![
+                0,    // the body
+                802,  // the chestpiece's sleeves, in place of bare arms
+                1104, // the legs' trousers
+                2001, // bare feet, because the set has no boots in it
+                2702, // the helm
+                1002, // the chestpiece
+                1301, // the robe group, which is the one two pieces asked for
+                501,  // no boot
+                2101, // the skull
+            ]
+        );
+
+        // One group, one part — which is the whole of "no doubled limbs and no z-fighting"
+        // stated as arithmetic. A group awarded twice would show up here and nowhere else.
+        let mut groups: Vec<u16> = drawn(&dressed)
+            .iter()
+            .filter(|geoset| **geoset != 0)
+            .map(|geoset| geoset / 100)
+            .collect();
+        groups.sort_unstable();
+        let mut distinct = groups.clone();
+        distinct.dedup();
+        assert_eq!(groups, distinct, "a group drawn twice is a limb drawn twice");
+
+        // And nothing went missing: a bare body draws ten parts and this draws nine, the one
+        // difference being the hairstyle the helm covers.
+        assert_eq!(drawn(&dressed).len(), drawn(&mesh()).len() - 1);
+    }
+
+    // The sentence the priority table exists for, read as geometry: a robe hangs *over* the
+    // legs rather than beside them. Both pieces drive group 13 and the body holds a part for
+    // each of the two values they ask for, so this is the one place where losing the argument
+    // is visible rather than absorbed by the floor — 1302 is the skirt and 1301 is the nothing
+    // that is there without one.
+    #[test]
+    fn a_robe_in_a_set_hangs_over_the_legs_rather_than_beside_them() {
+        let dressed = drawn(&worn_mesh(&outfit_of(&[ROBE, LEGS])));
+        assert!(dressed.contains(&1302), "{dressed:?}");
+        assert!(!dressed.contains(&1301), "{dressed:?}");
+        // And the trousers underneath are still the legs', which is what "over" means: the
+        // robe took the group the two of them shared and none of the ones it did not.
+        assert!(dressed.contains(&1104), "{dressed:?}");
+        assert_eq!(dressed.len(), drawn(&mesh()).len());
+    }
+
+    // The compositing half of the same argument. Two pieces of one set can paint the same
+    // rectangle — a robe's lower legs and a pair of boots' both land in section 6 — and which
+    // one the reader sees is the draw order and nothing else. Boots composite below the chest,
+    // so the robe's picture is the one on top whichever order the set named them in.
+    #[test]
+    fn paints_two_pieces_that_share_a_rectangle_in_the_order_they_composite() {
+        for order in [[ROBE, BOOTS], [BOOTS, ROBE]] {
+            let atlas = outfit_atlas(&order);
+            assert_eq!(middle_of(&atlas, 6), [200, 240, 40, 255], "the robe's lower legs");
+            // And each piece still owns the rectangles nothing contests.
+            assert_eq!(middle_of(&atlas, 7), [20, 100, 240, 255], "the boots' feet");
+            assert_eq!(middle_of(&atlas, 3), [240, 130, 20, 255], "the robe's torso");
+        }
+    }
+
+    // The compositor underneath that, with the game's tables taken out of it: two pictures, one
+    // rectangle, and the second is the one that is left. `Atlas::wear` takes the layers in the
+    // order they go down and has never needed to know why they are in it.
+    #[test]
+    fn paints_a_later_layer_over_an_earlier_one_in_the_same_rectangle() {
+        let files = fixture_files();
+        let over = |first, second| {
+            let mut atlas = Atlas::unpainted();
+            atlas.wear(&files, &[
+                ComponentTexture { section: 6, file: first },
+                ComponentTexture { section: 6, file: second },
+            ]);
+            let png = atlas.png().unwrap();
+            middle_of(&image::load_from_memory(&png).unwrap().into_rgba8(), 6)
+        };
+        assert_eq!(over(151_010, 151_008), [200, 240, 40, 255]);
+        assert_eq!(over(151_008, 151_010), [150, 30, 90, 255]);
     }
 
     // A model the install does not hold leaves the body without it rather than dropping it at
