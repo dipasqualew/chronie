@@ -14,9 +14,9 @@ import { ago, clock, dayLabel, duration, escapeHtml, plural, signed } from "./fo
 import { eventsOf } from "./types";
 import type {
   AccountCurrency, AccountFaction, AccountHoldings, AchievementEvent, EventListKey, EventOf,
-  ReputationGain, Segment,
+  Segment,
 } from "./types";
-import { activityChip, classDot, className, highlightList, locationType } from "./ui";
+import { activityChip, classDot, className, highlightList, locationType, standingBar } from "./ui";
 
 const wowhead = (kind: string, id: number, text: string): string =>
   `<a href="https://www.wowhead.com/${kind}=${encodeURIComponent(id)}"
@@ -145,37 +145,6 @@ function equipsets(): Section {
 }
 
 /**
- * Where a reputation gain left the character, as a bar under the faction it belongs to.
- *
- * The pair of numbers is a position inside one level rather than a faction's whole
- * reputation — the addon has already decided which of the client's reputation systems
- * answers for this faction and reduced its answer to that shape — so the bar is always read
- * the same way whether the level is Honored, Renown 12 or a friendship rank.
- *
- * A gain the client could not place gets nothing at all: an account-wide line read on a
- * character that has never met the faction has no standing to draw, and an empty track
- * would claim they were at the bottom of one.
- *
- * A standing whose level has no length to it — the client named the level and said nothing
- * about how long it is — gets its name and no bar, for the same reason. A bar drawn at zero
- * is announced as zero per cent, which is a claim about where the character stands, and the
- * one thing known here is that nobody knows.
- */
-function standingBar(event: ReputationGain): string {
-  const max = Math.max(event.max || 0, 0);
-  const current = Math.min(Math.max(event.current || 0, 0), max);
-  if (!event.standing && max === 0) return "";
-  const bar = max === 0 ? "" : `<progress class="rep-bar" value="${current}" max="${max}"
-      aria-label="${escapeHtml(`${event.standing || "Standing"} with ${event.faction}`)}"></progress>`;
-  const numbers = max > 0 ? `${current.toLocaleString()} / ${max.toLocaleString()}` : "";
-  const caption = [event.standing, numbers].filter(Boolean).join(" ");
-  return `<p class="rep-standing">
-    ${bar}
-    <span class="muted">${escapeHtml(caption)}</span>
-  </p>`;
-}
-
-/**
  * The reputation gains, each with the standing it left behind.
  *
  * A section of its own rather than a one-line formatter, because the bar is a block under
@@ -213,7 +182,7 @@ function reputation(holdings?: AccountHoldings): Section {
         <h3>Reputation</h3>
         <ul>${gains.map((gain) => `<li>
           🎖️ ${escapeHtml(gain.faction)} <span class="muted">${escapeHtml(signed(gain.amount))}</span> ${at(gain)}
-          ${standingBar(gain)}
+          ${standingBar(gain, gain.faction)}
           ${accountStanding(byFaction.get(gain.faction), segment.character)}
         </li>`).join("")}</ul>
       </section>`;

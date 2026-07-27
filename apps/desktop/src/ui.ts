@@ -11,6 +11,7 @@
 import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities";
 import type { PartialActivity } from "./activities";
 import { clock, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
+import { highlights } from "./sessions";
 import type { Highlight } from "./sessions";
 import type { SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
@@ -199,6 +200,47 @@ export function highlightList(
   return parts.join("");
 }
 
+/* ---------- standings ---------- */
+
+/** As much of a standing as anything drawing one needs: the level, and where inside it. */
+export interface Standing {
+  /** The level's own name — "Honored", "Renown 12", "Best Friend". */
+  standing?: string | null;
+  current?: number | null;
+  max?: number | null;
+}
+
+/**
+ * Where a standing sits inside its own level, as a bar with the level's name beside it.
+ *
+ * The pair of numbers is a position inside one level rather than a faction's whole
+ * reputation — the addon has already decided which of the client's reputation systems
+ * answers for this faction and reduced its answer to that shape — so the bar is always read
+ * the same way whether the level is Honored, Renown 12 or a friendship rank.
+ *
+ * A standing the client could not place gets nothing at all: an account-wide line read on a
+ * character that has never met the faction has no standing to draw, and an empty track would
+ * claim they were at the bottom of one.
+ *
+ * A standing whose level has no length to it — the client named the level and said nothing
+ * about how long it is — gets its name and no bar, for the same reason. A bar drawn at zero
+ * is announced as zero per cent, which is a claim about where the character stands, and the
+ * one thing known here is that nobody knows.
+ */
+export function standingBar(standing: Standing, faction: string): string {
+  const max = Math.max(standing.max || 0, 0);
+  const current = Math.min(Math.max(standing.current || 0, 0), max);
+  if (!standing.standing && max === 0) return "";
+  const bar = max === 0 ? "" : `<progress class="rep-bar" value="${current}" max="${max}"
+      aria-label="${escapeHtml(`${standing.standing || "Standing"} with ${faction}`)}"></progress>`;
+  const numbers = max > 0 ? `${current.toLocaleString()} / ${max.toLocaleString()}` : "";
+  const caption = [standing.standing, numbers].filter(Boolean).join(" ");
+  return `<p class="rep-standing">
+    ${bar}
+    <span class="muted">${escapeHtml(caption)}</span>
+  </p>`;
+}
+
 /* ---------- activities ---------- */
 
 /**
@@ -222,6 +264,47 @@ export const activityText = (activities?: PartialActivity[]): string =>
     const detail = activitySummary(activity);
     return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
   }).join(", ");
+
+/* ---------- a segment, as one row ---------- */
+
+/**
+ * A segment summarised the way its session is, and clickable for the same reason: the detail
+ * modal it opens is where the summary comes apart, so the chips here stay inert — they are
+ * what the row says, not another thing to press inside a thing to press.
+ *
+ * It lives here rather than in either view because both draw it: an evening on the timeline
+ * unfolds into these rows, and so does a character on the roster. One row means a change to
+ * what a segment says at a glance lands in both places at once, which is the only way the
+ * two can be relied on to agree.
+ *
+ * The running totals are left off. On one segment they are four more numbers beside two
+ * things that actually happened, and the modal has them a click away.
+ *
+ * The row carries its own character's class, not the surrounding view's: an evening spent on
+ * three characters is exactly when the rail down the left of each row is worth having, and it
+ * would say the opposite of the truth if every row took the colour of whoever led.
+ */
+export function segmentButton(segment: Segment): string {
+  const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
+  const summary = highlightList(highlights([segment]), { tallies: false, interactive: false });
+  return `<button type="button" class="seg" data-open-segment="${segment.segmentId}"
+    ${classAttr(segment.classFile)}
+    aria-label="Open segment: ${escapeHtml(label)}">
+    <span class="seg-time">${escapeHtml(clock(segment.startedAt))}</span>
+    <span class="seg-body">
+      <span class="seg-head">
+        <span class="seg-who">${classDot(segment.classFile)}${escapeHtml(segment.character)}</span>
+        <span class="seg-where">${escapeHtml(segment.instance)}</span>
+        <span class="badge">${escapeHtml(locationType(segment))}</span>
+        ${segment.difficulty ? `<span class="muted">${escapeHtml(segment.difficulty)}</span>` : ""}
+      </span>
+      <span class="seg-activities">${(segment.activities || []).map(activityChip).join("") ||
+        '<span class="muted">No activity recorded</span>'}</span>
+      ${summary ? `<span class="seg-summary">${summary}</span>` : ""}
+    </span>
+    <span class="seg-dur">${escapeHtml(duration(segment.seconds))}</span>
+  </button>`;
+}
 
 /* ---------- the floating tooltip ---------- */
 

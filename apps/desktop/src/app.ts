@@ -1,10 +1,10 @@
 /**
- * The window: three views over one loaded dashboard.
+ * The window: four views over one loaded dashboard, and the plumbing behind them.
  *
- * Timeline is what happened, Details is every row of it, Setup is the plumbing. All three
- * read the same `SEGMENTS` array, and every write goes through the backend and comes back
- * as a whole dashboard — so what is on screen is always what was stored, never what the
- * page hoped a write did.
+ * Timeline is what happened, Characters is who it happened to, Details is every row of it,
+ * Setup is the plumbing. They all read the same `SEGMENTS` array, and every write goes
+ * through the backend and comes back as a whole dashboard — so what is on screen is always
+ * what was stored, never what the page hoped a write did.
  */
 
 import { desktop, message } from "./bridge";
@@ -12,6 +12,7 @@ import { activityFields, activityLabel, fieldValue, parseMetadata } from "./acti
 import type { ActivityField } from "./activities";
 import { buildSessions } from "./sessions";
 import { createAchievementBook } from "./achievements";
+import { createCharacters } from "./characters";
 import { createCombatLogging } from "./combatLog";
 import { createDetails } from "./details";
 import { createSegmentModal } from "./segmentModal";
@@ -67,6 +68,17 @@ const modal = createSegmentModal({
 
 const timeline = createTimeline({
   host: $("timeline"),
+  onOpenSegment: (segmentId, order) => modal.open(segmentId, order),
+});
+
+// The roster's segments are that character's own, so the modal opened from here walks their
+// history rather than the whole of recorded time.
+const characters = createCharacters({
+  elements: {
+    meta: $("characters-meta"),
+    list: $("characters-list"),
+    detail: $("character-detail"),
+  },
   onOpenSegment: (segmentId, order) => modal.open(segmentId, order),
 });
 
@@ -129,11 +141,12 @@ function repaint(): void {
     ].join(" · ")
     : "Nothing collected yet.";
   timeline.render(sessions);
+  characters.render(SEGMENTS, PAYLOAD.holdings);
   details.render(SEGMENTS);
   modal.refresh(SEGMENTS);
 }
 
-const VIEWS = ["timeline", "details", "transmog", "setup"] as const;
+const VIEWS = ["timeline", "characters", "details", "transmog", "setup"] as const;
 
 function show(view: string): void {
   for (const name of VIEWS) {

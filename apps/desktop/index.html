@@ -301,6 +301,67 @@
   .seg-summary .hl-icon { font-size: 11px; }
   .seg-dur { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
 
+  /* ---------- the characters roster ---------- */
+
+  /* The roster stays beside its character rather than above them: picking somebody is a
+     thing a reader does repeatedly, and a list that scrolled away on every pick would make
+     comparing two characters a matter of memory. It stacks below 900px, where two columns
+     would leave neither of them readable. */
+  .roster { display: grid; grid-template-columns: minmax(230px, 300px) 1fr; gap: 14px; align-items: start; }
+  .roster-panel { padding: 8px; position: sticky; top: 8px; max-height: calc(100vh - 48px); overflow-y: auto; }
+  .roster-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  @media (max-width: 900px) {
+    .roster { grid-template-columns: 1fr; }
+    .roster-panel { position: static; max-height: none; }
+  }
+
+  /* An entry wears its class the way a segment row does — a rail and a wash that has faded
+     out before the numbers — so the roster reads as the same kind of thing as the rows it
+     opens. The chosen one is ringed rather than filled: the wash is already spoken for. */
+  .roster-entry {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    width: 100%; text-align: left; padding: 8px 10px 8px 13px;
+    border: none; border-radius: 8px;
+    --class-wash: linear-gradient(to right,
+      color-mix(in srgb, var(--class-color) 18%, transparent), transparent 62%);
+    background: var(--class-wash);
+    box-shadow: inset 3px 0 0 var(--class-color), inset 4px 0 0 var(--border);
+  }
+  .roster-entry:hover { background: var(--class-wash), var(--surface-2); }
+  .roster-entry[aria-pressed="true"] {
+    background: var(--class-wash), var(--surface-2);
+    box-shadow: inset 3px 0 0 var(--class-color), inset 4px 0 0 var(--border),
+      0 0 0 1px var(--series-1);
+  }
+  .roster-who { display: grid; min-width: 0; }
+  .roster-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roster-class { font-size: 11.5px; }
+  .roster-numbers { display: grid; text-align: right; line-height: 1.3; }
+  .roster-played { font-weight: 620; font-variant-numeric: tabular-nums; }
+  .roster-numbers .muted { font-size: 11px; }
+
+  .roster-detail { padding: 16px; }
+  .profile-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .profile-head .circle { width: 40px; height: 40px; font-size: 13px; }
+  .profile-head h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+  .profile-head p { margin: 2px 0 0; }
+  .profile-stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 10px;
+    margin: 0 0 12px; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2);
+  }
+  .profile-stats dt { font-size: 11px; color: var(--text-muted); }
+  .profile-stats dd {
+    margin: 2px 0 0; font-size: 15px; font-weight: 620; font-variant-numeric: tabular-nums;
+  }
+  .profile-where { margin: 0 0 12px; }
+  .profile-segments h4 {
+    margin: 12px 0 4px; font-size: 11px; font-weight: 650; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--text-muted);
+  }
+  .profile-day:first-of-type h4 { margin-top: 4px; }
+  .segment-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+
   /* ---------- chips and badges ---------- */
 
   .badge {
@@ -619,6 +680,7 @@
   <nav class="appbar" aria-label="Application">
     <span class="brand">Chronie</span>
     <button id="timeline-tab" class="primary" type="button">Timeline</button>
+    <button id="characters-tab" type="button">Characters</button>
     <button id="details-tab" type="button">Details</button>
     <button id="transmog-tab" type="button">Transmog</button>
     <button id="setup-tab" type="button">Setup</button>
@@ -631,6 +693,17 @@
     </header>
     <div id="timeline"></div>
   </main>
+
+  <section id="characters-view" hidden>
+    <header class="view-head">
+      <h1>Characters</h1>
+      <div class="sub" id="characters-meta"></div>
+    </header>
+    <div class="roster">
+      <nav class="panel roster-panel" id="characters-list" aria-label="Character roster"></nav>
+      <section class="panel roster-detail" id="character-detail" aria-live="polite"></section>
+    </div>
+  </section>
 
   <section id="details-view" hidden>
     <header class="view-head">
