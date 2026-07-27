@@ -43,7 +43,16 @@ include!(concat!(env!("OUT_DIR"), "/bundled_addon.rs"));
 
 const UPDATER_PLUGIN: &str = "updater";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// What Chronie photographs by itself, for a settings file that does not say.
+///
+/// Conservative rather than empty, because "the first time this account ever did this" is
+/// rare enough to be worth a picture every time — which "an achievement fired" is not, there
+/// being thirty of those in the first minute of clearing an old raid.
+fn default_capture_triggers() -> Vec<String> {
+    vec!["accountFirstAchievement".to_string()]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
     wow_path: Option<String>,
@@ -59,6 +68,24 @@ struct Settings {
     /// leaves every original where it was while Chronie still holds a verified copy.
     #[serde(default)]
     keep_original_screenshots: bool,
+    /// Which things worth remembering photograph themselves — see `ns.newCaptureTriggers` in
+    /// the addon for what each name means. A settings file that does not mention it gets the
+    /// conservative default rather than an empty list, so an install that predates this
+    /// still photographs its account firsts; an explicit `[]` is respected and means off.
+    #[serde(default = "default_capture_triggers")]
+    capture_triggers: Vec<String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            wow_path: None,
+            last_sync: None,
+            combat_logging: false,
+            keep_original_screenshots: false,
+            capture_triggers: default_capture_triggers(),
+        }
+    }
 }
 
 struct AppState {
@@ -458,12 +485,31 @@ fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value
 /// is always what Setup last said.
 const SETTINGS_MODULE: &str = "src/Settings.lua";
 
+/// A trigger name as a Lua string literal, or nothing at all.
+///
+/// The names come out of a settings file somebody can edit by hand, and they end up inside a
+/// Lua source file the game executes. Rather than escape whatever arrives, this only lets
+/// through what a trigger name can actually be — letters, and nothing else — so there is no
+/// quote, backslash, newline or comment marker left to get the escaping wrong about. A name
+/// that is not one is dropped rather than repaired: a trigger Chronie does not have would do
+/// nothing anyway, and silently rewriting somebody's typo into a different rule would be
+/// worse than ignoring it.
+fn trigger_literal(name: &str) -> Option<String> {
+    let clean = !name.is_empty() && name.chars().all(|character| character.is_ascii_alphabetic());
+    clean.then(|| format!("\"{name}\""))
+}
+
 /// The contents of that file for a given setting.
 ///
 /// Pure, so the thing that actually reaches somebody's game folder is testable without a
 /// game folder. The shape has to match the `ns.settings` the bundled `src/Settings.lua`
 /// declares, because a hand-installed copy gets that one and must still load.
-fn settings_module(combat_logging: bool) -> String {
+fn settings_module(combat_logging: bool, capture_triggers: &[String]) -> String {
+    let triggers: Vec<String> = capture_triggers
+        .iter()
+        .filter_map(|name| trigger_literal(name))
+        .collect();
+    let triggers = triggers.join(", ");
     format!(
         "local _, ns = ...\n\
          \n\
@@ -472,6 +518,7 @@ fn settings_module(combat_logging: bool) -> String {
          -- the Setup screen is where these are meant to be changed.\n\
          ns.settings = {{\n\
          \x20   combatLogging = {combat_logging},\n\
+         \x20   captureTriggers = {{ {triggers} }},\n\
          }}\n"
     )
 }
@@ -484,7 +531,10 @@ fn stage_addon(destination: &Path, settings: &Settings) -> Result<(), String> {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         if *relative == SETTINGS_MODULE {
-            fs::write(&output, settings_module(settings.combat_logging))
+            fs::write(
+                &output,
+                settings_module(settings.combat_logging, &settings.capture_triggers),
+            )
         } else {
             fs::write(&output, contents)
         }
@@ -1046,7 +1096,80 @@ mod tests {
 
         assert!(bundled.contains("ns.settings = {"), "{bundled}");
         assert!(bundled.contains("combatLogging = false"), "{bundled}");
-        assert!(settings_module(false).contains("ns.settings = {"));
+        assert!(
+            bundled.contains("captureTriggers = { \"accountFirstAchievement\" }"),
+            "{bundled}"
+        );
+        let generated = settings_module(false, &default_capture_triggers());
+        assert!(generated.contains("ns.settings = {"));
+        assert!(
+            generated.contains("captureTriggers = { \"accountFirstAchievement\" }"),
+            "{generated}"
+        );
+    }
+
+    /// The list has to survive the trip into the game folder the same way combat logging
+    /// does, because the addon reads it there and nowhere else.
+    #[test]
+    fn writes_the_capture_triggers_into_the_installed_addon() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let settings = Settings {
+            capture_triggers: vec!["levelUp".into(), "mount".into()],
+            ..Settings::default()
+        };
+
+        replace_addon(&retail, &settings).unwrap();
+
+        let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
+        assert!(
+            installed.contains("captureTriggers = { \"levelUp\", \"mount\" }"),
+            "{installed}"
+        );
+    }
+
+    /// An empty list is a thing somebody can mean: photograph nothing unless I press the key.
+    #[test]
+    fn writes_an_empty_trigger_list_as_one() {
+        let generated = settings_module(false, &[]);
+
+        assert!(generated.contains("captureTriggers = {  }"), "{generated}");
+    }
+
+    /// The names reach a Lua file the game executes, out of a settings file somebody can
+    /// edit by hand. Nothing that is not a plain name may get that far.
+    #[test]
+    fn keeps_anything_that_is_not_a_trigger_name_out_of_the_lua() {
+        assert_eq!(trigger_literal("levelUp").as_deref(), Some("\"levelUp\""));
+        assert_eq!(trigger_literal(""), None);
+        assert_eq!(trigger_literal("level up"), None);
+        assert_eq!(trigger_literal("level_up"), None);
+        assert_eq!(trigger_literal("\" } print(1) --"), None);
+        assert_eq!(trigger_literal("a\\\"b"), None);
+        assert_eq!(trigger_literal("mount\nlevelUp"), None);
+
+        let generated = settings_module(false, &["\" } print(1) --".into(), "mount".into()]);
+        assert!(
+            generated.contains("captureTriggers = { \"mount\" }"),
+            "{generated}"
+        );
+    }
+
+    /// A settings file written before automatic capture existed must not read as "photograph
+    /// nothing" — the default is what an install that has never been told otherwise gets.
+    #[test]
+    fn reads_a_settings_file_that_predates_capture_triggers_as_the_default() {
+        let settings: Settings = serde_json::from_str(r#"{"wowPath": "/games/wow"}"#).unwrap();
+
+        assert_eq!(settings.capture_triggers, default_capture_triggers());
+    }
+
+    /// And an explicit empty list is respected, because turning it off is a thing to want.
+    #[test]
+    fn reads_an_explicit_empty_trigger_list_as_off() {
+        let settings: Settings = serde_json::from_str(r#"{"captureTriggers": []}"#).unwrap();
+
+        assert!(settings.capture_triggers.is_empty());
     }
 
     #[test]

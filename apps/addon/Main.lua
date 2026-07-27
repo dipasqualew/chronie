@@ -284,6 +284,13 @@ function ns.main(env)
         openSegment = segmentTracker.current,
     })
 
+    -- ns.settings again: which things are worth a photograph is the player's list, not
+    -- Chronie's, and it reaches the addon down the same channel combat logging does.
+    local captureTriggers = ns.newCaptureTriggers({
+        triggers = ns.settings.captureTriggers,
+        now = env.now,
+    })
+
     ---Takes a Chronie screenshot: what the keybinding in Bindings.xml runs.
     ---
     ---The marker is written first and the shutter fired second, and only if the marker
@@ -292,9 +299,12 @@ function ns.main(env)
     ---the file to the marker by the second in its name. Firing the shutter for an entry
     ---the log refused would leave an image with no marker to claim it, which reads to the
     ---desktop side as a photograph somebody else took.
+    ---@param options EntryOptions? What fired it, when something other than a key did.
     ---@return EntryRecord? entry nil when the log refused the press.
-    local function capture()
-        local entry = entryLog.record({ hasImage = true })
+    local function capture(options)
+        options = options or {}
+        options.hasImage = true
+        local entry = entryLog.record(options)
         if not entry then
             return nil
         end
@@ -303,6 +313,26 @@ function ns.main(env)
         -- segment that saw nothing.
         tally.entry()
         env.screenshot()
+        return entry
+    end
+
+    ---Photographs something worth remembering, if the player's rules say it is one.
+    ---
+    ---The limiter is started only once a capture has actually happened. The entry log has
+    ---refusals of its own — a press in the same second, a world that has not finished
+    ---loading — and spending a minute of silence on a picture that was never taken would
+    ---lose the next thing that was genuinely worth one.
+    ---@param event CaptureEvent
+    ---@return EntryRecord?
+    local function autoCapture(event)
+        local decision = captureTriggers.consider(event)
+        if not decision then
+            return nil
+        end
+        local entry = capture({ trigger = decision.trigger, achievement = decision.achievement })
+        if entry then
+            captureTriggers.taken()
+        end
         return entry
     end
 
@@ -534,6 +564,11 @@ function ns.main(env)
     -- between two neighbouring zones. Duplicate notifications are harmless because the
     -- tracker keeps the current segment when the location identity has not changed.
     local function syncSegment()
+        -- Belt and braces on the loading screen. LOADING_SCREEN_DISABLED is the event that
+        -- says it has lifted, but a flag left stuck up would silence automatic capture for
+        -- the rest of the session, and this fires on the far side of every load screen
+        -- there is.
+        captureTriggers.obscured("loading", false)
         env.requestRaidInfo()
         snapshotActiveQuests()
         segmentTracker.sync()
@@ -545,6 +580,31 @@ function ns.main(env)
     end
     dispatcher.on("PLAYER_ENTERING_WORLD", syncSegment)
     dispatcher.on("ZONE_CHANGED_NEW_AREA", syncSegment)
+
+    -- What is between the player and the world. Events fire happily during a load screen
+    -- and a cinematic, and the picture that comes back from either is worth nothing, so an
+    -- automatic capture is dropped rather than taken while one of these is up. Tracked by
+    -- name because they overlap — a cinematic that ends in a load screen is one continuous
+    -- stretch of not being able to see anything.
+    --
+    -- The event that lifts an obstruction is subscribed first and the one that raises it
+    -- only if that worked. On a client build that defines one of a pair and not the other,
+    -- an obstruction that can go up and never come down would silence automatic capture for
+    -- the rest of the session, which is a far worse failure than not suppressing at all.
+    for _, obstruction in ipairs({
+        { reason = "loading", up = "LOADING_SCREEN_ENABLED", down = "LOADING_SCREEN_DISABLED" },
+        { reason = "cinematic", up = "CINEMATIC_START", down = "CINEMATIC_STOP" },
+    }) do
+        local reason = obstruction.reason
+        local lifts = dispatcher.on(obstruction.down, function()
+            captureTriggers.obscured(reason, false)
+        end)
+        if lifts then
+            dispatcher.on(obstruction.up, function()
+                captureTriggers.obscured(reason, true)
+            end)
+        end
+    end
 
     -- Logging out or reloading is the last chance to file a segment: SavedVariables are
     -- only written to disk on the way out, so an unfiled segment would never be exported.
@@ -605,7 +665,13 @@ function ns.main(env)
         end
     end)
     onTallyEvent("ACHIEVEMENT_EARNED", function(id, alreadyEarned)
-        tally.achievement(id, env.achievementInfo(id), env.now(), not alreadyEarned)
+        local accountFirst = not alreadyEarned
+        tally.achievement(id, env.achievementInfo(id), env.now(), accountFirst)
+        -- Fired from inside the handler the tally already has, rather than from a second
+        -- subscription to the same event: two listeners for one event is how the thing that
+        -- counts and the thing that photographs drift apart. Deliberately not delayed — the
+        -- toast on screen is part of the memory, not something to race.
+        autoCapture({ kind = "achievement", id = id, accountFirst = accountFirst })
     end)
     -- The client reports the standing, not the delta, so the tally is handed the whole
     -- state and works the gain out against the baseline it anchored when the segment began.
@@ -622,6 +688,7 @@ function ns.main(env)
     onTallyEvent("PLAYER_LEVEL_UP", function(level)
         tally.levelUp(level, env.now())
         foldExperience()
+        autoCapture({ kind = "levelUp", id = level })
     end)
     -- A boss fight that ended, won or lost. ENCOUNTER_END is the only event that reports
     -- wipes, and a raid night's wipe count is what separates progression from a farm clear.
@@ -649,18 +716,22 @@ function ns.main(env)
         local completion = env.keystoneCompletion()
         if completion then
             tally.keystoneComplete(completion, env.now())
+            autoCapture({ kind = "keystone", id = completion.mapId, onTime = completion.onTime })
         end
     end)
     onTallyEvent("CHALLENGE_MODE_RESET", tally.keystoneReset)
     onTallyEvent("NEW_MOUNT_ADDED", function(id)
         tally.mount(id, env.mountInfo(id), env.now())
+        autoCapture({ kind = "mount", id = id })
     end)
     onTallyEvent("NEW_PET_ADDED", function(guid)
         local speciesID, name = env.petInfo(guid)
         tally.pet(speciesID, name, env.now(), guid)
+        autoCapture({ kind = "pet", id = speciesID })
     end)
     onTallyEvent("NEW_TOY_ADDED", function(id)
         tally.toy(id, env.toyInfo(id), env.now())
+        autoCapture({ kind = "toy", id = id })
     end)
     -- Housing decor is warband-wide, so the owned count decides first-time from duplicate:
     -- one copy means this segment collected it for the whole warband, more is an extra.
@@ -727,6 +798,7 @@ function ns.main(env)
         entryLog = entryLog,
         combatLogging = combatLogging,
         capture = capture,
+        captureTriggers = captureTriggers,
     }
 end
 

@@ -28,10 +28,18 @@ local _, ns = ...
 ---@field hasImage boolean? True when a screenshot was fired for this entry, absent when
 ---nothing was. The addon cannot see the filesystem, so this is a statement about what was
 ---asked for, never about what landed on disk.
+---@field trigger string? The rule that fired this capture by itself, absent when a person
+---pressed the key. Its presence is what tells the two apart downstream.
+---@field achievement integer? The achievement this entry is filed against, when that is
+---what it was taken for. A field of its own per subject kind rather than a kind/id pair:
+---there will only ever be a handful of kinds, and downstream this resolves to a real
+---foreign key with the referential integrity a polymorphic column cannot have.
 
 ---What the caller wants recorded.
 ---@class EntryOptions
 ---@field hasImage boolean? Whether a screenshot is being taken alongside this entry.
+---@field trigger string? The rule that asked for it, for an automatic capture.
+---@field achievement integer? The achievement it is filed against, if any.
 
 ---The permanent store of entries. Nothing here prunes: that is the whole reason entries
 ---are not kept inside the segments they belong to.
@@ -140,6 +148,14 @@ function ns.newEntryLog(deps)
             if hasImage then
                 entry.hasImage = true
                 lastImageAt = at
+            end
+
+            -- Absent rather than false or zero when nothing fired this by itself: a reader
+            -- downstream tells a pressed capture from an automatic one by whether there is
+            -- a trigger at all, and the subject only means anything beside one.
+            if options.trigger then
+                entry.trigger = options.trigger
+                entry.achievement = options.achievement
             end
 
             db.entries[#db.entries + 1] = entry

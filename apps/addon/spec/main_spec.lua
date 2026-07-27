@@ -1287,6 +1287,229 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("capturing without being asked", function()
+        ---Boot into the world with a given allowlist, the way an installed copy the
+        ---desktop app configured arrives.
+        ---@param triggers string[]?
+        ---@return table app, table recorded
+        local function bootWithTriggers(triggers)
+            local options = { playerName = "Thrall", realmName = "Ragnaros" }
+            if triggers then
+                options.settings = { captureTriggers = triggers }
+            end
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            return app, recorded
+        end
+
+        -- The acceptance criterion, end to end through the real dispatch: the client says
+        -- an achievement was earned for the first time, and a photograph of it exists.
+        it("photographs an account-first achievement and files it against that achievement", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(1, recorded.screenshots())
+            local entry = recorded.db.entries[1]
+            assert.equal("accountFirstAchievement", entry.trigger)
+            assert.equal(12345, entry.achievement)
+            assert.is_true(entry.hasImage)
+        end)
+
+        -- The addon ships conservative, and an installed copy nobody has configured must
+        -- behave the same way rather than photographing everything or nothing.
+        it("ships with the account-first rule and nothing else", function()
+            local ns = loader.load()
+
+            assert.same({ "accountFirstAchievement" }, ns.settings.captureTriggers)
+        end)
+
+        it("leaves an achievement the account already had alone", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, true)
+
+            assert.equal(0, recorded.screenshots())
+            assert.same({}, recorded.db.entries)
+        end)
+
+        it("takes no picture at all when the allowlist is empty", function()
+            local _, recorded = bootWithTriggers({})
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(0, recorded.screenshots())
+        end)
+
+        -- Thirty achievements in a minute is one memory, not thirty pictures of the same
+        -- corridor. Two seconds apart, so the entry log's own one-second cooldown is not
+        -- what is being measured here.
+        it("takes one picture of a raid clear rather than thirty", function()
+            local _, recorded = bootWithTriggers()
+
+            for id = 1, 30 do
+                recorded.frame:fire("ACHIEVEMENT_EARNED", id, false)
+                recorded.clock.advance(2)
+            end
+
+            assert.equal(1, recorded.screenshots())
+            assert.equal(1, #recorded.db.entries)
+        end)
+
+        it("photographs the next account first once the rate limit has passed", function()
+            local _, recorded = bootWithTriggers()
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 1, false)
+
+            recorded.clock.advance(60)
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 2, false)
+
+            assert.equal(2, recorded.screenshots())
+            assert.equal(2, recorded.db.entries[2].achievement)
+        end)
+
+        -- Events fire during a loading screen and the picture that comes back is a black
+        -- rectangle. Nothing is queued for later: the moment has gone.
+        it("takes no picture while a loading screen is up", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("LOADING_SCREEN_ENABLED")
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(0, recorded.screenshots())
+        end)
+
+        it("takes one again once the loading screen has lifted", function()
+            local _, recorded = bootWithTriggers()
+            recorded.frame:fire("LOADING_SCREEN_ENABLED")
+
+            recorded.frame:fire("LOADING_SCREEN_DISABLED")
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(1, recorded.screenshots())
+        end)
+
+        -- A load screen the client never said it had lifted would silence automatic
+        -- capture for the rest of the session, so entering the world clears it too.
+        it("clears a loading screen that entering the world ended", function()
+            local _, recorded = bootWithTriggers()
+            recorded.frame:fire("LOADING_SCREEN_ENABLED")
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(1, recorded.screenshots())
+        end)
+
+        it("takes no picture during a cinematic", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("CINEMATIC_START")
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(0, recorded.screenshots())
+
+            recorded.frame:fire("CINEMATIC_STOP")
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12346, false)
+
+            assert.equal(1, recorded.screenshots())
+        end)
+
+        -- Filed the way a pressed capture is, because it is one: the segment link is what
+        -- gives the photograph its location, class and difficulty.
+        it("links an automatic capture to the segment it happened in", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(recorded.db.segments[1].id, recorded.db.entries[1].segment)
+        end)
+
+        -- A pressed capture is somebody deciding, and it says so by carrying no trigger.
+        it("leaves a pressed capture unmarked", function()
+            local app, recorded = bootWithTriggers()
+
+            app.capture()
+
+            assert.is_nil(recorded.db.entries[1].trigger)
+            assert.is_nil(recorded.db.entries[1].achievement)
+        end)
+
+        -- The rate limit is about Chronie's own noise. Somebody holding the keybinding
+        -- down is doing something deliberate and is not what it is protecting against.
+        it("does not let the rate limit refuse a pressed capture", function()
+            local app, recorded = bootWithTriggers()
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            recorded.clock.advance(1)
+
+            assert.is_table(app.capture())
+            assert.equal(2, recorded.screenshots())
+        end)
+
+        for _, case in ipairs({
+            { trigger = "levelUp", fire = { "PLAYER_LEVEL_UP", 70 } },
+            { trigger = "mount", fire = { "NEW_MOUNT_ADDED", 1234 } },
+            { trigger = "toy", fire = { "NEW_TOY_ADDED", 999 } },
+        }) do
+            it("photographs a " .. case.trigger .. " for somebody who asked for one", function()
+                local _, recorded = bootWithTriggers({ case.trigger })
+
+                recorded.frame:fire(unpack(case.fire))
+
+                assert.equal(1, recorded.screenshots())
+                assert.equal(case.trigger, recorded.db.entries[1].trigger)
+                -- Only the achievement has a subject; the rest hang off the segment.
+                assert.is_nil(recorded.db.entries[1].achievement)
+            end)
+
+            it("leaves a " .. case.trigger .. " alone by default", function()
+                local _, recorded = bootWithTriggers()
+
+                recorded.frame:fire(unpack(case.fire))
+
+                assert.equal(0, recorded.screenshots())
+            end)
+        end
+
+        it("photographs a keystone that beat the timer", function()
+            local _, recorded = bootWithTriggers({ "keystoneOnTime" })
+            recorded.setKeystoneCompletion({
+                level = 20, mapId = 375, durationMs = 1000, onTime = true, upgrades = 1,
+            })
+
+            recorded.frame:fire("CHALLENGE_MODE_COMPLETED")
+
+            assert.equal(1, recorded.screenshots())
+            assert.equal("keystoneOnTime", recorded.db.entries[1].trigger)
+        end)
+
+        it("leaves a keystone that missed the timer alone", function()
+            local _, recorded = bootWithTriggers({ "keystoneOnTime" })
+            recorded.setKeystoneCompletion({
+                level = 20, mapId = 375, durationMs = 1000, onTime = false, upgrades = 0,
+            })
+
+            recorded.frame:fire("CHALLENGE_MODE_COMPLETED")
+
+            assert.equal(0, recorded.screenshots())
+        end)
+
+        -- Not a second subscription to ACHIEVEMENT_EARNED: the capture rides inside the
+        -- handler that already folds the achievement into the tally, so the two can never
+        -- disagree about what happened.
+        it("counts the achievement it photographed as well", function()
+            local app, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            local achievements = app.tally.summary().achievements
+            assert.equal(1, #achievements)
+            assert.equal(12345, achievements[1].id)
+        end)
+    end)
+
     describe("the current segment panel", function()
         ---@param itemID integer
         ---@return string a self-loot chat line's item link

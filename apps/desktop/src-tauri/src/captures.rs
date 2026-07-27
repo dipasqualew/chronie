@@ -56,6 +56,13 @@ pub struct Marker {
     /// Whether the addon fired a screenshot alongside this entry. A statement about what was
     /// asked for, never about what landed on disk — the addon has no way to know the latter.
     pub wants_image: bool,
+    /// The rule that fired this capture without being asked, absent when a person pressed the
+    /// key. Its presence is the whole difference between the two.
+    pub trigger: Option<String>,
+    /// The achievement this capture is of, as the game numbers it. Resolved to a row of its
+    /// own later — see `link_capture_achievements` — because the achievement may not have
+    /// been filed yet when the marker arrives.
+    pub achievement: Option<i64>,
 }
 
 impl Marker {
@@ -82,6 +89,8 @@ impl Marker {
                 .get("hasImage")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            trigger: text("trigger"),
+            achievement: value.get("achievement").and_then(Value::as_i64),
         })
     }
 }
@@ -379,6 +388,49 @@ mod tests {
         assert_eq!(markers[0].ui_map_id, Some(2649));
         assert_eq!(markers[0].x, None);
         assert_eq!(markers[0].y, None);
+    }
+
+    #[test]
+    fn reads_what_an_automatic_capture_says_it_is_of() {
+        let markers = markers(&json!({
+            "entries": [{
+                "id": "account|1|1",
+                "at": 1,
+                "stamp": "111423_120000",
+                "hasImage": true,
+                "trigger": "accountFirstAchievement",
+                "achievement": 4001,
+            }],
+        }));
+        assert_eq!(markers[0].trigger.as_deref(), Some("accountFirstAchievement"));
+        assert_eq!(markers[0].achievement, Some(4001));
+    }
+
+    /// The absence of a trigger is what says a person pressed the key, so it has to stay an
+    /// absence rather than becoming an empty string.
+    #[test]
+    fn reads_a_pressed_capture_as_being_of_nothing() {
+        let markers = markers(&json!({
+            "entries": [{
+                "id": "account|1|1", "at": 1, "stamp": "111423_120000", "hasImage": true,
+            }],
+        }));
+        assert_eq!(markers[0].trigger, None);
+        assert_eq!(markers[0].achievement, None);
+    }
+
+    /// A trigger with no subject: level ups, mounts and the rest hang off the segment and the
+    /// rule that fired them, because there is no row downstream to point a link at.
+    #[test]
+    fn reads_a_trigger_that_names_no_achievement() {
+        let markers = markers(&json!({
+            "entries": [{
+                "id": "account|1|1", "at": 1, "stamp": "111423_120000",
+                "hasImage": true, "trigger": "levelUp",
+            }],
+        }));
+        assert_eq!(markers[0].trigger.as_deref(), Some("levelUp"));
+        assert_eq!(markers[0].achievement, None);
     }
 
     #[test]
