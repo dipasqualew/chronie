@@ -15,49 +15,27 @@ import type { Highlight } from "./sessions";
 import type { SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
 
-/** The client's own class colours, so a character reads the same here as in game. */
-export const CLASS_COLORS: Record<string, string> = {
-  DEATHKNIGHT: "#c41e3a", DEMONHUNTER: "#a330c9", DRUID: "#ff7c0a", EVOKER: "#33937f",
-  HUNTER: "#aad372", MAGE: "#3fc7eb", MONK: "#00ff98", PALADIN: "#f48cba",
-  PRIEST: "#ffffff", ROGUE: "#fff468", SHAMAN: "#0070dd", WARLOCK: "#8788ee",
-  WARRIOR: "#c69b6d",
-};
-
-export const classColor = (classFile?: string | null): string =>
-  CLASS_COLORS[classFile ?? ""] || "var(--text-muted)";
-
-/** Near-black and white, the two inks the initials inside a filled circle can be written in. */
-const INK_DARK = "#0b0b0b";
-const INK_LIGHT = "#ffffff";
-
-/** WCAG relative luminance, which is what "how light is this colour" means when measured. */
-function luminance(hex: string): number {
-  const channel = (offset: number): number => {
-    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
-    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-}
-
-const contrast = (one: number, other: number): number =>
-  (Math.max(one, other) + 0.05) / (Math.min(one, other) + 0.05);
+/** The classes the stylesheet has a colour and an ink for, which is all thirteen of them. */
+export const CLASS_FILES = [
+  "DEATHKNIGHT", "DEMONHUNTER", "DRUID", "EVOKER", "HUNTER", "MAGE", "MONK",
+  "PALADIN", "PRIEST", "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
+] as const;
 
 /**
- * The ink to write a character's initials in once the circle is filled with their class
- * colour. No single choice reads on all thirteen: priest is white and rogue is nearly
- * yellow-white, while death knight red and shaman blue are darker than the body text. So
- * the fill is measured and whichever ink contrasts with it more wins.
+ * The attribute that puts a character's class colour on an element.
+ *
+ * The colour itself is not here, and deliberately: the packaged app's CSP carries a nonce
+ * in `style-src`, which makes the browser ignore `'unsafe-inline'` and drop every `style=""`
+ * attribute the page writes. So this hands the stylesheet a class rather than a colour, and
+ * the stylesheet — nonced, and therefore trusted — turns it into `--class-color` and
+ * `--class-ink`. Anything drawing in a class colour wants this and not a style attribute.
+ *
+ * A class the palette does not know still gets the attribute, empty. That is what makes it
+ * fall to the muted grey rather than inherit the colour of the session around it.
  */
-export function classInk(classFile?: string | null): string {
-  const fill = CLASS_COLORS[classFile ?? ""];
-  // A class the palette does not know is filled with the theme's muted grey, whose value
-  // lives in the stylesheet and cannot be measured from here. It is mid-toned in both
-  // themes, and the dark ink is the one that reads on it either way.
-  if (!fill) return INK_DARK;
-  const light = luminance(fill);
-  return contrast(light, luminance(INK_DARK)) >= contrast(light, luminance(INK_LIGHT))
-    ? INK_DARK
-    : INK_LIGHT;
+export function classAttr(classFile?: string | null): string {
+  const known = CLASS_FILES.find((file) => file === classFile);
+  return `data-class="${known ?? ""}"`;
 }
 
 /** "DEATHKNIGHT" is how the game files it and not how anyone says it. */
@@ -73,12 +51,11 @@ export const isInstance = (segment: Segment): boolean =>
 export const locationType = (segment: Segment): string => (isInstance(segment) ? "instance" : "world");
 
 export const classDot = (classFile?: string | null): string =>
-  `<span class="dot" style="background:${classColor(classFile)}"></span>`;
+  `<span class="dot" ${classAttr(classFile)}></span>`;
 
 /**
  * A character as a circle filled with their class colour, carrying everything the hover
- * card needs. The fill and the ink that reads on it travel together as two custom
- * properties, because the stylesheet cannot work the second one out from the first.
+ * card needs.
  *
  * Focusable and named, so the detail is reachable without a mouse: the circle is the only
  * place a session says which characters were involved, and that must not be hover-only.
@@ -95,8 +72,7 @@ export function characterCircle(character: SessionCharacter): string {
   const tip = `<b>${escapeHtml(character.name)}</b>${parts.map(escapeHtml).join(" · ")}` +
     (places ? `<span class="tip-places">${escapeHtml(places)}</span>` : "");
   const label = `${character.name}, ${parts.join(", ")}`;
-  return `<span class="circle" role="img" tabindex="0"
-    style="--class-color:${classColor(character.classFile)};--class-ink:${classInk(character.classFile)}"
+  return `<span class="circle" role="img" tabindex="0" ${classAttr(character.classFile)}
     aria-label="${escapeHtml(label)}" data-tip="${escapeHtml(tip)}"
   >${escapeHtml(initials(character.name))}</span>`;
 }
