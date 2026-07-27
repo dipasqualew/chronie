@@ -4,10 +4,13 @@ describe("segment views", function()
     local ns = loader.load()
 
     local CHARACTER = "Main-Ravencrest"
-    -- The addon loaded half an hour before the clock these tests read, so a segment can be
-    -- placed inside this session or before it by moving its endedAt either side of START.
-    local START = 1700000000
-    local NOW = START + 1800
+    -- The open segment began half an hour before the clock these tests read. The evening
+    -- reaches back from that start, so a finished segment is inside it or outside it
+    -- depending on how long a silence it left before OPENED.
+    local OPENED = 1700000000
+    local NOW = OPENED + 120
+    -- The silence that ends an evening, mirroring the desktop app's SESSION_GAP_SECONDS.
+    local GAP = 300
 
     ---A SegmentSummary with every field the panel reads, all at rest. Deliberately zeroed
     ---rather than absent: this is what the tally hands over for a segment nothing happened
@@ -46,6 +49,10 @@ describe("segment views", function()
 
     ---A filed record, which is summary-shaped already plus the few fields the log adds.
     ---That is the whole reason the panel can draw one: nothing has to convert it.
+    ---
+    ---A test places one by when it ended, because that is the end the evening chains
+    ---across; unless it says otherwise the segment ran for five minutes before that, which
+    ---is long enough that two placed a few minutes apart chain into one evening.
     ---@param overrides table?
     ---@return SegmentRecord
     local function record(overrides)
@@ -53,11 +60,12 @@ describe("segment views", function()
             id = "segment",
             character = CHARACTER,
             instance = "Deadmines",
-            endedAt = NOW,
+            endedAt = OPENED - 60,
         })
         for key, value in pairs(overrides or {}) do
             base[key] = value
         end
+        base.startedAt = base.startedAt or (base.endedAt - 300)
         return base
     end
 
@@ -67,7 +75,7 @@ describe("segment views", function()
     ---`options.segments` is kept by reference rather than copied, so a test can file a new
     ---segment into it half way through and watch what that does to the selection — which is
     ---exactly what the game does while the panel is open.
-    ---@param options table? `{ live, location, segments, character, sessionStart, now }`
+    ---@param options table? `{ live, location, opened, segments, character, now }`
     ---@return SegmentViews views, table counted `{ liveSummary = integer }`
     local function newViews(options)
         options = options or {}
@@ -88,8 +96,11 @@ describe("segment views", function()
             character = function()
                 return options.character or CHARACTER
             end,
-            sessionStart = function()
-                return options.sessionStart or START
+            liveStart = function()
+                if options.opened == false then
+                    return nil
+                end
+                return options.opened or OPENED
             end,
             now = function()
                 return options.now or NOW
@@ -351,8 +362,8 @@ describe("segment views", function()
             local views = newViews({
                 location = "Wailing Caverns",
                 segments = {
-                    record({ id = "newer", instance = "Deadmines", endedAt = NOW - 60 }),
-                    record({ id = "older", instance = "Stockade", endedAt = NOW - 600 }),
+                    record({ id = "newer", instance = "Deadmines", endedAt = OPENED - 60 }),
+                    record({ id = "older", instance = "Stockade", endedAt = OPENED - 420 }),
                 },
             })
 
@@ -364,7 +375,7 @@ describe("segment views", function()
             end
             assert.same({ "session", "live", "record", "record" }, kinds)
             assert.same({
-                "Session · 3 segments", "Wailing Caverns", "Deadmines · 1m ago", "Stockade · 10m ago",
+                "Session · 3 segments", "Wailing Caverns", "Deadmines · 3m ago", "Stockade · 9m ago",
             }, titlesOf(strip))
         end)
 
@@ -391,8 +402,8 @@ describe("segment views", function()
         it("walks back through the finished segments and stops at the oldest", function()
             local views = newViews({
                 segments = {
-                    record({ id = "newer", endedAt = NOW - 60 }),
-                    record({ id = "older", endedAt = NOW - 600 }),
+                    record({ id = "newer", endedAt = OPENED - 60 }),
+                    record({ id = "older", endedAt = OPENED - 420 }),
                 },
             })
 
@@ -401,42 +412,80 @@ describe("segment views", function()
             assert.equal("record:older", views.move(1).key)
         end)
 
-        -- The log is account-wide, so it holds every character's segments. The panel is one
-        -- character's HUD and a strip mixing an alt's evening into it would be nonsense.
-        it("leaves another character's segments off the strip", function()
+        -- An evening survives hopping alts — that is the app's own rule for what a session
+        -- is — so the dungeon run that happened on the alt before this character logged in
+        -- is part of it. It says whose it was, or it would read as somewhere this character
+        -- has been.
+        it("keeps an alt's segments on the strip, and says whose they were", function()
             local views = newViews({
                 segments = {
-                    record({ id = "mine" }),
-                    record({ id = "theirs", character = "Alt-Ravencrest" }),
+                    record({ id = "mine", instance = "Stockade", endedAt = OPENED - 60 }),
+                    record({ id = "theirs", instance = "Deadmines", endedAt = OPENED - 420,
+                        character = "Alt-Ravencrest" }),
                 },
             })
 
-            assert.equal(3, #walk(views))
+            local strip = walk(views)
+
+            assert.equal(4, #strip)
+            assert.equal("Stockade · 3m ago", strip[3].title)
+            assert.equal("Alt — Deadmines · 9m ago", strip[4].title)
         end)
 
-        -- "This session" is since the addon loaded, the same way a damage meter's is. The
-        -- log keeps a week of history and none of it belongs on this evening's strip.
+        -- An evening is what the desktop app says it is: segments chained across silences of
+        -- no more than five minutes. The log keeps a week of history and the rest of it —
+        -- last night's raid, this morning's dailies — belongs to other evenings.
         for _, case in ipairs({
-            { what = "closed exactly as the session began", endedAt = START, onStrip = true },
-            { what = "closed a second before it", endedAt = START - 1, onStrip = false },
-            { what = "closed a day before it", endedAt = START - 86400, onStrip = false },
+            { what = "ended as the open one began", endedAt = OPENED, onStrip = true },
+            { what = "left exactly five minutes of silence", endedAt = OPENED - GAP, onStrip = true },
+            { what = "left a second more than five minutes", endedAt = OPENED - GAP - 1, onStrip = false },
+            { what = "was played last night", endedAt = OPENED - 86400, onStrip = false },
         }) do
-            it("puts a segment " .. case.what .. (case.onStrip and " on the strip" or " nowhere"), function()
+            it("puts a segment that " .. case.what .. (case.onStrip and " on the strip" or " nowhere"), function()
                 local views = newViews({ segments = { record({ id = "a", endedAt = case.endedAt }) } })
 
                 assert.equal(case.onStrip and 3 or 2, #walk(views))
             end)
         end
 
+        -- The walk chains: each segment is measured against how far back the evening has
+        -- already reached, not against the open segment, so an evening of short runs stays
+        -- whole however long it has been going on.
+        it("chains back through an evening far older than five minutes", function()
+            local views = newViews({
+                segments = {
+                    record({ id = "third", endedAt = OPENED - 60 }),
+                    record({ id = "second", endedAt = OPENED - 420 }),
+                    record({ id = "first", endedAt = OPENED - 780 }),
+                },
+            })
+
+            assert.equal(5, #walk(views))
+        end)
+
+        -- And a silence in the middle of it ends the walk: nothing beyond the break belongs
+        -- to this evening, however close together the segments on the far side of it are.
+        it("stops at the first silence, and does not reach past it", function()
+            local views = newViews({
+                segments = {
+                    record({ id = "tonight", endedAt = OPENED - 60 }),
+                    record({ id = "earlier", endedAt = OPENED - 3600 }),
+                    record({ id = "earlier still", endedAt = OPENED - 3900 }),
+                },
+            })
+
+            assert.equal(3, #walk(views))
+        end)
+
         -- The strip grows underneath the selection: a segment closing pushes every older one
         -- along by a place. Holding the choice as a position would silently move the panel
         -- onto a different segment than the player parked it on.
         it("stays on the segment it was showing when a newer one is filed", function()
-            local segments = { record({ id = "a", instance = "Deadmines", endedAt = NOW - 600 }) }
+            local segments = { record({ id = "a", instance = "Deadmines", endedAt = OPENED - 120 }) }
             local views = newViews({ segments = segments })
             assert.equal("record:a", views.move(1).key)
 
-            table.insert(segments, 1, record({ id = "b", instance = "Stockade", endedAt = NOW - 60 }))
+            table.insert(segments, 1, record({ id = "b", instance = "Stockade", endedAt = OPENED - 60 }))
 
             local view = views.selected()
             assert.equal("record:a", view.key)
@@ -469,7 +518,7 @@ describe("segment views", function()
                 it("counts the open segment into " .. case.title, function()
                     local segments = {}
                     for index = 1, case.finished do
-                        segments[index] = record({ id = "a" .. index, endedAt = NOW - index })
+                        segments[index] = record({ id = "a" .. index, endedAt = OPENED - index * 60 })
                     end
                     local views = newViews({ segments = segments })
 
@@ -503,8 +552,10 @@ describe("segment views", function()
                 it("dates a segment that closed " .. case.what, function()
                     local views = newViews({
                         segments = { record({ id = "a", instance = "Deadmines", endedAt = case.endedAt }) },
-                        -- Far enough back that a three-hour-old segment is still this session.
-                        sessionStart = NOW - 86400,
+                        -- The open segment picked up where that one left off, so however long
+                        -- ago it closed, it is still this evening — a player can stand in one
+                        -- zone for three hours.
+                        opened = case.endedAt + 30,
                     })
 
                     assert.equal(case.title, views.move(1).title)
@@ -517,8 +568,8 @@ describe("segment views", function()
                 local views = newViews({
                     live = summary({ lootValue = 5 }),
                     segments = {
-                        record({ id = "newer", lootValue = 20, endedAt = NOW - 60 }),
-                        record({ id = "older", lootValue = 100, endedAt = NOW - 600 }),
+                        record({ id = "newer", lootValue = 20, endedAt = OPENED - 60 }),
+                        record({ id = "older", lootValue = 100, endedAt = OPENED - 420 }),
                     },
                 })
 
@@ -529,8 +580,10 @@ describe("segment views", function()
                 local views = newViews({
                     live = summary({ levelUps = { { level = 72, at = NOW } } }),
                     segments = {
-                        record({ id = "newer", endedAt = NOW - 60, levelUps = { { level = 71, at = NOW - 120 } } }),
-                        record({ id = "older", endedAt = NOW - 600, levelUps = { { level = 70, at = NOW - 700 } } }),
+                        record({ id = "newer", endedAt = OPENED - 60,
+                            levelUps = { { level = 71, at = OPENED - 120 } } }),
+                        record({ id = "older", endedAt = OPENED - 420,
+                            levelUps = { { level = 70, at = OPENED - 500 } } }),
                     },
                 })
 

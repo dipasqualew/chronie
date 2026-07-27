@@ -179,12 +179,6 @@ function ns.main(env)
         holdings.record(currentCharacter(), env.heldSweep())
     end
 
-    -- When this session began, and so how far back the panel's session total reaches. Read
-    -- once, here, because this runs when the addon's saved variables land — which is the
-    -- earliest the session can be said to have started, and the same moment a reload gives
-    -- the player a fresh one.
-    local sessionStart = env.now()
-
     -- Declared before the panel and filled in after the log and the tracker they read from,
     -- because the panel is built first and its arrows have to reach them.
     ---@type SegmentViews
@@ -307,11 +301,12 @@ function ns.main(env)
             local open = segmentTracker.current()
             return open and open.instance
         end,
+        liveStart = function()
+            local open = segmentTracker.current()
+            return open and open.startedAt
+        end,
         segments = segmentLog.all,
         character = currentCharacter,
-        sessionStart = function()
-            return sessionStart
-        end,
         now = env.now,
     })
 

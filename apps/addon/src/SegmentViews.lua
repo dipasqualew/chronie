@@ -19,8 +19,13 @@ local _, ns = ...
 ---HUD is asking about; the arrows are what reach anything else, and where they are left is
 ---where they stay — a player who parked the panel on the session total meant to.
 ---
----"This session" means since the addon loaded. A reload or a relog starts a new one, the
----same way a damage meter's does, and the segments themselves survive either in the log.
+---"This session" is the same evening the desktop app draws: the segment being played, and
+---every earlier one that chains back to it across a gap of no more than five minutes,
+---whichever character played it. That rule lives in `apps/desktop/src/sessions.ts` as
+---SESSION_GAP_SECONDS, and it is repeated here rather than invented afresh, because a panel
+---that called an evening one thing while the app it feeds called it another would be worse
+---than either. It also means a reload does not fork the evening in half: the log survives
+---one, so the chain walks straight back through it.
 ---@class SegmentViews
 ---@field selected fun(): SegmentView What the panel should be drawing.
 ---@field move fun(delta: integer): SegmentView Walk the strip; clamped at both ends.
@@ -28,10 +33,16 @@ local _, ns = ...
 ---@class SegmentViewsDeps
 ---@field liveSummary fun(): SegmentSummary The running tally of the open segment.
 ---@field liveLocation fun(): string? Where that segment is being played, when one is open.
----@field segments fun(): SegmentRecord[] Everything the log holds, newest first.
+---@field liveStart fun(): integer? When the open segment began, which is where the walk
+---back through the evening starts from.
+---@field segments fun(): SegmentRecord[] Everything the log holds.
 ---@field character fun(): string "Name-Realm" of whoever is playing.
----@field sessionStart fun(): integer When this session began.
 ---@field now fun(): integer
+
+---The silence that ends an evening. Five minutes is long enough to cover a loading screen,
+---and it is SESSION_GAP_SECONDS out of `apps/desktop/src/sessions.ts` — the same number
+---because it is the same rule, not because both happened to pick five.
+local SESSION_GAP = 300
 
 ---Lists concatenated end to end when segments are added up, as opposed to the two —
 ---currencies and reputation — whose entries have to be folded together by what they name.
@@ -186,16 +197,35 @@ function ns.newSegmentViews(deps)
     -- index would silently start pointing at a different segment than the player chose.
     local selection = { kind = "live", key = "live" }
 
-    ---Everything this character has finished during this session, newest first.
+    ---Every segment already finished that belongs to this evening, newest first.
+    ---
+    ---Walked backwards from the open segment: a record joins while it ended within the gap
+    ---of the earliest start the session has reached so far, and the first one that did not
+    ---ends the walk, because everything beyond it is older still. Comparing against the
+    ---earliest start rather than the previous record's is what the app's forward pass does
+    ---with its frontier, and for the same reason — two characters' segments can overlap, and
+    ---a short one nested inside a long one must not look like a break in the evening.
     ---@return SegmentRecord[]
     local function history()
-        local character = deps.character()
-        local start = deps.sessionStart()
-        local list = {}
-        for _, record in ipairs(deps.segments()) do
-            if record.character == character and (record.endedAt or 0) >= start then
-                list[#list + 1] = record
+        local records = {}
+        for index, record in ipairs(deps.segments()) do
+            records[index] = record
+        end
+        table.sort(records, function(left, right)
+            if (left.startedAt or 0) ~= (right.startedAt or 0) then
+                return (left.startedAt or 0) > (right.startedAt or 0)
             end
+            return (left.endedAt or 0) > (right.endedAt or 0)
+        end)
+
+        local earliest = deps.liveStart() or deps.now()
+        local list = {}
+        for _, record in ipairs(records) do
+            if earliest - (record.endedAt or 0) > SESSION_GAP then
+                break
+            end
+            list[#list + 1] = record
+            earliest = math.min(earliest, record.startedAt or earliest)
         end
         return list
     end
@@ -220,11 +250,19 @@ function ns.newSegmentViews(deps)
             },
         }
         local now = deps.now()
+        local playing = deps.character()
         for _, record in ipairs(finished) do
+            -- An evening survives hopping alts, so the strip holds the alt's segments too —
+            -- and one of those has to say whose it was, or it reads as somewhere this
+            -- character has been. Only the name, because the realm is the same evening's.
+            local who = record.character ~= playing
+                and (tostring(record.character or ""):match("^([^-]+)") or record.character)
+                or nil
             views[#views + 1] = {
                 kind = "record",
                 key = "record:" .. tostring(record.id),
-                title = (record.instance or "Unknown") .. " · " .. ago(now - (record.endedAt or now)),
+                title = (who and who .. " — " or "")
+                    .. (record.instance or "Unknown") .. " · " .. ago(now - (record.endedAt or now)),
                 record = record,
             }
         end
