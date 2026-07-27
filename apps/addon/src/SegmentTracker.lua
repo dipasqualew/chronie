@@ -1,11 +1,7 @@
 local _, ns = ...
 
----What the client reports about the zone the player is standing in.
----@class InstanceInfo
----@field name string? Zone or instance name.
----@field kind string? IsInInstance's type: "party", "raid", "scenario", "none", ...
----@field difficultyId integer?
----@field difficulty string? Localised difficulty name.
+---`InstanceInfo` — what the client reports about the place the player is standing in — is
+---defined in Location.lua, beside the read that produces it.
 
 ---Owns the lifecycle of a segment: when it starts, when it ends, and what identity it
 ---is filed under. A segment is one character's continuous stay in one location — any
