@@ -856,9 +856,10 @@ mod tests {
     mod display {
         /// Plainly stored arrays, elements laid end to end inside one column.
         pub const MODEL_RESOURCES_ID: usize = 10;
-        pub const GEOSET_GROUP: usize = 12;
-        /// A palette of whole runs rather than of single values.
-        pub const MODEL_TYPE: usize = 13;
+        pub const GEOSET_GROUP: usize = 13;
+        /// A palette of whole runs rather than of single values, and the column an install
+        /// keeps immediately in front of the geoset groups: two values where that holds six.
+        pub const MODEL_TYPE: usize = 12;
         /// Not an array at all, which is the case that has to keep working.
         pub const FLAGS: usize = 0;
     }
@@ -1177,6 +1178,27 @@ mod tests {
                 vec![0, 0],
             ]
         );
+    }
+
+    // What the file says about a column, which is how the two array columns nothing else can
+    // tell apart get told apart: `ModelType` holds two values and `GeosetGroup` six, and
+    // reading either as the other is the mistake `examples/dump_display_columns` exists to
+    // catch. This is the shape that tool prints, on a table whose layout is known.
+    #[test]
+    fn says_how_wide_a_column_is_and_how_many_values_one_entry_holds() {
+        let table = table(ITEM_DISPLAY_INFO);
+        let shape = |column: usize| table.column_shape(column).expect("the column is there");
+
+        assert_eq!(shape(display::MODEL_TYPE).storage, "palette of runs");
+        assert_eq!(shape(display::MODEL_TYPE).array_count, 2);
+        // A plainly stored array states only its total width; six 32-bit values is what 192
+        // bits is, and the caller is the one that knows to divide by 32.
+        assert_eq!(shape(display::GEOSET_GROUP).storage, "plain");
+        assert_eq!(shape(display::GEOSET_GROUP).size_bits, 192);
+        assert_eq!(shape(display::GEOSET_GROUP).array_count, 0);
+
+        assert_eq!(table.column_count(), 14);
+        assert_eq!(table.column_shape(table.column_count()), None);
     }
 
     #[test]

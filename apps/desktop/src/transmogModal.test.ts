@@ -32,19 +32,20 @@ const payload = (
 });
 
 describe("slotName", () => {
-  // The eleven armour slots are the game's own numbering, in the order it numbers them.
+  // The eleven armour slots as an install numbers them, which is not as the community's list
+  // does: a shirt is 2, and everything from the chest down sits one higher than that list says.
   it.each<[number, string]>([
     [0, "Head"],
     [1, "Shoulder"],
-    [2, "Chest"],
-    [3, "Waist"],
-    [4, "Legs"],
-    [5, "Feet"],
-    [6, "Wrist"],
-    [7, "Hands"],
-    [8, "Back"],
-    [9, "Tabard"],
-    [10, "Shirt"],
+    [2, "Shirt"],
+    [3, "Chest"],
+    [4, "Waist"],
+    [5, "Legs"],
+    [6, "Feet"],
+    [7, "Wrist"],
+    [8, "Hands"],
+    [9, "Back"],
+    [10, "Tabard"],
   ])("reads display type %i as the %s slot", (displayType, expected) => {
     expect(slotName(displayType)).toBe(expected);
   });

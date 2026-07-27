@@ -87,8 +87,8 @@ is comes out of the player's own customization — `ChrCustomizationChoice` →
 those four tables' column positions have been read off an install the way the chains in
 [game-files.md](game-files.md#the-chain-verified) were. Until they have been,
 `character.rs` allocates the atlas and leaves it a flat tone; `Atlas::base` is written and
-tested and is the one function that changes when they are. That is the same bar
-`GeosetGroup[6]` is held to, and for the same reason: four guessed indices in a row would
+tested and is the one function that changes when they are. That is the bar `GeosetGroup[6]`
+was eventually held to as well, and for the same reason: four guessed indices in a row would
 paint the body with whatever the guess landed on and call it a skin.
 
 1. Allocate `2048 × 1024` RGBA.
@@ -136,27 +136,31 @@ Armour-relevant groups (from
 27 helm      28 arm upper
 ```
 
-`ItemDisplayInfo.GeosetGroup[6]` says which values the item sets — **but which column of
-that table holds it has not been verified**, unlike the model and material slots beside it.
-Column 12 is where the community puts it and where `worn.rs` reads it, which is the one place
-this repository relies on an unverified position; see the note in
-[game-files.md](game-files.md#the-chain-verified) for why that was allowed and what bounds it.
-Settling it against a real install is still the first thing to do here, and the symptom of it
-having moved is an appearance that changes nothing on the body rather than an error. The
-slot → group mapping (community):
+`ItemDisplayInfo.GeosetGroup[6]` says which values the item sets, out of **column 13** —
+verified on 12.0.5.67, along with the `DisplayType` numbering below; see
+[game-files.md](game-files.md#the-chain-verified) for the run and the three things that
+settled it. Column 12 is `ModelType[2]`, which is what this used to be read out of, and the
+symptom was the quiet one: an appearance that changes nothing on the body rather than an
+error. The slot → group mapping, with the display type each slot is:
 
-| Slot | `[0]` | `[1]` | `[2]` | `[3]` | `[4]` |
-|---|---|---|---|---|---|
-| head | 27 helm | 21 skull | | | |
-| shoulder | 26 shoulders | | | | |
-| **chest** | 8 sleeves | 10 chest | 13 robe | 22 torso | 28 arm upper |
-| waist | 18 belt | | | | |
-| legs | 11 pants | 9 kneepads | 13 robe | | |
-| feet | 5 boots | 20 feet | | | |
-| hands | 4 gloves | 23 hand attach | | | |
-| back | 15 cape | | | | |
-| tabard | 12 tabard | | | | |
-| wrist | *(none)* | | | | |
+| `DisplayType` | Slot | `[0]` | `[1]` | `[2]` | `[3]` | `[4]` |
+|---|---|---|---|---|---|---|
+| 0 | head | 27 helm | 21 skull | | | |
+| 1 | shoulder | 26 shoulders | | | | |
+| 2 | shirt | *(none)* | | | | |
+| 3 | **chest** | 8 sleeves | 10 chest | 13 robe | 22 torso | 28 arm upper |
+| 4 | waist | 18 belt | | | | |
+| 5 | legs | 11 pants | 9 kneepads | 13 robe | | |
+| 6 | feet | 5 boots | 20 feet | | | |
+| 7 | wrist | *(none)* | | | | |
+| 8 | hands | 4 gloves | 23 hand attach | | | |
+| 9 | back | 15 cape | | | | |
+| 10 | tabard | 12 tabard | | | | |
+
+The groups are the community's; which display type names which slot is the install's, and the
+two lists disagree — the community's puts the shirt last and every slot from the chest down
+one lower. Reading a chestpiece as a waist is as quiet a way to be wrong as reading the wrong
+column, and has the same floor under it.
 
 One item can drive several groups at once — a chestpiece drives five — and since they all
 come from the same item there is no conflict. Show all of them.
@@ -188,9 +192,10 @@ error: too much and limbs double and z-fight, too little and they go missing.
 
 One more rule, which is this repository's rather than the game's: **a group is only taken over
 when the body actually holds the geoset the value resolves to.** Otherwise the default stays.
-That is the floor under the unverified column above — of the three ways to get geosets wrong,
-hiding a group and then showing nothing in it is the one that takes a limb with it, and this
-turns it into a body that looks unchanged.
+That is the floor under everything above — of the three ways to get geosets wrong, hiding a
+group and then showing nothing in it is the one that takes a limb with it, and this turns it
+into a body that looks unchanged. It is what kept a wrong column from ever looking like
+anything, which is a mixed blessing: it also kept it from being noticed.
 
 **Priority is not needed for single-item rendering** — see the scope note above. When
 assembled outfits arrive, the table is at

@@ -102,14 +102,17 @@ pub mod display_column {
     /// material. This is the texture an item's own model uses, and not the one armour is
     /// drawn on the body with — that comes out of `ItemDisplayInfoMaterialRes`.
     pub const MATERIAL_RESOURCES_ID: usize = 11;
+    /// What kind of model each of the two slots holds. Nothing reads it; it is named because
+    /// it is what sits between the materials and the geoset groups, and reading it *as* the
+    /// geoset groups is the mistake this table invites — see `examples/dump_display_columns`.
+    pub const MODEL_TYPE: usize = 12;
     /// Which variant of each geoset group the display switches on: an array of six, read one
     /// element at a time like the two above.
     ///
-    /// **Unlike 10 and 11, this position was not read off an install.** It is where the
-    /// community's definitions put it, and `docs/game-files.md` says what that is worth. A
-    /// build that moved it would hand `worn` six numbers that are not geoset values, which is
-    /// why nothing downstream hides a part of the body it cannot then show something for.
-    pub const GEOSET_GROUP: usize = 12;
+    /// Verified on 12.0.5.67, like 10 and 11: this column holds six values where 12 holds two,
+    /// and a robe puts a 1 in its third while leaving its second at 0. `docs/game-files.md`
+    /// has the whole tail of array columns and what told them apart.
+    pub const GEOSET_GROUP: usize = 13;
 }
 
 /// How many model slots `ModelResourcesID` holds, and how wide one of them is. The file
@@ -565,13 +568,13 @@ mod tests {
                 {
                     "modifiedAppearanceId": 71008, "itemId": 30008,
                     "name": "Emberforge Breastplate", "appearanceId": 80008,
-                    "displayType": 2, "displayInfoId": 900003, "iconFileDataId": 130003,
+                    "displayType": 3, "displayInfoId": 900003, "iconFileDataId": 130003,
                     "hasModel": false,
                 },
                 {
                     "modifiedAppearanceId": 71009, "itemId": 30009, "name": "Emberforge Greaves",
                     "appearanceId": 80009,
-                    "displayType": 4, "displayInfoId": 900006, "iconFileDataId": 130006,
+                    "displayType": 5, "displayInfoId": 900006, "iconFileDataId": 130006,
                     "hasModel": false,
                 },
             ])
@@ -620,7 +623,7 @@ mod tests {
                 {
                     "modifiedAppearanceId": 71011, "itemId": 30011, "name": "",
                     "appearanceId": 80011,
-                    "displayType": 2, "displayInfoId": 900900, "iconFileDataId": 130008,
+                    "displayType": 3, "displayInfoId": 900900, "iconFileDataId": 130008,
                     "hasModel": false,
                 },
                 {
@@ -652,7 +655,7 @@ mod tests {
             json!([{
                 "modifiedAppearanceId": 71013, "itemId": 30013, "name": "",
                 "appearanceId": 80013,
-                "displayType": 10, "displayInfoId": 900008, "iconFileDataId": 0,
+                "displayType": 2, "displayInfoId": 900008, "iconFileDataId": 0,
                 "hasModel": false,
             }])
         );

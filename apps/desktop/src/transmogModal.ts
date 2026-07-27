@@ -40,14 +40,14 @@ import type {
 /**
  * The slot an appearance fills, as `ItemAppearance.DisplayType` numbers them.
  *
- * The names are the community's, recorded in `docs/game-files.md`; which of them carry a
- * model of their own was verified against a real install, the naming was not. The values
- * past this list are weapons and shields, which the definitions do not pin down well enough
- * to name one by one.
+ * Read off an install item by item, and recorded in `docs/game-files.md`: a shirt is 2 and a
+ * chestpiece 3, where the community's list puts a chestpiece at 2 and a shirt last. The
+ * values past this list are weapons and shields, which nothing pins down well enough to name
+ * one by one.
  */
 const SLOTS = [
-  "Head", "Shoulder", "Chest", "Waist", "Legs", "Feet", "Wrist", "Hands", "Back",
-  "Tabard", "Shirt",
+  "Head", "Shoulder", "Shirt", "Chest", "Waist", "Legs", "Feet", "Wrist", "Hands", "Back",
+  "Tabard",
 ] as const;
 
 /** The display types that are a weapon or a shield rather than a piece of armour. */

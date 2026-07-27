@@ -599,7 +599,7 @@ const mockDesktop: E2EMock = {
         },
         {
           modifiedAppearanceId: 71003, itemId: 30003, name: "Tideglass Robe", appearanceId: 80003,
-          displayType: 2, displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
+          displayType: 3, displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
         },
       ],
     },
@@ -611,11 +611,11 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71004, itemId: 30004, name: "Tideglass Sandals",
           appearanceId: 80004,
-          displayType: 5, displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
+          displayType: 6, displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
         },
         {
           modifiedAppearanceId: 71005, itemId: 30005, name: "Tideglass Gloves", appearanceId: 80005,
-          displayType: 7, displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
+          displayType: 8, displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
         },
       ],
     },
@@ -637,12 +637,12 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71008, itemId: 30008, name: "Emberforge Breastplate",
           appearanceId: 80008,
-          displayType: 2, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
+          displayType: 3, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
         },
         {
           modifiedAppearanceId: 71009, itemId: 30009, name: "Emberforge Greaves",
           appearanceId: 80009,
-          displayType: 4, displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
+          displayType: 5, displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
         },
         // A weapon: the other half of what the game gives geometry to, and the half whose
         // display type the community definitions do not pin down well enough to name.
@@ -662,7 +662,7 @@ const mockDesktop: E2EMock = {
       appearances: [
         {
           modifiedAppearanceId: 71011, itemId: 30011, name: "", appearanceId: 80011,
-          displayType: 2, displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
+          displayType: 3, displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
         },
         {
           modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0,
