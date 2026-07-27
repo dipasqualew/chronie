@@ -1,13 +1,13 @@
 /**
- * The transmog view: every set the installed game knows about.
+ * The transmog sets the installed game knows about, as names, groups and filters.
  *
- * This is the one view that reads the game's own files rather than the addon's history, so
- * it shows what exists rather than what a character has collected. The backend hands over a
- * flat list; everything below is how it gets grouped, filtered and named.
+ * This is the one view that reads the game's own files rather than the addon's history, so it
+ * shows what exists rather than what a character has collected. The backend hands over a flat
+ * list; everything here is how it gets grouped, filtered and named. The drawing over it is
+ * `transmogView.tsx`.
  */
 
-import { escapeHtml, plural } from "./format";
-import type { TransmogPayload, TransmogSet } from "./types";
+import type { TransmogSet } from "./types";
 
 /**
  * The classes, in the order the game's class mask numbers them.
@@ -15,7 +15,7 @@ import type { TransmogPayload, TransmogSet } from "./types";
  * A set's mask is a bit per class from this list; a mask of zero belongs to no class in
  * particular, which is how the game marks the sets anyone can wear.
  */
-const CLASSES = [
+export const CLASSES = [
   "Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Death Knight", "Shaman",
   "Mage", "Warlock", "Monk", "Druid", "Demon Hunter", "Evoker",
 ] as const;
@@ -71,29 +71,6 @@ export function patchName(packed: number): string {
   return `${major}.${minor}.${patch}`;
 }
 
-export interface TransmogElements {
-  meta: HTMLElement;
-  search: HTMLInputElement;
-  expansion: HTMLSelectElement;
-  klass: HTMLSelectElement;
-  list: HTMLElement;
-  empty: HTMLElement;
-  count: HTMLElement;
-}
-
-export interface TransmogOptions {
-  elements: TransmogElements;
-  /** Opens one set. The grid knows which set was clicked and nothing about what is in it. */
-  onOpenSet: (set: TransmogSet) => void;
-}
-
-export interface TransmogView {
-  /** Draws a loaded payload. */
-  render(payload: TransmogPayload): void;
-  /** Draws the state the view is in before, or instead of, a payload. */
-  status(message: string): void;
-}
-
 /** The sets a filter leaves, in the order the backend already sorted them. */
 export function filterSets(
   sets: TransmogSet[],
@@ -126,95 +103,4 @@ export function groupSets(sets: TransmogSet[]): Array<{ group: string; sets: Tra
     bucket.push(set);
   }
   return groups;
-}
-
-export function createTransmog({ elements, onOpenSet }: TransmogOptions): TransmogView {
-  let loaded: TransmogPayload | null = null;
-
-  function draw(): void {
-    if (!loaded) return;
-    const sets = filterSets(loaded.sets, {
-      search: elements.search.value,
-      expansion: elements.expansion.value,
-      klass: elements.klass.value,
-    });
-
-    elements.count.textContent = `${plural(sets.length, "set")} shown`;
-    elements.empty.hidden = sets.length > 0;
-    if (sets.length === 0) {
-      elements.empty.innerHTML = '<p class="empty-title">Nothing matches</p>'
-        + "<p>Try a different search, class or expansion.</p>";
-      elements.list.innerHTML = "";
-      return;
-    }
-
-    elements.list.innerHTML = groupSets(sets).map((group) => `
-      <section class="mog-group">
-        <h3>${escapeHtml(group.group)}<span class="muted"> · ${plural(group.sets.length, "set")}</span></h3>
-        <div class="mog-grid">
-          ${group.sets.map(card).join("")}
-        </div>
-      </section>`).join("");
-  }
-
-  function card(set: TransmogSet): string {
-    const patch = patchName(set.patchIntroduced);
-    const classes = classNames(set.classMask);
-    // The name is the button rather than the card being one, because a card holds a heading
-    // and a heading cannot live inside a button — and the heading is how the view is walked.
-    return `<article class="mog-card" data-set="${set.id}"${
-      classes.length ? ` title="${escapeHtml(classes.join(", "))}"` : ""}>
-      <h4><button type="button" class="mog-open">${
-        escapeHtml(set.name) || "Unnamed set"}</button></h4>
-      <div class="mog-facts">
-        <span class="chip">${escapeHtml(classLabel(set.classMask))}</span>
-        <span class="chip">${escapeHtml(expansionName(set.expansionId))}</span>
-        ${patch ? `<span class="chip">Patch ${escapeHtml(patch)}</span>` : ""}
-      </div>
-      <div class="mog-foot">
-        <span>${plural(set.itemCount, "appearance")}</span>
-        <span class="muted">#${set.id}</span>
-      </div>
-    </article>`;
-  }
-
-  for (const control of [elements.search, elements.expansion, elements.klass]) {
-    control.addEventListener("input", draw);
-    control.addEventListener("change", draw);
-  }
-
-  // Delegated, so a card opens whether it was clicked on its name or anywhere else on it,
-  // and so that redrawing the grid never has to re-attach anything.
-  elements.list.addEventListener("click", (event) => {
-    const card = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-set]") : null;
-    const found = loaded?.sets.find((set) => String(set.id) === card?.dataset.set);
-    if (found) onOpenSet(found);
-  });
-
-  return {
-    render(payload) {
-      loaded = payload;
-
-      // Only offer the expansions and classes this install actually has sets for.
-      const expansions = [...new Set(payload.sets.map((set) => set.expansionId))].sort((a, b) => b - a);
-      elements.expansion.innerHTML = '<option value="">All expansions</option>'
-        + expansions.map((id) => `<option value="${id}">${escapeHtml(expansionName(id))}</option>`).join("");
-      elements.klass.innerHTML = '<option value="">All classes</option>'
-        + CLASSES.map((name, index) => `<option value="${index}">${escapeHtml(name)}</option>`).join("");
-
-      const withheld = payload.withheldCount > 0
-        ? ` · ${plural(payload.withheldCount, "set")} the game keeps encrypted`
-        : "";
-      elements.meta.textContent =
-        `${plural(payload.sets.length, "set")} from the installed game${withheld}`;
-      draw();
-    },
-    status(message) {
-      loaded = null;
-      elements.meta.textContent = message;
-      elements.list.innerHTML = "";
-      elements.count.textContent = "";
-      elements.empty.hidden = true;
-    },
-  };
 }

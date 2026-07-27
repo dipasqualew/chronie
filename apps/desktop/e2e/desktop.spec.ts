@@ -458,7 +458,7 @@ const NIGHT_BEFORE = 1784977200;
 // actually returns fails the type check rather than the assertion three steps later.
 //
 // The places are invented, the classes are not: a class token is the app's own vocabulary —
-// the palette in `ui.ts` is keyed by it — so a made-up one would draw every character in the
+// the palette in `ui.tsx` is keyed by it — so a made-up one would draw every character in the
 // colourless fallback and hide the very thing the cast is coloured for.
 const mockDesktop: E2EMock = {
   dashboard: {
