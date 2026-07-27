@@ -12,6 +12,12 @@
  * `transmog.ts` decides how sets group and filter, `outfit.ts` decides what goes where, and
  * `outfitPanel.tsx` draws the body. This is the browsing over them.
  *
+ * Two things about the left half are worth saying plainly, because both were the other way
+ * round once. **A row's whole width puts the piece on**, and Wowhead is an icon at the end of
+ * it: dressing the character is the errand, and leaving the app is the exception. And **the
+ * rows with nowhere to go are hidden** until the checkbox above them says otherwise — see
+ * `onlyWearable`, and the count each set gives of what it left out.
+ *
  * The list costs a second and a few hundred megabytes to read out of the game's own files, so
  * it arrives after the window has opened — which is why this view has a loading line and a
  * failure to draw, and no other one does.
@@ -22,7 +28,9 @@ import type { ReactNode } from "react";
 
 import { plural } from "./format";
 import { wearable as canBeWorn } from "./modelPreview";
-import { NOTHING_ON, isWorn, takeOff, toggle as toggleWorn, wearSet, wearable } from "./outfit";
+import {
+  NOTHING_ON, isWorn, onlyWearable, takeOff, toggle as toggleWorn, wearSet, wearable,
+} from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
 import { CLASSES, classLabel, classNames, expansionName, filterSets, groupSets, patchName } from "./transmog";
@@ -62,6 +70,12 @@ export function TransmogView(
   const [expansion, setExpansion] = useState("");
   const [klass, setKlass] = useState("");
   const [outfit, setOutfit] = useState<Outfit>(NOTHING_ON);
+  /**
+   * Whether the rows nothing can be done with are left out, which they are until a reader says
+   * otherwise. See [`onlyWearable`]: they are a disabled button and an apology, and a reader
+   * clicking down a set to dress a character has no use for either.
+   */
+  const [hideUnwearable, setHideUnwearable] = useState(true);
   /** The sets a reader has opened, which stay open: comparing two of them is the ordinary use. */
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
 
@@ -160,6 +174,15 @@ export function TransmogView(
               <option value="">All classes</option>
               {CLASSES.map((name, index) => <option key={name} value={index}>{name}</option>)}
             </select>
+            {/* Applies to every set at once rather than to the one being read, because it is a
+                statement about what a reader is here for and not about a particular set. */}
+            <label className="mog-hide">
+              <input
+                type="checkbox" id="transmog-hide-unwearable" checked={hideUnwearable}
+                onChange={(event) => setHideUnwearable(event.target.checked)}
+              />
+              Hide what she cannot wear
+            </label>
             <span className="count" id="transmog-count">
               {payload ? `${plural(sets.length, "set")} shown` : ""}
             </span>
@@ -174,6 +197,7 @@ export function TransmogView(
                   <Card
                     key={set.id} set={set} open={open.has(set.id)} onToggle={() => openSet(set)}
                     contents={known.get(set.id)} icons={icons} outfit={outfit}
+                    hideUnwearable={hideUnwearable}
                     onWear={(row) => setOutfit((was) => toggleWorn(was, row, set))}
                     onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
                   />
@@ -205,7 +229,7 @@ export function TransmogView(
  * cannot live inside a button.
  */
 function Card(
-  { set, open, onToggle, contents, icons, outfit, onWear, onWearAll }: {
+  { set, open, onToggle, contents, icons, outfit, hideUnwearable, onWear, onWearAll }: {
     set: TransmogSet;
     open: boolean;
     onToggle: () => void;
@@ -213,6 +237,8 @@ function Card(
     contents: TransmogSetItemsPayload | string | undefined;
     icons: Map<number, string>;
     outfit: Outfit;
+    /** Whether the rows with nowhere to go are left out, which the browser decides for all. */
+    hideUnwearable: boolean;
     onWear: (row: AppearanceRow) => void;
     onWearAll: (rows: AppearanceRow[]) => void;
   },
@@ -220,6 +246,10 @@ function Card(
   const patch = patchName(set.patchIntroduced);
   const classes = classNames(set.classMask);
   const rows = typeof contents === "object" ? appearanceRows(contents) : [];
+  // Whatever is hidden is still worn by "wear all of", because that puts the set on rather
+  // than what happens to be listed, and it is still counted below so nothing goes quietly.
+  const shown = hideUnwearable ? onlyWearable(rows) : rows;
+  const hidden = rows.length - shown.length;
   const name = set.name || "Unnamed set";
 
   return (
@@ -253,6 +283,13 @@ function Card(
             {contents.withheldCount > 0 || rows.length !== set.itemCount
               ? <p className="detail-facts">{appearanceSummary(contents)}</p>
               : null}
+            {/* Hidden rather than absent: the count on the card includes them, and a list
+                shorter than it promised is what a reader would otherwise have to explain. */}
+            {hidden
+              ? <p className="detail-facts muted">
+                {`${plural(hidden, "appearance")} hidden, with nowhere on her to go`}
+              </p>
+              : null}
             {/* A set is a set of clothes and seeing all of it at once is the ordinary thing to
                 want; clicking twelve rows to get there is not. */}
             {rows.some((row) => wearable(row))
@@ -262,7 +299,7 @@ function Card(
               : null}
           </div>
           <ul className="mog-items">
-            {rows.map((row, index) => (
+            {shown.map((row, index) => (
               <Line
                 key={`${row.appearanceId}-${index}`} row={row} worn={isWorn(outfit, row)}
                 icon={icons.get(row.iconFileDataId)} onWear={() => onWear(row)}
@@ -282,10 +319,15 @@ function Card(
  * second thing for the same place swaps rather than stacks, which is `outfit.ts`'s rule and
  * is what a reader trying hats expects.
  *
+ * **The whole row is the button, and Wowhead is the small link at the end of it.** They were
+ * the other way round — the name was the link and only the icon put the thing on — and the
+ * row a reader means to click is the one with the name on it. Leaving the app is the rarer
+ * errand of the two, so it gets the corner and an icon rather than the width of the row.
+ *
  * Whether it can be worn at all is a fact about the game rather than about this install: an
  * appearance the game encrypts, and a thing it files under a weapon slot and gives nobody a
- * place to hold. Those rows keep their place in the list — the set's own count includes them —
- * and say why they are not on her instead of being a button that does nothing.
+ * place to hold. Such a row is hidden unless the browser above is asked to show it, and when
+ * it is shown it says why it is not on her instead of being a button that does nothing.
  */
 function Line(
   { row, worn, icon, onWear }:
@@ -299,25 +341,48 @@ function Line(
   // picture is decorative: the row already says which slot it is and which item it came from.
   return (
     <li className="mog-item" data-worn={worn}>
-      {/* The picture and the slot together are the button, and the item name stays a link
-          beside it: one changes what she is wearing and the other leaves the app, and a
-          reader is entitled to tell which is which before clicking. */}
       <button
         type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
       >
         <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
         <span className="badge">{row.slot}</span>
+        <span className="mog-name">{row.label}</span>
       </button>
-      {row.withheld
-        ? <span className="muted">{row.label}</span>
-        : <a href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
-          target="_blank" rel="noopener noreferrer">{row.label}</a>}
       {worn ? <span className="chip">worn</span> : null}
-      {/* A withheld row already says so where its name would be, and saying it twice is two
-          elements with the same sentence in them rather than one clearer row. */}
+      {/* A withheld row says so where a name would be, and saying it twice is two elements
+          with the same sentence in them rather than one clearer row. */}
       {canWear || row.withheld ? null : <span className="muted">{wanted.note}</span>}
+      {/* Nothing to look up for an appearance the game withholds: it has no item behind it. */}
+      {row.withheld ? null : (
+        <a
+          className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
+          target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
+          aria-label={`${row.label} on Wowhead`}
+        ><LinkOut /></a>
+      )}
     </li>
+  );
+}
+
+/**
+ * The mark on the link out: a box with an arrow leaving it, drawn rather than written.
+ *
+ * Drawn because there is nothing to write it with. The window ships no icon font and loads
+ * nothing from the network, and the arrows in the fonts it does have are a lottery across
+ * machines — so the one glyph this view needs is eleven points of SVG in the markup.
+ */
+function LinkOut(): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"
+      fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.5 2.5H13.5V6.5" />
+      <path d="M13.5 2.5L7.5 8.5" />
+      <path d="M12 9.5V13C12 13.3 11.8 13.5 11.5 13.5H3C2.7 13.5 2.5 13.3 2.5 13V4.5C2.5 4.2 2.7 4 3 4H6.5" />
+    </svg>
   );
 }
 
