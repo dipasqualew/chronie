@@ -343,9 +343,9 @@ mod tests {
 
     /// The fixture displays whose appearances are worn rather than shown on their own, and the
     /// slots `ItemAppearance` gives them.
-    const CHESTPIECE: (u32, u32) = (900_003, 2);
-    const BOOTS: (u32, u32) = (900_004, 5);
-    const ROBE: (u32, u32) = (900_012, 2);
+    const CHESTPIECE: (u32, u32) = (900_003, 3);
+    const BOOTS: (u32, u32) = (900_004, 6);
+    const ROBE: (u32, u32) = (900_012, 3);
 
     fn mesh() -> Mesh {
         worn_mesh(&[])
@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_an_appearance_it_cannot_read() {
         for display in [900_900, 404_040] {
-            let answer = worn_model_of(&fixture_files(), display, 2).unwrap();
+            let answer = worn_model_of(&fixture_files(), display, CHESTPIECE.1).unwrap();
             assert_eq!(answer["model"], Value::Null, "display {display}");
         }
     }
@@ -673,7 +673,7 @@ mod tests {
     //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
     //         character apps/desktop/fixtures/transmog/character.glb
     //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
-    //         worn/900012/2 apps/desktop/fixtures/transmog/robe.glb
+    //         worn/900012/3 apps/desktop/fixtures/transmog/robe.glb
     #[test]
     fn writes_the_glbs_the_browser_tests_load() {
         let robe = crate::worn::of(&fixture_files(), ROBE.0, ROBE.1).unwrap();

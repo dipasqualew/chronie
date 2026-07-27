@@ -252,33 +252,35 @@ const itemAppearance: TableSpec = {
   sections: [
     {
       key: 0n,
-      // DisplayType is the slot: 0 head, 1 shoulder, 2 chest, 4 legs, 5 feet, 7 hands,
-      // 10 shirt, 11 a weapon. Only head, shoulder and the weapons carry a model.
+      // DisplayType is the slot, as an install numbers them: 0 head, 1 shoulder, 2 shirt,
+      // 3 chest, 5 legs, 6 feet, 8 hands, 11 a weapon. Only head, shoulder and the weapons
+      // carry a model. These are not the numbers the community's definitions give — a shirt
+      // is 2 and everything from the chest down sits one higher than that list says.
       rows: [
         [0, 900001, 130001],
         [1, 900002, 130002],
         // The robe, which is the chest slot and a display of its own: same slot as the
         // breastplate below and a different set of geosets under it.
-        [2, 900012, 130003],
-        [5, 900004, 130004],
-        [7, 900005, 130005],
+        [3, 900012, 130003],
+        [6, 900004, 130004],
+        [8, 900005, 130005],
         [0, 900001, 130001],
         [1, 900009, 130002],
-        [2, 900003, 130003],
-        [4, 900006, 130006],
+        [3, 900003, 130003],
+        [5, 900006, 130006],
         [11, 900007, 130007],
         // Its display is in an encrypted section of `ItemDisplayInfo`, so the row knows
         // which slot it fills and nothing about how it is drawn.
-        [2, 900900, 130008],
+        [3, 900900, 130008],
         // An appearance the table gives no icon at all.
-        [10, 900008, 0],
+        [2, 900008, 0],
       ],
       idList: [80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013],
     },
     {
       key: 0x6b02e9f43d78a1c5n,
       rows: [
-        [3, 900004, 130009],
+        [4, 900004, 130009],
         [0, 900001, 130010],
       ],
       idList: [80012, 80900],
@@ -289,18 +291,20 @@ const itemAppearance: TableSpec = {
 /**
  * `ItemDisplayInfo` — how one appearance is drawn, and the table of array columns.
  *
- * The game keeps a display's two model slots, its two material slots, its six geoset groups
- * and its two model types as fixed-size arrays inside single columns, stored two different
- * ways: the first four plainly, elements laid end to end, and the last as a palette of whole
- * runs. Reading either as one number gets the first element and quietly loses the rest, so
- * the fixture gives every one of them a distinguishable tail.
+ * The game keeps a display's two model slots, its two material slots, its two model types and
+ * its six geoset groups as fixed-size arrays inside single columns, stored two different
+ * ways: three of them plainly, elements laid end to end, and one as a palette of whole runs.
+ * Reading either as one number gets the first element and quietly loses the rest, so the
+ * fixture gives every one of them a distinguishable tail.
  *
- * **Two of the column positions below are the game's own and the rest are not.**
- * `ModelResourcesID` at 10 and `ModelMaterialResourcesID` at 11 were read off a real install
- * and are written down in `docs/game-files.md`; the columns before them are filler of the
- * right shape, and `GeosetGroup` and `ModelType` sit where they do only because that is where
- * the community's definitions put them. `docs/character-rendering.md` says what rests on the
- * geoset one and what a wrong guess would look like on screen.
+ * The install stores all four as palettes of runs. The fixture keeps three of them plain
+ * because the reader has both paths and only this table exercises either: the palette one is
+ * `ModelType`, the plain one is everything else.
+ *
+ * **The four array positions below are the game's own; the columns before them are not.**
+ * 10, 11, 12 and 13 were read off a real install and are written down in
+ * `docs/game-files.md` — including which of 12 and 13 is which, which is the pair the table
+ * invites getting backwards. What sits in front of them is filler of the right shape.
  *
  * **`GeosetGroup` holds values, not group numbers.** Which group an element drives is decided
  * by the slot the item fills and the element's position — a chestpiece's first element is
@@ -328,57 +332,58 @@ const itemDisplayInfo: TableSpec = {
     { storage: Storage.indexed, offsetBits: 112, sizeBits: 3, palette: [0, 1, 2, 3] }, // HelmetGeosetVis
     { storage: Storage.plain, offsetBits: 128, sizeBits: 64 }, // ModelResourcesID[2]
     { storage: Storage.plain, offsetBits: 192, sizeBits: 64 }, // ModelMaterialResourcesID[2]
-    { storage: Storage.plain, offsetBits: 256, sizeBits: 192 }, // GeosetGroup[6]
     {
       storage: Storage.indexedArray,
-      offsetBits: 448,
+      offsetBits: 256,
       sizeBits: 3,
       arrayCount: 2,
       // Three runs of two: no model, a one-handed model, a two-handed one.
       palette: [0, 0, 1, 0, 2, 3],
     }, // ModelType[2]
+    { storage: Storage.plain, offsetBits: 264, sizeBits: 192 }, // GeosetGroup[6]
   ],
   sections: [
     {
       key: 0n,
       // Flags, then the eight scalars nothing reads, HelmetGeosetVis, and then the four
-      // arrays: models, materials, geoset groups, model types.
+      // arrays in the order the install keeps them: models, materials, model types, geoset
+      // groups. The last two are the pair worth reading twice — two values then six.
       rows: [
         // A helm: one model slot, the helm group switched to its second variant, and a skull
         // element of -1 — which the game writes where a row drives no geoset at all, and
         // which read as a value would ask the body for its hundred-and-somethingth skull.
-        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [2, -1, 0, 0, 0, 0], [1, 0]],
+        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [1, 0], [2, -1, 0, 0, 0, 0]],
         // Shoulders: both model slots used, left and right.
-        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [1, 0, 0, 0, 0, 0], [2, 3]],
+        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [2, 3], [1, 0, 0, 0, 0, 0]],
         // A chestpiece: no model at all, and the two of its five groups this body has —
         // sleeves over the bare arms, and a chest piece over the bare torso.
-        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [1, 1, 0, 0, 0, 0], [0, 0]],
+        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [0, 0], [1, 1, 0, 0, 0, 0]],
         // Boots: the first element is the boot itself, and the second is the feet group whose
         // zero means "booted" rather than "bare" — the exception a reader has to know about.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [1, 0, 0, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [0, 0], [1, 0, 0, 0, 0, 0]],
         // Gloves: a slot this body holds no geoset for at all, so it is texture and nothing
         // else — which is what most of a wardrobe does to most of a mesh.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [1, 0, 0, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [0, 0], [1, 0, 0, 0, 0, 0]],
         // Legs, whose first element is the trousers.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [3, 0, 0, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [0, 0], [3, 0, 0, 0, 0, 0]],
         // A weapon, which is geometry and nothing else.
-        [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [0, 0, 0, 0, 0, 0], [1, 0]],
+        [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [1, 0], [0, 0, 0, 0, 0, 0]],
         // A shirt: nothing at all beyond its material.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0, 0, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0], [0, 0, 0, 0, 0, 0]],
         // Shoulders that keep their model in the second slot only, which is exactly what a
         // reader that stops at element zero calls "no model at all".
-        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [1, 0, 0, 0, 0, 0], [2, 3]],
+        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [2, 3], [1, 0, 0, 0, 0, 0]],
         // A display naming a model resource no file in this install belongs to, which is what
         // a partial download looks like from here.
-        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [2, 0, 0, 0, 0, 0], [1, 0]],
+        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [1, 0], [2, 0, 0, 0, 0, 0]],
         // One whose file is there and is not a model, which is the other kind of wrong and
         // has to read differently: an install missing a file is ordinary, an unreadable file
         // is this app being wrong about the format.
-        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [2, 0, 0, 0, 0, 0], [1, 0]],
+        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [1, 0], [2, 0, 0, 0, 0, 0]],
         // A robe, which is the chest slot again and the one that shows why the groups are
         // worth getting right: it leaves the chest group bare and switches on the robe group
         // instead, which is the skirt that hangs over the legs.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51014, 0], [1, 0, 1, 0, 0, 0], [0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51014, 0], [0, 0], [1, 0, 1, 0, 0, 0]],
       ],
       idList: [
         900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008, 900009, 900010, 900011,
@@ -389,7 +394,7 @@ const itemDisplayInfo: TableSpec = {
       // Encrypted, so an appearance pointing here knows its slot and nothing more.
       key: 0x5d38af0c9e142b76n,
       rows: [
-        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [2, 0, 0, 0, 0, 0], [1, 0]],
+        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [1, 0], [2, 0, 0, 0, 0, 0]],
       ],
       idList: [900900],
     },

@@ -49,6 +49,37 @@ impl Storage {
     fn uses_palette(self) -> bool {
         matches!(self, Storage::Indexed | Storage::IndexedArray)
     }
+
+    /// What to call this storage when describing a column to a reader.
+    fn name(self) -> &'static str {
+        match self {
+            Storage::Plain => "plain",
+            Storage::Bitpacked => "bitpacked",
+            Storage::Common => "sparse",
+            Storage::Indexed => "palette",
+            Storage::IndexedArray => "palette of runs",
+            Storage::BitpackedSigned => "bitpacked signed",
+        }
+    }
+}
+
+/// What the file itself says about one column, which is all it says.
+///
+/// Enough to tell an array from a scalar without knowing what the column means: a plainly
+/// stored array is as wide as its elements laid end to end, so a column of 192 bits holds six
+/// 32-bit values and one of 32 holds one. A palette of runs states its own count instead.
+///
+/// This is what `examples/dump_display_columns` reads a column's shape out of, which is how a
+/// position taken from the community's definitions gets checked against an install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColumnShape {
+    /// How the column is stored, as a word for a person rather than the file's number.
+    pub storage: &'static str,
+    /// The column's total width in bits — every element of an array together.
+    pub size_bits: u32,
+    /// How many values one entry holds, for a palette of runs. Zero for every other storage,
+    /// which says nothing about how many elements a plainly stored array has.
+    pub array_count: u32,
 }
 
 struct Column {
@@ -391,6 +422,24 @@ impl Db2 {
     /// How many rows the header counts, including any this install cannot decrypt.
     pub fn declared_rows(&self) -> usize {
         self.total_rows
+    }
+
+    /// How many columns the table holds, so that a caller printing them knows where to stop.
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// What the file says about one column, or nothing when the table has no such column.
+    pub fn column_shape(&self, column: usize) -> Option<ColumnShape> {
+        self.columns.get(column).map(|info| ColumnShape {
+            storage: info.storage.name(),
+            size_bits: info.size_bits,
+            array_count: if info.storage == Storage::IndexedArray {
+                info.array_count
+            } else {
+                0
+            },
+        })
     }
 
     /// Whether a section Blizzard encrypted really did arrive as zeroes.
@@ -807,9 +856,10 @@ mod tests {
     mod display {
         /// Plainly stored arrays, elements laid end to end inside one column.
         pub const MODEL_RESOURCES_ID: usize = 10;
-        pub const GEOSET_GROUP: usize = 12;
-        /// A palette of whole runs rather than of single values.
-        pub const MODEL_TYPE: usize = 13;
+        pub const GEOSET_GROUP: usize = 13;
+        /// A palette of whole runs rather than of single values, and the column an install
+        /// keeps immediately in front of the geoset groups: two values where that holds six.
+        pub const MODEL_TYPE: usize = 12;
         /// Not an array at all, which is the case that has to keep working.
         pub const FLAGS: usize = 0;
     }
@@ -1128,6 +1178,27 @@ mod tests {
                 vec![0, 0],
             ]
         );
+    }
+
+    // What the file says about a column, which is how the two array columns nothing else can
+    // tell apart get told apart: `ModelType` holds two values and `GeosetGroup` six, and
+    // reading either as the other is the mistake `examples/dump_display_columns` exists to
+    // catch. This is the shape that tool prints, on a table whose layout is known.
+    #[test]
+    fn says_how_wide_a_column_is_and_how_many_values_one_entry_holds() {
+        let table = table(ITEM_DISPLAY_INFO);
+        let shape = |column: usize| table.column_shape(column).expect("the column is there");
+
+        assert_eq!(shape(display::MODEL_TYPE).storage, "palette of runs");
+        assert_eq!(shape(display::MODEL_TYPE).array_count, 2);
+        // A plainly stored array states only its total width; six 32-bit values is what 192
+        // bits is, and the caller is the one that knows to divide by 32.
+        assert_eq!(shape(display::GEOSET_GROUP).storage, "plain");
+        assert_eq!(shape(display::GEOSET_GROUP).size_bits, 192);
+        assert_eq!(shape(display::GEOSET_GROUP).array_count, 0);
+
+        assert_eq!(table.column_count(), 14);
+        assert_eq!(table.column_shape(table.column_count()), None);
     }
 
     #[test]

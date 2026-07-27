@@ -7,7 +7,9 @@ Warcraft install off limits for ordinary work, and these notes are the reason th
 rule costs nothing: everything below was read off a real install once, deliberately,
 and written down.
 
-**Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26. Column
+**Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26, and the array
+columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the same build on
+2026-07-27 — the two things this file used to carry on the community's say-so. Column
 indices and file ids are stated as *verified* only where they were read out of that
 install and cross-checked against the data they resolve to. Everything else is marked
 as coming from [WoWDBDefs](https://github.com/wowdev/WoWDBDefs) or
@@ -146,6 +148,8 @@ ItemAppearance                    (id in the id list — $noninline,id$)
 ItemDisplayInfo                   (id in the id list)
   col10 = ModelResourcesID[2]         ← an array; use element()
   col11 = ModelMaterialResourcesID[2] ← an array; use element()
+  col12 = ModelType[2]                ← nothing reads it; see below
+  col13 = GeosetGroup[6]              ← which geoset variant the item switches on
      │                    │
      │                    └──▶ TextureFileData.col2 = MaterialResourcesID
      │                            row.id() = FileDataID ──▶ BLP2
@@ -165,17 +169,37 @@ reading `number(10)` and `number(11)` appears to give two unrelated scalars — 
 element exists. 12,656 rows use both model slots; shoulders are the reason (a left and a
 right). Use `element()`.
 
-**Only 10 and 11 are verified positions in that table.** `GeosetGroup[6]` is read from
-column 12 and `ModelType[2]` from column 13 on the community's say-so; neither index was read
-off an install.
+**The table ends in six array columns, and 12 and 13 are the pair worth reading twice.** All
+six were read off 12.0.5.67 on 2026-07-27 with `examples/dump_display_columns`, which is what
+to run again after a patch:
 
-`worn.rs` **does** rely on column 12 — it is what says which geoset variant an appearance
-switches on, and there is no showing armour without it. That is a deliberate exception to the
-rule the rest of this file keeps, and it is bounded rather than waved through: `character.rs`
-takes a group over only when the body actually holds the geoset the value resolves to, so a
-column that has moved reads as an appearance that changed nothing rather than as a character
-with a limb missing. Checking it the way 10 and 11 were checked is still worth doing, and
-[character-rendering.md](character-rendering.md#geosets) says what to look for.
+| Column | Field | Elements |
+|---|---|---|
+| 10 | `ModelResourcesID` | 2 |
+| 11 | `ModelMaterialResourcesID` | 2 |
+| 12 | `ModelType` | 2 |
+| 13 | `GeosetGroup` | 6 |
+| 14 | `AttachmentGeosetGroup` | 6 |
+| 15 | `HelmetGeosetVis` | 2 |
+
+`GeosetGroup` is column **13**, not 12 — the community's definitions were read here as putting
+it before `ModelType` and it comes after. Three things say so, and the install stores every one
+of these as a palette of runs, which is what makes the first of them readable at all:
+
+- **How many values one entry holds.** 12 holds two and 13 holds six, which is the shape of
+  `ModelType[2]` and `GeosetGroup[6]` and of nothing else in the run.
+- **How big the numbers are.** A geoset value is 0 to 98, and -1 where a row drives no geoset.
+  10 and 11 fail that on half the table; 12 reads `-1` on every piece of armour, which is
+  `ModelType` saying the item has no model of its own.
+- **A robe against a breastplate.** Both are the chest slot, whose six values drive sleeves,
+  chest, robe, torso and arm upper in that order. Every robe read leaves the chest group at 0
+  and puts a 1 in the robe group — `[1, 0, 1, 0, 0, 0]` for Acolyte's Robe — and every
+  breastplate has neither. No other column in the table looks like that.
+
+Getting it wrong is quiet rather than loud, which is the reason it went unchecked for so long
+and the reason it is bounded anyway: `character.rs` takes a group over only when the body
+actually holds the geoset the value resolves to, so a column that moves reads as an appearance
+that changes nothing rather than as a character with a limb missing.
 
 For body-component textures — which is how armour is drawn — the path is different and
 does **not** go through `col11`:
@@ -220,11 +244,11 @@ Per-region texture columns (`ArmUpperTexture`, `TorsoUpperTexture`, …) **left
 
 The single most consequential finding, measured across real transmog sets:
 
-| `DisplayType` | Slot (per community definitions) | `ModelResourcesID` | Geometry |
+| `DisplayType` | Slot | `ModelResourcesID` | Geometry |
 |---|---|---|---|
 | 0 | head | non-zero | an M2 of its own |
 | 1 | shoulder | non-zero | an M2 of its own |
-| **2–10** | **chest, waist, legs, feet, wrist, hands, back, tabard, shirt** | **0** | **none at all** |
+| **2–10** | **shirt, chest, waist, legs, feet, wrist, hands, back, tabard** | **0** | **none at all** |
 | 11, 12, 13, 15 | weapons and shields | non-zero | an M2 of its own |
 
 Most armour has no model. It is texture painted onto the character's body, plus geoset
@@ -235,11 +259,18 @@ This is why `ItemDisplayInfoMaterialRes` and the relationship block are load-bea
 rather than incidental, and why showing armour at all requires the character-rendering
 work in [character-rendering.md](character-rendering.md).
 
-The `DisplayType` → slot naming above is from community definitions and was not
-independently verified; which values carry a model *was* verified. The set detail view names
-0 through 10 from that list and calls 11, 12, 13 and 15 a "weapon or shield" between them,
-because the definitions do not say which of those is the main hand and which the off hand
-and four labelled guesses would read as fact.
+The `DisplayType` → slot naming above was read off 12.0.5.67 on 2026-07-27, an item at a
+time, with `examples/dump_display_columns`: a Blackrock Pauldrons is 1, a Recruit's Shirt 2,
+a Robe of the Magi 3, a Support Girdle 4, a Lambent Scale Legguards 5, a Recruit's Boots 6,
+an Ice-Covered Bracers 7, a Thick Cloth Gloves 8, an Overseer's Cloak 9, a Guild Tabard 10.
+Swords, staves and daggers are 11, bows and wands 12, shields 13.
+
+**This is not what the community's definitions say**, which put the chest at 2 and the shirt
+last at 10. Every slot from the chest down sits one higher than that list, because the shirt
+is 2 rather than 10. The set detail view and `worn.rs`'s slot → geoset-group table both follow
+what the install says. 11 upward are still named "weapon or shield" between them rather than
+one by one, because nothing says which of them is the main hand and which the off hand and
+four labelled guesses would read as fact.
 
 ## Achievements
 

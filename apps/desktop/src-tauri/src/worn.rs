@@ -24,11 +24,12 @@
 //! that table at all is not excluded**: silence is what most of the game's armour has, and
 //! reading it as "not for this body" would leave the character bare.
 //!
-//! The second is the one to distrust. `GeosetGroup`'s column position is the community's and
-//! has not been read off an install, unlike the two beside it — `docs/game-files.md` says so
-//! and `docs/character-rendering.md` says what a wrong guess would look like. Which is why
-//! nothing here hides a group it cannot then show something for: see
-//! [`crate::character::dressed`].
+//! The second chain is two positions rather than one, and both were read off an install:
+//! `GeosetGroup` is column 13 of `ItemDisplayInfo`, and which slot a display type names is
+//! item by item in [`SLOT_GROUPS`]. Neither is the community's, because the community is wrong
+//! about both — `docs/game-files.md` has the run that settled them. Getting either wrong is
+//! quiet rather than loud, which is why nothing here hides a group it cannot then show
+//! something for: see [`crate::character::dressed`].
 
 use std::collections::HashMap;
 
@@ -87,25 +88,29 @@ const LARGEST_VALUE: u32 = 98;
 
 /// Which geoset groups each slot's `GeosetGroup` elements drive, indexed by `DisplayType`.
 ///
-/// From `docs/character-rendering.md`, which has the group numbers and the slots side by side.
-/// One item drives several at once — a chestpiece drives five — and since they all come from
-/// the same item, none of them can conflict with another. That is the whole reason a single
-/// appearance is so much less work than an assembled outfit.
+/// The group numbers are `docs/character-rendering.md`'s, which has them and the slots side by
+/// side. The slot each one is filed under was read off an install with
+/// `examples/dump_display_columns`, item by item — a shirt is 2 and a chestpiece is 3, which
+/// is not where the community's list puts either.
 ///
-/// Wrist and shirt drive nothing: a bracer is texture alone, and the shirt row is not in the
+/// One item drives several groups at once — a chestpiece drives five — and since they all come
+/// from the same item, none of them can conflict with another. That is the whole reason a
+/// single appearance is so much less work than an assembled outfit.
+///
+/// Shirt and wrist drive nothing: a bracer is texture alone, and the shirt row is not in the
 /// community's table at all, so it is left as texture rather than guessed at.
 const SLOT_GROUPS: [&[u16]; 11] = [
-    &[27, 21],            // head: helm, skull
-    &[26],                // shoulder
-    &[8, 10, 13, 22, 28], // chest: sleeves, chest, robe, torso, arm upper
-    &[18],                // waist: belt
-    &[11, 9, 13],         // legs: pants, kneepads, robe
-    &[5, 20],             // feet: boot, feet
-    &[],                  // wrist
-    &[4, 23],             // hands: gloves, hand attach
-    &[15],                // back: cape
-    &[12],                // tabard
-    &[],                  // shirt
+    &[27, 21],            // 0  head: helm, skull
+    &[26],                // 1  shoulder
+    &[],                  // 2  shirt
+    &[8, 10, 13, 22, 28], // 3  chest: sleeves, chest, robe, torso, arm upper
+    &[18],                // 4  waist: belt
+    &[11, 9, 13],         // 5  legs: pants, kneepads, robe
+    &[5, 20],             // 6  feet: boot, feet
+    &[],                  // 7  wrist
+    &[4, 23],             // 8  hands: gloves, hand attach
+    &[15],                // 9  back: cape
+    &[12],                // 10 tabard
 ];
 
 /// The two groups whose zero does not mean "nothing here".
@@ -330,12 +335,13 @@ mod tests {
     /// A display in a section the game encrypts, so nothing can be read about it.
     const WITHHELD: u32 = 900900;
 
-    /// The slots those displays are worn in, as `ItemAppearance` numbers them.
+    /// The slots those displays are worn in, as an install numbers them — which is not how
+    /// the community's list does: a shirt is 2 and a chestpiece 3.
     const HEAD: u32 = 0;
-    const CHEST: u32 = 2;
-    const FEET_SLOT: u32 = 5;
-    const HANDS: u32 = 7;
-    const SHIRT_SLOT: u32 = 10;
+    const CHEST: u32 = 3;
+    const FEET_SLOT: u32 = 6;
+    const HANDS: u32 = 8;
+    const SHIRT_SLOT: u32 = 2;
 
     fn worn(display_info_id: u32, display_type: u32) -> Worn {
         of(&fixture_files(), display_info_id, display_type).unwrap()
