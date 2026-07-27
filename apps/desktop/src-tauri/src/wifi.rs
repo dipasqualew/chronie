@@ -911,7 +911,7 @@ mod tests {
         )
         .unwrap();
         let path = directory.join("chronie.sqlite3");
-        collector::collect(&wow, &path, 2_000_000_000).unwrap();
+        collector::collect(&wow, &path, 2_000_000_000, collector::Options::default()).unwrap();
         path
     }
 

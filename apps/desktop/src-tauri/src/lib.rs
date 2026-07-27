@@ -1,5 +1,6 @@
 mod activity;
 pub mod achievements;
+pub mod captures;
 pub mod casc;
 pub mod character;
 mod collector;
@@ -51,6 +52,12 @@ struct Settings {
     /// Chronie deletes an old log yet.
     #[serde(default)]
     combat_logging: bool,
+    /// Whether the game keeps its own copy of a screenshot Chronie has ingested. Off, so the
+    /// game's folder stops growing — but taking files out of a folder somebody has been
+    /// curating for years is not a thing to make unrecoverable by design, and turning this on
+    /// leaves every original where it was while Chronie still holds a verified copy.
+    #[serde(default)]
+    keep_original_screenshots: bool,
 }
 
 struct AppState {
@@ -127,14 +134,24 @@ fn configured_wow_path(settings: &Settings) -> Result<PathBuf, String> {
 }
 
 fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
-    let wow_path = {
+    let (wow_path, options) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
-        configured_wow_path(&settings)?
+        (
+            configured_wow_path(&settings)?,
+            collector::Options {
+                keep_originals: settings.keep_original_screenshots,
+            },
+        )
     };
     // Not while a database arriving over the network is being put in place, which would
     // otherwise have this writing into a file that is about to stop existing.
     let held = state.database.lock().map_err(|_| "Database lock failed.")?;
-    let result = collector::collect(&wow_path, &state.database_path(), Utc::now().timestamp())?;
+    let result = collector::collect(
+        &wow_path,
+        &state.database_path(),
+        Utc::now().timestamp(),
+        options,
+    )?;
     drop(held);
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.last_sync = Some(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
