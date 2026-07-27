@@ -725,6 +725,11 @@ function fake.newEnv(options)
     -- the shape ns.factionStanding returns: `{ standing, current, max }`. A faction with no
     -- entry models one the client cannot place.
     local factions = options.factions or {}
+    -- What a walk of the client's own currency and reputation panes would come back with,
+    -- already in the shape ns.readHoldings reduces them to. Empty by default, and mutable,
+    -- so a test that says nothing about it models panes with nothing on them — the sweep
+    -- writes nothing, and only what was watched being earned reaches the snapshot.
+    local held = options.held or {}
     local achievementNames = options.achievements or {}
     local mountNames = options.mounts or {}
     local pets = options.pets or {}
@@ -876,6 +881,12 @@ function fake.newEnv(options)
         factionState = function(faction)
             return factions[faction]
         end,
+        heldSweep = function()
+            return {
+                currencies = held.currencies or {},
+                reputation = held.reputation or {},
+            }
+        end,
         ownedItemCount = function(itemID)
             local item = currencyItems[itemID]
             return item and item.count or 0
@@ -1019,6 +1030,12 @@ function fake.newEnv(options)
         ---@param value integer?
         setWarbandMoney = function(value)
             warbandMoney = value
+        end,
+        ---Drive what the client's currency and reputation panes would say the character is
+        ---holding, as spending a currency or earning a reputation between two zonings would.
+        ---@param value table? `{ currencies, reputation }`; nil empties both panes.
+        setHeld = function(value)
+            held = value or {}
         end,
         ---Drive the grand-total owned count the addon reads through env.ownedItemCount,
         ---as looting, spending or moving a currency item between stores would.

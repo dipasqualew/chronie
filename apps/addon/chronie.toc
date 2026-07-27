@@ -19,6 +19,7 @@ src/DetailWindow.lua
 src/LockoutWindow.lua
 src/SegmentSchema.lua
 src/FactionStanding.lua
+src/HoldingsSweep.lua
 src/HoldingsStore.lua
 src/SegmentTally.lua
 src/ResultsWindow.lua
