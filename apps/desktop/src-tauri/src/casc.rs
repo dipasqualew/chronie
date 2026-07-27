@@ -127,6 +127,7 @@ impl CascFiles {
     ///
     /// `install` is the folder holding `Data/` — the parent of `_retail_`, not `_retail_`
     /// itself, which is the path the rest of the app carries around.
+    #[tracing::instrument(name = "casc.open", skip_all)]
     pub fn open(install: &Path) -> Result<Self, String> {
         let data_dir = install.join("Data");
         if !data_dir.is_dir() {
@@ -159,18 +160,28 @@ impl CascFiles {
             },
         };
 
-        storage.encoding = Encoding::parse(storage.fetch(&parse_key(encoding_ekey)?)?)?;
+        storage.encoding = {
+            let held = tracing::info_span!("casc.encoding", bytes = tracing::field::Empty).entered();
+            let bytes = storage.fetch(&parse_key(encoding_ekey)?)?;
+            held.record("bytes", bytes.len());
+            Encoding::parse(bytes)?
+        };
         let root_ekey = storage
             .encoding
             .encoding_key(&root_ckey)
             .ok_or("The root file is not listed in encoding.")?;
-        let root_bytes = storage.fetch(&root_ekey)?;
-        storage.root = WowRoot::parse(&mut Cursor::new(&root_bytes), LocaleFlags::any_locale())
-            .map_err(|error| format!("The root file would not parse: {error}"))?;
+        storage.root = {
+            let held = tracing::info_span!("casc.root", bytes = tracing::field::Empty).entered();
+            let root_bytes = storage.fetch(&root_ekey)?;
+            held.record("bytes", root_bytes.len());
+            WowRoot::parse(&mut Cursor::new(&root_bytes), LocaleFlags::any_locale())
+                .map_err(|error| format!("The root file would not parse: {error}"))?
+        };
         Ok(storage)
     }
 
     /// Pulls one BLTE payload out of the `data.NNN` blobs by encoding key.
+    #[tracing::instrument(name = "casc.fetch", skip_all)]
     fn fetch(&self, ekey: &[u8; 16]) -> Result<Vec<u8>, String> {
         let mut prefix = [0u8; 9];
         prefix.copy_from_slice(&ekey[0..9]);
@@ -194,6 +205,7 @@ impl CascFiles {
 }
 
 impl GameFiles for CascFiles {
+    #[tracing::instrument(name = "casc.read", skip_all, fields(fdid = fdid))]
     fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
         let variants = self
             .root
@@ -284,6 +296,7 @@ fn parse_key(hex: &str) -> Result<[u8; 16], String> {
 /// Each bucket is a header, a small table CASC uses for its own bookkeeping, then a run of
 /// fixed-size entries: a 9-byte key prefix, a 40-bit big-endian word packing the archive
 /// number above the offset, and a little-endian size.
+#[tracing::instrument(name = "casc.indices", skip_all)]
 fn load_indices(data_dir: &Path) -> Result<HashMap<[u8; 9], Location>, String> {
     let dir = data_dir.join("data");
     let entries = std::fs::read_dir(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -396,6 +409,7 @@ fn read_exact_at(file: &File, buffer: &mut [u8], offset: u64) -> std::io::Result
 /// public — those chunks come back as zeroes, which is what every other tool does and what
 /// the DB2 reader is written to expect, because the records inside them live in their own
 /// sections that it can then recognise and skip.
+#[tracing::instrument(name = "casc.blte", skip_all, fields(bytes = data.len()))]
 pub fn blte_decode(data: &[u8]) -> Result<Vec<u8>, String> {
     if data.len() < 8 || &data[0..4] != b"BLTE" {
         return Err("Not a BLTE payload.".into());

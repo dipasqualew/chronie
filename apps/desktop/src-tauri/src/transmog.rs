@@ -157,6 +157,7 @@ pub struct TransmogSet {
 }
 
 /// Everything the transmog view needs, in one payload.
+#[tracing::instrument(name = "transmog.sets", skip_all)]
 pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
     let groups = Db2::parse(files.read(TRANSMOG_SET_GROUP)?)?;
     let group_names: HashMap<u32, String> = groups
@@ -253,6 +254,7 @@ pub struct TransmogSetAppearance {
 /// answerable from the game files alone. One row comes back per row of `TransmogSetItem` —
 /// including a set that names the same appearance twice — so the length of the list always
 /// matches the count the grid showed.
+#[tracing::instrument(name = "transmog.set_items", skip_all, fields(set = set_id))]
 pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
     let items = Db2::parse(files.read(TRANSMOG_SET_ITEM)?)?;
     let wanted: Vec<u32> = items

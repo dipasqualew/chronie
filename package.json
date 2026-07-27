@@ -10,6 +10,7 @@
     "build": "bun run --cwd apps/desktop tauri build",
     "install-locally": "bun run scripts/install-locally.ts",
     "render": "bun run scripts/render-model.ts",
+    "trace": "bun run scripts/trace-render.ts",
     "test": "bun run --cwd apps/desktop test",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
     "typecheck": "tsc -p apps/desktop && tsc -p scripts",
