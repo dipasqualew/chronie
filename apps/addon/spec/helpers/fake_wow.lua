@@ -265,6 +265,30 @@ function fake.newFrame(options)
         self.highlighted = (self.highlighted or 0) + 1
     end
 
+    -- Keyboard focus is recorded rather than ignored, because "this box never took focus
+    -- unless somebody deliberately asked for it" is the assertion the note prompt exists to
+    -- satisfy: a focused EditBox swallows every keybind the player has.
+    function frame:SetAutoFocus(enabled)
+        self.autoFocus = enabled and true or false
+    end
+
+    function frame:SetFocus()
+        self.focused = true
+        self.focusCount = (self.focusCount or 0) + 1
+    end
+
+    function frame:ClearFocus()
+        self.focused = false
+    end
+
+    function frame:HasFocus()
+        return self.focused == true
+    end
+
+    function frame:SetMaxBytes(bytes)
+        self.maxBytes = bytes
+    end
+
     function frame:Show()
         self.shown = true
     end
@@ -308,11 +332,9 @@ function fake.newFrame(options)
         "SetHighlightTexture",
         "RegisterForClicks",
         "SetJustifyH",
-        "SetAutoFocus",
         "SetCursorPosition",
         "SetFontObject",
         "ClearAllPoints",
-        "ClearFocus",
         "Raise",
         "StartMoving",
         "StopMovingOrSizing",
@@ -728,6 +750,8 @@ function fake.newEnv(options)
     -- How many times the addon reached for the shutter. There is nothing else to observe:
     -- the real Screenshot() is asynchronous and writes a file the addon can never see.
     local screenshots = 0
+    ---Which bindings the addon asked the player's key for.
+    local bindingKeysAsked = {}
     -- The client's own unique id for the logged-in character. `false` models every moment
     -- before the world has loaded, where the client will not name the player at all.
     local playerGUID = options.playerGUID
@@ -901,6 +925,13 @@ function fake.newEnv(options)
         screenshot = function()
             screenshots = screenshots + 1
         end,
+        -- What the player has bound to one of the addon's own bindings. Defaults to nothing
+        -- bound, which is what every player has until they go and bind something, and is the
+        -- case anything naming a key in front of them has to cope with.
+        bindingKey = function(action)
+            bindingKeysAsked[#bindingKeysAsked + 1] = action
+            return (options.bindingKeys or {})[action]
+        end,
         loggingCombat = function(enable)
             if enable ~= nil then
                 logging = enable and true or false
@@ -1053,6 +1084,8 @@ function fake.newEnv(options)
         end,
         ---Every write the addon attempted, refused ones included.
         setCVarCalls = setCVarCalls,
+        ---Which of its own bindings the addon looked up a key for.
+        bindingKeysAsked = bindingKeysAsked,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
             return raidInfoRequests

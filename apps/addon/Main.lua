@@ -7,6 +7,7 @@ local addonName, ns = ...
 -- which may be long before or entirely without the addon having wired itself up.
 BINDING_HEADER_CHRONIE = "Chronie"
 BINDING_NAME_CHRONIE_CAPTURE = "Take a screenshot"
+BINDING_NAME_CHRONIE_ANNOTATE = "Add a note to what was just captured"
 
 ---Everything the addon needs from the outside world, in one injectable bag.
 ---@class WowEnv
@@ -63,6 +64,8 @@ BINDING_NAME_CHRONIE_CAPTURE = "Take a screenshot"
 ---@field mapState fun(): MapPosition? Where the player is standing, when the client says.
 ---@field screenshot fun() Take a screenshot. Asynchronous: the file lands a moment later,
 ---and the addon can never see it, so nothing may wait on or confirm it.
+---@field bindingKey fun(action: string): string? Which key the player has bound to one of
+---the addon's own bindings, or nil when they have bound none.
 ---@field loggingCombat fun(enable: boolean?): boolean Client LoggingCombat: starts or stops
 ---combat logging when passed a value, and reports the current state either way.
 ---@field getCVar fun(name: string): string? Reads a client setting.
@@ -284,6 +287,38 @@ function ns.main(env)
         openSegment = segmentTracker.current,
     })
 
+    -- The offer to say something about what was just captured, and the toast that carries
+    -- it. Wired to each other in both directions and declared in this order because of it:
+    -- the prompt shows and hides the toast, the toast reports what the player did to the
+    -- prompt. The toast is reached through an upvalue rather than being built first,
+    -- because the prompt is the half with the rules and nothing should be tempted to give
+    -- the frame any.
+    local entryToast
+    local entryPrompt = ns.newEntryPrompt({
+        now = env.now,
+        attach = entryLog.annotate,
+        onShow = function(entry)
+            entryToast.show(entry)
+        end,
+        onHide = function()
+            entryToast.hide()
+        end,
+    })
+
+    entryToast = ns.newEntryToast({
+        createFrame = env.createFrame,
+        uiParent = env.uiParent,
+        specialFrames = env.specialFrames,
+        onEngage = entryPrompt.engage,
+        onSubmit = entryPrompt.submit,
+        onDismiss = entryPrompt.dismiss,
+        onRelease = entryPrompt.release,
+        tick = entryPrompt.tick,
+        bindingKey = function()
+            return env.bindingKey and env.bindingKey("CHRONIE_ANNOTATE")
+        end,
+    })
+
     -- ns.settings again: which things are worth a photograph is the player's list, not
     -- Chronie's, and it reaches the addon down the same channel combat logging does.
     local captureTriggers = ns.newCaptureTriggers({
@@ -313,6 +348,11 @@ function ns.main(env)
         -- segment that saw nothing.
         tally.entry()
         env.screenshot()
+        -- Offered for every capture, the automatic ones included: a picture Chronie took
+        -- by itself is exactly the kind that wants a sentence saying why it was worth
+        -- taking. The offer is passive and expires on its own, so a player who is busy
+        -- does nothing and loses nothing.
+        entryPrompt.offer(entry)
         return entry
     end
 
@@ -799,6 +839,9 @@ function ns.main(env)
         combatLogging = combatLogging,
         capture = capture,
         captureTriggers = captureTriggers,
+        entryPrompt = entryPrompt,
+        entryToast = entryToast,
+        annotate = entryToast.engage,
     }
 end
 
@@ -1072,6 +1115,11 @@ if CreateFrame then
                 return ns.readMapPosition(C_Map)
             end,
             screenshot = Screenshot,
+            -- Two keys can be bound to one action; the toast has room to name one, and the
+            -- first is the one the Key Bindings panel shows as the primary.
+            bindingKey = function(action)
+                return (GetBindingKey(action))
+            end,
             loggingCombat = LoggingCombat,
             -- C_CVar is the modern home of both; the bare globals are still defined and are
             -- what older clients have, so each is taken from whichever this build offers.
@@ -1103,8 +1151,9 @@ if CreateFrame then
             db = ChronieDB,
         })
 
-        -- What the keybinding in Bindings.xml calls. Published only now, so a key pressed
+        -- What the keybindings in Bindings.xml call. Published only now, so a key pressed
         -- during login runs nothing rather than reaching a half-built addon.
         ChronieCapture = ns.app.capture
+        ChronieAnnotate = ns.app.annotate
     end)
 end

@@ -28,6 +28,10 @@ local _, ns = ...
 ---@field hasImage boolean? True when a screenshot was fired for this entry, absent when
 ---nothing was. The addon cannot see the filesystem, so this is a statement about what was
 ---asked for, never about what landed on disk.
+---@field note string? What the player said about it, when they said anything. Absent
+---rather than empty on the overwhelming majority of entries, which carry no note at all.
+---The only user-authored string in the record: see ns.entryText for what it is allowed to
+---contain and why the rules are as strict as they are.
 ---@field trigger string? The rule that fired this capture by itself, absent when a person
 ---pressed the key. Its presence is what tells the two apart downstream.
 ---@field achievement integer? The achievement this entry is filed against, when that is
@@ -46,6 +50,8 @@ local _, ns = ...
 ---@class EntryLog
 ---@field record fun(options: EntryOptions?): EntryRecord? The entry written, or nil when it
 ---was refused — see the cooldown below.
+---@field annotate fun(entry: EntryRecord, text: string): EntryRecord Attaches a note to an
+---entry already written.
 
 ---@class EntryLogDeps
 ---@field db table SavedVariables table; mutated in place so the client persists it.
@@ -159,6 +165,25 @@ function ns.newEntryLog(deps)
             end
 
             db.entries[#db.entries + 1] = entry
+            return entry
+        end,
+
+        ---Attaches a note to an entry this log already wrote.
+        ---
+        ---A note arrives after the record it belongs to, always: the picture is taken the
+        ---instant the key goes down and the sentence about it is typed seconds later. The
+        ---row is mutated in place rather than rewritten, which is all it takes — the table
+        ---handed back by `record` is the one sitting in `db.entries`, and the client writes
+        ---whatever it holds at logout.
+        ---
+        ---The text is expected to have been through `ns.entryText` already. Doing it here
+        ---as well would put the cap and the escape rules in two places at once, and the
+        ---place it belongs is the one that can tell the player their note was empty.
+        ---@param entry EntryRecord
+        ---@param text string
+        ---@return EntryRecord
+        annotate = function(entry, text)
+            entry.note = text
             return entry
         end,
     }
