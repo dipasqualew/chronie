@@ -292,16 +292,18 @@ async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
 ///
 /// The slot comes across beside the display id because `ItemAppearance` is what knows it and
 /// the window already has it — and because it is what says which geoset groups the display's
-/// six values drive. `null` is the ordinary answer for an appearance this install can say
-/// nothing about, and leaves the window showing the icon.
+/// six values drive. The inventory type comes with it for the one thing the slot cannot say:
+/// which hand a weapon is held in. `null` is the ordinary answer for an appearance this install
+/// can say nothing about, and leaves the window showing the icon.
 #[tauri::command]
 async fn worn_model(
     display_info_id: u32,
     display_type: u32,
+    inventory_type: u32,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     read_game_files(&state, move |files| {
-        character::worn_model_of(files, display_info_id, display_type)
+        character::worn_model_of(files, display_info_id, display_type, inventory_type)
     })
     .await
 }

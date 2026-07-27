@@ -258,8 +258,9 @@ pub fn worn_model_of(
     files: &dyn GameFiles,
     display_info_id: u32,
     display_type: u32,
+    inventory_type: u32,
 ) -> Result<Value, String> {
-    let worn = crate::worn::of(files, display_info_id, display_type)?;
+    let worn = crate::worn::of(files, display_info_id, display_type, inventory_type)?;
     if worn.is_empty() {
         return Ok(serde_json::json!({ "displayInfoId": display_info_id, "model": Value::Null }));
     }
@@ -469,15 +470,19 @@ mod tests {
     /// writes them.
     const QUADRANTS: [[u8; 3]; 4] = [[66, 130, 198], [198, 65, 66], [255, 0, 132], [0, 195, 255]];
 
-    /// The fixture displays whose appearances are worn rather than shown on their own, and the
-    /// slots `ItemAppearance` gives them.
-    const CHESTPIECE: (u32, u32) = (900_003, 3);
-    const BOOTS: (u32, u32) = (900_004, 6);
-    const ROBE: (u32, u32) = (900_012, 3);
-    /// And the four with geometry of their own, which are the ones that hang off her.
-    const HELM: (u32, u32) = (900_001, 0);
-    const SHOULDERS: (u32, u32) = (900_002, 1);
-    const CAPE: (u32, u32) = (900_013, 9);
+    /// One fixture appearance as the window asks for it: the display, the slot
+    /// `ItemAppearance` gives it, and where `ItemSparse` says the item is worn — which is
+    /// nothing at all for a piece of armour and the hand for a weapon.
+    type Appearance = (u32, u32, u32);
+
+    /// The fixture displays whose appearances are painted onto the body.
+    const CHESTPIECE: Appearance = (900_003, 3, 0);
+    const BOOTS: Appearance = (900_004, 6, 0);
+    const ROBE: Appearance = (900_012, 3, 0);
+    /// And the ones with geometry of their own, which are what hangs off her.
+    const HELM: Appearance = (900_001, 0, 0);
+    const SHOULDERS: Appearance = (900_002, 1, 0);
+    const CAPE: Appearance = (900_013, 9, 0);
 
     fn mesh() -> Mesh {
         worn_mesh(&Worn::default())
@@ -500,8 +505,8 @@ mod tests {
     }
 
     /// What the fixture's own tables say an appearance does to the body.
-    fn worn_of((display_info_id, display_type): (u32, u32)) -> Worn {
-        crate::worn::of(&fixture_files(), display_info_id, display_type).unwrap()
+    fn worn_of((display_info_id, display_type, inventory_type): Appearance) -> Worn {
+        crate::worn::of(&fixture_files(), display_info_id, display_type, inventory_type).unwrap()
     }
 
     /// The geosets a body ends up drawing, which is what the whole selection comes down to.
@@ -511,20 +516,21 @@ mod tests {
 
     /// The atlas an appearance paints on its own, over nothing — which is how the rectangles
     /// each texture lands in are read without the skin underneath colouring the answer.
-    fn atlas_of((display_info_id, display_type): (u32, u32)) -> RgbaImage {
+    fn atlas_of((display_info_id, display_type, inventory_type): Appearance) -> RgbaImage {
         let files = fixture_files();
-        let worn = crate::worn::of(&files, display_info_id, display_type).unwrap();
+        let worn = crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap();
         let mut atlas = Atlas::unpainted();
         atlas.wear(&files, &worn.textures);
         image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
     }
 
     /// The atlas the app actually paints a body with: the skin, and an appearance over it.
-    fn body_atlas(worn: Option<(u32, u32)>) -> RgbaImage {
+    fn body_atlas(worn: Option<Appearance>) -> RgbaImage {
         let files = fixture_files();
-        let worn = worn.map(|(display_info_id, display_type)| {
-            crate::worn::of(&files, display_info_id, display_type).unwrap()
+        let worn = worn.map(|(display_info_id, display_type, inventory_type)| {
+            crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap()
         });
+
         let png = atlas(&files, worn.as_ref()).unwrap().png().unwrap();
         image::load_from_memory(&png).unwrap().into_rgba8()
     }
@@ -540,7 +546,7 @@ mod tests {
     }
 
     /// The scene the window is handed for one appearance worn on the body.
-    fn worn_scene(appearance: (u32, u32)) -> Value {
+    fn worn_scene(appearance: Appearance) -> Value {
         let worn = worn_of(appearance);
         scene(&glb_of(&fixture_files(), Some(&worn)).unwrap())
     }
@@ -847,7 +853,7 @@ mod tests {
     // lost with it. The boots carry one.
     #[test]
     fn drops_a_section_the_layout_has_nowhere_to_put() {
-        let boots = crate::worn::of(&fixture_files(), BOOTS.0, BOOTS.1).unwrap();
+        let boots = crate::worn::of(&fixture_files(), BOOTS.0, BOOTS.1, BOOTS.2).unwrap();
         assert!(boots.textures.iter().any(|texture| texture.section == 8));
         let atlas = atlas_of(BOOTS);
         assert_eq!(middle_of(&atlas, 7), [20, 100, 240, 255]);
@@ -861,7 +867,7 @@ mod tests {
     #[test]
     fn leaves_a_part_bare_when_its_texture_cannot_be_read() {
         // The shirt's only texture is a file the fixture directory deliberately omits.
-        let atlas = atlas_of((900_008, 10));
+        let atlas = atlas_of((900_008, 10, 0));
         assert_eq!(middle_of(&atlas, 3), UNPAINTED);
     }
 
@@ -869,7 +875,7 @@ mod tests {
     // picture and still the same mesh.
     #[test]
     fn hands_the_window_a_body_with_one_appearance_on_it() {
-        let answer = worn_model_of(&fixture_files(), ROBE.0, ROBE.1).unwrap();
+        let answer = worn_model_of(&fixture_files(), ROBE.0, ROBE.1, ROBE.2).unwrap();
         assert_eq!(answer["displayInfoId"], ROBE.0);
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
@@ -884,7 +890,7 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_an_appearance_it_cannot_read() {
         for display in [900_900, 404_040] {
-            let answer = worn_model_of(&fixture_files(), display, CHESTPIECE.1).unwrap();
+            let answer = worn_model_of(&fixture_files(), display, CHESTPIECE.1, 0).unwrap();
             assert_eq!(answer["model"], Value::Null, "display {display}");
         }
     }
@@ -972,7 +978,7 @@ mod tests {
     // resource whose file the fixture deliberately omits.
     #[test]
     fn leaves_out_a_worn_model_this_install_cannot_read() {
-        let scene = worn_scene((900_010, HELM.1));
+        let scene = worn_scene((900_010, HELM.1, 0));
         assert_eq!(scene["nodes"].as_array().unwrap().len(), 1);
     }
 

@@ -909,7 +909,9 @@ mod tests {
         /// The three columns behind the strings, which only a reader that walked them finds.
         pub const ITEM_LEVEL: usize = 6;
         pub const QUALITY: usize = 7;
-        pub const INVENTORY_TYPE: usize = 8;
+        /// And the far one, sixty columns further on, which is where the install keeps
+        /// `InventoryType` — the column that says which hand a weapon goes in.
+        pub const INVENTORY_TYPE: usize = 66;
     }
 
     fn table(fdid: u32) -> Db2 {
@@ -1024,13 +1026,13 @@ mod tests {
     fn reads_a_copied_row_under_its_new_id_with_the_data_it_copied() {
         let table = table(TRANSMOG_SET_ITEM);
         let rows: Vec<Row<'_>> = table.rows().collect();
-        assert_eq!(rows.len(), 14);
+        assert_eq!(rows.len(), 17);
 
         let original = rows.iter().find(|row| row.id() == 1).unwrap();
         let copy = rows
             .iter()
-            .find(|row| row.id() == 14)
-            .expect("the fixture copies row 1 to id 14");
+            .find(|row| row.id() == 17)
+            .expect("the fixture copies row 1 to id 17");
         for column in [item::SET_ID, item::APPEARANCE_ID, item::FLAGS] {
             assert_eq!(copy.number(column), original.number(column));
         }
@@ -1083,7 +1085,10 @@ mod tests {
             .collect();
         // Row nine is the one that keeps a model only in its second slot, and reading the
         // column as one number is exactly how that gets missed.
-        assert_eq!(first, vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0, 41006, 41007, 0, 0]);
+        assert_eq!(
+            first,
+            vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0, 41006, 41007, 0, 0, 41005, 0]
+        );
     }
 
     // The elements past the first are the reason this exists: a shoulder set keeps a model
@@ -1117,6 +1122,10 @@ mod tests {
                 vec![0, 0],
                 // The cape, which is the slot that has geometry without having a model.
                 vec![0, 0],
+                vec![41005, 0],
+                // The weapon whose only model is in the second slot, which is the same trap
+                // the shoulders above set and the reason a weapon is not read as element 0.
+                vec![0, 41004],
             ]
         );
 
@@ -1147,6 +1156,8 @@ mod tests {
                 vec![2, 0, 0, 0, 0, 0],
                 vec![1, 0, 1, 0, 0, 0],
                 vec![1, 0, 0, 0, 0, 0],
+                vec![0, 0, 0, 0, 0, 0],
+                vec![0, 0, 0, 0, 0, 0],
             ]
         );
     }
@@ -1180,6 +1191,8 @@ mod tests {
                 vec![1, 0],
                 vec![0, 0],
                 vec![0, 0],
+                vec![1, 0],
+                vec![0, 1],
             ]
         );
     }
@@ -1212,7 +1225,7 @@ mod tests {
             .rows()
             .map(|row| row.element(display::FLAGS, 0, 32))
             .collect();
-        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         // Asking past the end says so rather than running into the next column.
         for row in table.rows() {
             assert_eq!(row.element(display::FLAGS, 1, 32), 0);
@@ -1307,7 +1320,10 @@ mod tests {
                 (30007, "Emberforge Pauldrons".into()),
                 (30008, "Emberforge Breastplate".into()),
                 (30009, "Emberforge Greaves".into()),
-                (30010, "Emberforge Bulwark".into()),
+                (30010, "Emberforge Blade".into()),
+                (30014, "Emberforge Greatsword".into()),
+                (30015, "Emberforge Aegis".into()),
+                (30016, "Emberforge Censer".into()),
                 // The row the table holds and puts no name in.
                 (30013, String::new()),
             ]
@@ -1344,7 +1360,10 @@ mod tests {
                 ("Emberforge Pauldrons".into(), 489, 4, 3),
                 ("Emberforge Breastplate".into(), 502, 5, 5),
                 ("Emberforge Greaves".into(), 489, 4, 7),
-                ("Emberforge Bulwark".into(), 502, 5, 13),
+                ("Emberforge Blade".into(), 502, 5, 13),
+                ("Emberforge Greatsword".into(), 502, 5, 17),
+                ("Emberforge Aegis".into(), 502, 5, 14),
+                ("Emberforge Censer".into(), 502, 5, 23),
                 (String::new(), 421, 1, 4),
             ]
         );
@@ -1368,8 +1387,8 @@ mod tests {
     #[test]
     fn skips_the_variable_records_of_a_section_it_cannot_decrypt() {
         let table = sparse_table();
-        assert_eq!(table.rows().count(), 11);
-        assert_eq!(table.declared_rows(), 14);
+        assert_eq!(table.rows().count(), 14);
+        assert_eq!(table.declared_rows(), 17);
         for id in [30011, 30012, 30900] {
             assert!(!table.rows().any(|row| row.id() == id), "{id} was decrypted");
         }
@@ -1381,7 +1400,7 @@ mod tests {
     #[test]
     fn reads_a_variable_table_no_further_than_its_first_string_when_told_of_none() {
         let table = Db2::parse(fixture_files().read(ITEM_SPARSE).unwrap()).unwrap();
-        assert_eq!(table.rows().count(), 11);
+        assert_eq!(table.rows().count(), 14);
         assert_eq!(
             table.rows().map(|row| row.id()).take(3).collect::<Vec<u32>>(),
             vec![30001, 30002, 30003]

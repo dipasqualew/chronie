@@ -85,8 +85,10 @@ mod attachment_field {
 /// The same for one `M2CompBone`. The two tracks are the ones that can still be doing something
 /// with nothing playing — see [`bound_to_a_global_sequence`].
 mod bone_field {
+    pub const PARENT: usize = 0x08;
     pub const ROTATION: usize = 0x24;
     pub const SCALE: usize = 0x38;
+    pub const PIVOT: usize = 0x4c;
 }
 
 /// Where the pieces of one `M2Track` sit, in bytes.
@@ -175,8 +177,17 @@ pub struct Part {
 ///
 /// **The position is already in model space.** The format states it as "relative to the bone",
 /// and the bone's own translation track is per-animation, so with nothing playing there is
-/// nothing to add. Read off build 12.0.5.67: all 43 of `humanfemale_hd`'s attachments state a
-/// position exactly equal to their bone's pivot, which is the same reading arriving twice.
+/// nothing to add. Read off build 12.0.5.67: every one of `humanfemale_hd`'s attachments that
+/// states a position states one exactly equal to its bone's pivot, which is the same reading
+/// arriving twice.
+///
+/// **Except that ten of the 43 state no position at all**, and three of those are the ones a
+/// weapon needs: the shield, the right hand and the left. Their records hold the origin, and so
+/// do the bones they name — they are helper bones the game *animates* into the hand, and a
+/// still picture has no animation to do it with. What the file still says is where that bone
+/// chain hangs from, so the position falls back to the first ancestor that states one: the
+/// right wrist for attachment 1, the left for 2, the left forearm for the shield. See
+/// [`where_the_chain_puts_it`].
 ///
 /// **The rotation and the scale are not.** They come off the bone, and this is the half that
 /// looks like it can be skipped and cannot: an attachment bone can carry rotation and scale
@@ -189,7 +200,8 @@ pub struct Part {
 /// either way and why this was worth measuring rather than eyeballing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Attachment {
-    /// The community's numbering: 5 and 6 are the shoulders, 11 the helm, 12 the back.
+    /// The community's numbering: 0 is the shield, 1 and 2 the hands, 5 and 6 the shoulders,
+    /// 11 the helm, 12 the back.
     pub id: u32,
     pub position: [f32; 3],
     /// A quaternion, `[x, y, z, w]`, which is the order glTF states one in.
@@ -426,14 +438,64 @@ pub fn attachments(skeleton: &[u8]) -> Result<Vec<Attachment>, String> {
             Some(bones) => how_the_bone_sits(bones, bone)?,
             None => (NO_ROTATION, NO_SCALE),
         };
+        let stated = read_vector(record, attachment_field::POSITION)?;
+        let position = match (at_the_origin(stated), bones) {
+            (true, Some(bones)) => where_the_chain_puts_it(bones, bone)?,
+            _ => y_up(stated),
+        };
         found.push(Attachment {
             id: read_u32(record, attachment_field::ID)?,
-            position: y_up(read_vector(record, attachment_field::POSITION)?),
+            position,
             rotation,
             scale,
         });
     }
     Ok(found)
+}
+
+/// Where the bones put an attachment that states no position of its own.
+///
+/// A bone's pivot is in model space, and in the bind pose it is simply where that bone is: no
+/// animation, no parent composition, nothing to accumulate. So the first bone up the chain that
+/// states a pivot is the place on the body the attachment belongs to — for the right hand,
+/// through two helper bones, the right wrist.
+///
+/// **The origin is the sentinel, and it is one to be generous about.** Nothing hangs off a
+/// character between her feet, so a pivot there is a bone that has not been placed rather than
+/// one placed low. `humanfemale_hd` makes the point: the right hand's chain passes through a
+/// bone whose pivot is a millimetre off the origin on one axis, which is a rounding of zero and
+/// not a place. [`NEAR_THE_ORIGIN`] is well under the height of anything real on a body.
+///
+/// A chain that reaches the root without stating one leaves the attachment at the origin, which
+/// is what a caller drops rather than draws — see `crate::character::hung_on`.
+fn where_the_chain_puts_it(bones: &[u8], bone: usize) -> Result<[f32; 3], String> {
+    let array = array_at(bones, BONES)?;
+    let mut which = bone;
+    // A skeleton whose parents form a loop is a file this cannot walk out of, and it cannot
+    // take more steps than there are bones without having taken one twice.
+    for _ in 0..array.count {
+        if which >= array.count {
+            break;
+        }
+        let record = array.record(bones, which, BONE_SIZE)?;
+        let pivot = read_vector(record, bone_field::PIVOT)?;
+        if !at_the_origin(pivot) {
+            return Ok(y_up(pivot));
+        }
+        let parent = read_u16(record, bone_field::PARENT)? as i16;
+        if parent < 0 {
+            break;
+        }
+        which = parent as usize;
+    }
+    Ok([0.0; 3])
+}
+
+/// How close to the origin a position has to be to be no position at all, in the game's metres.
+const NEAR_THE_ORIGIN: f32 = 0.01;
+
+fn at_the_origin(position: [f32; 3]) -> bool {
+    position.iter().all(|axis| axis.abs() < NEAR_THE_ORIGIN)
 }
 
 /// The rotation and scale a bone applies with no animation playing.
@@ -687,6 +749,9 @@ mod tests {
     const SKELETON: u32 = 1_000_766;
 
     /// The attachments this app asks for, as the community numbers them.
+    const SHIELD: u32 = 0;
+    const HAND_RIGHT: u32 = 1;
+    const HAND_LEFT: u32 = 2;
     const RIGHT_SHOULDER: u32 = 5;
     const LEFT_SHOULDER: u32 = 6;
     const HELM_ATTACHMENT: u32 = 11;
@@ -936,7 +1001,49 @@ mod tests {
     fn finds_an_attachment_by_its_id_rather_than_by_its_place_in_the_list() {
         let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
         let ids: Vec<u32> = attachments.iter().map(|attachment| attachment.id).collect();
-        assert_eq!(ids, vec![BACK, LEFT_SHOULDER, HELM_ATTACHMENT, 1, RIGHT_SHOULDER]);
+        assert_eq!(
+            ids,
+            vec![
+                BACK, LEFT_SHOULDER, HELM_ATTACHMENT, HAND_RIGHT, RIGHT_SHOULDER, HAND_LEFT,
+                SHIELD,
+            ]
+        );
+    }
+
+    // The three a weapon needs, and the only ones on the body that state no position of their
+    // own. Left as the file states them they are all three at the origin, which on a character
+    // is between her feet — so a sword, a shield and everything else a hand holds would be
+    // drawn in a heap on the floor. What says where they go is the bone chain above them.
+    #[test]
+    fn puts_a_hand_where_its_bones_do_when_the_attachment_states_nothing() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let at = |id: u32| found(&attachments, id).position;
+        // The right hand is down the game's Y like the right shoulder, and the left up it —
+        // and the chain is walked through a bone that states nothing rather than stopping at
+        // the first ancestor.
+        assert_eq!(at(HAND_RIGHT), [1.0, 1.0, 3.0]);
+        assert_eq!(at(HAND_LEFT), [1.0, 1.0, -3.0]);
+        // The shield, which is neither hand and two bones up.
+        assert_eq!(at(SHIELD), [0.0, 2.0, -3.0]);
+    }
+
+    // The tolerance under that, which the retail body needs and a strict reading of "states
+    // nothing" would miss: the right hand's chain passes through a bone whose pivot is a
+    // millimetre off the origin on one axis. That is a rounding of zero rather than a place on
+    // a person, and a reader that stopped there would hang the sword between her feet after
+    // all.
+    #[test]
+    fn walks_past_a_bone_whose_pivot_is_a_rounding_of_the_origin() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        assert_ne!(found(&attachments, HAND_RIGHT).position, [0.0, 0.001, 0.0]);
+    }
+
+    // And the other side of it: an attachment that does state a position keeps it, whatever
+    // its bones say. Every one of the retail body's other 33 attachments is that.
+    #[test]
+    fn leaves_an_attachment_that_states_a_position_where_it_states() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        assert_eq!(found(&attachments, HELM_ATTACHMENT).position, [0.0, 4.0, 0.0]);
     }
 
     // An item's model hangs things off nothing and says so, and a file with no attachments in

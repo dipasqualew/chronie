@@ -91,6 +91,15 @@ pub mod item_column {
     /// Every column of the table that holds text, in the order it holds them: the item's
     /// description, its three alternate display names, and its name.
     pub const TEXT: [usize; 5] = [1, 2, 3, 4, 5];
+    /// Where the item is worn, which is the one thing `ItemAppearance.DisplayType` will not
+    /// say about a weapon: a one-hander is 13, a two-hander 17, a shield 14, an off-hand 22.
+    ///
+    /// **Unlike the rest of this module, this position was read off an install** — 12.0.5.67,
+    /// with `examples/dump_inventory_types`, which finds it rather than trusting it: every
+    /// armour slot has exactly one `InventoryType` it can be, and column 66 is the one that
+    /// agrees with all eleven of them on 99.8% of the 77,356 pieces of armour in the game.
+    /// Nothing else in the table comes within 13%.
+    pub const INVENTORY_TYPE: usize = 66;
 }
 
 /// Columns of `ItemDisplayInfo`.
@@ -226,6 +235,10 @@ pub struct TransmogSetAppearance {
     /// Which slot the appearance fills, as `ItemAppearance` numbers them: 0 head,
     /// 1 shoulder, 2 through 10 the rest of the armour, 11 upward weapons and shields.
     pub display_type: u32,
+    /// Where the item is worn, as `ItemSparse` says it — which for a weapon is the only thing
+    /// that says which hand, because the four display types above do not. Zero when the game
+    /// holds no row for the item, which is the same silence that leaves it unnamed.
+    pub inventory_type: u32,
     pub display_info_id: u32,
     /// The icon the game shows for it, as a FileDataID, or zero when it names none.
     pub icon_file_data_id: u32,
@@ -311,6 +324,7 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
                 name: String::new(),
                 appearance_id,
                 display_type,
+                inventory_type: 0,
                 display_info_id,
                 icon_file_data_id,
                 has_model: has_model.get(&display_info_id).copied().unwrap_or(false),
@@ -329,21 +343,27 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
             appearance.modified_appearance_id,
         )
     });
-    name_items(files, &mut found)?;
+    describe_items(files, &mut found)?;
     Ok(payload(set_id, found))
 }
 
-/// Fills in what the game calls each of a set's items, out of `ItemSparse`.
+/// Fills in what the game calls each of a set's items and where it is worn, out of `ItemSparse`.
 ///
 /// That table is every item in the game — 63 MB of it on a shipping build, an order of
 /// magnitude more than the rest of the chain put together — so nothing is kept from it beyond
-/// the dozen names a set actually needs. The rows are walked once and only the ones an
-/// appearance here belongs to are turned into text; the file itself is dropped on the way out.
+/// the dozen rows a set actually needs. The rows are walked once and only the ones an
+/// appearance here belongs to are read; the file itself is dropped on the way out.
 ///
-/// An item the table says nothing about keeps an empty name rather than costing its row. The
-/// game encrypts the items of content it has not shipped, exactly as it does everywhere else
-/// along this chain, and a name is the least of what a row is worth opening a set for.
-fn name_items(
+/// Two things come out of the same walk, and the second is why a weapon can be shown at all.
+/// The **name** is what the row is labelled with. The **inventory type** is where the item is
+/// worn, and for a weapon it is the only statement in the game's files of which hand it goes
+/// in — `ItemAppearance.DisplayType` files a sword, a shield and a wand under four numbers that
+/// say none of it. See `worn::held_in`.
+///
+/// An item the table says nothing about keeps an empty name and a zero rather than costing its
+/// row. The game encrypts the items of content it has not shipped, exactly as it does
+/// everywhere else along this chain, and neither is worth dropping a row for.
+fn describe_items(
     files: &dyn GameFiles,
     appearances: &mut [TransmogSetAppearance],
 ) -> Result<(), String> {
@@ -357,13 +377,26 @@ fn name_items(
     }
 
     let items = Db2::parse_with_text_columns(files.read(ITEM_SPARSE)?, &item_column::TEXT)?;
-    let names: HashMap<u32, String> = items
+    let described: HashMap<u32, (String, u32)> = items
         .rows()
         .filter(|row| wanted.contains(&row.id()))
-        .map(|row| (row.id(), row.text(item_column::NAME)))
+        .map(|row| {
+            (
+                row.id(),
+                (
+                    row.text(item_column::NAME),
+                    row.number(item_column::INVENTORY_TYPE),
+                ),
+            )
+        })
         .collect();
     for appearance in appearances {
-        appearance.name = names.get(&appearance.item_id).cloned().unwrap_or_default();
+        let (name, inventory_type) = described
+            .get(&appearance.item_id)
+            .cloned()
+            .unwrap_or_default();
+        appearance.name = name;
+        appearance.inventory_type = inventory_type;
     }
     Ok(())
 }
@@ -477,7 +510,9 @@ mod tests {
                 (&json!(205), &json!(2)),
                 (&json!(206), &json!(1)),
                 (&json!(203), &json!(4)),
-                (&json!(204), &json!(1)),
+                // The weapon rack: a one-hander, a two-hander, a shield, and one held in
+                // the other hand.
+                (&json!(204), &json!(4)),
                 (&json!(201), &json!(4)),
                 (&json!(202), &json!(2)),
             ]
@@ -559,25 +594,29 @@ mod tests {
                 {
                     "modifiedAppearanceId": 71006, "itemId": 30006, "name": "Emberforge Helm",
                     "appearanceId": 80006,
-                    "displayType": 0, "displayInfoId": 900001, "iconFileDataId": 130001,
+                    "displayType": 0, "inventoryType": 1,
+                    "displayInfoId": 900001, "iconFileDataId": 130001,
                     "hasModel": true,
                 },
                 {
                     "modifiedAppearanceId": 71007, "itemId": 30007, "name": "Emberforge Pauldrons",
                     "appearanceId": 80007,
-                    "displayType": 1, "displayInfoId": 900009, "iconFileDataId": 130002,
+                    "displayType": 1, "inventoryType": 3,
+                    "displayInfoId": 900009, "iconFileDataId": 130002,
                     "hasModel": true,
                 },
                 {
                     "modifiedAppearanceId": 71008, "itemId": 30008,
                     "name": "Emberforge Breastplate", "appearanceId": 80008,
-                    "displayType": 3, "displayInfoId": 900003, "iconFileDataId": 130003,
+                    "displayType": 3, "inventoryType": 5,
+                    "displayInfoId": 900003, "iconFileDataId": 130003,
                     "hasModel": false,
                 },
                 {
                     "modifiedAppearanceId": 71009, "itemId": 30009, "name": "Emberforge Greaves",
                     "appearanceId": 80009,
-                    "displayType": 5, "displayInfoId": 900006, "iconFileDataId": 130006,
+                    "displayType": 5, "inventoryType": 7,
+                    "displayInfoId": 900006, "iconFileDataId": 130006,
                     "hasModel": false,
                 },
             ])
@@ -626,12 +665,14 @@ mod tests {
                 {
                     "modifiedAppearanceId": 71011, "itemId": 30011, "name": "",
                     "appearanceId": 80011,
-                    "displayType": 3, "displayInfoId": 900900, "iconFileDataId": 130008,
+                    "displayType": 3, "inventoryType": 0,
+                    "displayInfoId": 900900, "iconFileDataId": 130008,
                     "hasModel": false,
                 },
                 {
                     "modifiedAppearanceId": 71012, "itemId": 0, "name": "", "appearanceId": 0,
-                    "displayType": 0, "displayInfoId": 0, "iconFileDataId": 0,
+                    "displayType": 0, "inventoryType": 0, "displayInfoId": 0,
+                    "iconFileDataId": 0,
                     "hasModel": false,
                 },
             ])
@@ -658,7 +699,8 @@ mod tests {
             json!([{
                 "modifiedAppearanceId": 71013, "itemId": 30013, "name": "",
                 "appearanceId": 80013,
-                "displayType": 2, "displayInfoId": 900008, "iconFileDataId": 0,
+                "displayType": 2, "inventoryType": 4,
+                "displayInfoId": 900008, "iconFileDataId": 0,
                 "hasModel": false,
             }])
         );

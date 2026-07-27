@@ -8,10 +8,12 @@
 //! The model to write is one of three things: an `ItemDisplayInfo` id, on its own, for an
 //! appearance that has geometry of its own; the word `character`, for the bare body every
 //! appearance is worn on; or `worn/<display>/<slot>` for that body with one appearance on it,
-//! where the slot is the display type `ItemAppearance` gives it.
+//! where the slot is the display type `ItemAppearance` gives it. A weapon takes a fourth
+//! number, `worn/<display>/<slot>/<inventory type>`, because its slot does not say which hand.
 //!
 //! ```sh
 //! cargo run --example dump_model -- "/Applications/World of Warcraft" 900001 helm.glb
+//! cargo run --example dump_model -- "/Applications/World of Warcraft" worn/8483/11/13 sword.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog 900001 \
 //!     apps/desktop/fixtures/transmog/helm.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog character \
@@ -43,10 +45,16 @@ fn main() {
 
     let written = match what.split('/').collect::<Vec<&str>>()[..] {
         ["character"] => character::glb_of(files.as_ref(), None).map(Some),
-        ["worn", display, slot] => {
+        ["worn", display, slot] | ["worn", display, slot, _] => {
             let display: u32 = display.parse().unwrap_or_else(|_| usage());
             let slot: u32 = slot.parse().unwrap_or_else(|_| usage());
-            worn::of(files.as_ref(), display, slot)
+            // A weapon needs a fourth number that armour does not: where the item is worn,
+            // which is the only thing that says which hand it goes in.
+            let worn_in: u32 = match what.split('/').nth(3) {
+                Some(inventory_type) => inventory_type.parse().unwrap_or_else(|_| usage()),
+                None => 0,
+            };
+            worn::of(files.as_ref(), display, slot, worn_in)
                 .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
                 .map(Some)
         }
