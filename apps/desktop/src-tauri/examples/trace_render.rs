@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chronie_desktop_lib::{casc, character, transmog, worn};
+use chronie_desktop_lib::{budget, casc, character, transmog, worn};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -99,6 +99,30 @@ fn main() {
         drop(totals);
     }
 
+    // And the same run counted rather than timed, which is what `src/budget.rs` asserts on in
+    // CI. Printed last and once: the numbers do not vary between runs, which is the point of
+    // them — a clock says something different every time and these say the same thing on this
+    // machine, on a runner, and against the fixtures.
+    match pieces_of(&*open(&install, &root), &what) {
+        Ok(pieces) => match budget::cost_of(&*open(&install, &root), &pieces) {
+            Ok(cost) => {
+                println!(
+                    "\n=== budget  {} reads ({} of them repeats), {} rows walked",
+                    cost.reads, cost.repeats, cost.rows_walked,
+                );
+                println!(
+                    "            {} bytes of glb, {} vertices shipped, {} drawn ({:.1}%)",
+                    cost.glb_bytes,
+                    cost.vertices_shipped,
+                    cost.vertices_drawn,
+                    cost.vertex_use(),
+                );
+            }
+            Err(error) => eprintln!("Could not count {what}: {error}"),
+        },
+        Err(error) => eprintln!("Could not read {what}: {error}"),
+    }
+
     if let Some(provider) = provider {
         let _ = provider.force_flush();
         let _ = provider.shutdown();
@@ -112,7 +136,14 @@ fn main() {
 /// inside the span.
 fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<usize, String> {
     let _held = span!(tracing::Level::INFO, "apply_transmog").entered();
-    let pieces = match what.split('/').collect::<Vec<&str>>()[..] {
+    let pieces = pieces_of(files, what)?;
+    let payload = character::worn_set_of(files, &pieces)?;
+    Ok(payload["model"].as_str().map_or(0, str::len))
+}
+
+/// The outfit a spec on the command line comes to.
+fn pieces_of(files: &dyn casc::GameFiles, what: &str) -> Result<Vec<worn::Piece>, String> {
+    Ok(match what.split('/').collect::<Vec<&str>>()[..] {
         ["set", set] => set_pieces(files, set.parse().map_err(|_| "not a set id")?)?,
         ["worn", display, slot] | ["worn", display, slot, _] => vec![worn::Piece {
             display_info_id: display.parse().map_err(|_| "not a display id")?,
@@ -121,9 +152,7 @@ fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<usize, String> {
         }],
         ["character"] => Vec::new(),
         _ => return Err(format!("`{what}` is not something to draw")),
-    };
-    let payload = character::worn_set_of(files, &pieces)?;
-    Ok(payload["model"].as_str().map_or(0, str::len))
+    })
 }
 
 /// The pieces of one set, the way `dump_model` reads them and the window sends them.

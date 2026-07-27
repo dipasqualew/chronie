@@ -27,6 +27,14 @@ pub trait GameFiles {
     fn read(&self, fdid: u32) -> Result<Vec<u8>, String>;
 }
 
+/// A borrowed source is a source, which is what lets [`Counted`] wrap the `&dyn GameFiles` the
+/// commands pass around without taking it away from whoever else is holding it.
+impl<F: GameFiles + ?Sized> GameFiles for &F {
+    fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+        (**self).read(fdid)
+    }
+}
+
 /// Game files as a directory of `<fdid>.<ext>`, which is how the tests supply them.
 ///
 /// The client addresses everything it owns by number and says nothing about what kind of
@@ -63,6 +71,38 @@ impl GameFiles for DirFiles {
             }
         }
         Err(error)
+    }
+}
+
+/// Game files that remember what was asked of them.
+///
+/// A decorator rather than a mode on [`DirFiles`], so it wraps a real install as readily as a
+/// directory of fixtures — which is what lets one budget be checked against both.
+///
+/// **What it counts is the point of it.** Every read here is a BLTE payload inflated on a real
+/// install, and the largest of them is 85ms on its own; a read that happens twice for one click
+/// is 85ms spent twice. So the list is kept in order and whole, repeats included, and
+/// [`crate::budget`] is what reads it.
+pub struct Counted<F> {
+    files: F,
+    asked: std::cell::RefCell<Vec<u32>>,
+}
+
+impl<F: GameFiles> Counted<F> {
+    pub fn new(files: F) -> Self {
+        Self { files, asked: std::cell::RefCell::new(Vec::new()) }
+    }
+
+    /// Every file asked for, in the order it was asked for, with repeats kept.
+    pub fn asked(&self) -> Vec<u32> {
+        self.asked.borrow().clone()
+    }
+}
+
+impl<F: GameFiles> GameFiles for Counted<F> {
+    fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+        self.asked.borrow_mut().push(fdid);
+        self.files.read(fdid)
     }
 }
 

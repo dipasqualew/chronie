@@ -14,7 +14,33 @@
 //! saying where each one starts and how long it is, and puts its strings inside the records
 //! rather than in a block of their own. [`Db2::parse_with_text_columns`] reads those.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+
+thread_local! {
+    /// How many rows this thread has walked, summed over every call to [`Db2::rows`].
+    ///
+    /// Thread-local rather than global so that two tests measuring at once cannot see each
+    /// other's work, and a `Cell` rather than an atomic because a read of the game's files
+    /// happens on one thread from beginning to end. One addition per call to `rows`, which is
+    /// nothing beside the `Vec` and `HashMap` that call is about to build.
+    static ROWS_WALKED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// How much table this thread has walked since [`forget_rows_walked`], summed over every call
+/// to [`Db2::rows`] whether the caller kept one row of it or all of them.
+///
+/// It is a proxy for time and a deliberately crude one — what it is good at is being exactly
+/// reproducible, which a clock in CI is not. A scan put back inside a loop multiplies it; a
+/// table read the app already has the answer for adds to it. See [`crate::budget`].
+pub fn rows_walked() -> u64 {
+    ROWS_WALKED.with(Cell::get)
+}
+
+/// Zeroes the count, so that what follows is measured on its own.
+pub fn forget_rows_walked() {
+    ROWS_WALKED.with(|walked| walked.set(0));
+}
 
 /// How a column was stored. The numbering is the file's, not ours.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -383,7 +409,15 @@ impl Db2 {
     ///
     /// Copied rows come last. A table can say "row 40 is row 12 again under a new id"
     /// instead of storing it twice, and a caller counting or listing rows wants both.
+    ///
+    /// **This is not a cheap iterator and calling it in a loop is the mistake to avoid.** It
+    /// materialises a `Vec` of every row and a `HashMap` of every row id before it yields the
+    /// first one, so its cost is the whole table however few rows the caller goes on to keep —
+    /// which on `ItemDisplayInfoMaterialRes` is 5ms a call, and eight pieces of an outfit asking
+    /// one at a time is 45ms. [`rows_walked`] is what keeps that from being reintroduced
+    /// unnoticed; `budget::cost_of` asserts on it.
     pub fn rows(&self) -> impl Iterator<Item = Row<'_>> {
+        ROWS_WALKED.with(|walked| walked.set(walked.get() + self.total_rows as u64));
         let direct: Vec<Row<'_>> = self
             .sections
             .iter()
