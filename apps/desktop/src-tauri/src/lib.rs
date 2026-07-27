@@ -11,6 +11,7 @@ pub mod m2;
 pub mod models;
 pub mod transmog;
 pub mod wifi;
+pub mod worn;
 
 use achievements::AchievementBook;
 use chrono::Utc;
@@ -226,7 +227,28 @@ async fn transmog_model(display_info_id: u32, state: State<'_, AppState>) -> Res
 /// `character::Atlas::base`, which is the one place that changes when they have been.
 #[tauri::command]
 async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
-    read_game_files(&state, move |files| character::model_of(files, None)).await
+    read_game_files(&state, character::model_of).await
+}
+
+/// The same character with one appearance worn on it, as a `.glb` in a data URL, or `null`.
+///
+/// This is what most of a set has instead of a model: a chestpiece is textures painted into
+/// the body's atlas and a few geoset switches, and neither means anything off the character.
+///
+/// The slot comes across beside the display id because `ItemAppearance` is what knows it and
+/// the window already has it — and because it is what says which geoset groups the display's
+/// six values drive. `null` is the ordinary answer for an appearance this install can say
+/// nothing about, and leaves the window showing the icon.
+#[tauri::command]
+async fn worn_model(
+    display_info_id: u32,
+    display_type: u32,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| {
+        character::worn_model_of(files, display_info_id, display_type)
+    })
+    .await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -819,6 +841,7 @@ pub fn run() {
             transmog_set_items,
             transmog_model,
             character_model,
+            worn_model,
             achievement_details,
             game_icons,
             settings,

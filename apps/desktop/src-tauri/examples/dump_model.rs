@@ -5,8 +5,10 @@
 //! the browser tests load into three.js — so what the window is shown to render is what these
 //! converters actually write, rather than a hand-made stand-in for it.
 //!
-//! The model to write is either an `ItemDisplayInfo` id or the word `character`, which is the
-//! bare body every appearance is worn on.
+//! The model to write is one of three things: an `ItemDisplayInfo` id, on its own, for an
+//! appearance that has geometry of its own; the word `character`, for the bare body every
+//! appearance is worn on; or `worn/<display>/<slot>` for that body with one appearance on it,
+//! where the slot is the display type `ItemAppearance` gives it.
 //!
 //! ```sh
 //! cargo run --example dump_model -- "/Applications/World of Warcraft" 900001 helm.glb
@@ -14,9 +16,11 @@
 //!     apps/desktop/fixtures/transmog/helm.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog character \
 //!     apps/desktop/fixtures/transmog/character.glb
+//! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog worn/900012/2 \
+//!     apps/desktop/fixtures/transmog/robe.glb
 //! ```
 
-use chronie_desktop_lib::{casc, character, models};
+use chronie_desktop_lib::{casc, character, models, worn};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -37,12 +41,19 @@ fn main() {
     let what = args.next().unwrap_or_else(|| usage());
     let out = args.next().unwrap_or_else(|| usage());
 
-    // No base skin: see `character::Atlas::base` for what is missing and why.
-    let written = if what == "character" {
-        character::glb_of(files.as_ref(), None).map(Some)
-    } else {
-        let display: u32 = what.parse().unwrap_or_else(|_| usage());
-        models::glb_of(files.as_ref(), display)
+    let written = match what.split('/').collect::<Vec<&str>>()[..] {
+        ["character"] => character::glb_of(files.as_ref(), None).map(Some),
+        ["worn", display, slot] => {
+            let display: u32 = display.parse().unwrap_or_else(|_| usage());
+            let slot: u32 = slot.parse().unwrap_or_else(|_| usage());
+            worn::of(files.as_ref(), display, slot)
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
+                .map(Some)
+        }
+        _ => {
+            let display: u32 = what.parse().unwrap_or_else(|_| usage());
+            models::glb_of(files.as_ref(), display)
+        }
     };
 
     let glb = match written {
@@ -65,7 +76,8 @@ fn main() {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: dump_model <wow install> | --fixtures <dir>  <displayInfoID> | character  <out.glb>"
+        "usage: dump_model <wow install> | --fixtures <dir>  \
+         <displayInfoID> | character | worn/<displayInfoID>/<displayType>  <out.glb>"
     );
     std::process::exit(2)
 }

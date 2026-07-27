@@ -541,7 +541,7 @@ mod tests {
         let body = mesh(CHARACTER, CHARACTER_SKIN);
         let types: Vec<Paint> = body.parts.iter().map(|part| part.paint).collect();
         // Every part but the hair is the composited body atlas, which is type 1.
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 10);
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 16);
         assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 1);
     }
 
@@ -551,7 +551,13 @@ mod tests {
     fn reads_the_geoset_each_part_of_a_body_belongs_to() {
         let body = mesh(CHARACTER, CHARACTER_SKIN);
         let geosets: Vec<u16> = body.parts.iter().map(|part| part.geoset).collect();
-        assert_eq!(geosets, vec![0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 101, 2101]);
+        assert_eq!(
+            geosets,
+            vec![
+                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 101, 1001, 1002, 1301, 1302,
+                501, 502, 2101,
+            ]
+        );
         // An item is drawn whole, and says so by belonging to no geoset.
         assert!(mesh(HELM, HELM_SKIN).parts.iter().all(|part| part.geoset == 0));
     }

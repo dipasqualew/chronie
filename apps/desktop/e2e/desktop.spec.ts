@@ -599,7 +599,7 @@ const mockDesktop: E2EMock = {
         },
         {
           modifiedAppearanceId: 71003, itemId: 30003, name: "Tideglass Robe", appearanceId: 80003,
-          displayType: 2, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
+          displayType: 2, displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
         },
       ],
     },
@@ -685,6 +685,10 @@ const mockDesktop: E2EMock = {
       + "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
     130006: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
       + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+    // The gloves, which are the one row that both has a picture and cannot be put on the
+    // character — so the picture is what the reader is left looking at.
+    130005: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mP4z9"
+      + "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
     250001: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
       + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
   },
@@ -713,6 +717,15 @@ const mockDesktop: E2EMock = {
   },
   // The body every set detail opens on, before anything is worn.
   characterModel: fixtureModel("character.glb"),
+  // The same body with one appearance composited onto it, which is what the eight slots with
+  // no model of their own show. 900005 is missing on purpose: an appearance the tables
+  // describe and this install can put on nobody, which is the row that falls back to its icon.
+  wornModels: {
+    900012: fixtureModel("robe.glb"),
+    900003: fixtureModel("robe.glb"),
+    900004: fixtureModel("robe.glb"),
+    900006: fixtureModel("robe.glb"),
+  },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
@@ -1307,11 +1320,12 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.note()).toHaveText("Nothing is worn yet. Drag to turn it.");
     await expect(transmogDetail.canvas()).toBeVisible();
 
-    // 7 × 88: the fixture body holds eleven geosets and a bare one draws seven of them, and
-    // every part is drawn out of the same 88 vertices the whole model shares. Which makes this
-    // the geoset selection, counted from the far end of the pipe — a variant drawn alongside
-    // its default reads as 8 × 88, and a default that went missing as 6 × 88.
-    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "616");
+    // 10 × 136: the fixture body holds seventeen geosets and a bare one draws ten of them —
+    // one per group — and every part is drawn out of the same 136 vertices the whole model
+    // shares. Which makes this the geoset selection, counted from the far end of the pipe: a
+    // variant drawn alongside its default reads as 11 × 136, and a default that went missing
+    // as 9 × 136.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1360");
   });
 
   await test.step("picking an appearance with a model shows it in 3D", async () => {
@@ -1325,13 +1339,19 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "8");
   });
 
-  await test.step("picking one the game paints onto the character shows its icon instead", async () => {
+  // The whole point of the character being there: a robe has no model of its own, and the
+  // only place it is anything to look at is on a body.
+  await test.step("picking one the game paints onto the character shows it worn", async () => {
     await transmogDetail.pick("Chest", "Tideglass Robe");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
-    await expect(transmogDetail.note())
-      .toHaveText("The game paints this slot onto the character, so it has no model of its own.");
-    await expect(transmogDetail.stillPicture()).toBeVisible();
-    await expect(transmogDetail.canvas()).toBeHidden();
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
+    await expect(transmogDetail.note()).toHaveText("Worn on the character. Drag to turn it.");
+    await expect(transmogDetail.canvas()).toBeVisible();
+    await expect(transmogDetail.stillPicture()).toBeHidden();
+
+    // A body, not the item: 10 × 136, which is the same one part per geoset group the bare
+    // character draws, out of the vertices the whole model shares. A robe that arrived as
+    // geometry of its own would be a fraction of that.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1360");
   });
 
   // The tables say this shoulder has a model and the install holds no file for it, which is
@@ -1391,6 +1411,28 @@ test("shows the game's transmog sets by collection and filters them", async ({
 
     await transmogDetail.pick("Weapon or shield", "Emberforge Bulwark");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
+    await expect(transmogDetail.canvas()).toBeVisible();
+    await transmogDetail.close();
+  });
+
+  // The tables describe this appearance and this install can put it on nobody: every texture
+  // it names was painted for a body this app does not draw. That is a row back to its icon,
+  // and a sentence of its own — the reader is not missing a model, they are missing a picture
+  // to paint with.
+  await test.step("one the install cannot paint onto the character keeps its icon", async () => {
+    await transmog.card("Tideglass Hide").click();
+    await expect(transmogDetail.named("Tideglass Hide")).toBeVisible();
+    await transmogDetail.pick("Hands", "Tideglass Gloves");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
+    await expect(transmogDetail.note())
+      .toHaveText("This install holds nothing to paint this slot onto the character with.");
+    await expect(transmogDetail.stillPicture()).toBeVisible();
+    await expect(transmogDetail.canvas()).toBeHidden();
+
+    // And its neighbour in the same set, which this install can — so the pane goes back to a
+    // body rather than staying on the picture it fell back to.
+    await transmogDetail.pick("Feet", "Tideglass Sandals");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
     await expect(transmogDetail.canvas()).toBeVisible();
     await transmogDetail.close();
   });

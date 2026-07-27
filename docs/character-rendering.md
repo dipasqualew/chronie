@@ -94,9 +94,15 @@ paint the body with whatever the guess landed on and call it a skin.
 1. Allocate `2048 × 1024` RGBA.
 2. Blit the base skin BLP over the whole buffer.
 3. For the one item being shown, for each `ComponentSection` it supplies (via
-   `ItemDisplayInfoMaterialRes`, joined by `foreign_id()`): decode its BLP, scale to fill
-   the section rectangle exactly, and **alpha-blend** it.
+   `ItemDisplayInfoMaterialRes`, joined by `foreign_id()`): resolve the material to the one
+   file painted for *this* body, decode its BLP, scale to fill the section rectangle exactly,
+   and **alpha-blend** it.
 4. Bind the result as M2 texture **type 1** on the character model.
+
+Step 3's first hop is a trap of its own: a material resource names a file per body, and only
+`ComponentTextureFileData` says which is which. It is written down in
+[game-files.md](game-files.md#componenttexturefiledata), because it is a table rather than a
+rendering decision. `Atlas::wear` in `character.rs` is steps 1 and 3; `worn.rs` is the reading.
 
 Two things to get right, both from wow.export:
 
@@ -132,9 +138,12 @@ Armour-relevant groups (from
 
 `ItemDisplayInfo.GeosetGroup[6]` says which values the item sets — **but which column of
 that table holds it has not been verified**, unlike the model and material slots beside it.
-See the note in [game-files.md](game-files.md#the-chain-verified); that is the first thing
-to settle before any of this can be read off a real install. The slot → group mapping
-(community):
+Column 12 is where the community puts it and where `worn.rs` reads it, which is the one place
+this repository relies on an unverified position; see the note in
+[game-files.md](game-files.md#the-chain-verified) for why that was allowed and what bounds it.
+Settling it against a real install is still the first thing to do here, and the symptom of it
+having moved is an appearance that changes nothing on the body rather than an error. The
+slot → group mapping (community):
 
 | Slot | `[0]` | `[1]` | `[2]` | `[3]` | `[4]` |
 |---|---|---|---|---|---|
@@ -176,6 +185,12 @@ belt — and geoset 0 is the skin, the one id with no group of its own. The file
 variant of every group at once, so drawing them all is what puts two pairs of legs in the
 same trousers. All three ways of getting this wrong show up as geometry rather than as an
 error: too much and limbs double and z-fight, too little and they go missing.
+
+One more rule, which is this repository's rather than the game's: **a group is only taken over
+when the body actually holds the geoset the value resolves to.** Otherwise the default stays.
+That is the floor under the unverified column above — of the three ways to get geosets wrong,
+hiding a group and then showing nothing in it is the one that takes a limb with it, and this
+turns it into a body that looks unchanged.
 
 **Priority is not needed for single-item rendering** — see the scope note above. When
 assembled outfits arrive, the table is at

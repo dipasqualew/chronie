@@ -587,6 +587,42 @@ export function bgraPixels(): Bytes {
   return body;
 }
 
+/** One colour a body texture is painted in, as `[red, green, blue, alpha]`. */
+export type Paint = readonly [number, number, number, number];
+
+/**
+ * A texture in two horizontal bands, uncompressed, for the pictures armour is painted on a
+ * body with.
+ *
+ * The icons above are four quadrants of the same four colours, which is what says a decoder
+ * read them. These are the other job: a body texture is blitted into one rectangle of a
+ * 2048 × 1024 atlas, and what has to be provable about it is *where it landed* and *how* — so
+ * each one is painted in colours of its own, and in two bands rather than one flat tone.
+ *
+ * The bands are what hold the two traps in `docs/character-rendering.md` to account, and both
+ * of them look like a plausible picture rather than an error:
+ *
+ * - **A band with no alpha** says whether the layer was blended or copied. A straight copy
+ *   erases the body wherever the item is transparent, which is a hole in the arm for every
+ *   sleeveless chestpiece.
+ * - **Two opaque bands** say whether it was scaled with a linear filter. Nearest-neighbour
+ *   leaves the seam between them a hard edge; a linear filter leaves a row of blends, and the
+ *   textures are authored eight pixels tall against a rectangle a few hundred deep.
+ */
+export function bodyPixels(top: Paint, bottom: Paint): Bytes {
+  const body = new Bytes();
+  for (let y = 0; y < ICON_SIZE; y += 1) {
+    const [red, green, blue, alpha] = y < ICON_SIZE / 2 ? top : bottom;
+    for (let x = 0; x < ICON_SIZE; x += 1) {
+      body.u8(blue);
+      body.u8(green);
+      body.u8(red);
+      body.u8(alpha);
+    }
+  }
+  return body;
+}
+
 /**
  * A DXT icon's blocks, one 4×4 block per quadrant.
  *

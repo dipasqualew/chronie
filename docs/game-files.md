@@ -166,10 +166,16 @@ element exists. 12,656 rows use both model slots; shoulders are the reason (a le
 right). Use `element()`.
 
 **Only 10 and 11 are verified positions in that table.** `GeosetGroup[6]` is read from
-column 12 and `ModelType[2]` from column 13 *in the fixtures*, which is where those two were
-put so that something exercises them; neither index was read off an install. Nothing outside
-a test may rely on them until they have been checked the way 10 and 11 were — which is work
-the character rendering needs done before it can pick geosets.
+column 12 and `ModelType[2]` from column 13 on the community's say-so; neither index was read
+off an install.
+
+`worn.rs` **does** rely on column 12 — it is what says which geoset variant an appearance
+switches on, and there is no showing armour without it. That is a deliberate exception to the
+rule the rest of this file keeps, and it is bounded rather than waved through: `character.rs`
+takes a group over only when the body actually holds the geoset the value resolves to, so a
+column that has moved reads as an appearance that changed nothing rather than as a character
+with a limb missing. Checking it the way 10 and 11 were checked is still worth doing, and
+[character-rendering.md](character-rendering.md#geosets) says what to look for.
 
 For body-component textures — which is how armour is drawn — the path is different and
 does **not** go through `col11`:
@@ -178,11 +184,34 @@ does **not** go through `col11`:
 ItemDisplayInfoMaterialRes        (id in the id list)
   foreign_id() = ItemDisplayInfoID   ← relationship block, nowhere else
   col0 = ComponentSection (0..=8)
-  col1 = MaterialResourcesID  ──▶ TextureFileData ──▶ BLP2
+  col1 = MaterialResourcesID  ──▶ TextureFileData ──▶ one or more BLP2
+                                     └──▶ ComponentTextureFileData, below
 ```
 
 Verified: 221,170 readable rows, **every one** attributed to a display, 93,179 distinct
 displays, component sections spanning exactly `0..=8`.
+
+### ComponentTextureFileData
+
+**A material resource can name several files**, one per body the game painted it for, and
+`TextureFileData` does not say which is which. This table does, keyed by the FileDataID itself:
+
+```
+ComponentTextureFileData          (id in the id list — the texture's own FileDataID)
+  col0 = GenderIndex               0 male, 1 female, 2 none, 3 any
+  col1 = ClassID                   0 is every class
+  col2 = RaceID
+```
+
+Its column positions are the community's, like `ItemSparse`'s and unlike the chain above. The
+matching rule is wow.export's `DBComponentTextureFileData`: keep the candidates whose gender is
+the one being drawn or "any" and whose class is generic, prefer the more specific, and break
+ties by race.
+
+**Silence is not exclusion.** Most of the game's armour has no row here at all, and a reader
+that read the absence as "not for this body" would leave the character bare. An untagged file
+is the fallback, and taking the first or the lowest-numbered file instead is what dresses a
+Human Female in a Human Male's chest.
 
 Per-region texture columns (`ArmUpperTexture`, `TorsoUpperTexture`, …) **left
 `ItemDisplayInfo` in Legion**. They are historical; do not look for them.
@@ -293,14 +322,22 @@ from inside the `MD21` chunk, and a submesh that starts past the first 64k of th
 which is why `141004.skin` is 131 KB of mostly padding.
 
 It also writes the character body, under the FileDataID the retail client keeps
-`humanfemale_hd.m2` at: eleven cubes carrying nine geoset variants across four groups, a hair
-part on M2 texture type 6 beside a body on type 1, and a skull past the first 64k of the index
-list. Those are the three things an item's model never exercises, and all three fail as
-geometry rather than as an error — see [character-rendering.md](character-rendering.md).
+`humanfemale_hd.m2` at: seventeen cubes carrying the geoset groups the fixture's own items
+drive — sleeves, chest, robe, trousers, boot, feet and helm, each as a bare default beside the
+variant an item switches on — a hair part on M2 texture type 6 beside a body on type 1, and a
+skull past the first 64k of the index list. Those are the three things an item's model never
+exercises, and all three fail as geometry rather than as an error — see
+[character-rendering.md](character-rendering.md).
 
-`helm.glb` and `character.glb` are the derived fixtures: the converters' own output, which the
-browser tests load into three.js to prove that what this app writes is glTF a loader will
-take. Tests in `models.rs` and `character.rs` fail if either has drifted from what the
+The body textures beside them are the other half: one picture per row of
+`ItemDisplayInfoMaterialRes` that resolves to a file, each painted in colours of its own so that
+a test can say which rectangle of the atlas it landed in, and two of them banded so that a layer
+copied rather than blended, or scaled without a filter, shows up as a colour rather than as a
+judgement call.
+
+`helm.glb`, `character.glb` and `robe.glb` are the derived fixtures: the converters' own output,
+which the browser tests load into three.js to prove that what this app writes is glTF a loader
+will take. Tests in `models.rs` and `character.rs` fail if any of them has drifted from what the
 converters now produce:
 
 ```sh
@@ -308,6 +345,8 @@ cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model
     --fixtures apps/desktop/fixtures/transmog 900001 apps/desktop/fixtures/transmog/helm.glb
 cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
     --fixtures apps/desktop/fixtures/transmog character apps/desktop/fixtures/transmog/character.glb
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
+    --fixtures apps/desktop/fixtures/transmog worn/900012/2 apps/desktop/fixtures/transmog/robe.glb
 ```
 
 Every fixture table carries an encrypted section, because that is where the edge cases
