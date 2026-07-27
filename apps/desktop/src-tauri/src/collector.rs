@@ -4918,6 +4918,42 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
     }
 
+    /// The subject columns arrive by ALTER TABLE onto a table that already has rows in it,
+    /// which is the case a fresh database never exercises. The photographs somebody already
+    /// has must survive it and the new ones must be filed against what they are of.
+    #[test]
+    fn migrates_a_database_written_before_a_capture_could_say_what_it_was_of() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..8] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction.pragma_update(None, "user_version", 8_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+        // A photograph taken and stored under the old schema, before the columns existed.
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
+
+        write_saved(
+            &wow,
+            CAPTURE_ENTRY_OF_ACHIEVEMENT,
+            CAPTURE_SEGMENT_WITH_ACHIEVEMENTS,
+            "-- touched",
+        );
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        let (trigger, source, achievement) = capture_subject(&database, "TEST|2000000000|1");
+        assert_eq!(trigger.as_deref(), Some("accountFirstAchievement"));
+        assert_eq!(source, Some(4001));
+        assert!(achievement.is_some());
+        assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
+    }
+
     /// An install whose SavedVariables carry the addon's per-character snapshot and nothing
     /// else. No segments on purpose: what a character holds is a fact about the character,
     /// and it has to reach the database whether or not that character has filed a segment.
