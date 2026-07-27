@@ -153,6 +153,25 @@ describe("ns.newResultsWindow", function()
         return nil
     end
 
+    ---The characters beyond ASCII that the panel is allowed to put on screen.
+    ---
+    ---Every row is drawn in FRIZQT__.TTF, and that font carries 253 codepoints: ASCII,
+    ---Latin-1 and a short tail of punctuation. Anything outside them draws as an empty box.
+    ---These seven were read out of the font's own cmap — `fonts/frizqt__.ttf`, file 615960,
+    ---build 12.0.5.67823 — and U+2713 CHECK MARK, which a reviewed transmog used to be
+    ---ticked with, is not in it. Icons belong in `|T...|t` texture escapes, which are ASCII.
+    local DRAWABLE = { "·", "Δ", "»", "«", "—", "–", "…", "•" }
+
+    ---@param text string?
+    ---@return string? the first byte of a character the game's font cannot draw
+    local function undrawable(text)
+        local rest = text or ""
+        for _, glyph in ipairs(DRAWABLE) do
+            rest = rest:gsub(glyph, "")
+        end
+        return rest:match("[\128-\255]")
+    end
+
     it("is exported by the addon files", function()
         assert.is_function(ns.newResultsWindow)
     end)
@@ -1041,7 +1060,74 @@ describe("ns.newResultsWindow", function()
 
             assert.same({ 19019 }, recorded.previews)
             assert.same({ 11 }, recorded.collections)
-            assert.equal("new", valueFor(rowsOf(frames[1]), "  ✓ Named item 19019"))
+            -- Reviewed, and so ticked: the tick is a texture escape rather than a character,
+            -- because the client's font has no check mark to draw.
+            local reviewed
+            for _, row in ipairs(rowsOf(frames[1])) do
+                if row.label:find("Named item 19019", 1, true) then
+                    reviewed = row
+                end
+            end
+            assert.is_not_nil(reviewed)
+            assert.equal("new", reviewed.value)
+            assert.truthy(reviewed.label:find("|TInterface", 1, true))
+        end)
+
+        ---Clicks the first row whose text contains `needle`, which is how a heading is
+        ---reached without spelling out the icon markup its label is built from.
+        ---@param frame table
+        ---@param needle string
+        local function clickContaining(frame, needle)
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and (fontString.text or ""):find(needle, 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    return
+                end
+            end
+            error("no row containing " .. needle .. " to click")
+        end
+
+        -- A tick, a bullet or an arrow that the client's font has no glyph for draws as an
+        -- empty box, which is what a reviewed transmog used to be marked with (issue #83).
+        -- Everything on screen at once, expanded, is what makes this one assertion cover the
+        -- whole panel rather than the one row the bug was reported against.
+        it("draws every row in characters the game's font actually has", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                lootValue = 1234,
+                goldDiff = -500,
+                achievements = { { id = 1, name = "The Loremaster", accountFirst = true } },
+                currencies = { { id = 2, name = "Valor", amount = 7 } },
+                currencyTotal = 7,
+                levelUps = { { level = 42 } },
+                mounts = { { id = 3, name = "Alabaster Hyena" } },
+                pets = { { id = 4, name = "Darkmoon Rabbit" } },
+                quests = { { id = 5, name = "A Quest", accountFirst = true } },
+                reputation = {
+                    { faction = "Argent Dawn", amount = 2, standing = "Honored", current = 1, max = 2 },
+                },
+                reputationTotal = 2,
+                toys = { { id = 6, name = "Train Set" } },
+                transmogs = { { id = 19019, sourceID = 11, newAppearance = true } },
+                housingItems = { { id = 7, name = "Iron Sconce", warbandFirst = true } },
+                housingXP = 250,
+                housingLevelUps = { { level = 3 } },
+            }))
+            for _, heading in ipairs({
+                "Achievements", "Currency", "Level ups", "Mounts", "Pets", "Quests",
+                "Reputation", "Toys", "Housing items", "Housing levels", "Transmog",
+            }) do
+                clickContaining(frames[1], heading)
+            end
+            -- Reviewing one marks it, which is the state the missing glyph appeared in.
+            clickContaining(frames[1], "Named item 19019")
+
+            for _, fontString in ipairs(frames[1].fontStrings) do
+                if fontString.shown then
+                    assert.is_nil(undrawable(fontString.text),
+                        "undrawable character in " .. tostring(fontString.text))
+                end
+            end
         end)
     end)
 
