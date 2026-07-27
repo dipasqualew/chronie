@@ -1,0 +1,14 @@
+-- The track finally has a reader, and the reader reads it by time.
+--
+-- `log_positions` was written for a year with three indexes, none of which answers "what was
+-- recorded around this instant": one is keyed on the segment, one is the partial index over the
+-- points still waiting for a segment, and the unique constraint leads with `log_id`, so a bare
+-- range over `at_ms` had to scan the table. Both of the things that now read the track ask
+-- exactly that question — the pass that places a capture from the points either side of it, and
+-- the sweep that deletes every point no remembered moment is near — so the question gets an
+-- index.
+--
+-- It is not a fourth index that grows for ever. The sweep it serves is what stops the table
+-- growing at all, and an index over a table that is being compacted costs a fraction of what the
+-- same index over an unbounded one would.
+CREATE INDEX log_positions_by_time ON log_positions(at_ms);
