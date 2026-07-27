@@ -349,6 +349,29 @@
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .status { color: var(--text-secondary); min-height: 21px; }
 
+  /* ---------- sync over wifi ---------- */
+
+  .wifi-halves {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px;
+    margin-top: 12px;
+  }
+  .wifi-half h3 { margin: 0; font-size: 14px; }
+  .wifi-half > .sub { margin-top: 4px; }
+  .wifi-peers { display: grid; gap: 6px; margin-top: 12px; }
+  .wifi-peer {
+    display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+    text-align: left; width: 100%;
+  }
+  .wifi-peer-address { color: var(--text-muted); font-size: 12px; }
+  /* The one screen in the app that destroys data if it is answered without reading, so it
+     is drawn as an interruption rather than as another row of settings. */
+  .wifi-offer {
+    margin-top: 12px; padding: 12px; border-radius: 8px;
+    border: 1px solid var(--series-1); background: var(--surface-2);
+  }
+  .wifi-offer p { margin: 0; }
+  .wifi-offer .actions { margin-top: 10px; }
+
   /* ---------- dialogs ---------- */
 
   dialog {
@@ -580,6 +603,50 @@
       <p class="sub">Chronie installs its own addon every time it starts, so the two are never
         out of step. The button above only does it again now, without waiting for a restart.</p>
       <p id="last-sync" class="sub"></p>
+    </div>
+
+    <div class="panel setup">
+      <h2>Sync over WiFi</h2>
+      <p class="sub">Chronie can hand its whole history to another Chronie on this network —
+        a desktop's collection onto a laptop, or a spare machine kept as a copy. The one
+        receiving it loses what it had, so somebody there has to agree first.</p>
+      <div class="wifi-halves">
+        <section class="wifi-half" aria-labelledby="wifi-send-heading">
+          <h3 id="wifi-send-heading">Send this history</h3>
+          <p class="sub">Start the other Chronie waiting, then look for it here.</p>
+          <div class="actions">
+            <button id="wifi-find" type="button">Look for Chronies</button>
+          </div>
+          <div id="wifi-peers" class="wifi-peers"></div>
+          <div class="setup-grid">
+            <label for="wifi-address">Address
+              <span class="path-row">
+                <input id="wifi-address" type="text" placeholder="192.168.1.20">
+              </span>
+            </label>
+            <button id="wifi-send" type="button">Send history</button>
+          </div>
+          <p id="wifi-send-status" class="status" role="status"></p>
+        </section>
+
+        <section class="wifi-half" aria-labelledby="wifi-receive-heading">
+          <h3 id="wifi-receive-heading">Receive a history</h3>
+          <p class="sub">Nothing can be sent to this Chronie unless it is waiting, and
+            nothing is replaced until the offer below is accepted.</p>
+          <div class="actions">
+            <button id="wifi-wait" class="primary" type="button">Wait for a database</button>
+          </div>
+          <p id="wifi-receive-status" class="status" role="status"></p>
+          <div id="wifi-offer" class="wifi-offer" role="group"
+            aria-labelledby="wifi-offer-text" hidden>
+            <p id="wifi-offer-text"></p>
+            <div class="actions">
+              <button id="wifi-accept" class="primary" type="button">Accept and replace</button>
+              <button id="wifi-decline" type="button">Decline</button>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   </section>
 </div>
