@@ -772,6 +772,8 @@ end
 ---  itemPrices, transmogSources, currencies, achievements, mounts, pets, toys, housingItems,
 ---  activeQuests, questStates, lootFormats, factionFormats }`
 ---  `housingItems` maps an id to `{ name, quantity }`, quantity being the warband-owned count.
+---  `pets` maps a battle pet GUID to `{ id, name, owned }`, owned being how many of that
+---  species the account holds once the catch has landed — one for a species new to it.
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
 ---  `currencyItems` maps an item id to `{ name, count }`, count being the grand total owned.
 ---  `factions` maps a localised faction name to `{ standing, current, max }`.
@@ -1015,7 +1017,7 @@ function fake.newEnv(options)
         end,
         petInfo = function(guid)
             local pet = pets[guid] or {}
-            return pet.id, pet.name
+            return pet.id, pet.name, pet.owned
         end,
         toyInfo = function(id)
             return toyNames[id]

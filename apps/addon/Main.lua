@@ -49,7 +49,7 @@ local addonName, ns = ...
 ---@field clearCursor fun() Release whatever the cursor is holding.
 ---@field achievementInfo fun(id: integer): string? Localised name of an achievement.
 ---@field mountInfo fun(id: integer): string? Localised name of a mount.
----@field petInfo fun(guid: string): (integer?, string?) Battle pet species ID and localised name.
+---@field petInfo fun(guid: string): (integer?, string?, integer?) Species ID, name, owned count.
 ---@field toyInfo fun(id: integer): string? Localised name of a toy.
 ---@field housingItemInfo fun(id: integer): (string?, integer?) Localised name and warband-owned count.
 ---@field openAchievement fun(id: integer)
@@ -1008,9 +1008,16 @@ function ns.main(env)
         tally.mount(id, env.mountInfo(id), env.now())
         autoCapture({ kind = "mount", id = id })
     end)
+    -- A battle pet is the one collectible the game lets a player own several of, so the
+    -- owned count decides first-of-its-species from duplicate the way it does for housing
+    -- decor. A client that would not say leaves the flag off rather than claiming either.
     onTallyEvent("NEW_PET_ADDED", function(guid)
-        local speciesID, name = env.petInfo(guid)
-        tally.pet(speciesID, name, env.now(), guid)
+        local speciesID, name, owned = env.petInfo(guid)
+        local speciesFirst
+        if owned then
+            speciesFirst = owned <= 1
+        end
+        tally.pet(speciesID, name, env.now(), guid, speciesFirst)
         autoCapture({ kind = "pet", id = speciesID })
     end)
     onTallyEvent("NEW_TOY_ADDED", function(id)
@@ -1367,7 +1374,14 @@ if CreateFrame then
             end,
             petInfo = function(guid)
                 local speciesID, _, _, _, _, _, _, name = C_PetJournal.GetPetInfoByPetID(guid)
-                return speciesID, name
+                if not speciesID then
+                    return nil, name
+                end
+                -- The event has already landed by the time this runs, so the pet being
+                -- announced is inside the count: one means it is the first of its species,
+                -- more means another of something already owned.
+                local owned = C_PetJournal.GetNumCollectedInfo(speciesID)
+                return speciesID, name, owned
             end,
             toyInfo = function(id)
                 return (select(2, C_ToyBox.GetToyInfo(id)))

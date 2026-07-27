@@ -1,0 +1,13 @@
+-- Whether a caught pet was the first of its species, or another of one already held.
+--
+-- A battle pet is the only collectible the game lets a player own several of: a mount, a toy
+-- and a housing decor entry are each either collected or not, but a rabbit can be caught
+-- twenty times. Until now every catch read the same on screen, so an evening of levelling
+-- pets announced "12 pets" as though the collection had grown by twelve.
+--
+-- Only the client can settle it, and only at the moment of the catch — `GetNumCollectedInfo`
+-- counts what is held once the pet has landed — so the addon reads it there and this column
+-- is where the answer is kept. NULL is a row recorded before the addon asked: not a
+-- duplicate, but a catch nobody can say either way about, which the app draws as it always
+-- did rather than hiding.
+ALTER TABLE pets ADD COLUMN species_first INTEGER;

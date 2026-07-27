@@ -971,6 +971,35 @@ describe("ns.newSegmentTally", function()
             assert.same({}, tally.summary().pets)
             assert.same({}, tally.summary().toys)
         end)
+
+        -- A pet is the one collectible a player can hold several of, so whether the
+        -- collection actually grew is a thing only the caller can say.
+        it("records a pet caught for the first time as a species first", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.pet(456, "Darkmoon Rabbit", 101, "BattlePet-0-1", true)
+
+            assert.is_true(tally.summary().pets[1].speciesFirst)
+        end)
+
+        it("records another of the same species as not a species first", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.pet(456, "Darkmoon Rabbit", 101, "BattlePet-0-2", false)
+
+            assert.is_false(tally.summary().pets[1].speciesFirst)
+        end)
+
+        it("leaves the flag absent when nobody said whether the species was new", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.pet(456, "Darkmoon Rabbit", 101, "BattlePet-0-1")
+
+            assert.is_nil(tally.summary().pets[1].speciesFirst)
+        end)
     end)
 
     describe("housing items", function()
