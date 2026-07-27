@@ -45,16 +45,29 @@ describe("ns.newSegmentTally", function()
 
     ---Build the tally directly with fake seams, mirroring how lockout_store_spec builds
     ---the store: no frames, no Main, just the pure module and injected dependencies.
-    ---@param options table? `{ prices, lootFormats, factionFormats }`
+    ---`factions` maps a faction name to the standing the client reports for it, or to a
+    ---list of standings to hand back one per call, which is how a faction that levels up
+    ---part way through a segment is modelled.
+    ---@param options table? `{ prices, lootFormats, factionFormats, factions }`
     ---@return SegmentTally
     local function newTally(options)
         options = options or {}
         local prices = options.prices or {}
+        local factions = options.factions or {}
+        local asked = {}
         return ns.newSegmentTally({
             lootFormats = options.lootFormats or LOOT_FORMATS,
             factionFormats = options.factionFormats or FACTION_FORMATS,
             itemSellPrice = function(itemID)
                 return prices[itemID]
+            end,
+            factionState = function(faction)
+                local state = factions[faction]
+                if type(state) ~= "table" or state.standing ~= nil or state.max ~= nil then
+                    return state
+                end
+                asked[faction] = (asked[faction] or 0) + 1
+                return state[math.min(asked[faction], #state)]
             end,
         })
     end
@@ -498,6 +511,79 @@ describe("ns.newSegmentTally", function()
 
             assert.same({}, tally.summary().reputation)
         end)
+
+        it("records where the character now stands with the faction", function()
+            local tally = newTally({
+                factions = {
+                    ["Argent Dawn"] = { standing = "Honored", current = 3000, max = 12000 },
+                },
+            })
+            tally.begin(0)
+
+            tally.reputation("Your Argent Dawn reputation has increased by 250.")
+
+            assert.same({
+                {
+                    faction = "Argent Dawn",
+                    amount = 250,
+                    standing = "Honored",
+                    current = 3000,
+                    max = 12000,
+                },
+            }, tally.summary().reputation)
+        end)
+
+        -- The standing is a running state, not a property of one gain: a segment that
+        -- carries a faction into the next level should report the level it ended on.
+        it("keeps the standing read at the last gain, not the first", function()
+            local tally = newTally({
+                factions = {
+                    ["Argent Dawn"] = {
+                        { standing = "Friendly", current = 5900, max = 6000 },
+                        { standing = "Honored", current = 150, max = 12000 },
+                    },
+                },
+            })
+            tally.begin(0)
+
+            tally.reputation("Your Argent Dawn reputation has increased by 100.")
+            tally.reputation("Your Argent Dawn reputation has increased by 150.")
+
+            local gain = tally.summary().reputation[1]
+            assert.equal(250, gain.amount)
+            assert.equal("Honored", gain.standing)
+            assert.equal(150, gain.current)
+            assert.equal(12000, gain.max)
+        end)
+
+        -- The client can go quiet about a faction it answered for a moment earlier; the
+        -- standing already read is still true, and dropping it would take the bar away.
+        it("keeps the last standing the client gave when a later gain gets none", function()
+            local answers = { { standing = "Honored", current = 3000, max = 12000 } }
+            local tally = ns.newSegmentTally({
+                factionFormats = FACTION_FORMATS,
+                factionState = function()
+                    return table.remove(answers, 1)
+                end,
+            })
+            tally.begin(0)
+            tally.reputation("Your Argent Dawn reputation has increased by 100.")
+
+            tally.reputation("Your Argent Dawn reputation has increased by 150.")
+
+            local gain = tally.summary().reputation[1]
+            assert.equal(250, gain.amount)
+            assert.equal("Honored", gain.standing)
+        end)
+
+        it("leaves the standing absent for a faction the client cannot place", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.reputation("Your Argent Dawn reputation has increased by 250.")
+
+            assert.same({ { faction = "Argent Dawn", amount = 250 } }, tally.summary().reputation)
+        end)
     end)
 
     describe("currency earned", function()
@@ -589,6 +675,41 @@ describe("ns.newSegmentTally", function()
 
             assert.same({}, tally.summary().currencies)
         end)
+
+        it("records what the character holds once the change has landed", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.currency(1166, 15, "Timewarped Badge", 30)
+
+            assert.same(
+                { { id = 1166, name = "Timewarped Badge", amount = 15, total = 30 } },
+                tally.summary().currencies
+            )
+        end)
+
+        it("keeps the holding reported by the most recent change", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.currency(1166, 15, "Timewarped Badge", 30)
+            tally.currency(1166, -10, "Timewarped Badge", 20)
+
+            local gain = tally.summary().currencies[1]
+            assert.equal(5, gain.amount)
+            assert.equal(20, gain.total)
+        end)
+
+        -- An older client build hands the event no quantity at all; the gain is still
+        -- worth recording, just without a holding beside it.
+        it("leaves the holding absent when the client reported none", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.currency(1166, 15, "Timewarped Badge")
+
+            assert.is_nil(tally.summary().currencies[1].total)
+        end)
     end)
 
     describe("currency items", function()
@@ -598,7 +719,10 @@ describe("ns.newSegmentTally", function()
 
             tally.currencyItem(5001, 55, "Bloody Token")
 
-            assert.same({ { id = 5001, name = "Bloody Token", amount = 15 } }, tally.summary().currencies)
+            assert.same(
+                { { id = 5001, name = "Bloody Token", amount = 15, total = 55 } },
+                tally.summary().currencies
+            )
         end)
 
         it("records a spend when the owned total falls below the baseline", function()
@@ -660,7 +784,7 @@ describe("ns.newSegmentTally", function()
             tally.currencyItem(5001, 3, "Bloody Token")
 
             assert.same({
-                { id = 5001, name = "Bloody Token", amount = 3 },
+                { id = 5001, name = "Bloody Token", amount = 3, total = 3 },
                 { id = 1, name = "Honor", amount = 7 },
             }, tally.summary().currencies)
         end)

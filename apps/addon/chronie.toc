@@ -17,6 +17,7 @@ src/SlashRouter.lua
 src/DetailWindow.lua
 src/LockoutWindow.lua
 src/SegmentSchema.lua
+src/FactionStanding.lua
 src/SegmentTally.lua
 src/ResultsWindow.lua
 src/MinimapButton.lua

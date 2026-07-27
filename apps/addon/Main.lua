@@ -36,6 +36,8 @@ local addonName, ns = ...
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
+---@field factionState fun(faction: string): FactionStanding? Where the character stands with one
+---faction, by its localised name: the level, and how far into it they are.
 ---@field ownedItemCount fun(itemID: integer): integer Grand total owned across bags and every bank,
 ---the warband bank included, so internal transfers leave it unchanged.
 ---@field getCursorItem fun(): (integer?, string?) Item held on the cursor: id and name, or nil.
@@ -112,6 +114,7 @@ function ns.main(env)
         lootFormats = env.lootSelfFormats,
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
+        factionState = env.factionState,
     })
     local currencyItems = ns.newCurrencyItems({ db = env.db })
     local questBaselines = {}
@@ -495,9 +498,11 @@ function ns.main(env)
         tally.reputation(message)
     end)
     -- The client hands the signed change straight to the event, so a spend arrives as a
-    -- negative and only the localised name has to be looked up.
-    onTallyEvent("CURRENCY_DISPLAY_UPDATE", function(currencyType, _, change)
-        tally.currency(currencyType, change, env.currencyInfo(currencyType))
+    -- negative and only the localised name has to be looked up. The quantity beside it is
+    -- what the character holds now that the change has landed, which is the running total
+    -- the panel shows next to the gain.
+    onTallyEvent("CURRENCY_DISPLAY_UPDATE", function(currencyType, quantity, change)
+        tally.currency(currencyType, change, env.currencyInfo(currencyType), quantity)
     end)
     -- Item-based currencies — vendor tokens, crest-like items and the like — never fire
     -- CURRENCY_DISPLAY_UPDATE; their quantity lives in item counts. Recounting each tracked
@@ -823,6 +828,39 @@ if CreateFrame then
                 end
                 local info = C_CurrencyInfo.GetCurrencyInfo(currencyType)
                 return info and info.name
+            end,
+            -- Chat is the only place a reputation gain is announced, and it names the faction
+            -- rather than identifying it, so the standing has to be looked up by that name.
+            -- Which of the client's reputation systems answers for a faction decides what its
+            -- bar means; gathering all of their answers here keeps the choosing in
+            -- ns.factionStanding, where it can be tested without a client.
+            factionState = function(faction)
+                if not faction then
+                    return nil
+                end
+                local data = C_Reputation.GetFactionDataByName(faction)
+                if not data then
+                    return nil
+                end
+                local factionID = data.factionID
+                local renown, friendship, paragon
+                if factionID then
+                    if C_Reputation.IsMajorFaction(factionID) then
+                        renown = C_MajorFactionData.GetMajorFactionData(factionID)
+                    end
+                    friendship = C_GossipInfo.GetFriendshipReputation(factionID)
+                    if C_Reputation.IsFactionParagon(factionID) then
+                        local value, threshold = C_Reputation.GetFactionParagonInfo(factionID)
+                        paragon = { value = value, threshold = threshold }
+                    end
+                end
+                return ns.factionStanding({
+                    faction = data,
+                    renown = renown,
+                    friendship = friendship,
+                    paragon = paragon,
+                    reactionLabel = data.reaction and _G["FACTION_STANDING_LABEL" .. data.reaction] or nil,
+                })
             end,
             -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
             -- store the character owns, so moving the item between them never shifts the total.

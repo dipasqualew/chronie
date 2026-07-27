@@ -129,6 +129,43 @@ function fake.newFontString()
     return fontString
 end
 
+---A stand-in for a Texture. Records the colour it was filled with and the box it was
+---given, which is what a progress bar is: a track and a filled part of it, both sized.
+---@return table
+function fake.newTexture(layer)
+    local texture = { shown = true, layer = layer, points = {} }
+
+    function texture:SetColorTexture(r, g, b, a)
+        self.color = { r, g, b, a }
+    end
+
+    function texture:SetPoint(...)
+        self.points[#self.points + 1] = { ... }
+    end
+
+    function texture:SetWidth(width)
+        self.width = width
+    end
+
+    function texture:SetHeight(height)
+        self.height = height
+    end
+
+    function texture:Show()
+        self.shown = true
+    end
+
+    function texture:Hide()
+        self.shown = false
+    end
+
+    function texture:IsShown()
+        return self.shown
+    end
+
+    return texture
+end
+
 ---A stand-in for a WoW Frame. Records what the addon asked of it and lets the
 ---test drive the frame's scripts by hand.
 ---
@@ -157,6 +194,7 @@ function fake.newFrame(options)
         registered = {},
         registeredOrder = {},
         fontStrings = {},
+        textures = {},
         points = {},
         shown = false,
     }
@@ -197,6 +235,12 @@ function fake.newFrame(options)
         local fontString = fake.newFontString()
         self.fontStrings[#self.fontStrings + 1] = fontString
         return fontString
+    end
+
+    function frame:CreateTexture(_, layer)
+        local texture = fake.newTexture(layer)
+        self.textures[#self.textures + 1] = texture
+        return texture
     end
 
     function frame:SetPoint(...)
@@ -557,6 +601,7 @@ end
 ---  `housingItems` maps an id to `{ name, quantity }`, quantity being the warband-owned count.
 ---  `currencies` maps a currencyType to its localised name; `achievements` maps an id to its name.
 ---  `currencyItems` maps an item id to `{ name, count }`, count being the grand total owned.
+---  `factions` maps a localised faction name to `{ standing, current, max }`.
 ---  `trackedCurrencies` is a list of item ids to pre-seed into the tracked-currency store.
 ---@return table env, table recorded
 function fake.newEnv(options)
@@ -598,6 +643,10 @@ function fake.newEnv(options)
     local equipmentSets = options.equipmentSets or {}
     local equippedItems = options.equippedItems or {}
     local currencyNames = options.currencies or {}
+    -- Where the character stands with each faction, by localised name, already reduced to
+    -- the shape ns.factionStanding returns: `{ standing, current, max }`. A faction with no
+    -- entry models one the client cannot place.
+    local factions = options.factions or {}
     local achievementNames = options.achievements or {}
     local mountNames = options.mounts or {}
     local pets = options.pets or {}
@@ -717,6 +766,9 @@ function fake.newEnv(options)
         end,
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]
+        end,
+        factionState = function(faction)
+            return factions[faction]
         end,
         ownedItemCount = function(itemID)
             local item = currencyItems[itemID]
