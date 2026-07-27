@@ -28,6 +28,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0010_capture_notes.sql"),
     include_str!("../migrations/0011_gold.sql"),
     include_str!("../migrations/0012_log_retention.sql"),
+    include_str!("../migrations/0013_account_wide_currencies.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2511,14 +2512,18 @@ fn sync_holdings(
             transaction
                 .execute(
                     "INSERT INTO character_currencies (
-                         character_id, currency_id, name, total, observed_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                         character_id, currency_id, name, total, observed_at, account_wide
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         character_id,
                         currency_id,
                         optional_text(held, "name"),
                         total,
-                        optional_integer(held, "at")
+                        optional_integer(held, "at"),
+                        // The addon writes the flag only when it is set, so an absent one is
+                        // a currency this character's own — which is what the column's
+                        // default already says for every row written before it existed.
+                        optional_boolean(held, "accountWide").unwrap_or(0)
                     ],
                 )
                 .map_err(|error| error.to_string())?;
@@ -3232,7 +3237,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
 fn account_holdings(connection: &Connection) -> Result<Value, String> {
     let mut statement = connection
         .prepare(
-            "SELECT h.currency_id, h.name, h.total, h.observed_at, c.source_key
+            "SELECT h.currency_id, h.name, h.total, h.observed_at, c.source_key, h.account_wide
              FROM character_currencies h
              JOIN characters c ON c.id = h.character_id
              ORDER BY h.currency_id, c.source_key",
@@ -3246,13 +3251,14 @@ fn account_holdings(connection: &Connection) -> Result<Value, String> {
                 row.get::<_, i64>(2)?,
                 row.get::<_, Option<i64>>(3)?,
                 row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)? != 0,
             ))
         })
         .map_err(|error| error.to_string())?;
 
     let mut currencies: Vec<Value> = Vec::new();
     for row in rows {
-        let (currency_id, name, total, observed_at, character) =
+        let (currency_id, name, total, observed_at, character, account_wide) =
             row.map_err(|error| error.to_string())?;
         let holder = serde_json::json!({
             "character": character,
@@ -3274,6 +3280,13 @@ fn account_holdings(connection: &Connection) -> Result<Value, String> {
                 if entry["name"].is_null() {
                     entry["name"] = serde_json::json!(name);
                 }
+                // Being shared is a fact about the currency rather than about the character
+                // that looked, so one row that says so settles it for all of them: a row
+                // written before the addon ever collected the flag is an unasked question,
+                // not a "no".
+                if account_wide {
+                    entry["accountWide"] = serde_json::json!(true);
+                }
                 if let Some(holders) = entry["characters"].as_array_mut() {
                     holders.push(holder);
                 }
@@ -3282,12 +3295,19 @@ fn account_holdings(connection: &Connection) -> Result<Value, String> {
                 "id": currency_id,
                 "name": name,
                 "total": total,
+                "accountWide": account_wide,
                 "oldest": observed_at,
                 "characters": [holder],
             })),
         }
     }
     drop(statement);
+
+    for entry in &mut currencies {
+        if entry["accountWide"] == serde_json::json!(true) {
+            share_one_pot(entry);
+        }
+    }
 
     let mut statement = connection
         .prepare(
@@ -3345,6 +3365,43 @@ fn account_holdings(connection: &Connection) -> Result<Value, String> {
         "factions": factions,
         "gold": account_gold(connection)?,
     }))
+}
+
+/// Rewrites a warband currency's rollup as the one pot it actually is.
+///
+/// The client answers every character that asks with the account's shared quantity, so the
+/// per-character rows are one number reported several times rather than several holdings, and
+/// the sum they arrived as multiplied the pot by the size of the roster. The freshest of them
+/// is the reading to believe — the others are the same pot out of date — and being the whole
+/// claim rather than one term of a sum, it is also what dates the total. Everywhere else
+/// `oldest` names the weakest link in an addition; here there is no addition to weaken.
+///
+/// The rows themselves stay, because they are what says the number was checked from more than
+/// one place and how long ago each character last saw it.
+///
+/// Ties on the timestamp — and a currency nobody has stamped at all — fall to the first
+/// character in the list, which the query has already put in `source_key` order, so which
+/// reading wins never depends on how rows came back.
+fn share_one_pot(entry: &mut Value) {
+    let freshest = entry["characters"]
+        .as_array()
+        .and_then(|holders| {
+            holders.iter().fold(None::<&Value>, |best, holder| match best {
+                Some(best)
+                    if holder["at"].as_i64().unwrap_or(i64::MIN)
+                        <= best["at"].as_i64().unwrap_or(i64::MIN) =>
+                {
+                    Some(best)
+                }
+                _ => Some(holder),
+            })
+        })
+        .cloned();
+    let Some(freshest) = freshest else {
+        return;
+    };
+    entry["total"] = freshest["total"].clone();
+    entry["oldest"] = freshest["at"].clone();
 }
 
 /// What the account is worth in gold: every wallet that has reported, and the warband bank.

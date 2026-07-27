@@ -5,6 +5,10 @@ local _, ns = ...
 ---@field character string "Name-Realm".
 ---@field name string What the client called the currency when it last said.
 ---@field total integer The holding itself.
+---@field accountWide boolean? True when this is the warband's one pot rather than this
+---character's own holding, so every character reads the same number. Absent rather than
+---false, because a key per currency per character saying "no" costs a saved file to say
+---nothing.
 ---@field at integer When it was read, in epoch seconds.
 
 ---What one character was last seen standing at with one faction.
@@ -16,7 +20,10 @@ local _, ns = ...
 ---@class CurrencyRollup
 ---@field id integer
 ---@field name string
----@field total integer Summed across every character that has ever reported holding any.
+---@field total integer Summed across every character that has ever reported holding any —
+---or, when `accountWide`, the freshest single reading of the one pot they all share.
+---@field accountWide boolean True when the account holds one shared pot of this rather than
+---a holding per character.
 ---@field characters CurrencyHolding[] Sorted by character, so the list never reshuffles.
 ---@field oldest integer The least recently read of the holdings the total is built from.
 
@@ -80,6 +87,11 @@ local _, ns = ...
 ---so a character that logs in, wanders and logs out has still never reported one. The warband
 ---bank is kept beside the wallets rather than inside them: every character reads the same
 ---pot, so filing it per character would add it to the account's worth once per alt.
+---
+---A warband-wide currency is that pot under another name, and it is the one thing in here
+---that cannot be kept outside the snapshots the way the bank's gold is — which currencies
+---are shared is a fact about the currency and only the client knows it, so the flag rides in
+---on the reading and `currency` is where it is spent.
 function ns.newHoldingsStore(deps)
     local db = deps.db
     local now = deps.now
@@ -162,9 +174,20 @@ function ns.newHoldingsStore(deps)
 
             for _, gain in ipairs(summary.currencies or {}) do
                 if gain.id and gain.total then
+                    local previous = entry.currencies[gain.id] or {}
+                    -- Only a walk of the currency pane reads whether the pot is shared; a
+                    -- gain arrives off an event that never carries the flag, and a reading
+                    -- that says nothing must leave the last answer standing or a currency
+                    -- would unshare itself between two zonings-in. A walk does say — false
+                    -- included — so it is also what takes the flag back off again.
+                    local accountWide = gain.accountWide
+                    if accountWide == nil then
+                        accountWide = previous.accountWide
+                    end
                     entry.currencies[gain.id] = {
-                        name = gain.name or (entry.currencies[gain.id] or {}).name,
+                        name = gain.name or previous.name,
                         total = gain.total,
+                        accountWide = accountWide or nil,
                         at = at,
                     }
                     touched = true
@@ -221,6 +244,25 @@ function ns.newHoldingsStore(deps)
         ---
         ---Nil rather than an empty rollup when no character has ever reported a holding: a
         ---total of zero is a claim, and the honest answer is that nobody has looked.
+        ---
+        ---A warband-wide currency is the same trap the warband bank's gold sits beside, come
+        ---at from the other direction. The client answers every character that asks with the
+        ---account's shared balance, so the per-character rows are one number reported several
+        ---times rather than several holdings to add up, and summing them multiplies the pot
+        ---by the size of the roster. The pot could not simply be kept outside the snapshots
+        ---the way the bank's gold is, because which currencies are shared is a fact about the
+        ---currency that only the client knows — so it travels with the reading instead, and
+        ---is spent here.
+        ---
+        ---One reading is taken rather than the sum, and it is the freshest: the older rows
+        ---are the same pot out of date. That also makes the freshest reading the whole claim,
+        ---which is why it is what dates the total rather than the eldest — everywhere else
+        ---the eldest is the weakest link in a sum, and here there is no sum to weaken.
+        ---
+        ---A currency counts as shared once **any** character has said so. Being shared is a
+        ---fact about the currency rather than about the character that looked, so a snapshot
+        ---written before the addon ever collected the flag is an unasked question rather than
+        ---a "no", and one character that has been asked settles it for the whole roster.
         ---@param currencyID integer
         ---@return CurrencyRollup?
         currency = function(currencyID)
@@ -230,21 +272,31 @@ function ns.newHoldingsStore(deps)
 
             local holders = {}
             local total, name, oldest = 0, nil, nil
+            local accountWide = false
+            local freshest
 
             for character, entry in pairs(db.holdings) do
                 local held = (entry.currencies or {})[currencyID]
                 if held and held.total then
                     total = total + held.total
                     name = name or held.name
+                    accountWide = accountWide or held.accountWide == true
                     if not oldest or (held.at or 0) < oldest then
                         oldest = held.at or 0
                     end
-                    holders[#holders + 1] = {
+                    local holder = {
                         character = character,
                         name = held.name,
                         total = held.total,
                         at = held.at or 0,
                     }
+                    -- Ties break on name so that which reading wins never depends on the
+                    -- order a Lua table happened to be walked in.
+                    if not freshest or holder.at > freshest.at
+                        or (holder.at == freshest.at and holder.character < freshest.character) then
+                        freshest = holder
+                    end
+                    holders[#holders + 1] = holder
                 end
             end
 
@@ -259,9 +311,10 @@ function ns.newHoldingsStore(deps)
             return {
                 id = currencyID,
                 name = name or "",
-                total = total,
+                total = accountWide and freshest.total or total,
+                accountWide = accountWide,
                 characters = holders,
-                oldest = oldest or 0,
+                oldest = accountWide and freshest.at or (oldest or 0),
             }
         end,
 

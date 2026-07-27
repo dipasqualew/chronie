@@ -1,0 +1,19 @@
+-- Whether a currency's balance belongs to the warband rather than to the character it was
+-- read on.
+--
+-- The client answers every character that asks with the account's shared quantity, so the
+-- per-character rows for a warband currency are one number reported several times rather
+-- than several holdings — and the rollup beside them was adding it up once per alt. A
+-- ten-character roster sitting on 2,000 Valorstones read as 20,000.
+--
+-- This is the trap `account_gold` already dodges by keeping the warband bank in a table of
+-- its own. A currency cannot be moved out of the per-character snapshots the same way:
+-- which currencies are shared is a fact about the currency and only the game client knows
+-- it, so the flag arrives on the reading and the rollup spends it.
+--
+-- NOT NULL with a default rather than nullable, because there is no third state worth
+-- keeping. A row written before the addon ever collected the flag is an unasked question,
+-- and the rollup already answers it the only way it safely can: a currency counts as shared
+-- as soon as *any* character has said so, so one character logging in settles it for the
+-- whole roster and the untouched rows never have to speak for themselves.
+ALTER TABLE character_currencies ADD COLUMN account_wide INTEGER NOT NULL DEFAULT 0;

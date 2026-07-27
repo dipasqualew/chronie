@@ -209,6 +209,11 @@ function AccountWorth({ held }: { held: CharacterGold }): ReactNode {
  *
  * The account total is only worth saying when somebody else holds some too: on a currency only
  * this character has ever picked up, it is the number already on the line.
+ *
+ * A warband currency needs saying for the opposite reason. Its two numbers always match, so
+ * the comparison below has nothing to add — and the balance on the line is not this
+ * character's holding at all but the account's one pot, read from here. Left unlabelled it
+ * would read as a coincidence rather than as the same money the alt beside it is looking at.
  */
 function Currencies({ entry }: { entry: CharacterProfile }): ReactNode {
   if (!entry.currencies.length) return null;
@@ -217,9 +222,11 @@ function Currencies({ entry }: { entry: CharacterProfile }): ReactNode {
       <h3>Currencies</h3>
       <ul>
         {entry.currencies.map((held) => {
-          const elsewhere = held.accountTotal > held.total
-            ? ` · ${held.accountTotal.toLocaleString()} across the account`
-            : "";
+          const elsewhere = held.accountWide
+            ? " · shared across the warband"
+            : held.accountTotal > held.total
+              ? ` · ${held.accountTotal.toLocaleString()} across the account`
+              : "";
           const read = held.at ? ` · read ${ago(held.at)}` : "";
           return (
             <li key={held.id}>
