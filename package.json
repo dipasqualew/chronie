@@ -9,12 +9,14 @@
     "dev": "bun run --cwd apps/desktop tauri dev",
     "build": "bun run --cwd apps/desktop tauri build",
     "install-locally": "bun run scripts/install-locally.ts",
+    "render": "bun run scripts/render-model.ts",
     "test": "bun run --cwd apps/desktop test",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
     "typecheck": "tsc -p apps/desktop && tsc -p scripts",
     "ci:wait": "bun run scripts/wait-for-ci.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@types/node": "^22.15.3",
     "typescript": "^5.9.2"
   }

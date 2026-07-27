@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>chronie — model render</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #ff00ff;
+      }
+      #stage {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      The page `scripts/render-model.ts` drives, and nothing else opens.
+
+      It exists so that a render can be measured without a window and without a person: the
+      same `modelViewer.ts` the app puts a model on, served by the app's own dev server, under
+      the app's own Content Security Policy. A renderer of its own would be quicker to write
+      and would prove nothing about the product — which is the whole point, since the last
+      thing to go wrong in this pipeline was the policy rather than the pixels.
+
+      The background is magenta because nothing in the game is, so a reader — a person or an
+      assertion — can always tell the model from what is behind it.
+    -->
+    <div id="stage"></div>
+    <script type="module" src="/src/renderStage.ts"></script>
+  </body>
+</html>
