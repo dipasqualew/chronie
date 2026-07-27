@@ -1531,14 +1531,14 @@ struct Ingested {
 
 /// Which markers are still hoping for a file.
 ///
-/// A capture whose image is already in the store is deliberately not among them. The same
-/// SavedVariables file is read again whenever anything in it changes, and it still carries
-/// every entry ever written — so without this, the marker for a screenshot ingested in March
-/// would go looking for an original that ingesting it in March is precisely the reason is no
-/// longer there, and record its own image as missing.
+/// A capture whose image is already in the store is deliberately not among them. `db.entries`
+/// is never pruned and the whole of it is re-read whenever anything in the file changes, so
+/// without this every sync after any change would go back to the folder and re-hash every
+/// original still sitting in it. Nothing about the row is at stake — `upsert_capture` will
+/// not let an image be un-stored — it is the work that is not worth doing twice.
 ///
 /// A row an earlier sync could not find a file for is, on the other hand, worth another look:
-/// the client writes an image asynchronously and may not have finished when the file was
+/// the client writes an image asynchronously and may not have finished when the folder was
 /// read, and a folder can be restored.
 fn wanted_images(connection: &Connection, markers: &[&Marker]) -> Result<Vec<Wanted>, String> {
     let mut state = connection
@@ -3595,6 +3595,326 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(count_of(&database, "lockouts"), 1);
         // One character, reached from both directions.
         assert_eq!(count_of(&database, "characters"), 1);
+    }
+
+    /// A segment a capture can name, written the way the addon builds the link:
+    /// `character|startedAt|instance`.
+    const CAPTURE_SEGMENT: &str = r#"
+      { ["id"] = "Aster-Vale|1999990000|Ulduar", ["character"] = "Aster-Vale",
+        ["instance"] = "Ulduar", ["instanceType"] = "raid",
+        ["startedAt"] = 1999990000, ["endedAt"] = 2000000000, ["seconds"] = 10000 }
+    "#;
+
+    /// One capture of that segment, taken at a stamp the tests can name a file after.
+    const CAPTURE_ENTRY: &str = r#"
+      { ["id"] = "TEST|2000000000|1", ["schema"] = 1, ["at"] = 2000000000,
+        ["stamp"] = "111423_120000", ["character"] = "Aster-Vale", ["author"] = "TEST",
+        ["segment"] = "Aster-Vale|1999990000|Ulduar", ["uiMapID"] = 350,
+        ["x"] = 0.25, ["y"] = 0.5, ["hasImage"] = true }
+    "#;
+
+    /// A wow folder with all three of the places a capture lives on disk: the entries store,
+    /// the segments beside it, and the folder the client leaves its screenshots in.
+    fn capture_install(
+        entries_lua: &str,
+        segments_lua: &str,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        fs::create_dir_all(wow.join("WTF/Account/TEST/SavedVariables")).unwrap();
+        fs::create_dir_all(wow.join(captures::GAME_FOLDER)).unwrap();
+        let database = temp.path().join("data/chronie.sqlite3");
+        write_saved(&wow, entries_lua, segments_lua, "");
+        (temp, wow, database)
+    }
+
+    /// The same store rewritten. The trailing note is what makes the file look different to a
+    /// collector that skips a source whose size and timestamp are unchanged.
+    fn write_saved(wow: &Path, entries_lua: &str, segments_lua: &str, note: &str) {
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            format!(
+                r#"ChronieDB = {{ ["segments"] = {{ {segments_lua} }},
+                                  ["entries"] = {{ {entries_lua} }} }} {note}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    /// A file in the game's screenshot folder, under the name the client would give it.
+    fn screenshot(wow: &Path, stamp: &str, bytes: &[u8]) -> PathBuf {
+        let path = wow
+            .join(captures::GAME_FOLDER)
+            .join(format!("WoWScrnShot_{stamp}.jpg"));
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// One capture row: its rowid, what Chronie has of the image, where it put it, and the
+    /// segment it ended up attached to.
+    fn capture_row(database: &Path, source_id: &str) -> (i64, String, Option<String>, Option<i64>) {
+        open_database(database)
+            .unwrap()
+            .query_row(
+                "SELECT id, image_state, file_path, segment_id FROM captures
+                 WHERE source_id = ?1",
+                [source_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+    }
+
+    /// How many images the store is holding, sharded directories and all.
+    fn stored_files(root: &Path) -> usize {
+        let Ok(listing) = fs::read_dir(root) else {
+            return 0;
+        };
+        listing
+            .flatten()
+            .map(|entry| {
+                if entry.path().is_dir() {
+                    stored_files(&entry.path())
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+
+    #[test]
+    fn takes_custody_of_the_image_a_marker_names() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        let original = screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let connection = open_database(&database).unwrap();
+        let (file_path, hash, size, name, map, x, y, segment): (
+            String,
+            String,
+            i64,
+            String,
+            i64,
+            f64,
+            f64,
+            i64,
+        ) = connection
+            .query_row(
+                "SELECT c.file_path, c.content_hash, c.byte_size, c.source_name, c.ui_map_id,
+                        c.map_x, c.map_y, s.id
+                 FROM captures c JOIN segments s ON s.id = c.segment_id",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(size, 19);
+        assert_eq!(name, "WoWScrnShot_111423_120000.jpg");
+        assert_eq!((map, x, y), (350, 0.25, 0.5));
+        assert!(segment > 0, "attached to the segment it was taken in");
+
+        let stored = store_root(&database).join(&file_path);
+        assert_eq!(fs::read(&stored).unwrap(), b"a picture of Ulduar");
+        assert!(
+            file_path.starts_with(&format!("{}/", &hash[..2])),
+            "named for its own contents: {file_path}"
+        );
+        assert!(!original.exists(), "the game's copy is moved, not left");
+    }
+
+    #[test]
+    fn ingests_the_same_capture_only_once_however_often_it_is_read() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let first = capture_row(&database, "TEST|2000000000|1");
+
+        // The same entries and the same segment, read again because something else in the
+        // file changed. The image it names is long gone from the game's folder by now, which
+        // is exactly the trap: nothing here may conclude the image is missing.
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "captures"), 1);
+        // The same rowid, so the row was never deleted and rebuilt the way a segment's
+        // children are — which is the whole reason captures are not one of them.
+        assert_eq!(capture_row(&database, "TEST|2000000000|1"), first);
+        assert_eq!(stored_files(&store_root(&database)), 1);
+    }
+
+    #[test]
+    fn does_not_go_back_for_an_image_it_already_holds() {
+        // With the originals kept, the file a stored capture names is still sitting in the
+        // game's folder, and nothing but the record of having already taken it stops the next
+        // sync reading and hashing it all over again.
+        let keep = Options {
+            keep_originals: true,
+        };
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, keep).unwrap();
+
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_200, keep).unwrap();
+
+        let ingested_at: i64 = open_database(&database)
+            .unwrap()
+            .query_row("SELECT ingested_at FROM captures", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(ingested_at, 2_000_000_100, "taken custody of once");
+    }
+
+    #[test]
+    fn records_a_marker_whose_file_cannot_be_found() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "missing");
+        assert_eq!(file_path, None);
+    }
+
+    #[test]
+    fn looks_again_for_an_image_that_was_not_there_the_first_time() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "missing");
+
+        // Written afterwards, and SavedVariables untouched — so this sync reads no markers at
+        // all and still has to go looking on behalf of the row that is waiting.
+        screenshot(&wow, "111423_120000", b"late");
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored");
+        assert_eq!(
+            fs::read(store_root(&database).join(file_path.unwrap())).unwrap(),
+            b"late"
+        );
+    }
+
+    #[test]
+    fn attaches_a_capture_to_a_segment_that_arrives_after_it() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, "");
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let (_, state, _, segment) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored", "the image does not wait for the segment");
+        assert_eq!(segment, None);
+
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert!(capture_row(&database, "TEST|2000000000|1").3.is_some());
+    }
+
+    #[test]
+    fn keeps_a_capture_after_the_segment_it_named_is_gone() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        open_database(&database)
+            .unwrap()
+            .execute("DELETE FROM segments", [])
+            .unwrap();
+
+        // Unattached, not deleted. The link is a link; the photograph is nobody's child.
+        let (_, state, file_path, segment) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored");
+        assert_eq!(segment, None);
+        assert!(store_root(&database).join(file_path.unwrap()).is_file());
+    }
+
+    #[test]
+    fn records_an_entry_that_asked_for_no_picture() {
+        let note = r#"
+          { ["id"] = "TEST|2000000000|2", ["at"] = 2000000000,
+            ["stamp"] = "111423_120000", ["character"] = "Aster-Vale", ["author"] = "TEST" }
+        "#;
+        let (_temp, wow, database) = capture_install(note, CAPTURE_SEGMENT);
+        let bystander = screenshot(&wow, "111423_120000", b"somebody else's shot");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|2");
+        assert_eq!(state, "none");
+        assert_eq!(file_path, None);
+        assert!(bystander.exists(), "an entry with no image claims no file");
+    }
+
+    #[test]
+    fn leaves_the_players_own_archive_where_it_is() {
+        let (_temp, wow, database) = capture_install("", CAPTURE_SEGMENT);
+        let archive = [
+            screenshot(&wow, "010119_080000", b"a screenshot from 2019"),
+            screenshot(&wow, "070420_211500", b"and one from 2020"),
+            screenshot(&wow, "111423_120000", b"and one from today"),
+        ];
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        // Marker-driven, all the way down. Thousands of files nothing has a marker for are
+        // not orphans to be swept up; ingesting them is a different feature entirely.
+        assert_eq!(count_of(&database, "captures"), 0);
+        assert_eq!(stored_files(&store_root(&database)), 0);
+        assert!(archive.iter().all(|path| path.is_file()));
+    }
+
+    #[test]
+    fn keeps_the_games_own_copy_when_the_setting_asks_it_to() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        let original = screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(
+            &wow,
+            &database,
+            2_000_000_100,
+            Options {
+                keep_originals: true,
+            },
+        )
+        .unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored");
+        assert_eq!(fs::read(&original).unwrap(), b"a picture of Ulduar");
+        assert_eq!(
+            fs::read(store_root(&database).join(file_path.unwrap())).unwrap(),
+            b"a picture of Ulduar"
+        );
+    }
+
+    #[test]
+    fn migrates_a_database_written_before_captures_were_kept() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..5] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction.pragma_update(None, "user_version", 5_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
     }
 
     #[test]
