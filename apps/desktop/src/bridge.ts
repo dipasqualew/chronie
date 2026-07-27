@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { wornSetKey } from "./modelPreview";
+
 import type {
   AchievementDetail,
   AchievementDetailsPayload,
@@ -19,13 +21,13 @@ import type {
   Segment,
   Settings,
   SyncResult,
-  TransmogModelPayload,
   TransmogPayload,
   TransmogSetItemsPayload,
   WifiPeer,
   WifiReceipt,
   WifiReceiveStatus,
-  WornModelPayload,
+  WornPiece,
+  WornSetPayload,
 } from "./types";
 
 const mock = globalThis.__Chronie_E2E__;
@@ -59,28 +61,20 @@ export const desktop = {
   gameIcons: (iconFileDataIds: number[]): Promise<IconsPayload> => mock
     ? Promise.resolve({ icons: mockIcons(iconFileDataIds) })
     : invoke<IconsPayload>("game_icons", { iconFileDataIds }),
-  // One appearance's model, asked for when a reader picks that row and not before: a set's
-  // worth of geometry is tens of megabytes nobody has clicked on. Most rows have none, and
-  // `null` is what says so.
-  transmogModel: (displayInfoId: number): Promise<TransmogModelPayload> => mock
-    ? Promise.resolve({ displayInfoId, model: mock.transmogModels[displayInfoId] ?? null })
-    : invoke<TransmogModelPayload>("transmog_model", { displayInfoId }),
   // The body every appearance is worn on. One model for the whole app, so the window asks the
   // first time a set is opened and keeps it for every set after.
   characterModel: (): Promise<CharacterModelPayload> => mock
     ? Promise.resolve({ model: mock.characterModel })
     : invoke<CharacterModelPayload>("character_model"),
-  // The same body with one appearance on it, which is how every slot is shown. Two numbers go
-  // across beside the display id, and neither is in the display: the slot is what says which
-  // geoset groups the appearance drives, and where the item is worn is what says which hand a
-  // weapon is held in.
-  wornModel: (
-    displayInfoId: number,
-    displayType: number,
-    inventoryType: number,
-  ): Promise<WornModelPayload> => mock
-    ? Promise.resolve({ displayInfoId, model: mock.wornModels[displayInfoId] ?? null })
-    : invoke<WornModelPayload>("worn_model", { displayInfoId, displayType, inventoryType }),
+  // The same body wearing a set of clothes, which is how every slot is shown. A list rather
+  // than one appearance because two of the three subsystems behind character rendering exist
+  // to arbitrate between pieces — which of two owns a contested geoset group, and which of two
+  // textures painting the same rectangle goes on top — and neither can be asked one piece at a
+  // time. Each piece carries the slot, which says which geoset groups it drives and where it
+  // sits in the stack, and where the item is worn, which says which hand a weapon is in.
+  wornSet: (pieces: WornPiece[]): Promise<WornSetPayload> => mock
+    ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null })
+    : invoke<WornSetPayload>("worn_set", { pieces }),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {

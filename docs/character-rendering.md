@@ -1,7 +1,7 @@
 # Showing an appearance on a character
 
-How to render one transmog item on a fixed character model, and why that is much less
-work than rendering a whole outfit.
+How to render a transmog set on a fixed character model, and what the two subsystems that
+only an assembled outfit reaches actually do.
 
 Read [game-files.md](game-files.md) first — it covers how to get the bytes at all, and
 the finding this document exists because of: **most armour has no model of its own.**
@@ -14,25 +14,57 @@ character's body. There is no mesh to show in isolation.
 well. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
-## The scope decision, and why it matters
+## One item, and then a set of them
 
-Rendering **one item at a time on an otherwise bare model** is dramatically cheaper than
-rendering an assembled outfit, because two of the three fiddly subsystems exist purely to
-arbitrate between items:
+Rendering **one item at a time on an otherwise bare model** was where this started, and it
+was dramatically cheaper, because two of the three fiddly subsystems exist purely to
+arbitrate between items and one item cannot argue with itself. Both have since landed, and
+both are in `worn.rs` rather than anywhere further down: the model parse, the compositor,
+the atlas and the viewer never changed, which is what "a strict subset, not a dead end"
+turned out to mean.
 
-- **Geoset priority.** Sleeves are claimed by gloves, chest and shirt; trousers by chest
-  and legs; boots fight pants. Blizzard resolves this with a hardcoded priority table.
-  One item cannot conflict with itself, so the table is unreachable.
+- **Geoset priority.** Sleeves are claimed by gloves, chest and shirt; the robe group by
+  chest and legs; boots fight pants. Blizzard resolves this with a hardcoded table: per
+  contested group, an ordered list of slots, and the first slot that drives the group at
+  all wins outright. It is `worn::GEOSET_PRIORITY`, and it runs **before** geoset
+  selection, so what `character::dressed` is handed is still at most one value per group.
 - **Slot draw order.** Item textures composite in a fixed per-slot order so bracers land
-  over sleeves and gauntlets over bracers. With one item over a fixed base there is one
-  item layer, and the ordering question does not arise.
+  over sleeves and gauntlets over bracers. It is `worn::SLOT_LAYER`, and it runs **before**
+  compositing, so `Atlas::wear` still paints a list in the order it is given.
 
-What remains is the same either way: parse the model, decode the textures, blit them into
-the body atlas, and pick the right geosets for that one item.
+Both tables are wow.export's, re-keyed. Its `GEOSET_PRIORITY` in
+`src/js/db/caches/DBItemGeosets.js` and its `SLOT_LAYER` in `src/js/wow/EquipmentSlots.js`
+are keyed by the game's **equipment slots** — a helm is 1, a cloak 15, a tabard 19 — and
+this app carries `DisplayType`, where a helm is 0, a cloak 9 and a tabard 10. Each list is
+therefore written out in `DisplayType` numbering rather than translated at the point of
+use. Read on 2026-07-27.
 
-**This is a strict subset, not a dead end.** Priority slots in as one resolution step
-before geoset selection. The model parse, compositor, atlas and viewer are identical.
-Assembled outfits can be added later without rework.
+**Most of the priority table is inert against the slot → group table below**, and it is
+kept whole anyway. Sleeves name gloves first and no gloves drive sleeves; the chest group
+names the shirt and the shirt drives nothing at all. The one contest that fires is group
+13, where a robe worn on the chest beats a pair of legs — which is what "a set with a robe
+in it puts the robe over the legs rather than beside them" comes to.
+
+**A set is renderable from an install without the app running**, which is the only way to
+put either table in front of real data — nothing in the test suite may read one. `set/<id>`
+walks a `TransmogSet` the same way the window does and hands the whole outfit over:
+
+```sh
+bun run render set/5570 augur.png --install "/Applications/World of Warcraft" --view right
+cargo run --example dump_model -- "/Applications/World of Warcraft" set/5613 plate.glb
+```
+
+Sets 5570 and 5613 on build 12.0.5.67 are what this was checked against on 2026-07-27: a
+Silvermoon cloth set whose robe hangs over its legs, and a Thalassian plate set of 59
+appearances, which is every contest the table can stage at once. Both come out with one part
+per geoset group.
+
+**Priority never leaves a group unowned.** The floor below — a group is only taken over
+when the body holds the geoset asked for — is what keeps an unverified column from costing
+a limb, and resolution must not become a second way to lose one. A winner whose value this
+body has nothing for leaves the group where a bare body had it; it does not fall through to
+the piece that lost, because the game's answer to "who owns this group" is one item and not
+a queue.
 
 ## The base model
 
@@ -97,10 +129,12 @@ agree exactly.
    pictures those are is
    [game-files.md](game-files.md#the-characters-own-skin-verified); `skin.rs` is the reading
    and `Atlas::base` is the blit.
-3. For the one item being shown, for each `ComponentSection` it supplies (via
-   `ItemDisplayInfoMaterialRes`, joined by `foreign_id()`): resolve the material to the one
-   file painted for *this* body, decode its BLP, scale to fill the section rectangle exactly,
-   and **alpha-blend** it.
+3. For each item, **lowest `SLOT_LAYER` first**, and for each `ComponentSection` it supplies
+   (via `ItemDisplayInfoMaterialRes`, joined by `foreign_id()`): resolve the material to the
+   one file painted for *this* body, decode its BLP, scale to fill the section rectangle
+   exactly, and **alpha-blend** it. Two items can supply the same section — a robe's lower
+   legs and a pair of boots' both land in section 6 — and the layer order is the whole of
+   what decides which one the reader sees.
 4. Bind the result as M2 texture **type 1** on the character model.
 
 Step 3's first hop is a trap of its own: a material resource names a file per body, and only
@@ -169,13 +203,36 @@ error. The slot → group mapping, with the display type each slot is:
 | 9 | back | 15 cape | | | | |
 | 10 | tabard | 12 tabard | | | | |
 
+The last column is `SLOT_LAYER`, the order the slot's textures go into the atlas — lowest
+first, ties keeping the order the set named them in. It is wow.export's, re-keyed, and it is
+what decides which of two items painting one section rectangle the reader ends up seeing:
+
+| `DisplayType` | Slot | Layer |
+|---|---|---|
+| 2 | shirt | 10 |
+| 5 | legs | 10 |
+| 0 | head | 11 |
+| 6 | feet | 11 |
+| 1 | shoulder | 13 |
+| 3 | chest | 13 |
+| 10 | tabard | 17 |
+| 4 | waist | 18 |
+| 7 | wrist | 19 |
+| 8 | hands | 20 |
+| 9 | back | 23 |
+
+Everything above 10 is a weapon, which paints no part of the body and so shares a rectangle
+with nothing; wow.export's default of 10 is what it lands on and it never comes up.
+
 The groups are the community's; which display type names which slot is the install's, and the
 two lists disagree — the community's puts the shirt last and every slot from the chest down
 one lower. Reading a chestpiece as a waist is as quiet a way to be wrong as reading the wrong
 column, and has the same floor under it.
 
 One item can drive several groups at once — a chestpiece drives five — and since they all
-come from the same item there is no conflict. Show all of them.
+come from the same item there is no conflict between them. Show all of them. Where two *items*
+drive one group, the priority table above decides, and it decides once per group rather than
+once per item.
 
 **Value formula:** `geosetID = group × 100 + (1 + GeosetGroup[i])`, with two exceptions:
 
@@ -187,12 +244,14 @@ come from the same item there is no conflict. Show all of them.
 **Application:**
 
 ```
+for each group any item drives:
+    award it to the first slot in GEOSET_PRIORITY[group] that drives it
 hide everything (0..3000)
 show geoset 0 (the skin)
 show the default customization geosets
-for each group the item drives:
+for each group awarded:
     hide  group*100 .. group*100+99
-    show  group*100 + resolved value
+    show  group*100 + the winner's resolved value
 ```
 
 The first two lines are `character::bare`, which is `geoset == 0 || geoset % 100 == 1`: value
@@ -209,10 +268,10 @@ group and then showing nothing in it is the one that takes a limb with it, and t
 into a body that looks unchanged. It is what kept a wrong column from ever looking like
 anything, which is a mixed blessing: it also kept it from being noticed.
 
-**Priority is not needed for single-item rendering** — see the scope note above. When
-assembled outfits arrive, the table is at
+The table itself is at
 [GeosRenderPrep](https://wowdev.wiki/DB/ItemDisplayInfo/GeosRenderPrep) and, more
-readably, in wow.export's `src/js/db/caches/DBItemGeosets.js`.
+readably, in wow.export's `src/js/db/caches/DBItemGeosets.js`; what this app carries and how
+it is keyed is the scope note above.
 
 ### What the body actually holds, verified
 

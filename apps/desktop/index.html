@@ -637,28 +637,25 @@
     /* Icons are stored at 64 pixels and shown at half that, which bilinear scaling suits. */
     object-fit: cover;
   }
-  /* The picture and the slot are one button: picking a row is what fills the pane above. */
+  /* The picture and the slot are one button: it is what takes that piece off the character
+     above, or puts it back. Pressed means worn, which is how every row of a set opens. */
   .mog-pick {
     display: flex; align-items: center; gap: 8px; flex: none;
     padding: 2px; margin: 0; border: 0; border-radius: 8px; background: none; cursor: pointer;
   }
   .mog-pick[aria-pressed="true"] { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  /* A piece the game gives no place on a character. The row keeps its picture and its name —
+     the set's own count includes it — and only the toggle is out of reach. */
+  .mog-pick:disabled { cursor: default; opacity: 0.55; }
 
-  /* The pane the picked appearance is shown in. It keeps its height whatever it is showing,
-     so picking down a list does not make the rows below jump about. */
+  /* The pane the set is worn in. It keeps its height whatever it is showing, so toggling a
+     row does not make the rows below jump about. */
   .mog-preview {
     flex: none; display: grid; justify-items: center; gap: 6px;
     padding: 10px 14px; border-bottom: 1px solid var(--border);
   }
-  .mog-preview[data-state="empty"] .mog-still { display: none; }
   .mog-stage { width: 100%; height: 240px; }
   .mog-stage canvas { display: block; width: 100%; height: 100%; }
-  .mog-still img {
-    display: block; width: 96px; height: 96px; border-radius: 10px;
-    border: 1px solid var(--border); background: var(--surface-2);
-    /* The game stores an icon at 64 pixels; shown larger, its own edges are the point. */
-    image-rendering: pixelated;
-  }
   .mog-note { text-align: center; margin: 0; }
 
   /* ---------- screenshots ---------- */

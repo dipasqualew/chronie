@@ -302,9 +302,8 @@ export function App({ payload, settings }: AppProps): ReactNode {
         onClose={() => setOpenSet(null)}
         load={desktop.transmogSetItems}
         loadIcons={desktop.gameIcons}
-        loadModel={desktop.transmogModel}
         loadCharacter={desktop.characterModel}
-        loadWorn={desktop.wornModel}
+        loadWorn={desktop.wornSet}
       />
 
       <ActivityEditor

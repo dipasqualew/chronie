@@ -5,15 +5,19 @@
 //! the browser tests load into three.js — so what the window is shown to render is what these
 //! converters actually write, rather than a hand-made stand-in for it.
 //!
-//! The model to write is one of three things: an `ItemDisplayInfo` id, on its own, for an
+//! The model to write is one of four things: an `ItemDisplayInfo` id, on its own, for an
 //! appearance that has geometry of its own; the word `character`, for the bare body every
-//! appearance is worn on; or `worn/<display>/<slot>` for that body with one appearance on it,
-//! where the slot is the display type `ItemAppearance` gives it. A weapon takes a fourth
-//! number, `worn/<display>/<slot>/<inventory type>`, because its slot does not say which hand.
+//! appearance is worn on; `worn/<display>/<slot>` for that body with one appearance on it,
+//! where the slot is the display type `ItemAppearance` gives it; or **`set/<id>`, for the body
+//! wearing a whole `TransmogSet`**, which is the one that reaches the priority table and the
+//! draw order. A weapon takes a fourth number, `worn/<display>/<slot>/<inventory type>`,
+//! because its slot does not say which hand; a set reads that per piece out of `ItemSparse`,
+//! the way the window does.
 //!
 //! ```sh
 //! cargo run --example dump_model -- "/Applications/World of Warcraft" 900001 helm.glb
 //! cargo run --example dump_model -- "/Applications/World of Warcraft" worn/8483/11/13 sword.glb
+//! cargo run --example dump_model -- "/Applications/World of Warcraft" set/1919 outfit.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog 900001 \
 //!     apps/desktop/fixtures/transmog/helm.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog character \
@@ -22,7 +26,7 @@
 //!     apps/desktop/fixtures/transmog/robe.glb
 //! ```
 
-use chronie_desktop_lib::{casc, character, models, worn};
+use chronie_desktop_lib::{casc, character, models, transmog, worn};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -45,6 +49,19 @@ fn main() {
 
     let written = match what.split('/').collect::<Vec<&str>>()[..] {
         ["character"] => character::glb_of(files.as_ref(), None).map(Some),
+        // A whole set, walked out of the game's own tables exactly as the window walks it —
+        // which is the only way to put the priority table and the draw order in front of real
+        // data, since nothing in the test suite is allowed to read an install.
+        ["set", set] => {
+            let set: u32 = set.parse().unwrap_or_else(|_| usage());
+            worn_set(files.as_ref(), set)
+                .and_then(|pieces| {
+                    println!("{} pieces", pieces.len());
+                    worn::of_set(files.as_ref(), &pieces)
+                })
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
+                .map(Some)
+        }
         ["worn", display, slot] | ["worn", display, slot, _] => {
             let display: u32 = display.parse().unwrap_or_else(|_| usage());
             let slot: u32 = slot.parse().unwrap_or_else(|_| usage());
@@ -82,10 +99,36 @@ fn main() {
     println!("{out}  {} bytes", glb.len());
 }
 
+/// The pieces of one transmog set, as the window would send them.
+///
+/// The same payload `transmog::set_items` hands the window, read back into the three numbers
+/// each row carries. Going through that rather than the tables directly is the point: what this
+/// renders is what the window renders, out of the same walk.
+fn worn_set(files: &dyn casc::GameFiles, set_id: u32) -> Result<Vec<worn::Piece>, String> {
+    let payload = transmog::set_items(files, set_id)?;
+    let appearances = payload["appearances"]
+        .as_array()
+        .ok_or("the set payload holds no appearances")?;
+    Ok(appearances
+        .iter()
+        .filter_map(|appearance| {
+            let number = |key: &str| appearance[key].as_u64().unwrap_or(0) as u32;
+            let display_info_id = number("displayInfoId");
+            // A row the game withholds names no display, and there is nothing to put on her.
+            (display_info_id != 0).then_some(worn::Piece {
+                display_info_id,
+                display_type: number("displayType"),
+                inventory_type: number("inventoryType"),
+            })
+        })
+        .collect())
+}
+
 fn usage() -> ! {
     eprintln!(
         "usage: dump_model <wow install> | --fixtures <dir>  \
-         <displayInfoID> | character | worn/<displayInfoID>/<displayType>  <out.glb>"
+         <displayInfoID> | character | worn/<displayInfoID>/<displayType> | set/<transmogSetID>  \
+         <out.glb>"
     );
     std::process::exit(2)
 }

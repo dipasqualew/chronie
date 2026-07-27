@@ -48,12 +48,36 @@
 //! a sword, a bow, a shield and a tome under four numbers that distinguish none of them. Which
 //! hand comes from the item rather than from the display — `ItemSparse.InventoryType`, which
 //! [`crate::transmog`] already reads for the name — and is [`held_in`].
+//!
+//! # A set of them, which is where the arguments start
+//!
+//! Everything above is one appearance answering for itself, and none of it can be wrong about
+//! another item because there is no other item. [`of_set`] is the whole outfit, and it adds the
+//! two subsystems that exist only to settle arguments between pieces:
+//!
+//! - **[`GEOSET_PRIORITY`]**, which says who owns a group two pieces both drive. A robe and a
+//!   pair of legs both claim group 13, and the game's answer is a fixed order of slots per
+//!   contested group rather than anything in either row.
+//! - **[`SLOT_LAYER`]**, which says what order the textures go down in. With one item over a
+//!   bare body there is one layer; with twelve there is a stack, and it is not the order the
+//!   tables happen to hand the pieces over in.
+//!
+//! Both are wow.export's, re-keyed, and both are stated where they are defined.
+//!
+//! The other thing a set changes is arithmetic rather than correctness. Twelve appearances read
+//! one at a time is twelve parses of `ItemDisplayInfoMaterialRes`, `TextureFileData`,
+//! `ComponentTextureFileData` and `ItemDisplayInfo`, and on a real install those are the
+//! expensive part by a wide margin. So [`of_set`] reads each table **once per outfit** and hands
+//! the parse down — [`TextureFiles`] and [`ModelFiles`] are what it hands down — rather than
+//! caching anything between renders.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use serde::Deserialize;
 
 use crate::casc::GameFiles;
 use crate::db2::{Db2, Row};
-use crate::models::{file_named, MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
+use crate::models::{MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
 use crate::models::TEXTURE_FILE_DATA;
 use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
 
@@ -169,6 +193,86 @@ const SLOT_GROUPS: [&[u16]; 11] = [
     &[12],                // 10 tabard
 ];
 
+/// Which slot owns each contested geoset group, best claim first.
+///
+/// **This is the table one item cannot reach.** Sleeves are claimed by gloves, the chest and the
+/// shirt; the robe group by the chest and the legs; the feet group by boots. The game settles it
+/// with a fixed order per group — the first slot in the list that drives the group at all wins
+/// outright, and nothing in either row is consulted.
+///
+/// The shape and the contents are wow.export's `GEOSET_PRIORITY`, in
+/// `src/js/db/caches/DBItemGeosets.js` (MIT), read on 2026-07-27. What is changed is the key:
+/// that table is keyed by the game's **equipment slots**, where a helm is 1 and a cloak 15, and
+/// this app carries `DisplayType`, where a helm is 0 and a cloak 9. So each list is written here
+/// in the numbering the rest of this module already uses — [`SLOT_GROUPS`]'s — rather than
+/// keeping a second table to translate between the two. `docs/character-rendering.md` has both
+/// numberings side by side.
+///
+/// Several of these rows can never fire against [`SLOT_GROUPS`], and they are kept anyway.
+/// Sleeves name gloves first, and no gloves in this app's table drive sleeves; the chest group
+/// names the shirt, and this app's shirt drives nothing at all. They are wow.export's rows and
+/// they are inert rather than wrong — the one contest that does fire is group 13, where a robe
+/// worn on the chest beats a pair of legs, which is the sentence the whole table is here for.
+const GEOSET_PRIORITY: [(u16, &[u32]); 17] = [
+    (8, &[8, 3, 2]),  // sleeves: gloves, then chest, then shirt
+    (10, &[3, 2]),    // chest: chest, then shirt
+    (13, &[3, 5]),    // robe: the chest beats the legs
+    (12, &[10]),      // tabard
+    (15, &[9]),       // cape
+    (18, &[4]),       // belt
+    (20, &[6]),       // feet
+    (22, &[3]),       // torso
+    (23, &[8]),       // hand attach
+    (27, &[0]),       // helm
+    (28, &[3]),       // arm upper
+    (21, &[0]),       // skull
+    (26, &[1]),       // shoulders
+    (5, &[6]),        // boot
+    (4, &[8]),        // gloves
+    (11, &[5]),       // pants
+    (9, &[5]),        // kneepads
+];
+
+/// What order a slot's textures go into the atlas, lowest first.
+///
+/// Bracers land over sleeves and gauntlets over bracers, and none of that is decidable from the
+/// section rectangles: two pieces can paint the same rectangle, and which one the reader ends up
+/// seeing is this and nothing else. Getting it wrong looks like the wrong sleeve rather than
+/// like an error.
+///
+/// wow.export's `SLOT_LAYER`, in `src/js/wow/EquipmentSlots.js` (MIT), read on 2026-07-27 and
+/// re-keyed to `DisplayType` the same way [`GEOSET_PRIORITY`] is. The ties are the source's:
+/// the shirt and the legs share a layer, as do the head and the feet, and the shoulders and the
+/// chest — so pieces on the same layer keep the order they arrived in, which is the order the
+/// set itself names them.
+const SLOT_LAYER: [u32; 11] = [
+    11, // 0  head
+    13, // 1  shoulder
+    10, // 2  shirt
+    13, // 3  chest
+    18, // 4  waist
+    10, // 5  legs
+    11, // 6  feet
+    19, // 7  wrist
+    20, // 8  hands
+    23, // 9  back
+    17, // 10 tabard
+];
+
+/// Where a slot the layer table says nothing about goes, which is the bottom.
+///
+/// wow.export's own default, and what every weapon lands on. It costs nothing either way: a
+/// weapon paints no part of the body, so where it would sit in the stack never comes up.
+const BOTTOM_LAYER: u32 = 10;
+
+/// Where a slot's textures sit in the stack.
+fn layer_of(display_type: u32) -> u32 {
+    SLOT_LAYER
+        .get(display_type as usize)
+        .copied()
+        .unwrap_or(BOTTOM_LAYER)
+}
+
 /// The two groups whose zero does not mean "nothing here".
 ///
 /// Every other group reads value 0 as its bare default. These two invert it: a boot with a
@@ -271,6 +375,20 @@ const HEAD: u32 = 0;
 /// written for does not turn on the choice; the rarer groups do.
 const FEMALE_VIS: usize = 1;
 
+/// One piece of an outfit: which appearance, which slot it fills, and where its item is worn.
+///
+/// The three numbers the window already has for every row of a set. `display_type` is
+/// `ItemAppearance`'s and is what says which geoset groups the six values drive and where the
+/// piece sits in the stack; `inventory_type` is `ItemSparse`'s and is what the slot cannot say,
+/// which is the hand a weapon is held in. Zero for every piece of armour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Piece {
+    pub display_info_id: u32,
+    pub display_type: u32,
+    pub inventory_type: u32,
+}
+
 /// One texture, and which part of the body it is painted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentTexture {
@@ -335,7 +453,7 @@ impl Worn {
     }
 }
 
-/// What an appearance puts on the body, out of the game's own tables.
+/// What one appearance puts on the body, out of the game's own tables.
 ///
 /// `display_type` is the slot, as `ItemAppearance` numbers it, and it is what says which
 /// geoset groups the display's six values drive. It comes from the row the reader clicked
@@ -344,83 +462,199 @@ impl Worn {
 /// `inventory_type` is the item's, out of `ItemSparse`, and it is what the slot cannot say: a
 /// weapon's hand. Zero for every piece of armour and for an item the game withholds — see
 /// [`held_in`].
+///
+/// A set of one, and it goes through [`of_set`] like any other: neither the priority table nor
+/// the draw order has anything to settle when there is one piece, which is the whole reason a
+/// single appearance was worth shipping first.
 pub fn of(
     files: &dyn GameFiles,
     display_info_id: u32,
     display_type: u32,
     inventory_type: u32,
 ) -> Result<Worn, String> {
-    let materials = sections(files, display_info_id)?;
-    let textures = if materials.is_empty() {
-        // Neither of the two tables below is worth opening for an appearance that paints
-        // nothing: `TextureFileData` is a row per texture the client owns.
-        Vec::new()
-    } else {
-        resolve(files, &materials)?
-    };
+    of_set(
+        files,
+        &[Piece {
+            display_info_id,
+            display_type,
+            inventory_type,
+        }],
+    )
+}
+
+/// What a whole outfit puts on the body, with the arguments between its pieces settled.
+///
+/// Three things happen here that [`of`] on its own never needed:
+///
+/// - **The pieces are laid in draw order first**, by [`SLOT_LAYER`], so the textures come out of
+///   this in the order they are meant to go down and [`crate::character::Atlas::wear`] can stay
+///   a loop over a list.
+/// - **Each contested geoset group is resolved once**, by [`GEOSET_PRIORITY`], so what comes
+///   back is at most one [`Geoset`] per group and nothing downstream has to arbitrate.
+/// - **Each of the game's tables is parsed once for the whole outfit** rather than once per
+///   piece, which is where twelve appearances stop being twelve times the work.
+///
+/// A set may name the same appearance twice and may name pieces whose slots conflict outright —
+/// a robe and a pair of legs. Neither is deduplicated on the way in: the priority table is the
+/// game's own answer to the second, and a reader that collapsed by slot first would quietly
+/// drop one of them.
+pub fn of_set(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Worn, String> {
+    // Draw order before anything else, because everything below walks this list in order and
+    // the textures come out of it stacked. A stable sort, so pieces sharing a layer — the
+    // shirt and the legs, the head and the feet — keep the order the set named them in.
+    let mut layered = pieces.to_vec();
+    layered.sort_by_key(|piece| layer_of(piece.display_type));
+
+    let materials = Db2::parse(files.read(ITEM_DISPLAY_INFO_MATERIAL_RES)?)?;
+    let painted: Vec<Vec<(u32, u32)>> = layered
+        .iter()
+        .map(|piece| sections(&materials, piece.display_info_id))
+        .collect();
+    drop(materials);
 
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
-    let Some(display) = displays.rows().find(|row| row.id() == display_info_id) else {
-        return Ok(Worn {
-            textures,
-            ..Default::default()
-        });
+    let wanted: HashSet<u32> = layered.iter().map(|piece| piece.display_info_id).collect();
+    let rows: HashMap<u32, Row<'_>> = displays
+        .rows()
+        .filter(|row| wanted.contains(&row.id()))
+        .map(|row| (row.id(), row))
+        .collect();
+    // In draw order, and only the pieces this install can say anything about. A display in a
+    // section the game encrypts drops out here and takes its geometry with it; whatever it
+    // paints was already resolved above, because the two tables fail independently.
+    let drawn: Vec<(Piece, &Row<'_>)> = layered
+        .iter()
+        .filter_map(|piece| Some((*piece, rows.get(&piece.display_info_id)?)))
+        .collect();
+
+    // Everything an item's *own* pictures are named by, which is one question asked of
+    // `TextureFileData` for three different things: the body textures, the picture on a model,
+    // and the picture on a cape. A wardrobe of chestpieces needs it once and a set needs it
+    // once, rather than once per row of either.
+    let hangs = hangs_in(&drawn);
+    let cape_resource = cape_in(&drawn);
+    let textures = if painted.iter().all(Vec::is_empty)
+        && hangs.iter().all(|hung| hung.material == 0)
+        && cape_resource.is_none()
+    {
+        // Not worth opening for an outfit that names no picture of its own anywhere:
+        // `TextureFileData` is a row per texture the client owns.
+        None
+    } else {
+        Some(TextureFiles::read(files)?)
+    };
+
+    let painted = if painted.iter().all(Vec::is_empty) {
+        Vec::new()
+    } else {
+        let bodies = bodies_in(files, COMPONENT_TEXTURE_FILE_DATA)?;
+        let files = textures.as_ref().expect("a painted outfit opened the texture table");
+        painted
+            .iter()
+            .flatten()
+            .filter_map(|(section, material)| {
+                Some(ComponentTexture {
+                    section: *section,
+                    file: files.for_this_body(*material, &bodies)?,
+                })
+            })
+            .collect()
     };
 
     Ok(Worn {
-        textures,
-        geosets: geosets_of(&display, display_type),
-        models: models_of(files, &display, display_type, inventory_type)?,
-        cape: cape_of(files, &display, display_type)?,
-        hidden: hidden_of(files, &display, display_type)?,
+        textures: painted,
+        geosets: geosets_of(&drawn),
+        models: models_of(files, &hangs, textures.as_ref())?,
+        cape: cape_resource.and_then(|resource| {
+            textures
+                .as_ref()
+                .expect("a caped outfit opened the texture table")
+                .named(resource)
+        }),
+        hidden: hidden_of(files, &drawn)?,
     })
 }
 
-/// The models an appearance hangs off the body, one per model slot the display fills.
+/// One thing an outfit hangs off the body, before the files behind it have been looked up.
 ///
-/// Both slots, not the first: shoulders keep a left pad in one and a right in the other, and
-/// showing one of them is the shape of an appearance that has half its geometry. Which
-/// attachment each goes to is [`hangs_from`], and for armour it is the position in the array
-/// rather than anything in the row that says which is which.
+/// The model slot travels with the rest, because it is not only where the row's values are: it
+/// is also which shoulder the model is for. See [`ModelFiles::file`].
+struct Hung {
+    slot: usize,
+    attachment: u32,
+    model: u32,
+    material: u32,
+}
+
+/// Everything an outfit hangs off the body, in draw order and across every piece of it.
+///
+/// Both of a display's model slots, not the first: shoulders keep a left pad in one and a right
+/// in the other, and showing one of them is the shape of an appearance that has half its
+/// geometry. Which attachment each goes to is [`hangs_from`], and for armour it is the position
+/// in the array rather than anything in the row that says which is which.
+fn hangs_in(drawn: &[(Piece, &Row<'_>)]) -> Vec<Hung> {
+    drawn
+        .iter()
+        .flat_map(|(piece, display)| {
+            hangs_from(display, piece.display_type, piece.inventory_type)
+                .into_iter()
+                .map(move |(slot, attachment)| Hung {
+                    slot,
+                    attachment,
+                    model: display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
+                    material: display.element(
+                        display_column::MATERIAL_RESOURCES_ID,
+                        slot,
+                        MODEL_SLOT_BITS,
+                    ),
+                })
+        })
+        .filter(|hung| hung.model != 0)
+        .collect()
+}
+
+/// The `.m2`s behind those, narrowed to the copy this body and this side want.
+///
+/// The two model tables are read once for the whole outfit or not at all: most of a wardrobe
+/// hangs nothing off the body, and on a real install `ModelFileData` is a row per model the
+/// client owns.
 fn models_of(
     files: &dyn GameFiles,
-    display: &Row<'_>,
-    display_type: u32,
-    inventory_type: u32,
+    hangs: &[Hung],
+    textures: Option<&TextureFiles>,
 ) -> Result<Vec<WornModel>, String> {
-    // The slot travels with the rest, because it is not only where the row's values are: it is
-    // also which shoulder the model is for. See [`model_file`].
-    let asked: Vec<(usize, u32, u32, u32)> = hangs_from(display, display_type, inventory_type)
-        .into_iter()
-        .map(|(slot, attachment)| {
-            (
-                slot,
-                attachment,
-                display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
-                display.element(display_column::MATERIAL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
-            )
-        })
-        .filter(|(_, _, model, _)| *model != 0)
-        .collect();
-    if asked.is_empty() {
-        // Neither table below is worth opening for an appearance that hangs nothing off the
-        // body, which is every slot but two and most of what a reader clicks on.
+    if hangs.is_empty() {
         return Ok(Vec::new());
     }
+    let models = ModelFiles::read(files)?;
 
-    let mut found = Vec::with_capacity(asked.len());
-    for (slot, attachment, model, material) in asked {
-        let Some(file) = model_file(files, model, slot)? else {
+    let mut found: Vec<WornModel> = Vec::with_capacity(hangs.len());
+    for hung in hangs {
+        let Some(file) = models.file(hung.model, hung.slot) else {
             continue;
         };
-        found.push(WornModel {
-            attachment,
+        let model = WornModel {
+            attachment: hung.attachment,
             file,
-            texture: match material {
+            texture: match hung.material {
                 0 => None,
-                resource => file_named(files, TEXTURE_FILE_DATA, MATERIAL_RESOURCES_ID, resource)?,
+                resource => textures
+                    .expect("an outfit naming a model material opened the texture table")
+                    .named(resource),
             },
-        });
+        };
+        // The same mesh, the same picture and the same place on the body, twice. The game
+        // stores a set's repeated appearance as a copy of an earlier one — `TransmogSetItem`
+        // does it rather than write the row again — so an outfit can genuinely name one helm
+        // twice, and drawing it twice is two identical surfaces at one depth. That is the
+        // z-fighting an assembled outfit is supposed to be free of.
+        //
+        // Note what this is *not*: deduplicating by slot. Two pieces of one slot with anything
+        // different about them are both kept, and which of them owns a contested geoset group
+        // is the priority table's business rather than this list's.
+        if !found.contains(&model) {
+            found.push(model);
+        }
     }
     Ok(found)
 }
@@ -454,56 +688,133 @@ fn hangs_from(display: &Row<'_>, display_type: u32, inventory_type: u32) -> Vec<
     vec![(filled, hand)]
 }
 
-/// The `.m2` a model resource names for the body this app draws, on the side it is worn.
+/// `ModelFileData` and `ComponentModelFileData`, parsed: every `.m2` a resource names, and what
+/// the game says about each of those files.
 ///
-/// Two narrowings, and the game uses one or the other rather than both. **Per body**: a helm's
-/// resource names 31 files on 12.0.5.67, one per race and gender, and `ComponentModelFileData`
-/// is the only place saying which is which — [`for_this_body`], the same function the textures
-/// go through. **Per side**: a shoulder's resource names two, a left pad and its mirror, told
-/// apart by `PositionIndex` and by nothing else. `slot` is the model slot the resource came out
-/// of, and it *is* the side — element 0 of `ModelResourcesID` is the left pad and element 1 the
-/// right, which is what the two files' geometry says: position 0 leans towards the character's
-/// left and position 1 is the same mesh mirrored.
+/// One read for a whole outfit. A set with a helm and a pair of shoulders asks this three
+/// questions, and on a real install each of the two tables behind it is a row per model the
+/// client owns.
+struct ModelFiles {
+    /// Every file each resource names, lowest first — which is the order the fallback leans on:
+    /// the client numbers a model's coarser levels of detail above the model itself.
+    candidates: HashMap<u32, Vec<u32>>,
+    bodies: HashMap<u32, (u32, u32, u32)>,
+    sides: HashMap<u32, u32>,
+}
+
+impl ModelFiles {
+    fn read(files: &dyn GameFiles) -> Result<Self, String> {
+        let table = Db2::parse(files.read(MODEL_FILE_DATA)?)?;
+        let mut candidates: HashMap<u32, Vec<u32>> = HashMap::new();
+        for row in table.rows() {
+            candidates
+                .entry(row.number(MODEL_RESOURCES_ID))
+                .or_default()
+                .push(row.id());
+        }
+        for named in candidates.values_mut() {
+            named.sort_unstable();
+        }
+
+        let table = Db2::parse(files.read(COMPONENT_MODEL_FILE_DATA)?)?;
+        let mut bodies: HashMap<u32, (u32, u32, u32)> = HashMap::new();
+        let mut sides: HashMap<u32, u32> = HashMap::new();
+        for row in table.rows() {
+            bodies.insert(
+                row.id(),
+                (
+                    row.number(component_column::GENDER),
+                    row.number(component_column::CLASS),
+                    row.number(component_column::RACE),
+                ),
+            );
+            sides.insert(row.id(), row.number(component_column::POSITION));
+        }
+        Ok(Self {
+            candidates,
+            bodies,
+            sides,
+        })
+    }
+
+    /// The `.m2` a model resource names for the body this app draws, on the side it is worn.
+    ///
+    /// Two narrowings, and the game uses one or the other rather than both. **Per body**: a
+    /// helm's resource names 31 files on 12.0.5.67, one per race and gender, and
+    /// `ComponentModelFileData` is the only place saying which is which — [`for_this_body`], the
+    /// same function the textures go through. **Per side**: a shoulder's resource names two, a
+    /// left pad and its mirror, told apart by `PositionIndex` and by nothing else. `slot` is the
+    /// model slot the resource came out of, and it *is* the side — element 0 of
+    /// `ModelResourcesID` is the left pad and element 1 the right, which is what the two files'
+    /// geometry says: position 0 leans towards the character's left and position 1 is the same
+    /// mesh mirrored.
+    ///
+    /// Silence means what it means everywhere else here: a model nothing was said about is the
+    /// fallback rather than a reject, which is what a weapon and a shield are.
+    fn file(&self, resource: u32, slot: usize) -> Option<u32> {
+        let mut candidates = self.candidates.get(&resource)?.clone();
+        // A file modelled for the other shoulder is not a candidate at all, whatever body it is
+        // for. A file with no side — every helm, and everything untagged — is one for any.
+        let wanted = u32::try_from(slot).unwrap_or(0);
+        candidates.retain(|file| match self.sides.get(file) {
+            Some(side) if *side < SIDES => *side == wanted,
+            _ => true,
+        });
+        for_this_body(&candidates, &self.bodies)
+    }
+}
+
+/// The `.m2` a model resource names for this body, read on its own.
 ///
-/// Silence means what it means everywhere else here: a model nothing was said about is the
-/// fallback rather than a reject, which is what a weapon and a shield are.
+/// [`crate::models`] shows one appearance's geometry without a body under it, and asks this
+/// exactly once — so it pays for the two tables rather than being handed them. Everything on a
+/// character goes through [`ModelFiles`] instead.
 pub fn model_file(files: &dyn GameFiles, resource: u32, slot: usize) -> Result<Option<u32>, String> {
-    let table = Db2::parse(files.read(MODEL_FILE_DATA)?)?;
-    let mut candidates: Vec<u32> = table
-        .rows()
-        .filter(|row| row.number(MODEL_RESOURCES_ID) == resource)
-        .map(|row| row.id())
-        .collect();
-    if candidates.is_empty() {
-        return Ok(None);
-    }
-    // Lowest first, which is the order the fallback leans on: the client numbers a model's
-    // coarser levels of detail above the model itself.
-    candidates.sort_unstable();
+    Ok(ModelFiles::read(files)?.file(resource, slot))
+}
 
-    let table = Db2::parse(files.read(COMPONENT_MODEL_FILE_DATA)?)?;
-    let mut bodies: HashMap<u32, (u32, u32, u32)> = HashMap::new();
-    let mut sides: HashMap<u32, u32> = HashMap::new();
-    for row in table.rows() {
-        bodies.insert(
-            row.id(),
-            (
-                row.number(component_column::GENDER),
-                row.number(component_column::CLASS),
-                row.number(component_column::RACE),
-            ),
-        );
-        sides.insert(row.id(), row.number(component_column::POSITION));
+/// `TextureFileData`, parsed: every `.blp` each material resource names, lowest first.
+///
+/// One read for a whole outfit, and it answers the three different questions an outfit asks of
+/// this one table — the pictures painted onto the body, the picture on a model that hangs off
+/// it, and the picture on a cape.
+struct TextureFiles(HashMap<u32, Vec<u32>>);
+
+impl TextureFiles {
+    fn read(files: &dyn GameFiles) -> Result<Self, String> {
+        let table = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
+        let mut named: HashMap<u32, Vec<u32>> = HashMap::new();
+        for row in table.rows() {
+            named
+                .entry(row.number(MATERIAL_RESOURCES_ID))
+                .or_default()
+                .push(row.id());
+        }
+        for files in named.values_mut() {
+            files.sort_unstable();
+        }
+        Ok(Self(named))
     }
 
-    // A file modelled for the other shoulder is not a candidate at all, whatever body it is
-    // for. A file with no side — every helm, and everything untagged — is a candidate for any.
-    let wanted = u32::try_from(slot).unwrap_or(0);
-    candidates.retain(|file| match sides.get(file) {
-        Some(side) if *side < SIDES => *side == wanted,
-        _ => true,
-    });
-    Ok(for_this_body(&candidates, &bodies))
+    /// The one file a resource names, for the resources that name one thing.
+    ///
+    /// A resource can name more than one file — a texture and its second usage sit under the
+    /// same id — and the client numbers a file's variants above the file itself, so the lowest
+    /// is the one to draw. That is enough for an item's *own* picture, which is what a model and
+    /// a cape want; a body texture is the next function, because the table saying which body a
+    /// file was painted for is a different one.
+    fn named(&self, resource: u32) -> Option<u32> {
+        self.0.get(&resource)?.first().copied()
+    }
+
+    /// The one file a resource names that was painted for the body this app draws.
+    fn for_this_body(
+        &self,
+        resource: u32,
+        bodies: &HashMap<u32, (u32, u32, u32)>,
+    ) -> Option<u32> {
+        for_this_body(self.0.get(&resource)?, bodies)
+    }
 }
 
 /// The picture a cape is painted with, which is not a model and not a body texture either.
@@ -514,44 +825,44 @@ pub fn model_file(files: &dyn GameFiles, resource: u32, slot: usize) -> Result<O
 /// the body's cape parts ask for and nothing else on it does. Read off 12.0.5.67:
 /// `humanfemale_hd`'s geosets 1502 to 1510 are the only parts of the body on that type, and a
 /// back display keeps both its model slots at zero and names a material anyway.
-fn cape_of(
-    files: &dyn GameFiles,
-    display: &Row<'_>,
-    display_type: u32,
-) -> Result<Option<u32>, String> {
-    if display_type != BACK {
-        return Ok(None);
-    }
-    match display.element(display_column::MATERIAL_RESOURCES_ID, 0, MODEL_SLOT_BITS) {
-        0 => Ok(None),
-        resource => file_named(files, TEXTURE_FILE_DATA, MATERIAL_RESOURCES_ID, resource),
-    }
+///
+/// One cape per outfit, because one back: the first the set names, in draw order.
+fn cape_in(drawn: &[(Piece, &Row<'_>)]) -> Option<u32> {
+    drawn
+        .iter()
+        .filter(|(piece, _)| piece.display_type == BACK)
+        .map(|(_, display)| display.element(display_column::MATERIAL_RESOURCES_ID, 0, MODEL_SLOT_BITS))
+        .find(|resource| *resource != 0)
 }
 
-/// The geoset groups a helm hides on this body.
+/// The geoset groups an outfit's helm hides on this body.
 ///
 /// Not variants: a helm takes hair, ears or a beard away entirely, and what the table names is
 /// the group rather than an id inside it. Which rows apply is the display's `HelmetGeosetVis`
 /// through the relationship block, then the race — the table lists every race the game ships
 /// under one vis id, and a reader that took them all would hide groups meant for a Draenei's
 /// horns.
-fn hidden_of(
-    files: &dyn GameFiles,
-    display: &Row<'_>,
-    display_type: u32,
-) -> Result<Vec<u16>, String> {
-    if display_type != HEAD {
-        return Ok(Vec::new());
-    }
-    let vis = display.element(display_column::HELMET_GEOSET_VIS, FEMALE_VIS, MODEL_SLOT_BITS);
-    if vis == 0 {
-        // 210 of the game's helms say this, and it means an open helm that hides nothing.
+///
+/// Every head the set names rather than one, and their groups together. A set holds one helm and
+/// this costs nothing to say properly; hiding is the one thing here where two pieces cannot
+/// disagree, because a group hidden by either is hidden.
+fn hidden_of(files: &dyn GameFiles, drawn: &[(Piece, &Row<'_>)]) -> Result<Vec<u16>, String> {
+    let vis: HashSet<u32> = drawn
+        .iter()
+        .filter(|(piece, _)| piece.display_type == HEAD)
+        .map(|(_, display)| {
+            display.element(display_column::HELMET_GEOSET_VIS, FEMALE_VIS, MODEL_SLOT_BITS)
+        })
+        // 210 of the game's helms say zero here, and it means an open helm that hides nothing.
+        .filter(|entry| *entry != 0)
+        .collect();
+    if vis.is_empty() {
         return Ok(Vec::new());
     }
     let table = Db2::parse(files.read(HELMET_GEOSET_DATA)?)?;
     let mut groups: Vec<u16> = table
         .rows()
-        .filter(|row| row.foreign_id() == vis && row.number(helmet_column::RACE) == HUMAN)
+        .filter(|row| vis.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == HUMAN)
         .filter_map(|row| u16::try_from(row.number(helmet_column::HIDE_GEOSET_GROUP)).ok())
         .collect();
     groups.sort_unstable();
@@ -559,13 +870,13 @@ fn hidden_of(
     Ok(groups)
 }
 
-/// The sections an appearance paints, as `(section, material resource)`.
+/// The sections one appearance paints, as `(section, material resource)`.
 ///
 /// In section order, so that an atlas is composited the same way twice. The game does not
 /// order the rows, and two appearances that paint the same parts should not differ by the
-/// order their rows happen to sit in.
-fn sections(files: &dyn GameFiles, display_info_id: u32) -> Result<Vec<(u32, u32)>, String> {
-    let table = Db2::parse(files.read(ITEM_DISPLAY_INFO_MATERIAL_RES)?)?;
+/// order their rows happen to sit in. Between appearances the order is the draw order, which is
+/// [`SLOT_LAYER`] and not this.
+fn sections(table: &Db2, display_info_id: u32) -> Vec<(u32, u32)> {
     let mut found: Vec<(u32, u32)> = table
         .rows()
         .filter(|row| row.foreign_id() == display_info_id)
@@ -578,37 +889,7 @@ fn sections(files: &dyn GameFiles, display_info_id: u32) -> Result<Vec<(u32, u32
         .filter(|(_, material)| *material != 0)
         .collect();
     found.sort_by_key(|(section, _)| *section);
-    Ok(found)
-}
-
-/// The one texture per section that was painted for this body.
-fn resolve(files: &dyn GameFiles, materials: &[(u32, u32)]) -> Result<Vec<ComponentTexture>, String> {
-    let textures = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
-    // Every file each material names, lowest first — which is the order the ranking below
-    // falls back on when nothing distinguishes two candidates.
-    let mut candidates: HashMap<u32, Vec<u32>> = HashMap::new();
-    for row in textures.rows() {
-        candidates
-            .entry(row.number(MATERIAL_RESOURCES_ID))
-            .or_default()
-            .push(row.id());
-    }
-    for files in candidates.values_mut() {
-        files.sort_unstable();
-    }
-
-    let bodies = bodies_in(files, COMPONENT_TEXTURE_FILE_DATA)?;
-
-    Ok(materials
-        .iter()
-        .filter_map(|(section, material)| {
-            let file = for_this_body(candidates.get(material)?, &bodies)?;
-            Some(ComponentTexture {
-                section: *section,
-                file,
-            })
-        })
-        .collect())
+    found
 }
 
 /// Which body each file in a component table belongs to, keyed by the file's own FileDataID.
@@ -665,13 +946,65 @@ fn for_this_body(candidates: &[u32], bodies: &HashMap<u32, (u32, u32, u32)>) -> 
         .or_else(|| candidates.iter().find(|file| !bodies.contains_key(file)).copied())
 }
 
-/// The geosets a display switches on, for the slot it is worn in.
+/// The one geoset per group an outfit ends up switching on, with the contests settled.
+///
+/// Every piece states what it wants of every group its slot drives, and then each group is
+/// awarded once. A group only one piece drives is that piece's, which is every group of a set
+/// with one item in it and most groups of a set with twelve. A group two pieces drive goes
+/// through [`GEOSET_PRIORITY`], and the loser's value is dropped rather than kept beside the
+/// winner's — a group with two values in it is two pairs of legs in the same trousers.
+///
+/// The order is the order the groups were first claimed, walking the pieces in draw order. What
+/// that buys is only that the answer is the same twice; nothing downstream reads it as an order.
+fn geosets_of(drawn: &[(Piece, &Row<'_>)]) -> Vec<Geoset> {
+    let claims: Vec<(u32, Geoset)> = drawn
+        .iter()
+        .flat_map(|(piece, display)| {
+            drives(display, piece.display_type)
+                .into_iter()
+                .map(move |geoset| (piece.display_type, geoset))
+        })
+        .collect();
+
+    let mut awarded: Vec<Geoset> = Vec::new();
+    for (_, claimed) in &claims {
+        if awarded.iter().any(|geoset| geoset.group == claimed.group) {
+            continue;
+        }
+        awarded.push(owner_of(claimed.group, &claims));
+    }
+    awarded
+}
+
+/// Which piece's value a group takes, out of everything claiming it.
+///
+/// The first slot in the group's priority list that claims it at all, exactly as the game
+/// resolves it. A group with no list, or a list none of the claimants is in, falls back to the
+/// first claim — because the alternative is a group driven by an item and awarded to nobody,
+/// and the whole floor under this pipeline is that priority decides *which* item owns a group
+/// and never that a group goes unowned.
+fn owner_of(group: u16, claims: &[(u32, Geoset)]) -> Geoset {
+    let claiming = |slot: u32| {
+        claims
+            .iter()
+            .find(|(claimed, geoset)| geoset.group == group && *claimed == slot)
+    };
+    GEOSET_PRIORITY
+        .iter()
+        .find(|(contested, _)| *contested == group)
+        .and_then(|(_, order)| order.iter().find_map(|slot| claiming(*slot)))
+        .or_else(|| claims.iter().find(|(_, geoset)| geoset.group == group))
+        .map(|(_, geoset)| *geoset)
+        .expect("the group was claimed by something")
+}
+
+/// The geosets one display asks for, for the slot it is worn in.
 ///
 /// A group the row says nothing about still gets an answer: value 0 is every group's bare
 /// default, so an item that drives five groups and fills two of them puts the other three
 /// back where a bare body had them. What drops out entirely is a group whose value cannot be
 /// one — see [`LARGEST_VALUE`].
-fn geosets_of(display: &Row<'_>, display_type: u32) -> Vec<Geoset> {
+fn drives(display: &Row<'_>, display_type: u32) -> Vec<Geoset> {
     let groups = SLOT_GROUPS
         .get(display_type as usize)
         .copied()
@@ -726,6 +1059,7 @@ mod tests {
     const GLOVES: u32 = 900005;
     const SHIRT: u32 = 900008;
     const ROBE: u32 = 900012;
+    const LEGS: u32 = 900006;
     /// A display in a section the game encrypts, so nothing can be read about it.
     const WITHHELD: u32 = 900900;
 
@@ -737,6 +1071,7 @@ mod tests {
     const SHIRT_SLOT: u32 = 2;
     const SHOULDER: u32 = 1;
     const BACK_SLOT: u32 = 9;
+    const LEGS_SLOT: u32 = 5;
     /// The three slots the game files a weapon or a shield under, and the whole of what they
     /// say: 11 is a sword and a two-hander alike, 13 a shield, 15 a thing held in an off hand.
     const WEAPON_SLOT: u32 = 11;
@@ -1085,5 +1420,248 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = of(&DirFiles::new(temp.path()), CHESTPIECE, CHEST, NOT_A_WEAPON).unwrap_err();
         assert!(error.contains("1280614.db2"), "{error}");
+    }
+
+    /* ---------- a whole outfit, and the arguments between its pieces ---------- */
+
+    /// An outfit, out of the fixture's own tables. Each piece is a display and the slot it
+    /// fills; nothing here is a weapon, so nothing needs the third number.
+    fn outfit(pieces: &[(u32, u32)]) -> Worn {
+        let pieces: Vec<Piece> = pieces
+            .iter()
+            .map(|(display_info_id, display_type)| Piece {
+                display_info_id: *display_info_id,
+                display_type: *display_type,
+                inventory_type: NOT_A_WEAPON,
+            })
+            .collect();
+        of_set(&fixture_files(), &pieces).unwrap()
+    }
+
+    // The acceptance, and the one contest this app's slot table can actually stage: a robe and
+    // a pair of legs both drive group 13, and the game's answer is that the chest owns it.
+    //
+    // The two values are what makes this a test rather than a coincidence. The robe asks for
+    // 1302, the skirt that hangs over the legs; the legs ask for 1301, which is the nothing
+    // that is there the rest of the time. And the legs are laid down *first*, because their
+    // slot composites below the chest's — so a reader that took the first claim, or the last,
+    // would answer 1301 and the skirt would simply not be there.
+    #[test]
+    fn gives_a_contested_group_to_the_slot_the_game_puts_first() {
+        for order in [
+            [(ROBE, CHEST), (LEGS, LEGS_SLOT)],
+            [(LEGS, LEGS_SLOT), (ROBE, CHEST)],
+        ] {
+            let dressed = outfit(&order);
+            assert_eq!(
+                dressed.geosets.iter().filter(|geoset| geoset.group == 13).count(),
+                1,
+                "a group with two values in it is two skirts on one pair of legs"
+            );
+            assert!(
+                dressed.geosets.contains(&Geoset { group: 13, geoset: 1302 }),
+                "the robe lost group 13 to the legs, given {order:?}: {:?}",
+                dressed.geosets
+            );
+        }
+    }
+
+    // And the other half of the same sentence: winning group 13 wins that group and nothing
+    // else. The legs keep every group the chest does not drive at all — a robe does not take
+    // the trousers away, it hangs over them.
+    #[test]
+    fn leaves_every_group_only_one_piece_drives_with_that_piece() {
+        let dressed = outfit(&[(ROBE, CHEST), (LEGS, LEGS_SLOT)]);
+        let switched: Vec<(u16, u16)> = dressed
+            .geosets
+            .iter()
+            .map(|geoset| (geoset.group, geoset.geoset))
+            .collect();
+        assert_eq!(
+            switched,
+            vec![
+                (11, 1104), // the legs' trousers, which nothing else claims
+                (9, 901),   // and their kneepads
+                (13, 1302), // the group the two of them fought over
+                (8, 802),   // the robe's sleeves
+                (10, 1001), // the chest it leaves bare
+                (22, 2201),
+                (28, 2801),
+            ]
+        );
+    }
+
+    // The whole table, stated as a pair of lists rather than as one contest. Every group this
+    // app's slots drive is in it, and the order inside a row is what decides an argument — so
+    // this is what a patch to either list has to be read against.
+    #[test]
+    fn says_which_slot_owns_each_group_two_slots_can_both_drive() {
+        // The three rows that can fire at all, given what the slots drive.
+        assert_eq!(owner(8, &[(3, 802), (2, 801)]), 802, "the chest beats the shirt");
+        assert_eq!(owner(8, &[(2, 801), (8, 803)]), 803, "and gloves beat both");
+        assert_eq!(owner(10, &[(2, 1001), (3, 1002)]), 1002);
+        assert_eq!(owner(13, &[(5, 1301), (3, 1302)]), 1302);
+        // A group only one slot drives is that slot's, whichever way round it is asked.
+        assert_eq!(owner(27, &[(0, 2702)]), 2702);
+        assert_eq!(owner(20, &[(6, 2002)]), 2002);
+        // And a group claimed by a slot the table does not list under it falls back to the
+        // claim rather than to nothing. Nothing in this app reaches it, and what it rules out
+        // is a group an item drives and nobody owns — which is a limb that goes missing.
+        assert_eq!(owner(13, &[(9, 1303)]), 1303);
+    }
+
+    /// [`owner_of`] as the test above reads it: the claims as `(slot, geoset)`.
+    fn owner(group: u16, claims: &[(u32, u16)]) -> u16 {
+        let claims: Vec<(u32, Geoset)> = claims
+            .iter()
+            .map(|(slot, geoset)| (*slot, Geoset { group, geoset: *geoset }))
+            .collect();
+        owner_of(group, &claims).geoset
+    }
+
+    // The draw order, on the one pair of fixture appearances that paint the same rectangle: a
+    // robe's lower legs and a pair of boots' both land in section 6, and boots composite below
+    // the chest. So the boots' picture goes down first and the robe's over it — whichever order
+    // the set happened to name the two in, which is what the second half of this reads.
+    #[test]
+    fn lays_the_pieces_down_in_the_order_their_slots_composite_in() {
+        for order in [
+            [(ROBE, CHEST), (BOOTS, FEET_SLOT)],
+            [(BOOTS, FEET_SLOT), (ROBE, CHEST)],
+        ] {
+            let painted = painted(&outfit(&order));
+            let boots = painted.iter().position(|(section, _)| *section == 7).expect("the feet");
+            let robe = painted.iter().position(|(section, _)| *section == 5).expect("the legs");
+            assert!(boots < robe, "given {order:?}: {painted:?}");
+
+            // And the two that overlap, in that order: 151010 is the boots' lower legs and
+            // 151008 the robe's, so the robe's is the one a reader ends up seeing.
+            let contested: Vec<u32> = painted
+                .iter()
+                .filter(|(section, _)| *section == 6)
+                .map(|(_, file)| *file)
+                .collect();
+            assert_eq!(contested, vec![151_010, 151_008], "given {order:?}");
+        }
+    }
+
+    // The layer table itself, at the places it is not the obvious order. A cape goes over
+    // everything and trousers go under everything, and neither is the order the slots are
+    // numbered in — which is what the app would fall back to if the table were dropped.
+    #[test]
+    fn stacks_the_slots_the_way_the_game_composites_them() {
+        let mut slots: Vec<u32> = (0..11).collect();
+        slots.sort_by_key(|slot| layer_of(*slot));
+        assert_eq!(slots, vec![2, 5, 0, 6, 1, 3, 10, 4, 7, 8, 9]);
+        // A weapon has no layer of its own and lands at the bottom, which costs nothing: it
+        // paints no part of the body, so it never shares a rectangle with anything.
+        assert_eq!(layer_of(WEAPON_SLOT), layer_of(SHIRT_SLOT));
+    }
+
+    // Everything with geometry keeps it, across the whole outfit: a helm on her head and a pad
+    // on each shoulder is three models from two pieces.
+    #[test]
+    fn hangs_the_geometry_of_every_piece_that_has_any() {
+        let dressed = outfit(&[(HELM_DISPLAY, HEAD), (SHOULDERS, SHOULDER), (CHESTPIECE, CHEST)]);
+        assert_eq!(
+            dressed.models,
+            vec![
+                WornModel { attachment: 11, file: 140_001, texture: Some(150_004) },
+                WornModel { attachment: 6, file: 140_002, texture: Some(150_002) },
+                WornModel { attachment: 5, file: 140_006, texture: Some(150_007) },
+            ]
+        );
+        // And what a helm takes away is taken away from the outfit, not from the helm.
+        assert_eq!(dressed.hidden, vec![0]);
+    }
+
+    // The game stores a set's repeated appearance as a copy of an earlier row rather than
+    // writing it again, so an outfit can genuinely name one helm twice. Hanging it twice is two
+    // identical surfaces at one depth, which is the z-fighting an assembled outfit is meant to
+    // be free of — and this is *not* a deduplication by slot, which would drop a second piece
+    // that had anything different about it.
+    #[test]
+    fn hangs_an_appearance_a_set_names_twice_once() {
+        let once = outfit(&[(HELM_DISPLAY, HEAD)]);
+        let twice = outfit(&[(HELM_DISPLAY, HEAD), (HELM_DISPLAY, HEAD)]);
+        assert_eq!(twice.models, once.models);
+        assert_eq!(twice.geosets, once.geosets);
+    }
+
+    // The arithmetic the whole restructure is for. Twelve appearances read one at a time is
+    // twelve parses of the four largest tables on this chain, and on a real install that is
+    // where showing a set stops being fast enough. Every table here is opened once or not at
+    // all, however many pieces the outfit holds.
+    #[test]
+    fn reads_each_of_the_games_tables_once_however_many_pieces_are_worn() {
+        let files = Noted::new();
+        of_set(
+            &files,
+            &[
+                Piece { display_info_id: HELM_DISPLAY, display_type: HEAD, inventory_type: 0 },
+                Piece { display_info_id: SHOULDERS, display_type: SHOULDER, inventory_type: 0 },
+                Piece { display_info_id: ROBE, display_type: CHEST, inventory_type: 0 },
+                Piece { display_info_id: LEGS, display_type: LEGS_SLOT, inventory_type: 0 },
+                Piece { display_info_id: BOOTS, display_type: FEET_SLOT, inventory_type: 0 },
+                Piece { display_info_id: GLOVES, display_type: HANDS, inventory_type: 0 },
+                Piece { display_info_id: CAPE, display_type: BACK_SLOT, inventory_type: 0 },
+            ],
+        )
+        .unwrap();
+
+        let mut opened = files.asked.into_inner();
+        opened.sort_unstable();
+        let mut once = opened.clone();
+        once.dedup();
+        assert_eq!(opened, once, "a table was parsed more than once for one outfit");
+
+        let mut wanted = vec![
+            ITEM_DISPLAY_INFO_MATERIAL_RES,
+            ITEM_DISPLAY_INFO,
+            TEXTURE_FILE_DATA,
+            COMPONENT_TEXTURE_FILE_DATA,
+            MODEL_FILE_DATA,
+            COMPONENT_MODEL_FILE_DATA,
+            HELMET_GEOSET_DATA,
+        ];
+        wanted.sort_unstable();
+        assert_eq!(once, wanted);
+    }
+
+    // And the other side of that: a table nothing in the outfit has a question for is not
+    // opened at all, which is what keeps a wardrobe of chestpieces off the model tables.
+    #[test]
+    fn opens_no_table_the_outfit_has_no_question_for() {
+        let files = Noted::new();
+        of_set(
+            &files,
+            &[Piece { display_info_id: CHESTPIECE, display_type: CHEST, inventory_type: 0 }],
+        )
+        .unwrap();
+        let opened = files.asked.into_inner();
+        assert!(!opened.contains(&MODEL_FILE_DATA), "{opened:?}");
+        assert!(!opened.contains(&HELMET_GEOSET_DATA), "{opened:?}");
+    }
+
+    /// Fixture files that remember which of the game's tables were parsed.
+    struct Noted {
+        files: DirFiles,
+        asked: std::cell::RefCell<Vec<u32>>,
+    }
+
+    impl Noted {
+        fn new() -> Self {
+            Self {
+                files: fixture_files(),
+                asked: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl GameFiles for Noted {
+        fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+            self.asked.borrow_mut().push(fdid);
+            self.files.read(fdid)
+        }
     }
 }
