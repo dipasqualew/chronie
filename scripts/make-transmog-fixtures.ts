@@ -40,6 +40,8 @@ const FILE_DATA_ID = {
   modelFileData: 1337833,
   textureFileData: 982459,
   componentTextureFileData: 1278239,
+  componentModelFileData: 1349053,
+  helmetGeosetData: 2821752,
   chrCustomizationChoice: 3450554,
   chrCustomizationOption: 3384247,
   chrCustomizationElement: 3512765,
@@ -317,13 +319,24 @@ const itemAppearance: TableSpec = {
  * So the numbers below are small, and `docs/character-rendering.md` is where the two groups
  * that do not follow the ordinary `group × 100 + (1 + value)` are written down.
  */
+/**
+ * What the two array columns after `GeosetGroup` hold where a display has nothing to say.
+ *
+ * `AttachmentGeosetGroup` is read by nothing at all and is here because a column between two
+ * that *are* read has to be laid out or everything behind it moves. `HelmetGeosetVis` is two
+ * `HelmetGeosetData` ids, one per gender, and a pair of zeroes is what the 210 helms in the
+ * game that hide nothing carry — along with everything that is not a helm.
+ */
+const NO_ATTACHMENT_GROUPS = [0, 0, 0, 0, 0, 0];
+const NO_HELMET_VIS = [0, 0];
+
 const itemDisplayInfo: TableSpec = {
   fileDataId: FILE_DATA_ID.itemDisplayInfo,
   layoutHash: 0x9f3ab8a9,
   tableHash: 0x71c40e52,
   idColumn: 0,
   flags: 4,
-  recordSize: 57,
+  recordSize: 89,
   columns: [
     { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // Flags
     { storage: Storage.bitpacked, offsetBits: 32, sizeBits: 10 }, // ItemVisual
@@ -334,7 +347,7 @@ const itemDisplayInfo: TableSpec = {
     { storage: Storage.bitpacked, offsetBits: 82, sizeBits: 10 }, // StateSpellVisualKitID
     { storage: Storage.bitpacked, offsetBits: 92, sizeBits: 10 }, // SheathedSpellVisualKitID
     { storage: Storage.bitpacked, offsetBits: 102, sizeBits: 10 }, // UnsheathedSpellVisualKitID
-    { storage: Storage.indexed, offsetBits: 112, sizeBits: 3, palette: [0, 1, 2, 3] }, // HelmetGeosetVis
+    { storage: Storage.indexed, offsetBits: 112, sizeBits: 3, palette: [0, 1, 2, 3] }, // filler
     { storage: Storage.plain, offsetBits: 128, sizeBits: 64 }, // ModelResourcesID[2]
     { storage: Storage.plain, offsetBits: 192, sizeBits: 64 }, // ModelMaterialResourcesID[2]
     {
@@ -346,6 +359,8 @@ const itemDisplayInfo: TableSpec = {
       palette: [0, 0, 1, 0, 2, 3],
     }, // ModelType[2]
     { storage: Storage.plain, offsetBits: 264, sizeBits: 192 }, // GeosetGroup[6]
+    { storage: Storage.plain, offsetBits: 456, sizeBits: 192 }, // AttachmentGeosetGroup[6]
+    { storage: Storage.plain, offsetBits: 648, sizeBits: 64 }, // HelmetGeosetVis[2]
   ],
   sections: [
     {
@@ -357,49 +372,69 @@ const itemDisplayInfo: TableSpec = {
         // A helm: one model slot, the helm group switched to its second variant, and a skull
         // element of -1 — which the game writes where a row drives no geoset at all, and
         // which read as a value would ask the body for its hundred-and-somethingth skull.
-        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [1, 0], [2, -1, 0, 0, 0, 0]],
+        // Its two `HelmetGeosetVis` entries hide different things, which is the trap: 701 is
+        // the one an app drawing a male body would take, and it hides the robe group.
+        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [1, 0], [2, -1, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, [701, 700]],
         // Shoulders: both model slots used, left and right.
-        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [2, 3], [1, 0, 0, 0, 0, 0]],
+        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [2, 3], [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // A chestpiece: no model at all, and the two of its five groups this body has —
         // sleeves over the bare arms, and a chest piece over the bare torso.
-        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [0, 0], [1, 1, 0, 0, 0, 0]],
+        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [0, 0], [1, 1, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // Boots: the first element is the boot itself, and the second is the feet group whose
         // zero means "booted" rather than "bare" — the exception a reader has to know about.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [0, 0], [1, 0, 0, 0, 0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [0, 0], [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // Gloves: a slot this body holds no geoset for at all, so it is texture and nothing
         // else — which is what most of a wardrobe does to most of a mesh.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [0, 0], [1, 0, 0, 0, 0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [0, 0], [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // Legs, whose first element is the trousers.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [0, 0], [3, 0, 0, 0, 0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [0, 0], [3, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // A weapon, which is geometry and nothing else.
-        [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [1, 0], [0, 0, 0, 0, 0, 0]],
+        [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [1, 0], [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // A shirt: nothing at all beyond its material.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0], [0, 0, 0, 0, 0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0], [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // Shoulders that keep their model in the second slot only, which is exactly what a
         // reader that stops at element zero calls "no model at all".
-        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [2, 3], [1, 0, 0, 0, 0, 0]],
+        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [2, 3], [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // A display naming a model resource no file in this install belongs to, which is what
         // a partial download looks like from here.
-        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [1, 0], [2, 0, 0, 0, 0, 0]],
+        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [1, 0], [2, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // One whose file is there and is not a model, which is the other kind of wrong and
         // has to read differently: an install missing a file is ordinary, an unreadable file
         // is this app being wrong about the format.
-        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [1, 0], [2, 0, 0, 0, 0, 0]],
+        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [1, 0], [2, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
         // A robe, which is the chest slot again and the one that shows why the groups are
         // worth getting right: it leaves the chest group bare and switches on the robe group
         // instead, which is the skirt that hangs over the legs.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51014, 0], [0, 0], [1, 0, 1, 0, 0, 0]],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51014, 0], [0, 0], [1, 0, 1, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        // A cape, which is the one slot with geometry and no model: both model slots are zero
+        // and it names a material anyway, because what it supplies is the picture on a cloak
+        // the body already carries. Its geoset value switches that cloak on.
+        [0, 18, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51015, 0], [0, 0], [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
       ],
       idList: [
         900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008, 900009, 900010, 900011,
-        900012,
+        900012, 900013,
       ],
     },
     {
       // Encrypted, so an appearance pointing here knows its slot and nothing more.
       key: 0x5d38af0c9e142b76n,
       rows: [
-        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [1, 0], [2, 0, 0, 0, 0, 0]],
+        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [1, 0], [2, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
       ],
       idList: [900900],
     },
@@ -589,17 +624,29 @@ const modelFileData: TableSpec = {
     {
       key: 0n,
       rows: [
-        [0, 0, 0, 0, 41001], // the helm
-        [0, 3, 0, 0, 41001], // the same helm at a coarser level of detail
-        [0, 0, 0, 0, 41002], // a shoulder's left pad
-        [0, 0, 0, 0, 41003], // and its right one
+        // The helm, modelled per body: the one this app draws, and the one it does not. The
+        // male copy is numbered *below* the female, so a reader that took the lowest id — the
+        // rule that is right for a texture and for a level of detail — puts a man's helm on
+        // her. Which is which is `componentModelFileData` and nowhere else.
+        [0, 0, 0, 0, 41001], // the helm, for a body this app never draws
+        [0, 0, 0, 0, 41001], // and the one it does
+        [0, 3, 0, 0, 41001], // the same helm at a coarser level of detail, for anybody
+        [0, 0, 0, 0, 41002], // a shoulder's left pad, for the same body this app is not
+        [0, 0, 0, 0, 41002], // and the one it is
+        [0, 0, 0, 0, 41003], // its right pad, likewise
+        [0, 0, 0, 0, 41003],
         [0, 0, 0, 0, 41004], // the weapon
         [0, 0, 0, 0, 41005], // the shoulder whose display fills only the second slot
         [0, 0, 0, 0, 41007], // the file that is there and is not a model
       ],
       // The client numbers a file's coarser variants above the file itself, which is why the
-      // helm's two rows are 140001 and 140101 and why the lower of them is the one to draw.
-      idList: [140001, 140101, 140002, 140006, 140004, 140005, 140007],
+      // helm's levels of detail are 140001 and 140101 and why the lower of them is the one to
+      // draw. The 139xxx files are the other body's, and are named by nothing else here.
+      idList: [
+        139001, 140001, 140101,
+        139002, 140002, 139006, 140006,
+        140004, 140005, 140007,
+      ],
     },
     {
       // Encrypted, so the model an unreleased appearance names cannot be found at all.
@@ -636,10 +683,12 @@ const textureFileData: TableSpec = {
       key: 0n,
       rows: [
         [0, 0, 51001], // the helm's own material, which its model never asks for
-        [0, 0, 51002], // the shoulder's, which its model does
+        [0, 0, 51002], // the shoulder's left pad, which its model does
         [1, 0, 51002], // the same material at a second usage, numbered above the first
+        [0, 0, 51003], // and its right pad's, which is a picture of its own
         [0, 0, 51008], // the weapon's
         [0, 0, 51011], // the second-slot shoulder's
+        [0, 0, 51015], // the cape's, which goes on the body's own cloak rather than a model
         // The body textures. 52001 is the material with a picture per body: the lower id is
         // the one this app must not use, so a reader that took the first file, or the
         // smallest, paints the character with somebody else's chest.
@@ -665,7 +714,7 @@ const textureFileData: TableSpec = {
         [0, 0, 53004], // the other swatch's skin, which this app must not reach
       ],
       idList: [
-        150004, 150002, 150102, 150005, 150003,
+        150004, 150002, 150102, 150007, 150005, 150003, 150006,
         151001, 151002, 151003, 151004, 151005, 151006, 151007, 151008, 151009, 151010, 151011,
         151012, 151013,
         160001, 160002, 160003, 160004,
@@ -730,6 +779,117 @@ const componentTextureFileData: TableSpec = {
       key: 0x2d70b95c14ea836fn,
       rows: [[1, 0, 1]],
       idList: [151007],
+    },
+  ],
+};
+
+/**
+ * `ComponentModelFileData` — which body each of a model resource's `.m2`s was modelled for.
+ *
+ * The same table as `componentTextureFileData` above with meshes behind it, down to the three
+ * columns, and the same trap: a helm resource names a file per race and per gender — 31 of
+ * them on a real install — and nothing in `ModelFileData` says which is which. A reader that
+ * took the lowest id would put a Human Male's helm on a Human Female, which is geometry that
+ * fits badly rather than an error.
+ *
+ * The silence is the same too. A weapon is modelled once and has no row here at all, and that
+ * is the fallback rather than a reject.
+ *
+ * A fourth column, `PositionIndex`, sits after these and reads -1 on every row of a real
+ * install. It is written so the record has the shape the game's does, and nothing reads it.
+ */
+const componentModelFileData: TableSpec = {
+  fileDataId: FILE_DATA_ID.componentModelFileData,
+  layoutHash: 0x5c1ad4e7,
+  tableHash: 0x2b937f60,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 8 }, // GenderIndex
+    { storage: Storage.plain, offsetBits: 8, sizeBits: 8 }, // ClassID
+    { storage: Storage.plain, offsetBits: 16, sizeBits: 8 }, // RaceID
+    { storage: Storage.plain, offsetBits: 24, sizeBits: 8 }, // PositionIndex
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        [0, 0, 1, 255], // 139001, the helm for a Human Male
+        [1, 0, 1, 255], // 140001, and for the Human Female this app draws
+        [0, 0, 1, 255], // 139002, the left pad, male
+        [1, 0, 1, 255], // 140002, female
+        [0, 0, 1, 255], // 139006, the right pad, male
+        [1, 0, 1, 255], // 140006, female
+      ],
+      idList: [139001, 140001, 139002, 140002, 139006, 140006],
+    },
+    {
+      // Encrypted, so the model it describes arrives untagged — which is the fallback rather
+      // than an exclusion, exactly as it is for a texture.
+      key: 0x71c3e05a9d248bf6n,
+      rows: [[1, 0, 1, 255]],
+      idList: [140005],
+    },
+  ],
+};
+
+/**
+ * `HelmetGeosetData` — which of a body's geoset groups a helm covers up.
+ *
+ * The only table here that takes geometry away rather than adding it, and the only one that
+ * names a *group* rather than a geoset: a helm hides hair, and there is no variant of hair
+ * that fits under one, so the whole hundred goes.
+ *
+ * Which helm a row belongs to is the relationship block, the way it is in
+ * `itemDisplayInfoMaterialRes` — the display names two `HelmetGeosetVisDataID`s, one per
+ * gender, and the rows underneath one of them cover every race the game ships. Both of those
+ * are traps, and this fixture holds each: 701 is the entry an app drawing a male body would
+ * take, and 700's second row belongs to a race this app is not. Either mistake hides the robe
+ * group, which is a skirt that vanishes rather than an error.
+ *
+ * **Hair is group 0**, which is the third trap and lives in `character.rs` rather than here:
+ * geoset 0 is the body itself, and hiding "group 0" without excepting it is a bald character
+ * with no body attached to her.
+ */
+const helmetGeosetData: TableSpec = {
+  fileDataId: FILE_DATA_ID.helmetGeosetData,
+  layoutHash: 0x3e70b1c9,
+  tableHash: 0x08d5a2f4,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 8 }, // RaceID
+    { storage: Storage.plain, offsetBits: 8, sizeBits: 8 }, // HideGeosetGroup
+    { storage: Storage.plain, offsetBits: 16, sizeBits: 8 }, // a column that reads zero
+    { storage: Storage.plain, offsetBits: 24, sizeBits: 8 }, // RaceBitSelection
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        // 700, the entry for the body this app draws: hair, and nothing else, for a Human.
+        [1, 0, 0, 32],
+        // The same entry for another race, which this app must not read: it hides the robe
+        // group, and a reader that skipped the race would lose the skirt off every robe.
+        [2, 13, 0, 32],
+        // 701, the entry for the other gender. Same trap, one column over.
+        [1, 13, 0, 32],
+      ],
+      idList: [1, 2, 3],
+      relationships: [
+        [700, 0],
+        [700, 1],
+        [701, 2],
+      ],
+    },
+    {
+      // Encrypted, so a helm pointing here hides nothing rather than everything.
+      key: 0x4f9b26d10c837ae5n,
+      rows: [[1, 0, 0, 32]],
+      idList: [4],
+      relationships: [[702, 0]],
     },
   ],
 };
@@ -1047,6 +1207,15 @@ interface ModelPart {
 interface ModelSpec {
   fileDataId: number;
   skinFileDataId: number;
+  /**
+   * The `.skel` this model keeps its skeleton in, for the one model that has one.
+   *
+   * A retail character's bone and attachment arrays are both *empty* in the `.m2` itself: the
+   * `SKID` chunk names a file beside it, and that is where the attachments a helm and a pair
+   * of pauldrons hang off actually live. An item's model has nothing to attach anything to
+   * and names no skeleton at all.
+   */
+  skeletonFileDataId?: number;
   cubes: number;
   textures: ModelTexture[];
   /** Material flags and blending mode. Flag `0x04` is two-sided; blend 0 opaque, 1 alpha
@@ -1168,8 +1337,98 @@ function writeModel(model: ModelSpec): Uint8Array {
   const textureFiles = new Bytes();
   for (const texture of model.textures) textureFiles.u32(texture.fileDataId);
   chunk("TXID", textureFiles);
+
+  if (model.skeletonFileDataId !== undefined) {
+    const skeleton = new Bytes();
+    skeleton.u32(model.skeletonFileDataId);
+    chunk("SKID", skeleton);
+  }
   return out.toBuffer();
 }
+
+/** One place on a body where a piece of gear hangs, in the game's axes: X forward, Y left,
+ * **Z up** — so a helm is up the Z and the two shoulders are a pair either side of Y. */
+interface AttachmentSpec {
+  /** The community's numbering: 5 and 6 are the shoulders, 11 the helm, 12 the back. */
+  id: number;
+  at: readonly [number, number, number];
+}
+
+/**
+ * One `.skel`: chunked like an M2, and holding the arrays the header used to.
+ *
+ * `SKA1` is the attachments and the lookup table beside them, and its offsets count from the
+ * chunk's own data rather than from the file — the same trap `MD21` sets, one file over, which
+ * is why the fixture has to lay them that way to prove anything.
+ *
+ * The records are deliberately not in id order, and their ids are not their indices. An
+ * attachment is found by the id in the record; a reader that indexed the array by attachment
+ * id would hang the helm off a shoulder, and only a fixture that disagrees about the two can
+ * say so.
+ */
+function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
+  const HEADER = 16;
+  const records = new Bytes();
+  for (const attachment of attachments) {
+    records.u32(attachment.id);
+    records.u16(0); // the bone it hangs off, which a bind pose does not need — see `m2.rs`
+    records.u16(0); // and two bytes the format has never named
+    for (const axis of attachment.at) records.f32(axis);
+    // `M2Track<uint8> animate_attached`: an interpolation type, a global sequence, and two
+    // empty arrays. Twenty bytes of nothing, and the reason a record is forty and not twenty.
+    records.u16(0);
+    records.u16(0);
+    for (let word = 0; word < 4; word += 1) records.u32(0);
+  }
+
+  const lookup = new Bytes();
+  for (let id = 0; id <= 12; id += 1) {
+    const at = attachments.findIndex((attachment) => attachment.id === id);
+    lookup.u16(at < 0 ? 0xffff : at);
+  }
+
+  const ska1 = new Bytes();
+  ska1.u32(attachments.length);
+  ska1.u32(HEADER);
+  ska1.u32(13);
+  ska1.u32(HEADER + records.length);
+  ska1.bytes(records.toBuffer());
+  ska1.bytes(lookup.toBuffer());
+
+  const out = new Bytes();
+  const chunk = (magic: string, payload: Bytes): void => {
+    out.bytes(new TextEncoder().encode(magic));
+    out.u32(payload.length);
+    out.bytes(payload.toBuffer());
+  };
+  // The name chunk a real skeleton opens with, which nothing here reads and which is what
+  // makes `SKA1` a chunk to find rather than the first one.
+  const name = new Bytes();
+  name.u32(1);
+  name.u32(8);
+  name.u32(0);
+  name.u32(0);
+  chunk("SKL1", name);
+  chunk("SKA1", ska1);
+  return out.toBuffer();
+}
+
+/**
+ * Where the fixture body's gear hangs.
+ *
+ * The body is a row of cubes along X rather than a person, so these are chosen to be told
+ * apart rather than to be anatomical: the helm is highest, the two shoulders are a mirrored
+ * pair, and the back is behind. What a test reads is the position after the Z-up to Y-up turn
+ * `m2.rs` makes — `(x, y, z)` becomes `(x, z, -y)` — so the helm arrives at `[0, 4, 0]` and
+ * the left shoulder, which is up the game's Y, at `[0, 3, -2]`.
+ */
+const ATTACHMENTS: readonly AttachmentSpec[] = [
+  { id: 12, at: [-1, 0, 2] }, // the back, which a quiver hangs off and a cloak does not
+  { id: 6, at: [0, 2, 3] }, // the left shoulder
+  { id: 11, at: [0, 0, 4] }, // the helm
+  { id: 1, at: [6, 0, 0] }, // a hand, which nothing in this app asks for
+  { id: 5, at: [0, -2, 3] }, // the right shoulder
+];
 
 /**
  * One `.skin`: which vertices a submesh uses, in which order, and what draws it.
@@ -1380,46 +1639,58 @@ const models: ModelSpec[] = [
 const characterModel: ModelSpec = {
   fileDataId: 1000764,
   skinFileDataId: 1000765,
-  cubes: 17,
-  // Written backwards into the combo list, so combo 1 reaches the skin and combo 0 the hair.
+  skeletonFileDataId: 1000766,
+  cubes: 19,
+  // Written backwards into the combo list, so combo 2 reaches the skin, combo 1 the hair and
+  // combo 0 the cape.
   textures: [
     { kind: 1, fileDataId: 0 }, // the composited body atlas
     { kind: 6, fileDataId: 0 }, // the hair, which this app composites nothing for
+    { kind: 2, fileDataId: 0 }, // the cape, which is the one item picture a body wears itself
   ],
   materials: [
     [0, 0], // the body: opaque
-    [0x04, 1], // the hair: alpha tested and two-sided, which is what a hair sheet is
+    [0x04, 1], // the hair and the cloak: alpha tested and two-sided, which is what a sheet is
   ],
   parts: [
-    // The skin, which is the one geoset with no group of its own.
-    { cube: 0, from: 0, count: 36, material: 0, level: 0, geoset: 0, combo: 1 },
+    // The skin, which is the one geoset with no group of its own — and the one a helm that
+    // hides group 0 must leave alone, because hair *is* group 0.
+    { cube: 0, from: 0, count: 36, material: 0, level: 0, geoset: 0, combo: 2 },
     // Group 8, sleeves: bare arms, and the variant a chestpiece would switch on.
-    { cube: 1, from: 0, count: 36, material: 0, level: 0, geoset: 801, combo: 1 },
-    { cube: 2, from: 0, count: 36, material: 0, level: 0, geoset: 802, combo: 1 },
+    { cube: 1, from: 0, count: 36, material: 0, level: 0, geoset: 801, combo: 2 },
+    { cube: 2, from: 0, count: 36, material: 0, level: 0, geoset: 802, combo: 2 },
     // Group 11, pants.
-    { cube: 3, from: 0, count: 36, material: 0, level: 0, geoset: 1101, combo: 1 },
-    { cube: 4, from: 0, count: 36, material: 0, level: 0, geoset: 1104, combo: 1 },
+    { cube: 3, from: 0, count: 36, material: 0, level: 0, geoset: 1101, combo: 2 },
+    { cube: 4, from: 0, count: 36, material: 0, level: 0, geoset: 1104, combo: 2 },
     // Group 20, feet: bare feet, and boots.
-    { cube: 5, from: 0, count: 36, material: 0, level: 0, geoset: 2001, combo: 1 },
-    { cube: 6, from: 0, count: 36, material: 0, level: 0, geoset: 2002, combo: 1 },
+    { cube: 5, from: 0, count: 36, material: 0, level: 0, geoset: 2001, combo: 2 },
+    { cube: 6, from: 0, count: 36, material: 0, level: 0, geoset: 2002, combo: 2 },
     // Group 27, helm: no helm, and a helm.
-    { cube: 7, from: 0, count: 36, material: 0, level: 0, geoset: 2701, combo: 1 },
-    { cube: 8, from: 0, count: 36, material: 0, level: 0, geoset: 2702, combo: 1 },
-    // Group 1, hair — the one part painted with something other than the body atlas.
-    { cube: 9, from: 0, count: 36, material: 1, level: 0, geoset: 101, combo: 0 },
+    { cube: 7, from: 0, count: 36, material: 0, level: 0, geoset: 2701, combo: 2 },
+    { cube: 8, from: 0, count: 36, material: 0, level: 0, geoset: 2702, combo: 2 },
+    // Group 0, the hair: the hairstyle a bare body wears and one it does not, both painted
+    // with something other than the body atlas. The group is 0 because that is where the
+    // retail body keeps it — geosets 1 to 33 on `humanfemale_hd`, read off 12.0.5.67 — which
+    // is what puts the hair and the skin in the same hundred and makes a helm's hiding sharp.
+    { cube: 9, from: 0, count: 36, material: 1, level: 0, geoset: 1, combo: 1 },
+    { cube: 17, from: 0, count: 36, material: 1, level: 0, geoset: 2, combo: 1 },
     // Group 21, the skull, past the first 64k indices.
-    { cube: 10, from: 0, count: 36, material: 0, level: 1, geoset: 2101, combo: 1 },
+    { cube: 10, from: 0, count: 36, material: 0, level: 1, geoset: 2101, combo: 2 },
     // Group 10, the chest: bare, and the piece a chestpiece switches on.
-    { cube: 11, from: 0, count: 36, material: 0, level: 0, geoset: 1001, combo: 1 },
-    { cube: 12, from: 0, count: 36, material: 0, level: 0, geoset: 1002, combo: 1 },
+    { cube: 11, from: 0, count: 36, material: 0, level: 0, geoset: 1001, combo: 2 },
+    { cube: 12, from: 0, count: 36, material: 0, level: 0, geoset: 1002, combo: 2 },
     // Group 13, the robe — the skirt a robe hangs over the legs, and the nothing that is
     // there the rest of the time.
-    { cube: 13, from: 0, count: 36, material: 0, level: 0, geoset: 1301, combo: 1 },
-    { cube: 14, from: 0, count: 36, material: 0, level: 0, geoset: 1302, combo: 1 },
+    { cube: 13, from: 0, count: 36, material: 0, level: 0, geoset: 1301, combo: 2 },
+    { cube: 14, from: 0, count: 36, material: 0, level: 0, geoset: 1302, combo: 2 },
     // Group 5, the boot. Boots drive this *and* group 20 above, which is the pair that says
     // whether a reader applied every group an item names or stopped at the first.
-    { cube: 15, from: 0, count: 36, material: 0, level: 0, geoset: 501, combo: 1 },
-    { cube: 16, from: 0, count: 36, material: 0, level: 0, geoset: 502, combo: 1 },
+    { cube: 15, from: 0, count: 36, material: 0, level: 0, geoset: 501, combo: 2 },
+    { cube: 16, from: 0, count: 36, material: 0, level: 0, geoset: 502, combo: 2 },
+    // Group 15, the cloak — the one piece of gear a body wears out of its own geometry. There
+    // is no `1501` beside it, exactly as there is none on the retail body: a bare back is a
+    // group with no default in it rather than a default that draws nothing.
+    { cube: 18, from: 0, count: 36, material: 1, level: 0, geoset: 1502, combo: 0 },
   ],
 };
 
@@ -1454,6 +1725,10 @@ const icons: IconSpec[] = [
   },
   { fileDataId: 150002, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
   { fileDataId: 150003, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
+  // The right shoulder pad's, so that a pair of pads is two pictures rather than one drawn
+  // twice — and the cape's, which is painted onto geometry the body already carries.
+  { fileDataId: 150006, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
+  { fileDataId: 150007, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
   {
     fileDataId: 150005, encoding: Encoding.dxt, alphaBits: 8,
     alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
@@ -1561,6 +1836,8 @@ emit("transmog", {
     modelFileData,
     textureFileData,
     componentTextureFileData,
+    componentModelFileData,
+    helmetGeosetData,
     chrModelTextureLayer,
     chrCustomizationElement,
     chrCustomizationMaterial,
@@ -1575,6 +1852,14 @@ emit("transmog", {
       { fileDataId: model.fileDataId, extension: "m2", bytes: writeModel(model) },
       { fileDataId: model.skinFileDataId, extension: "skin", bytes: writeSkin(model) },
     ]),
+    // The body's skeleton, which is where a retail character keeps the attachments a helm and
+    // a pair of pauldrons hang off — not in the model, whose own arrays are empty.
+    {
+      fileDataId: 1000766,
+      extension: "skel",
+      bytes: writeSkeleton(ATTACHMENTS),
+      note: "the body's attachments",
+    },
     // Icon 130007 belongs to content the game has not shipped. Its chunk is encrypted, and a
     // chunk only Blizzard holds the key to arrives as zeroes of the right length — so this is
     // what a reader is actually handed rather than an error it can act on. 130008 is named by

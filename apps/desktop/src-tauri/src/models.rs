@@ -23,7 +23,9 @@ use crate::m2::{Model, Paint};
 use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
 
 /// `ModelFileData` — every `.m2` the client owns, keyed by the resource that names it.
-const MODEL_FILE_DATA: u32 = 1337833;
+///
+/// Shared with `worn`, which asks it the same question for a model that goes on a body.
+pub const MODEL_FILE_DATA: u32 = 1337833;
 /// `TextureFileData` — the same for `.blp`s.
 ///
 /// Shared with `worn`, which asks it a wider question: an item's model wants the one file its
@@ -32,7 +34,7 @@ const MODEL_FILE_DATA: u32 = 1337833;
 pub const TEXTURE_FILE_DATA: u32 = 982459;
 
 /// The one column of `ModelFileData` that is not the row id: which model resource the file is.
-const MODEL_RESOURCES_ID: usize = 4;
+pub const MODEL_RESOURCES_ID: usize = 4;
 /// The same for `TextureFileData`.
 pub const MATERIAL_RESOURCES_ID: usize = 2;
 
@@ -66,8 +68,9 @@ pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<
         return Ok(None);
     };
 
-    let Some(model_file) = file_named(files, MODEL_FILE_DATA, MODEL_RESOURCES_ID, model_resource)?
-    else {
+    // The same question `worn` asks of a helm that is about to go on a head, and the same
+    // answer: a model resource names a file per body, and this app draws one body.
+    let Some(model_file) = crate::worn::model_file(files, model_resource)? else {
         return Ok(None);
     };
     let Ok(bytes) = files.read(model_file) else {
@@ -84,7 +87,7 @@ pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<
     // and not before: `TextureFileData` is a table with a row per texture the client owns,
     // and a model that paints itself entirely out of its own `TXID` never needs it opened.
     let supplied: RefCell<Option<Option<u32>>> = RefCell::new(None);
-    let glb = glb::write(&mesh, &|paint| {
+    let picture = |paint| {
         let texture = match paint {
             Paint::File(fdid) => Some(fdid),
             // Whichever type asked: an item's model wants one texture and the appearance's
@@ -99,8 +102,8 @@ pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<
         // A texture that will not decode leaves its part grey rather than failing the model:
         // the shape of a helm is most of what a reader opened it for.
         files.read(texture).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
-    })?;
-    Ok(Some(glb))
+    };
+    Ok(Some(glb::write(&[glb::Piece::only(&mesh, &picture)])?))
 }
 
 /// What a display says it is drawn with: a model resource, and the material that paints it.
@@ -127,10 +130,11 @@ fn resources(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<(u32,
 
 /// The FileDataID of the one file in `table` that is the given resource.
 ///
-/// A resource can name more than one file — a model and its lower levels of detail sit under
-/// the same id — and the client numbers a file's variants above the file itself, so the
-/// lowest id is the one to draw.
-fn file_named(
+/// A resource can name more than one file — a texture and its second usage sit under the same
+/// id — and the client numbers a file's variants above the file itself, so the lowest id is
+/// the one to draw. That rule is enough for a *texture*: `worn` is where the one that names a
+/// file per body lives, because the table that says which body is which is a different one.
+pub(crate) fn file_named(
     files: &dyn GameFiles,
     table: u32,
     column: usize,
@@ -227,6 +231,9 @@ mod tests {
             vec![
                 ITEM_DISPLAY_INFO,
                 MODEL_FILE_DATA,
+                // Which of the resource's three files is this body's, which is a table of
+                // its own — and the reason a helm shown alone is the same helm worn.
+                1_349_053, // ComponentModelFileData
                 140001, // the helm's .m2
                 141001, // the skin profile its SFID names
                 150001, // the texture its TXID names

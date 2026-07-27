@@ -113,6 +113,9 @@ pub mod display_column {
     /// and a robe puts a 1 in its third while leaving its second at 0. `docs/game-files.md`
     /// has the whole tail of array columns and what told them apart.
     pub const GEOSET_GROUP: usize = 13;
+    /// Which rows of `HelmetGeosetData` say what a helm hides: an array of two, one per
+    /// gender. Column 14 between them is `AttachmentGeosetGroup[6]`, which nothing reads.
+    pub const HELMET_GEOSET_VIS: usize = 15;
 }
 
 /// How many model slots `ModelResourcesID` holds, and how wide one of them is. The file

@@ -5,9 +5,12 @@
 //! which textures the model wants and how they are blended — plus two chunks beside it that
 //! replace what used to be filenames: `SFID` names the `.skin` files and `TXID` the textures.
 //!
-//! What is deliberately not read: bones, sequences, `M2Track`s, `.anim` files, particles,
-//! ribbons, cameras and lights. A vertex position in an M2 is already the bind pose, so a
-//! still picture of an item needs none of it.
+//! What is deliberately not read: sequences, `M2Track`s, `.anim` files, particles, ribbons,
+//! cameras and lights. A vertex position in an M2 is already the bind pose, so a still picture
+//! of an item needs none of it.
+//!
+//! What *is* read beyond the geometry is where a piece of gear hangs off a body — see
+//! [`attachments`], and the `.skel` file it takes rather than the model.
 //!
 //! Two traps, both written down in `docs/character-rendering.md` and both silent:
 //!
@@ -25,6 +28,8 @@
 const MD21: &[u8; 4] = b"MD21";
 const SFID: &[u8; 4] = b"SFID";
 const TXID: &[u8; 4] = b"TXID";
+/// The `.skel` file this model keeps its skeleton in, when it keeps one there at all.
+const SKID: &[u8; 4] = b"SKID";
 
 /// What the `MD21` payload starts with, which is the pre-Legion file's own magic.
 const MD20: &[u8; 4] = b"MD20";
@@ -57,7 +62,24 @@ mod batch_field {
     pub const TEXTURE_COMBO: usize = 16;
 }
 
+/// The one chunk of a `.skel` this reads, and where the attachment list sits inside it.
+///
+/// A `.skel` is chunked the same way an M2 is, and `SKA1` holds the two arrays the game's own
+/// `M2Attachment` block used to: the attachments themselves, then a lookup table from
+/// attachment id to index which nothing here needs, because the id travels in the record.
+///
+/// Its offsets, like `MD21`'s, count from the chunk's own data rather than from the file.
+const SKA1: &[u8; 4] = b"SKA1";
+const ATTACHMENTS: usize = 0;
+
+/// Where the two fields of one `M2Attachment` this reads sit, in bytes.
+mod attachment_field {
+    pub const ID: usize = 0;
+    pub const POSITION: usize = 8;
+}
+
 /// Sizes of the records those lists hold, in bytes.
+const ATTACHMENT_SIZE: usize = 40;
 const VERTEX_SIZE: usize = 48;
 const TEXTURE_SIZE: usize = 16;
 const MATERIAL_SIZE: usize = 4;
@@ -126,6 +148,23 @@ pub struct Part {
     pub two_sided: bool,
 }
 
+/// A place on a body where a piece of gear hangs, and where that place is.
+///
+/// The position is the attachment's own, in the viewer's axes, and it is the whole of what a
+/// bind-pose render needs. The format states it as "relative to the bone", and a bone in bind
+/// pose carries no transform at all — no keyframes, so no translation, rotation or scale — so
+/// the bone contributes an identity matrix and the position is already in model space.
+///
+/// Read off build 12.0.5.67 on 2026-07-27: on `humanfemale_hd`'s skeleton all 43 attachments
+/// state a position exactly equal to their bone's pivot, which is the reading above arriving
+/// twice. That is why nothing here opens the bone array — see `docs/character-rendering.md`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Attachment {
+    /// The community's numbering: 5 and 6 are the shoulders, 11 the helm, 12 the back.
+    pub id: u32,
+    pub position: [f32; 3],
+}
+
 /// A model and one of its skin profiles, resolved into something drawable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mesh {
@@ -151,6 +190,8 @@ pub struct Model {
     materials: Vec<(u16, u16)>,
     /// `SFID`: the skin profiles, most detailed first.
     skins: Vec<u32>,
+    /// `SKID`: the `.skel` this model's bones and attachments were moved out into.
+    skeleton: Option<u32>,
 }
 
 impl Model {
@@ -159,6 +200,7 @@ impl Model {
         let mut md21: Option<&[u8]> = None;
         let mut skins: Vec<u32> = Vec::new();
         let mut texture_files: Vec<u32> = Vec::new();
+        let mut skeleton: Option<u32> = None;
 
         let mut at = 0usize;
         while at + 8 <= bytes.len() {
@@ -175,6 +217,7 @@ impl Model {
                 // shorter than it says. Its own length is what bounds the read.
                 SFID => skins = read_u32s(payload),
                 TXID => texture_files = read_u32s(payload),
+                SKID => skeleton = read_u32s(payload).first().copied().filter(|id| *id != 0),
                 _ => {}
             }
             at = start.saturating_add(size);
@@ -196,6 +239,7 @@ impl Model {
             texture_combos,
             materials,
             skins,
+            skeleton,
         })
     }
 
@@ -205,6 +249,16 @@ impl Model {
     /// low-detail ones. A model shown on its own in a window is only ever worth the first.
     pub fn skin_file_data_id(&self) -> Option<u32> {
         self.skins.first().copied().filter(|id| *id != 0)
+    }
+
+    /// The `.skel` holding this model's skeleton, which is where its attachments are.
+    ///
+    /// A character's are not in the model at all: `humanfemale_hd`'s own bone and attachment
+    /// arrays are both empty and its `SKID` names a 16 MB file that holds them, along with
+    /// every animation. That is the only shape this app has to read — an item's model has
+    /// nothing to attach anything to — so [`attachments`] takes a skeleton and not a model.
+    pub fn skeleton_file_data_id(&self) -> Option<u32> {
+        self.skeleton
     }
 
     /// The textures the model owns, as FileDataIDs, without the slots it leaves to the item.
@@ -313,7 +367,48 @@ impl Model {
     }
 }
 
+/// Where each piece of gear hangs off a body, out of that body's `.skel`.
+///
+/// The `SKA1` chunk holds what the pre-Legion header held at offset `0xf0`: a count-and-offset
+/// pair naming a run of 40-byte records, each an attachment id, the bone it hangs off, and a
+/// position. Only the first and the last are read — see [`Attachment`] for why the bone is not.
+///
+/// A skeleton with no `SKA1` is not an error. Every character body has one; this is what says
+/// so for the file that turns out not to.
+pub fn attachments(skeleton: &[u8]) -> Result<Vec<Attachment>, String> {
+    let Some(ska1) = chunk_named(skeleton, SKA1) else {
+        return Ok(Vec::new());
+    };
+    let array = array_at(ska1, ATTACHMENTS)?;
+    let mut found = Vec::with_capacity(array.count);
+    for index in 0..array.count {
+        let record = array.record(ska1, index, ATTACHMENT_SIZE)?;
+        found.push(Attachment {
+            id: read_u32(record, attachment_field::ID)?,
+            position: y_up(read_vector(record, attachment_field::POSITION)?),
+        });
+    }
+    Ok(found)
+}
+
 /* ---------- reading the pieces ---------- */
+
+/// The payload of the first chunk with this magic, bounded by the file's own length.
+fn chunk_named<'a>(bytes: &'a [u8], magic: &[u8; 4]) -> Option<&'a [u8]> {
+    let mut at = 0usize;
+    while at + 8 <= bytes.len() {
+        let size = read_u32(bytes, at + 4).ok()? as usize;
+        let start = at + 8;
+        // A chunk that runs past the end of the file is a truncated download rather than a
+        // chunk, and what is there of it is still worth reading.
+        let end = start.saturating_add(size).min(bytes.len());
+        if &bytes[at..at + 4] == magic {
+            return bytes.get(start.min(bytes.len())..end);
+        }
+        at = start.saturating_add(size);
+    }
+    None
+}
 
 /// A count-and-offset pair, which is how every list in an M2 or a skin is written.
 struct Md21Array {
@@ -542,7 +637,10 @@ mod tests {
         let types: Vec<Paint> = body.parts.iter().map(|part| part.paint).collect();
         // Every part but the hair is the composited body atlas, which is type 1.
         assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 16);
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 1);
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 2);
+        // And the cape, which is the third: a body wears one item picture out of its own
+        // geometry, and it is neither the atlas nor the hair.
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(2)).count(), 1);
     }
 
     // The geoset is what says whether a part of a body is drawn at all, and it is the one
@@ -554,8 +652,8 @@ mod tests {
         assert_eq!(
             geosets,
             vec![
-                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 101, 1001, 1002, 1301, 1302,
-                501, 502, 2101,
+                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 1, 2, 1001, 1002, 1301, 1302,
+                501, 502, 1502, 2101,
             ]
         );
         // An item is drawn whole, and says so by belonging to no geoset.

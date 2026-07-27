@@ -15,6 +15,9 @@
 //!                                     └──▶ ComponentTextureFileData: which body each is for
 //!
 //! ItemDisplayInfo.GeosetGroup[6]  which variant of which group the item switches on
+//! ItemDisplayInfo.ModelResourcesID[2] ──▶ ModelFileData ──▶ several .m2s
+//!                                            └──▶ ComponentModelFileData: which body each is
+//! ItemDisplayInfo.HelmetGeosetVis[2] ──▶ HelmetGeosetData: what a helm hides
 //! ```
 //!
 //! The first chain has two traps beyond the relationship block. **A material can name more
@@ -30,18 +33,32 @@
 //! about both — `docs/game-files.md` has the run that settled them. Getting either wrong is
 //! quiet rather than loud, which is why nothing here hides a group it cannot then show
 //! something for: see [`crate::character::dressed`].
+//!
+//! The third chain is the same trap as the first, one table over. **A model resource names an
+//! `.m2` per body too** — a helm is modelled for every race and gender the game ships — and
+//! `ComponentModelFileData` is `ComponentTextureFileData` with models behind it, down to the
+//! column positions. [`for_this_body`] is therefore one function asked twice, which is the
+//! whole reason it takes the table's rows rather than reading them itself.
+//!
+//! The fourth is the smallest and the only one that takes geometry *away*: a helm hides hair,
+//! ears and facial hair, and `HelmetGeosetData` says which groups, per race.
 
 use std::collections::HashMap;
 
 use crate::casc::GameFiles;
 use crate::db2::{Db2, Row};
-use crate::models::{MATERIAL_RESOURCES_ID, TEXTURE_FILE_DATA};
-use crate::transmog::{display_column, ITEM_DISPLAY_INFO};
+use crate::models::{file_named, MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
+use crate::models::TEXTURE_FILE_DATA;
+use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOT_BITS};
 
 /// `ItemDisplayInfoMaterialRes` — which texture an appearance paints each part of a body with.
 const ITEM_DISPLAY_INFO_MATERIAL_RES: u32 = 1280614;
 /// `ComponentTextureFileData` — which body a given texture file was painted for.
 const COMPONENT_TEXTURE_FILE_DATA: u32 = 1278239;
+/// `ComponentModelFileData` — the same for a model file, and the same three columns.
+const COMPONENT_MODEL_FILE_DATA: u32 = 1349053;
+/// `HelmetGeosetData` — which of a body's geoset groups a helm hides, race by race.
+const HELMET_GEOSET_DATA: u32 = 2821752;
 
 /// Columns of `ItemDisplayInfoMaterialRes`. Its own id is of no use to anybody: what ties a
 /// row to an appearance is the relationship block, which [`Row::foreign_id`] reads.
@@ -51,11 +68,27 @@ mod material_column {
     pub const MATERIAL_RESOURCES_ID: usize = 1;
 }
 
-/// Columns of `ComponentTextureFileData`, whose row id is the texture's own FileDataID.
+/// Columns of `ComponentTextureFileData`, whose row id is the texture's own FileDataID — and
+/// of `ComponentModelFileData`, which is the same three columns with models behind them.
+///
+/// `ComponentModelFileData` carries a fourth, `PositionIndex`, which reads `-1` on every one
+/// of its rows on 12.0.5.67 and which nothing here has a use for.
 mod component_column {
     pub const GENDER: usize = 0;
     pub const CLASS: usize = 1;
     pub const RACE: usize = 2;
+}
+
+/// Columns of `HelmetGeosetData`. Which helm a row belongs to is the relationship block, as it
+/// is in `ItemDisplayInfoMaterialRes`, so [`Row::foreign_id`] is what reads it.
+///
+/// Two more columns follow these, read off 12.0.5.67 and left alone: one is zero on all but
+/// five of the table's 19,150 rows, and `RaceBitSelection` is `32` or `-1` throughout. Neither
+/// has a reading this app could act on, and ignoring them errs towards hiding — which is what
+/// a helm does.
+mod helmet_column {
+    pub const RACE: usize = 0;
+    pub const HIDE_GEOSET_GROUP: usize = 1;
 }
 
 /// The body every appearance in this app is worn on, as the game numbers bodies.
@@ -123,6 +156,42 @@ const HELM: u16 = 27;
 const BOOTED: u16 = 2002;
 const HELMETED: u16 = 2702;
 
+/// Where each slot's model slots hang off the body, as the community numbers attachments.
+///
+/// Indexed by `DisplayType` like [`SLOT_GROUPS`], and parallel to `ModelResourcesID`: element
+/// `i` of that array goes to attachment `SLOT_ATTACHMENTS[slot][i]`. Everything not named here
+/// has no model of its own, and the weapons above 10 hang off hands, which is another issue.
+///
+/// The ids are the community's, at <https://wowdev.wiki/M2#Attachments>, and the positions
+/// `humanfemale_hd`'s skeleton states for them on 12.0.5.67 are what says they are right: 11
+/// sits at the top of the head, 5 and 6 are a mirrored pair at shoulder height, and 12 is
+/// behind the chest.
+const SLOT_ATTACHMENTS: [&[u32]; 11] = [
+    &[11],    // 0  head: the helm
+    &[6, 5],  // 1  shoulder: the left pad, then the right
+    &[],      // 2  shirt
+    &[],      // 3  chest
+    &[],      // 4  waist
+    &[],      // 5  legs
+    &[],      // 6  feet
+    &[],      // 7  wrist
+    &[],      // 8  hands
+    &[],      // 9  back — a cape is the body's own geometry, not a model. See [`cape_of`].
+    &[],      // 10 tabard
+];
+
+/// The slot a cape is worn in, and the slot a helm is.
+const BACK: u32 = 9;
+const HEAD: u32 = 0;
+
+/// Which of `HelmetGeosetVis`'s two elements is this app's body.
+///
+/// The community's definitions read the array as male then female, and this app draws a Human
+/// Female. On 12.0.5.67 the two elements name the same hidden groups for hair on every one of
+/// the 5,698 helms in the table — 4,576 hide it either way — so the acceptance this was
+/// written for does not turn on the choice; the rarer groups do.
+const FEMALE_VIS: usize = 1;
+
 /// One texture, and which part of the body it is painted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentTexture {
@@ -142,11 +211,30 @@ pub struct Geoset {
     pub geoset: u16,
 }
 
+/// One model an appearance hangs off the body, already narrowed to this body's copy of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WornModel {
+    /// Where it hangs, as the community numbers a body's attachments.
+    pub attachment: u32,
+    /// The `.m2` itself.
+    pub file: u32,
+    /// The one picture the model paints itself with, where the item names one.
+    pub texture: Option<u32>,
+}
+
 /// Everything one appearance does to a bare body.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Worn {
     pub textures: Vec<ComponentTexture>,
     pub geosets: Vec<Geoset>,
+    /// The geometry it hangs off the body: a helm, or a pad on each shoulder.
+    pub models: Vec<WornModel>,
+    /// The picture the body's own cape geometry is painted with, for the one slot whose
+    /// "model" is a geoset the body already holds. Bound as M2 texture type 2.
+    pub cape: Option<u32>,
+    /// The geoset groups a helm hides outright — hair, ears, facial hair — rather than
+    /// swapping a variant of. The whole group goes, which is why it is a group and not an id.
+    pub hidden: Vec<u16>,
 }
 
 impl Worn {
@@ -156,8 +244,14 @@ impl Worn {
     /// content it has not shipped, and a slot whose only texture was painted for another body
     /// resolves to nothing. Either way there is nothing to put on the character, and the
     /// window is better off showing the appearance's icon.
+    ///
+    /// Note what is *not* here: `hidden` on its own is a helm this install holds no model for,
+    /// which is a bald character rather than a helmed one and is not worth showing.
     pub fn is_empty(&self) -> bool {
-        self.textures.is_empty() && self.geosets.is_empty()
+        self.textures.is_empty()
+            && self.geosets.is_empty()
+            && self.models.is_empty()
+            && self.cape.is_none()
     }
 }
 
@@ -177,13 +271,146 @@ pub fn of(files: &dyn GameFiles, display_info_id: u32, display_type: u32) -> Res
     };
 
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
-    let geosets = displays
-        .rows()
-        .find(|row| row.id() == display_info_id)
-        .map(|display| geosets_of(&display, display_type))
-        .unwrap_or_default();
+    let Some(display) = displays.rows().find(|row| row.id() == display_info_id) else {
+        return Ok(Worn {
+            textures,
+            ..Default::default()
+        });
+    };
 
-    Ok(Worn { textures, geosets })
+    Ok(Worn {
+        textures,
+        geosets: geosets_of(&display, display_type),
+        models: models_of(files, &display, display_type)?,
+        cape: cape_of(files, &display, display_type)?,
+        hidden: hidden_of(files, &display, display_type)?,
+    })
+}
+
+/// The models an appearance hangs off the body, one per model slot the display fills.
+///
+/// Both slots, not the first: shoulders keep a left pad in one and a right in the other, and
+/// showing one of them is the shape of an appearance that has half its geometry. Which
+/// attachment each goes to is [`SLOT_ATTACHMENTS`], and it is the position in the array rather
+/// than anything in the row that says which is which.
+fn models_of(
+    files: &dyn GameFiles,
+    display: &Row<'_>,
+    display_type: u32,
+) -> Result<Vec<WornModel>, String> {
+    let attachments = SLOT_ATTACHMENTS
+        .get(display_type as usize)
+        .copied()
+        .unwrap_or(&[]);
+    let asked: Vec<(u32, u32, u32)> = attachments
+        .iter()
+        .enumerate()
+        .map(|(slot, attachment)| {
+            (
+                *attachment,
+                display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
+                display.element(display_column::MATERIAL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
+            )
+        })
+        .filter(|(_, model, _)| *model != 0)
+        .collect();
+    if asked.is_empty() {
+        // Neither table below is worth opening for an appearance that hangs nothing off the
+        // body, which is every slot but two and most of what a reader clicks on.
+        return Ok(Vec::new());
+    }
+
+    let mut found = Vec::with_capacity(asked.len());
+    for (attachment, model, material) in asked {
+        let Some(file) = model_file(files, model)? else {
+            continue;
+        };
+        found.push(WornModel {
+            attachment,
+            file,
+            texture: match material {
+                0 => None,
+                resource => file_named(files, TEXTURE_FILE_DATA, MATERIAL_RESOURCES_ID, resource)?,
+            },
+        });
+    }
+    Ok(found)
+}
+
+/// The `.m2` a model resource names for the body this app draws.
+///
+/// A model resource names a file per race and per gender — a helm's does 31 of them on
+/// 12.0.5.67 — and `ComponentModelFileData` is the only place saying which is which. The
+/// matching is [`for_this_body`], the same function the textures go through, and silence means
+/// the same thing there: a model nothing was said about is the fallback rather than a reject,
+/// which is what a weapon and a shield are.
+pub fn model_file(files: &dyn GameFiles, resource: u32) -> Result<Option<u32>, String> {
+    let table = Db2::parse(files.read(MODEL_FILE_DATA)?)?;
+    let mut candidates: Vec<u32> = table
+        .rows()
+        .filter(|row| row.number(MODEL_RESOURCES_ID) == resource)
+        .map(|row| row.id())
+        .collect();
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    // Lowest first, which is the order the fallback below leans on: the client numbers a
+    // model's coarser levels of detail above the model itself.
+    candidates.sort_unstable();
+    Ok(for_this_body(&candidates, &bodies_in(files, COMPONENT_MODEL_FILE_DATA)?))
+}
+
+/// The picture a cape is painted with, which is not a model and not a body texture either.
+///
+/// The back slot is the one that has geometry without having a model: the body carries the
+/// cloak itself as geoset group 15, and what an appearance supplies is only the picture on it —
+/// out of `ModelMaterialResourcesID[0]`, and bound as M2 texture **type 2**, which is the type
+/// the body's cape parts ask for and nothing else on it does. Read off 12.0.5.67:
+/// `humanfemale_hd`'s geosets 1502 to 1510 are the only parts of the body on that type, and a
+/// back display keeps both its model slots at zero and names a material anyway.
+fn cape_of(
+    files: &dyn GameFiles,
+    display: &Row<'_>,
+    display_type: u32,
+) -> Result<Option<u32>, String> {
+    if display_type != BACK {
+        return Ok(None);
+    }
+    match display.element(display_column::MATERIAL_RESOURCES_ID, 0, MODEL_SLOT_BITS) {
+        0 => Ok(None),
+        resource => file_named(files, TEXTURE_FILE_DATA, MATERIAL_RESOURCES_ID, resource),
+    }
+}
+
+/// The geoset groups a helm hides on this body.
+///
+/// Not variants: a helm takes hair, ears or a beard away entirely, and what the table names is
+/// the group rather than an id inside it. Which rows apply is the display's `HelmetGeosetVis`
+/// through the relationship block, then the race — the table lists every race the game ships
+/// under one vis id, and a reader that took them all would hide groups meant for a Draenei's
+/// horns.
+fn hidden_of(
+    files: &dyn GameFiles,
+    display: &Row<'_>,
+    display_type: u32,
+) -> Result<Vec<u16>, String> {
+    if display_type != HEAD {
+        return Ok(Vec::new());
+    }
+    let vis = display.element(display_column::HELMET_GEOSET_VIS, FEMALE_VIS, MODEL_SLOT_BITS);
+    if vis == 0 {
+        // 210 of the game's helms say this, and it means an open helm that hides nothing.
+        return Ok(Vec::new());
+    }
+    let table = Db2::parse(files.read(HELMET_GEOSET_DATA)?)?;
+    let mut groups: Vec<u16> = table
+        .rows()
+        .filter(|row| row.foreign_id() == vis && row.number(helmet_column::RACE) == HUMAN)
+        .filter_map(|row| u16::try_from(row.number(helmet_column::HIDE_GEOSET_GROUP)).ok())
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+    Ok(groups)
 }
 
 /// The sections an appearance paints, as `(section, material resource)`.
@@ -224,20 +451,7 @@ fn resolve(files: &dyn GameFiles, materials: &[(u32, u32)]) -> Result<Vec<Compon
         files.sort_unstable();
     }
 
-    let components = Db2::parse(files.read(COMPONENT_TEXTURE_FILE_DATA)?)?;
-    let bodies: HashMap<u32, (u32, u32, u32)> = components
-        .rows()
-        .map(|row| {
-            (
-                row.id(),
-                (
-                    row.number(component_column::GENDER),
-                    row.number(component_column::CLASS),
-                    row.number(component_column::RACE),
-                ),
-            )
-        })
-        .collect();
+    let bodies = bodies_in(files, COMPONENT_TEXTURE_FILE_DATA)?;
 
     Ok(materials
         .iter()
@@ -251,14 +465,40 @@ fn resolve(files: &dyn GameFiles, materials: &[(u32, u32)]) -> Result<Vec<Compon
         .collect())
 }
 
-/// Which of a material's textures was painted for the body this app draws.
+/// Which body each file in a component table belongs to, keyed by the file's own FileDataID.
+///
+/// One function for two tables: `ComponentTextureFileData` and `ComponentModelFileData` are
+/// the same three columns keyed the same way, and the only difference between them is whether
+/// the file behind the id is a picture or a mesh.
+fn bodies_in(files: &dyn GameFiles, table: u32) -> Result<HashMap<u32, (u32, u32, u32)>, String> {
+    let table = Db2::parse(files.read(table)?)?;
+    Ok(table
+        .rows()
+        .map(|row| {
+            (
+                row.id(),
+                (
+                    row.number(component_column::GENDER),
+                    row.number(component_column::CLASS),
+                    row.number(component_column::RACE),
+                ),
+            )
+        })
+        .collect())
+}
+
+/// Which of a resource's files was made for the body this app draws.
 ///
 /// Following wow.export's `DBComponentTextureFileData`: a candidate is in the running when its
 /// gender is this one or "any" and its class is this one or "any", and among those the more
 /// specific wins — a female texture over a generic one, then a class match, then a race match.
 ///
 /// A candidate the table says nothing about is the fallback rather than a reject, and it is
-/// what most of the game's armour is: one texture, no row, worn by everybody.
+/// what most of the game's armour is: one texture, no row, worn by everybody. On the model
+/// side it is what a weapon and a shield are — geometry nobody modelled twice.
+///
+/// `candidates` is in ascending order, which is what the fallback leans on: the client numbers
+/// a file's variants above the file itself.
 fn for_this_body(candidates: &[u32], bodies: &HashMap<u32, (u32, u32, u32)>) -> Option<u32> {
     let mut best: Option<(u32, u32)> = None;
     for file in candidates {
