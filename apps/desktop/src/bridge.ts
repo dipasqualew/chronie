@@ -70,12 +70,17 @@ export const desktop = {
   characterModel: (): Promise<CharacterModelPayload> => mock
     ? Promise.resolve({ model: mock.characterModel })
     : invoke<CharacterModelPayload>("character_model"),
-  // The same body with one appearance on it, which is how the eight slots that have no model
-  // of their own are shown. The slot goes across beside the display id: it is what says which
-  // geoset groups the appearance drives, and only the appearance knows it.
-  wornModel: (displayInfoId: number, displayType: number): Promise<WornModelPayload> => mock
+  // The same body with one appearance on it, which is how every slot is shown. Two numbers go
+  // across beside the display id, and neither is in the display: the slot is what says which
+  // geoset groups the appearance drives, and where the item is worn is what says which hand a
+  // weapon is held in.
+  wornModel: (
+    displayInfoId: number,
+    displayType: number,
+    inventoryType: number,
+  ): Promise<WornModelPayload> => mock
     ? Promise.resolve({ displayInfoId, model: mock.wornModels[displayInfoId] ?? null })
-    : invoke<WornModelPayload>("worn_model", { displayInfoId, displayType }),
+    : invoke<WornModelPayload>("worn_model", { displayInfoId, displayType, inventoryType }),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {

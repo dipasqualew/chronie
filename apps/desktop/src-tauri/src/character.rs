@@ -483,6 +483,11 @@ mod tests {
     const HELM: Appearance = (900_001, 0, 0);
     const SHOULDERS: Appearance = (900_002, 1, 0);
     const CAPE: Appearance = (900_013, 9, 0);
+    /// And the weapon rack, which is the one kind of appearance whose third number does the
+    /// work: the display and the slot say a weapon, and where it is worn says which hand.
+    const ONE_HANDER: Appearance = (900_007, 11, 13);
+    const OFF_HAND: Appearance = (900_007, 15, 23);
+    const SHIELD: Appearance = (900_015, 13, 14);
 
     fn mesh() -> Mesh {
         worn_mesh(&Worn::default())
@@ -971,6 +976,46 @@ mod tests {
     fn taking_the_helm_off_puts_the_hair_back() {
         assert_eq!(drawn(&worn_mesh(&Worn::default())), drawn(&mesh()));
         assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&1), true);
+    }
+
+    // The acceptance for a weapon: it is in her hand rather than in mid-air, and *which* hand
+    // is the one thing the display cannot say. The same display, read as a one-hander and as
+    // something held in the other hand, is the same mesh on two different sides of her.
+    #[test]
+    fn puts_a_sword_in_the_hand_the_game_says_it_is_held_in() {
+        let right = worn_scene(ONE_HANDER);
+        assert_eq!(
+            right["nodes"],
+            serde_json::json!([
+                { "mesh": 0 },
+                { "mesh": 1, "translation": [1.0, 1.0, 3.0] },
+            ])
+        );
+        // Geometry, and not merely a node: the weapon's two submeshes, whole.
+        assert_eq!(right["meshes"][1]["primitives"].as_array().unwrap().len(), 2);
+
+        let left = worn_scene(OFF_HAND);
+        assert_eq!(left["nodes"][1]["translation"], serde_json::json!([1.0, 1.0, -3.0]));
+        assert_eq!(right["meshes"], left["meshes"], "the same weapon, the other hand");
+    }
+
+    // A shield is neither hand: it hangs off the arm, and on the real body off a bone the
+    // hands' chains do not pass through at all.
+    #[test]
+    fn hangs_a_shield_off_her_arm() {
+        let scene = worn_scene(SHIELD);
+        assert_eq!(scene["nodes"].as_array().unwrap().len(), 2);
+        assert_eq!(scene["nodes"][1]["translation"], serde_json::json!([0.0, 2.0, -3.0]));
+    }
+
+    // And the body underneath is untouched by any of it. A weapon paints nothing into the
+    // atlas and switches no geoset, so what is left is a woman holding something — the same
+    // parts a bare body draws, and one picture more than it has.
+    #[test]
+    fn a_weapon_changes_nothing_about_the_body_it_is_held_by() {
+        assert_eq!(drawn(&worn_mesh(&worn_of(ONE_HANDER))), drawn(&mesh()));
+        let scene = worn_scene(ONE_HANDER);
+        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
     }
 
     // A model the install does not hold leaves the body without it rather than dropping it at

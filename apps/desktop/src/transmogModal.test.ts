@@ -9,6 +9,7 @@ const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearanc
   name: "Tideglass Crown",
   appearanceId: 80001,
   displayType: 0,
+  inventoryType: 1,
   displayInfoId: 900001,
   iconFileDataId: 130001,
   hasModel: false,
@@ -50,26 +51,46 @@ describe("slotName", () => {
     expect(slotName(displayType)).toBe(expected);
   });
 
-  // The definitions do not pin the weapon types down well enough to name one by one, so all
-  // four read the same rather than four guesses at which is which.
-  it.each<[number]>([[11], [12], [13], [15]])(
-    "calls display type %i a weapon or shield",
-    (displayType) => {
+  // The display type gets a weapon as far as "a weapon" and no further: 11 is a one-hander
+  // and a two-hander alike, and 15 covers a shield's neighbours. Where the item is worn is
+  // what names it, and it comes from a different table entirely.
+  it.each<[number, number, string]>([
+    [11, 13, "One-hand"],
+    [11, 17, "Two-hand"],
+    [11, 21, "Main hand"],
+    [11, 22, "Off hand"],
+    [13, 14, "Shield"],
+    [15, 23, "Held in off hand"],
+    [12, 15, "Ranged"],
+    [12, 25, "Thrown"],
+    [14, 24, "Ammo"],
+  ])("names display type %i worn at %i the %s slot", (displayType, inventoryType, expected) => {
+    expect(slotName(displayType, inventoryType)).toBe(expected);
+  });
+
+  // And where the game says nothing — an item it withholds — the old sentence is what is
+  // left, because it is still true and a guess would not be.
+  it("calls a weapon the game says nothing about a weapon or shield", () => {
+    for (const displayType of [11, 12, 13, 15]) {
+      expect(slotName(displayType, 0)).toBe("Weapon or shield");
       expect(slotName(displayType)).toBe("Weapon or shield");
-    },
-  );
+    }
+  });
 
   // A slot from a patch newer than this build still has to render as something.
   it("says which slot it was when it cannot name one", () => {
-    expect(slotName(14)).toBe("Slot 14");
-    expect(slotName(99)).toBe("Slot 99");
+    expect(slotName(16, 0)).toBe("Slot 16");
+    expect(slotName(99, 13)).toBe("Slot 99");
   });
 });
 
 describe("appearanceRows", () => {
   it("names the slot an appearance fills and the item it came from", () => {
     expect(appearanceRows(payload([
-      appearance({ displayType: 1, itemId: 30007, name: "Emberforge Pauldrons", hasModel: true }),
+      appearance({
+        displayType: 1, inventoryType: 3, itemId: 30007, name: "Emberforge Pauldrons",
+        hasModel: true,
+      }),
     ])))
       .toEqual([
         {
@@ -78,6 +99,7 @@ describe("appearanceRows", () => {
           itemId: 30007,
           appearanceId: 80001,
           displayType: 1,
+          inventoryType: 3,
           displayInfoId: 900001,
           iconFileDataId: 130001,
           hasModel: true,
@@ -92,6 +114,7 @@ describe("appearanceRows", () => {
   it("says nothing it cannot know about an appearance the game withholds", () => {
     const withheld = appearance({
       modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0, iconFileDataId: 0,
+      inventoryType: 0,
     });
     expect(appearanceRows(payload([withheld])))
       .toEqual([
@@ -101,6 +124,7 @@ describe("appearanceRows", () => {
           itemId: 0,
           appearanceId: 0,
           displayType: 0,
+          inventoryType: 0,
           displayInfoId: 900001,
           iconFileDataId: 0,
           hasModel: false,

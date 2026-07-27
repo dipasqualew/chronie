@@ -710,7 +710,11 @@ mod tests {
     const HELM_DISPLAY: u32 = 900001;
     const SHOULDERS: u32 = 900002;
     const CHESTPIECE: u32 = 900003;
+    /// The weapon rack: a one-hander, a second model for the two-hander, and a shield whose
+    /// only model sits in the display's second slot.
     const WEAPON: u32 = 900007;
+    const SECOND_WEAPON: u32 = 900014;
+    const SECOND_SLOT_WEAPON: u32 = 900015;
     const CAPE: u32 = 900013;
     const BOOTS: u32 = 900004;
     const GLOVES: u32 = 900005;
@@ -727,7 +731,19 @@ mod tests {
     const SHIRT_SLOT: u32 = 2;
     const SHOULDER: u32 = 1;
     const BACK_SLOT: u32 = 9;
+    /// The three slots the game files a weapon or a shield under, and the whole of what they
+    /// say: 11 is a sword and a two-hander alike, 13 a shield, 15 a thing held in an off hand.
     const WEAPON_SLOT: u32 = 11;
+    const SHIELD_SLOT: u32 = 13;
+    const OFF_HAND_SLOT: u32 = 15;
+
+    /// Where the game says each of those is worn, which is the half `DisplayType` leaves out.
+    const ONE_HAND: u32 = 13;
+    const TWO_HAND: u32 = 17;
+    const A_SHIELD: u32 = 14;
+    const HELD_IN_OFF_HAND: u32 = 23;
+    /// Arrows, which are the one thing the game files under a weapon slot and nothing holds.
+    const AMMO: u32 = 24;
 
     fn worn(display_info_id: u32, display_type: u32) -> Worn {
         of(&fixture_files(), display_info_id, display_type, NOT_A_WEAPON).unwrap()
@@ -935,7 +951,77 @@ mod tests {
     #[test]
     fn hangs_nothing_off_a_slot_that_has_no_attachment() {
         assert_eq!(worn(CHESTPIECE, CHEST).models, vec![]);
+        // A weapon whose item the game says nothing about is the same answer arrived at the
+        // other way: the slot has an attachment and nothing says which one.
         assert_eq!(worn(WEAPON, WEAPON_SLOT).models, vec![]);
+    }
+
+    /* ---------- the hand a weapon is held in ---------- */
+
+    // The whole of what this adds, in one sentence: the *same* display, filed under the same
+    // kind of slot, goes in a different hand depending on where the game says the item is
+    // worn. Nothing in `ItemDisplayInfo` differs between these two reads.
+    #[test]
+    fn puts_a_one_hander_in_her_right_hand_and_an_off_hand_in_her_left() {
+        assert_eq!(
+            held(WEAPON, WEAPON_SLOT, ONE_HAND).models,
+            vec![WornModel { attachment: 1, file: 140_004, texture: Some(150_005) }]
+        );
+        assert_eq!(
+            held(WEAPON, OFF_HAND_SLOT, HELD_IN_OFF_HAND).models,
+            vec![WornModel { attachment: 2, file: 140_004, texture: Some(150_005) }]
+        );
+    }
+
+    // A two-hander is one model on one attachment and not two, which is the trap in holding
+    // something with both hands: it is still the main hand that carries it.
+    #[test]
+    fn holds_a_two_hander_in_one_hand_rather_than_two() {
+        assert_eq!(
+            held(SECOND_WEAPON, WEAPON_SLOT, TWO_HAND).models,
+            vec![WornModel { attachment: 1, file: 140_005, texture: Some(150_003) }]
+        );
+    }
+
+    // And a shield is not an off-hand weapon: it hangs off attachment 0, which on the real
+    // body is a bone on the forearm rather than in the hand. This display is also the one
+    // whose only model sits in the *second* slot — a weapon has one model and either slot can
+    // hold it, so a reader that took element 0 would call this shield flat.
+    #[test]
+    fn hangs_a_shield_off_the_arm_rather_than_out_of_a_hand() {
+        assert_eq!(
+            held(SECOND_SLOT_WEAPON, SHIELD_SLOT, A_SHIELD).models,
+            vec![WornModel { attachment: 0, file: 140_004, texture: Some(150_005) }]
+        );
+    }
+
+    // The table itself, and the three things it has to keep apart. Everything a hand holds is
+    // one of two hands; a shield is neither; and arrows are the game's own reminder that a
+    // weapon slot is not the same as something being held.
+    #[test]
+    fn says_which_hand_each_kind_of_weapon_is_worn_in() {
+        for right in [ONE_HAND, TWO_HAND, 21, 25, 26, 29] {
+            assert_eq!(held_in(right), Some(1), "{right} is worn in the right hand");
+        }
+        for left in [22, HELD_IN_OFF_HAND, 15, 30] {
+            assert_eq!(held_in(left), Some(2), "{left} is worn in the left hand");
+        }
+        assert_eq!(held_in(A_SHIELD), Some(0));
+        // And the two silences: ammo, and the zero an item the game withholds arrives as.
+        assert_eq!(held_in(AMMO), None);
+        assert_eq!(held_in(0), None);
+    }
+
+    // A weapon switches no geometry on the body and paints none of it, which is what says the
+    // hand is the whole of what it does. `ItemDisplayInfoMaterialRes` holds nothing for one.
+    #[test]
+    fn a_weapon_is_geometry_and_nothing_else() {
+        let sword = held(WEAPON, WEAPON_SLOT, ONE_HAND);
+        assert_eq!(painted(&sword), vec![]);
+        assert_eq!(switched(&sword), Vec::<u16>::new());
+        assert_eq!(sword.hidden, Vec::<u16>::new());
+        assert_eq!(sword.cape, None);
+        assert!(!sword.is_empty(), "there is still a sword to show");
     }
 
     // The back is the slot with geometry and no model at all: the cloak is the body's own, and

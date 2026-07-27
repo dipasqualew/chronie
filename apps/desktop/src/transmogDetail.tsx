@@ -47,8 +47,12 @@ export interface TransmogDetailProps {
   loadModel: (displayInfoId: number) => Promise<TransmogModelPayload>;
   /** Asks for the bare body a set opens on. One model for the whole app. */
   loadCharacter: () => Promise<CharacterModelPayload>;
-  /** Asks for that body with one appearance composited onto it, which is how armour is shown. */
-  loadWorn: (displayInfoId: number, displayType: number) => Promise<WornModelPayload>;
+  /** Asks for that body with one appearance on it, which is how every slot is shown. */
+  loadWorn: (
+    displayInfoId: number,
+    displayType: number,
+    inventoryType: number,
+  ) => Promise<WornModelPayload>;
   /**
    * Makes the 3D pane. Passed in because it is the one thing here that needs a graphics card:
    * a machine without working 3D throws, and the reader gets the icon instead.
@@ -86,7 +90,11 @@ export function TransmogDetail(
   const models = useRef(new Map<number, string | null>()).current;
   // The same, for the bodies wearing one appearance. Kept apart from the models above because
   // a display id means a different picture in each: the item alone, and the item on somebody.
-  const wornModels = useRef(new Map<number, string | null>()).current;
+  //
+  // Keyed by more than the display, because a display is not the whole question any more: one
+  // weapon display is worn in either hand depending on the item, and a body holding a sword on
+  // the wrong side is what a cache keyed by the display alone would hand back.
+  const wornModels = useRef(new Map<string, string | null>()).current;
   // The bare body, asked for once and kept for as long as the app runs. It is one model for
   // every set there is, and the read behind it is the game's own storage.
   const character = useRef<Promise<CharacterModelPayload> | null>(null);
@@ -275,8 +283,8 @@ export function TransmogDetail(
     // The two are the same errand with different answers behind them: read one `.glb`, put it
     // on the stage, and fall back to the icon if there is nothing to put there.
     const worn = wanted.kind === "worn";
-    const cache = worn ? wornModels : models;
-    const cached = cache.get(wanted.displayInfoId);
+    const key = worn ? `${wanted.displayInfoId}/${wanted.displayType}/${wanted.inventoryType}` : "";
+    const cached = worn ? wornModels.get(key) : models.get(wanted.displayInfoId);
     if (cached !== undefined) {
       void showModel(row, cached, mine, worn);
       return;
@@ -285,12 +293,13 @@ export function TransmogDetail(
     setState("loading", worn
       ? `Putting ${row.label.toLowerCase()} on the character…`
       : `Reading the model of ${row.label.toLowerCase()}…`);
-    const loading = worn
-      ? loadWorn(wanted.displayInfoId, wanted.displayType)
+    const loading = wanted.kind === "worn"
+      ? loadWorn(wanted.displayInfoId, wanted.displayType, wanted.inventoryType)
       : loadModel(wanted.displayInfoId);
     void loading
       .then((answer) => {
-        cache.set(wanted.displayInfoId, answer.model);
+        if (worn) wornModels.set(key, answer.model);
+        else models.set(wanted.displayInfoId, answer.model);
         if (mine === asked.current) void showModel(row, answer.model, mine, worn);
       })
       .catch((error: unknown) => {

@@ -729,6 +729,37 @@ mod tests {
         );
     }
 
+    // The sixth thing the chain now answers, and the reason the largest table in the game is
+    // read for two columns rather than one. Set 204 is the weapon rack: four appearances the
+    // game files under three display types, none of which says which hand — and the inventory
+    // types beside them, which say a one-hander, a two-hander, a shield and a thing held in
+    // the other hand.
+    #[test]
+    fn says_where_each_weapon_of_a_set_is_worn() {
+        let opened = opened(204);
+        let worn: Vec<(&Value, &Value, &Value)> = opened["appearances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|appearance| {
+                (
+                    &appearance["name"],
+                    &appearance["displayType"],
+                    &appearance["inventoryType"],
+                )
+            })
+            .collect();
+        assert_eq!(
+            worn,
+            vec![
+                (&json!("Emberforge Blade"), &json!(11), &json!(13)),
+                (&json!("Emberforge Greatsword"), &json!(11), &json!(17)),
+                (&json!("Emberforge Aegis"), &json!(13), &json!(14)),
+                (&json!("Emberforge Censer"), &json!(15), &json!(23)),
+            ]
+        );
+    }
+
     // `ItemSparse` is the largest file the app reads by an order of magnitude, and a set the
     // install can say nothing about is not worth opening it for.
     #[test]
