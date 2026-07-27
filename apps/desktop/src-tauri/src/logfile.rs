@@ -447,7 +447,7 @@ pub enum Fought {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fight {
     pub kind: Fought,
-    pub fight_id: Option<i64>,
+    pub encounter_id: Option<i64>,
     pub name: String,
     pub difficulty_id: Option<i64>,
     pub group_size: Option<i64>,
@@ -466,7 +466,7 @@ impl Fight {
     fn opened(kind: Fought, at: i64) -> Self {
         Self {
             kind,
-            fight_id: None,
+            encounter_id: None,
             name: String::new(),
             difficulty_id: None,
             group_size: None,
@@ -565,6 +565,9 @@ pub struct Reading {
     pub cursor: Cursor,
     pub restarted: Option<Restarted>,
     pub facts: Facts,
+    /// New bytes this read got through, which is what a caller working to a budget across
+    /// several files spends out of it.
+    pub consumed: u64,
     /// Whether the read stopped on its byte budget rather than at the end of the file, which
     /// is the caller's cue that there is more waiting and no reason to hurry.
     pub more: bool,
@@ -636,6 +639,7 @@ impl Reader {
             },
             restarted,
             facts,
+            consumed,
             more,
         })
     }
@@ -816,7 +820,7 @@ fn read_map(parts: &[&str], at: i64) -> Option<MapBounds> {
 /// `ENCOUNTER_START,encounterID,encounterName,difficultyID,groupSize,instanceID`
 fn start_encounter(parts: &[&str], at: i64) -> Fight {
     Fight {
-        fight_id: parts.get(1).and_then(|field| integer(field)),
+        encounter_id: parts.get(1).and_then(|field| integer(field)),
         name: parts.get(2).map(|field| unquoted(field).to_string()).unwrap_or_default(),
         difficulty_id: parts.get(3).and_then(|field| integer(field)),
         group_size: parts.get(4).and_then(|field| integer(field)),
@@ -835,7 +839,7 @@ fn end_encounter(open: Option<Fight>, parts: &[&str], at: i64) -> Fight {
     });
     fight.kind = Fought::Encounter;
     fight.ended_at = Some(at);
-    fight.fight_id = parts.get(1).and_then(|field| integer(field)).or(fight.fight_id);
+    fight.encounter_id = parts.get(1).and_then(|field| integer(field)).or(fight.encounter_id);
     if let Some(name) = parts.get(2).map(|field| unquoted(field)) {
         if !name.is_empty() {
             fight.name = name.to_string();
@@ -853,7 +857,7 @@ fn start_keystone(parts: &[&str], at: i64) -> Fight {
     Fight {
         name: parts.get(1).map(|field| unquoted(field).to_string()).unwrap_or_default(),
         instance_id: parts.get(2).and_then(|field| integer(field)),
-        fight_id: parts.get(3).and_then(|field| integer(field)),
+        encounter_id: parts.get(3).and_then(|field| integer(field)),
         keystone_level: parts.get(4).and_then(|field| integer(field)),
         affixes: parts
             .get(5)
@@ -1424,7 +1428,7 @@ mod tests {
         assert_eq!(facts.fights.len(), 2);
         let wipe = &facts.fights[0];
         assert_eq!(wipe.kind, Fought::Encounter);
-        assert_eq!(wipe.fight_id, Some(2820));
+        assert_eq!(wipe.encounter_id, Some(2820));
         assert_eq!(wipe.name, "Gnarlroot");
         assert_eq!(wipe.difficulty_id, Some(16));
         assert_eq!(wipe.group_size, Some(20));
@@ -1498,7 +1502,7 @@ mod tests {
             .expect("the keystone run");
         assert_eq!(run.name, "Dawn of the Infinite: Galakrond's Fall");
         assert_eq!(run.instance_id, Some(2579));
-        assert_eq!(run.fight_id, Some(2521));
+        assert_eq!(run.encounter_id, Some(2521));
         assert_eq!(run.keystone_level, Some(20));
         assert_eq!(run.affixes, [10, 9, 152]);
         assert_eq!(run.success, Some(true));
