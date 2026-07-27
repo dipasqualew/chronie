@@ -2630,6 +2630,131 @@ ChronieDB = {{ ["segments"] = {{
         );
     }
 
+    /// One segment holding both kinds of gain twice over: once with what the client said the
+    /// character was left with, and once without. The pair is the point — the columns exist
+    /// to tell "the client did not say" apart from "none", and only a file carrying both can
+    /// show that the two survive as different things.
+    const HOLDING_SEGMENT: &str = r#"
+      { ["id"] = "hold-1", ["character"] = "Aster-Vale", ["instance"] = "Glass Caverns",
+        ["instanceType"] = "party", ["endedAt"] = 2000000000, ["startedAt"] = 1999990000,
+        ["currencies"] = {
+          { ["id"] = 3008, ["name"] = "Valorstones", ["amount"] = 15, ["total"] = 12450 },
+          { ["id"] = 2914, ["name"] = "Weathered Relic", ["amount"] = 3 }
+        },
+        ["reputation"] = {
+          { ["faction"] = "Cavern Cartographers", ["amount"] = 250,
+            ["standing"] = "Honored", ["current"] = 4200, ["max"] = 12000 },
+          { ["faction"] = "Lamplighters", ["amount"] = 75 }
+        } }
+    "#;
+
+    /// A gain says what was earned; what the character was left holding is the number that
+    /// says whether it was enough to buy anything, or how far it moved the faction. Both are
+    /// written by the addon and both have to come back out the other side of the database.
+    #[test]
+    fn keeps_what_a_gain_left_the_character_holding() {
+        let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        // Currencies come back ordered by name, so Valorstones leads.
+        let currency = &segment["currencies"][0];
+        assert_eq!(currency["name"], "Valorstones");
+        assert_eq!(currency["amount"], 15);
+        assert_eq!(currency["total"], 12_450);
+
+        let faction = &segment["reputation"][0];
+        assert_eq!(faction["faction"], "Cavern Cartographers");
+        assert_eq!(faction["amount"], 250);
+        assert_eq!(faction["standing"], "Honored");
+        assert_eq!(faction["current"], 4_200);
+        assert_eq!(faction["max"], 12_000);
+    }
+
+    /// The distinction the nullable columns exist for. An item-based currency counted before
+    /// its first change has no holding, and a faction the client will not place has no
+    /// standing — and neither of those is a holding of zero or a standing at the bottom of a
+    /// bar. The key is still there, so nothing downstream has to guess whether it was asked.
+    #[test]
+    fn says_nothing_at_all_rather_than_zero_when_a_gain_carries_no_holding() {
+        let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        let currency = &segment["currencies"][1];
+        assert_eq!(currency["name"], "Weathered Relic");
+        assert_eq!(currency["amount"], 3);
+        assert_eq!(currency["total"], Value::Null);
+        assert!(
+            currency.as_object().expect("a currency object").contains_key("total"),
+            "the key has to be there and null, not missing: {currency}"
+        );
+
+        let faction = &segment["reputation"][1];
+        assert_eq!(faction["faction"], "Lamplighters");
+        assert_eq!(faction["standing"], Value::Null);
+        assert_eq!(faction["current"], Value::Null);
+        assert_eq!(faction["max"], Value::Null);
+        let keys = faction.as_object().expect("a reputation object");
+        for key in ["standing", "current", "max"] {
+            assert!(keys.contains_key(key), "{key} has to be there and null: {faction}");
+        }
+    }
+
+    /// A history collected before the holdings were kept has rows in both tables and no
+    /// columns to put them in. The migration has to widen those tables under the rows that
+    /// are already there rather than demanding a fresh install — and what it cannot know
+    /// about an old row is exactly what a null says.
+    #[test]
+    fn migrates_a_database_written_before_holdings_were_kept() {
+        let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..4] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction
+                .execute_batch(
+                    "INSERT INTO accounts (id, source_key, first_seen_at, last_seen_at)
+                       VALUES (1, 'legacy', 1900000000, 1900000000);
+                     INSERT INTO characters (id, account_id, source_key, name, realm,
+                                             first_seen_at, last_seen_at)
+                       VALUES (1, 1, 'Brin-Vale', 'Brin', 'Vale', 1900000000, 1900000000);
+                     INSERT INTO segments (id, character_id, source_id, ended_day,
+                                           instance_name, instance_type, difficulty_name,
+                                           started_at, ended_at, duration_seconds,
+                                           first_seen_at, last_seen_at)
+                       VALUES (1, 1, 'old-1', '2030-04-14', 'Copperwood', 'none', '',
+                               1899999000, 1900000000, 1000, 1900000000, 1900000000);
+                     INSERT INTO currency_gains (segment_id, currency_id, name, amount)
+                       VALUES (1, 3008, 'Valorstones', 40);
+                     INSERT INTO reputation_gains (segment_id, faction, amount)
+                       VALUES (1, 'Lamplighters', 500);",
+                )
+                .unwrap();
+            transaction.pragma_update(None, "user_version", 4_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let payload = dashboard(&database).unwrap();
+        // Newest first, so the segment just collected leads and the old one follows.
+        assert_eq!(payload["segments"][0]["currencies"][0]["total"], 12_450);
+        let old = &payload["segments"][1];
+        assert_eq!(old["id"], "old-1");
+        assert_eq!(old["currencies"][0]["name"], "Valorstones");
+        assert_eq!(old["currencies"][0]["amount"], 40);
+        assert_eq!(old["currencies"][0]["total"], Value::Null);
+        assert_eq!(old["reputation"][0]["faction"], "Lamplighters");
+        assert_eq!(old["reputation"][0]["amount"], 500);
+        assert_eq!(old["reputation"][0]["standing"], Value::Null);
+    }
+
     #[test]
     fn stores_a_keystone_run_and_guesses_the_activity_from_it() {
         let keystone = r#"

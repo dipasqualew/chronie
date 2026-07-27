@@ -149,22 +149,25 @@ function equipsets(): Section {
  * answers for this faction and reduced its answer to that shape — so the bar is always read
  * the same way whether the level is Honored, Renown 12 or a friendship rank.
  *
- * A gain the client could not place gets no bar at all: an account-wide line read on a
+ * A gain the client could not place gets nothing at all: an account-wide line read on a
  * character that has never met the faction has no standing to draw, and an empty track
  * would claim they were at the bottom of one.
+ *
+ * A standing whose level has no length to it — the client named the level and said nothing
+ * about how long it is — gets its name and no bar, for the same reason. A bar drawn at zero
+ * is announced as zero per cent, which is a claim about where the character stands, and the
+ * one thing known here is that nobody knows.
  */
 function standingBar(event: ReputationGain): string {
   const max = Math.max(event.max || 0, 0);
   const current = Math.min(Math.max(event.current || 0, 0), max);
   if (!event.standing && max === 0) return "";
+  const bar = max === 0 ? "" : `<progress class="rep-bar" value="${current}" max="${max}"
+      aria-label="${escapeHtml(`${event.standing || "Standing"} with ${event.faction}`)}"></progress>`;
   const numbers = max > 0 ? `${current.toLocaleString()} / ${max.toLocaleString()}` : "";
   const caption = [event.standing, numbers].filter(Boolean).join(" ");
-  // A bar with no length to it is still drawn, so a maxed-out standing reads as a standing
-  // rather than as a faction with no bar. `max` of 0 is not a legal progress element, so the
-  // unknown-length case is the one drawn as an empty track.
   return `<p class="rep-standing">
-    <progress class="rep-bar" value="${max > 0 ? current : 0}" max="${max > 0 ? max : 1}"
-      aria-label="${escapeHtml(`${event.standing || "Standing"} with ${event.faction}`)}"></progress>
+    ${bar}
     <span class="muted">${escapeHtml(caption)}</span>
   </p>`;
 }
