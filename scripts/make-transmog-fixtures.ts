@@ -40,6 +40,11 @@ const FILE_DATA_ID = {
   modelFileData: 1337833,
   textureFileData: 982459,
   componentTextureFileData: 1278239,
+  chrCustomizationChoice: 3450554,
+  chrCustomizationOption: 3384247,
+  chrCustomizationElement: 3512765,
+  chrCustomizationMaterial: 3459652,
+  chrModelTextureLayer: 3548976,
 } as const;
 
 /* ---------- the tables ---------- */
@@ -651,11 +656,19 @@ const textureFileData: TableSpec = {
         [0, 0, 52010], // the boots' accessory section, which the layout puts nowhere
         [0, 0, 52011], // the gloves' hands, kept for a body this is not
         [0, 0, 52012], // the shirt's torso, which no install here holds the file for
+        // The character's own skin, and the two layers her customization paints over it. Not
+        // an item's textures at all: these come out of `chrCustomizationMaterial` above, and
+        // they are here because that chain ends in this table the same way an item's does.
+        [0, 0, 53001], // the base skin
+        [0, 0, 53002], // painted over it
+        [0, 0, 53003], // and so is this
+        [0, 0, 53004], // the other swatch's skin, which this app must not reach
       ],
       idList: [
         150004, 150002, 150102, 150005, 150003,
         151001, 151002, 151003, 151004, 151005, 151006, 151007, 151008, 151009, 151010, 151011,
         151012, 151013,
+        160001, 160002, 160003, 160004,
       ],
     },
     {
@@ -717,6 +730,257 @@ const componentTextureFileData: TableSpec = {
       key: 0x2d70b95c14ea836fn,
       rows: [[1, 0, 1]],
       idList: [151007],
+    },
+  ],
+};
+
+/**
+ * `ChrModelTextureLayer` — how a texture layout is composited, one layer at a time.
+ *
+ * This is the table that says *which* of a choice's materials is the skin, and it is the
+ * reason the app reads it rather than assuming a number: a choice paints several targets and
+ * only one of them is the body underneath. The base skin is the layer that is **copied**
+ * rather than blended — blend mode 1, which wow.export calls blit — and on a real layout there
+ * is exactly one of those on the body atlas. The rest blend into the rectangles their section
+ * mask names, one bit per `SectionType`: 8 is the upper torso and 32 the upper legs, which is
+ * where the two halves of a character's underwear go.
+ *
+ * Three of the rows below are traps rather than decoration. The hair layer is *also* copied
+ * and belongs to another atlas entirely, so a reader that took the blend mode and skipped the
+ * texture type paints the body with a hairline. Layout 2's base layer is another body's, and
+ * taking it would resolve — to the wrong target. And the item layer between them is a target
+ * this choice paints nothing for, which is what most of the table is.
+ *
+ * The layout each row belongs to is in the relationship block, not in a column.
+ */
+const chrModelTextureLayer: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrModelTextureLayer,
+  layoutHash: 0xd0583fb4,
+  tableHash: 0x4c19e7a2,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 3, palette: [1, 6, 19, 20] }, // TextureType
+    { storage: Storage.indexed, offsetBits: 3, sizeBits: 5, palette: [0, 1, 2, 10, 11, 14] }, // Layer
+    { storage: Storage.bitpackedSigned, offsetBits: 8, sizeBits: 2 }, // Flags
+    { storage: Storage.indexed, offsetBits: 10, sizeBits: 4, palette: [1, 15] }, // BlendMode
+    { storage: Storage.indexed, offsetBits: 14, sizeBits: 4, palette: [-1, 512, 32, 8] }, // SectionMask
+    { storage: Storage.indexed, offsetBits: 18, sizeBits: 2, palette: [-1] }, // SectionMask2
+    // Field_9_0_1_34365_006[3], which nothing has ever needed and which sits between the
+    // blend modes and the targets — so a reader that skipped it reads a target as a mask.
+    { storage: Storage.indexedArray, offsetBits: 20, sizeBits: 2, arrayCount: 3, palette: [0, 0, 0] },
+    // ChrModelTextureTargetID[2]. The game stores it as runs of two and uses only the first.
+    {
+      storage: Storage.indexedArray,
+      offsetBits: 22,
+      sizeBits: 6,
+      arrayCount: 2,
+      palette: [1, 0, 10, 0, 4, 0, 13, 0, 14, 0, 27, 0, 40, 0],
+    },
+  ],
+  sections: [
+    {
+      key: 0n,
+      // TextureType, Layer, Flags, BlendMode, SectionMask, SectionMask2, Field[3], Target[2].
+      rows: [
+        [1, 0, 0, 1, -1, -1, [0, 0, 0], [1, 0]], // the base skin: the body atlas, copied
+        [6, 1, 0, 1, -1, -1, [0, 0, 0], [10, 0]], // hair: copied too, and a different atlas
+        [1, 2, 0, 15, 512, -1, [0, 0, 0], [4, 0]], // a layer this choice paints nothing for
+        // The two halves of the underwear, blended into one rectangle each: section 5, the
+        // upper legs, and section 3, the upper torso. Their masks are what says so.
+        [1, 10, 0, 15, 32, -1, [0, 0, 0], [13, 0]],
+        [1, 11, 0, 15, 8, -1, [0, 0, 0], [14, 0]],
+        [20, 14, 0, 1, -1, -1, [0, 0, 0], [27, 0]], // jewelry: a third atlas, copied as well
+        // Another layout's base layer, which is the one row here that would resolve and be
+        // wrong: same shape, same blend mode, a target this app must never paint.
+        [1, 0, 0, 1, -1, -1, [0, 0, 0], [40, 0]],
+      ],
+      idList: [29, 30, 31, 39, 64, 339, 900029],
+      relationships: [
+        [104, 0],
+        [104, 1],
+        [104, 2],
+        [104, 3],
+        [104, 4],
+        [104, 5],
+        [2, 6],
+      ],
+    },
+  ],
+};
+
+/**
+ * `ChrCustomizationElement` — what one customization choice actually does to a character.
+ *
+ * A choice is a swatch in the character creation screen; an element is one of the things
+ * picking it does. Most drive a geoset or a model and paint nothing, which is why the material
+ * column is read with a zero check rather than taken whole.
+ *
+ * The default skin's three elements are the point: one is the body, and the other two are
+ * layers the game paints over it. Nothing in this table says which is which — that is the
+ * material's target and the layer table above — so a reader that stopped here and took the
+ * first would paint a character with the layer meant to go on top of her.
+ */
+const chrCustomizationElement: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrCustomizationElement,
+  layoutHash: 0x6483c37e,
+  tableHash: 0x9a2f5c11,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 16,
+  columns: [
+    { storage: Storage.bitpackedSigned, offsetBits: 0, sizeBits: 17 }, // ChrCustomizationChoiceID
+    { storage: Storage.bitpackedSigned, offsetBits: 17, sizeBits: 17 }, // RelatedChrCustomizationChoiceID
+    { storage: Storage.bitpackedSigned, offsetBits: 34, sizeBits: 15 }, // ChrCustomizationGeosetID
+    { storage: Storage.indexed, offsetBits: 49, sizeBits: 10, palette: [0] }, // SkinnedModelID
+    { storage: Storage.bitpackedSigned, offsetBits: 59, sizeBits: 18 }, // ChrCustomizationMaterialID
+    { storage: Storage.indexed, offsetBits: 77, sizeBits: 10, palette: [0] }, // BoneSetID
+    { storage: Storage.indexed, offsetBits: 87, sizeBits: 2, palette: [0] }, // CondModelID
+    { storage: Storage.indexed, offsetBits: 89, sizeBits: 9, palette: [0] }, // DisplayInfoID
+    { storage: Storage.indexed, offsetBits: 98, sizeBits: 5, palette: [0] }, // ItemGeoModifyID
+    { storage: Storage.indexed, offsetBits: 103, sizeBits: 1, palette: [0] }, // VoiceID
+    { storage: Storage.indexed, offsetBits: 104, sizeBits: 3, palette: [0] }, // AnimKitID
+    { storage: Storage.indexed, offsetBits: 107, sizeBits: 4, palette: [0] }, // ParticleColorID
+    { storage: Storage.indexed, offsetBits: 111, sizeBits: 2, palette: [0] }, // GeoComponentLinkID
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Choice, Related, Geoset, SkinnedModel, Material, and then nine columns of nothing.
+      rows: [
+        // The choice this app draws, and everything picking it does.
+        [85, 0, 0, 0, 823, 0, 0, 0, 0, 0, 0, 0, 0], // the skin itself
+        [85, 0, 0, 0, 824, 0, 0, 0, 0, 0, 0, 0, 0], // a layer painted over it
+        [85, 0, 0, 0, 825, 0, 0, 0, 0, 0, 0, 0, 0], // and another
+        [85, 0, 0, 0, 826, 0, 0, 0, 0, 0, 0, 0, 0], // one whose texture no install holds
+        // The same choice switching a geoset on, which paints nothing at all. A reader that
+        // did not check for the zero would look up material 0 and find whatever is first.
+        [85, 0, 2410, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        // A second swatch of the same option, whose skin is a different picture. Reading the
+        // choice column wrong lands here, and it resolves.
+        [86, 0, 0, 0, 827, 0, 0, 0, 0, 0, 0, 0, 0],
+      ],
+      idList: [2917, 2918, 2919, 2920, 2921, 2922],
+    },
+    {
+      // Encrypted, so a choice belonging to a body the game has not shipped says nothing.
+      key: 0x8b13f5a02c9e7d64n,
+      rows: [[900, 0, 0, 0, 899, 0, 0, 0, 0, 0, 0, 0, 0]],
+      idList: [2990],
+    },
+  ],
+};
+
+/**
+ * `ChrCustomizationMaterial` — which layer of the atlas a customization paints, and with what.
+ *
+ * Two columns and no more, because the id is kept beside the rows: a reader that expected the
+ * id inside the row would take the target for an id and the resource for a target, and every
+ * material would then be filed under a layer that does not exist.
+ */
+const chrCustomizationMaterial: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrCustomizationMaterial,
+  layoutHash: 0xbe9767e9,
+  tableHash: 0x7e41a0d3,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [1, 13, 14, 20] }, // TextureTargetID
+    { storage: Storage.bitpackedSigned, offsetBits: 6, sizeBits: 22 }, // MaterialResourcesID
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        [1, 53001], // 823, the default skin: the target the layer table calls the base
+        [13, 53002], // 824, painted over it
+        [14, 53003], // 825, and so is this
+        [20, 53009], // 826, a target whose texture this install does not hold
+        [1, 53004], // 827, the *other* swatch's skin — same target, another choice
+      ],
+      idList: [823, 824, 825, 826, 827],
+    },
+    {
+      key: 0x4f9c2e18d73b06a5n,
+      rows: [[1, 53900]],
+      idList: [899],
+    },
+  ],
+};
+
+/**
+ * `ChrCustomizationChoice` and `ChrCustomizationOption` — the swatch and the thing it is a
+ * swatch of.
+ *
+ * Nothing in the app reads either: the choice is hard-coded, and one Human Female is the whole
+ * of what this draws. `examples/dump_customization` reads them so that a run against an
+ * install can say *whose* skin it just resolved, which is the difference between a chain that
+ * works and a chain that works on the wrong body. They are here so that the same run against
+ * the fixtures says it too.
+ *
+ * Both keep their ids **inside** the row, unlike the three tables above — which is why the
+ * option is column 2 here and the material was column 4 there.
+ */
+const chrCustomizationChoice: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrCustomizationChoice,
+  layoutHash: 0x1c8f60b3,
+  tableHash: 0x2a75d9e0,
+  idColumn: 1,
+  flags: 0,
+  recordSize: 20,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // Name_lang
+    { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 18 }, // ID
+    { storage: Storage.bitpackedSigned, offsetBits: 50, sizeBits: 15 }, // ChrCustomizationOptionID
+    { storage: Storage.bitpackedSigned, offsetBits: 65, sizeBits: 12 }, // ChrCustomizationReqID
+    { storage: Storage.bitpackedSigned, offsetBits: 77, sizeBits: 12 }, // ChrCustomizationVisReqID
+    { storage: Storage.bitpackedSigned, offsetBits: 89, sizeBits: 9 }, // OrderIndex
+    { storage: Storage.bitpackedSigned, offsetBits: 98, sizeBits: 9 }, // UiOrderIndex
+    { storage: Storage.indexed, offsetBits: 107, sizeBits: 3, palette: [0] }, // Flags
+    { storage: Storage.indexed, offsetBits: 110, sizeBits: 3, palette: [90001] }, // AddedInPatch
+    { storage: Storage.indexed, offsetBits: 113, sizeBits: 3, palette: [0] }, // SoundKitID
+    { storage: Storage.indexedArray, offsetBits: 116, sizeBits: 3, arrayCount: 2, palette: [0, 0] },
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Name, ID, Option, Req, VisReq, OrderIndex, UiOrderIndex, Flags, Patch, Sound, Swatch.
+      rows: [
+        ["", 85, 14, 318, 0, 0, 40, 0, 90001, 0, [0, 0]],
+        ["", 86, 14, 318, 0, 1, 41, 0, 90001, 0, [0, 0]],
+      ],
+    },
+  ],
+};
+
+const chrCustomizationOption: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrCustomizationOption,
+  layoutHash: 0x5d2a1e94,
+  tableHash: 0x6b03fc27,
+  idColumn: 1,
+  flags: 0,
+  recordSize: 16,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // Name_lang
+    { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 15 }, // ID
+    { storage: Storage.bitpackedSigned, offsetBits: 47, sizeBits: 12 }, // SecondaryID
+    { storage: Storage.indexed, offsetBits: 59, sizeBits: 8, palette: [0, 80] }, // Flags
+    { storage: Storage.bitpackedSigned, offsetBits: 67, sizeBits: 9 }, // ChrModelID
+    { storage: Storage.bitpackedSigned, offsetBits: 76, sizeBits: 6 }, // OrderIndex
+    { storage: Storage.indexed, offsetBits: 82, sizeBits: 6, palette: [2] }, // CategoryID
+    { storage: Storage.indexed, offsetBits: 88, sizeBits: 3, palette: [0] }, // OptionType
+    { storage: Storage.indexed, offsetBits: 91, sizeBits: 3, palette: [0] }, // BarberShopCostModifier
+    { storage: Storage.indexed, offsetBits: 94, sizeBits: 3, palette: [1] }, // ChrCustomizationID
+    { storage: Storage.indexed, offsetBits: 97, sizeBits: 3, palette: [0] }, // Requirement
+    { storage: Storage.indexed, offsetBits: 100, sizeBits: 3, palette: [1] }, // SecondaryOrderIndex
+    { storage: Storage.indexed, offsetBits: 103, sizeBits: 3, palette: [90001] }, // AddedInPatch
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [["Skin Color", 14, 14, 80, 2, 2, 2, 0, 0, 1, 0, 1, 90001]],
     },
   ],
 };
@@ -1202,8 +1466,33 @@ const icons: IconSpec[] = [
     fileDataId: 160001, encoding: Encoding.dxt, alphaBits: 0,
     alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
   },
+  ...skinTextures(),
   ...bodyTextures(),
 ];
+
+/**
+ * The pictures a skin choice paints that are *not* the skin, and the skin of another swatch.
+ *
+ * Every one of these resolves. That is the whole point of them: the trap in reading a
+ * customization is not a lookup that fails, it is three lookups that succeed and hand back a
+ * picture meant to go somewhere else. A flat colour each, so that a body painted with the
+ * wrong one is a body of the wrong colour rather than a judgement call.
+ */
+function skinTextures(): IconSpec[] {
+  const painted: Array<[number, Paint]> = [
+    [160002, [190, 40, 40, 255]], // target 13: her underwear, over the upper legs
+    [160003, [40, 190, 40, 255]], // target 14: the other half of it, over the upper torso
+    [160004, [40, 40, 190, 255]], // the *other* swatch's skin, on the same target as the first
+  ];
+
+  return painted.map(([fileDataId, colour]) => ({
+    fileDataId,
+    encoding: Encoding.bgra,
+    alphaBits: 8,
+    alphaType: 0,
+    body: bodyPixels(colour, colour),
+  }));
+}
 
 /**
  * The pictures armour is painted onto a body with: one per row of `ItemDisplayInfoMaterialRes`
@@ -1272,6 +1561,11 @@ emit("transmog", {
     modelFileData,
     textureFileData,
     componentTextureFileData,
+    chrModelTextureLayer,
+    chrCustomizationElement,
+    chrCustomizationMaterial,
+    chrCustomizationChoice,
+    chrCustomizationOption,
   ],
   icons,
   raw: [

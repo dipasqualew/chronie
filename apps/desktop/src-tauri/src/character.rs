@@ -100,7 +100,8 @@ const SECTIONS: [(u32, Rect); 10] = [
 ///
 /// A flat tone rather than transparency or magenta: the point of this view is the shape of a
 /// body, and a body with see-through patches reads as broken geometry rather than as a missing
-/// texture. See [`Atlas::base`] for why nothing better is put here yet.
+/// texture. [`Atlas::base`] covers every pixel of it on an install this app can read a skin
+/// out of, so what is left of this is the install that cannot — see [`crate::skin::of`].
 const UNPAINTED: [u8; 4] = [0xc8, 0xa2, 0x8c, 0xff];
 
 /// Whether a geoset is drawn on a body with nothing on it.
@@ -151,14 +152,8 @@ impl Atlas {
     /// Scaled with a linear filter: a skin is authored a few hundred pixels a side and this
     /// buffer is 2048 wide, and nearest-neighbour at that ratio shows the reader the texels.
     ///
-    /// **Nothing in the app calls this yet, and that is the one thing missing from the bare
-    /// body.** Which BLP a character's skin is comes out of the player's own customization —
-    /// `ChrCustomizationChoice` to `ChrCustomizationElement` to `ChrCustomizationMaterial` and
-    /// only then into `TextureFileData` — and not one of those four tables' column positions
-    /// has been read off an install the way the chains in `docs/game-files.md` were. Guessing
-    /// at four in a row would paint the body with whatever the guess landed on and call it a
-    /// skin. So the atlas stays [`Atlas::unpainted`] until that chain is verified, and this is
-    /// the one function that changes when it is.
+    /// Which BLP to hand it is [`crate::skin`]'s question, out of the player's own
+    /// customization; this end of it only paints.
     pub fn base(&mut self, blp: &[u8]) -> Result<(), String> {
         let skin = pixels_of(blp, ATLAS_WIDTH)?;
         self.pixels = image::imageops::resize(&skin, ATLAS_WIDTH, ATLAS_HEIGHT, FilterType::Triangle);
@@ -274,12 +269,7 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
         worn.map_or(&[], |worn| worn.geosets.as_slice()),
     );
 
-    // No base skin: see `Atlas::base` for what is missing and why.
-    let mut atlas = Atlas::unpainted();
-    if let Some(worn) = worn {
-        atlas.wear(files, &worn.textures);
-    }
-    let painted = atlas.png()?;
+    let painted = atlas(files, worn)?.png()?;
 
     glb::write(&mesh, &|paint| match paint {
         // The model's own textures, which on a body are the few things not customized.
@@ -288,6 +278,32 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
         // Hair, eyes and jewelry: real texture types this composites nothing for.
         Paint::Supplied(_) => None,
     })
+}
+
+/// The one picture the whole body is painted out of: her own skin, and the appearance over it.
+///
+/// The order is the whole of the compositing rule. The skin covers all 2048 × 1024 as a
+/// straight copy, because it is the bottom of the stack and has nothing to blend against;
+/// everything above it lands in its own rectangles and blends, because it has. That is the
+/// same operation for the two halves of her underwear as for a chestpiece's sleeves — the
+/// underwear is only lower down the stack, which is why an item painted over it covers it.
+///
+/// An install that cannot say which skin leaves the flat tone underneath — which is what every
+/// body in this app looked like before that chain was read, so the worst case is the picture
+/// this used to give rather than a broken one. What is *not* tolerated is a skin that resolves
+/// and will not decode: that is either a build whose columns have moved or this app being
+/// wrong about BLP, and a body quietly back to being a mannequin hides both. See
+/// [`crate::skin::of`].
+fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
+    let mut atlas = Atlas::unpainted();
+    if let Some(skin) = crate::skin::of(files)? {
+        atlas.base(&files.read(skin.base)?)?;
+        atlas.wear(files, &skin.over);
+    }
+    if let Some(worn) = worn {
+        atlas.wear(files, &worn.textures);
+    }
+    Ok(atlas)
 }
 
 /// The mesh with only the parts a body wearing this — or nothing — draws.
@@ -371,13 +387,24 @@ mod tests {
         mesh.parts.iter().map(|part| part.geoset).collect()
     }
 
-    /// The atlas an appearance paints, as pixels, ready to be sampled a rectangle at a time.
+    /// The atlas an appearance paints on its own, over nothing — which is how the rectangles
+    /// each texture lands in are read without the skin underneath colouring the answer.
     fn atlas_of((display_info_id, display_type): (u32, u32)) -> RgbaImage {
         let files = fixture_files();
         let worn = crate::worn::of(&files, display_info_id, display_type).unwrap();
         let mut atlas = Atlas::unpainted();
         atlas.wear(&files, &worn.textures);
         image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
+    }
+
+    /// The atlas the app actually paints a body with: the skin, and an appearance over it.
+    fn body_atlas(worn: Option<(u32, u32)>) -> RgbaImage {
+        let files = fixture_files();
+        let worn = worn.map(|(display_info_id, display_type)| {
+            crate::worn::of(&files, display_info_id, display_type).unwrap()
+        });
+        let png = atlas(&files, worn.as_ref()).unwrap().png().unwrap();
+        image::load_from_memory(&png).unwrap().into_rgba8()
     }
 
     /// The colour in the middle of one of the atlas's section rectangles.
@@ -491,6 +518,70 @@ mod tests {
             );
             assert_eq!(pixel[3], 255, "the base skin is opaque throughout");
         }
+    }
+
+    // The point of the whole chain: a bare body opens with skin on it rather than as a
+    // mannequin in one flat tone. Every part of the atlas, because a skin covers all of it —
+    // including the right half the body's own UVs never read.
+    #[test]
+    fn opens_the_bare_body_with_skin_on_it() {
+        let atlas = body_atlas(None);
+        for (quadrant, (x, y)) in [(256, 128), (1792, 128), (256, 896), (1792, 896)].iter().enumerate() {
+            let pixel = atlas.get_pixel(*x, *y).0;
+            assert_ne!(pixel, UNPAINTED, "the body is still the unpainted tone at {x},{y}");
+            assert_eq!([pixel[0], pixel[1], pixel[2]], QUADRANTS[quadrant], "at {x},{y}");
+        }
+    }
+
+    // The rest of what the same choice paints, which is why a bare body is not a nude one: the
+    // underwear is two more layers over the skin rather than part of its picture, and each
+    // lands in the one rectangle its section mask names. An item worn over it covers it, the
+    // same way it covers anything else already in that rectangle.
+    #[test]
+    fn dresses_the_bare_body_in_what_the_rest_of_the_choice_paints() {
+        let bare = body_atlas(None);
+        assert_eq!(middle_of(&bare, 3), [40, 190, 40, 255], "the upper torso");
+        assert_eq!(middle_of(&bare, 5), [190, 40, 40, 255], "the upper legs");
+        // And nowhere else: a layer painted over the whole buffer instead of into its own
+        // rectangle would be the body rather than a thing worn on it.
+        assert_eq!(middle_of(&bare, 4), middle_of(&bare, 0));
+
+        let chestpiece = body_atlas(Some(CHESTPIECE));
+        assert_eq!(middle_of(&chestpiece, 3), [40, 160, 220, 255], "and armour goes over it");
+    }
+
+    // And the other half of it: an appearance worn on that body still lands where the layout
+    // puts it, and the parts it does not paint are skin rather than the tone underneath. The
+    // legs are the pair worth reading — the robe paints them and the chestpiece does not.
+    #[test]
+    fn paints_an_appearance_over_the_skin_rather_than_over_the_flat_tone() {
+        // What a bare body has in each rectangle, which is what the parts an appearance does
+        // not paint have to still be.
+        let bare = body_atlas(None);
+
+        let robe = body_atlas(Some(ROBE));
+        assert_eq!(middle_of(&robe, 3), [240, 130, 20, 255]); // upper torso
+        assert_eq!(middle_of(&robe, 5), [70, 20, 190, 255]); // upper legs
+        assert_eq!(middle_of(&robe, 6), [200, 240, 40, 255]); // lower legs
+        assert_eq!(middle_of(&robe, 0), middle_of(&bare, 0), "a sleeveless robe leaves the arm");
+
+        let chestpiece = body_atlas(Some(CHESTPIECE));
+        assert_eq!(middle_of(&chestpiece, 0), [90, 200, 60, 255]); // upper arms
+        assert_eq!(middle_of(&chestpiece, 5), middle_of(&bare, 5), "the chestpiece paints no legs");
+        assert_ne!(middle_of(&bare, 5), UNPAINTED, "and what is left there is skin");
+    }
+
+    // The trap the base is the other side of: a sleeveless chestpiece is transparent where the
+    // arm shows, and what shows through is now the character rather than a flat tone. Copy the
+    // item layer instead of blending it and the hole is in the skin.
+    #[test]
+    fn shows_the_skin_through_a_transparent_item_layer() {
+        let arms = rect_of(0).unwrap();
+        let (x, y) = (arms.x + arms.width / 2, arms.y + arms.height - 8);
+        let worn = body_atlas(Some(CHESTPIECE));
+        let bare = body_atlas(None);
+        assert_eq!(worn.get_pixel(x, y), bare.get_pixel(x, y));
+        assert_ne!(bare.get_pixel(x, y).0, UNPAINTED);
     }
 
     // The whole module, as the window asks for it: a body with geometry and a picture in it.

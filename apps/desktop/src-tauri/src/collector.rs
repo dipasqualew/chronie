@@ -1,6 +1,7 @@
 use crate::activity;
 use crate::captures::{self, Marker, Stored, Wanted};
 use crate::combatlog;
+use crate::icons;
 use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
 use chrono::{DateTime, Datelike, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -23,7 +24,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_account_rollups.sql"),
     include_str!("../migrations/0008_combat_logs.sql"),
     include_str!("../migrations/0009_capture_subjects.sql"),
-    include_str!("../migrations/0010_gold.sql"),
+    include_str!("../migrations/0010_capture_notes.sql"),
+    include_str!("../migrations/0011_gold.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1662,8 +1664,8 @@ fn upsert_capture(
             "INSERT INTO captures (
                  account_id, source_id, schema, character_id, author, segment_source_id,
                  captured_at, stamp, ui_map_id, map_x, map_y, image_state,
-                 trigger_name, achievement_source_id, first_seen_at, last_seen_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+                 trigger_name, achievement_source_id, note, first_seen_at, last_seen_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?16, ?15, ?15)
              ON CONFLICT(source_id) DO UPDATE SET
                  account_id = excluded.account_id,
                  schema = excluded.schema,
@@ -1685,6 +1687,10 @@ fn upsert_capture(
                  achievement_source_id = COALESCE(
                      excluded.achievement_source_id, captures.achievement_source_id
                  ),
+                 note = CASE
+                     WHEN captures.note_edited_at IS NOT NULL THEN captures.note
+                     ELSE COALESCE(excluded.note, captures.note)
+                 END,
                  last_seen_at = excluded.last_seen_at",
             params![
                 account_id,
@@ -1702,10 +1708,29 @@ fn upsert_capture(
                 marker.trigger,
                 marker.achievement,
                 now,
+                marker.note,
             ],
         )
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// The source ids somebody has deleted, which are the markers this sync must walk past.
+///
+/// Read once per sync rather than asked per marker: an account's entries are read in full every
+/// time its file changes, and the deletions are a handful of rows against thousands of markers.
+fn deleted_captures(connection: &Connection) -> Result<HashSet<String>, String> {
+    let mut statement = connection
+        .prepare("SELECT source_id FROM capture_deletions")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    let mut deleted = HashSet::new();
+    for row in rows {
+        deleted.insert(row.map_err(|error| error.to_string())?);
+    }
+    Ok(deleted)
 }
 
 /// Records the images this sync took custody of, whichever sync wrote the rows they belong
@@ -2498,12 +2523,18 @@ pub fn collect(
         });
     }
 
+    // A capture somebody deleted is not read again. Its marker is still in SavedVariables and
+    // will be for as long as the entry exists, so this is what makes deleting mean deleting
+    // rather than hiding it until the next logout.
+    let deleted = deleted_captures(&connection)?;
+
     // Before the transaction, on purpose: an image is copied and proved before any row claims
     // it exists, and the game's own copy is deleted only once that row has been committed.
     let store_root = store_root(database_path);
     let markers: Vec<&Marker> = incoming
         .iter()
         .flat_map(|account| account.markers.iter())
+        .filter(|marker| !deleted.contains(&marker.source_id))
         .collect();
     let ingested = ingest_images(&connection, wow_path, &store_root, &markers)?;
     drop(markers);
@@ -2533,6 +2564,9 @@ pub fn collect(
         sync_holdings(&transaction, account_id, &account.holdings, now)?;
         sync_warband(&transaction, account_id, &account.warband)?;
         for marker in &account.markers {
+            if deleted.contains(&marker.source_id) {
+                continue;
+            }
             let character_id = match marker.character.as_deref() {
                 Some(character) => Some(upsert_character_key(
                     &transaction,
@@ -2648,6 +2682,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
                         "endLevel": experience_end,
                     })),
                     "activities": [],
+                    "captures": [],
                     "encounters": [],
                     "equipsetChanges": [],
                     "transmogs": [],
@@ -2854,6 +2889,40 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
             serde_json::json!({
                 "level": row.get::<_, i64>(1)?,
                 "at": row.get::<_, Option<i64>>(2)?
+            })
+        ))
+    );
+
+    // The photographs of a segment, in the order they were taken. `image_state` travels with
+    // every row because it is the difference between a picture that is coming, an entry that
+    // never asked for one and a marker whose file was never found — and the window draws each
+    // of those three as a different thing rather than as a blank tile.
+    load_rows!(
+        "SELECT segment_id, id, source_id, captured_at, stamp, image_state, note,
+                trigger_name, achievement_source_id, byte_size, source_name,
+                ui_map_id, map_x, map_y
+         FROM captures
+         WHERE segment_id IS NOT NULL
+         ORDER BY segment_id, captured_at, id",
+        "captures",
+        |row| Ok((
+            row.get::<_, i64>(0)?,
+            serde_json::json!({
+                "id": row.get::<_, i64>(1)?,
+                "sourceId": row.get::<_, String>(2)?,
+                "at": row.get::<_, i64>(3)?,
+                "stamp": row.get::<_, Option<String>>(4)?,
+                "imageState": row.get::<_, String>(5)?,
+                "note": row.get::<_, Option<String>>(6)?,
+                // Absent for a capture somebody pressed the key for, which is the whole
+                // difference between the two and is worth saying on screen.
+                "trigger": row.get::<_, Option<String>>(7)?,
+                "achievementId": row.get::<_, Option<i64>>(8)?,
+                "byteSize": row.get::<_, Option<i64>>(9)?,
+                "sourceName": row.get::<_, Option<String>>(10)?,
+                "uiMapId": row.get::<_, Option<i64>>(11)?,
+                "mapX": row.get::<_, Option<f64>>(12)?,
+                "mapY": row.get::<_, Option<f64>>(13)?
             })
         ))
     );
@@ -3394,6 +3463,189 @@ pub fn reset_activities(database_path: &Path, segment_id: i64, now: i64) -> Resu
     let segment = segment_value(&transaction, segment_id)?;
     refresh_activities(&transaction, segment_id, &segment, now)?;
     transaction.commit().map_err(|error| error.to_string())
+}
+
+/* ---------- what somebody does to a capture ---------- */
+
+/// Writes what somebody said about a capture, or clears it.
+///
+/// Cleaned by `captures::note_text`, so a note typed in the app is held to exactly the rules a
+/// note typed in game is. Nothing but whitespace and escapes clears the note rather than
+/// storing an empty string: the column has one way of saying "nobody has written about this",
+/// and a note somebody deleted is that.
+///
+/// `note_edited_at` is what makes the write survive the next sync — the marker in
+/// SavedVariables still carries whatever was typed in the moment, and without this the sync
+/// would put that sentence back over the top of every edit. See `0010_capture_notes.sql`.
+pub fn set_capture_note(
+    database_path: &Path,
+    capture_id: i64,
+    note: &str,
+    now: i64,
+) -> Result<(), String> {
+    let connection = open_database(database_path)?;
+    let changed = connection
+        .execute(
+            "UPDATE captures SET note = ?2, note_edited_at = ?3 WHERE id = ?1",
+            params![capture_id, captures::note_text(note), now],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed == 0 {
+        return Err("That screenshot is no longer in Chronie's history.".into());
+    }
+    Ok(())
+}
+
+/// Deletes a capture: the row, the file, and the thumbnails made from it.
+///
+/// One function owning both halves, deliberately. There is a second place a file will have to
+/// be deleted from as soon as anything but the local disk holds one, and a delete path
+/// scattered across the window is what leaves the other half behind — so everything that
+/// deleting means lives here, and the window only says when.
+///
+/// Three things happen in an order that is the whole argument:
+///
+/// 1. The row goes, and a tombstone takes its place under the same source id. Without the
+///    tombstone the next sync reads the marker again — `db.entries` never prunes — and puts
+///    the row back with no file behind it.
+/// 2. Whether anything else still names the file is asked *after* the row is gone and before
+///    the commit. The store is content-addressed: two captures of identical bytes are one
+///    file, and deleting it for one of them would blank the other.
+/// 3. The file goes last, once the row that named it is committed. Killed in between, what
+///    survives is a file nothing points at — which wastes space and shows nobody a
+///    photograph they deleted. The other order would leave a row pointing at nothing, which
+///    the window draws as a picture that failed to load.
+pub fn delete_capture(database_path: &Path, capture_id: i64, now: i64) -> Result<(), String> {
+    let store = store_root(database_path);
+    let mut connection = open_database(database_path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    let found: Option<(String, Option<String>, Option<String>)> = transaction
+        .query_row(
+            "SELECT source_id, file_path, content_hash FROM captures WHERE id = ?1",
+            [capture_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    // Deleting something that is already gone is what was asked for, so it is not an error.
+    let Some((source_id, file_path, content_hash)) = found else {
+        return Ok(());
+    };
+
+    transaction
+        .execute("DELETE FROM captures WHERE id = ?1", [capture_id])
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO capture_deletions (source_id, deleted_at) VALUES (?1, ?2)
+             ON CONFLICT(source_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+            params![source_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+    let shared: i64 = match file_path.as_deref() {
+        Some(path) => transaction
+            .query_row(
+                "SELECT COUNT(*) FROM captures WHERE file_path = ?1",
+                [path],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?,
+        None => 0,
+    };
+    transaction.commit().map_err(|error| error.to_string())?;
+
+    if let Some(path) = file_path.filter(|_| shared == 0) {
+        captures::discard(&store, &path, content_hash.as_deref()).map_err(|error| {
+            // The row is already gone, so this cannot be reported as "nothing happened".
+            format!("Chronie forgot the screenshot, but could not delete the file: {error}")
+        })?;
+    }
+    Ok(())
+}
+
+/// One capture's image, as the window has to be handed it.
+///
+/// A `data:` URL rather than a file the webview loads, and rather than Tauri's asset protocol.
+/// The window has no origin to load from — every byte it draws already comes across the
+/// command bridge, which is how the icons and the models arrive — and the asset protocol would
+/// mean opening the store to the frontend by scope and widening `img-src` in the CSP to reach
+/// it. The scaling argument for the protocol is real and is answered a different way: the grid
+/// asks for thumbnails, which are tens of kilobytes each, and the original crosses the bridge
+/// once, for one picture, when somebody opens it.
+///
+/// `None` is an ordinary answer: an entry that never asked for a picture, and a marker whose
+/// file was never found, are both rows with nothing to show. So is a file that has gone missing
+/// underneath a row that says `stored` — which is exactly why the row carries a hash and a size.
+pub fn capture_image(database_path: &Path, capture_id: i64) -> Result<Value, String> {
+    let connection = open_database(database_path)?;
+    let Some(image) = stored_image(&connection, capture_id)? else {
+        return Ok(serde_json::json!({ "id": capture_id, "image": Value::Null }));
+    };
+    let path = store_root(database_path).join(&image.file_path);
+    let Ok(bytes) = fs::read(&path) else {
+        return Ok(serde_json::json!({ "id": capture_id, "image": Value::Null }));
+    };
+    Ok(serde_json::json!({
+        "id": capture_id,
+        "image": icons::data_url(captures::mime_of(&image.file_path), &bytes),
+        "byteSize": bytes.len(),
+    }))
+}
+
+/// The thumbnails for a list of captures, keyed by the id the row carries.
+///
+/// Asked for in a batch and answered from a cache on disk, the way the game's icons are: a grid
+/// asks for everything in it at once, and a reader scrolling back through a year of history
+/// meets the same evening's pictures every time they come past it.
+///
+/// A capture this cannot produce one for is left out rather than sent as null, because a row
+/// with no image and a row whose image will not decode draw the same placeholder.
+pub fn capture_thumbnails(database_path: &Path, ids: &[i64]) -> Result<Value, String> {
+    let connection = open_database(database_path)?;
+    let store = store_root(database_path);
+    let mut thumbnails = Map::new();
+    for id in ids {
+        if thumbnails.contains_key(&id.to_string()) {
+            continue;
+        }
+        let Some(image) = stored_image(&connection, *id)? else {
+            continue;
+        };
+        let Some(hash) = image.content_hash else {
+            continue;
+        };
+        if let Ok(small) = captures::thumbnail(&store, &image.file_path, &hash) {
+            thumbnails.insert(
+                id.to_string(),
+                Value::String(icons::data_url("image/jpeg", &small)),
+            );
+        }
+    }
+    Ok(serde_json::json!({ "thumbnails": Value::Object(thumbnails) }))
+}
+
+/// Where one capture's image sits, as its row names it, and nothing at all for a row that
+/// never had one.
+struct StoredImage {
+    file_path: String,
+    content_hash: Option<String>,
+}
+
+fn stored_image(connection: &Connection, capture_id: i64) -> Result<Option<StoredImage>, String> {
+    connection
+        .query_row(
+            "SELECT file_path, content_hash FROM captures
+             WHERE id = ?1 AND image_state = 'stored' AND file_path IS NOT NULL",
+            [capture_id],
+            |row| {
+                Ok(StoredImage {
+                    file_path: row.get(0)?,
+                    content_hash: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())
 }
 
 fn suppress(
@@ -5086,6 +5338,209 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
     }
 
+    /* ---------- what somebody says about a capture, and throwing one away ---------- */
+
+    /// The same capture with a sentence typed in game beside it.
+    const CAPTURE_ENTRY_WITH_NOTE: &str = r#"
+      { ["id"] = "TEST|2000000000|1", ["schema"] = 1, ["at"] = 2000000000,
+        ["stamp"] = "111423_120000", ["character"] = "Aster-Vale", ["author"] = "TEST",
+        ["segment"] = "Aster-Vale|1999990000|Ulduar", ["hasImage"] = true,
+        ["note"] = "first Yogg kill" }
+    "#;
+
+    /// The note on a capture, and whether the app is the one that last wrote it.
+    fn capture_note(database: &Path, source_id: &str) -> (Option<String>, Option<i64>) {
+        open_database(database)
+            .unwrap()
+            .query_row(
+                "SELECT note, note_edited_at FROM captures WHERE source_id = ?1",
+                [source_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    /// The captures the dashboard hands the window for one segment.
+    fn dashboard_captures(database: &Path) -> Vec<Value> {
+        dashboard(database).unwrap()["segments"][0]["captures"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn keeps_the_note_somebody_typed_in_the_moment() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY_WITH_NOTE, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(capture_note(&database, "TEST|2000000000|1").0.as_deref(), Some("first Yogg kill"));
+        // And nothing claims the app wrote it, which is what leaves the game free to correct
+        // it on a later sync.
+        assert_eq!(capture_note(&database, "TEST|2000000000|1").1, None);
+        assert_eq!(dashboard_captures(&database)[0]["note"], "first Yogg kill");
+    }
+
+    // The marker keeps whatever was typed in game for as long as the entry exists, and it is
+    // read again on every single sync. An edit that a logout undid would be worse than no
+    // editing at all: somebody would type the sentence, see it, and lose it silently.
+    #[test]
+    fn keeps_an_edited_note_through_the_syncs_that_read_the_marker_again() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY_WITH_NOTE, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let capture_id = capture_row(&database, "TEST|2000000000|1").0;
+
+        set_capture_note(&database, capture_id, "  Yogg-Saron, no lights  ", 2_000_000_200).unwrap();
+        write_saved(&wow, CAPTURE_ENTRY_WITH_NOTE, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_300, Options::default()).unwrap();
+
+        let (note, edited) = capture_note(&database, "TEST|2000000000|1");
+        assert_eq!(note.as_deref(), Some("Yogg-Saron, no lights"));
+        assert_eq!(edited, Some(2_000_000_200));
+    }
+
+    // Clearing is an edit like any other, and the state it leaves behind is the one a capture
+    // nobody ever wrote about is in — which is why it has to be the same NULL and not an
+    // empty string that every reader downstream would have to know about.
+    #[test]
+    fn keeps_a_note_cleared_rather_than_letting_the_next_sync_put_it_back() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY_WITH_NOTE, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let capture_id = capture_row(&database, "TEST|2000000000|1").0;
+
+        set_capture_note(&database, capture_id, "   ", 2_000_000_200).unwrap();
+        write_saved(&wow, CAPTURE_ENTRY_WITH_NOTE, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_300, Options::default()).unwrap();
+
+        assert_eq!(capture_note(&database, "TEST|2000000000|1").0, None);
+    }
+
+    // The same rules the addon holds a typed note to, applied to the app's own field, so that
+    // "a stored note holds no pipe" is true of every note however it was written.
+    #[test]
+    fn cleans_a_note_typed_in_the_app_the_way_the_game_cleans_one() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let capture_id = capture_row(&database, "TEST|2000000000|1").0;
+
+        set_capture_note(
+            &database,
+            capture_id,
+            "got |cffa335ee|Hitem:19019|h[Thunderfury]|h|r\nat last",
+            2_000_000_200,
+        )
+        .unwrap();
+
+        // Down to the `r` left behind by `|r`, which `ns.entryText` also leaves: it strips the
+        // pipe and keeps what follows, and the two implementations agreeing is worth more than
+        // either of them being tidier than the other.
+        assert_eq!(
+            capture_note(&database, "TEST|2000000000|1").0.as_deref(),
+            Some("got [Thunderfury]r at last"),
+        );
+    }
+
+    #[test]
+    fn refuses_to_write_a_note_on_a_capture_that_is_gone() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let error = set_capture_note(&database, 9999, "nothing to say", 2_000_000_200).unwrap_err();
+        assert!(error.contains("no longer in Chronie's history"), "{error}");
+    }
+
+    // Deleting is the row and the file together, and it stays deleted: `db.entries` never
+    // prunes, so the marker for this capture is read again on every sync for as long as the
+    // player keeps that file. A photograph that came back as a broken tile after being thrown
+    // away would be worse than one that could not be thrown away at all.
+    #[test]
+    fn deletes_the_row_and_the_file_and_does_not_ingest_it_again() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let (capture_id, _, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        let store = store_root(&database);
+        let image = store.join(file_path.unwrap());
+        assert!(image.is_file());
+
+        delete_capture(&database, capture_id, 2_000_000_200).unwrap();
+
+        assert!(!image.exists(), "the file goes with the row");
+        assert_eq!(count_of(&database, "captures"), 0);
+
+        // The marker is still in the file, and the original is still where the player left it
+        // — which is exactly the case a sync would otherwise ingest all over again.
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_300, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "captures"), 0);
+        assert!(!image.exists());
+    }
+
+    // The store is content-addressed, so two captures of identical bytes are one file. Deleting
+    // one of them must not blank the other, which would be a picture nobody asked to lose.
+    #[test]
+    fn keeps_a_file_a_second_capture_still_names() {
+        let twins = format!("{CAPTURE_ENTRY}, {}", r#"
+          { ["id"] = "TEST|2000000001|2", ["schema"] = 1, ["at"] = 2000000001,
+            ["stamp"] = "111423_120001", ["character"] = "Aster-Vale", ["author"] = "TEST",
+            ["segment"] = "Aster-Vale|1999990000|Ulduar", ["hasImage"] = true }
+        "#);
+        let (_temp, wow, database) = capture_install(&twins, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"the very same picture");
+        screenshot(&wow, "111423_120001", b"the very same picture");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let first = capture_row(&database, "TEST|2000000000|1");
+        let second = capture_row(&database, "TEST|2000000001|2");
+        assert_eq!(first.2, second.2, "one file, named by both rows");
+        let image = store_root(&database).join(second.2.clone().unwrap());
+
+        delete_capture(&database, first.0, 2_000_000_200).unwrap();
+
+        assert_eq!(count_of(&database, "captures"), 1);
+        assert!(image.is_file(), "the surviving capture still has its picture");
+    }
+
+    #[test]
+    fn deletes_a_capture_that_has_already_gone_without_complaining() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        delete_capture(&database, 9999, 2_000_000_200).unwrap();
+    }
+
+    // What the window is drawn from. The state of the image travels with every row because
+    // the three ways there is no picture — one is coming, none was asked for, the file was
+    // never found — are three different things to say and not one blank tile.
+    #[test]
+    fn hands_the_window_the_captures_of_the_segment_they_were_taken_in() {
+        let entries = format!("{CAPTURE_ENTRY_WITH_NOTE}, {}", r#"
+          { ["id"] = "TEST|2000000050|2", ["schema"] = 1, ["at"] = 2000000050,
+            ["stamp"] = "111423_130000", ["character"] = "Aster-Vale", ["author"] = "TEST",
+            ["segment"] = "Aster-Vale|1999990000|Ulduar", ["hasImage"] = true }
+        "#);
+        let (_temp, wow, database) = capture_install(&entries, CAPTURE_SEGMENT);
+        // Only the first has a file waiting for it; the second is a marker whose picture was
+        // never found, which is a row the window has to show and explain rather than drop.
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let captures = dashboard_captures(&database);
+        assert_eq!(captures.len(), 2);
+        assert_eq!(captures[0]["sourceId"], "TEST|2000000000|1");
+        assert_eq!(captures[0]["imageState"], "stored");
+        assert_eq!(captures[0]["note"], "first Yogg kill");
+        assert_eq!(captures[0]["byteSize"], 19);
+        assert_eq!(captures[1]["imageState"], "missing");
+        assert_eq!(captures[1]["note"], Value::Null);
+    }
+
     /// An install whose SavedVariables carry the addon's per-character snapshot and nothing
     /// else. No segments on purpose: what a character holds is a fact about the character,
     /// and it has to reach the database whether or not that character has filed a segment.
@@ -5375,7 +5830,7 @@ ChronieDB = {{ ["segments"] = {{
             fs::create_dir_all(database.parent().unwrap()).unwrap();
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
-            for migration in &MIGRATIONS[..9] {
+            for migration in &MIGRATIONS[..10] {
                 transaction.execute_batch(migration).unwrap();
             }
             transaction
@@ -5387,7 +5842,7 @@ ChronieDB = {{ ["segments"] = {{
                        VALUES (1, 1, 'Brin-Vale', 'Brin', 'Vale', 1900000000, 1900000000);",
                 )
                 .unwrap();
-            transaction.pragma_update(None, "user_version", 9_i64).unwrap();
+            transaction.pragma_update(None, "user_version", 10_i64).unwrap();
             transaction.commit().unwrap();
         }
         // Nothing read yet under the old schema: a character with a history and no balance.

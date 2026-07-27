@@ -18,7 +18,11 @@ chrono = { version = "0.4.38", features = ["serde"] }
 flate2 = "1.1.9"
 gltf-json = "1.4.1"
 hex = "0.4.3"
-image = { version = "0.25", default-features = false, features = ["png"] }
+# The formats this app has to read, and no others. `png` is what an icon is re-encoded as;
+# `jpeg` and `tga` are what the client writes a screenshot as, which is the player's own choice
+# of `screenshotFormat` and not something Chronie gets to assume either way. Default features
+# would pull in a dozen decoders nothing here will ever be handed.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga"] }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.122"

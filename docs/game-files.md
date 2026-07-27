@@ -7,9 +7,10 @@ real install once, deliberately, and written down; going back to the install is 
 the questions it does not answer, and an answer found that way belongs here
 afterwards, marked with the build it came from.
 
-**Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26, and the array
+**Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26; the array
 columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the same build on
-2026-07-27 — the two things this file used to carry on the community's say-so. Column
+2026-07-27 — the two things this file used to carry on the community's say-so; and the
+customization chain below against `12.0.5.67823` on 2026-07-27. Column
 indices and file ids are stated as *verified* only where they were read out of that
 install and cross-checked against the data they resolve to. Everything else is marked
 as coming from [WoWDBDefs](https://github.com/wowdev/WoWDBDefs) or
@@ -89,6 +90,10 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `ChrModelMaterial` | 3566562 | fixed | yes |
 | `ChrModelTextureLayer` | 3548976 | fixed | yes |
 | `ChrModel` | 3384313 | fixed | yes |
+| `ChrCustomizationChoice` | 3450554 | fixed | yes |
+| `ChrCustomizationOption` | 3384247 | fixed | yes |
+| `ChrCustomizationElement` | 3512765 | fixed | yes |
+| `ChrCustomizationMaterial` | 3459652 | fixed | yes |
 | `HelmetGeosetData` | 2821752 | fixed | yes |
 | `Achievement` | 1260179 | fixed | yes |
 | `Achievement_Category` | 1324299 | fixed | yes |
@@ -272,6 +277,89 @@ what the install says. 11 upward are still named "weapon or shield" between them
 one by one, because nothing says which of them is the main hand and which the off hand and
 four labelled guesses would read as fact.
 
+## The character's own skin, verified
+
+What an item paints is above; what the body already *is* comes from somewhere else entirely.
+A character's skin is a customization the player picked, and four hops stand between the swatch
+and a picture. All of them were read off `12.0.5.67823` on 2026-07-27 with
+`examples/dump_customization`, which is what to run again after a patch:
+
+```sh
+cargo run --example dump_customization -- "<install>"
+```
+
+**Every table on this chain keeps its id beside the rows rather than in them**, so `ID` is not
+a column and everything sits one place earlier than the community's field list reads. That is
+the single thing most likely to go wrong here, and the column *count* is what says it: two in
+`ChrCustomizationMaterial` rather than three.
+
+```
+ChrCustomizationChoice            (id inline, in column 1 — the exception)
+  col1 = ID                        85 is Human Female's first skin swatch
+  col2 = ChrCustomizationOptionID  14, which ChrCustomizationOption names "Skin Color"
+  col5 = OrderIndex                0, which is what makes it the default
+     │
+     ▼
+ChrCustomizationElement           (id in the id list)
+  col0 = ChrCustomizationChoiceID   ← an ordinary column, not the relationship block
+  col4 = ChrCustomizationMaterialID   0 where the element drives a geoset and paints nothing
+     │
+     ▼
+ChrCustomizationMaterial          (id in the id list)
+  col0 = ChrModelTextureTargetID    which layer of the atlas it belongs to
+  col1 = MaterialResourcesID
+     │
+     ▼
+TextureFileData.col2 = MaterialResourcesID
+  row.id() = FileDataID ──▶ BLP2
+```
+
+**One choice paints several targets, and only one of them is the skin.** Choice 85 has three
+elements: material 823 on target 1, and 824 and 825 on targets 13 and 14. All three resolve to
+real BLP2s, so picking wrong is a body painted with something that looks like a skin and is
+not. What settles it is `ChrModelTextureLayer`, keyed to the layout by the relationship block:
+
+```
+ChrModelTextureLayer              (id in the id list)
+  foreign_id() = CharComponentTextureLayoutsID   ← the relationship block, and nowhere else
+  col0 = TextureType                1 is the body atlas; 6 hair, 19 eyes, 20 jewelry
+  col1 = Layer                      bottom first
+  col3 = BlendMode                  1 is a straight copy; everything else blends
+  col4 = TextureSectionTypeBitMask  one bit per SectionType; -1 is the whole buffer
+  col7 = ChrModelTextureTargetID[2] ──▶ ChrCustomizationMaterial.col0
+```
+
+On layout 104 that reads, in full:
+
+| Layer | Type | Blend | Target | What |
+|---|---|---|---|---|
+| 0 | 1 | **1, a copy** | **1** | **the base skin** |
+| 1 | 6 | 1 | 10 | hair, on its own atlas |
+| 2–9, 13 | 1 | 15, 6, 7 | 4, 5, 30, 29, 11, 12, 7, 8, 36 | face and item layers |
+| 10 | 1 | 15 | 13 | underwear, section mask 32 — the upper legs |
+| 11 | 1 | 15 | 14 | underwear, section mask 8 — the upper torso |
+| 12, 16 | 19 | 1, 9 | 25, 44 | eyes |
+| 14, 15 | 20 | 1 | 27, 28 | jewelry |
+
+**The base skin is the one layer of the body atlas that is copied rather than blended**, which
+is what `skin.rs` picks it out by. Blend mode 1 is wow.export's "blit"; it is the only mode in
+`CharMaterialRenderer`'s switch that disables blending outright. Note that hair, eyes and
+jewelry are copied too — the texture type has to be checked as well, or a hairline lands across
+the body.
+
+Resolved end to end, choice 85 is:
+
+| Hop | Value |
+|---|---|
+| element 2917 → material 823 | target 1, resource 128773 → **1002483**, BLP2 1024 × 512 |
+| element 2918 → material 824 | target 13, resource 128747 → 1002457, BLP2 256 × 128 |
+| element 2919 → material 825 | target 14, resource 128760 → 1002470, BLP2 256 × 128 |
+
+**The underwear is not part of the skin texture**, which is what it was on the races that
+predate the Shadowlands customization system. It is those two 256 × 128 pictures, blended into
+one section rectangle each. A reader that took only the base gets a nude body; one that painted
+all three over the whole buffer gets underwear for a body.
+
 ## Achievements
 
 Two tables, no chain: `Achievement` is the achievements and `Achievement_Category` is the
@@ -318,8 +406,8 @@ than failing:
 
 Measured on 12.0.5.67: 13,736 declared rows, 13,732 readable, 3,846 distinct icons, 243
 categories. `cargo run --example dump_achievements -- "<install>"` prints the lot for a
-handful of ids and is what to run after a patch — as `dump_items` is for `ItemSparse` and
-`dump_transmog` for the chain above.
+handful of ids and is what to run after a patch — as `dump_items` is for `ItemSparse`,
+`dump_transmog` for the chain above and `dump_customization` for the skin.
 
 ## Regenerating the fixtures
 
@@ -340,6 +428,14 @@ encrypts, an `ItemAppearance` whose display info is encrypted, one with no icon 
 display whose only model sits in the second slot, an item `ItemSparse` holds a row for and no
 name in, an achievement filed under a category whose parent is encrypted, one filed under a
 category that is not in the tree at all, and one the game withholds entirely.
+
+The customization tables are there too, and their fixture is built around the one way that
+chain goes wrong: the default choice paints four targets, every one of them resolves to a real
+picture, and only the layer table says which is the skin. Beside them sit the rest of what
+makes that reading non-trivial — a second swatch whose skin lands on the same target, an
+element that drives a geoset and paints nothing, a copied layer belonging to another atlas, and
+another layout's base layer, which has the same shape as this one's and a target that must
+never be painted.
 
 The `ItemSparse` fixture is the only one with variable-length records, and it is where that
 half of the reader is exercised: strings written into the record, records addressed through

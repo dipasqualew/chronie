@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ActivityEditor } from "./activityEditor";
+import { createCaptureAlbum } from "./captures";
 import { buildCharacters } from "./characters";
 import { Characters } from "./charactersView";
 import { Details } from "./details";
@@ -79,6 +80,25 @@ export function App({ payload, settings }: AppProps): ReactNode {
     loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
   }), []);
 
+  // The same argument as the achievement book: a thumbnail outlives any one grid, and a reader
+  // scrolling back through a history meets the same evening's pictures over and over. One
+  // album for the window means each one crosses the bridge once.
+  const album = useMemo(() => createCaptureAlbum(desktop.captureThumbnails), []);
+
+  // Every write answers with the whole dashboard, so what ends up on screen is what was
+  // stored. Which matters more for a note than for anything else in the app: a sentence that
+  // looked saved and was not is one nobody will think to type again.
+  const captureActions = useMemo(() => ({
+    loadImage: desktop.captureImage,
+    setNote: desktop.setCaptureNote,
+    remove: desktop.deleteCapture,
+    onApply: applyDashboard,
+    onError: message,
+  // `applyDashboard` is redeclared on every render and does not close over anything that
+  // changes, so pinning the actions here is what keeps the viewer's effects from re-running.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+
   const sessions = useMemo(() => buildSessions(segments), [segments]);
   const profiles = useMemo(
     () => buildCharacters(segments, payload.holdings), [segments, payload.holdings],
@@ -119,17 +139,25 @@ export function App({ payload, settings }: AppProps): ReactNode {
     return () => clearInterval(timer);
   }, [segments]);
 
-  /** Folds a fresh dashboard onto the segments already on screen. */
+  /**
+   * Folds a fresh dashboard onto the segments already on screen.
+   *
+   * Only the parts a write can have changed, rather than replacing the segments outright: the
+   * page keeps its identity — an open modal, an unfolded summary — and picks up the two lists
+   * that an edit in this window can move.
+   */
   function applyDashboard(fresh: DashboardPayload): void {
     const byId = new Map((fresh.segments || []).map((segment) => [segment.segmentId, segment]));
     setSegments((list) => list.map((segment) => {
       const next = byId.get(segment.segmentId);
-      return next ? { ...segment, activities: next.activities || [] } : segment;
+      return next
+        ? { ...segment, activities: next.activities || [], captures: next.captures || [] }
+        : segment;
     }));
   }
 
   // The modal walks the list it was opened from, and that list is re-resolved against the
-  // segments on screen — so an activity edit lands in the open modal too.
+  // segments on screen — so an activity edit, or a note, lands in the open modal too.
   const walking = useMemo((): SegmentModalState | null => {
     if (!showing) return null;
     const byId = new Map(segments.map((segment) => [segment.segmentId, segment]));
@@ -185,7 +213,10 @@ export function App({ payload, settings }: AppProps): ReactNode {
           <div className="sub" id="timeline-meta">{meta}</div>
         </header>
         <div id="timeline">
-          <Timeline sessions={sessions} onOpenSegment={openSegment} />
+          <Timeline
+            sessions={sessions} onOpenSegment={openSegment}
+            album={album} captures={captureActions}
+          />
         </div>
       </main>
 
@@ -250,6 +281,8 @@ export function App({ payload, settings }: AppProps): ReactNode {
         showing={walking}
         achievements={achievements}
         holdings={payload.holdings}
+        album={album}
+        captures={captureActions}
         onStep={(by) => setShowing((was) => {
           if (!was) return was;
           const next = was.index + by;

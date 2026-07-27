@@ -12,6 +12,9 @@
 import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 
+import { CaptureFold } from "./captureGallery";
+import type { CaptureActions } from "./captureGallery";
+import type { CaptureAlbum } from "./captures";
 import { clock, dayLabel, duration, plural } from "./format";
 import type { Session } from "./sessions";
 import { CharacterCircle, HighlightList, SegmentButton, classProps, shownHighlights } from "./ui";
@@ -20,15 +23,20 @@ import type { OpenSegment } from "./ui";
 export interface TimelineProps {
   sessions: Session[];
   onOpenSegment: OpenSegment;
+  /** The thumbnails the window has already been handed, shared with every other grid. */
+  album: CaptureAlbum;
+  captures: CaptureActions;
 }
 
-export function Timeline({ sessions, onOpenSegment }: TimelineProps): ReactNode {
+export function Timeline({ sessions, onOpenSegment, album, captures }: TimelineProps): ReactNode {
   // What the user has opened, kept across repaints: an activity edit redraws the whole view,
   // and having it fold back up under the cursor would be maddening.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   // At most one summary is unfolded per session — opening a second closes the first — so a
   // card never grows two lists at once and the page stays the length the reader expects.
   const [unfolded, setUnfolded] = useState<ReadonlyMap<string, string>>(() => new Map());
+  // The evening's pictures, folded away like everything else on this page until asked for.
+  const [showing, setShowing] = useState<ReadonlySet<string>>(() => new Set());
 
   if (!sessions.length) {
     return (
@@ -41,6 +49,12 @@ export function Timeline({ sessions, onOpenSegment }: TimelineProps): ReactNode 
   }
 
   const toggleSegments = (id: string): void => setExpanded((open) => {
+    const next = new Set(open);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+
+  const toggleCaptures = (id: string): void => setShowing((open) => {
     const next = new Set(open);
     if (!next.delete(id)) next.add(id);
     return next;
@@ -72,6 +86,10 @@ export function Timeline({ sessions, onOpenSegment }: TimelineProps): ReactNode 
               session={session}
               open={expanded.has(session.id)}
               unfolded={unfolded.get(session.id) ?? null}
+              album={album}
+              captures={captures}
+              showingCaptures={showing.has(session.id)}
+              onToggleCaptures={() => toggleCaptures(session.id)}
               onToggleSegments={() => toggleSegments(session.id)}
               onUnfold={(kind) => unfold(session.id, kind)}
               // A summary chip, one of the things it unfolded into, and a segment row all
@@ -89,13 +107,20 @@ interface SessionCardProps {
   session: Session;
   open: boolean;
   unfolded: string | null;
+  album: CaptureAlbum;
+  captures: CaptureActions;
+  showingCaptures: boolean;
+  onToggleCaptures: () => void;
   onToggleSegments: () => void;
   onUnfold: (kind: string) => void;
   onOpenSegment: (segmentId: number) => void;
 }
 
 function SessionCard(
-  { session, open, unfolded, onToggleSegments, onUnfold, onOpenSegment }: SessionCardProps,
+  {
+    session, open, unfolded, album, captures, showingCaptures, onToggleCaptures,
+    onToggleSegments, onUnfold, onOpenSegment,
+  }: SessionCardProps,
 ): ReactNode {
   const cast = session.characters;
   // The spine's node takes the colour of whoever played most, which makes an evening on one
@@ -131,6 +156,12 @@ function SessionCard(
             onUnfold={onUnfold} onOpenSegment={onOpenSegment}
           />
           : <p className="session-quiet">A quiet session — nothing new to show for it.</p>}
+        {/* The evening's pictures, above the segments that produced them: a photograph is
+            what somebody came back to this card for, and the segments are the ledger. */}
+        <CaptureFold
+          segments={session.segments} album={album} actions={captures}
+          open={showingCaptures} onToggle={onToggleCaptures}
+        />
         <button
           type="button" className="session-toggle" aria-expanded={open}
           onClick={onToggleSegments}
