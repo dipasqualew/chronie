@@ -23,6 +23,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_account_rollups.sql"),
     include_str!("../migrations/0008_combat_logs.sql"),
     include_str!("../migrations/0009_capture_subjects.sql"),
+    include_str!("../migrations/0010_gold.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2312,6 +2313,7 @@ struct Incoming {
     segments: Vec<Value>,
     lockouts: LockoutFeed,
     holdings: Value,
+    warband: Value,
     markers: Vec<Marker>,
 }
 
@@ -2370,6 +2372,25 @@ fn sync_holdings(
                 .map_err(|error| error.to_string())?;
         }
 
+        // Absent rather than zero when the character has never reported one: a row saying a
+        // character holds nothing is a claim, and an old history has simply never been asked.
+        if let Some(total) = snapshot.get("gold").and_then(|gold| optional_integer(gold, "total"))
+        {
+            transaction
+                .execute(
+                    "INSERT OR REPLACE INTO character_gold (character_id, total, observed_at)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        character_id,
+                        total,
+                        snapshot
+                            .get("gold")
+                            .and_then(|gold| optional_integer(gold, "at"))
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
         let factions = snapshot.get("factions").cloned().unwrap_or(Value::Null);
         for (faction, held) in entries(&factions) {
             transaction
@@ -2392,6 +2413,29 @@ fn sync_holdings(
                 .map_err(|error| error.to_string())?;
         }
     }
+    Ok(())
+}
+
+/// The warband bank's balance, which is the account's rather than any character's.
+///
+/// Replaced outright each sync. There is nothing to merge: the addon reads one live pot, so a
+/// newer reading is simply a better one, and an account whose file has never carried the key
+/// keeps no row at all rather than gaining a zero it never claimed.
+fn sync_warband(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    warband: &Value,
+) -> Result<(), String> {
+    let Some(gold) = optional_integer(warband, "gold") else {
+        return Ok(());
+    };
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO account_gold (account_id, warband, observed_at)
+             VALUES (?1, ?2, ?3)",
+            params![account_id, gold, optional_integer(warband, "at")],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -2446,6 +2490,10 @@ pub fn collect(
                 .collect::<Vec<_>>(),
             lockouts: LockoutFeed::read(&saved),
             holdings: saved.get("holdings").cloned().unwrap_or(Value::Null),
+            // Beside the per-character snapshots rather than inside them: the addon keys
+            // `holdings` by character, and a warband entry in there would arrive here as a
+            // character named "warband".
+            warband: saved.get("warband").cloned().unwrap_or(Value::Null),
             markers: captures::markers(&saved),
         });
     }
@@ -2483,6 +2531,7 @@ pub fn collect(
         }
         sync_lockouts(&transaction, account_id, &account.lockouts, now)?;
         sync_holdings(&transaction, account_id, &account.holdings, now)?;
+        sync_warband(&transaction, account_id, &account.warband)?;
         for marker in &account.markers {
             let character_id = match marker.character.as_deref() {
                 Some(character) => Some(upsert_character_key(
@@ -3091,6 +3140,89 @@ fn account_holdings(connection: &Connection) -> Result<Value, String> {
     Ok(serde_json::json!({
         "currencies": currencies,
         "factions": factions,
+        "gold": account_gold(connection)?,
+    }))
+}
+
+/// What the account is worth in gold: every wallet that has reported, and the warband bank.
+///
+/// The pot is added once rather than per character, because there is one of it. Everything
+/// here is in copper, the unit the client counts in and the unit every other money figure in
+/// this schema is already stored as.
+///
+/// Null when nothing has ever been read. A total of zero is a claim about an account, and an
+/// account nobody has collected from has not made it.
+fn account_gold(connection: &Connection) -> Result<Value, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT c.source_key, g.total, g.observed_at
+             FROM character_gold g
+             JOIN characters c ON c.id = g.character_id
+             ORDER BY c.source_key",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut characters: Vec<Value> = Vec::new();
+    let mut wallets = 0;
+    let mut oldest: Option<i64> = None;
+    for row in rows {
+        let (character, total, observed_at) = row.map_err(|error| error.to_string())?;
+        wallets += total;
+        if let Some(at) = observed_at {
+            if oldest.is_none_or(|eldest| at < eldest) {
+                oldest = Some(at);
+            }
+        }
+        characters.push(serde_json::json!({
+            "character": character,
+            "total": total,
+            "at": observed_at,
+        }));
+    }
+    drop(statement);
+
+    // Summed across accounts, the same way the wallets above are. Two accounts synced into one
+    // history have two warband banks, and the roster's worth is both of them.
+    let (warband, warband_at) = connection
+        .query_row(
+            "SELECT SUM(warband), MIN(observed_at) FROM account_gold",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                ))
+            },
+        )
+        .map_err(|error| error.to_string())?;
+
+    if characters.is_empty() && warband.is_none() {
+        return Ok(Value::Null);
+    }
+
+    // The warband reading ages the total the same way a wallet does.
+    if let Some(at) = warband_at {
+        if oldest.is_none_or(|eldest| at < eldest) {
+            oldest = Some(at);
+        }
+    }
+
+    Ok(serde_json::json!({
+        "characters": characters,
+        "wallets": wallets,
+        "warband": warband,
+        "warbandAt": warband_at,
+        "total": wallets + warband.unwrap_or(0),
+        "oldest": oldest,
     }))
 }
 

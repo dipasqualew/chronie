@@ -160,6 +160,14 @@ function ns.main(env)
     -- before the window that asks it questions.
     local holdings = ns.newHoldingsStore({ db = env.db, now = env.now })
 
+    ---Reads the warband bank's balance into the account's holdings.
+    ---
+    ---A client build with no warband bank hands back nil, which the store leaves standing
+    ---rather than writing down as a balance of zero.
+    local function readWarbandGold()
+        holdings.recordWarband(env.warbandMoney and env.warbandMoney())
+    end
+
     local resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
@@ -183,6 +191,7 @@ function ns.main(env)
         character = currentCharacter,
         accountCurrency = holdings.currency,
         accountStanding = holdings.standing,
+        accountGold = holdings.gold,
     })
 
     local segmentLog = ns.newSegmentLog({
@@ -579,6 +588,9 @@ function ns.main(env)
             level = env.unitLevel("player"),
         })
         env.requestRaidInfo()
+        -- Once at login, so a character that plays without ever opening a bank still leaves
+        -- the pot's balance behind it. ACCOUNT_MONEY keeps it current from here.
+        readWarbandGold()
         -- Minted here rather than at the first capture, because this is the earliest
         -- moment the client will name the player at all, and an entry authored by nobody
         -- is not something a later release could repair.
@@ -648,7 +660,13 @@ function ns.main(env)
 
     -- Logging out or reloading is the last chance to file a segment: SavedVariables are
     -- only written to disk on the way out, so an unfiled segment would never be exported.
-    dispatcher.on("PLAYER_LOGOUT", segmentTracker.flush)
+    -- The warband pot is re-read on the way past for the same reason — this is the freshest
+    -- moment there is, and the number the file carries is the one every other character's
+    -- rollup will read until one of them logs in again.
+    dispatcher.on("PLAYER_LOGOUT", function()
+        readWarbandGold()
+        segmentTracker.flush()
+    end)
 
     -- Every one of these events folds something into the running tally and then wants the
     -- results panel redrawn. Wrapping the subscription keeps that redraw in one place, so a
@@ -663,6 +681,10 @@ function ns.main(env)
     onTallyEvent("PLAYER_MONEY", function()
         tally.money(env.getMoney())
     end)
+    -- The warband pot changing under any of the account's characters. It carries no arguments
+    -- — the balance has to be gone and read — and the read inside the handler is already the
+    -- new one, which is what lets this be treated as PLAYER_MONEY's opposite number.
+    onTallyEvent("ACCOUNT_MONEY", readWarbandGold)
     onTallyEvent("CHAT_MSG_LOOT", function(message)
         tally.loot(message)
     end)
@@ -912,6 +934,25 @@ if CreateFrame then
             getInstanceByIndex = EJ_GetInstanceByIndex,
             registerSlash = registerSlash,
             getMoney = GetMoney,
+            -- The warband bank's own gold. Read on build 12.0.5.67823 as answering anywhere,
+            -- with no banker and no bank frame in sight — `C_Bank.CanViewBank` reads false at
+            -- the very moment this returns the real balance, so the read is deliberately not
+            -- gated on it. Guarded instead on the API existing at all, because a client build
+            -- without warband banks has no C_Bank and calling into one raises.
+            warbandMoney = function()
+                if not C_Bank or not C_Bank.FetchDepositedMoney then
+                    return nil
+                end
+                local accountBank = Enum and Enum.BankType and Enum.BankType.Account
+                if not accountBank then
+                    return nil
+                end
+                local ok, amount = pcall(C_Bank.FetchDepositedMoney, accountBank)
+                if not ok then
+                    return nil
+                end
+                return amount
+            end,
             instanceInfo = function()
                 local name, kind, difficultyId, difficulty = GetInstanceInfo()
                 return { name = name, kind = kind, difficultyId = difficultyId, difficulty = difficulty }

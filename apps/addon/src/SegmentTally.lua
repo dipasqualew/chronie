@@ -137,6 +137,7 @@ local _, ns = ...
 ---@field goldLooted integer Copper picked up as money.
 ---@field itemValue integer Summed vendor value of looted items, in copper.
 ---@field goldDiff integer Net wallet change over the segment, in copper; may be negative.
+---@field wallet integer What the wallet holds now, in copper — the balance the diff landed on.
 ---@field transmogs TransmogEvent[] Newly collected transmog items, in acquisition order.
 ---@field currencyTotal integer Summed absolute-signed currency change across every currency.
 ---@field currencies CurrencyGain[] Per-currency totals, sorted by name.
@@ -953,6 +954,11 @@ function ns.newSegmentTally(deps)
                 goldLooted = segment.goldLooted,
                 itemValue = segment.itemValue,
                 goldDiff = segment.latestMoney - segment.openingMoney,
+                -- The balance itself, not only the movement: what the character is left
+                -- holding is a fact about the character, and the account's worth is built
+                -- from it. The log does not keep it — it is state rather than event, and
+                -- the holdings snapshot is where state lives.
+                wallet = segment.latestMoney,
                 transmogs = ns.copyEventList(specs.transmogs, segment.transmogs),
                 currencyTotal = currencyTotal,
                 currencies = currencies,

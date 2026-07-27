@@ -13,6 +13,9 @@ local fake = {}
 ---
 ---Verified against https://warcraft.wiki.gg/wiki/Events (patch 12.0.5).
 fake.KNOWN_EVENTS = {
+    -- Read out of the 12.0.5.67823 client's own event table, where it sits beside
+    -- PLAYER_MONEY, and confirmed firing on a warband bank deposit on that build.
+    "ACCOUNT_MONEY",
     "ACHIEVEMENT_EARNED",
     "BAG_UPDATE_DELAYED",
     "BOSS_KILL",

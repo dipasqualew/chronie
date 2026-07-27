@@ -1628,6 +1628,7 @@ describe("ns.newSegmentTally", function()
                 goldLooted = 100,
                 itemValue = 50,
                 goldDiff = 100,
+                wallet = 200,
                 transmogs = { { id = 19019, at = 450 } },
                 currencyTotal = 15,
                 currencies = { { id = 1166, name = "Timewarped Badge", amount = 15 } },

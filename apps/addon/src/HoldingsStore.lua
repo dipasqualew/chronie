@@ -26,10 +26,27 @@ local _, ns = ...
 ---@field best StandingHolding The furthest along any character has been seen.
 ---@field characters StandingHolding[] Sorted by character.
 
+---What one character was last seen carrying in its own wallet.
+---@class GoldHolding
+---@field character string "Name-Realm".
+---@field total integer Copper.
+---@field at integer When it was read, in epoch seconds.
+
+---What the account is worth: every wallet, and the one pot they all share.
+---@class GoldRollup
+---@field characters GoldHolding[] Sorted by character.
+---@field wallets integer Summed across every character that has reported one.
+---@field warband integer? The warband bank's own gold; nil when it has never been read.
+---@field warbandAt integer? When that was read.
+---@field total integer `wallets` plus `warband`.
+---@field oldest integer The least recently read of the numbers the total is built from.
+
 ---@class HoldingsStore
 ---@field record fun(character: string, summary: table)
+---@field recordWarband fun(amount: integer?)
 ---@field currency fun(currencyID: integer): CurrencyRollup?
 ---@field standing fun(faction: string): StandingRollup?
+---@field gold fun(): GoldRollup?
 
 ---@class HoldingsStoreDeps
 ---@field db table SavedVariables table; mutated in place so the client persists it.
@@ -54,6 +71,12 @@ local _, ns = ...
 ---  character has never gained while the addon was loaded is not in here — which is a hole
 ---  in the account total, not a zero. Filling it would mean walking the client's own currency
 ---  and reputation panes, which is a separate piece of work.
+---
+---Gold is the exception to the second of those. `GetMoney` answers outright rather than only
+---as part of a change, so a wallet is read whole at every segment close and is a hole only
+---for a character that has not been played since the addon started keeping them. The warband
+---bank is kept beside the wallets rather than inside them: every character reads the same
+---pot, so filing it per character would add it to the account's worth once per alt.
 function ns.newHoldingsStore(deps)
     local db = deps.db
     local now = deps.now
@@ -159,9 +182,35 @@ function ns.newHoldingsStore(deps)
                 end
             end
 
+            -- Zero is a real balance rather than a missing reading, so this is guarded on the
+            -- type alone: a character that has genuinely spent everything must be able to say
+            -- so, or the account total keeps counting gold that is no longer there.
+            if type(summary.wallet) == "number" then
+                entry.gold = { total = summary.wallet, at = at }
+                touched = true
+            end
+
             if touched then
                 entry.updatedAt = at
             end
+        end,
+
+        ---What the warband bank is holding, which belongs to the account rather than to any
+        ---one character.
+        ---
+        ---Kept once, outside the per-character snapshots, because every character reads the
+        ---same pot: filed under each of them it would be added to the account's worth once
+        ---per character on the roster.
+        ---
+        ---`C_Bank.FetchDepositedMoney` answers away from a banker as readily as at one, so
+        ---this is current rather than last-seen-at-the-bank — but it is still stamped, because
+        ---the character that last wrote it may not have been played in weeks.
+        ---@param amount integer? Copper; a nil or a non-number leaves the last reading standing.
+        recordWarband = function(amount)
+            if type(amount) ~= "number" or amount < 0 then
+                return
+            end
+            db.warband = { gold = amount, at = now() }
         end,
 
         ---What the whole account holds of one currency, and who holds it.
@@ -257,6 +306,58 @@ function ns.newHoldingsStore(deps)
             end
 
             return { faction = faction, best = best, characters = seen }
+        end,
+
+        ---What the account is worth in gold: every wallet that has reported, and the warband
+        ---bank once.
+        ---
+        ---Nil when nothing has ever been read, for the same reason an unheld currency rolls up
+        ---to nil: a total of zero is a claim about the account, and the honest answer is that
+        ---nobody has looked yet.
+        ---@return GoldRollup?
+        gold = function()
+            local holders = {}
+            local wallets, oldest = 0, nil
+
+            for character, entry in pairs(db.holdings) do
+                local held = entry.gold
+                if held and held.total then
+                    wallets = wallets + held.total
+                    if not oldest or (held.at or 0) < oldest then
+                        oldest = held.at or 0
+                    end
+                    holders[#holders + 1] = {
+                        character = character,
+                        total = held.total,
+                        at = held.at or 0,
+                    }
+                end
+            end
+
+            local warband = db.warband and db.warband.gold
+            if #holders == 0 and not warband then
+                return nil
+            end
+
+            table.sort(holders, function(left, right)
+                return left.character < right.character
+            end)
+
+            -- The warband reading ages the total the same way a wallet does, so it is weighed
+            -- for the eldest alongside them rather than being treated as permanently current.
+            local warbandAt = db.warband and db.warband.at
+            if warband and (not oldest or (warbandAt or 0) < oldest) then
+                oldest = warbandAt or 0
+            end
+
+            return {
+                characters = holders,
+                wallets = wallets,
+                warband = warband,
+                warbandAt = warbandAt,
+                total = wallets + (warband or 0),
+                oldest = oldest or 0,
+            }
         end,
     }
 end

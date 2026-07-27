@@ -27,6 +27,8 @@ local _, ns = ...
 ---as this character's own number.
 ---@field accountStanding fun(faction: string): StandingRollup? Where the account as a whole
 ---stands with a faction, so a grind already finished elsewhere says so.
+---@field accountGold fun(): GoldRollup? What every character and the warband bank hold
+---between them. Absent, or nil before anything has been read, leaves the wallet on its own.
 ---@field character fun(): string? "Name-Realm" of whoever is playing, so the account rollup
 ---can leave out the character whose own numbers are already on the line above.
 ---@field title string|fun(summary: SegmentSummary): string?
@@ -326,8 +328,35 @@ function ns.newResultsWindow(deps)
                 who .. staleness(best.at), ACCOUNT_COLOR, nil, SUMMARY_VALUE_WIDTH)
         end
 
+        ---What the account is worth in gold, under the wallet this segment moved.
+        ---
+        ---Drawn only when it is a different number from the wallet directly above — a lone
+        ---character with an empty warband bank is worth exactly what is in its pocket, and
+        ---saying so twice takes a line to say nothing. The wallets and the pot are named
+        ---separately because they answer different questions: one is what the roster is
+        ---sitting on, the other is what any of them can reach from a bank.
+        local function accountGoldLines()
+            if not deps.accountGold then
+                return
+            end
+            local rollup = deps.accountGold()
+            if not rollup or rollup.total == (summary.wallet or 0) then
+                return
+            end
+            line("    account", deps.formatMoney(rollup.total) .. staleness(rollup.oldest),
+                MUTED_COLOR, nil, SUMMARY_VALUE_WIDTH)
+            if rollup.warband and rollup.warband > 0 then
+                line("    warband bank", deps.formatMoney(rollup.warband),
+                    MUTED_COLOR, nil, SUMMARY_VALUE_WIDTH)
+            end
+        end
+
         line("Loot value", deps.formatMoney(summary.lootValue), GOLD_COLOR)
         line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
+        if summary.wallet then
+            line("Wallet", deps.formatMoney(summary.wallet), GOLD_COLOR)
+            accountGoldLines()
+        end
 
         local achievements = summary.achievements or {}
         local currencies = summary.currencies or {}
