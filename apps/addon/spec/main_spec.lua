@@ -2748,6 +2748,90 @@ describe("addon integration", function()
             assert.is_nil(quest.accountFirst)
         end)
 
+        ---@param recorded table
+        ---@return table? the results panel's frame, once something has built it
+        local function panelFrame(recorded)
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == "ChronieResultsWindow" then
+                    return frame
+                end
+            end
+        end
+
+        ---The header's own font strings: the two arrows, named by the glyphs they are drawn
+        ---with, and the title between them. They are the only ones the panel builds without
+        ---a justification, which is what tells them from every row in the body.
+        ---@param frame table
+        ---@return table `{ back, forward, title }`
+        local function headerOf(frame)
+            local header = {}
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.justify == nil then
+                    if fontString.text == "«" then
+                        header.back = fontString
+                    elseif fontString.text == "»" then
+                        header.forward = fontString
+                    else
+                        header.title = fontString
+                    end
+                end
+            end
+            return header
+        end
+
+        ---What the panel is showing against one of the body's labels. The value font string
+        ---is created straight after its label, which is what pairs the two.
+        ---@param frame table
+        ---@param label string
+        ---@return string?
+        local function panelValueFor(frame, label)
+            for index, fontString in ipairs(frame.fontStrings) do
+                if fontString.text == label then
+                    local value = frame.fontStrings[index + 1]
+                    return value and value.text
+                end
+            end
+        end
+
+        -- The panel could only ever say one thing: what is happening right now. The arrows
+        -- are what reach the other two questions a damage meter answers with the same frame
+        -- — what the evening adds up to, and what the dungeon before this one did — and only
+        -- the whole addon wired together can say whether they reach the right segments.
+        it("walks from the open segment to the session total and on to a filed one", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 0,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            -- Coin picked up in Deadmines, or the segment is dropped as empty on the way out.
+            recorded.setMoney(500)
+            recorded.frame:fire("PLAYER_MONEY")
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            -- Twelve minutes of Westfall, so the segment left behind has an age to report.
+            recorded.clock.advance(720)
+
+            local frame = panelFrame(recorded)
+            local header = headerOf(frame)
+            assert.equal("Westfall", header.title.text)
+            assert.equal("0c", panelValueFor(frame, "Gold Δ"))
+
+            header.back:run("OnMouseUp", "LeftButton")
+
+            assert.equal("Session · 2 segments", header.title.text)
+            -- Deadmines' five silver plus the open segment's nothing: the body follows the
+            -- header rather than staying on whatever was drawn before the arrow was clicked.
+            assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
+
+            header.forward:run("OnMouseUp", "LeftButton")
+            header.forward:run("OnMouseUp", "LeftButton")
+
+            assert.equal("Deadmines · 12m ago", header.title.text)
+            assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
+        end)
+
         it("registers the events that feed the segment panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
