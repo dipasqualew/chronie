@@ -60,6 +60,13 @@ bun install
 bun run dev
 ```
 
+To run this checkout as an installed application rather than under `bun run dev` —
+the `.app` in `/Applications` on macOS, the per-user NSIS installer on Windows:
+
+```sh
+bun run install-locally
+```
+
 Run frontend unit tests and browser E2E tests:
 
 ```sh
