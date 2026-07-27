@@ -84,7 +84,8 @@ describe("ns.factionStanding", function()
                 },
             })
 
-            assert.same({ standing = "Renown 12", current = 900, max = 2500 }, standing)
+            assert.same({ standing = "Renown 12", current = 900, max = 2500,
+                rank = 12, system = "renown" }, standing)
         end)
     end)
 
@@ -100,7 +101,8 @@ describe("ns.factionStanding", function()
                 paragon = { value = 25000, threshold = 10000 },
             })
 
-            assert.same({ standing = "Paragon", current = 5000, max = 10000 }, standing)
+            assert.same({ standing = "Paragon", current = 5000, max = 10000,
+                rank = 8, system = "paragon" }, standing)
         end)
 
         it("is ignored while the character is too low a level to have one", function()
@@ -136,7 +138,8 @@ describe("ns.factionStanding", function()
                 },
             })
 
-            assert.same({ standing = "Best Friend", current = 0, max = 8400 }, standing)
+            assert.same({ standing = "Best Friend", current = 0, max = 8400,
+                rank = 8400, system = "friendship" }, standing)
         end)
 
         it("draws the last rank full", function()
@@ -240,7 +243,8 @@ describe("ns.readFactionState", function()
         local standing = ns.readFactionState(client({ data = HONORED, labels = { [6] = "Honored" } }),
             "The Consortium")
 
-        assert.same({ standing = "Honored", current = 3000, max = 12000 }, standing)
+        assert.same({ standing = "Honored", current = 3000, max = 12000,
+            rank = 6, system = "reaction" }, standing)
     end)
 
     -- The bug behind #44: the client this addon ran on had no
@@ -256,7 +260,8 @@ describe("ns.readFactionState", function()
 
         local standing = ns.readFactionState(clients, "The Consortium")
 
-        assert.same({ standing = "Honored", current = 3000, max = 12000 }, standing)
+        assert.same({ standing = "Honored", current = 3000, max = 12000,
+            rank = 6, system = "reaction" }, standing)
     end)
 
     it("says nothing when the client offers no way to find a faction at all", function()
@@ -293,7 +298,8 @@ describe("ns.readFactionState", function()
 
         local standing = ns.readFactionState(clients, "The Consortium")
 
-        assert.same({ standing = "Honored", current = 3000, max = 12000 }, standing)
+        assert.same({ standing = "Honored", current = 3000, max = 12000,
+            rank = 6, system = "reaction" }, standing)
     end)
 
     it("prefers renown when the faction is a major one", function()
@@ -304,7 +310,8 @@ describe("ns.readFactionState", function()
 
         local standing = ns.readFactionState(clients, "Dream Wardens")
 
-        assert.same({ standing = "Renown 12", current = 500, max = 2500 }, standing)
+        assert.same({ standing = "Renown 12", current = 500, max = 2500,
+            rank = 12, system = "renown" }, standing)
     end)
 
     it("carries the paragon bar through", function()
@@ -315,7 +322,8 @@ describe("ns.readFactionState", function()
 
         local standing = ns.readFactionState(clients, "Valdrakken Accord")
 
-        assert.same({ standing = "Paragon", current = 2500, max = 10000 }, standing)
+        assert.same({ standing = "Paragon", current = 2500, max = 10000,
+            rank = 8, system = "paragon" }, standing)
     end)
 
     it("carries the friendship bar through", function()
@@ -332,6 +340,7 @@ describe("ns.readFactionState", function()
 
         local standing = ns.readFactionState(clients, "Brann Bronzebeard")
 
-        assert.same({ standing = "Best Friend", current = 500, max = 2000 }, standing)
+        assert.same({ standing = "Best Friend", current = 500, max = 2000,
+            rank = 1500, system = "friendship" }, standing)
     end)
 end)

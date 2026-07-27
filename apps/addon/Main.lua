@@ -148,6 +148,15 @@ function ns.main(env)
         end
     end
 
+    ---Only the logged-in character can be scanned, so identity is captured at save time.
+    local function currentCharacter()
+        return (env.unitName("player") or "?") .. "-" .. (env.realmName() or "?")
+    end
+
+    -- Account-wide, and read by the panel while a segment is still running, so it is built
+    -- before the window that asks it questions.
+    local holdings = ns.newHoldingsStore({ db = env.db, now = env.now })
+
     local resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
@@ -167,12 +176,11 @@ function ns.main(env)
         previewTransmog = env.previewTransmog,
         openTransmogCollection = env.openTransmogCollection,
         itemName = env.itemName,
+        now = env.now,
+        character = currentCharacter,
+        accountCurrency = holdings.currency,
+        accountStanding = holdings.standing,
     })
-
-    ---Only the logged-in character can be scanned, so identity is captured at save time.
-    local function currentCharacter()
-        return (env.unitName("player") or "?") .. "-" .. (env.realmName() or "?")
-    end
 
     local segmentLog = ns.newSegmentLog({
         db = env.db,
@@ -248,6 +256,7 @@ function ns.main(env)
         end,
         expansions = expansions,
         experienceState = env.experienceState,
+        holdings = holdings,
     })
 
     local accountIdentity = ns.newAccountIdentity({
@@ -705,6 +714,7 @@ function ns.main(env)
         resultsWindow = resultsWindow,
         segmentLog = segmentLog,
         segmentTracker = segmentTracker,
+        holdings = holdings,
         segmentTable = segmentTable,
         segmentWindow = segmentWindow,
         segmentDetailWindow = segmentDetailWindow,

@@ -5,6 +5,8 @@ describe("ns.newResultsWindow", function()
     local ns = loader.load()
 
     local NAME = "ChronieTestResultsWindow"
+    local NOW = 1700000000
+    local CHARACTER = "Main-Ravencrest"
 
     ---Build the window with fake frames and deps, recording what it loads and saves.
     ---`loadPoint` returns whatever the test planted, so both the default and the
@@ -47,6 +49,14 @@ describe("ns.newResultsWindow", function()
             itemName = function(id)
                 return "Named item " .. id
             end,
+            now = function()
+                return options.now or NOW
+            end,
+            character = function()
+                return options.character or CHARACTER
+            end,
+            accountCurrency = options.accountCurrency,
+            accountStanding = options.accountStanding,
         })
         return window, frames, recorded
     end
@@ -394,6 +404,99 @@ describe("ns.newResultsWindow", function()
             assert.equal("+40", valueFor(rowsOf(frames[1]), "  Argent Dawn"))
         end)
 
+        describe("what the rest of the account has already done with the faction", function()
+            ---@param best table?
+            ---@return function
+            local function standingSource(best)
+                return function(faction)
+                    assert.equal("Dream Wardens", faction)
+                    return best and { faction = faction, best = best, characters = { best } } or nil
+                end
+            end
+
+            ---@param overrides table?
+            ---@return table
+            local function gained(overrides)
+                local gain = {
+                    faction = "Dream Wardens",
+                    amount = 250,
+                    standing = "Renown 8",
+                    current = 500,
+                    max = 2500,
+                    rank = 8,
+                    system = "renown",
+                }
+                for key, value in pairs(overrides or {}) do
+                    gain[key] = value
+                end
+                return { reputationTotal = 250, reputation = { gain } }
+            end
+
+            it("says which character has got furthest, and how stale that is", function()
+                local window, frames = newWindow({
+                    accountStanding = standingSource({
+                        character = "Alt-Ravencrest",
+                        standing = "Renown 22",
+                        rank = 22,
+                        system = "renown",
+                        at = NOW - 3 * 24 * 60 * 60,
+                    }),
+                })
+                window.update(summary(gained()))
+
+                expand(frames[1], "Reputation +")
+
+                assert.equal("Alt, 3d ago", valueFor(rowsOf(frames[1]), "    best Renown 22"))
+            end)
+
+            it("stays quiet when this character is the one out in front", function()
+                local window, frames = newWindow({
+                    accountStanding = standingSource({
+                        character = "Main-Ravencrest",
+                        standing = "Renown 8",
+                        rank = 8,
+                        system = "renown",
+                        at = NOW,
+                    }),
+                })
+                window.update(summary(gained()))
+
+                expand(frames[1], "Reputation +")
+
+                assert.is_nil(valueFor(rowsOf(frames[1]), "    best Renown 8"))
+            end)
+
+            it("stays quiet when the character ahead is not actually ahead", function()
+                local window, frames = newWindow({
+                    accountStanding = standingSource({
+                        character = "Alt-Ravencrest",
+                        standing = "Renown 4",
+                        rank = 4,
+                        system = "renown",
+                        at = NOW,
+                    }),
+                })
+                window.update(summary(gained()))
+
+                expand(frames[1], "Reputation +")
+
+                assert.is_nil(valueFor(rowsOf(frames[1]), "    best Renown 4"))
+            end)
+
+            it("says nothing about a faction no other character has been seen with", function()
+                local window, frames = newWindow({ accountStanding = standingSource(nil) })
+                window.update(summary(gained()))
+
+                expand(frames[1], "Reputation +")
+
+                local labels = {}
+                for _, row in ipairs(rowsOf(frames[1])) do
+                    labels[#labels + 1] = row.label
+                end
+                assert.is_nil((table.concat(labels, "\n")):match("best"))
+            end)
+        end)
+
         -- Bars are pooled the same way rows are, so one drawn for a busier summary has to
         -- come off screen when a later, quieter one no longer has a faction for it.
         it("takes leftover bars off screen when a later summary has fewer factions", function()
@@ -453,6 +556,57 @@ describe("ns.newResultsWindow", function()
             expand(frames[1], "Currency +")
 
             assert.equal("+7 (12,450)", valueFor(rowsOf(frames[1]), "  Honor"))
+        end)
+
+        it("shows what the rest of the account holds of the same currency", function()
+            local window, frames = newWindow({
+                accountCurrency = function(id)
+                    assert.equal(1, id)
+                    return {
+                        id = 1,
+                        name = "Honor",
+                        total = 30000,
+                        oldest = NOW - 3 * 24 * 60 * 60,
+                        characters = {
+                            { character = "Alt-Ravencrest", total = 17550, at = NOW - 3 * 24 * 60 * 60 },
+                            { character = "Main-Ravencrest", total = 12450, at = NOW },
+                        },
+                    }
+                end,
+            })
+            window.update(summary({
+                currencyTotal = 7,
+                currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
+            }))
+
+            expand(frames[1], "Currency +")
+
+            -- The eldest of the readings the sum is built from, because a total made partly
+            -- of three-day-old numbers should not read as though it were all current.
+            assert.equal("30,000 on 2, 3d ago", valueFor(rowsOf(frames[1]), "    account"))
+        end)
+
+        it("leaves the account total off when only this character holds any", function()
+            local window, frames = newWindow({
+                accountCurrency = function()
+                    return {
+                        id = 1,
+                        name = "Honor",
+                        total = 12450,
+                        oldest = NOW,
+                        characters = { { character = "Main-Ravencrest", total = 12450, at = NOW } },
+                    }
+                end,
+            })
+            window.update(summary({
+                currencyTotal = 7,
+                currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
+            }))
+
+            expand(frames[1], "Currency +")
+
+            -- It would be the same number as the line above it, said twice.
+            assert.is_nil(valueFor(rowsOf(frames[1]), "    account"))
         end)
 
         it("shows a spend against the holding it left behind", function()

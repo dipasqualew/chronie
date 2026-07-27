@@ -21,6 +21,14 @@ local _, ns = ...
 ---@field previewTransmog fun(itemID: integer)?
 ---@field openTransmogCollection fun(sourceID: integer)?
 ---@field itemName fun(itemID: integer): string?
+---@field now fun(): integer? Current time, for saying how old an account-wide figure is.
+---@field accountCurrency fun(currencyID: integer): CurrencyRollup? What the whole account
+---holds of a currency. Absent, or nil for a currency nobody has reported, leaves the gain
+---as this character's own number.
+---@field accountStanding fun(faction: string): StandingRollup? Where the account as a whole
+---stands with a faction, so a grind already finished elsewhere says so.
+---@field character fun(): string? "Name-Realm" of whoever is playing, so the account rollup
+---can leave out the character whose own numbers are already on the line above.
 ---@field title string|fun(summary: SegmentSummary): string?
 ---@field closable boolean?
 ---@field specialFrames string[]?
@@ -258,6 +266,66 @@ function ns.newResultsWindow(deps)
             return heading .. (isExpanded and " -" or " +")
         end
 
+        ---How stale an account-wide figure is, as it reads on the end of a line. Empty for
+        ---anything read in the last minute, which is the ordinary case for the character
+        ---being played and not worth the width.
+        ---@param at integer? When it was read.
+        ---@return string
+        local function staleness(at)
+            local clock = deps.now
+            if not clock or not at or at <= 0 then
+                return ""
+            end
+            local age = ns.formatAge(clock() - at)
+            return age == "now" and "" or (", " .. age)
+        end
+
+        ---What the rest of the account holds of a currency this segment earned.
+        ---
+        ---Only drawn when another character holds some too. On an account of one — or a
+        ---currency only this character has ever picked up — the account total is the same
+        ---number as the holding on the line above, and repeating it says nothing.
+        ---@param gain CurrencyGain
+        local function accountCurrencyLine(gain)
+            if not deps.accountCurrency or not gain.id then
+                return
+            end
+            local rollup = deps.accountCurrency(gain.id)
+            if not rollup or #rollup.characters < 2 then
+                return
+            end
+            -- The oldest reading is what the total's honesty rests on: it is a sum of
+            -- numbers of different ages, and the eldest of them is the weakest claim in it.
+            line("    account", group(rollup.total) .. " on " .. #rollup.characters
+                .. staleness(rollup.oldest), MUTED_COLOR, nil, SUMMARY_VALUE_WIDTH)
+        end
+
+        ---Where the account as a whole stands with a faction this segment gained.
+        ---
+        ---Only drawn when some other character is further along, because that is the whole
+        ---question it answers: whether grinding this faction here is worth anything when it
+        ---may already be finished elsewhere. The character's own bar is directly above, so
+        ---repeating its standing back at it would only take a line.
+        ---@param gain ReputationGain
+        local function accountStandingLine(gain)
+            if not deps.accountStanding or not gain.faction then
+                return
+            end
+            local rollup = deps.accountStanding(gain.faction)
+            local best = rollup and rollup.best
+            if not best or best.character == (deps.character and deps.character()) then
+                return
+            end
+            -- A standing on another ladder is not a better standing, only a different one,
+            -- and the store has already refused to rank the two against each other.
+            if gain.rank and best.system == gain.system and best.rank and best.rank <= gain.rank then
+                return
+            end
+            local who = best.character:match("^([^-]+)") or best.character
+            line("    best " .. (best.standing or "standing"),
+                who .. staleness(best.at), ACCOUNT_COLOR, nil, SUMMARY_VALUE_WIDTH)
+        end
+
         line("Loot value", deps.formatMoney(summary.lootValue), GOLD_COLOR)
         line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
 
@@ -332,6 +400,7 @@ function ns.newResultsWindow(deps)
                     local change = (gain.amount >= 0 and "+" or "") .. group(gain.amount)
                     local held = gain.total and (change .. " (" .. group(gain.total) .. ")") or change
                     line("  " .. gain.name, held, REP_COLOR)
+                    accountCurrencyLine(gain)
                 end
             end
         end
@@ -417,6 +486,7 @@ function ns.newResultsWindow(deps)
                         end
                         bar(current, max, caption)
                     end
+                    accountStandingLine(gain)
                 end
             end
         end
