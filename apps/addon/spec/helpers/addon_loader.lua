@@ -20,9 +20,10 @@ function loader.tocFiles()
     return files
 end
 
----Reads one file the .toc names, so a test can assert on something the client parses
----rather than executes — Bindings.xml being the only one of those today.
----@param relative string A path as it appears in the .toc.
+---Reads one file out of the addon folder, so a test can assert on something the client
+---parses rather than executes — Bindings.xml being the only one of those today, and it is
+---not in the .toc at all, because the client finds it by name.
+---@param relative string A path inside the addon folder.
 ---@return string contents
 function loader.read(relative)
     local path = ROOT .. relative
@@ -42,10 +43,9 @@ function loader.load(addonName)
             local chunk = assert(loadfile(path), "cannot load " .. path)
             chunk(addonName or "chronie", ns)
         else
-            -- The client hands XML in the .toc to its own parser, which there is no Lua
-            -- stand-in for. What the harness can still check is that the file the .toc
-            -- promises is really there, so a typo or a rename fails here rather than
-            -- silently costing the player a keybinding in game.
+            -- Nothing but Lua is listed today. Anything else the .toc grows would go to a
+            -- client parser there is no Lua stand-in for; reading it at least fails here
+            -- when the .toc promises a file that is not on disk.
             loader.read(relative)
         end
     end
