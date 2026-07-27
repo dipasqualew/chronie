@@ -458,28 +458,34 @@ export interface IconsPayload {
 }
 
 /**
- * The model one appearance is drawn with, as a `.glb` in a data URL.
+ * One piece of an outfit, as the backend's `worn::Piece` reads it.
  *
- * `null` is the ordinary answer rather than a failure. Only heads, shoulders, weapons and
- * shields have geometry of their own — the rest of a set is texture painted onto the
- * character's body — and an install can also be missing the file an appearance names, or
- * hold it only in the encrypted form the game ships unreleased content as.
+ * Three numbers the rows already carry. The display is which appearance; the display type is
+ * which slot, which is what says both which geoset groups it drives and where it sits in the
+ * stack of textures; and the inventory type is the one thing the slot cannot say, which is
+ * which hand a weapon is held in.
  */
-export interface TransmogModelPayload {
+export interface WornPiece {
   displayInfoId: number;
-  model: string | null;
+  displayType: number;
+  inventoryType: number;
 }
 
 /**
- * The character with one appearance worn on it, as a `.glb` in a data URL.
+ * The character wearing a set of clothes, as a `.glb` in a data URL.
  *
- * The same shape as an appearance's own model, and `null` means the same thing: there is
- * nothing to show and the window keeps the icon. What differs is what arrives when there is —
- * the whole body, its atlas painted with this appearance's textures and its geosets switched
- * to the variants the appearance drives. Which is the only way the game itself draws a
+ * `null` means what it means everywhere else on this chain: there is nothing to show and the
+ * window keeps the icons. What arrives when there is, is the whole body — its atlas painted
+ * with every piece's textures in the order they composite, and its geosets switched to the
+ * variants the pieces drive, one per group. Which is the only way the game itself draws a
  * chestpiece: there is no chestpiece, there is a character wearing one.
+ *
+ * No display id comes back, unlike an appearance's own model, because there is no one
+ * appearance this is the answer for.
  */
-export type WornModelPayload = TransmogModelPayload;
+export interface WornSetPayload {
+  model: string | null;
+}
 
 /**
  * The character an appearance is worn on, bare, as a `.glb` in a data URL.
@@ -714,15 +720,14 @@ export interface E2EMock {
   transmog: TransmogPayload;
   /** What each set is made of, keyed by set id, as opening one asks for. */
   transmogItems: Record<number, TransmogSetItemsPayload>;
-  /** The converted models, keyed by display info id. An id absent from here is an appearance
-   * this install has no model for, which the real backend answers with `null`. */
-  transmogModels: Record<number, string>;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
-  /** The body with one appearance composited onto it, keyed by display info id. An id absent
-   * from here is an appearance this install can put on nobody, which the real backend answers
-   * with `null`. */
-  wornModels: Record<number, string>;
+  /** The body wearing an outfit, keyed by that outfit's display ids in ascending order and
+   * joined by commas — see `wornSetKey`. A key absent from here is a set this install can put
+   * on nobody, which the real backend answers with `null`. Keying by the pieces rather than by
+   * one of them is what lets a test say which outfit the window actually asked for, which is
+   * the whole of what a row toggling changes. */
+  wornSets: Record<string, string>;
   /** The decoded icons, keyed the way whatever named them named them. An id absent from here
    * is an icon the install cannot show, which is a row the real backend answers nothing for. */
   gameIcons: Record<number, string>;

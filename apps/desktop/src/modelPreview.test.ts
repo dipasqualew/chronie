@@ -3,8 +3,10 @@ import {
   cameraFor,
   framingDistance,
   glbBytes,
-  previewFor,
+  outfitOf,
   REASONS,
+  wearable,
+  wornSetKey,
   type Previewable,
 } from "./modelPreview";
 
@@ -19,10 +21,10 @@ const appearance = (fields: Partial<Previewable> = {}): Previewable => ({
   ...fields,
 });
 
-describe("previewFor", () => {
-  // Every armour slot, head through tabard, is shown on the body — including the two that
-  // have a mesh of their own. That is the whole of the decision this used to make: a helm has
-  // geometry and the only place that geometry means anything is on a head.
+describe("wearable", () => {
+  // Every armour slot, head through tabard, goes on the body — including the two that have a
+  // mesh of their own. That is the whole of the decision this makes: a helm has geometry and
+  // the only place that geometry means anything is on a head.
   it.each<[string, number, boolean]>([
     ["head", 0, true],
     ["shoulder", 1, true],
@@ -35,12 +37,10 @@ describe("previewFor", () => {
     ["hands", 8, false],
     ["back", 9, false],
     ["tabard", 10, false],
-  ])("shows the %s slot worn on the character", (_, displayType, hasModel) => {
-    expect(previewFor(appearance({ displayType, hasModel }))).toEqual({
+  ])("wears the %s slot on the character", (_, displayType, hasModel) => {
+    expect(wearable(appearance({ displayType, hasModel }))).toEqual({
       kind: "worn",
-      displayInfoId: 900001,
-      displayType,
-      inventoryType: 1,
+      piece: { displayInfoId: 900001, displayType, inventoryType: 1 },
     });
   });
 
@@ -52,49 +52,82 @@ describe("previewFor", () => {
     ["a shield", 13, 14],
     ["a bow", 12, 15],
     ["a tome in the other hand", 15, 23],
-  ])("shows %s held on the character", (_, displayType, inventoryType) => {
-    expect(previewFor(appearance({ displayType, inventoryType }))).toEqual({
+  ])("wears %s held on the character", (_, displayType, inventoryType) => {
+    expect(wearable(appearance({ displayType, inventoryType }))).toEqual({
       kind: "worn",
-      displayInfoId: 900001,
-      displayType,
-      inventoryType,
+      piece: { displayInfoId: 900001, displayType, inventoryType },
     });
   });
 
-  // What is left on its own is a weapon nothing says a place for: an item the game withholds,
-  // and the arrows it files under a weapon slot and nobody holds. A model at the origin would
-  // be inside her pelvis, so the shape of the thing beside her is the better answer.
+  // What is left off her is a weapon nothing says a place for: an item the game withholds, and
+  // the arrows it files under a weapon slot and nobody holds. Neither is a failure of this
+  // install, and both keep their row — they simply have nowhere on a body to be.
   it.each<[string, number, number]>([
     ["an item the game withholds", 11, 0],
     ["ammunition", 14, 24],
-  ])("shows %s as a model of its own", (_, displayType, inventoryType) => {
-    expect(previewFor(appearance({ displayType, inventoryType }))).toEqual({
-      kind: "model",
-      displayInfoId: 900001,
-    });
+  ])("gives %s no place on the character", (_, displayType, inventoryType) => {
+    expect(wearable(appearance({ displayType, inventoryType })))
+      .toEqual({ kind: "nowhere", note: REASONS.nowhere });
   });
 
-  // A weapon slot with no model is not armour painted on a body, so it is not worn on one —
-  // and it gets the plainer reason rather than one that would be untrue of it.
-  it("does not put a weapon with no model on the character", () => {
-    expect(previewFor(appearance({ displayType: 11, inventoryType: 0, hasModel: false })))
-      .toEqual({ kind: "icon", iconFileDataId: 130001, note: REASONS.none });
-  });
-
-  // An appearance the game encrypts has no icon either — the row knows nothing about it at
-  // all — so there is nothing to show and only something to say.
-  it("shows nothing at all for an appearance the game withholds", () => {
-    expect(previewFor(appearance({ withheld: true, hasModel: false, iconFileDataId: 0 })))
-      .toEqual({ kind: "none", note: REASONS.withheld });
+  // Having no model of its own says nothing either way. Eight of the eleven armour slots have
+  // none and are worn regardless, and a weapon slot with none still fails for the reason it
+  // always did, which is that nothing says a hand.
+  it("does not read a missing model as a reason not to wear something", () => {
+    expect(wearable(appearance({ displayType: 3, hasModel: false })).kind).toBe("worn");
+    expect(wearable(appearance({ displayType: 11, inventoryType: 0, hasModel: false })))
+      .toEqual({ kind: "nowhere", note: REASONS.nowhere });
   });
 
   // Withheld wins: a row the game encrypts can still carry a display id from an earlier hop,
-  // and asking the backend for its model would be asking about something unknowable.
+  // and asking the backend to put it on her would be asking about something unknowable.
   it("says nothing rather than guessing about a withheld row that looks modelled", () => {
-    expect(previewFor(appearance({ withheld: true }))).toEqual({
-      kind: "none",
-      note: REASONS.withheld,
-    });
+    expect(wearable(appearance({ withheld: true })))
+      .toEqual({ kind: "nowhere", note: REASONS.withheld });
+  });
+});
+
+describe("outfitOf", () => {
+  const helm = appearance({ displayType: 0, displayInfoId: 900001 });
+  const chest = appearance({ displayType: 3, displayInfoId: 900003 });
+  const legs = appearance({ displayType: 5, displayInfoId: 900006 });
+  const arrows = appearance({ displayType: 14, inventoryType: 24, displayInfoId: 900020 });
+
+  // The outfit is the rows that are picked, in the order the rows are listed — which is not
+  // the order they will be worn in, because that is the game's own table and the backend's.
+  it("takes the picked rows in the order the list holds them", () => {
+    const picked = outfitOf([helm, chest, legs], new Set([2, 0]));
+    expect(picked.map((piece) => piece.displayInfoId)).toEqual([900001, 900006]);
+  });
+
+  // A picked row the character cannot wear is not part of the outfit, however it got picked.
+  it("leaves out a picked row that has nowhere to go", () => {
+    expect(outfitOf([helm, arrows], new Set([0, 1]))).toHaveLength(1);
+  });
+
+  it("comes back empty when nothing is picked", () => {
+    expect(outfitOf([helm, chest], new Set())).toEqual([]);
+  });
+});
+
+describe("wornSetKey", () => {
+  const piece = (displayInfoId: number) => ({ displayInfoId, displayType: 3, inventoryType: 0 });
+
+  // Two lists of the same pieces are the same outfit and get the same body back, so a reader
+  // who takes a piece off and puts it on again pays for the read once.
+  it("names an outfit by its pieces rather than by the order they arrived in", () => {
+    expect(wornSetKey([piece(3), piece(1), piece(2)])).toBe(wornSetKey([piece(1), piece(2), piece(3)]));
+  });
+
+  // And two different outfits are two different names, including the one that differs only by
+  // naming the same appearance twice — which the game does, and which is a set of its own.
+  it("tells two outfits apart", () => {
+    expect(wornSetKey([piece(1), piece(2)])).not.toBe(wornSetKey([piece(1)]));
+    expect(wornSetKey([piece(1), piece(1)])).not.toBe(wornSetKey([piece(1)]));
+  });
+
+  it("names an empty outfit", () => {
+    expect(wornSetKey([])).toBe("");
   });
 });
 

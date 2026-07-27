@@ -260,18 +260,6 @@ async fn game_icons(
     Ok(cache.answer(&icon_file_data_ids))
 }
 
-/// The model one appearance is drawn with, as a `.glb` in a data URL, or `null`.
-///
-/// Asked for one appearance at a time, because a reader looks at one at a time and a set's
-/// worth of models is tens of megabytes of geometry nobody has clicked on. Only heads,
-/// shoulders, weapons and shields have anything to answer with; the rest of a set is texture
-/// painted onto the character's body, and `null` is the ordinary answer for it rather than a
-/// failure — the window keeps showing the icon it already has.
-#[tauri::command]
-async fn transmog_model(display_info_id: u32, state: State<'_, AppState>) -> Result<Value, String> {
-    read_game_files(&state, move |files| models::model_of(files, display_info_id)).await
-}
-
 /// The character an appearance is worn on, bare, as a `.glb` in a data URL.
 ///
 /// One fixed model for the whole app — a Human Female, because gear is authored to look right
@@ -1010,7 +998,6 @@ pub fn run() {
             dashboard,
             transmog_sets,
             transmog_set_items,
-            transmog_model,
             character_model,
             worn_set,
             achievement_details,

@@ -337,13 +337,13 @@ class TransmogDetail {
   }
 
   /**
-   * Picks a row, which is what fills the preview above the list.
+   * The toggle on one row, which takes that piece off the character or puts it back.
    *
-   * The first of its name, because a set naming one appearance twice has two rows that are
-   * the same appearance — and picking either of them is picking the same thing.
+   * `nth` because a set naming one appearance twice has two rows for it, and they are two
+   * separate toggles: taking one off leaves the other on.
    */
-  pick(slot: string, label: string): Promise<void> {
-    return this.dialog.getByRole("button", { name: `Preview ${slot}: ${label}` }).first().click();
+  wear(slot: string, label: string, nth = 0): Locator {
+    return this.dialog.getByRole("button", { name: `Wear ${slot}: ${label}` }).nth(nth);
   }
 
   /**
@@ -362,11 +362,6 @@ class TransmogDetail {
   /** The canvas the model is drawn on, which only exists once one has been shown. */
   canvas(): Locator {
     return this.dialog.locator(".mog-stage canvas");
-  }
-
-  /** The still picture, shown for the slots the game paints onto the character. */
-  stillPicture(): Locator {
-    return this.dialog.locator(".mog-still img");
   }
 
   /** Whatever the pane says about what it is showing, which is a live region. */
@@ -987,30 +982,29 @@ const mockDesktop: E2EMock = {
     12: { thumbnail: THUMBNAIL, full: FULL_SIZE, byteSize: 3_100_000 },
     33: { thumbnail: THUMBNAIL, full: FULL_SIZE, byteSize: 2_411_902 },
   },
-  // The models, as the backend hands them over: a `.glb` in a data URL, keyed by the display
-  // the appearance named. Only the weapons ask for one now — every armour slot is shown worn.
-  transmogModels: {
-    900007: fixtureModel("helm.glb"),
-  },
-  // The body every set detail opens on, before anything is worn.
+  // The body every set detail falls back to when nothing is worn.
   characterModel: fixtureModel("character.glb"),
-  // The same body with one appearance on it, which is what every armour slot shows. 900001 is
-  // the helm, and it is the one with a second node in it — the body, and the helm above it on
-  // a translation, which is the shape three.js had never been handed before.
+  // The bodies, keyed by the outfit each is wearing: every piece's display id, ascending and
+  // comma joined, which is `wornSetKey`. Keying by the whole outfit rather than by a piece of
+  // it is the point — it is what lets a step below say which outfit the window actually asked
+  // the backend for, and taking a piece off is exactly a different key.
   //
-  // Two are missing on purpose, and they fall back to their icons for different reasons.
-  // 900002 is a shoulder the tables say has a model and this install holds no file for; 900005
-  // a pair of gloves whose every texture was painted for a body this app does not draw.
-  wornModels: {
-    900001: fixtureModel("worn-helm.glb"),
-    // The weapon, which is worn like everything else now: the mock keys these by the display
-    // alone, so the hand the window asked for is the unit tests' business rather than this
-    // file's — what this says is that a weapon reaches the character at all.
-    900007: fixtureModel("worn-helm.glb"),
-    900012: fixtureModel("robe.glb"),
-    900003: fixtureModel("robe.glb"),
-    900004: fixtureModel("robe.glb"),
-    900006: fixtureModel("robe.glb"),
+  // `worn-helm.glb` is the one with a second node in it — the body, and a helm above it on a
+  // translation, which is the shape three.js had never been handed before; `robe.glb` is one
+  // node, a body with armour painted into its atlas.
+  wornSets: {
+    // Set 201 as it opens: two crowns, a mantle and a robe. The game names the crown twice
+    // and both rows are worn, which is a set of four pieces rather than three.
+    "900001,900001,900002,900012": fixtureModel("worn-helm.glb"),
+    // The same set with everything but the robe taken off, which is what a reader who wants
+    // to look at one piece does now.
+    "900012": fixtureModel("robe.glb"),
+    // Set 203 as it opens: a helm, a pair of pauldrons, a breastplate, greaves and a blade.
+    // Its sixth row is an item the game withholds, so nothing says a hand and it is not on her.
+    "900001,900003,900006,900007,900009": fixtureModel("worn-helm.glb"),
+    // Two outfits are missing on purpose and answer `null`. Set 202's is a pair of sandals and
+    // a pair of gloves this install can paint neither of; set 205's one wearable row names a
+    // display the game keeps encrypted.
   },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
@@ -1976,48 +1970,44 @@ test("shows the game's transmog sets by collection and filters them", async ({
     expect(widths).toEqual([8, 8, 8, 8]);
   });
 
-  // Every armour slot is shown the way the game shows it, which is on the body. The pane opens
-  // on that body with nothing on it.
-  await test.step("opening a set shows the character everything is worn on", async () => {
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
-    await expect(transmogDetail.note()).toHaveText("Nothing is worn yet. Drag to turn it.");
-    await expect(transmogDetail.canvas()).toBeVisible();
-
-    // 10 × 152: the fixture body holds nineteen geosets and a bare one draws ten of them —
-    // one per group, plus the hairstyle that shares the skin's — and every part is drawn out
-    // of the same 152 vertices the whole model shares. Which makes this the geoset selection,
-    // counted from the far end of the pipe: a variant drawn alongside its default reads as
-    // 11 × 152, and a default that went missing as 9 × 152.
-    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1520");
-  });
-
-  // The change this pane was built towards: a helm has geometry of its own, and it is shown
-  // where that geometry belongs rather than floating in front of her.
-  await test.step("picking an appearance with a model shows it on her head", async () => {
-    await transmogDetail.pick("Head", "Tideglass Crown");
+  // The change this pane was built towards: a set opens as a set. Twelve pieces at once, on
+  // one character, the way a player sees one in the dressing room — and the pane opens on it
+  // rather than on a bare body waiting to be told what to put on.
+  await test.step("opening a set shows the whole set worn", async () => {
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
-    await expect(transmogDetail.canvas()).toBeVisible();
     await expect(transmogDetail.note()).toHaveText("Worn on the character. Drag to turn it.");
+    await expect(transmogDetail.canvas()).toBeVisible();
 
-    // A body *and* a helm, which is the whole point: 9 × 152 for the body — one part fewer
-    // than bare, because the helm covers the hair — plus the helm's own eight vertices. Two
-    // nodes in one scene is the shape this file gained for this, and a loader that read only
-    // the first would answer 1368.
+    // Every row that has somewhere to go is on her, which is what a set opened *is* — both of
+    // the two rows the set names the same crown under included.
+    await expect(transmogDetail.wear("Head", "Tideglass Crown", 0)).toHaveAttribute("aria-pressed", "true");
+    await expect(transmogDetail.wear("Head", "Tideglass Crown", 1)).toHaveAttribute("aria-pressed", "true");
+    await expect(transmogDetail.wear("Shoulder", "Tideglass Mantle")).toHaveAttribute("aria-pressed", "true");
+    await expect(transmogDetail.wear("Chest", "Tideglass Robe")).toHaveAttribute("aria-pressed", "true");
+
+    // A body *and* a helm: 9 × 152 for the body — one part fewer than a bare one, because the
+    // helm covers the hair — plus the helm's own eight vertices. Two nodes in one scene is the
+    // shape this file gained for a worn helm, and a loader that read only the first would
+    // answer 1368.
     await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1376");
   });
 
-  // The whole point of the character being there: a robe has no model of its own, and the
-  // only place it is anything to look at is on a body.
-  await test.step("picking one the game paints onto the character shows it worn", async () => {
-    await transmogDetail.pick("Chest", "Tideglass Robe");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
-    await expect(transmogDetail.note()).toHaveText("Worn on the character. Drag to turn it.");
-    await expect(transmogDetail.canvas()).toBeVisible();
-    await expect(transmogDetail.stillPicture()).toBeHidden();
+  // And the rows are how a piece comes off. Which is also how a reader looks at one piece now:
+  // take the others off rather than pick this one. What the mock keys on is the whole outfit,
+  // so the body that arrives here is proof of what the window actually asked for.
+  await test.step("taking pieces off asks for the set without them", async () => {
+    await transmogDetail.wear("Head", "Tideglass Crown", 0).click();
+    await transmogDetail.wear("Head", "Tideglass Crown", 1).click();
+    await transmogDetail.wear("Shoulder", "Tideglass Mantle").click();
+    await expect(transmogDetail.wear("Head", "Tideglass Crown", 0))
+      .toHaveAttribute("aria-pressed", "false");
+    await expect(transmogDetail.wear("Chest", "Tideglass Robe"))
+      .toHaveAttribute("aria-pressed", "true");
 
-    // A body, not the item: 10 × 152, which is the same one part per geoset group the bare
-    // character draws, out of the vertices the whole model shares. A robe that arrived as
-    // geometry of its own would be a fraction of that.
+    // The robe on its own, which is a body and not an item: 10 × 152, the same one part per
+    // geoset group the bare character draws. A robe that arrived as geometry of its own would
+    // be a fraction of that, and the helm's eight vertices are gone with the helm.
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
     await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1520");
 
     // And the armour has a colour on it. Geometry was all this ever asked for, and geometry
@@ -2038,12 +2028,27 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.stage()).toHaveAttribute("data-blank", "0");
   });
 
-  // The tables say this shoulder has a model and the install holds no file for it, which is
-  // the third case: not an armour slot, not a model, and still not an error.
-  await test.step("a model this install does not hold falls back to the icon", async () => {
-    await transmogDetail.pick("Shoulder", "Tideglass Mantle");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
-    await expect(transmogDetail.note()).toHaveText("This install holds no model for it.");
+  // Taking the last piece off is a thing a reader does on purpose, and what is underneath is
+  // the body the set is a set of clothes for.
+  await test.step("taking everything off leaves the character standing there", async () => {
+    await transmogDetail.wear("Chest", "Tideglass Robe").click();
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
+    await expect(transmogDetail.note()).toHaveText("Nothing is worn. Drag to turn it.");
+
+    // 10 × 152: the fixture body holds nineteen geosets and a bare one draws ten of them —
+    // one per group, plus the hairstyle that shares the skin's — and every part is drawn out
+    // of the same 152 vertices the whole model shares. Which makes this the geoset selection,
+    // counted from the far end of the pipe: a variant drawn alongside its default reads as
+    // 11 × 152, and a default that went missing as 9 × 152.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1520");
+  });
+
+  // And putting one back on is the same toggle the other way, answered out of the cache the
+  // outfit was already read into.
+  await test.step("putting a piece back on dresses her again", async () => {
+    await transmogDetail.wear("Chest", "Tideglass Robe").click();
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1520");
   });
 
   await test.step("closing a set hands back the grid the reader left", async () => {
@@ -2084,48 +2089,42 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await transmogDetail.close();
   });
 
-  // Weapons are the other half of what the game gives a model to, and they arrive through a
-  // second dialog opening — so this is also what says the pane survives being reused.
-  await test.step("a weapon in another set gets a model of its own", async () => {
+  // The other set with weapons in it, arriving through a second dialog opening — so this is
+  // also what says the pane survives being reused.
+  await test.step("a set with a weapon in it is worn with the weapon in her hand", async () => {
     await transmog.klass().selectOption("");
     await transmog.card("Emberforge Plate").click();
     await expect(transmogDetail.named("Emberforge Plate")).toBeVisible();
-    // Back to the body, on a stage that has had a helm and an icon on it since.
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
-
-    // Named by where the game says it is worn rather than by the display type it shares
-    // with every other weapon in the game, and held rather than floating.
-    await transmogDetail.pick("One-hand", "Emberforge Blade");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
     await expect(transmogDetail.canvas()).toBeVisible();
 
-    // And the one the game withholds the item for, which is the only appearance left that is
-    // shown on its own: nothing says a hand, so there is nowhere on her to put it.
-    await transmogDetail.pick("Weapon or shield", "Item 30017");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
-    await expect(transmogDetail.canvas()).toBeVisible();
+    // The blade is on her, named by where the game says it is worn rather than by the display
+    // type it shares with every other weapon in the game.
+    await expect(transmogDetail.wear("One-hand", "Emberforge Blade"))
+      .toHaveAttribute("aria-pressed", "true");
+
+    // And the one the game withholds the item for is not, and cannot be put on: nothing says
+    // a hand, so there is nowhere on her for it. The row keeps its place and says so, because
+    // a set one row short of the count on the card reads as a bug.
+    const nowhere = transmogDetail.wear("Weapon or shield", "Item 30017");
+    await expect(nowhere).toBeDisabled();
+    await expect(transmogDetail.says("The game gives this appearance no place on a character"))
+      .toBeVisible();
     await transmogDetail.close();
   });
 
-  // The tables describe this appearance and this install can put it on nobody: every texture
-  // it names was painted for a body this app does not draw. That is a row back to its icon,
-  // and a sentence of its own — the reader is not missing a model, they are missing a picture
-  // to paint with.
-  await test.step("one the install cannot paint onto the character keeps its icon", async () => {
+  // The tables describe both of this set's appearances and this install can put neither on
+  // anybody: every texture they name was painted for a body this app does not draw. That is a
+  // set with nothing to show, and a sentence of its own rather than an error where a body
+  // should be — the rows are all still there, named and pictured.
+  await test.step("a set this install can show nothing for says so and keeps its rows", async () => {
     await transmog.card("Tideglass Hide").click();
     await expect(transmogDetail.named("Tideglass Hide")).toBeVisible();
-    await transmogDetail.pick("Hands", "Tideglass Gloves");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "still");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
     await expect(transmogDetail.note())
-      .toHaveText("This install holds nothing to paint this slot onto the character with.");
-    await expect(transmogDetail.stillPicture()).toBeVisible();
+      .toHaveText("This install holds nothing to put on the character for these.");
     await expect(transmogDetail.canvas()).toBeHidden();
-
-    // And its neighbour in the same set, which this install can — so the pane goes back to a
-    // body rather than staying on the picture it fell back to.
-    await transmogDetail.pick("Feet", "Tideglass Sandals");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
-    await expect(transmogDetail.canvas()).toBeVisible();
+    await expect(transmogDetail.rows()).toHaveCount(2);
     await transmogDetail.close();
   });
 });

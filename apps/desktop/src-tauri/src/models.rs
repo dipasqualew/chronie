@@ -11,20 +11,18 @@
 //! onto the character's body, which is the work in `docs/character-rendering.md` rather than
 //! here. Those appearances answer with nothing, and the window keeps showing their icon.
 //!
-//! What is left for this module is narrower than it was, and deliberately so: **every
-//! appearance the game says a place for is now shown worn**, by [`crate::character`]. A model
-//! on its own is what a weapon nothing says a hand for falls back to — an item the game
-//! withholds, and the arrows it files under a weapon slot and nobody holds — because a model
-//! hung at the origin is inside her pelvis and the shape of the thing is better than that.
+//! What is left for this module is narrower than it was, and deliberately so: **the window
+//! shows a whole set worn**, by [`crate::character`], and nothing in it any longer asks for one
+//! appearance's geometry on its own. What still does is `examples/dump_model`, which writes one
+//! `.m2` out to a file so that a mesh can be looked at away from the body it belongs on — which
+//! is how every trap in [`crate::m2`] was found and is what to reach for when the next one is.
 
 use std::cell::RefCell;
-
-use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
 use crate::glb;
-use crate::icons::{data_url, png_of};
+use crate::icons::png_of;
 use crate::m2::{Model, Paint};
 use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
 
@@ -53,22 +51,10 @@ const LARGEST_TEXTURE: u32 = 2048;
 
 /// The model an appearance is drawn with, as a `.glb`, or nothing when it has none.
 ///
-/// A `null` model is an ordinary answer rather than a failure. Most armour has no geometry to
-/// show; an install can be missing the file an appearance names; and the game withholds
-/// content it has not shipped. All three leave the window showing the icon it already has.
-/// What does fail is a model that is there and cannot be read, because that is this app being
-/// wrong about the format rather than the install being short of a file.
-pub fn model_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Value, String> {
-    Ok(match glb_of(files, display_info_id)? {
-        Some(glb) => json!({
-            "displayInfoId": display_info_id,
-            "model": data_url("model/gltf-binary", &glb),
-        }),
-        None => json!({ "displayInfoId": display_info_id, "model": Value::Null }),
-    })
-}
-
-/// The same, as the `.glb` bytes themselves — which is what `dump_model` writes to a file.
+/// Nothing is an ordinary answer rather than a failure. Most armour has no geometry to show;
+/// an install can be missing the file an appearance names; and the game withholds content it
+/// has not shipped. What does fail is a model that is there and cannot be read, because that is
+/// this app being wrong about the format rather than the install being short of a file.
 pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<u8>>, String> {
     let Some((slot, model_resource, material_resource)) = resources(files, display_info_id)?
     else {
@@ -177,22 +163,13 @@ mod tests {
     /// A display in a section the game encrypts, so nothing can be read about it.
     const WITHHELD: u32 = 900900;
 
-    fn model(display_info_id: u32) -> Value {
-        model_of(&fixture_files(), display_info_id).unwrap()
-    }
-
-    /// The `.glb` out of an answer, decoded back from the data URL the window receives.
-    fn glb(answer: &Value) -> Vec<u8> {
-        let url = answer["model"].as_str().expect("the answer holds a model");
-        let encoded = url
-            .strip_prefix("data:model/gltf-binary;base64,")
-            .unwrap_or_else(|| panic!("not a glb data url: {url}"));
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        STANDARD.decode(encoded).unwrap()
+    /// The `.glb` an appearance's own geometry comes out as, or nothing when it has none.
+    fn model(display_info_id: u32) -> Option<Vec<u8>> {
+        glb_of(&fixture_files(), display_info_id).unwrap()
     }
 
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
-    fn scene(bytes: &[u8]) -> Value {
+    fn scene(bytes: &[u8]) -> serde_json::Value {
         let length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
         serde_json::from_slice(&bytes[20..20 + length]).unwrap()
     }
@@ -223,9 +200,7 @@ mod tests {
     // geometry and a picture in it.
     #[test]
     fn walks_a_display_down_to_a_model_a_window_can_show() {
-        let answer = model(HELM);
-        assert_eq!(answer["displayInfoId"], HELM);
-        let scene = scene(&glb(&answer));
+        let scene = scene(&model(HELM).expect("the helm has geometry"));
         assert_eq!(scene["asset"]["version"], "2.0");
         assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 1);
         assert_eq!(scene["accessors"][0]["count"], 8);
@@ -237,7 +212,7 @@ mod tests {
     #[test]
     fn reads_the_model_its_skin_and_the_textures_the_two_of_them_name() {
         let files = Noted::new();
-        model_of(&files, HELM).unwrap();
+        glb_of(&files, HELM).unwrap();
         assert_eq!(
             files.asked.into_inner(),
             vec![
@@ -258,12 +233,12 @@ mod tests {
     #[test]
     fn paints_a_model_with_the_texture_the_item_supplies() {
         let files = Noted::new();
-        let answer = model_of(&files, SHOULDERS).unwrap();
+        let answer = glb_of(&files, SHOULDERS).unwrap().expect("the pad has geometry");
         let asked = files.asked.into_inner();
         assert!(asked.contains(&TEXTURE_FILE_DATA), "{asked:?}");
         // 51002 is the shoulder's first material, and 150002 the texture the table gives it.
         assert!(asked.contains(&150002), "{asked:?}");
-        assert_eq!(scene(&glb(&answer))["images"].as_array().unwrap().len(), 1);
+        assert_eq!(scene(&answer)["images"].as_array().unwrap().len(), 1);
     }
 
     // Shoulders keep a left model and a right one, and a display can fill either slot. A
@@ -271,8 +246,7 @@ mod tests {
     #[test]
     fn finds_a_model_kept_only_in_the_second_slot() {
         let files = Noted::new();
-        let answer = model_of(&files, SECOND_SLOT_ONLY).unwrap();
-        assert!(answer["model"].is_string());
+        assert!(glb_of(&files, SECOND_SLOT_ONLY).unwrap().is_some());
         // 41005 is that display's second model resource, and 140005 the file behind it.
         assert!(files.asked.into_inner().contains(&140005));
     }
@@ -281,22 +255,22 @@ mod tests {
     // rather than a failure, because the row it belongs to still has its icon.
     #[test]
     fn answers_with_nothing_for_an_appearance_that_has_no_model() {
-        assert_eq!(model(CHESTPIECE), json!({ "displayInfoId": CHESTPIECE, "model": null }));
+        assert_eq!(model(CHESTPIECE), None);
     }
 
     // The two ways an install can hold no answer: a display in a section the game encrypts,
     // and one this build's tables do not mention at all.
     #[test]
     fn answers_with_nothing_for_a_display_it_cannot_read() {
-        assert_eq!(model(WITHHELD)["model"], Value::Null);
-        assert_eq!(model(404_040)["model"], Value::Null);
+        assert_eq!(model(WITHHELD), None);
+        assert_eq!(model(404_040), None);
     }
 
     // A weapon is the other half of what has geometry, and the one whose model the fixture
     // splits across two levels of the index list.
     #[test]
     fn shows_a_weapon_as_well_as_a_helm() {
-        let scene = scene(&glb(&model(WEAPON)));
+        let scene = scene(&model(WEAPON).expect("the weapon has geometry"));
         assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 2);
     }
 
@@ -306,9 +280,9 @@ mod tests {
     #[test]
     fn tells_a_missing_model_apart_from_an_unreadable_one() {
         // Display 900010 names a model resource whose file the fixture directory omits.
-        assert_eq!(model(900_010)["model"], Value::Null);
+        assert_eq!(model(900_010), None);
         // Display 900011 names one that is there and holds no MD21 chunk.
-        let error = model_of(&fixture_files(), 900_011).unwrap_err();
+        let error = glb_of(&fixture_files(), 900_011).unwrap_err();
         assert!(error.contains("MD21"), "{error}");
     }
 
@@ -338,7 +312,7 @@ mod tests {
     #[test]
     fn says_so_when_the_chain_starts_at_a_table_that_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        let error = model_of(&DirFiles::new(temp.path()), HELM).unwrap_err();
+        let error = glb_of(&DirFiles::new(temp.path()), HELM).unwrap_err();
         assert!(error.contains("1266429.db2"), "{error}");
     }
 }

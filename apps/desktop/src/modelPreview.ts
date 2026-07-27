@@ -7,32 +7,36 @@
  */
 
 import { isHeld } from "./transmogModal";
+import type { WornPiece } from "./types";
 
-/** What the preview pane is showing. */
-export type Preview =
-  | { kind: "model"; displayInfoId: number }
-  | { kind: "worn"; displayInfoId: number; displayType: number; inventoryType: number }
-  | { kind: "icon"; iconFileDataId: number; note: string }
-  | { kind: "none"; note: string };
+/** Whether a row of a set is something the character can wear, and what it is if not. */
+export type Wearable =
+  | { kind: "worn"; piece: WornPiece }
+  | { kind: "nowhere"; note: string };
 
 /**
- * What the pane says about what it is showing, and why it is not showing something else.
+ * What the pane says about what it is showing, and what a row that cannot be worn says.
  *
- * Every slot is now shown the way the game itself shows it, which is on a body — the helm on
- * her head rather than floating in front of her, the sword in her hand — so what is left of
- * the old explanations is the two ways an install can hold nothing to put there. `absent` is
- * a slot with geometry whose file is missing, and `unpaintable` a slot without one whose
- * every texture was painted for a body this app does not draw.
+ * A set is shown as a set now, so the pane's two sentences are the whole outfit and the bare
+ * body — and the explanations that are left belong to the rows rather than to the pane. Both
+ * of them are facts about the game rather than about this install: `withheld` is an appearance
+ * the game encrypts, and `nowhere` a thing the game files under a weapon slot and gives no
+ * place on a body — arrows, and an item whose own row is withheld so nothing says a hand.
+ *
+ * What is gone with the single-appearance pane is the pair that explained an install rather
+ * than a game — a slot whose model file is missing, a slot whose every texture was painted for
+ * another body. Neither is attributable once twelve pieces come back as one body, and what a
+ * reader sees instead is the gap in the outfit where that piece would have been.
  */
 export const REASONS = {
-  worn: "Worn on the character. Drag to turn it.",
-  none: "The game gives this appearance no model.",
+  set: "Worn on the character. Drag to turn it.",
+  bare: "Nothing is worn. Drag to turn it.",
+  unshowable: "This install holds nothing to put on the character for these.",
   withheld: "The game keeps this appearance encrypted.",
-  absent: "This install holds no model for it.",
-  unpaintable: "This install holds nothing to paint this slot onto the character with.",
+  nowhere: "The game gives this appearance no place on a character.",
 } as const;
 
-/** The appearances a preview needs to tell apart, which is less than a row carries. */
+/** The appearances an outfit needs to tell apart, which is less than a row carries. */
 export interface Previewable {
   displayType: number;
   inventoryType: number;
@@ -51,31 +55,65 @@ export interface Previewable {
 const ARMOUR = (displayType: number): boolean => displayType >= 0 && displayType <= 10;
 
 /**
- * How one appearance is best shown: on a character, on its own, or as a picture.
+ * Whether one appearance goes on the character, and as what.
  *
- * The order is the point. **Every appearance the game says a place for is shown worn**,
- * whether or not it has geometry: a helm has a model and the only place that model means
- * anything is on a head, and a sword means as little in mid-air as a helm does. So armour goes
- * on the body by its slot, and a weapon goes there when the item says which hand it is held
- * in.
+ * **Every appearance the game says a place for is worn**, whether or not it has geometry: a
+ * helm has a model and the only place that model means anything is on a head, and a sword
+ * means as little in mid-air as a helm does. So armour goes on the body by its slot, and a
+ * weapon goes there when the item says which hand it is held in.
  *
- * What is left on its own is a weapon the game says no hand for — arrows, and an item whose
- * row the game withholds — because a model at the origin is inside her pelvis and a model
- * beside the window is at least the shape of the thing. What is left as a picture is an
- * appearance with no model at all and a row the game encrypts.
+ * What is left is the two the game itself has nothing to say about, and neither is a failure
+ * of this install: a row the game encrypts outright, and a thing filed under a weapon slot
+ * that nobody holds. Those rows stay in the list and stay off the character, because a set is
+ * what the game says it is and a list one row short reads as a bug.
  */
-export function previewFor(appearance: Previewable): Preview {
-  if (appearance.withheld) return { kind: "none", note: REASONS.withheld };
+export function wearable(appearance: Previewable): Wearable {
+  if (appearance.withheld) return { kind: "nowhere", note: REASONS.withheld };
   if (ARMOUR(appearance.displayType) || isHeld(appearance.displayType, appearance.inventoryType)) {
     return {
       kind: "worn",
-      displayInfoId: appearance.displayInfoId,
-      displayType: appearance.displayType,
-      inventoryType: appearance.inventoryType,
+      piece: {
+        displayInfoId: appearance.displayInfoId,
+        displayType: appearance.displayType,
+        inventoryType: appearance.inventoryType,
+      },
     };
   }
-  if (appearance.hasModel) return { kind: "model", displayInfoId: appearance.displayInfoId };
-  return { kind: "icon", iconFileDataId: appearance.iconFileDataId, note: REASONS.none };
+  return { kind: "nowhere", note: REASONS.nowhere };
+}
+
+/**
+ * The outfit a list of rows and a set of picks comes to, in the order the rows are listed.
+ *
+ * The row order rather than the picking order, so that taking a piece off and putting it back
+ * asks for the outfit it asked for before — which is what makes caching one worth doing. What
+ * order the pieces actually composite in is the backend's, out of the game's own table, and
+ * nothing here needs to know it.
+ */
+export function outfitOf(rows: Previewable[], picked: ReadonlySet<number>): WornPiece[] {
+  return rows
+    .map((row, index): WornPiece | null => {
+      if (!picked.has(index)) return null;
+      const wanted = wearable(row);
+      return wanted.kind === "worn" ? wanted.piece : null;
+    })
+    .filter((piece): piece is WornPiece => piece !== null);
+}
+
+/**
+ * How an outfit is named, for anything holding on to one: its display ids, sorted, joined.
+ *
+ * Sorted rather than left in the order they are worn, because two lists of the same pieces are
+ * the same outfit and get the same body back — the backend lays them out by slot before it
+ * does anything else. An appearance a set names twice keeps both of its places, for the same
+ * reason the list itself does: that is what the set says, and it is not the same outfit as the
+ * one that names it once.
+ */
+export function wornSetKey(pieces: WornPiece[]): string {
+  return pieces
+    .map((piece) => piece.displayInfoId)
+    .sort((left, right) => left - right)
+    .join(",");
 }
 
 /** The `.glb` inside a data URL, as the bytes a loader parses. */
