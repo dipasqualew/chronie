@@ -83,7 +83,9 @@ pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<
     let glb = glb::write(&mesh, &|paint| {
         let texture = match paint {
             Paint::File(fdid) => Some(fdid),
-            Paint::Item => *supplied.borrow_mut().get_or_insert_with(|| match material_resource {
+            // Whichever type asked: an item's model wants one texture and the appearance's
+            // material is it. Only a character declares several and has to tell them apart.
+            Paint::Supplied(_) => *supplied.borrow_mut().get_or_insert_with(|| match material_resource {
                 0 => None,
                 resource => file_named(files, TEXTURE_FILE_DATA, MATERIAL_RESOURCES_ID, resource)
                     .ok()

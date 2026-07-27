@@ -467,7 +467,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(mesh.parts.len(), 3);
-        assert_eq!(asked.into_inner(), vec![Paint::Item]);
+        assert_eq!(asked.into_inner(), vec![Paint::Supplied(2)]);
         assert_eq!(parse(&glb).json["images"].as_array().unwrap().len(), 1);
     }
 

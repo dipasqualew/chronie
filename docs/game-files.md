@@ -292,13 +292,22 @@ hold both of the traps in [character-rendering.md](character-rendering.md) — o
 from inside the `MD21` chunk, and a submesh that starts past the first 64k of the index list,
 which is why `141004.skin` is 131 KB of mostly padding.
 
-`helm.glb` is the one derived fixture: the converter's own output for display 900001, which
-the browser tests load into three.js to prove that what this app writes is glTF a loader will
-take. A test in `models.rs` fails if it has drifted from what the converter now produces:
+It also writes the character body, under the FileDataID the retail client keeps
+`humanfemale_hd.m2` at: eleven cubes carrying nine geoset variants across four groups, a hair
+part on M2 texture type 6 beside a body on type 1, and a skull past the first 64k of the index
+list. Those are the three things an item's model never exercises, and all three fail as
+geometry rather than as an error — see [character-rendering.md](character-rendering.md).
+
+`helm.glb` and `character.glb` are the derived fixtures: the converters' own output, which the
+browser tests load into three.js to prove that what this app writes is glTF a loader will
+take. Tests in `models.rs` and `character.rs` fail if either has drifted from what the
+converters now produce:
 
 ```sh
 cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
     --fixtures apps/desktop/fixtures/transmog 900001 apps/desktop/fixtures/transmog/helm.glb
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
+    --fixtures apps/desktop/fixtures/transmog character apps/desktop/fixtures/transmog/character.glb
 ```
 
 Every fixture table carries an encrypted section, because that is where the edge cases

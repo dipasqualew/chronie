@@ -306,6 +306,19 @@ export interface TransmogModelPayload {
   model: string | null;
 }
 
+/**
+ * The character an appearance is worn on, bare, as a `.glb` in a data URL.
+ *
+ * One model for the whole app — a Human Female, because gear is authored to look right on
+ * human proportions — so it is asked for once and shown for every set opened after. There is
+ * no `null` here, unlike an appearance's own model: every armour slot in the game is drawn on
+ * this one mesh, so an install that cannot produce it has nothing to fall back to and the
+ * command says what went wrong instead.
+ */
+export interface CharacterModelPayload {
+  model: string;
+}
+
 /* ---------- achievements, as the game describes them ---------- */
 
 /**
@@ -422,6 +435,8 @@ export interface E2EMock {
   /** The converted models, keyed by display info id. An id absent from here is an appearance
    * this install has no model for, which the real backend answers with `null`. */
   transmogModels: Record<number, string>;
+  /** The bare character body, which every set detail opens on. */
+  characterModel: string;
   /** The decoded icons, keyed the way whatever named them named them. An id absent from here
    * is an icon the install cannot show, which is a row the real backend answers nothing for. */
   gameIcons: Record<number, string>;

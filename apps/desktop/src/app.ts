@@ -83,6 +83,7 @@ const transmogDetail = createTransmogModal({
   load: (setId) => desktop.transmogSetItems(setId),
   loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
   loadModel: (displayInfoId) => desktop.transmogModel(displayInfoId),
+  loadCharacter: () => desktop.characterModel(),
 });
 
 const transmog = createTransmog({

@@ -1,6 +1,7 @@
 mod activity;
 pub mod achievements;
 pub mod casc;
+pub mod character;
 mod collector;
 pub mod db2;
 pub mod glb;
@@ -204,6 +205,19 @@ async fn game_icons(
 #[tauri::command]
 async fn transmog_model(display_info_id: u32, state: State<'_, AppState>) -> Result<Value, String> {
     read_game_files(&state, move |files| models::model_of(files, display_info_id)).await
+}
+
+/// The character an appearance is worn on, bare, as a `.glb` in a data URL.
+///
+/// One fixed model for the whole app — a Human Female, because gear is authored to look right
+/// on human proportions — so this is asked for once and shown for every set opened after.
+///
+/// No base skin is passed, because which texture a character's skin is comes out of four
+/// customization tables whose column positions have not been read off an install. See
+/// `character::Atlas::base`, which is the one place that changes when they have been.
+#[tauri::command]
+async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
+    read_game_files(&state, move |files| character::model_of(files, None)).await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -693,6 +707,7 @@ pub fn run() {
             transmog_sets,
             transmog_set_items,
             transmog_model,
+            character_model,
             achievement_details,
             game_icons,
             settings,

@@ -7,6 +7,7 @@ import type {
   Activity,
   ActivityMetadata,
   AppUpdateResult,
+  CharacterModelPayload,
   DashboardPayload,
   IconsPayload,
   InstallResult,
@@ -58,6 +59,11 @@ export const desktop = {
   transmogModel: (displayInfoId: number): Promise<TransmogModelPayload> => mock
     ? Promise.resolve({ displayInfoId, model: mock.transmogModels[displayInfoId] ?? null })
     : invoke<TransmogModelPayload>("transmog_model", { displayInfoId }),
+  // The body every appearance is worn on. One model for the whole app, so the window asks the
+  // first time a set is opened and keeps it for every set after.
+  characterModel: (): Promise<CharacterModelPayload> => mock
+    ? Promise.resolve({ model: mock.characterModel })
+    : invoke<CharacterModelPayload>("character_model"),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {

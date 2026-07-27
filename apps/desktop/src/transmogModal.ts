@@ -15,6 +15,11 @@
  * reading the tables that named them, and a list of slots is worth looking at while that
  * happens — so a row draws an empty frame and fills it in when its picture turns up, or
  * leaves it empty for good if the install has nothing to put there.
+ *
+ * The pane above the list opens on the character rather than on nothing, because that is what
+ * the set is a set of clothes for: a bare Human Female, asked for once for the whole app and
+ * shown for every set after. Picking a row still swaps it for that appearance's own model or
+ * its icon — putting the two together is the next piece of work, not this one.
  */
 
 import { escapeHtml, plural } from "./format";
@@ -22,6 +27,7 @@ import { glbBytes, previewFor, REASONS } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
 import { classLabel, expansionName, patchName } from "./transmog";
 import type {
+  CharacterModelPayload,
   TransmogAppearance,
   IconsPayload,
   TransmogModelPayload,
@@ -125,6 +131,8 @@ export interface TransmogModalOptions {
   loadIcons: (iconFileDataIds: number[]) => Promise<IconsPayload>;
   /** Asks for one appearance's model, converted to something a browser can load. */
   loadModel: (displayInfoId: number) => Promise<TransmogModelPayload>;
+  /** Asks for the bare body a set opens on. One model for the whole app. */
+  loadCharacter: () => Promise<CharacterModelPayload>;
   /**
    * Makes the 3D pane. Injected because it is the one thing here that needs a graphics card:
    * a machine without working 3D throws, and the reader gets the icon instead.
@@ -146,7 +154,7 @@ function part(dialog: HTMLDialogElement, selector: string): HTMLElement {
 }
 
 export function createTransmogModal(
-  { dialog, load, loadIcons, loadModel, createStage = lazyStage }: TransmogModalOptions,
+  { dialog, load, loadIcons, loadModel, loadCharacter, createStage = lazyStage }: TransmogModalOptions,
 ): TransmogModal {
   // What a set is made of never changes under a running app — it is read out of the
   // installed game — so a set opened twice is read once.
@@ -158,6 +166,9 @@ export function createTransmogModal(
   // The models, by the display they were asked for under. `null` is an answer: this install
   // has nothing to show for that appearance, and asking again would say the same.
   const models = new Map<number, string | null>();
+  // The bare body, asked for once and kept for as long as the app runs. It is one model for
+  // every set there is, and the read behind it is the game's own storage.
+  let character: Promise<CharacterModelPayload> | null = null;
   let showing: number | null = null;
   let rows: AppearanceRow[] = [];
   // One stage for as long as the dialog lives. Each one is a graphics context of its own, and
@@ -207,7 +218,7 @@ export function createTransmogModal(
       <p class="detail-facts">${escapeHtml(appearanceSummary(payload))}</p>
       ${rows.length ? `<ul class="mog-items">${rows.map(line).join("")}</ul>` : ""}
     `;
-    clearPreview();
+    showCharacter();
     fillIcons();
 
     const wanted = iconIds(payload).filter((id) => !pictures.has(id));
@@ -289,7 +300,56 @@ export function createTransmogModal(
   /** Puts a loaded model on the stage, or falls back to the icon when there is none. */
   async function showModel(row: AppearanceRow, glb: string | null, mine: number): Promise<void> {
     if (glb === null) return still(row, REASONS.absent);
+    // Either the model would not load or the machine has no working 3D at all — a remote
+    // desktop, a virtual machine, a driver the browser has blocklisted. Both leave the reader
+    // better off with the icon and a sentence than with an empty rectangle.
+    await onStage(glb, mine, "model", "Drag to turn it.", (error) => still(row, message(error)));
+  }
 
+  /**
+   * The body a set is opened on: the character with nothing worn, before a row is picked.
+   *
+   * Asked for once for the whole app rather than per set, because it is the same Human Female
+   * every time — so every set after the first opens on it without another read of the game's
+   * storage.
+   *
+   * A machine with no working 3D, or an install this app cannot read the body out of, falls
+   * back to the empty pane a set used to open on. That is a worse view of a set and not a
+   * broken one: every row is still there, and every row that has a model of its own still
+   * shows it.
+   */
+  function showCharacter(): void {
+    const mine = (asked += 1);
+    showingStill = null;
+    setState("loading", "Reading the character model…");
+    character ??= loadCharacter();
+    void character
+      .then((payload) => {
+        if (mine !== asked) return;
+        return onStage(payload.model, mine, "character", "Nothing is worn yet. Drag to turn it.", empty);
+      })
+      .catch(() => {
+        // The body is not worth an error where the set should be: it is the backdrop, and
+        // what the reader opened the set for is the list under it.
+        character = null;
+        if (mine === asked) empty();
+      });
+  }
+
+  /**
+   * Draws a `.glb` on the stage, making one the first time anything needs it.
+   *
+   * `fallback` is what a machine that cannot draw it is shown instead, and is the only
+   * difference between an appearance's model and the body: one has an icon to fall back to and
+   * the other has nothing.
+   */
+  async function onStage(
+    glb: string,
+    mine: number,
+    state: string,
+    note: string,
+    fallback: (error: unknown) => void,
+  ): Promise<void> {
     showingStill = null;
     const pane = part(dialog, ".mog-stage");
     pane.hidden = false;
@@ -301,12 +361,9 @@ export function createTransmogModal(
       starting ??= Promise.resolve(createStage(pane));
       stage = await starting;
       await stage.show(glbBytes(glb));
-      if (mine === asked) setState("model", "Drag to turn it.");
+      if (mine === asked) setState(state, note);
     } catch (error: unknown) {
-      // Either the model would not load or the machine has no working 3D at all — a remote
-      // desktop, a virtual machine, a driver the browser has blocklisted. Both leave the
-      // reader better off with the icon and a sentence than with an empty rectangle.
-      if (mine === asked) still(row, message(error));
+      if (mine === asked) fallback(error);
     }
   }
 
@@ -327,13 +384,18 @@ export function createTransmogModal(
     setState("still", note);
   }
 
-  /** Empties the pane, which is what a newly opened set starts on. */
-  function clearPreview(): void {
-    asked += 1;
+  /** Empties the pane: nothing on the stage, nothing in the frame, and the list to go on with. */
+  function empty(): void {
     showingStill = null;
     part(dialog, ".mog-stage").hidden = true;
     part(dialog, ".mog-still").replaceChildren();
     setState("empty", rows.length ? "Choose an appearance to see it up close." : "");
+  }
+
+  /** The same, and abandons whatever the pane was waiting for — which is what closing does. */
+  function clearPreview(): void {
+    asked += 1;
+    empty();
   }
 
   function setState(state: string, note: string): void {
