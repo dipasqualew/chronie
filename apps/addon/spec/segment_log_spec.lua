@@ -60,6 +60,14 @@ describe("ns.newSegmentLog", function()
                         difficultyId = 4, groupSize = 25, success = true,
                     },
                 },
+                equipsetChanges = {
+                    {
+                        setId = 3, name = "Raid", kind = "updated", at = NOW - 20,
+                        items = {
+                            { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" },
+                        },
+                    },
+                },
                 experience = { gained = 4500, percent = 0.45, startLevel = 41, endLevel = 41 },
             },
         }
@@ -115,6 +123,14 @@ describe("ns.newSegmentLog", function()
                     {
                         id = 745, name = "Flame Leviathan", at = NOW - 900,
                         difficultyId = 4, groupSize = 25, success = true,
+                    },
+                },
+                equipsetChanges = {
+                    {
+                        setId = 3, name = "Raid", kind = "updated", at = NOW - 20,
+                        items = {
+                            { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" },
+                        },
                     },
                 },
                 experience = { gained = 4500, percent = 0.45, startLevel = 41, endLevel = 41 },

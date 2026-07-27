@@ -33,6 +33,7 @@ local _, ns = ...
 ---@field housingXP integer Housing experience gained over the segment.
 ---@field housingLevelUps LevelUpEvent[]
 ---@field encounters EncounterEvent[] Boss fights that ended, kills and wipes alike.
+---@field equipsetChanges EquipsetChange[] Equipment sets created, deleted or edited.
 ---@field keystone KeystoneRun? Present only when the segment was a Mythic+ run.
 ---@field experience ExperienceGain? Present only when the character earned any.
 ---@field expansionTier integer? Encounter Journal tier the location belongs to, 1 = Classic.
@@ -152,6 +153,7 @@ function ns.newSegmentLog(deps)
                 housingXP = summary.housingXP or 0,
                 housingLevelUps = ns.copyEventList(specs.housingLevelUps, summary.housingLevelUps),
                 encounters = ns.copyEventList(specs.encounters, summary.encounters),
+                equipsetChanges = ns.copyEventList(specs.equipsetChanges, summary.equipsetChanges),
                 keystone = ns.copyDetail(details.keystone, summary.keystone),
                 experience = ns.copyDetail(details.experience, summary.experience),
             }

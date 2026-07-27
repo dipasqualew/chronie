@@ -23,6 +23,7 @@ fake.KNOWN_EVENTS = {
     "CHAT_MSG_LOOT",
     "CURRENCY_DISPLAY_UPDATE",
     "ENCOUNTER_END",
+    "EQUIPMENT_SETS_CHANGED",
     "GET_ITEM_INFO_RECEIVED",
     "NEW_MOUNT_ADDED",
     "NEW_PET_ADDED",
@@ -592,6 +593,10 @@ function fake.newEnv(options)
     }
     local itemPrices = options.itemPrices or {}
     local transmogSources = options.transmogSources or {}
+    -- The character's equipment sets and what it is wearing, both mutable so a test can
+    -- change them between two syncs and watch the ledger notice.
+    local equipmentSets = options.equipmentSets or {}
+    local equippedItems = options.equippedItems or {}
     local currencyNames = options.currencies or {}
     local achievementNames = options.achievements or {}
     local mountNames = options.mounts or {}
@@ -703,6 +708,12 @@ function fake.newEnv(options)
                 visualID = source.visualID,
                 newAppearance = source.newAppearance,
             }
+        end,
+        equipmentSets = function()
+            return equipmentSets
+        end,
+        equippedItems = function()
+            return equippedItems
         end,
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]

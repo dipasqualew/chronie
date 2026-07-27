@@ -1264,6 +1264,81 @@ describe("addon integration", function()
             assert.same({ { id = 19019, sourceID = 11, at = 1000 } }, app.tally.summary().transmogs)
         end)
 
+        it("records an equipment set created after the first look at them", function()
+            local sets = {}
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                equipmentSets = sets,
+                equippedItems = { [1] = { id = 100, level = 639, name = "Tideglass Crown" } },
+            })
+            -- Opening the segment is also the ledger's first look, which is what makes the
+            -- set below new rather than one of the ones the character already had.
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            sets[3] = { name = "Raid", items = { [1] = 100 } }
+            recorded.frame:fire("EQUIPMENT_SETS_CHANGED")
+
+            assert.same({
+                {
+                    setId = 3, name = "Raid", kind = "created", at = 1000,
+                    items = {
+                        { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" },
+                    },
+                },
+            }, app.tally.summary().equipsetChanges)
+        end)
+
+        it("records a set deleted while the addon was not watching, at the next login", function()
+            local sets = { [3] = { name = "Raid", items = { [1] = 100 } } }
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                equipmentSets = sets,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            sets[3] = nil
+            recorded.frame:fire("ZONE_CHANGED_NEW_AREA")
+
+            local changes = app.tally.summary().equipsetChanges
+            assert.equal(1, #changes)
+            assert.equal("deleted", changes[1].kind)
+            assert.equal("Raid", changes[1].name)
+        end)
+
+        -- Sets belong to a character but the saved file belongs to the account, so two alts
+        -- must not be able to read each other's last look and invent changes out of it.
+        it("keeps each character's last look apart in the saved file", function()
+            local sets = { [3] = { name = "Raid", items = { [1] = 100 } } }
+            local db = {}
+            local _, thrall = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                equipmentSets = sets,
+                db = db,
+            })
+            thrall.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local jaina, jainaRecorded = boot({
+                playerName = "Jaina",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                equipmentSets = sets,
+                db = db,
+            })
+            jainaRecorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            -- Jaina has never been looked at, so her first look seeds rather than reporting
+            -- Thrall's set as one she just created.
+            assert.same({}, jaina.tally.summary().equipsetChanges)
+            assert.is_not_nil(db.equipsets["Thrall-Ragnaros"])
+            assert.is_not_nil(db.equipsets["Jaina-Ragnaros"])
+        end)
+
         it("records newly collected mounts, pets and toys from their collection events", function()
             local app, recorded = boot({
                 playerName = "Thrall",

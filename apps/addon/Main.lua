@@ -31,6 +31,8 @@ local addonName, ns = ...
 ---@field keystoneCompletion fun(): table? `{ level, mapId, durationMs, onTime, upgrades }`.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---@field transmogSourceInfo fun(sourceID: integer): table?
+---@field equipmentSets fun(): table<integer, EquipsetState> Every equipment set the character has.
+---@field equippedItems fun(): table<integer, EquippedItem> What the character is wearing, by slot.
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
@@ -157,6 +159,49 @@ function ns.main(env)
         now = env.now,
         formatDate = env.formatDate,
     })
+
+    ---Where one character's last-seen equipment sets are kept.
+    ---
+    ---Sets belong to a character but SavedVariables are the account's, so the store is
+    ---keyed by character: two alts with a set each must not look to the ledger like one
+    ---character whose set keeps being replaced. The table is created on first use and then
+    ---mutated in place, because the client only persists what is still reachable from the
+    ---saved root at logout.
+    local function equipsetStore()
+        env.db.equipsets = env.db.equipsets or {}
+        local character = currentCharacter()
+        env.db.equipsets[character] = env.db.equipsets[character] or {}
+        return env.db.equipsets[character]
+    end
+
+    local equipsetLedger = ns.newEquipsetLedger({
+        readSets = env.equipmentSets,
+        readEquipped = env.equippedItems,
+        -- Indexing through a proxy rather than holding the table: the character is not known
+        -- until login, and the ledger is built before it.
+        store = setmetatable({}, {
+            __index = function(_, key)
+                return equipsetStore()[key]
+            end,
+            __newindex = function(_, key, value)
+                equipsetStore()[key] = value
+            end,
+        }),
+        now = env.now,
+    })
+
+    ---Files whatever the character's equipment sets have done since the last look.
+    ---
+    ---The client says only "the sets changed", never which set or how, so the ledger keeps
+    ---the last look and subtracts. This runs on the event and again whenever a segment
+    ---opens, which is what makes an edit performed in a session where nothing was recorded —
+    ---or a set deleted while the addon was not even loaded — still reach the ledger, filed
+    ---against the segment the character next plays.
+    local function syncEquipsets()
+        for _, change in ipairs(equipsetLedger.sync(env.now())) do
+            tally.equipsetChange(change)
+        end
+    end
 
     local segmentTracker = ns.newSegmentTracker({
         tally = tally,
@@ -399,6 +444,9 @@ function ns.main(env)
         env.requestRaidInfo()
         snapshotActiveQuests()
         segmentTracker.sync()
+        -- After the tracker, never before: a change is filed against the open segment, and
+        -- at login there is no open segment until sync() has made one.
+        syncEquipsets()
         resultsWindow.update(tally.summary())
         resultsWindow.show()
     end
@@ -442,6 +490,7 @@ function ns.main(env)
             })
         end
     end)
+    onTallyEvent("EQUIPMENT_SETS_CHANGED", syncEquipsets)
     onTallyEvent("CHAT_MSG_COMBAT_FACTION_CHANGE", function(message)
         tally.reputation(message)
     end)
@@ -708,6 +757,47 @@ if CreateFrame then
                     visualID = info.visualID,
                     newAppearance = ns.isNewTransmogAppearance(sources, uiNew),
                 }
+            end,
+            ---Every equipment set the character has, as ids, names and item-per-slot.
+            ---
+            ---`GetEquipmentSetInfo` returns its fields positionally and the list has grown
+            ---over the years, so only the two leading ones are taken: the name is the first
+            ---and the id is the fourth, and a set the call says nothing about is skipped
+            ---rather than recorded under a name of nil.
+            equipmentSets = function()
+                local sets = {}
+                for _, setID in ipairs(C_EquipmentSet.GetEquipmentSetIDs() or {}) do
+                    local name = C_EquipmentSet.GetEquipmentSetInfo(setID)
+                    if name then
+                        sets[setID] = {
+                            name = name,
+                            items = C_EquipmentSet.GetItemIDs(setID) or {},
+                        }
+                    end
+                end
+                return sets
+            end,
+            ---What the character is wearing, slot by slot, with each item's real worth.
+            ---
+            ---`GetCurrentItemLevel` is asked about the equipped item itself rather than
+            ---about its id, which is the whole point: an item's id says what it started as,
+            ---and only the item in the slot knows what upgrades, sockets and crafted quality
+            ---turned it into. Slots run 1 to 19 — head through tabard — which is every slot
+            ---an equipment set can name.
+            equippedItems = function()
+                local worn = {}
+                for slot = 1, 19 do
+                    local itemId = GetInventoryItemID("player", slot)
+                    if itemId then
+                        local location = ItemLocation:CreateFromEquipmentSlot(slot)
+                        worn[slot] = {
+                            id = itemId,
+                            level = C_Item.GetCurrentItemLevel(location),
+                            name = C_Item.GetItemNameByID(itemId),
+                        }
+                    end
+                end
+                return worn
             end,
             activeQuestIDs = function()
                 local ids = {}
