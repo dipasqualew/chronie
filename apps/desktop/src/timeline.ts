@@ -14,7 +14,7 @@ import { highlights } from "./sessions";
 import type { Session } from "./sessions";
 import type { Segment } from "./types";
 import {
-  activityChip, characterCircle, classColor, classDot, highlightList, locationType,
+  activityChip, characterCircle, classAttr, classDot, highlightList, locationType,
 } from "./ui";
 
 /**
@@ -102,8 +102,7 @@ function card(session: Session, open: boolean, unfolded: string | null): string 
   // The spine's node takes the colour of whoever played most, which makes an evening on
   // one character recognisable from the shape of the page alone.
   const lead = cast[0];
-  return `<article class="session" data-session="${escapeHtml(session.id)}"
-    style="--class-color:${classColor(lead?.classFile)}"
+  return `<article class="session" data-session="${escapeHtml(session.id)}" ${classAttr(lead?.classFile)}
     aria-label="Play session ${escapeHtml(dayLabel(session.day))} ${escapeHtml(clock(session.startedAt))}">
     <div class="session-node" aria-hidden="true"></div>
     <div class="panel session-card">
@@ -136,12 +135,17 @@ function card(session: Session, open: boolean, unfolded: string | null): string 
  *
  * The running totals are left off. On one segment they are four more numbers beside two
  * things that actually happened, and the modal has them a click away.
+ *
+ * The row carries its own character's class, not the session's: an evening spent on three
+ * characters is exactly when the rail down the left of each row is worth having, and it
+ * would say the opposite of the truth if every row took the colour of whoever led.
  */
 function segmentRow(segment: Segment): string {
   const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
   const summary = highlightList(highlights([segment]), { tallies: false, interactive: false });
   return `<li>
     <button type="button" class="seg" data-open-segment="${segment.segmentId}"
+      ${classAttr(segment.classFile)}
       aria-label="Open segment: ${escapeHtml(label)}">
       <span class="seg-time">${escapeHtml(clock(segment.startedAt))}</span>
       <span class="seg-body">

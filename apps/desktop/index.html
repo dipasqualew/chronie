@@ -59,6 +59,38 @@
     --shadow: none;
   }
 
+  /* ---------- the class palette ---------- */
+
+  /* The client's own thirteen colours, so a character reads here the way they do in game,
+     and beside each the ink that can be written on it: no single one clears priest white
+     and shaman blue both, so each is the near-black or the white that reaches WCAG 4.5:1
+     against its fill. `ui.test.ts` reads these rules back and re-measures that.
+
+     They live in the stylesheet, rather than being handed to it a character at a time,
+     because the packaged app's CSP carries a nonce in `style-src` — Tauri puts it there —
+     and a nonce makes every browser ignore `'unsafe-inline'`. A `style=""` attribute has
+     nowhere to carry a nonce, so a colour sent that way never arrives: that is what left
+     three attempts at these colours green in the tests and grey in the window. A
+     `data-class` the stylesheet matches on cannot be dropped by a policy.
+
+     The bare `[data-class]` first is the fallback, and it is deliberately a rule rather
+     than a `var()` default: a segment whose class nothing knows would otherwise inherit
+     the colour of whoever led the session and quietly claim to be them. */
+  [data-class] { --class-color: var(--text-muted); --class-ink: #0b0b0b; }
+  [data-class="DEATHKNIGHT"] { --class-color: #c41e3a; --class-ink: #ffffff; }
+  [data-class="DEMONHUNTER"] { --class-color: #a330c9; --class-ink: #ffffff; }
+  [data-class="DRUID"]       { --class-color: #ff7c0a; --class-ink: #0b0b0b; }
+  [data-class="EVOKER"]      { --class-color: #33937f; --class-ink: #0b0b0b; }
+  [data-class="HUNTER"]      { --class-color: #aad372; --class-ink: #0b0b0b; }
+  [data-class="MAGE"]        { --class-color: #3fc7eb; --class-ink: #0b0b0b; }
+  [data-class="MONK"]        { --class-color: #00ff98; --class-ink: #0b0b0b; }
+  [data-class="PALADIN"]     { --class-color: #f48cba; --class-ink: #0b0b0b; }
+  [data-class="PRIEST"]      { --class-color: #ffffff; --class-ink: #0b0b0b; }
+  [data-class="ROGUE"]       { --class-color: #fff468; --class-ink: #0b0b0b; }
+  [data-class="SHAMAN"]      { --class-color: #0070dd; --class-ink: #ffffff; }
+  [data-class="WARLOCK"]     { --class-color: #8788ee; --class-ink: #0b0b0b; }
+  [data-class="WARRIOR"]     { --class-color: #c69b6d; --class-ink: #0b0b0b; }
+
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -170,7 +202,7 @@
        The two rings hold a stacked cast apart and give a priest's white an edge. */
     background: var(--class-color);
     border: 2px solid var(--class-color);
-    color: var(--class-ink, var(--text-primary));
+    color: var(--class-ink);
     box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px var(--border);
     cursor: default; flex: none;
   }
@@ -235,12 +267,26 @@
     list-style: none; margin: 6px 0 0; padding: 6px 0 0;
     border-top: 1px solid var(--border); display: grid; gap: 2px;
   }
+  /* A segment carries its own character's class colour, quietly: a rail down the left edge
+     and a wash that has faded out by a third of the way across. Quietly is the point — the
+     row is already a time, a name, a place and a summary, and the colour is there to let an
+     evening's characters be told apart at a glance, not to be read.
+
+     The rail wears a hairline on its inner side for the same reason the circle does: priest
+     is #ffffff, and a rail in it against the card would read as a gap rather than a colour. */
   .seg {
     display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: start;
-    width: 100%; text-align: left; padding: 7px 8px;
-    border: none; border-radius: 8px; background: transparent;
+    width: 100%; text-align: left; padding: 7px 8px 7px 13px;
+    border: none; border-radius: 8px;
+    --class-wash: linear-gradient(to right,
+      color-mix(in srgb, var(--class-color) 18%, transparent), transparent 38%);
+    background: var(--class-wash);
+    box-shadow: inset 3px 0 0 var(--class-color), inset 4px 0 0 var(--border);
   }
-  .seg:hover { background: var(--surface-2); }
+  /* The wash is named above so that hovering can lay the hover surface *under* it rather
+     than replace it — a row that lost its colour on the way to being clicked would be the
+     one place the colour mattered most. */
+  .seg:hover { background: var(--class-wash), var(--surface-2); }
   .seg-time { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
   .seg-body { min-width: 0; }
   .seg-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
@@ -275,6 +321,7 @@
   .dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     margin-right: 7px; vertical-align: baseline;
+    background: var(--class-color);
   }
 
   .empty { padding: 44px 16px; text-align: center; color: var(--text-muted); }

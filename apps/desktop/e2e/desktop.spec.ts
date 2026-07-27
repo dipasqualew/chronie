@@ -818,11 +818,23 @@ const fillColours = (elements: Locator): Promise<string[]> =>
 /**
  * The colour each of a set of elements writes its text in, as the browser resolved it.
  *
- * The ink is chosen in TypeScript and applied in CSS, so this is the only place the two meet
- * and the only place the initials can be shown to still read against the fill behind them.
+ * The ink is written down beside the fill in the stylesheet, so this is where the pairing is
+ * shown to have survived to the page and the initials to still read against what is behind
+ * them.
  */
 const inkColours = (elements: Locator): Promise<string[]> =>
   elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+
+/**
+ * The colour of the rail down the left edge of each of a set of elements.
+ *
+ * The rail is an inset box-shadow rather than a border, so that the hairline holding a
+ * priest's white apart from the card can sit inside it. Its first layer is the class colour
+ * and the second is that hairline, which is why only the first is read.
+ */
+const railColours = (elements: Locator): Promise<string[]> =>
+  elements.evaluateAll((nodes) =>
+    nodes.map((node) => getComputedStyle(node).boxShadow.match(/rgba?\([^)]*\)/)?.[0] ?? ""));
 
 /**
  * How much of each element in a row the one after it covers, as a fraction of its own width.
@@ -878,6 +890,35 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
+/**
+ * The one test here that is about the harness rather than the product.
+ *
+ * Three attempts at the class colours were green in this suite and grey in the window,
+ * because the window is not a browser with the brakes off: Tauri serves the page under a
+ * CSP and stamps a nonce onto the `<style>` tags it embeds, and a nonce in `style-src` makes
+ * every engine ignore `'unsafe-inline'`. A `style=""` attribute has nowhere to put a nonce,
+ * so every colour the page sent that way was thrown out before it was ever drawn.
+ *
+ * `vite.config.ts` now serves that same policy to the dev server and to this one. This says
+ * so out loud, because the day it silently stops being true is the day the colour steps
+ * below go back to proving nothing.
+ */
+test("runs under the content policy the packaged window runs under", async ({ page }) => {
+  const response = await page.reload();
+  const csp = response?.headers()["content-security-policy"] ?? "";
+
+  // A nonce, specifically. `'unsafe-inline'` is in the directive too and is the thing the
+  // nonce switches off, so a policy that had lost the nonce would still look permissive
+  // while being far more permissive than the product.
+  expect(csp).toMatch(/style-src[^;]*'nonce-/);
+  expect(csp).toMatch(/script-src[^;]*'nonce-/);
+
+  // And the page has to survive it: the stylesheet is inline, so it lives or dies on having
+  // been stamped with that same nonce. A body drawn in the browser default is what a
+  // mis-stamped nonce looks like, and it would take every assertion about colour with it.
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(246, 245, 242)");
+});
+
 test("stitches segments into play sessions and leads with what happened", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Timeline" })).toBeVisible();
 
@@ -907,8 +948,9 @@ test("stitches segments into play sessions and leads with what happened", async 
   // page, with a thin coloured ring, and nothing that could tell. So the fill is asserted
   // outright: mage cyan then druid orange, filled, with the initials in the ink chosen to
   // read on them. Both of those take the near-black; the white ink belongs to death knight,
-  // demon hunter and shaman, which no fixture casts — `classInk`'s unit tests cover all
-  // thirteen, and this covers the only thing they cannot, which is the stylesheet.
+  // demon hunter and shaman, which no fixture casts — the palette's unit tests measure all
+  // thirteen, and this covers the only thing they cannot, which is that the page arrives
+  // with the colours still attached to it.
   await test.step("and filled with it, not merely ringed in it", async () => {
     const cast = sessions(page).first().getByRole("img");
 
@@ -996,6 +1038,15 @@ test("summarises each segment the same way, once the session is opened", async (
   await expect(row).toContainText("Level 12");
   // The running totals belong to the evening, not to a row inside it.
   await expect(row).not.toContainText("Glass Token");
+
+  // Each row carries its own character's colour rather than the session's. This evening
+  // opens on a mage and finishes on a druid, so a rail that took the card's colour — which
+  // is what it does if a row forgets to name its own class, since the property is inherited
+  // — would come out cyan twice and say nothing about who played what.
+  await test.step("and wears the class colour of whoever played it", async () => {
+    await expect(railColours(first.locator(".seg")))
+      .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+  });
 });
 
 test("digs from a session down into a single segment and back out again", async ({ page, detail }) => {
