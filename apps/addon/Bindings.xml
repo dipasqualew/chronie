@@ -14,4 +14,14 @@
     <Binding name="CHRONIE_CAPTURE" header="CHRONIE">
         if ChronieCapture then ChronieCapture() end
     </Binding>
+
+    <!--
+        The other half of a picture worth keeping: the sentence about it. Pressing this
+        turns the toast that a capture put up into an edit box and gives it keyboard focus,
+        which is the one deliberate act that is allowed to do so — nothing focuses itself.
+        Pressed when no toast is up, it does nothing at all.
+    -->
+    <Binding name="CHRONIE_ANNOTATE" header="CHRONIE">
+        if ChronieAnnotate then ChronieAnnotate() end
+    </Binding>
 </Bindings>
