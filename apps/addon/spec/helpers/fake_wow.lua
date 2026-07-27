@@ -640,6 +640,9 @@ end
 ---  `trackedCurrencies` is a list of item ids to pre-seed into the tracked-currency store.
 ---  `map` is `{ uiMapID, x, y }`, where the character is standing; `false` for nowhere.
 ---  `playerGUID` is the client's unique id for the logged-in character.
+---  `cvars` maps a client setting to its value; `protectedCVars` names the ones this client
+---  refuses to let an addon write, mapping each to "raise" or to any truthy value for a write
+---  that is silently dropped. `combatLogging` is whether the client starts out logging.
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -727,6 +730,14 @@ function fake.newEnv(options)
     if playerGUID == nil then
         playerGUID = "Player-970-0002FD1B"
     end
+    -- The client's settings and whether it is writing a combat log. `cvars` starts as
+    -- whatever the test planted, so a client that already has advanced logging ticked and one
+    -- that does not are both reachable; `protectedCVars` names the ones this client refuses to
+    -- let an addon write, which is the case the addon has to notice rather than assume away.
+    local cvars = options.cvars or {}
+    local protectedCVars = options.protectedCVars or {}
+    local logging = options.combatLogging == true
+    local setCVarCalls = {}
 
     local env = {
         createFrame = createFrame,
@@ -886,6 +897,29 @@ function fake.newEnv(options)
         screenshot = function()
             screenshots = screenshots + 1
         end,
+        loggingCombat = function(enable)
+            if enable ~= nil then
+                logging = enable and true or false
+            end
+            return logging
+        end,
+        getCVar = function(name)
+            return cvars[name]
+        end,
+        -- Two ways a protected CVar refuses an addon, because clients have done both: some
+        -- builds raise from insecure code, others quietly drop the write. "raise" picks the
+        -- first, any other truthy value the second.
+        setCVar = function(name, value)
+            setCVarCalls[#setCVarCalls + 1] = { name = name, value = value }
+            local protection = protectedCVars[name]
+            if protection == "raise" then
+                error("attempted to set a protected cvar: " .. name, 0)
+            end
+            if protection then
+                return
+            end
+            cvars[name] = value
+        end,
         itemName = function(itemID)
             local currencyItem = currencyItems[itemID]
             if currencyItem and currencyItem.name then
@@ -1004,6 +1038,17 @@ function fake.newEnv(options)
         screenshots = function()
             return screenshots
         end,
+        ---@return boolean whether the client is writing a combat log
+        isLogging = function()
+            return logging
+        end,
+        ---@param name string
+        ---@return string? what the client's setting reads as now
+        cvar = function(name)
+            return cvars[name]
+        end,
+        ---Every write the addon attempted, refused ones included.
+        setCVarCalls = setCVarCalls,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
             return raidInfoRequests
