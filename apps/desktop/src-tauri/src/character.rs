@@ -314,7 +314,9 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
     for ((piece, at, _), painter) in hung.iter().zip(painters.iter()) {
         pieces.push(glb::Piece {
             mesh: piece,
-            at: *at,
+            at: at.position,
+            rotation: at.rotation,
+            scale: at.scale,
             picture: painter.as_ref(),
         });
     }
@@ -337,7 +339,7 @@ fn hung_on(
     files: &dyn GameFiles,
     body: &Model,
     worn: Option<&Worn>,
-) -> Result<Vec<(Mesh, [f32; 3], Option<Vec<u8>>)>, String> {
+) -> Result<Vec<(Mesh, m2::Attachment, Option<Vec<u8>>)>, String> {
     let wanted = worn.map_or(&[][..], |worn| worn.models.as_slice());
     if wanted.is_empty() {
         // The skeleton is 16 MB on a real install, and most of a wardrobe hangs nothing.
@@ -353,7 +355,7 @@ fn hung_on(
         let Some(at) = attachments
             .iter()
             .find(|attachment| attachment.id == model.attachment)
-            .map(|attachment| attachment.position)
+            .copied()
         else {
             continue;
         };

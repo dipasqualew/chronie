@@ -42,8 +42,18 @@ pub struct Piece<'a> {
     /// Where the mesh's own origin goes, in the viewer's axes. `[0.0; 3]` for a model that is
     /// the whole of what is being shown; an attachment's position for one hanging off a body.
     pub at: [f32; 3],
+    /// How it sits there: a quaternion `[x, y, z, w]` and three lengths. An attachment can
+    /// carry both — a pauldron sits at 62% and rolled outward — and a model shown on its own
+    /// carries neither.
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
     pub picture: &'a dyn Fn(Paint) -> Option<Vec<u8>>,
 }
+
+/// What a piece with nothing to say about how it sits carries. glTF's own defaults, so both are
+/// left out of the file entirely rather than written as the identity.
+const AT_REST: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+const FULL_SIZE: [f32; 3] = [1.0, 1.0, 1.0];
 
 impl<'a> Piece<'a> {
     /// The one piece a model shown on its own is.
@@ -51,6 +61,8 @@ impl<'a> Piece<'a> {
         Self {
             mesh,
             at: [0.0; 3],
+            rotation: AT_REST,
+            scale: FULL_SIZE,
             picture,
         }
     }
@@ -253,9 +265,12 @@ fn write_piece(
     });
     root.push(gltf_json::Node {
         mesh: Some(drawn),
-        // Left out entirely where there is nothing to translate, so that a model shown on its
-        // own writes exactly the file it always did.
+        // Each left out entirely where it is the default, so that a model shown on its own
+        // writes exactly the file it always did.
         translation: (piece.at != [0.0; 3]).then_some(piece.at),
+        rotation: (piece.rotation != AT_REST)
+            .then_some(gltf_json::scene::UnitQuaternion(piece.rotation)),
+        scale: (piece.scale != FULL_SIZE).then_some(piece.scale),
         ..Default::default()
     })
 }
@@ -563,6 +578,8 @@ mod tests {
             Piece {
                 mesh: &hung,
                 at: [0.0, 4.0, -2.0],
+                rotation: [0.0, 0.0, 0.5f32.sqrt(), 0.5f32.sqrt()],
+                scale: [0.62, 0.62, 0.62],
                 picture: &always(b"the helm"),
             },
         ])
@@ -575,6 +592,12 @@ mod tests {
         assert_eq!(json["nodes"][0], serde_json::json!({ "mesh": 0 }));
         assert_eq!(json["nodes"][1]["mesh"], 1);
         assert_eq!(json["nodes"][1]["translation"], serde_json::json!([0.0, 4.0, -2.0]));
+        // How it sits there as well as where, because a pauldron is worn smaller than it was
+        // modelled and rolled outward, and both come off the body's own skeleton.
+        assert_eq!(json["nodes"][1]["scale"], serde_json::json!([0.62, 0.62, 0.62]));
+        let turned = json["nodes"][1]["rotation"].as_array().unwrap().clone();
+        assert_eq!(turned[0], 0.0);
+        assert!((turned[2].as_f64().unwrap() - 0.5f64.sqrt()).abs() < 1e-6, "{turned:?}");
 
         // Two meshes, two sets of vertices, and two pictures — one per piece rather than one
         // shared between them.

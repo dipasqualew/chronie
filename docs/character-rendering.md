@@ -302,10 +302,9 @@ AFID, BFID
 `C3Vector` position, and then a 20-byte `M2Track` a still picture has no use for.
 
 **The position is already in model space.** The format calls it "relative to the bone", and a
-bone in bind pose has no keyframes in any of its three tracks — so it contributes an identity
-matrix and there is nothing to compose. Read off this build, all 43 of the body's attachments
-state a position *exactly equal to their bone's pivot*, which is the same conclusion arriving
-twice. `m2.rs` therefore reads `SKA1` and never opens `SKB1`.
+bone's translation track holds one run of keyframes *per animation* — so with none playing there
+is nothing to add. Read off this build, all 43 of the body's attachments state a position
+*exactly equal to their bone's pivot*, which is the same conclusion arriving twice.
 
 **Find an attachment by the id in its record**, not by where it sits in the array: the body's
 43 records are not in id order and the ids run to 74.
@@ -323,9 +322,42 @@ say they are right:
 A mirrored pair at shoulder height, one at the top of the head, one behind the chest — on a
 body whose feet are at Z 0 and whose crown is at Z 1.99.
 
-**Nothing needs a rotation or a scale.** A helm, a pauldron and a cloak are all placed by
-translation alone; the attachments that carry more are the ones weapons hang off, which is
-another issue.
+### The bone is not always identity, verified
+
+The paragraph above is the whole of what a *helm* needs, and it is why the first version of this
+work drew a helm and a cloak correctly and a pair of pauldrons half again too large and lying
+flat. The position is not the whole of an attachment.
+
+**A track bound to a global sequence runs whether or not an animation does.** An ordinary track
+is one run of keyframes per animation and contributes nothing to a still picture, which is the
+reasoning that makes bones skippable — but `M2Track.global_sequence` names a loop on the world's
+clock, outside the animation system, and those apply always. On `humanfemale_hd`, **35 of 203
+bones carry one**, and every one of them is an attachment's own bone; no ancestor of an
+attachment carries any, so composing the attachment's own bone is enough on this body.
+
+What the four this app uses hold:
+
+| Bone | Attachment | Scale | Rotation |
+|---|---|---|---|
+| 176 | 5, shoulder right | `0.62` uniform | `(-0.3042, 0, 0.0222, 0.9523)` — 35.5° about ≈ −X |
+| 172 | 6, shoulder left | `0.62` uniform | the mirror of it |
+| 181 | 11, helm | *no track* | *no track* |
+| 161 | 12, back | *no track* | *no track* |
+
+Both shoulder values are constant across all 593 keys of the sequence, and identical between the
+two sides, which is what "a pauldron is worn at 62% and rolled outward" looks like written down.
+A still picture takes the first key.
+
+So the transform for something hanging off a body is `T(position) · R · S`, which is exactly a
+glTF node's `translation`, `rotation` and `scale` — no matrix composition anywhere. It is
+`T(p)·R·S·T(−p)` composed with `T(p)`, and the two `T(−p)`/`T(p)` cancel precisely because the
+attachment sits at its bone's pivot.
+
+**`M2CompQuat` wraps rather than scales.** Four `int16`s, and the mapping is
+`(v < 0 ? v + 32768 : v - 32767) / 32767` — so a *non-negative* number is the bottom half of the
+range and a negative one the top. `22800` is `-0.304` and `-9599` is `+0.707`. Read as a plain
+fraction of 32767 the sign comes out right about half the time, which is a pauldron rotated into
+her neck rather than an error.
 
 ## M2 and SKIN, the static subset
 
@@ -348,9 +380,9 @@ Chunks that matter:
 `PFID`, `AFID`, `BFID`, `EXP2`, `LDV1` are all irrelevant to a static render.
 
 **Bone weights are not needed.** For a bind-pose render, ignore `bone_weights` and
-`bone_indices` — the vertex position is already the bind pose. Bones, sequences, `.anim`
-files and `M2Track` decoding are all skippable — and so, for the same reason, is the bone an
-attachment names.
+`bone_indices` — the vertex position is already the bind pose. Sequences, `.anim` files and
+per-animation `M2Track` decoding are all skippable. **Bones are not**, quite: see
+[the bone is not always identity](#the-bone-is-not-always-identity-verified).
 
 **Coordinate system:** M2 is Z-up with X forward. To Y-up: `(X, Y, Z) → (X, Z, -Y)`, which
 is what wow.export's `M2Loader.js` does and what `m2.rs` follows. Both this and its mirror

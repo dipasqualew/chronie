@@ -1172,6 +1172,9 @@ const CORNERS: ReadonlyArray<readonly [number, number, number]> = Array.from(
   (_, corner) => [corner & 1 ? 1 : -1, corner & 2 ? 1 : -1, corner & 4 ? 1 : -1] as const,
 );
 
+/** A quarter turn, as the two equal components of the quaternion that is one. */
+const HALF_ROOT_TWO = Math.SQRT1_2;
+
 /** Two triangles per face, wound anticlockwise seen from outside the cube. */
 const CUBE_TRIANGLES = [
   0, 2, 3, 0, 3, 1, // -Z
@@ -1365,6 +1368,22 @@ interface AttachmentSpec {
   /** The community's numbering: 5 and 6 are the shoulders, 11 the helm, 12 the back. */
   id: number;
   at: readonly [number, number, number];
+  /**
+   * What the bone it hangs off does, and the half of this that looks skippable and is not.
+   *
+   * A bone's ordinary tracks hold one run of keyframes *per animation*, so with none playing
+   * there is nothing in them — which is why a still picture can ignore bones. A track bound to
+   * a **global sequence** is not one of those: it runs on the world's clock and applies
+   * regardless. On the retail body 35 of 203 bones carry one, and the two shoulders' hold a
+   * constant scale of 0.62 and a mirrored roll. A reader that took the position and stopped
+   * draws a pair of pauldrons half again too large and lying flat.
+   *
+   * `rotation` is a quaternion in the game's axes and `scale` three lengths. `animated` writes
+   * the same values into an *ordinary* track instead, which a still picture has to ignore.
+   */
+  rotation?: readonly [number, number, number, number];
+  scale?: readonly [number, number, number];
+  animated?: boolean;
 }
 
 /**
@@ -1381,18 +1400,20 @@ interface AttachmentSpec {
  */
 function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
   const HEADER = 16;
+
+  /* ---------- SKA1: the attachments ---------- */
   const records = new Bytes();
-  for (const attachment of attachments) {
+  attachments.forEach((attachment, index) => {
     records.u32(attachment.id);
-    records.u16(0); // the bone it hangs off, which a bind pose does not need — see `m2.rs`
+    records.u16(index); // the bone it hangs off, which is where its rotation and scale are
     records.u16(0); // and two bytes the format has never named
     for (const axis of attachment.at) records.f32(axis);
     // `M2Track<uint8> animate_attached`: an interpolation type, a global sequence, and two
     // empty arrays. Twenty bytes of nothing, and the reason a record is forty and not twenty.
     records.u16(0);
-    records.u16(0);
+    records.u16(0xffff);
     for (let word = 0; word < 4; word += 1) records.u32(0);
-  }
+  });
 
   const lookup = new Bytes();
   for (let id = 0; id <= 12; id += 1) {
@@ -1408,11 +1429,84 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
   ska1.bytes(records.toBuffer());
   ska1.bytes(lookup.toBuffer());
 
+  /* ---------- SKB1: the bones those attachments hang off ---------- */
+  //
+  // Laid in two passes rather than patched afterwards: the bone records are a fixed 88 bytes
+  // each, so where the keyframes begin is known before a single one is written.
+  const BONE = 88;
+  const bonesAt = HEADER;
+  const trailer = new Bytes();
+  const trailerAt = bonesAt + attachments.length * BONE;
+
+  /** One track's keyframes, and where the two nested arrays naming them begin. */
+  interface Keys { times: number; values: number }
+
+  const lay = (write: (into: Bytes) => void): Keys => {
+    const times = trailerAt + trailer.length;
+    trailer.u32(1); // the inner array: one key, which is what a constant is
+    trailer.u32(times + 8); // sitting just past this pair
+    trailer.u32(0); // the timestamp itself
+    const values = trailerAt + trailer.length;
+    trailer.u32(1);
+    trailer.u32(values + 8);
+    write(trailer);
+    return { times, values };
+  };
+
+  // A quaternion component, as the game compresses one: a non-negative int16 is the bottom
+  // half of the range and a negative one the top, so +0.707 is written as -9599 and a reader
+  // that treated it as a plain fraction of 32767 would get the sign right about half the time.
+  const compressed = (value: number): number =>
+    (value >= 0 ? Math.round(value * 32767) - 32768 : Math.round(value * 32767) + 32767) & 0xffff;
+
+  const keys = attachments.map((attachment) => ({
+    rotation: attachment.rotation
+      ? lay((into) => {
+          for (const part of attachment.rotation!) into.u16(compressed(part));
+        })
+      : null,
+    scale: attachment.scale
+      ? lay((into) => {
+          for (const axis of attachment.scale!) into.f32(axis);
+        })
+      : null,
+  }));
+
+  const bones = new Bytes();
+  const emit = (global: boolean, laid: Keys | null): void => {
+    bones.u16(1); // interpolation: linear, which one key makes moot
+    bones.u16(global ? 0 : 0xffff);
+    for (const at of [laid?.times, laid?.values]) {
+      bones.u32(at === undefined ? 0 : 1);
+      bones.u32(at ?? 0);
+    }
+  };
+
+  attachments.forEach((attachment, index) => {
+    bones.u32(0xffffffff); // key bone id: none
+    bones.u32(0x0200); // flags, as every bone on the real body carries
+    bones.u16(0xffff); // no parent, which keeps every chain here one bone long
+    bones.u16(0);
+    bones.u32(0);
+    emit(false, null); // translation, which the attachment's own position stands in for
+    emit(!attachment.animated, keys[index]!.rotation);
+    emit(!attachment.animated, keys[index]!.scale);
+    for (const axis of attachment.at) bones.f32(axis); // the pivot, which is where it is
+  });
+
+  const skb1 = new Bytes();
+  skb1.u32(attachments.length);
+  skb1.u32(bonesAt);
+  skb1.u32(0); // the key-bone lookup, which nothing here has one of
+  skb1.u32(0);
+  skb1.bytes(bones.toBuffer());
+  skb1.bytes(trailer.toBuffer());
+
   const out = new Bytes();
-  const chunk = (magic: string, payload: Bytes): void => {
+  const chunk = (magic: string, payload: Uint8Array): void => {
     out.bytes(new TextEncoder().encode(magic));
     out.u32(payload.length);
-    out.bytes(payload.toBuffer());
+    out.bytes(payload);
   };
   // The name chunk a real skeleton opens with, which nothing here reads and which is what
   // makes `SKA1` a chunk to find rather than the first one.
@@ -1421,8 +1515,9 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
   name.u32(8);
   name.u32(0);
   name.u32(0);
-  chunk("SKL1", name);
-  chunk("SKA1", ska1);
+  chunk("SKL1", name.toBuffer());
+  chunk("SKB1", skb1.toBuffer());
+  chunk("SKA1", ska1.toBuffer());
   return out.toBuffer();
 }
 
@@ -1436,11 +1531,27 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
  * the left shoulder, which is up the game's Y, at `[0, 3, -2]`.
  */
 const ATTACHMENTS: readonly AttachmentSpec[] = [
-  { id: 12, at: [-1, 0, 2] }, // the back, which a quiver hangs off and a cloak does not
-  { id: 6, at: [0, 2, 3] }, // the left shoulder
-  { id: 11, at: [0, 0, 4] }, // the helm
+  // The back, whose bone holds a rotation and a scale in an *ordinary* track — one run of keys
+  // per animation, of which none is playing. A still picture has to leave it alone, and this
+  // is the half of the rule that is easy to get backwards: read as though it applied, a cloak
+  // arrives quarter-turned and at a fifth of its size.
+  {
+    id: 12,
+    at: [-1, 0, 2],
+    animated: true,
+    rotation: [0, 0, HALF_ROOT_TWO, HALF_ROOT_TWO],
+    scale: [0.2, 0.2, 0.2],
+  },
+  // The left shoulder, which is where the game keeps the fact that a pauldron is smaller than
+  // it was modelled and tilted outward. A quarter turn about the game's **Y**, which is the
+  // axis the turn into the viewer's axes negates — so `(0, 0.707, 0, 0.707)` has to come out
+  // as `(0, 0, -0.707, 0.707)` and not as itself.
+  { id: 6, at: [0, 2, 3], rotation: [0, HALF_ROOT_TWO, 0, HALF_ROOT_TWO], scale: [0.5, 0.5, 0.5] },
+  { id: 11, at: [0, 0, 4] }, // the helm, whose bone says nothing — as the real one's does not
   { id: 1, at: [6, 0, 0] }, // a hand, which nothing in this app asks for
-  { id: 5, at: [0, -2, 3] }, // the right shoulder
+  // The right shoulder: a scale and no rotation, which is the other way a bone can be half
+  // silent. Three different lengths, so that the axes being permuted shows up here too.
+  { id: 5, at: [0, -2, 3], scale: [1, 2, 4] },
 ];
 
 /**
