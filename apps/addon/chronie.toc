@@ -21,6 +21,7 @@ src/SegmentSchema.lua
 src/FactionStanding.lua
 src/HoldingsSweep.lua
 src/HoldingsStore.lua
+src/AccountTooltip.lua
 src/SegmentTally.lua
 src/SegmentViews.lua
 src/ResultsWindow.lua

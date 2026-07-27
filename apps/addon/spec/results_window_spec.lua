@@ -16,12 +16,19 @@ describe("ns.newResultsWindow", function()
     ---`recorded.navigated`.
     ---@param options table? `{ name = string?, point = { string, number, number }?, navigate = boolean?,
     ---title = string|fun(summary: SegmentSummary): string? }`
-    ---@return table window, table frames, table recorded `{ saved, loadCalls, navigated }`
+    ---@return table window, table frames, table recorded `{ saved, loadCalls, navigated, tooltip }`
     local function newWindow(options)
         options = options or {}
         local createFrame, frames = fake.newCreateFrame()
+        local tooltip, tooltipRecorded = fake.newTooltip()
         local recorded = {
-            saved = {}, loadCalls = 0, achievements = {}, previews = {}, collections = {}, navigated = {},
+            saved = {},
+            loadCalls = 0,
+            achievements = {},
+            previews = {},
+            collections = {},
+            navigated = {},
+            tooltip = tooltipRecorded,
         }
         local window = ns.newResultsWindow({
             title = options.title,
@@ -66,6 +73,10 @@ describe("ns.newResultsWindow", function()
                 return options.character or CHARACTER
             end,
             accountStanding = options.accountStanding,
+            accountCurrency = options.accountCurrency,
+            -- Given unless a case deliberately withholds it, because a client build that
+            -- never handed the panel a tooltip is its own case rather than the ordinary one.
+            tooltip = options.tooltip ~= false and tooltip or nil,
         })
         return window, frames, recorded
     end
@@ -231,6 +242,47 @@ describe("ns.newResultsWindow", function()
             end
         end
         error("no row saying " .. name .. " to click")
+    end
+
+    ---Rests the pointer on the first row saying `name`, and takes it off again if asked.
+    ---@param frame table
+    ---@param name string
+    ---@param options table? `{ leave = boolean }`
+    ---@return table the font string the pointer was over
+    local function pointAt(frame, name, options)
+        for _, fontString in ipairs(frame.fontStrings) do
+            if fontString.shown and fontString.justify == "LEFT" and (fontString.text or ""):find(name, 1, true) then
+                fontString:run("OnEnter")
+                if options and options.leave then
+                    fontString:run("OnLeave")
+                end
+                return fontString
+            end
+        end
+        error("no row saying " .. name .. " to point at")
+    end
+
+    ---@param frame table
+    ---@param name string
+    ---@return boolean whether the row saying `name` has a tooltip on it at all
+    local function pointable(frame, name)
+        for _, fontString in ipairs(frame.fontStrings) do
+            if fontString.shown and fontString.justify == "LEFT" and (fontString.text or ""):find(name, 1, true) then
+                return fontString.scripts.OnEnter ~= nil
+            end
+        end
+        error("no row saying " .. name .. " on screen")
+    end
+
+    ---The tooltip as it reads: the title first, then `left` or `left → right` per line.
+    ---@param recorded table
+    ---@return string[]
+    local function tooltipLines(recorded)
+        local out = {}
+        for _, line in ipairs(recorded.tooltip.lines) do
+            out[#out + 1] = line.right and (line.text .. " → " .. line.right) or line.text
+        end
+        return out
     end
 
     ---The characters beyond ASCII that the panel is allowed to put on screen.
@@ -596,6 +648,96 @@ describe("ns.newResultsWindow", function()
                 end
                 assert.is_nil((table.concat(labels, "\n")):match("best"))
             end)
+
+            -- The "best" line above is silent when nobody is ahead, and silence is the one
+            -- answer a player cannot read: it looks exactly like the panel not knowing. So
+            -- the whole roster is one hover away, whichever way the answer falls.
+            describe("on hover", function()
+                it("opens the account's standings over the faction pointed at", function()
+                    local window, frames, recorded = newWindow({
+                        accountStanding = standingSource({
+                            character = "Alt-Ravencrest",
+                            standing = "Renown 22",
+                            rank = 22,
+                            system = "renown",
+                            at = NOW - 3 * 24 * 60 * 60,
+                        }),
+                    })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+
+                    pointAt(frames[1], "Dream Wardens")
+
+                    assert.equal(1, recorded.tooltip.shown)
+                    assert.equal("Dream Wardens", recorded.tooltip.lines[1].text)
+                    assert.same({
+                        "Dream Wardens",
+                        "Best → Renown 22 · Alt",
+                        " ",
+                        "Alt · 3d ago → Renown 22",
+                        "Main (you) → Renown 8  500 / 2,500",
+                    }, tooltipLines(recorded))
+                end)
+
+                it("closes it again when the pointer moves off", function()
+                    local window, frames, recorded = newWindow({ accountStanding = standingSource(nil) })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+
+                    pointAt(frames[1], "Dream Wardens", { leave = true })
+
+                    assert.equal(1, recorded.tooltip.hidden)
+                end)
+
+                it("anchors to the cursor, so the line pointed at is the one answered", function()
+                    local window, frames, recorded = newWindow({ accountStanding = standingSource(nil) })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+
+                    pointAt(frames[1], "Dream Wardens")
+
+                    assert.equal("ANCHOR_CURSOR", recorded.tooltip.anchor)
+                    assert.equal(frames[1], recorded.tooltip.owner)
+                end)
+
+                -- A row nothing can be said about must not become a dead spot on a frame the
+                -- player drags by: mouse-enabling it would swallow the drag for no answer.
+                it("leaves a faction the client could not place alone", function()
+                    local window, frames = newWindow({ accountStanding = function() return nil end })
+                    window.update(summary({
+                        reputationTotal = 40,
+                        reputation = { { faction = "Argent Dawn", amount = 40 } },
+                    }))
+
+                    expand(frames[1], "Reputation")
+
+                    assert.is_false(pointable(frames[1], "Argent Dawn"))
+                end)
+
+                -- Rows are pooled, so the font string that was a faction a moment ago is a
+                -- mount now, and must not still open that faction's tooltip.
+                it("takes the tooltip off a row reused for something else", function()
+                    local window, frames = newWindow({ accountStanding = standingSource(nil) })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+                    local row = pointAt(frames[1], "Dream Wardens")
+
+                    window.update(summary({ reputation = {}, mounts = { { name = "Invincible" } } }))
+
+                    assert.is_nil(row.scripts.OnEnter)
+                end)
+
+                it("draws nothing at all on a build that handed it no tooltip", function()
+                    local window, frames = newWindow({
+                        tooltip = false,
+                        accountStanding = standingSource(nil),
+                    })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+
+                    assert.is_false(pointable(frames[1], "Dream Wardens"))
+                end)
+            end)
         end)
 
         -- Bars are pooled the same way rows are, so one drawn for a busier summary has to
@@ -642,9 +784,9 @@ describe("ns.newResultsWindow", function()
             assert.equal("-3", valueFor(lines, "  Valor"))
         end)
 
-        -- The holding a gain landed on is a balance rather than something the segment did,
-        -- and it goes the same way the wallet went: the desktop app has it, against the
-        -- character it belongs to and beside what the rest of the account holds.
+        -- The holding a gain landed on is a balance rather than something the segment did, so
+        -- it stays off the line the way the wallet does. It is a hover away rather than gone:
+        -- see "on hover" below.
         it("says only what the segment earned, not what it is now holding", function()
             local window, frames = newWindow()
             window.update(summary({
@@ -669,6 +811,91 @@ describe("ns.newResultsWindow", function()
             expand(frames[1], "Currency")
 
             assert.equal("-300", valueFor(rowsOf(frames[1]), "  Honor"))
+        end)
+
+        describe("what the account is holding of a currency, on hover", function()
+            ---@param characters table[]?
+            ---@param accountWide boolean?
+            ---@return function
+            local function currencySource(characters, accountWide)
+                return function(id)
+                    assert.equal(1, id)
+                    if not characters then
+                        return nil
+                    end
+                    local total = 0
+                    for _, held in ipairs(characters) do
+                        total = total + held.total
+                    end
+                    return {
+                        id = id,
+                        name = "Honor",
+                        total = total,
+                        accountWide = accountWide or false,
+                        characters = characters,
+                        oldest = NOW,
+                    }
+                end
+            end
+
+            ---@return table
+            local function earned()
+                return {
+                    currencyTotal = 7,
+                    currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
+                }
+            end
+
+            it("adds up what every character is holding", function()
+                local window, frames, recorded = newWindow({
+                    accountCurrency = currencySource({
+                        { character = "Alt-Ravencrest", name = "Honor", total = 1910, at = NOW - 2 * 24 * 60 * 60 },
+                    }),
+                })
+                window.update(summary(earned()))
+                expand(frames[1], "Currency")
+
+                pointAt(frames[1], "Honor")
+
+                assert.same({
+                    "Honor",
+                    "Account → 14,360",
+                    " ",
+                    "Main (you) → 12,450",
+                    "Alt · 2d ago → 1,910",
+                }, tooltipLines(recorded))
+            end)
+
+            it("counts a warband-wide pot once rather than once per character", function()
+                local window, frames, recorded = newWindow({
+                    accountCurrency = currencySource({
+                        { character = "Main-Ravencrest", name = "Honor", total = 12000, at = NOW - 24 * 60 * 60 },
+                        { character = "Alt-Ravencrest", name = "Honor", total = 12000, at = NOW - 24 * 60 * 60 },
+                    }, true),
+                })
+                window.update(summary(earned()))
+                expand(frames[1], "Currency")
+
+                pointAt(frames[1], "Honor")
+
+                assert.same({
+                    "Honor",
+                    "Warband → 12,450",
+                    "One pot the whole account shares.",
+                }, tooltipLines(recorded))
+            end)
+
+            it("leaves a currency nobody has ever reported holding alone", function()
+                local window, frames = newWindow({ accountCurrency = currencySource(nil) })
+                window.update(summary({
+                    currencyTotal = 7,
+                    currencies = { { id = 1, name = "Honor", amount = 7 } },
+                }))
+
+                expand(frames[1], "Currency")
+
+                assert.is_false(pointable(frames[1], "Honor"))
+            end)
         end)
 
         it("hides achievements until one was earned", function()
