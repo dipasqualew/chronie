@@ -10,12 +10,9 @@
  */
 
 import { clock, dayLabel, duration, escapeHtml, plural } from "./format";
-import { highlights } from "./sessions";
 import type { Session } from "./sessions";
 import type { Segment } from "./types";
-import {
-  activityChip, characterCircle, classAttr, classDot, highlightList, locationType,
-} from "./ui";
+import { characterCircle, classAttr, highlightList, segmentButton } from "./ui";
 
 /**
  * Given the segment to show and the session it belongs to, so the detail modal's next and
@@ -128,38 +125,5 @@ function card(session: Session, open: boolean, unfolded: string | null): string 
   </article>`;
 }
 
-/**
- * A segment summarised the same way its session is, and clickable for the same reason: the
- * detail modal it opens is where the summary comes apart, so the chips here stay inert —
- * they are what the row says, not another thing to press inside a thing to press.
- *
- * The running totals are left off. On one segment they are four more numbers beside two
- * things that actually happened, and the modal has them a click away.
- *
- * The row carries its own character's class, not the session's: an evening spent on three
- * characters is exactly when the rail down the left of each row is worth having, and it
- * would say the opposite of the truth if every row took the colour of whoever led.
- */
-function segmentRow(segment: Segment): string {
-  const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
-  const summary = highlightList(highlights([segment]), { tallies: false, interactive: false });
-  return `<li>
-    <button type="button" class="seg" data-open-segment="${segment.segmentId}"
-      ${classAttr(segment.classFile)}
-      aria-label="Open segment: ${escapeHtml(label)}">
-      <span class="seg-time">${escapeHtml(clock(segment.startedAt))}</span>
-      <span class="seg-body">
-        <span class="seg-head">
-          <span class="seg-who">${classDot(segment.classFile)}${escapeHtml(segment.character)}</span>
-          <span class="seg-where">${escapeHtml(segment.instance)}</span>
-          <span class="badge">${escapeHtml(locationType(segment))}</span>
-          ${segment.difficulty ? `<span class="muted">${escapeHtml(segment.difficulty)}</span>` : ""}
-        </span>
-        <span class="seg-activities">${(segment.activities || []).map(activityChip).join("") ||
-          '<span class="muted">No activity recorded</span>'}</span>
-        ${summary ? `<span class="seg-summary">${summary}</span>` : ""}
-      </span>
-      <span class="seg-dur">${escapeHtml(duration(segment.seconds))}</span>
-    </button>
-  </li>`;
-}
+/** The shared row, in the list a session unfolds into. */
+const segmentRow = (segment: Segment): string => `<li>${segmentButton(segment)}</li>`;

@@ -137,10 +137,14 @@ class ActivityEditor {
  */
 class DetailsTable {
   readonly page: Page;
+  readonly view: Locator;
   readonly rows: Locator;
 
   constructor(page: Page) {
     this.page = page;
+    // Scoped to the view rather than the page: the roster next door is a landmark named for
+    // the characters in it, and a bare "Character" reaches that too.
+    this.view = page.locator("#details-view");
     this.rows = page.locator("#rows tr");
   }
 
@@ -150,16 +154,75 @@ class DetailsTable {
   }
 
   search(): Locator {
-    return this.page.getByLabel("Filter segments");
+    return this.view.getByLabel("Filter segments");
   }
 
   character(): Locator {
-    return this.page.getByLabel("Character");
+    return this.view.getByLabel("Character");
   }
 
   /** A cell of the ledger, found the way a reader finds it: by what it says. */
   cellSaying(text: string): Locator {
-    return this.page.getByRole("cell", { name: text });
+    return this.view.getByRole("cell", { name: text });
+  }
+}
+
+/**
+ * The characters view: the roster down the left, one character's whole history on the right.
+ *
+ * The roster is a navigation landmark and each character is a button in it, so picking one is
+ * reachable the way a screen reader reaches any list of choices; the pane beside it is walked
+ * by heading. Nothing here knows a class name beyond the two containers it scopes to.
+ */
+class Roster {
+  readonly page: Page;
+  readonly view: Locator;
+  readonly profile: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.view = page.locator("#characters-view");
+    this.profile = page.locator("#character-detail");
+  }
+
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Characters", exact: true }).click();
+    await expect(this.view.getByRole("heading", { name: "Characters", level: 1 })).toBeVisible();
+  }
+
+  /** The roster itself, in the order it chose to put its characters in. */
+  entries(): Locator {
+    return this.view.getByRole("navigation", { name: "Character roster" }).getByRole("button");
+  }
+
+  /** One character in it, found by the name the entry is announced with. */
+  entry(name: string): Locator {
+    return this.entries().filter({ hasText: name });
+  }
+
+  async pick(name: string): Promise<void> {
+    await this.entry(name).click();
+    await expect(this.profile.getByRole("heading", { name, level: 2 })).toBeVisible();
+  }
+
+  /** One of the numbers in the fact grid, addressed by the word above it. */
+  stat(label: string): Locator {
+    return this.profile.locator("dl div").filter({ hasText: label }).locator("dd");
+  }
+
+  /** The segment rows on the pane, which are the same rows the timeline unfolds into. */
+  segments(): Locator {
+    return this.profile.getByRole("button", { name: /^Open segment:/ });
+  }
+
+  /** The days those rows are filed under, newest first. */
+  days(): Locator {
+    return this.profile.getByRole("heading", { level: 4 });
+  }
+
+  /** A line on the pane, found by the thing it is about. */
+  lineFor(name: string): Locator {
+    return this.profile.getByRole("listitem").filter({ hasText: name });
   }
 }
 
@@ -358,6 +421,7 @@ const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
   ledger: DetailsTable;
+  roster: Roster;
   transmog: TransmogView;
   transmogDetail: TransmogDetail;
   combat: CombatLoggingPanel;
@@ -370,6 +434,9 @@ const test = base.extend<{
   },
   ledger: async ({ page }, use) => {
     await use(new DetailsTable(page));
+  },
+  roster: async ({ page }, use) => {
+    await use(new Roster(page));
   },
   transmog: async ({ page }, use) => {
     await use(new TransmogView(page));
@@ -1310,6 +1377,120 @@ test("lists every segment on the details view and filters it", async ({ detail, 
   });
 });
 
+/**
+ * The view the other three cannot be: one where the character is the subject.
+ *
+ * The timeline cuts an evening across everybody who played it and the ledger's rows each
+ * belong to one segment; neither can answer "what has this character been doing", which is
+ * the question a player with eight alts asks first.
+ */
+test("gives every character a page of their own", async ({ page, roster }) => {
+  await roster.open();
+
+  // Recency, not hours: Brin-Hearth logged out last, so Brin-Hearth is who the view opens on.
+  await test.step("the roster is everybody, most recently played first", async () => {
+    await expect(roster.entries()).toHaveCount(2);
+    await expect(roster.entries().first()).toContainText("Brin-Hearth");
+    await expect(roster.entries().nth(1)).toContainText("Aster-Vale");
+    await expect(page.locator("#characters-meta")).toContainText("2 characters");
+    await expect(page.locator("#characters-meta")).toContainText("3 segments");
+    await expect(page.locator("#characters-meta")).toContainText("1h 05m played");
+  });
+
+  // The same rail a segment row wears, for the same reason: the roster is a list of people,
+  // and the colour is what tells them apart before the name has been read.
+  await test.step("each of them wears their own class colour", async () => {
+    await expect(railColours(roster.entries()))
+      .resolves.toEqual(["rgb(255, 124, 10)", "rgb(63, 199, 235)"]);
+  });
+
+  await test.step("and the one the view opened on is the one it is showing", async () => {
+    await expect(roster.entries().first()).toHaveAttribute("aria-pressed", "true");
+    await expect(roster.profile.getByRole("heading", { name: "Brin-Hearth", level: 2 })).toBeVisible();
+  });
+
+  await test.step("the pane adds up everything known about them", async () => {
+    await roster.pick("Aster-Vale");
+    await expect(roster.profile).toContainText("Mage · level 12");
+    await expect(roster.stat("Played")).toHaveText("30m");
+    await expect(roster.stat("Segments")).toHaveText("1");
+    await expect(roster.stat("Days")).toHaveText("1");
+    await expect(roster.stat("Looted")).toHaveText("24g 50s");
+    await expect(roster.profile).toContainText("Mostly in Glass Caverns");
+  });
+
+  // Two days on one character, which is the thing no session card can show: the timeline
+  // files an evening under its date and this files a character under theirs.
+  await test.step("their segments sit under the days they happened on", async () => {
+    await roster.pick("Brin-Hearth");
+    await expect(roster.stat("Days")).toHaveText("2");
+    await expect(roster.days()).toHaveCount(2);
+    await expect(roster.segments()).toHaveCount(2);
+    await expect(roster.segments().first()).toContainText("Copperwood Depths");
+    // The same summary a timeline row carries, because it is the same row.
+    await expect(roster.segments().first()).toContainText("Level 9");
+  });
+
+  // The half of the story a segment cannot tell: what this character is carrying now, and
+  // whether anybody on the account has already got further with a faction than they have.
+  await test.step("what they are holding is read against what the account holds", async () => {
+    await expect(roster.lineFor("Glass Token")).toContainText("17,550");
+    await expect(roster.lineFor("Glass Token")).toContainText("30,000 across the account");
+    await expect(roster.lineFor("Deepwater Wardens")).toContainText("furthest on the account");
+
+    await roster.pick("Aster-Vale");
+    await expect(roster.lineFor("Glass Token")).toContainText("12,450");
+    // Somebody else is ahead of them here, so the badge belongs to that somebody else.
+    await expect(roster.lineFor("Cavern Cartographers")).not.toContainText("furthest");
+    const standing = roster.profile.getByRole("progressbar", { name: /Cavern Cartographers/ });
+    await expect(standing).toHaveJSProperty("value", 4200);
+    await expect(standing).toHaveJSProperty("max", 12000);
+  });
+});
+
+/**
+ * The point of the whole thing: a segment met here is the segment met anywhere else.
+ *
+ * The row is the timeline's row and the modal is the timeline's modal, so a change to what a
+ * segment says lands in both views at once rather than in whichever one somebody remembered.
+ */
+test("opens a character's segments into the same detail every other view opens", async ({
+  roster,
+  detail,
+}) => {
+  await roster.open();
+  await roster.pick("Brin-Hearth");
+
+  await test.step("a row opens the detail, walking that character's history and no more", async () => {
+    await roster.segments().first().click();
+    await expect(detail.title()).toHaveText("Copperwood Depths");
+    // Two segments, both Brin-Hearth's — the evening the modal walks from the timeline holds
+    // Aster-Vale's keystone run too, and it has no business in a character's own history.
+    await expect(detail.position()).toHaveText("1 of 2");
+
+    await detail.next();
+    await expect(detail.title()).toHaveText("Copperwood");
+    await expect(detail.dialog.getByRole("button", { name: "Next segment" })).toBeDisabled();
+    await detail.close();
+  });
+
+  // The summary strip is the session card's, which means the chips behave the way they do
+  // there: a summary standing for several things unfolds, and each of them is a way back.
+  await test.step("a summary of several unfolds into them, and they lead back to the segment", async () => {
+    await roster.pick("Aster-Vale");
+    const achievements = roster.profile.getByRole("button", { name: /2 achievements/ });
+    await expect(achievements).toHaveAttribute("aria-expanded", "false");
+
+    await achievements.click();
+    await expect(roster.profile).toContainText("Into the Light");
+    await roster.profile
+      .getByRole("button", { name: /Open the segment Into the Light was recorded in/ }).click();
+    await expect(detail.title()).toHaveText("Glass Caverns");
+    await expect(detail.position()).toHaveText("1 of 1");
+    await detail.close();
+  });
+});
+
 test("shows the game's transmog sets by collection and filters them", async ({
   page,
   transmog,
@@ -1674,4 +1855,3 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
       .toContainText("Replaced this history with Study desktop's: 1204 segments");
   });
 });
-
