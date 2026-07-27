@@ -71,13 +71,24 @@ mod material_column {
 /// Columns of `ComponentTextureFileData`, whose row id is the texture's own FileDataID — and
 /// of `ComponentModelFileData`, which is the same three columns with models behind them.
 ///
-/// `ComponentModelFileData` carries a fourth, `PositionIndex`, which reads `-1` on every one
-/// of its rows on 12.0.5.67 and which nothing here has a use for.
+/// The models table carries a fourth, and it is not decoration: **`PositionIndex` is which
+/// shoulder.** Read off 12.0.5.67, the two tags are orthogonal and each slot uses exactly one
+/// of them — a helm is `gender 0 or 1, position -1`, and every one of the 10,449 shoulder
+/// resources is `gender 2, positions 0 and 1`. Which is to say a helm is modelled per body and
+/// a pauldron is modelled per side, and neither is modelled per both.
 mod component_column {
     pub const GENDER: usize = 0;
     pub const CLASS: usize = 1;
     pub const RACE: usize = 2;
+    pub const POSITION: usize = 3;
 }
+
+/// How many sides a model resource can be modelled for, which is two: a left pad and a right.
+///
+/// Anything a row states outside that is the game saying the model has no side — `-1` on every
+/// helm, and read unsigned it arrives as a number far past this. Treating it as a bound rather
+/// than as a sentinel is what keeps that true however the column is packed.
+const SIDES: u32 = 2;
 
 /// Columns of `HelmetGeosetData`. Which helm a row belongs to is the relationship block, as it
 /// is in `ItemDisplayInfoMaterialRes`, so [`Row::foreign_id`] is what reads it.
@@ -99,8 +110,14 @@ mod helmet_column {
 const FEMALE: u32 = 1;
 const HUMAN: u32 = 1;
 
-/// The gender the game marks a texture with when it fits any body, and the class it marks one
-/// with when it fits any class. Both are "no opinion" rather than a body of their own.
+/// The genders the game marks a file with when it does not belong to one body, and the class
+/// it marks one with when it fits any class. All three are "no opinion" rather than a body.
+///
+/// 2 is the game's "none" and 3 its "any", and the difference between them is not one this app
+/// can act on — but excluding either is: **every shoulder model in the game is a 2**, because a
+/// pauldron is modelled per side rather than per body, and a reader that kept only 1 and 3
+/// would find no pauldron anywhere.
+const NO_GENDER: u32 = 2;
 const ANY_GENDER: u32 = 3;
 const ANY_CLASS: u32 = 0;
 
@@ -302,17 +319,20 @@ fn models_of(
         .get(display_type as usize)
         .copied()
         .unwrap_or(&[]);
-    let asked: Vec<(u32, u32, u32)> = attachments
+    // The slot travels with the rest, because it is not only where the row's values are: it is
+    // also which shoulder the model is for. See [`model_file`].
+    let asked: Vec<(usize, u32, u32, u32)> = attachments
         .iter()
         .enumerate()
         .map(|(slot, attachment)| {
             (
+                slot,
                 *attachment,
                 display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
                 display.element(display_column::MATERIAL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
             )
         })
-        .filter(|(_, model, _)| *model != 0)
+        .filter(|(_, _, model, _)| *model != 0)
         .collect();
     if asked.is_empty() {
         // Neither table below is worth opening for an appearance that hangs nothing off the
@@ -321,8 +341,8 @@ fn models_of(
     }
 
     let mut found = Vec::with_capacity(asked.len());
-    for (attachment, model, material) in asked {
-        let Some(file) = model_file(files, model)? else {
+    for (slot, attachment, model, material) in asked {
+        let Some(file) = model_file(files, model, slot)? else {
             continue;
         };
         found.push(WornModel {
@@ -337,14 +357,20 @@ fn models_of(
     Ok(found)
 }
 
-/// The `.m2` a model resource names for the body this app draws.
+/// The `.m2` a model resource names for the body this app draws, on the side it is worn.
 ///
-/// A model resource names a file per race and per gender — a helm's does 31 of them on
-/// 12.0.5.67 — and `ComponentModelFileData` is the only place saying which is which. The
-/// matching is [`for_this_body`], the same function the textures go through, and silence means
-/// the same thing there: a model nothing was said about is the fallback rather than a reject,
-/// which is what a weapon and a shield are.
-pub fn model_file(files: &dyn GameFiles, resource: u32) -> Result<Option<u32>, String> {
+/// Two narrowings, and the game uses one or the other rather than both. **Per body**: a helm's
+/// resource names 31 files on 12.0.5.67, one per race and gender, and `ComponentModelFileData`
+/// is the only place saying which is which — [`for_this_body`], the same function the textures
+/// go through. **Per side**: a shoulder's resource names two, a left pad and its mirror, told
+/// apart by `PositionIndex` and by nothing else. `slot` is the model slot the resource came out
+/// of, and it *is* the side — element 0 of `ModelResourcesID` is the left pad and element 1 the
+/// right, which is what the two files' geometry says: position 0 leans towards the character's
+/// left and position 1 is the same mesh mirrored.
+///
+/// Silence means what it means everywhere else here: a model nothing was said about is the
+/// fallback rather than a reject, which is what a weapon and a shield are.
+pub fn model_file(files: &dyn GameFiles, resource: u32, slot: usize) -> Result<Option<u32>, String> {
     let table = Db2::parse(files.read(MODEL_FILE_DATA)?)?;
     let mut candidates: Vec<u32> = table
         .rows()
@@ -354,10 +380,33 @@ pub fn model_file(files: &dyn GameFiles, resource: u32) -> Result<Option<u32>, S
     if candidates.is_empty() {
         return Ok(None);
     }
-    // Lowest first, which is the order the fallback below leans on: the client numbers a
-    // model's coarser levels of detail above the model itself.
+    // Lowest first, which is the order the fallback leans on: the client numbers a model's
+    // coarser levels of detail above the model itself.
     candidates.sort_unstable();
-    Ok(for_this_body(&candidates, &bodies_in(files, COMPONENT_MODEL_FILE_DATA)?))
+
+    let table = Db2::parse(files.read(COMPONENT_MODEL_FILE_DATA)?)?;
+    let mut bodies: HashMap<u32, (u32, u32, u32)> = HashMap::new();
+    let mut sides: HashMap<u32, u32> = HashMap::new();
+    for row in table.rows() {
+        bodies.insert(
+            row.id(),
+            (
+                row.number(component_column::GENDER),
+                row.number(component_column::CLASS),
+                row.number(component_column::RACE),
+            ),
+        );
+        sides.insert(row.id(), row.number(component_column::POSITION));
+    }
+
+    // A file modelled for the other shoulder is not a candidate at all, whatever body it is
+    // for. A file with no side — every helm, and everything untagged — is a candidate for any.
+    let wanted = u32::try_from(slot).unwrap_or(0);
+    candidates.retain(|file| match sides.get(file) {
+        Some(side) if *side < SIDES => *side == wanted,
+        _ => true,
+    });
+    Ok(for_this_body(&candidates, &bodies))
 }
 
 /// The picture a cape is painted with, which is not a model and not a body texture either.
@@ -505,8 +554,9 @@ fn for_this_body(candidates: &[u32], bodies: &HashMap<u32, (u32, u32, u32)>) -> 
         let Some((gender, class, race)) = bodies.get(file).copied() else {
             continue;
         };
-        // No class at all, so a texture kept for one is somebody else's.
-        if (gender != FEMALE && gender != ANY_GENDER) || class != ANY_CLASS {
+        // No class at all, so a file kept for one is somebody else's.
+        let gendered = gender == FEMALE || gender == ANY_GENDER || gender == NO_GENDER;
+        if !gendered || class != ANY_CLASS {
             continue;
         }
         let rank = u32::from(gender == FEMALE) * 2 + u32::from(race == HUMAN);
@@ -567,7 +617,10 @@ mod tests {
 
     /// The fixture displays, by what the generator made each of them.
     const HELM_DISPLAY: u32 = 900001;
+    const SHOULDERS: u32 = 900002;
     const CHESTPIECE: u32 = 900003;
+    const WEAPON: u32 = 900007;
+    const CAPE: u32 = 900013;
     const BOOTS: u32 = 900004;
     const GLOVES: u32 = 900005;
     const SHIRT: u32 = 900008;
@@ -577,11 +630,13 @@ mod tests {
 
     /// The slots those displays are worn in, as an install numbers them — which is not how
     /// the community's list does: a shirt is 2 and a chestpiece 3.
-    const HEAD: u32 = 0;
     const CHEST: u32 = 3;
     const FEET_SLOT: u32 = 6;
     const HANDS: u32 = 8;
     const SHIRT_SLOT: u32 = 2;
+    const SHOULDER: u32 = 1;
+    const BACK_SLOT: u32 = 9;
+    const WEAPON_SLOT: u32 = 11;
 
     fn worn(display_info_id: u32, display_type: u32) -> Worn {
         of(&fixture_files(), display_info_id, display_type).unwrap()
@@ -729,6 +784,106 @@ mod tests {
     fn answers_with_nothing_for_a_display_it_cannot_read() {
         assert!(worn(WITHHELD, CHEST).is_empty());
         assert!(worn(404_040, CHEST).is_empty());
+    }
+
+    /* ---------- the geometry an appearance hangs off the body ---------- */
+
+    // A helm is one model on one attachment, and the file behind it is the one modelled for
+    // this body: 139001 is the same helm for a Human Male and is numbered *below* it, so the
+    // lowest-id rule that is right for a level of detail puts a man's helm on her.
+    #[test]
+    fn hangs_a_helm_off_the_head_and_takes_the_one_modelled_for_this_body() {
+        assert_eq!(
+            worn(HELM_DISPLAY, HEAD).models,
+            vec![WornModel {
+                attachment: 11,
+                file: 140_001,
+                texture: Some(150_004),
+            }]
+        );
+    }
+
+    // Both pads, on the two attachments, out of the two model slots — and the file for each is
+    // the one modelled for *that side*. A resource holds a pad and its mirror, and the game
+    // tells them apart by `PositionIndex` and by nothing else, so a reader that took the lowest
+    // id would put two left pauldrons on her and a reader that stopped at the first slot would
+    // give her one.
+    #[test]
+    fn hangs_a_pad_off_each_shoulder_and_takes_the_one_for_that_side() {
+        assert_eq!(
+            worn(SHOULDERS, SHOULDER).models,
+            vec![
+                WornModel { attachment: 6, file: 140_002, texture: Some(150_002) },
+                WornModel { attachment: 5, file: 140_006, texture: Some(150_007) },
+            ]
+        );
+    }
+
+    // The other half of the same table, and the one the game actually uses for a pauldron: a
+    // shoulder model is marked gender 2, "none", because it belongs to a side rather than to a
+    // body. Read as "not this body" — which is what "not female and not any" comes to — there
+    // is not a pauldron in the game.
+    #[test]
+    fn keeps_a_model_the_game_marks_as_belonging_to_no_gender() {
+        let bodies = bodies_in(&fixture_files(), COMPONENT_MODEL_FILE_DATA).unwrap();
+        assert_eq!(bodies.get(&140_002), Some(&(NO_GENDER, 0, 0)));
+        assert_eq!(for_this_body(&[140_002], &bodies), Some(140_002));
+    }
+
+    // A slot with no attachment of its own hangs nothing, however much geometry the display
+    // names — and most of a wardrobe is that, which is why the tables behind this are not
+    // opened for it at all.
+    #[test]
+    fn hangs_nothing_off_a_slot_that_has_no_attachment() {
+        assert_eq!(worn(CHESTPIECE, CHEST).models, vec![]);
+        assert_eq!(worn(WEAPON, WEAPON_SLOT).models, vec![]);
+    }
+
+    // The back is the slot with geometry and no model at all: the cloak is the body's own, and
+    // what the appearance supplies is the picture that goes on it. Both model slots are zero
+    // and the material is read anyway.
+    #[test]
+    fn gives_a_cape_a_picture_rather_than_a_model() {
+        let cape = worn(CAPE, BACK_SLOT);
+        assert_eq!(cape.models, vec![]);
+        assert_eq!(cape.cape, Some(150_006));
+        // And the geoset that is the cloak itself, which is what the picture goes on.
+        assert_eq!(switched(&cape), vec![1502]);
+        // Nothing else in the game asks for one, so nothing else answers with one.
+        assert_eq!(worn(HELM_DISPLAY, HEAD).cape, None);
+        assert_eq!(worn(CHESTPIECE, CHEST).cape, None);
+    }
+
+    /* ---------- what a helm takes away ---------- */
+
+    // The groups a helm covers up, which is the one thing here that removes geometry. Group 0
+    // is the hair, and it is the only group this helm's own gender-entry names.
+    #[test]
+    fn reads_the_groups_a_helm_hides_on_this_body() {
+        assert_eq!(worn(HELM_DISPLAY, HEAD).hidden, vec![0]);
+    }
+
+    // Two ways of reading the same table wrong, and the fixture is built so that either one
+    // hides the robe group instead — a skirt that vanishes rather than an error.
+    //
+    // `HelmetGeosetVis` is two entries, one per gender, and this app draws one of them. And the
+    // rows under an entry cover every race the game ships, so the race has to be matched as
+    // well: the fixture's entry for this helm names group 0 for a Human and group 13 for
+    // somebody else.
+    #[test]
+    fn takes_the_entry_for_this_body_and_the_rows_for_this_race() {
+        assert!(!worn(HELM_DISPLAY, HEAD).hidden.contains(&13));
+    }
+
+    // Nothing but a helm hides anything, whatever the column happens to hold for it — and a
+    // helm whose entry is zero is an open one, which 210 of the game's helms are.
+    #[test]
+    fn hides_nothing_for_an_appearance_that_is_not_a_helm() {
+        assert_eq!(worn(SHOULDERS, SHOULDER).hidden, Vec::<u16>::new());
+        assert_eq!(worn(CHESTPIECE, CHEST).hidden, Vec::<u16>::new());
+        // The helm read as though it were worn somewhere else, which is the same question
+        // asked of the same row and has to come back empty.
+        assert_eq!(of(&fixture_files(), HELM_DISPLAY, CHEST).unwrap().hidden, Vec::<u16>::new());
     }
 
     #[test]

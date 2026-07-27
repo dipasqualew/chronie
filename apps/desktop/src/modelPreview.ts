@@ -16,11 +16,11 @@ export type Preview =
 /**
  * What the pane says about what it is showing, and why it is not showing something else.
  *
- * The slots between the shoulders and the weapons have no mesh of their own, and on a
- * twelve-piece set that is most of the rows. There used to be a sentence here explaining that
- * absence to the reader; they are now shown the only way the game itself shows them, which is
- * on a body, and `unpaintable` is all that is left of it — for the install that cannot manage
- * even that.
+ * Every armour slot is now shown the way the game itself shows it, which is on a body — the
+ * helm on her head rather than floating in front of her — so what is left of the old
+ * explanations is the two ways an install can hold nothing to put there. `absent` is a slot
+ * with geometry whose file is missing, and `unpaintable` a slot without one whose every
+ * texture was painted for a body this app does not draw.
  */
 export const REASONS = {
   worn: "Worn on the character. Drag to turn it.",
@@ -39,29 +39,34 @@ export interface Previewable {
   withheld: boolean;
 }
 
-/** The display types that are armour painted onto the body: everything between the shoulders
- * and the weapons. */
-const PAINTED_ON = (displayType: number): boolean => displayType >= 2 && displayType <= 10;
+/**
+ * The display types worn on the body: every armour slot, head through tabard.
+ *
+ * Everything above them is a weapon or a shield, which hangs off a hand and raises questions
+ * of its own — so those are still shown on their own, and are the only appearances that are.
+ */
+const WORN_ON = (displayType: number): boolean => displayType >= 0 && displayType <= 10;
 
 /**
- * How one appearance is best shown: on its own, on a character, or as a picture.
+ * How one appearance is best shown: on a character, on its own, or as a picture.
  *
- * The order is the point. An appearance with geometry of its own is shown as that geometry —
- * a helm is a helm, and the character it would sit on cannot wear it yet. Everything else in
- * an armour slot is painted onto a body and means nothing off one, so it is shown on the
- * body. What is left is a weapon the tables have no model for and a row the game encrypts,
- * neither of which is worth a character.
+ * The order is the point, and it is the other way round from what it used to be. **Every
+ * armour slot is shown worn**, whether or not it has geometry: a helm has a model and the
+ * only place that model means anything is on a head, so showing it in mid-air said less about
+ * the appearance than showing it where the game puts it. What is left on its own is a weapon,
+ * and what is left as a picture is a weapon the tables have no model for and a row the game
+ * encrypts, neither of which is worth a character.
  */
 export function previewFor(appearance: Previewable): Preview {
   if (appearance.withheld) return { kind: "none", note: REASONS.withheld };
-  if (appearance.hasModel) return { kind: "model", displayInfoId: appearance.displayInfoId };
-  if (PAINTED_ON(appearance.displayType)) {
+  if (WORN_ON(appearance.displayType)) {
     return {
       kind: "worn",
       displayInfoId: appearance.displayInfoId,
       displayType: appearance.displayType,
     };
   }
+  if (appearance.hasModel) return { kind: "model", displayInfoId: appearance.displayInfoId };
   return { kind: "icon", iconFileDataId: appearance.iconFileDataId, note: REASONS.none };
 }
 

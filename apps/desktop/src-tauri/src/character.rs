@@ -472,6 +472,10 @@ mod tests {
     const CHESTPIECE: (u32, u32) = (900_003, 3);
     const BOOTS: (u32, u32) = (900_004, 6);
     const ROBE: (u32, u32) = (900_012, 3);
+    /// And the four with geometry of their own, which are the ones that hang off her.
+    const HELM: (u32, u32) = (900_001, 0);
+    const SHOULDERS: (u32, u32) = (900_002, 1);
+    const CAPE: (u32, u32) = (900_013, 9);
 
     fn mesh() -> Mesh {
         worn_mesh(&Worn::default())
@@ -531,6 +535,12 @@ mod tests {
     fn middle_of(atlas: &RgbaImage, section: u32) -> [u8; 4] {
         let rect = rect_of(section).expect("the layout has a rectangle for that section");
         atlas.get_pixel(rect.x + rect.width / 2, rect.y + rect.height / 4).0
+    }
+
+    /// The scene the window is handed for one appearance worn on the body.
+    fn worn_scene(appearance: (u32, u32)) -> Value {
+        let worn = worn_of(appearance);
+        scene(&glb_of(&fixture_files(), Some(&worn)).unwrap())
     }
 
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
@@ -877,6 +887,93 @@ mod tests {
         }
     }
 
+    /* ---------- wearing the four slots that have geometry ---------- */
+
+    // The acceptance, for a helm: it is on her head rather than in mid-air. A node of its own
+    // with a translation on it, and the translation is the head attachment the body's skeleton
+    // states — which is what says the position came out of the game's files rather than out of
+    // an eyeball. An item left at the origin would be inside her pelvis.
+    #[test]
+    fn puts_a_helm_on_her_head() {
+        let scene = worn_scene(HELM);
+        assert_eq!(
+            scene["nodes"],
+            serde_json::json!([
+                { "mesh": 0 },
+                { "mesh": 1, "translation": [0.0, 4.0, 0.0] },
+            ])
+        );
+        // Geometry, not merely a node: the helm's own cube, whole.
+        assert_eq!(scene["meshes"][1]["primitives"].as_array().unwrap().len(), 1);
+    }
+
+    // And for a pair of shoulders: two pads, on the two shoulders, either side of her. One pad
+    // twice is what reading a single model resource and hanging it off both attachments looks
+    // like, so what this reads is that the two nodes hold *different* meshes as well as
+    // different positions.
+    #[test]
+    fn puts_a_pad_on_each_shoulder_rather_than_one_pad_twice() {
+        let scene = worn_scene(SHOULDERS);
+        let nodes = scene["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[1]["translation"], serde_json::json!([0.0, 3.0, -2.0]));
+        assert_eq!(nodes[2]["translation"], serde_json::json!([0.0, 3.0, 2.0]));
+        assert_ne!(nodes[1]["mesh"], nodes[2]["mesh"]);
+
+        // Each with a picture of its own, which is the other half of two pads rather than one:
+        // the body's atlas, and then one texture per pad.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 3);
+    }
+
+    // A cape is the odd one: geometry the body already carries, and all the appearance brings
+    // is the picture that goes on it. So there is no extra node at all — one mesh, one more
+    // part in it, and a second image beside the atlas.
+    #[test]
+    fn hangs_a_cape_off_her_back_without_a_model_to_hang() {
+        let scene = worn_scene(CAPE);
+        assert_eq!(scene["nodes"].as_array().unwrap().len(), 1);
+        assert!(drawn(&worn_mesh(&worn_of(CAPE))).contains(&1502));
+        // The atlas and the cloak's own picture. A cape whose texture went unresolved is a
+        // black sheet rather than an error, which is why the count is what this reads.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
+    }
+
+    // The other half of the acceptance, and the trap under it. A helm hides hair, and hair is
+    // **group 0** — the same hundred the skin is in. Hiding the group without excepting geoset
+    // 0 takes the whole character with the hairstyle, which is an empty pane rather than a
+    // helmed woman.
+    #[test]
+    fn a_helm_that_hides_hair_hides_it_and_leaves_the_body_on() {
+        let bare = drawn(&mesh());
+        assert!(bare.contains(&1), "a bare body wears the first hairstyle");
+
+        let helmed = drawn(&worn_mesh(&worn_of(HELM)));
+        assert!(!helmed.contains(&1), "the helm covers the hair");
+        assert!(helmed.contains(&0), "and not the body it is attached to");
+        // The whole hundred, not only the one variant a bare body happened to draw.
+        assert!(!helmed.contains(&2));
+        // And nothing else: the helm's own group swaps as any item's does, and every other
+        // group is where a bare body left it.
+        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 2101]);
+    }
+
+    // Taking it off puts the hair back, which is the same sentence read the other way: the
+    // hiding belongs to the appearance and not to the body.
+    #[test]
+    fn taking_the_helm_off_puts_the_hair_back() {
+        assert_eq!(drawn(&worn_mesh(&Worn::default())), drawn(&mesh()));
+        assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&1), true);
+    }
+
+    // A model the install does not hold leaves the body without it rather than dropping it at
+    // the origin, which on a character is inside her pelvis. Display 900010 names a model
+    // resource whose file the fixture deliberately omits.
+    #[test]
+    fn leaves_out_a_worn_model_this_install_cannot_read() {
+        let scene = worn_scene((900_010, HELM.1));
+        assert_eq!(scene["nodes"].as_array().unwrap().len(), 1);
+    }
+
     // The browser tests load `character.glb` into three.js, which is the only place anything
     // actually reads what this module writes. That is worth nothing if the file has drifted
     // from what the converter now produces, so this is what ties the two together:
@@ -885,12 +982,19 @@ mod tests {
     //         character apps/desktop/fixtures/transmog/character.glb
     //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
     //         worn/900012/3 apps/desktop/fixtures/transmog/robe.glb
+    //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
+    //         worn/900001/0 apps/desktop/fixtures/transmog/worn-helm.glb
+    //
+    // `worn-helm.glb` is the one with more than one node in it, which is the shape three.js
+    // had never been handed before this: a body, and a helm sitting above it on a translation.
     #[test]
     fn writes_the_glbs_the_browser_tests_load() {
-        let robe = crate::worn::of(&fixture_files(), ROBE.0, ROBE.1).unwrap();
+        let robe = worn_of(ROBE);
+        let helm = worn_of(HELM);
         for (name, written) in [
             ("character.glb", glb_of(&fixture_files(), None).unwrap()),
             ("robe.glb", glb_of(&fixture_files(), Some(&robe)).unwrap()),
+            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm)).unwrap()),
         ] {
             let committed = std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

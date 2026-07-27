@@ -823,19 +823,21 @@ const mockDesktop: E2EMock = {
     },
   },
   // The models, as the backend hands them over: a `.glb` in a data URL, keyed by the display
-  // the appearance named. 900002 is missing on purpose — a shoulder the tables say has a
-  // model and this install holds no file for, which is a row that has to fall back to its
-  // icon rather than show an error.
+  // the appearance named. Only the weapons ask for one now — every armour slot is shown worn.
   transmogModels: {
-    900001: fixtureModel("helm.glb"),
     900007: fixtureModel("helm.glb"),
   },
   // The body every set detail opens on, before anything is worn.
   characterModel: fixtureModel("character.glb"),
-  // The same body with one appearance composited onto it, which is what the eight slots with
-  // no model of their own show. 900005 is missing on purpose: an appearance the tables
-  // describe and this install can put on nobody, which is the row that falls back to its icon.
+  // The same body with one appearance on it, which is what every armour slot shows. 900001 is
+  // the helm, and it is the one with a second node in it — the body, and the helm above it on
+  // a translation, which is the shape three.js had never been handed before.
+  //
+  // Two are missing on purpose, and they fall back to their icons for different reasons.
+  // 900002 is a shoulder the tables say has a model and this install holds no file for; 900005
+  // a pair of gloves whose every texture was painted for a body this app does not draw.
   wornModels: {
+    900001: fixtureModel("worn-helm.glb"),
     900012: fixtureModel("robe.glb"),
     900003: fixtureModel("robe.glb"),
     900004: fixtureModel("robe.glb"),
@@ -1629,33 +1631,34 @@ test("shows the game's transmog sets by collection and filters them", async ({
     expect(widths).toEqual([8, 8, 8, 8]);
   });
 
-  // Only heads, shoulders, weapons and shields have geometry of their own. The pane is where
-  // that difference shows: a helm is a model to turn around, a chestpiece is its icon and a
-  // sentence saying why, and neither of them is an error.
-  // Most of a set has no model of its own, so the pane opens on the thing all of it is drawn
-  // on: a bare body, before anything is worn.
+  // Every armour slot is shown the way the game shows it, which is on the body. The pane opens
+  // on that body with nothing on it.
   await test.step("opening a set shows the character everything is worn on", async () => {
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
     await expect(transmogDetail.note()).toHaveText("Nothing is worn yet. Drag to turn it.");
     await expect(transmogDetail.canvas()).toBeVisible();
 
-    // 10 × 136: the fixture body holds seventeen geosets and a bare one draws ten of them —
-    // one per group — and every part is drawn out of the same 136 vertices the whole model
-    // shares. Which makes this the geoset selection, counted from the far end of the pipe: a
-    // variant drawn alongside its default reads as 11 × 136, and a default that went missing
-    // as 9 × 136.
-    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1360");
+    // 10 × 152: the fixture body holds nineteen geosets and a bare one draws ten of them —
+    // one per group, plus the hairstyle that shares the skin's — and every part is drawn out
+    // of the same 152 vertices the whole model shares. Which makes this the geoset selection,
+    // counted from the far end of the pipe: a variant drawn alongside its default reads as
+    // 11 × 152, and a default that went missing as 9 × 152.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1520");
   });
 
-  await test.step("picking an appearance with a model shows it in 3D", async () => {
+  // The change this pane was built towards: a helm has geometry of its own, and it is shown
+  // where that geometry belongs rather than floating in front of her.
+  await test.step("picking an appearance with a model shows it on her head", async () => {
     await transmogDetail.pick("Head", "Tideglass Crown");
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
     await expect(transmogDetail.canvas()).toBeVisible();
-    await expect(transmogDetail.note()).toHaveText("Drag to turn it.");
+    await expect(transmogDetail.note()).toHaveText("Worn on the character. Drag to turn it.");
 
-    // Geometry rather than merely a canvas: an empty scene and a helm draw the same blank
-    // rectangle, so what says the file was read is the stage saying what it is holding.
-    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "8");
+    // A body *and* a helm, which is the whole point: 9 × 152 for the body — one part fewer
+    // than bare, because the helm covers the hair — plus the helm's own eight vertices. Two
+    // nodes in one scene is the shape this file gained for this, and a loader that read only
+    // the first would answer 1368.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1376");
   });
 
   // The whole point of the character being there: a robe has no model of its own, and the
@@ -1667,14 +1670,14 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await expect(transmogDetail.canvas()).toBeVisible();
     await expect(transmogDetail.stillPicture()).toBeHidden();
 
-    // A body, not the item: 10 × 136, which is the same one part per geoset group the bare
+    // A body, not the item: 10 × 152, which is the same one part per geoset group the bare
     // character draws, out of the vertices the whole model shares. A robe that arrived as
     // geometry of its own would be a fraction of that.
-    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1360");
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1520");
 
     // And the armour has a colour on it. Geometry was all this ever asked for, and geometry
     // is the half that was never in doubt: a body with every texture refused draws the exact
-    // shape of the robe in flat white and answers 1360 to the line above.
+    // shape of the robe in flat white and answers 1520 to the line above.
     //
     // The refusing is the page's Content Security Policy. A `.glb` carries its pictures
     // inside itself, three.js hands each one to the browser as a `blob:` URL, and a policy

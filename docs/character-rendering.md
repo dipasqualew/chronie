@@ -9,7 +9,8 @@ Chest, legs, hands, feet, wrists, waist, back and tabard are textures painted on
 character's body. There is no mesh to show in isolation.
 
 **Provenance.** Constants marked *verified* were read from build `12.0.5.67` on
-2026-07-26. The rest is from [wowdev.wiki](https://wowdev.wiki) and
+2026-07-26; the attachments, the geoset groups the body actually holds, and the cape on
+2026-07-27. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
 ## The scope decision, and why it matters
@@ -212,8 +213,119 @@ assembled outfits arrive, the table is at
 [GeosRenderPrep](https://wowdev.wiki/DB/ItemDisplayInfo/GeosRenderPrep) and, more
 readably, in wow.export's `src/js/db/caches/DBItemGeosets.js`.
 
-Helmets also hide hair and ears via `HelmetGeosetVis[2]` → `HelmetGeosetData`. Worth
-deferring: hair through a helm is cosmetic, not broken.
+### What the body actually holds, verified
+
+Every geoset on `humanfemale_hd`, by group, with the M2 texture type each part asks for. This
+is what the rules above are being applied *to*, and two lines of it are load-bearing:
+
+| Group | Geosets | Texture type | What |
+|---|---|---|---|
+| **0** | **1–33** | **6** | **hairstyles** |
+| — | **0** | **1** | **the body itself** |
+| 4 | 401–404 | 1 | gloves |
+| 5 | 501–510 | 1 | boots |
+| 7 | 702–703 | 1 | ears |
+| 8 | 802–803 | 1 | sleeves |
+| 9 | 902–905 | 1 | kneepads |
+| 10 | 1002 | 1 | chest |
+| 11 | 1102–1105 | 1 | pants |
+| 12 | 1202–1204 | 1 | tabard |
+| 13 | 1301–1303 | 1 | robe |
+| **15** | **1502–1510** | **2** | **cloaks** |
+| 17 | 1701–1705 | a file of its own | eye glow |
+| 18 | 1801–1804 | 1 | belt |
+| 20 | 2001–2008 | 1 | feet |
+| 22 | 2201–2202 | 1 | torso |
+| 32, 33, 35, 36, 51 | 32xx, 3301, 35xx, 36xx, 51xx | 1, 6, 19, files | face, eyes, and the rest of a modern head |
+
+**Hair is group 0, and geoset 0 is the body.** They are in the same hundred, which matters
+exactly once — when a helm hides "group 0" and the rule is "hide the whole hundred". Hide geoset
+0 with it and the character goes with her hairstyle. `character::dressed` excepts it, and it is
+the one exception in that function.
+
+Note also that several groups have no `…01`: there is no 701, no 801, no 1501. A bare body
+therefore draws *nothing* from those groups rather than a default, and the bare arms and bare
+back are part of geoset 0. `bare()` handles this without knowing about it — a group with no
+value 1 simply contributes no part.
+
+### What a helm hides, verified
+
+`ItemDisplayInfo.HelmetGeosetVis[2]` → `HelmetGeosetData`, which is a table rather than a
+rendering decision and is written down in
+[game-files.md](game-files.md#helmetgeosetdata-verified). What it hands back is a list of
+*groups*, and applying it is one line beyond the rules above:
+
+```
+for each group the helm hides:
+    hide  group*100 .. group*100+99      but never geoset 0
+```
+
+The commonest entry for a Human is `{0, 7}` — hair and ears. A closed helm is `{0, 1, 7, 31,
+34, 35}`. 210 of the game's 5,698 helms hide nothing at all, which is what an open helm is.
+
+This is not cosmetic after all: a full helm with a hairstyle through it is the most obviously
+wrong thing this pipeline can draw, and it costs one filter.
+
+### What a cape is
+
+The one slot with geometry and no model. A back display keeps both `ModelResourcesID` slots at
+zero, switches on geoset group 15 — the cloak the body already carries — and supplies the
+picture that goes on it through `ModelMaterialResourcesID[0]`.
+
+That picture binds as **M2 texture type 2**, and on this body nothing but geosets 1502–1510 asks
+for that type. So a cape needs no attachment and no file of its own: a geoset switched on, and
+one texture bound.
+
+## Attachments: where a helm goes
+
+An item's model is authored around the point it hangs off, so a helm's vertices sit around the
+origin and mean nothing until the head's position is added to them. That position is an
+**attachment**, and the first thing to know is that a retail character does not keep its
+attachments in its model.
+
+**`humanfemale_hd.m2`'s own bone and attachment arrays are both empty.** The `SKID` chunk names
+a `.skel` file — 2137789, 16 MB of it — and that is where they are. A reader that looked at the
+header's `0xf0` would find a body nothing can be hung off, and no error to explain it.
+
+A `.skel` is chunked the same way an M2 is, offsets and all:
+
+```
+SKL1  a name
+SKS1  sequences
+SKB1  M2Array<M2CompBone> bones, then the key-bone lookup
+SKA1  M2Array<M2Attachment> attachments, then the attachment lookup
+AFID, BFID
+```
+
+**`SKA1`'s offsets count from the chunk's own data**, exactly as `MD21`'s do. One
+`M2Attachment` is 40 bytes: a `uint32` id, a `uint16` bone, two bytes nothing has named, a
+`C3Vector` position, and then a 20-byte `M2Track` a still picture has no use for.
+
+**The position is already in model space.** The format calls it "relative to the bone", and a
+bone in bind pose has no keyframes in any of its three tracks — so it contributes an identity
+matrix and there is nothing to compose. Read off this build, all 43 of the body's attachments
+state a position *exactly equal to their bone's pivot*, which is the same conclusion arriving
+twice. `m2.rs` therefore reads `SKA1` and never opens `SKB1`.
+
+**Find an attachment by the id in its record**, not by where it sits in the array: the body's
+43 records are not in id order and the ids run to 74.
+
+The ids are the community's numbering, and the positions this build states for them are what
+say they are right:
+
+| Id | What | Position, game axes (X forward, Y left, Z up) |
+|---|---|---|
+| 5 | shoulder, right | `(-0.050, -0.096, 1.631)` |
+| 6 | shoulder, left | `(-0.050, +0.096, 1.631)` |
+| 11 | helm | `(-0.033, 0.000, 1.712)` |
+| 12 | back | `(-0.145, 0.000, 1.540)` |
+
+A mirrored pair at shoulder height, one at the top of the head, one behind the chest — on a
+body whose feet are at Z 0 and whose crown is at Z 1.99.
+
+**Nothing needs a rotation or a scale.** A helm, a pauldron and a cloak are all placed by
+translation alone; the attachments that carry more are the ones weapons hang off, which is
+another issue.
 
 ## M2 and SKIN, the static subset
 
@@ -229,11 +341,16 @@ Chunks that matter:
 - **`TXID`** — texture FileDataIDs, parallel to the header's texture array. Replaces
   filenames since 8.0.1. The in-file filename is a single `\0` and must be ignored.
 
-`SKID`, `PFID`, `AFID`, `BFID`, `EXP2`, `LDV1` are all irrelevant to a static render.
+- **`SKID`** — the `.skel` holding the skeleton, which is where a retail character's
+  attachments are and the only reason this list is not four chunks long. See
+  [Attachments](#attachments-where-a-helm-goes).
+
+`PFID`, `AFID`, `BFID`, `EXP2`, `LDV1` are all irrelevant to a static render.
 
 **Bone weights are not needed.** For a bind-pose render, ignore `bone_weights` and
 `bone_indices` — the vertex position is already the bind pose. Bones, sequences, `.anim`
-files and `M2Track` decoding are all skippable.
+files and `M2Track` decoding are all skippable — and so, for the same reason, is the bone an
+attachment names.
 
 **Coordinate system:** M2 is Z-up with X forward. To Y-up: `(X, Y, Z) → (X, Z, -Y)`, which
 is what wow.export's `M2Loader.js` does and what `m2.rs` follows. Both this and its mirror

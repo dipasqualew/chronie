@@ -631,17 +631,18 @@ const modelFileData: TableSpec = {
         [0, 0, 0, 0, 41001], // the helm, for a body this app never draws
         [0, 0, 0, 0, 41001], // and the one it does
         [0, 3, 0, 0, 41001], // the same helm at a coarser level of detail, for anybody
-        [0, 0, 0, 0, 41002], // a shoulder's left pad, for the same body this app is not
-        [0, 0, 0, 0, 41002], // and the one it is
-        [0, 0, 0, 0, 41003], // its right pad, likewise
-        [0, 0, 0, 0, 41003],
+        [0, 0, 0, 0, 41002], // a shoulder's left design, mirrored onto the right shoulder
+        [0, 0, 0, 0, 41002], // and on the left, which is the one its display asks for
+        [0, 0, 0, 0, 41003], // its right design, on the left shoulder
+        [0, 0, 0, 0, 41003], // and on the right, which is the one its display asks for
         [0, 0, 0, 0, 41004], // the weapon
         [0, 0, 0, 0, 41005], // the shoulder whose display fills only the second slot
         [0, 0, 0, 0, 41007], // the file that is there and is not a model
       ],
       // The client numbers a file's coarser variants above the file itself, which is why the
       // helm's levels of detail are 140001 and 140101 and why the lower of them is the one to
-      // draw. The 139xxx files are the other body's, and are named by nothing else here.
+      // draw. The 139xxx files are the other body's and the other shoulder's, and are named by
+      // nothing else here — a reader that took the lowest id would draw every one of them.
       idList: [
         139001, 140001, 140101,
         139002, 140002, 139006, 140006,
@@ -795,8 +796,13 @@ const componentTextureFileData: TableSpec = {
  * The silence is the same too. A weapon is modelled once and has no row here at all, and that
  * is the fallback rather than a reject.
  *
- * A fourth column, `PositionIndex`, sits after these and reads -1 on every row of a real
- * install. It is written so the record has the shape the game's does, and nothing reads it.
+ * **A fourth column, `PositionIndex`, is which shoulder** — and it is the half of this table
+ * that a helm does not use and a pauldron uses instead of the other three. Read off 12.0.5.67:
+ * a helm resource's files are `gender 0 or 1, position -1`, and every one of the game's 10,449
+ * shoulder resources is `gender 2, positions 0 and 1`. Position 0 is a mesh leaning towards the
+ * character's left and position 1 is the same mesh mirrored, so the two are the two sides and
+ * not two bodies. Which is why gender **2**, the game's "none", cannot be read as "not this
+ * body": read that way there is not a pauldron in the game.
  */
 const componentModelFileData: TableSpec = {
   fileDataId: FILE_DATA_ID.componentModelFileData,
@@ -804,23 +810,30 @@ const componentModelFileData: TableSpec = {
   tableHash: 0x2b937f60,
   idColumn: 0,
   flags: 4,
-  recordSize: 4,
+  recordSize: 7,
   columns: [
     { storage: Storage.plain, offsetBits: 0, sizeBits: 8 }, // GenderIndex
     { storage: Storage.plain, offsetBits: 8, sizeBits: 8 }, // ClassID
     { storage: Storage.plain, offsetBits: 16, sizeBits: 8 }, // RaceID
-    { storage: Storage.plain, offsetBits: 24, sizeBits: 8 }, // PositionIndex
+    // Wide enough to hold the -1 the game writes for a model that has no side, which is what
+    // a reader sees for every helm and which arrives unsigned as a very large number.
+    { storage: Storage.plain, offsetBits: 24, sizeBits: 32 }, // PositionIndex
   ],
   sections: [
     {
       key: 0n,
       rows: [
-        [0, 0, 1, 255], // 139001, the helm for a Human Male
-        [1, 0, 1, 255], // 140001, and for the Human Female this app draws
-        [0, 0, 1, 255], // 139002, the left pad, male
-        [1, 0, 1, 255], // 140002, female
-        [0, 0, 1, 255], // 139006, the right pad, male
-        [1, 0, 1, 255], // 140006, female
+        // The helm: modelled per body, and for no side in particular.
+        [0, 0, 1, -1], // 139001, for a Human Male
+        [1, 0, 1, -1], // 140001, and for the Human Female this app draws
+        // The pads: modelled per side, and for no body in particular. The left pad's design
+        // is resource 41002 and the right's is 41003, and each resource holds *both* sides —
+        // so which file is drawn is the position rather than the id, and the lower id is the
+        // wrong side of both.
+        [2, 0, 0, 1], // 139002, the left design mirrored onto the right shoulder
+        [2, 0, 0, 0], // 140002, and on the left, where its display puts it
+        [2, 0, 0, 0], // 139006, the right design on the left shoulder
+        [2, 0, 0, 1], // 140006, and on the right, where its display puts it
       ],
       idList: [139001, 140001, 139002, 140002, 139006, 140006],
     },
@@ -828,7 +841,7 @@ const componentModelFileData: TableSpec = {
       // Encrypted, so the model it describes arrives untagged — which is the fallback rather
       // than an exclusion, exactly as it is for a texture.
       key: 0x71c3e05a9d248bf6n,
-      rows: [[1, 0, 1, 255]],
+      rows: [[1, 0, 1, -1]],
       idList: [140005],
     },
   ],

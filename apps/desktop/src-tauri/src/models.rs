@@ -64,13 +64,15 @@ pub fn model_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Value, St
 
 /// The same, as the `.glb` bytes themselves — which is what `dump_model` writes to a file.
 pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<u8>>, String> {
-    let Some((model_resource, material_resource)) = resources(files, display_info_id)? else {
+    let Some((slot, model_resource, material_resource)) = resources(files, display_info_id)?
+    else {
         return Ok(None);
     };
 
-    // The same question `worn` asks of a helm that is about to go on a head, and the same
-    // answer: a model resource names a file per body, and this app draws one body.
-    let Some(model_file) = crate::worn::model_file(files, model_resource)? else {
+    // The same question `worn` asks of a helm about to go on a head, and the same answer: a
+    // model resource names a file per body, or a pair of files one per shoulder, and this app
+    // draws one body and one shoulder at a time. The slot is which shoulder.
+    let Some(model_file) = crate::worn::model_file(files, model_resource, slot)? else {
         return Ok(None);
     };
     let Ok(bytes) = files.read(model_file) else {
@@ -106,14 +108,17 @@ pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<
     Ok(Some(glb::write(&[glb::Piece::only(&mesh, &picture)])?))
 }
 
-/// What a display says it is drawn with: a model resource, and the material that paints it.
+/// What a display says it is drawn with: a model slot, its resource, and the material that
+/// paints it.
 ///
-/// Both are arrays of two. Shoulders keep a model in each slot — a left pad and a right —
-/// and nothing in the game's files says where either sits on the body; that is an attachment
-/// point on the character, which is the character-rendering work. So the first slot that
-/// holds anything is the one shown, and a shoulder shows one pad rather than two overlapping
-/// at the origin.
-fn resources(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<(u32, u32)>, String> {
+/// Both arrays are of two. This shows the first slot that holds anything, which for a helm or
+/// a weapon is the whole of it — and for a pair of shoulders is one pad. Showing both is what
+/// [`crate::character`] does now, because both is only meaningful once there is a body with a
+/// shoulder on either side of it to hang them from.
+fn resources(
+    files: &dyn GameFiles,
+    display_info_id: u32,
+) -> Result<Option<(usize, u32, u32)>, String> {
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
     let Some(display) = displays.rows().find(|row| row.id() == display_info_id) else {
         return Ok(None);
@@ -121,11 +126,12 @@ fn resources(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<(u32,
     Ok((0..MODEL_SLOTS)
         .map(|slot| {
             (
+                slot,
                 display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
                 display.element(display_column::MATERIAL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
             )
         })
-        .find(|(model, _)| *model != 0))
+        .find(|(_, model, _)| *model != 0))
 }
 
 /// The FileDataID of the one file in `table` that is the given resource.

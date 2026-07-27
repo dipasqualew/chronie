@@ -542,6 +542,14 @@ mod tests {
     /// The character body, which is the only fixture with geosets and several texture types.
     const CHARACTER: u32 = 1_000_764;
     const CHARACTER_SKIN: u32 = 1_000_765;
+    /// And the skeleton beside it, which is the only fixture with attachments.
+    const SKELETON: u32 = 1_000_766;
+
+    /// The attachments this app asks for, as the community numbers them.
+    const RIGHT_SHOULDER: u32 = 5;
+    const LEFT_SHOULDER: u32 = 6;
+    const HELM_ATTACHMENT: u32 = 11;
+    const BACK: u32 = 12;
 
     fn model(fdid: u32) -> Model {
         Model::parse(&fixture_files().read(fdid).unwrap()).unwrap()
@@ -683,6 +691,58 @@ mod tests {
         // The cloak's batch list holds a second layer over its only submesh.
         let mesh = mesh(140003, 141003);
         assert_eq!(mesh.parts.len(), 3);
+    }
+
+    // Where a helm goes, which is the one thing beyond geometry this reads — and it does not
+    // read it out of the model at all. A retail character's own attachment array is empty and
+    // its `SKID` names the file that holds them, so the fixture body is built the same way and
+    // a reader that looked only at the header would find a body nothing can be hung off.
+    #[test]
+    fn reads_where_gear_hangs_off_a_body_out_of_its_skeleton() {
+        let body = model(CHARACTER);
+        let skeleton = body
+            .skeleton_file_data_id()
+            .expect("the body names a skeleton");
+        assert_eq!(skeleton, SKELETON);
+        let attachments = attachments(&fixture_files().read(skeleton).unwrap()).unwrap();
+
+        let at = |id: u32| {
+            attachments
+                .iter()
+                .find(|attachment| attachment.id == id)
+                .map(|attachment| attachment.position)
+        };
+        // The helm is highest, the two shoulders are a mirrored pair either side of her, and
+        // the back is behind — all in the viewer's axes, which is the turn `y_up` makes.
+        assert_eq!(at(HELM_ATTACHMENT), Some([0.0, 4.0, 0.0]));
+        assert_eq!(at(LEFT_SHOULDER), Some([0.0, 3.0, -2.0]));
+        assert_eq!(at(RIGHT_SHOULDER), Some([0.0, 3.0, 2.0]));
+        assert_eq!(at(BACK), Some([-1.0, 2.0, 0.0]));
+    }
+
+    // An attachment is found by the id in its record and not by where it sits in the array.
+    // The fixture disagrees about the two deliberately: the helm is id 11 and the third
+    // record, so a reader that indexed by id would run off the end of a five-entry list — and
+    // one that indexed by position would hang the helm off her back.
+    #[test]
+    fn finds_an_attachment_by_its_id_rather_than_by_its_place_in_the_list() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let ids: Vec<u32> = attachments.iter().map(|attachment| attachment.id).collect();
+        assert_eq!(ids, vec![BACK, LEFT_SHOULDER, HELM_ATTACHMENT, 1, RIGHT_SHOULDER]);
+    }
+
+    // An item's model hangs things off nothing and says so, and a file with no attachments in
+    // it is a fact about the file rather than a failure — a body is the only model here that
+    // has any.
+    #[test]
+    fn says_nothing_about_attachments_for_a_model_that_has_none() {
+        assert_eq!(model(HELM).skeleton_file_data_id(), None);
+        assert_eq!(attachments(b"").unwrap(), Vec::new());
+        // A skeleton whose chunks are none this reader knows, which is the same answer.
+        let mut chunked = b"SKL1".to_vec();
+        chunked.extend_from_slice(&4u32.to_le_bytes());
+        chunked.extend_from_slice(b"junk");
+        assert_eq!(attachments(&chunked).unwrap(), Vec::new());
     }
 
     #[test]

@@ -549,6 +549,46 @@ mod tests {
         assert_eq!(materials[1]["alphaCutoff"], 0.5);
     }
 
+    // A scene of several pieces, which is what a dressed character is. Each gets a node with
+    // its own mesh and its own translation, and — the reason they are pieces rather than one
+    // welded vertex list — its own answer to the same paint. A shared picture callback would
+    // paint the helm with the body's atlas, which is geometry that looks right and a picture
+    // that is nonsense.
+    #[test]
+    fn puts_each_piece_in_a_node_of_its_own_with_its_own_pictures() {
+        let body = mesh(CLOAK, CLOAK_SKIN);
+        let hung = mesh(HELM, HELM_SKIN);
+        let glb = write(&[
+            Piece::only(&body, &always(b"the body")),
+            Piece {
+                mesh: &hung,
+                at: [0.0, 4.0, -2.0],
+                picture: &always(b"the helm"),
+            },
+        ])
+        .unwrap();
+        let Parsed { json, bin } = parse(&glb);
+
+        assert_eq!(json["scenes"][0]["nodes"], serde_json::json!([0, 1]));
+        // No translation at all on the piece that has none, so a model shown on its own still
+        // writes the file it always did.
+        assert_eq!(json["nodes"][0], serde_json::json!({ "mesh": 0 }));
+        assert_eq!(json["nodes"][1]["mesh"], 1);
+        assert_eq!(json["nodes"][1]["translation"], serde_json::json!([0.0, 4.0, -2.0]));
+
+        // Two meshes, two sets of vertices, and two pictures — one per piece rather than one
+        // shared between them.
+        assert_eq!(json["meshes"].as_array().unwrap().len(), 2);
+        assert_eq!(json["images"].as_array().unwrap().len(), 2);
+        let picture = |at: usize| {
+            let view = &json["bufferViews"][json["images"][at]["bufferView"].as_u64().unwrap() as usize];
+            let from = view["byteOffset"].as_u64().unwrap() as usize;
+            bin[from..from + view["byteLength"].as_u64().unwrap() as usize].to_vec()
+        };
+        assert_eq!(picture(0), b"the body");
+        assert_eq!(picture(1), b"the helm");
+    }
+
     // A texture the install cannot show is not a reason to withhold the geometry: an
     // untextured helm still says what shape the helm is.
     #[test]

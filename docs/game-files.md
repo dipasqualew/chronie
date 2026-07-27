@@ -9,8 +9,9 @@ afterwards, marked with the build it came from.
 
 **Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26; the array
 columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the same build on
-2026-07-27 — the two things this file used to carry on the community's say-so; and the
-customization chain below against `12.0.5.67823` on 2026-07-27. Column
+2026-07-27 — the two things this file used to carry on the community's say-so; the
+customization chain below against `12.0.5.67823` on 2026-07-27; and `ComponentModelFileData`,
+`HelmetGeosetData` and the cape chain against `12.0.5.67` on 2026-07-27. Column
 indices and file ids are stated as *verified* only where they were read out of that
 install and cross-checked against the data they resolve to. Everything else is marked
 as coming from [WoWDBDefs](https://github.com/wowdev/WoWDBDefs) or
@@ -94,7 +95,7 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `ChrCustomizationOption` | 3384247 | fixed | yes |
 | `ChrCustomizationElement` | 3512765 | fixed | yes |
 | `ChrCustomizationMaterial` | 3459652 | fixed | yes |
-| `HelmetGeosetData` | 2821752 | fixed | yes |
+| `HelmetGeosetData` | 2821752 | fixed | yes, needs `foreign_id()` |
 | `Achievement` | 1260179 | fixed | yes |
 | `Achievement_Category` | 1324299 | fixed | yes |
 | `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` |
@@ -244,6 +245,75 @@ Human Female in a Human Male's chest.
 
 Per-region texture columns (`ArmUpperTexture`, `TorsoUpperTexture`, …) **left
 `ItemDisplayInfo` in Legion**. They are historical; do not look for them.
+
+### ComponentModelFileData, verified
+
+The same trap as `ComponentTextureFileData` with meshes behind it, and the same three columns —
+plus a fourth that turns out to carry the whole of how a pair of shoulders works:
+
+```
+ComponentModelFileData            (id in the id list — the model's own FileDataID)
+  col0 = GenderIndex               0 male, 1 female, 2 none, 3 any
+  col1 = ClassID                   0 is every class
+  col2 = RaceID
+  col3 = PositionIndex             which shoulder, and -1 on everything that is not one
+```
+
+**A helm uses the first three and a pauldron uses the fourth, and neither uses both.** Counted
+across every armour display on 12.0.5.67:
+
+| Slot | What its model resources' files are tagged | Count |
+|---|---|---|
+| 0 head | `gender [0, 1]`, `position [-1]` | 5,778 |
+| 1 shoulder | `gender [2]`, `positions [0, 1]` | 10,449 |
+| 11–15 weapons and shields | no row at all | 17,522 |
+
+So a helm is modelled once per race and gender — display 1126's resource names **31 files** —
+and picking the wrong one puts a Human Male's helm on a Human Female. A shoulder is modelled
+once per *side*: `ModelResourcesID[0]` and `[1]` are two pad designs, each resource holds the
+design and its mirror, and `PositionIndex` is the only thing that tells the two apart.
+**Position 0 is the character's left**, which the geometry says outright — 143183 has a mean
+game-Y of `+0.0837` and its position-1 twin 143486 of `-0.0837`, the same mesh flipped. Element
+0 of `ModelResourcesID` goes to position 0 and attachment 6; element 1 to position 1 and
+attachment 5.
+
+Two ways to be wrong here, both of them quiet:
+
+- **Taking the lowest id.** Right for a level of detail and right for a texture's second usage,
+  wrong for both of these — the male helm and the mirrored pad are numbered below the ones
+  wanted about as often as not.
+- **Reading gender 2 as "not this body".** It is the game's "none", and every shoulder model in
+  the game carries it. Read as an exclusion there is not a pauldron anywhere.
+
+### HelmetGeosetData, verified
+
+What a helm covers up. Not a variant swap — the whole group goes, because there is no variant
+of hair that fits under a helm:
+
+```
+HelmetGeosetData                  (id in the id list)
+  foreign_id() = HelmetGeosetVisDataID   ← the relationship block, and nowhere else
+  col0 = RaceID
+  col1 = HideGeosetGroup           0 hair, 1–3 facial hair, 7 ears, and the rest
+  col2 = zero on all but 5 of 19,150 rows
+  col3 = RaceBitSelection          32 or -1 throughout
+```
+
+`ItemDisplayInfo.HelmetGeosetVis[2]` (column 15) points into it, one entry per gender, and the
+community reads them as male then female. **The rows under one entry cover every race the game
+ships**, so the race has to be matched too — 126 distinct vis ids across 19,150 rows.
+
+The gender choice is less load-bearing than it looks: across the 5,698 helm displays on this
+build, the two entries hide hair equally often (4,576 each) and facial hair almost equally
+(2,069 against 2,061). They differ on the rarer groups.
+
+### A cape has geometry and no model
+
+The back slot is the exception to the table above. Its displays keep **both model slots at
+zero** and name a material anyway, because the cloak is the *body's* geometry — geoset group 15
+— and what the appearance supplies is only the picture on it, out of
+`ModelMaterialResourcesID[0]` and bound as M2 texture type 2. See
+[character-rendering.md](character-rendering.md#what-a-cape-is).
 
 ## What actually has geometry
 
@@ -449,12 +519,20 @@ from inside the `MD21` chunk, and a submesh that starts past the first 64k of th
 which is why `141004.skin` is 131 KB of mostly padding.
 
 It also writes the character body, under the FileDataID the retail client keeps
-`humanfemale_hd.m2` at: seventeen cubes carrying the geoset groups the fixture's own items
+`humanfemale_hd.m2` at: nineteen cubes carrying the geoset groups the fixture's own items
 drive — sleeves, chest, robe, trousers, boot, feet and helm, each as a bare default beside the
-variant an item switches on — a hair part on M2 texture type 6 beside a body on type 1, and a
-skull past the first 64k of the index list. Those are the three things an item's model never
-exercises, and all three fail as geometry rather than as an error — see
+variant an item switches on — two hairstyles on M2 texture type 6 and a cloak on type 2 beside a
+body on type 1, and a skull past the first 64k of the index list. Those are the things an item's
+model never exercises, and all of them fail as geometry rather than as an error — see
 [character-rendering.md](character-rendering.md).
+
+The hair sits in **group 0**, where the retail body keeps it, which is what makes a helm's
+hiding worth testing: geoset 0 is the body and lives in the same hundred.
+
+Beside the body sits its `.skel`, under a FileDataID of its own, holding the attachments a helm
+and a pair of pauldrons hang off — because that is where a retail character keeps them and not
+in the model. Its records are deliberately not in id order, so a reader that indexed the array
+by attachment id would hang the helm off her back.
 
 The body textures beside them are the other half: one picture per row of
 `ItemDisplayInfoMaterialRes` that resolves to a file, each painted in colours of its own so that
@@ -462,7 +540,8 @@ a test can say which rectangle of the atlas it landed in, and two of them banded
 copied rather than blended, or scaled without a filter, shows up as a colour rather than as a
 judgement call.
 
-`helm.glb`, `character.glb` and `robe.glb` are the derived fixtures: the converters' own output,
+`helm.glb`, `character.glb`, `robe.glb` and `worn-helm.glb` are the derived fixtures: the
+converters' own output,
 which the browser tests load into three.js to prove that what this app writes is glTF a loader
 will take. Tests in `models.rs` and `character.rs` fail if any of them has drifted from what the
 converters now produce:
@@ -473,7 +552,9 @@ cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model
 cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
     --fixtures apps/desktop/fixtures/transmog character apps/desktop/fixtures/transmog/character.glb
 cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
-    --fixtures apps/desktop/fixtures/transmog worn/900012/2 apps/desktop/fixtures/transmog/robe.glb
+    --fixtures apps/desktop/fixtures/transmog worn/900012/3 apps/desktop/fixtures/transmog/robe.glb
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model -- \
+    --fixtures apps/desktop/fixtures/transmog worn/900001/0 apps/desktop/fixtures/transmog/worn-helm.glb
 ```
 
 Every fixture table carries an encrypted section, because that is where the edge cases
