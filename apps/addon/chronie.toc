@@ -22,6 +22,9 @@ src/SegmentTally.lua
 src/ResultsWindow.lua
 src/MinimapButton.lua
 src/SegmentLog.lua
+src/AccountIdentity.lua
+src/MapPosition.lua
+src/EntryLog.lua
 src/EquipsetLedger.lua
 src/SegmentTracker.lua
 src/SegmentTable.lua
@@ -30,3 +33,4 @@ src/CurrencyWindow.lua
 src/ReportCommand.lua
 src/ReportWindow.lua
 Main.lua
+Bindings.xml

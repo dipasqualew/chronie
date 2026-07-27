@@ -1,0 +1,146 @@
+local _, ns = ...
+
+---One thing the player thought was worth remembering. Today that is a screenshot; the
+---same record with the picture left out and some text added is a note, which is why this
+---is not called a screenshot log and does not live in `db.captures`. Flat and JSON-shaped
+---like a segment record, because the desktop app's reader takes it verbatim.
+---
+---Entries sit in a top-level store rather than inside the segment they were taken in.
+---`db.segments` is pruned to a rolling week, and a photograph that vanished after seven
+---days because the segment around it aged out is a bug nobody wants to explain. The entry
+---carries the segment's identity as a link instead, built through `ns.segmentId` so it is
+---always exactly the string the log files that segment under.
+---@class EntryRecord
+---@field id string Unique across accounts, not merely within one. Entries are meant to be
+---shareable, and two players whose ids collide is not something a later release can fix.
+---@field schema integer Shape version, so a reader can tell an old row from a new one.
+---@field at integer Epoch second. What ordering and retention are done on.
+---@field stamp string The same moment in local time, formatted "MMDDYY_HHMMSS". Both
+---clocks are stored deliberately: the client names its screenshot files
+---`WoWScrnShot_MMDDYY_HHMMSS` in local time, so this is the half that pairs an entry with
+---its image, and the epoch is the half that survives a daylight-saving change.
+---@field character string "Name-Realm" of who was playing.
+---@field author string The account that made it — see ns.newAccountIdentity.
+---@field segment string? Link to the segment that was open, absent when none was.
+---@field uiMapID integer? The map the character was on, when the client named one.
+---@field x number? Normalised position across that map, 0..1.
+---@field y number?
+---@field hasImage boolean? True when a screenshot was fired for this entry, absent when
+---nothing was. The addon cannot see the filesystem, so this is a statement about what was
+---asked for, never about what landed on disk.
+
+---What the caller wants recorded.
+---@class EntryOptions
+---@field hasImage boolean? Whether a screenshot is being taken alongside this entry.
+
+---The permanent store of entries. Nothing here prunes: that is the whole reason entries
+---are not kept inside the segments they belong to.
+---@class EntryLog
+---@field record fun(options: EntryOptions?): EntryRecord? The entry written, or nil when it
+---was refused — see the cooldown below.
+
+---@class EntryLogDeps
+---@field db table SavedVariables table; mutated in place so the client persists it.
+---@field now fun(): integer
+---@field formatDate fun(format: string, timestamp: integer): string Usually the global `date`.
+---@field character fun(): string "Name-Realm" of the character making the entry.
+---@field author fun(): string? The account making it.
+---@field mapState fun(): MapPosition? Where the character is standing, if the client says.
+---@field openSegment fun(): table? The tracker's open segment descriptor, or nil.
+---@field cooldownSeconds integer? Seconds between two entries carrying an image. Default 1.
+
+---How the desktop app will read the shape of a row it did not write.
+local SCHEMA = 1
+
+---The client's screenshot filenames resolve to the second and no finer, so two images a
+---second apart are already the closest pair that can still be told from one another.
+local DEFAULT_COOLDOWN = 1
+
+---Local time in exactly the shape the client names a screenshot file.
+local STAMP_FORMAT = "%m%d%y_%H%M%S"
+
+---@param deps EntryLogDeps
+---@return EntryLog
+function ns.newEntryLog(deps)
+    local db = deps.db
+    local now = deps.now
+    local cooldown = deps.cooldownSeconds or DEFAULT_COOLDOWN
+
+    db.entries = db.entries or {}
+
+    ---When an entry carrying an image was last written. Session-local, because the only
+    ---way two entries land in one second across a reload is a clock that went backwards.
+    ---@type integer?
+    local lastImageAt
+
+    ---A counter rather than a timestamp, because it is what makes the id unique no matter
+    ---what the clock does. Persisted alongside the entries so it keeps climbing across
+    ---sessions even if every entry it once numbered has since been deleted.
+    ---@param author string
+    ---@param at integer
+    ---@return string
+    local function nextId(author, at)
+        db.entryCounter = (db.entryCounter or 0) + 1
+        return table.concat({ author, tostring(at), tostring(db.entryCounter) }, "|")
+    end
+
+    return {
+        ---Writes one entry, stamped with everything Chronie knew at this moment.
+        ---
+        ---Refuses, returning nil, in two cases. An entry with an image taken within the
+        ---cooldown of the last one would produce two markers the desktop side could not
+        ---tell apart, since it has only the filename's second to go on — better to drop
+        ---the second press than to file a marker that resolves to the wrong picture. And
+        ---an entry cannot be authored before the client will say who the player is, which
+        ---in practice means before the world has finished loading.
+        ---@param options EntryOptions?
+        ---@return EntryRecord?
+        record = function(options)
+            options = options or {}
+            local at = now()
+            local hasImage = options.hasImage and true or false
+
+            if hasImage and lastImageAt and at - lastImageAt < cooldown then
+                return nil
+            end
+
+            local author = deps.author()
+            if not author then
+                return nil
+            end
+
+            local entry = {
+                id = nextId(author, at),
+                schema = SCHEMA,
+                at = at,
+                stamp = deps.formatDate(STAMP_FORMAT, at),
+                character = deps.character(),
+                author = author,
+            }
+
+            local segment = deps.openSegment and deps.openSegment() or nil
+            if segment then
+                entry.segment = ns.segmentId(segment.character, segment.startedAt, segment.instance)
+            end
+
+            local position = deps.mapState and deps.mapState() or nil
+            if position and position.uiMapID then
+                entry.uiMapID = position.uiMapID
+                -- The map is recorded on its own where the client refuses the point,
+                -- which is most of instanced content. Never a fabricated 0, 0.
+                if position.x and position.y then
+                    entry.x = position.x
+                    entry.y = position.y
+                end
+            end
+
+            if hasImage then
+                entry.hasImage = true
+                lastImageAt = at
+            end
+
+            db.entries[#db.entries + 1] = entry
+            return entry
+        end,
+    }
+end

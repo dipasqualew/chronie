@@ -1,5 +1,13 @@
 local addonName, ns = ...
 
+-- The Key Bindings panel builds its list out of globals: BINDING_HEADER_<header> titles
+-- the section and BINDING_NAME_<name> labels the row inside it. Both refer to the tokens
+-- in Bindings.xml, and without them the panel shows those raw tokens to the player. They
+-- are declared here, at file scope, because the panel reads them whenever it is opened —
+-- which may be long before or entirely without the addon having wired itself up.
+BINDING_HEADER_CHRONIE = "Chronie"
+BINDING_NAME_CHRONIE_CAPTURE = "Take a screenshot"
+
 ---Everything the addon needs from the outside world, in one injectable bag.
 ---@class WowEnv
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
@@ -51,6 +59,10 @@ local addonName, ns = ...
 ---@field previewTransmog fun(itemID: integer)
 ---@field openTransmogCollection fun(sourceID: integer)
 ---@field itemName fun(itemID: integer): string?
+---@field playerGUID fun(): string? UnitGUID("player"), the client's own unique character id.
+---@field mapState fun(): MapPosition? Where the player is standing, when the client says.
+---@field screenshot fun() Take a screenshot. Asynchronous: the file lands a moment later,
+---and the addon can never see it, so nothing may wait on or confirm it.
 ---@field lootSelfFormats string[] Self-loot chat templates, most specific first.
 ---@field factionIncreaseFormats string[] Reputation-increase chat templates.
 ---@field uiParent table
@@ -232,6 +244,44 @@ function ns.main(env)
         expansions = expansions,
         experienceState = env.experienceState,
     })
+
+    local accountIdentity = ns.newAccountIdentity({
+        db = env.db,
+        now = env.now,
+        playerGUID = env.playerGUID,
+    })
+
+    local entryLog = ns.newEntryLog({
+        db = env.db,
+        now = env.now,
+        formatDate = env.formatDate,
+        character = currentCharacter,
+        author = accountIdentity.id,
+        mapState = env.mapState,
+        openSegment = segmentTracker.current,
+    })
+
+    ---Takes a Chronie screenshot: what the keybinding in Bindings.xml runs.
+    ---
+    ---The marker is written first and the shutter fired second, and only if the marker
+    ---was actually written. Screenshot() is asynchronous and the addon cannot see the
+    ---filesystem at all, so there is nothing to confirm afterwards — the desktop app pairs
+    ---the file to the marker by the second in its name. Firing the shutter for an entry
+    ---the log refused would leave an image with no marker to claim it, which reads to the
+    ---desktop side as a photograph somebody else took.
+    ---@return EntryRecord? entry nil when the log refused the press.
+    local function capture()
+        local entry = entryLog.record({ hasImage = true })
+        if not entry then
+            return nil
+        end
+        -- Without this the segment it points at may never be filed: standing somewhere
+        -- taking a picture leaves every other counter at rest, and the tracker drops a
+        -- segment that saw nothing.
+        tally.entry()
+        env.screenshot()
+        return entry
+    end
 
     local segmentWindow = ns.newDetailWindow({
         createFrame = env.createFrame,
@@ -431,6 +481,10 @@ function ns.main(env)
             level = env.unitLevel("player"),
         })
         env.requestRaidInfo()
+        -- Minted here rather than at the first capture, because this is the earliest
+        -- moment the client will name the player at all, and an entry authored by nobody
+        -- is not something a later release could repair.
+        accountIdentity.id()
         reportUnsupportedEvents()
     end)
 
@@ -632,6 +686,9 @@ function ns.main(env)
         reportWindow = reportWindow,
         currencyItems = currencyItems,
         currencyWindow = currencyWindow,
+        accountIdentity = accountIdentity,
+        entryLog = entryLog,
+        capture = capture,
     }
 end
 
@@ -917,6 +974,13 @@ if CreateFrame then
             itemName = function(itemID)
                 return (GetItemInfo(itemID))
             end,
+            playerGUID = function()
+                return UnitGUID("player")
+            end,
+            mapState = function()
+                return ns.readMapPosition(C_Map)
+            end,
+            screenshot = Screenshot,
             -- Every way an item can land in the player's own bags, because each one is
             -- vendor value the segment should count. "You receive loot:" alone misses most
             -- of it: quest rewards, container contents and anything pushed straight to a
@@ -942,5 +1006,9 @@ if CreateFrame then
             minimap = Minimap,
             db = ChronieDB,
         })
+
+        -- What the keybinding in Bindings.xml calls. Published only now, so a key pressed
+        -- during login runs nothing rather than reaching a half-built addon.
+        ChronieCapture = ns.app.capture
     end)
 end

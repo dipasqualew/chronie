@@ -1036,10 +1036,17 @@ describe("addon integration", function()
             end
         end)
 
+        -- The last Lua file rather than the last entry: Bindings.xml sits after it, and
+        -- the client's XML parser cares nothing for where in the list it appears.
         it("loads Main.lua last, so the modules exist when it wires them", function()
-            local files = loader.tocFiles()
+            local lua = {}
+            for _, path in ipairs(loader.tocFiles()) do
+                if path:match("%.lua$") then
+                    lua[#lua + 1] = path
+                end
+            end
 
-            assert.equal("Main.lua", files[#files])
+            assert.equal("Main.lua", lua[#lua])
         end)
     end)
 

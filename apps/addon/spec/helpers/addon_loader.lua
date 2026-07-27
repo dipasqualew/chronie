@@ -20,14 +20,34 @@ function loader.tocFiles()
     return files
 end
 
+---Reads one file the .toc names, so a test can assert on something the client parses
+---rather than executes — Bindings.xml being the only one of those today.
+---@param relative string A path as it appears in the .toc.
+---@return string contents
+function loader.read(relative)
+    local path = ROOT .. relative
+    local handle = assert(io.open(path, "r"), "cannot open " .. path)
+    local contents = handle:read("*a")
+    handle:close()
+    return contents
+end
+
 ---@param addonName string?
 ---@return table namespace populated by the addon files
 function loader.load(addonName)
     local ns = {}
     for _, relative in ipairs(loader.tocFiles()) do
-        local path = ROOT .. relative
-        local chunk = assert(loadfile(path), "cannot load " .. path)
-        chunk(addonName or "chronie", ns)
+        if relative:match("%.lua$") then
+            local path = ROOT .. relative
+            local chunk = assert(loadfile(path), "cannot load " .. path)
+            chunk(addonName or "chronie", ns)
+        else
+            -- The client hands XML in the .toc to its own parser, which there is no Lua
+            -- stand-in for. What the harness can still check is that the file the .toc
+            -- promises is really there, so a typo or a rename fails here rather than
+            -- silently costing the player a keybinding in game.
+            loader.read(relative)
+        end
     end
     return ns
 end

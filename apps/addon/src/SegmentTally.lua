@@ -35,6 +35,9 @@ local _, ns = ...
 ---@field housingLevelUp fun(level: integer, at: integer) Append a housing level gained.
 ---@field encounter fun(event: EncounterEvent) Append a boss encounter that ended, kill or wipe.
 ---@field equipsetChange fun(change: EquipsetChange) Append a change to one equipment set.
+---@field entry fun() Note that an entry — a screenshot, a note — was recorded during this
+---segment. Counted only so hasEvents() stops calling the segment empty; the entry itself
+---lives in its own store, not in the segment.
 ---@field keystoneStart fun(info: table, at: integer) Open a Mythic+ run: `{ level, mapId, affixes }`.
 ---@field keystoneComplete fun(info: table, at: integer) Close it: `{ durationMs, onTime, upgrades, level }`.
 ---@field keystoneReset fun() Abandon the open run; the level and map stay, completion does not.
@@ -311,6 +314,7 @@ function ns.newSegmentTally(deps)
         segment.housingLevelUps = {}
         segment.encounters = {}
         segment.equipsetChanges = {}
+        segment.entries = 0
         segment.keystone = nil
         segment.experienceGained = 0
         segment.experiencePercent = 0
@@ -663,6 +667,23 @@ function ns.newSegmentTally(deps)
             }
         end,
 
+        ---Notes that the player recorded an entry — a screenshot, a note — during this
+        ---segment.
+        ---
+        ---Nothing about the entry itself is kept here, because the entry does not belong
+        ---to the segment: it lives in its own permanent store and points back at this one.
+        ---All the tally keeps is that one happened, and it keeps that for a single reason.
+        ---Standing somewhere taking a photograph leaves every other counter at rest, so
+        ---hasEvents() would call the segment empty, the tracker would drop it on the way
+        ---out, and the entry would be left linking to a segment that was never filed.
+        ---Reaching for the camera is evidence the moment was worth keeping; that is
+        ---exactly what hasEvents() is asking about.
+        entry = function()
+            if segment.active then
+                segment.entries = segment.entries + 1
+            end
+        end,
+
         ---Opens a Mythic+ run on this segment. A level of nil is not a keystone start the
         ---tally can say anything useful about, so it is dropped rather than recorded as a
         ---run of unknown level.
@@ -869,6 +890,7 @@ function ns.newSegmentTally(deps)
                 or #segment.housingLevelUps > 0
                 or #segment.encounters > 0
                 or #segment.equipsetChanges > 0
+                or segment.entries > 0
                 or segment.keystone ~= nil
                 or segment.experienceGained ~= 0
         end,

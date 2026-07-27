@@ -574,6 +574,41 @@ function fake.newClock(start)
     return clock
 end
 
+---A stand-in for the client's `C_Map`, shaped the way the real one answers.
+---
+---Both of its refusals are modelled, because both are ordinary rather than exceptional.
+---`uiMapID = nil` is a loading screen, where the client has no map to name. A map with no
+---`x`/`y` is most of instanced content, where the client names the map perfectly happily
+---and then declines to say where on it you are standing. The point, when there is one,
+---comes back as a Vector2DMixin — an object you ask for the numbers, not a pair of them.
+---@param options table? `{ uiMapID = integer?, x = number?, y = number? }`
+---@return table cMap, table recorded
+function fake.newMap(options)
+    options = options or {}
+    local asked = {}
+
+    local cMap = {}
+
+    function cMap.GetBestMapForUnit(unit)
+        asked[#asked + 1] = { call = "GetBestMapForUnit", unit = unit }
+        return options.uiMapID
+    end
+
+    function cMap.GetPlayerMapPosition(uiMapID, unit)
+        asked[#asked + 1] = { call = "GetPlayerMapPosition", uiMapID = uiMapID, unit = unit }
+        if options.x == nil or options.y == nil then
+            return nil
+        end
+        local position = { x = options.x, y = options.y }
+        function position:GetXY()
+            return self.x, self.y
+        end
+        return position
+    end
+
+    return cMap, { asked = asked }
+end
+
 ---A deterministic stand-in for the global `date`, so expiry strings never depend on
 ---the machine's timezone or locale.
 ---@return fun(format: string, timestamp: integer): string
@@ -603,6 +638,8 @@ end
 ---  `currencyItems` maps an item id to `{ name, count }`, count being the grand total owned.
 ---  `factions` maps a localised faction name to `{ standing, current, max }`.
 ---  `trackedCurrencies` is a list of item ids to pre-seed into the tracked-currency store.
+---  `map` is `{ uiMapID, x, y }`, where the character is standing; `false` for nowhere.
+---  `playerGUID` is the client's unique id for the logged-in character.
 ---@return table env, table recorded
 function fake.newEnv(options)
     options = options or {}
@@ -675,6 +712,15 @@ function fake.newEnv(options)
     -- The keystone in the slot and the completion report, both nil until a test plants one.
     local activeKeystone = options.activeKeystone
     local keystoneCompletion = options.keystoneCompletion
+    -- Where the client says the character is standing. Mutable, so one test can walk from
+    -- a zone that reports a point into an instance that reports only a map.
+    local mapPosition = options.map
+    if mapPosition == nil then
+        mapPosition = { uiMapID = 84, x = 0.55, y = 0.62 }
+    end
+    -- How many times the addon reached for the shutter. There is nothing else to observe:
+    -- the real Screenshot() is asynchronous and writes a file the addon can never see.
+    local screenshots = 0
 
     local env = {
         createFrame = createFrame,
@@ -822,6 +868,18 @@ function fake.newEnv(options)
         openAchievement = function() end,
         previewTransmog = function() end,
         openTransmogCollection = function() end,
+        playerGUID = function()
+            return options.playerGUID or "Player-970-0002FD1B"
+        end,
+        mapState = function()
+            if not mapPosition then
+                return nil
+            end
+            return { uiMapID = mapPosition.uiMapID, x = mapPosition.x, y = mapPosition.y }
+        end,
+        screenshot = function()
+            screenshots = screenshots + 1
+        end,
         itemName = function(itemID)
             local currencyItem = currencyItems[itemID]
             if currencyItem and currencyItem.name then
@@ -928,6 +986,17 @@ function fake.newEnv(options)
             for key, field in pairs(value) do
                 zone[key] = field
             end
+        end,
+        ---Move the character, as walking or a loading screen would. Passing nil models a
+        ---client that cannot name a map at all; a table with no x/y models instanced
+        ---content, which names the map and refuses the point.
+        ---@param value table? `{ uiMapID, x, y }`
+        setMap = function(value)
+            mapPosition = value
+        end,
+        ---@return integer how many times the addon took a screenshot
+        screenshots = function()
+            return screenshots
         end,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
