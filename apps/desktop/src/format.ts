@@ -48,6 +48,40 @@ export function duration(seconds?: number | null): string {
   return `${s}s`;
 }
 
+/** A file's size the way a person judges "is that mine?" — never more than three digits. */
+export function fileSize(bytes: number): string {
+  const units = ["bytes", "KB", "MB", "GB"];
+  let value = Math.max(bytes || 0, 0);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return unit === 0 ? `${Math.round(value)} bytes` : `${value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * How long ago something happened, in the words somebody would use out loud.
+ *
+ * Deliberately vague at the coarse end: what a reader does with "3 days ago" is decide
+ * whether that is a surprise, and no amount of precision helps with that.
+ *
+ * @param at Epoch seconds.
+ * @param now The moment to reckon from; injected so the tests can pin it.
+ */
+export function ago(at: number, now: number = Date.now() / 1000): string {
+  // A file dated in the future is a clock disagreement, not news; it happened, so say so.
+  const seconds = Math.max(Math.round(now - at), 0);
+  if (seconds < 45) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 2) return "a minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
 export const clock = (epoch?: number | null): string =>
   new Date((epoch || 0) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 

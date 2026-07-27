@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
+import {
+  ago, dayLabel, duration, escapeHtml, fileSize, gold, initials, plural, signed, signedGold,
+} from "./format";
 
 describe("gold", () => {
   it.each<[number, string]>([
@@ -110,5 +112,35 @@ describe("signed", () => {
   it("marks a gain and leaves a loss alone", () => {
     expect(signed(25)).toBe("+25");
     expect(signed(-4)).toBe("-4");
+  });
+});
+
+describe("fileSize", () => {
+  it("never shows more digits than a person is judging by", () => {
+    expect(fileSize(0)).toBe("0 bytes");
+    expect(fileSize(900)).toBe("900 bytes");
+    expect(fileSize(4096)).toBe("4.0 KB");
+    expect(fileSize(4_404_019)).toBe("4.2 MB");
+    expect(fileSize(3_221_225_472)).toBe("3.0 GB");
+  });
+});
+
+describe("ago", () => {
+  const NOW = 1_800_000_000;
+
+  it.each<[number, string]>([
+    [NOW - 5, "just now"],
+    [NOW - 90, "a minute ago"],
+    [NOW - 600, "10 minutes ago"],
+    [NOW - 7_200, "2 hours ago"],
+    [NOW - 200_000, "2 days ago"],
+    [NOW - 86_400, "yesterday"],
+  ])("reads %i as %s", (at, expected) => {
+    expect(ago(at, NOW)).toBe(expected);
+  });
+
+  // A clock that disagrees with the file's is not worth a sentence about the future.
+  it("does not describe a moment that has not happened yet", () => {
+    expect(ago(NOW + 500, NOW)).toBe("just now");
   });
 });

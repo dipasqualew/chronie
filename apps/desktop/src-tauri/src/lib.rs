@@ -3,6 +3,7 @@ pub mod achievements;
 pub mod casc;
 pub mod character;
 mod collector;
+pub mod combatlog;
 pub mod db2;
 pub mod glb;
 pub mod icons;
@@ -44,6 +45,11 @@ const UPDATER_PLUGIN: &str = "updater";
 struct Settings {
     wow_path: Option<String>,
     last_sync: Option<String>,
+    /// Whether the addon should start combat logging at login. Off unless somebody has
+    /// deliberately turned it on: a raid night is hundreds of megabytes, and nothing in
+    /// Chronie deletes an old log yet.
+    #[serde(default)]
+    combat_logging: bool,
 }
 
 struct AppState {
@@ -63,6 +69,9 @@ struct AppState {
     icons: Arc<IconCache>,
     /// The achievements looked up so far, shared for the same reason.
     achievements: Arc<AchievementBook>,
+    /// The newest combat log as the last poll saw it. Kept because one look at a file cannot
+    /// tell "being written to" from "left there in March"; two looks thirty seconds apart can.
+    combat_log_seen: Mutex<Option<combatlog::LogFile>>,
     /// False in builds shipped without signing keys, where the release pipeline strips
     /// `plugins.updater` from the config. Touching the updater then panics, so every
     /// caller has to check this first.
@@ -286,6 +295,71 @@ fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> {
     perform_sync(&state)
 }
 
+/* ---------- combat logging ---------- */
+
+/// What the install is really doing about combat logs, from the install rather than from the
+/// setting: the CVar as the game last wrote it, and whether a file in `Logs/` is growing.
+///
+/// Cheap — two small reads and a directory listing — so the window asks on a timer while
+/// Setup is open, and the background sync asks on its own beat. Every call remembers the log
+/// it saw, which is what lets the next one tell a file being written from one left behind.
+fn combat_log_status(state: &AppState) -> Result<combatlog::Status, String> {
+    let (wow_path, requested) = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        (configured_wow_path(&settings).ok(), settings.combat_logging)
+    };
+    // Not an error. A first run has no game folder yet, and the honest answer to "what is the
+    // install doing" is then "there is nothing here to look at" — which the panel can say,
+    // and which still lets it show the switch in the position Chronie was left in.
+    let Some(wow_path) = wow_path else {
+        return Ok(combatlog::without_install(requested));
+    };
+    let mut seen = state
+        .combat_log_seen
+        .lock()
+        .map_err(|_| "Combat log lock failed.")?;
+    let status = combatlog::status(
+        &wow_path,
+        requested,
+        seen.as_ref(),
+        Utc::now().timestamp(),
+    );
+    seen.clone_from(&status.log);
+    Ok(status)
+}
+
+#[tauri::command]
+fn combat_logging(state: State<'_, AppState>) -> Result<combatlog::Status, String> {
+    combat_log_status(&state)
+}
+
+/// Turns Chronie's combat logging setting on or off.
+///
+/// The addon is reinstalled straight away rather than at the next launch, because the setting
+/// only reaches the game inside the addon folder — and answering with the resulting status
+/// means the panel repaints from what the install now says instead of from what the click
+/// hoped. The game reads addon files once, at load, so this takes effect at the next login or
+/// `/reload`; the panel is what says so.
+#[tauri::command]
+fn set_combat_logging(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<combatlog::Status, String> {
+    let configured = {
+        let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        settings.combat_logging = enabled;
+        state.save(&settings)?;
+        configured_wow_path(&settings).is_ok()
+    };
+    // Skipped rather than failed when no game folder has been chosen yet: the setting is
+    // recorded either way, and the install that runs when a folder is finally chosen carries
+    // it. Failing here would leave the switch reporting the opposite of what was saved.
+    if configured {
+        install_bundled_addon(&state)?;
+    }
+    combat_log_status(&state)
+}
+
 /// The four ways a user can correct the app's guess about what a segment was.
 ///
 /// Each one returns the whole dashboard rather than an acknowledgement, so the window
@@ -336,14 +410,45 @@ fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value
     load_dashboard(&state.database_path())
 }
 
-/// Lays the shipped addon out under `destination`.
-fn stage_addon(destination: &Path) -> Result<(), String> {
+/// The one file in the addon the app writes rather than copies: what it has been asked to do.
+///
+/// This is the whole channel between the two halves. The app already lays the addon folder
+/// down on every launch, so a setting reaches the game by riding along with it — the addon
+/// then reads a plain Lua table instead of guessing, and what is on disk in the game folder
+/// is always what Setup last said.
+const SETTINGS_MODULE: &str = "src/Settings.lua";
+
+/// The contents of that file for a given setting.
+///
+/// Pure, so the thing that actually reaches somebody's game folder is testable without a
+/// game folder. The shape has to match the `ns.settings` the bundled `src/Settings.lua`
+/// declares, because a hand-installed copy gets that one and must still load.
+fn settings_module(combat_logging: bool) -> String {
+    format!(
+        "local _, ns = ...\n\
+         \n\
+         -- Written by the Chronie desktop app when it installed this addon. Editing it by\n\
+         -- hand lasts until the app next starts, which lays the whole folder down again;\n\
+         -- the Setup screen is where these are meant to be changed.\n\
+         ns.settings = {{\n\
+         \x20   combatLogging = {combat_logging},\n\
+         }}\n"
+    )
+}
+
+/// Lays the shipped addon out under `destination`, configured the way `settings` says.
+fn stage_addon(destination: &Path, settings: &Settings) -> Result<(), String> {
     for (relative, contents) in BUNDLED_ADDON {
         let output = destination.join(relative);
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        fs::write(&output, contents).map_err(|error| error.to_string())?;
+        if *relative == SETTINGS_MODULE {
+            fs::write(&output, settings_module(settings.combat_logging))
+        } else {
+            fs::write(&output, contents)
+        }
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -368,7 +473,7 @@ fn bundled_addon_version() -> String {
 /// The new copy is assembled beside the old one and moved into place in a single rename, so
 /// the game never sees a folder holding half of one version and half of another — and the old
 /// copy is only deleted once its replacement is standing.
-fn replace_addon(wow_path: &Path) -> Result<InstallResult, String> {
+fn replace_addon(wow_path: &Path, settings: &Settings) -> Result<InstallResult, String> {
     let addons = wow_path.join("Interface").join("AddOns");
     if !addons.is_dir() {
         return Err(format!("AddOns folder not found at {}.", addons.display()));
@@ -377,7 +482,7 @@ fn replace_addon(wow_path: &Path) -> Result<InstallResult, String> {
         .prefix(".chronie-install-")
         .tempdir_in(&addons)
         .map_err(|error| error.to_string())?;
-    stage_addon(staging.path())?;
+    stage_addon(staging.path(), settings)?;
     let target = addons.join("chronie");
     let backup = addons.join(".chronie-backup");
     if backup.exists() {
@@ -403,11 +508,11 @@ fn replace_addon(wow_path: &Path) -> Result<InstallResult, String> {
 
 /// Installs the shipped addon into the configured game folder.
 fn install_bundled_addon(state: &AppState) -> Result<InstallResult, String> {
-    let wow_path = {
+    let (wow_path, settings) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
-        configured_wow_path(&settings)?
+        (configured_wow_path(&settings)?, settings.clone())
     };
-    replace_addon(&wow_path)
+    replace_addon(&wow_path, &settings)
 }
 
 #[tauri::command]
@@ -596,6 +701,11 @@ fn start_background_sync(app: AppHandle) {
             .is_ok_and(|settings| settings.wow_path.is_some())
         {
             let _ = perform_sync(&state);
+            // On the same beat, and for the same reason it is a beat at all: whether a combat
+            // log is growing is a question about two moments, and taking a look every thirty
+            // seconds is what gives the Setup panel a previous one to compare against the
+            // first time somebody opens it.
+            let _ = combat_log_status(&state);
         }
         std::thread::sleep(Duration::from_secs(30));
     });
@@ -679,6 +789,7 @@ pub fn run() {
                 data_dir,
                 icons: Arc::default(),
                 achievements: Arc::default(),
+                combat_log_seen: Mutex::default(),
                 updater_configured,
             };
             app.manage(state);
@@ -714,6 +825,8 @@ pub fn run() {
             choose_wow_path,
             save_wow_path,
             sync_now,
+            combat_logging,
+            set_combat_logging,
             install_addon,
             check_for_app_update,
             add_activity,
@@ -830,7 +943,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
-        let result = replace_addon(&retail).unwrap();
+        let result = replace_addon(&retail, &Settings::default()).unwrap();
 
         assert_eq!(result.version, version_in_the_toc());
         let installed = addon_folder(&retail);
@@ -846,6 +959,50 @@ mod tests {
         assert!(lua_modules > 0, "no Lua modules landed in src/");
     }
 
+    /// The setting has to survive the trip into the game folder, because the addon reads it
+    /// there and nowhere else.
+    #[test]
+    fn writes_the_combat_logging_setting_into_the_installed_addon() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let settings = Settings {
+            combat_logging: true,
+            ..Settings::default()
+        };
+
+        replace_addon(&retail, &settings).unwrap();
+
+        let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
+        assert!(
+            installed.contains("combatLogging = true"),
+            "the installed addon was not told to log: {installed}"
+        );
+    }
+
+    /// And the default install has to say no, whatever the bundle happens to carry — nobody
+    /// gets hundreds of megabytes of combat log for having installed Chronie.
+    #[test]
+    fn installs_with_combat_logging_off_by_default() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+
+        replace_addon(&retail, &Settings::default()).unwrap();
+
+        let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
+        assert!(installed.contains("combatLogging = false"), "{installed}");
+    }
+
+    /// The bundled module is what a hand-installed copy loads, so it has to declare the same
+    /// table the generated one does — and default to logging nothing.
+    #[test]
+    fn ships_a_settings_module_matching_the_one_it_generates() {
+        let bundled = std::str::from_utf8(bundled(SETTINGS_MODULE)).unwrap();
+
+        assert!(bundled.contains("ns.settings = {"), "{bundled}");
+        assert!(bundled.contains("combatLogging = false"), "{bundled}");
+        assert!(settings_module(false).contains("ns.settings = {"));
+    }
+
     #[test]
     fn replaces_an_older_copy_rather_than_merging_with_it() {
         let root = tempfile::tempdir().unwrap();
@@ -856,7 +1013,7 @@ mod tests {
         fs::write(&stale, b"-- a module this build no longer ships\n").unwrap();
         fs::write(installed.join("chronie.toc"), b"## Version: 0.0.1-stale\n").unwrap();
 
-        replace_addon(&retail).unwrap();
+        replace_addon(&retail, &Settings::default()).unwrap();
 
         assert!(!stale.exists(), "a file from the old copy survived the install");
         assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
@@ -873,9 +1030,9 @@ mod tests {
         let retail = game_folder(root.path());
         let addons = retail.join("Interface").join("AddOns");
 
-        let first = replace_addon(&retail).unwrap();
+        let first = replace_addon(&retail, &Settings::default()).unwrap();
         let after_first = tree(&addons);
-        let second = replace_addon(&retail).unwrap();
+        let second = replace_addon(&retail, &Settings::default()).unwrap();
 
         assert_eq!(second.version, first.version);
         assert_eq!(tree(&addons), after_first);
@@ -887,7 +1044,7 @@ mod tests {
         let bystander = root.path().join("WTF");
         fs::create_dir_all(&bystander).unwrap();
 
-        let error = replace_addon(root.path()).unwrap_err();
+        let error = replace_addon(root.path(), &Settings::default()).unwrap_err();
 
         assert!(error.contains("AddOns"), "unhelpful error: {error}");
         assert_eq!(tree(root.path()), Vec::<String>::new());

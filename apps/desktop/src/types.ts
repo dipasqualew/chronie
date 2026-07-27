@@ -376,6 +376,40 @@ export interface AchievementDetailsPayload {
 export interface Settings {
   wowPath?: string | null;
   lastSync?: string | null;
+  /** Whether the addon has been asked to start combat logging at login. */
+  combatLogging?: boolean;
+}
+
+/* ---------- combat logging ---------- */
+
+/** The newest file in the game's `Logs/` folder. Mirrors `combatlog::LogFile`. */
+export interface CombatLogFile {
+  name: string;
+  bytes: number;
+  /** Epoch seconds, or null on a filesystem that will not say. */
+  modified?: number | null;
+}
+
+/**
+ * Which of the four things is true of the install. Mirrors `combatlog::State`.
+ *
+ * `basic` and `stale` are both "asked for, not confirmed", and they are kept apart because
+ * the answer to each is different: `basic` means a box to tick, `stale` means a log nobody
+ * is writing to.
+ */
+export type CombatLogState = "off" | "basic" | "advanced" | "stale";
+
+/** What the combat logging panel is drawn from. Mirrors `combatlog::Status`. */
+export interface CombatLogStatus {
+  requested: boolean;
+  /** The advanced CVar as the game's own config records it. `null` means no config could be
+   * read at all, which is not the same as off and is never shown as if it were. */
+  advanced?: boolean | null;
+  /** Which file that came from, relative to the game folder. */
+  source?: string | null;
+  log?: CombatLogFile | null;
+  growing: boolean;
+  state: CombatLogState;
 }
 
 export interface SyncResult {
@@ -465,6 +499,9 @@ export interface E2EMock {
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;
   settings: Settings;
+  /** What the install is doing about combat logs. State rather than a fixture: ticking the
+   * box in the panel under test advances it, the way the real backend's own answer changes. */
+  combatLog: CombatLogStatus;
   chosenPath: string;
   syncResult: SyncResult;
   installResult: InstallResult;
