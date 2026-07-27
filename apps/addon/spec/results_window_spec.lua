@@ -55,9 +55,7 @@ describe("ns.newResultsWindow", function()
             character = function()
                 return options.character or CHARACTER
             end,
-            accountCurrency = options.accountCurrency,
             accountStanding = options.accountStanding,
-            accountGold = options.accountGold,
         })
         return window, frames, recorded
     end
@@ -126,16 +124,39 @@ describe("ns.newResultsWindow", function()
             end
         end
         -- Bars are pooled as a track/fill pair each, handed out in order, so the pair at
-        -- 2n-1 and 2n is the nth bar and the ones still on screen come first.
+        -- 2n-1 and 2n is the nth bar and the ones still on screen come first. The panel's own
+        -- chrome — the header strip and the hairlines between blocks — is drawn on BORDER,
+        -- which is what keeps it out of this pairing.
+        local pooled = {}
+        for _, texture in ipairs(frame.textures) do
+            if texture.layer == "BACKGROUND" or texture.layer == "ARTWORK" then
+                pooled[#pooled + 1] = texture
+            end
+        end
         local drawn = {}
-        for index = 1, math.floor(#frame.textures / 2) do
-            local back, fill = frame.textures[index * 2 - 1], frame.textures[index * 2]
+        for index = 1, math.floor(#pooled / 2) do
+            local back, fill = pooled[index * 2 - 1], pooled[index * 2]
             if back.shown then
                 drawn[#drawn + 1] = {
                     caption = captions[#drawn + 1],
                     width = back.width,
                     filled = fill.shown and fill.width or 0,
                 }
+            end
+        end
+        return drawn
+    end
+
+    ---The hairlines the panel draws between blocks, which is what replaced a row of dashes.
+    ---They share the BORDER layer with the header's own chrome, so the two the header always
+    ---draws are skipped and what is left is the body's.
+    ---@param frame table
+    ---@return table[] textures still on screen
+    local function rulesOf(frame)
+        local drawn = {}
+        for _, texture in ipairs(frame.textures) do
+            if texture.layer == "BORDER" and texture.shown then
+                drawn[#drawn + 1] = texture
             end
         end
         return drawn
@@ -151,6 +172,33 @@ describe("ns.newResultsWindow", function()
             end
         end
         return nil
+    end
+
+    ---A category heading is its disclosure icon and then its name, so it is found by what it
+    ---says rather than by the markup in front of it.
+    ---@param lines table[]
+    ---@param name string
+    ---@return string? the value paired with the first row whose label contains that name
+    local function valueForHeading(lines, name)
+        for _, line in ipairs(lines) do
+            if line.label:find(name, 1, true) then
+                return line.value
+            end
+        end
+        return nil
+    end
+
+    ---Clicks the first row saying `name`, the way a player reaches what is under a heading.
+    ---@param frame table
+    ---@param name string
+    local function expand(frame, name)
+        for _, fontString in ipairs(frame.fontStrings) do
+            if fontString.shown and (fontString.text or ""):find(name, 1, true) then
+                fontString:run("OnMouseUp", "LeftButton")
+                return
+            end
+        end
+        error("no row saying " .. name .. " to click")
     end
 
     ---The characters beyond ASCII that the panel is allowed to put on screen.
@@ -285,113 +333,17 @@ describe("ns.newResultsWindow", function()
             assert.equal("$-500", valueFor(rowsOf(frames[1]), "Gold Δ"))
         end)
 
-        -- The balance beside the movement, because they answer different questions: what this
-        -- hour was worth, and what the character is left holding after it.
-        it("renders the wallet the difference landed on", function()
+        -- A balance is not something the segment did, and the desktop app already reports
+        -- every one of them against the character it belongs to. The panel is for what just
+        -- happened, and the wallet would be the largest number on it.
+        it("says nothing about the wallet the difference landed on", function()
             local window, frames = newWindow()
 
             window.update(summary({ goldDiff = -500, wallet = 12000 }))
 
-            assert.equal("$12000", valueFor(rowsOf(frames[1]), "Wallet"))
-        end)
-
-        it("leaves the wallet off a tally that has not read one", function()
-            local window, frames = newWindow()
-
-            window.update(summary({ goldDiff = -500 }))
-
-            assert.is_nil(valueFor(rowsOf(frames[1]), "Wallet"))
-        end)
-
-        it("shows what the whole account is worth under the wallet", function()
-            local window, frames = newWindow({
-                accountGold = function()
-                    return {
-                        characters = {
-                            { character = "Alt-Ravencrest", total = 40000, at = NOW - 3 * 24 * 60 * 60 },
-                            { character = "Main-Ravencrest", total = 12000, at = NOW },
-                        },
-                        wallets = 52000,
-                        warband = 500000,
-                        warbandAt = NOW,
-                        total = 552000,
-                        oldest = NOW - 3 * 24 * 60 * 60,
-                    }
-                end,
-            })
-
-            window.update(summary({ wallet = 12000 }))
-
             local lines = rowsOf(frames[1])
-            -- Dated by the eldest reading it is built from, because a total made partly of
-            -- three-day-old numbers should not read as though it were all current.
-            assert.equal("$552000, 3d ago", valueFor(lines, "    account"))
-            assert.equal("$500000", valueFor(lines, "    warband bank"))
-        end)
-
-        it("leaves the account total off when the wallet is all there is", function()
-            local window, frames = newWindow({
-                accountGold = function()
-                    return {
-                        characters = { { character = "Main-Ravencrest", total = 12000, at = NOW } },
-                        wallets = 12000,
-                        total = 12000,
-                        oldest = NOW,
-                    }
-                end,
-            })
-
-            window.update(summary({ wallet = 12000 }))
-
-            -- It would be the same number as the line above it, said twice.
-            local lines = rowsOf(frames[1])
+            assert.is_nil(valueFor(lines, "Wallet"))
             assert.is_nil(valueFor(lines, "    account"))
-            assert.is_nil(valueFor(lines, "    warband bank"))
-        end)
-
-        -- A character part way through its first ever segment is not in the rollup yet: its
-        -- snapshot is written when the segment closes. The account really is worth less than
-        -- what is in front of it at that moment, and saying so out loud reads as nonsense.
-        it("leaves the account total off while it is behind the wallet beside it", function()
-            local window, frames = newWindow({
-                accountGold = function()
-                    return {
-                        characters = { { character = "Alt-Ravencrest", total = 4000, at = NOW } },
-                        wallets = 4000,
-                        total = 4000,
-                        oldest = NOW,
-                    }
-                end,
-            })
-
-            window.update(summary({ wallet = 12000 }))
-
-            assert.is_nil(valueFor(rowsOf(frames[1]), "    account"))
-        end)
-
-        -- An account with alts but an empty bank is worth more than this wallet and has
-        -- nothing in the pot, so the total is worth a line and the pot is not.
-        it("names the warband bank only when there is something in it", function()
-            local window, frames = newWindow({
-                accountGold = function()
-                    return {
-                        characters = {
-                            { character = "Alt-Ravencrest", total = 40000, at = NOW },
-                            { character = "Main-Ravencrest", total = 12000, at = NOW },
-                        },
-                        wallets = 52000,
-                        warband = 0,
-                        warbandAt = NOW,
-                        total = 52000,
-                        oldest = NOW,
-                    }
-                end,
-            })
-
-            window.update(summary({ wallet = 12000 }))
-
-            local lines = rowsOf(frames[1])
-            assert.equal("$52000", valueFor(lines, "    account"))
             assert.is_nil(valueFor(lines, "    warband bank"))
         end)
 
@@ -400,7 +352,12 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ transmogs = { { id = 1 }, { id = 2 }, { id = 3 } } }))
 
-            assert.equal("0 new · 3 variants", valueFor(rowsOf(frames[1]), "Transmog +"))
+            -- Purple for what is new to the account's wardrobe, green for a variant of
+            -- something it already had, the same two colours achievements are counted in.
+            assert.equal(
+                "|cffb373ff0 new|r · |cff59d9733 variants|r",
+                valueForHeading(rowsOf(frames[1]), "Transmog")
+            )
         end)
 
 
@@ -409,7 +366,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ reputation = {} }))
 
-            assert.is_nil(valueFor(rowsOf(frames[1]), "Reputation +"))
+            assert.is_nil(valueForHeading(rowsOf(frames[1]), "Reputation"))
         end)
 
         it("renders one indented signed line per faction", function()
@@ -423,13 +380,8 @@ describe("ns.newResultsWindow", function()
                 },
             }))
 
-            assert.equal("+260", valueFor(rowsOf(frames[1]), "Reputation +"))
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Reputation +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            assert.equal("+260", valueForHeading(rowsOf(frames[1]), "Reputation"))
+            expand(frames[1], "Reputation")
             local lines = rowsOf(frames[1])
             assert.equal("+250", valueFor(lines, "  Argent Dawn"))
             assert.equal("+10", valueFor(lines, "  Timbermaw Hold"))
@@ -453,19 +405,6 @@ describe("ns.newResultsWindow", function()
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Timbermaw Hold"))
         end)
 
-        ---Expand a heading by clicking it, the way a player reaches the detail under it.
-        ---@param frame table
-        ---@param heading string
-        local function expand(frame, heading)
-            for _, fontString in ipairs(frame.fontStrings) do
-                if fontString.text == heading then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    return
-                end
-            end
-            error("no row labelled " .. heading .. " to expand")
-        end
-
         it("draws a bar under each faction, filled to where the character stands", function()
             local window, frames = newWindow()
             window.update(summary({
@@ -481,7 +420,7 @@ describe("ns.newResultsWindow", function()
                 },
             }))
 
-            expand(frames[1], "Reputation +")
+            expand(frames[1], "Reputation")
 
             local bars = barsOf(frames[1])
             assert.equal(1, #bars)
@@ -498,7 +437,7 @@ describe("ns.newResultsWindow", function()
                 },
             }))
 
-            expand(frames[1], "Reputation +")
+            expand(frames[1], "Reputation")
 
             local bars = barsOf(frames[1])
             assert.equal("Exalted  1 / 1", bars[1].caption)
@@ -514,7 +453,7 @@ describe("ns.newResultsWindow", function()
                 },
             }))
 
-            expand(frames[1], "Reputation +")
+            expand(frames[1], "Reputation")
 
             local bars = barsOf(frames[1])
             assert.equal(1, #bars)
@@ -528,7 +467,7 @@ describe("ns.newResultsWindow", function()
                 reputation = { { faction = "Argent Dawn", amount = 40 } },
             }))
 
-            expand(frames[1], "Reputation +")
+            expand(frames[1], "Reputation")
 
             assert.same({}, barsOf(frames[1]))
             assert.equal("+40", valueFor(rowsOf(frames[1]), "  Argent Dawn"))
@@ -574,7 +513,7 @@ describe("ns.newResultsWindow", function()
                 })
                 window.update(summary(gained()))
 
-                expand(frames[1], "Reputation +")
+                expand(frames[1], "Reputation")
 
                 assert.equal("Alt, 3d ago", valueFor(rowsOf(frames[1]), "    best Renown 22"))
             end)
@@ -591,7 +530,7 @@ describe("ns.newResultsWindow", function()
                 })
                 window.update(summary(gained()))
 
-                expand(frames[1], "Reputation +")
+                expand(frames[1], "Reputation")
 
                 assert.is_nil(valueFor(rowsOf(frames[1]), "    best Renown 8"))
             end)
@@ -608,7 +547,7 @@ describe("ns.newResultsWindow", function()
                 })
                 window.update(summary(gained()))
 
-                expand(frames[1], "Reputation +")
+                expand(frames[1], "Reputation")
 
                 assert.is_nil(valueFor(rowsOf(frames[1]), "    best Renown 4"))
             end)
@@ -617,7 +556,7 @@ describe("ns.newResultsWindow", function()
                 local window, frames = newWindow({ accountStanding = standingSource(nil) })
                 window.update(summary(gained()))
 
-                expand(frames[1], "Reputation +")
+                expand(frames[1], "Reputation")
 
                 local labels = {}
                 for _, row in ipairs(rowsOf(frames[1])) do
@@ -638,7 +577,7 @@ describe("ns.newResultsWindow", function()
                     { faction = "Timbermaw Hold", amount = 20, standing = "Friendly", current = 1, max = 4 },
                 },
             }))
-            expand(frames[1], "Reputation +")
+            expand(frames[1], "Reputation")
 
             window.update(summary({ reputation = {} }))
 
@@ -650,7 +589,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ currencies = {} }))
 
-            assert.is_nil(valueFor(rowsOf(frames[1]), "Currency +"))
+            assert.is_nil(valueForHeading(rowsOf(frames[1]), "Currency"))
         end)
 
         it("renders one indented signed line per currency", function()
@@ -664,91 +603,40 @@ describe("ns.newResultsWindow", function()
                 },
             }))
 
-            assert.equal("+4", valueFor(rowsOf(frames[1]), "Currency +"))
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Currency +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            assert.equal("+4", valueForHeading(rowsOf(frames[1]), "Currency"))
+            expand(frames[1], "Currency")
             local lines = rowsOf(frames[1])
             assert.equal("+7", valueFor(lines, "  Honor"))
             assert.equal("-3", valueFor(lines, "  Valor"))
         end)
 
-        it("shows what the character holds beside what the segment earned", function()
+        -- The holding a gain landed on is a balance rather than something the segment did,
+        -- and it goes the same way the wallet went: the desktop app has it, against the
+        -- character it belongs to and beside what the rest of the account holds.
+        it("says only what the segment earned, not what it is now holding", function()
             local window, frames = newWindow()
             window.update(summary({
                 currencyTotal = 7,
                 currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
             }))
 
-            expand(frames[1], "Currency +")
+            expand(frames[1], "Currency")
 
-            assert.equal("+7 (12,450)", valueFor(rowsOf(frames[1]), "  Honor"))
+            local lines = rowsOf(frames[1])
+            assert.equal("+7", valueFor(lines, "  Honor"))
+            assert.is_nil(valueFor(lines, "    account"))
         end)
 
-        it("shows what the rest of the account holds of the same currency", function()
-            local window, frames = newWindow({
-                accountCurrency = function(id)
-                    assert.equal(1, id)
-                    return {
-                        id = 1,
-                        name = "Honor",
-                        total = 30000,
-                        oldest = NOW - 3 * 24 * 60 * 60,
-                        characters = {
-                            { character = "Alt-Ravencrest", total = 17550, at = NOW - 3 * 24 * 60 * 60 },
-                            { character = "Main-Ravencrest", total = 12450, at = NOW },
-                        },
-                    }
-                end,
-            })
-            window.update(summary({
-                currencyTotal = 7,
-                currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
-            }))
-
-            expand(frames[1], "Currency +")
-
-            -- The eldest of the readings the sum is built from, because a total made partly
-            -- of three-day-old numbers should not read as though it were all current.
-            assert.equal("30,000 on 2, 3d ago", valueFor(rowsOf(frames[1]), "    account"))
-        end)
-
-        it("leaves the account total off when only this character holds any", function()
-            local window, frames = newWindow({
-                accountCurrency = function()
-                    return {
-                        id = 1,
-                        name = "Honor",
-                        total = 12450,
-                        oldest = NOW,
-                        characters = { { character = "Main-Ravencrest", total = 12450, at = NOW } },
-                    }
-                end,
-            })
-            window.update(summary({
-                currencyTotal = 7,
-                currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
-            }))
-
-            expand(frames[1], "Currency +")
-
-            -- It would be the same number as the line above it, said twice.
-            assert.is_nil(valueFor(rowsOf(frames[1]), "    account"))
-        end)
-
-        it("shows a spend against the holding it left behind", function()
+        it("shows a spend as the spend it was", function()
             local window, frames = newWindow()
             window.update(summary({
                 currencyTotal = -300,
                 currencies = { { id = 1, name = "Honor", amount = -300, total = 1200 } },
             }))
 
-            expand(frames[1], "Currency +")
+            expand(frames[1], "Currency")
 
-            assert.equal("-300 (1,200)", valueFor(rowsOf(frames[1]), "  Honor"))
+            assert.equal("-300", valueFor(rowsOf(frames[1]), "  Honor"))
         end)
 
         it("hides achievements until one was earned", function()
@@ -756,20 +644,15 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary({ achievements = {} }))
 
-            assert.is_nil(valueFor(rowsOf(frames[1]), "Achievements +"))
+            assert.is_nil(valueForHeading(rowsOf(frames[1]), "Achievements"))
         end)
 
         it("expands level ups with the level reached", function()
             local window, frames = newWindow()
             window.update(summary({ levelUps = { { level = 42, at = 5000 } } }))
 
-            assert.equal("1", valueFor(rowsOf(frames[1]), "Level ups +"))
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Level ups +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            assert.equal("1", valueForHeading(rowsOf(frames[1]), "Level ups"))
+            expand(frames[1], "Level ups")
 
             assert.equal("reached", valueFor(rowsOf(frames[1]), "  Level 42"))
         end)
@@ -785,7 +668,7 @@ describe("ns.newResultsWindow", function()
                 },
             }))
 
-            local value = valueFor(rowsOf(frames[1]), "Housing items +")
+            local value = valueForHeading(rowsOf(frames[1]), "Housing items")
             assert.is_not_nil(value)
             assert.truthy(value:find("2 warband"))
             assert.truthy(value:find("1 extra"))
@@ -799,12 +682,7 @@ describe("ns.newResultsWindow", function()
                     { id = 2, name = "Iron Sconce", warbandFirst = false },
                 },
             }))
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Housing items +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            expand(frames[1], "Housing items")
 
             local lines = rowsOf(frames[1])
             assert.equal("warband first", valueFor(lines, "  Sturdy Oak Chair"))
@@ -831,13 +709,8 @@ describe("ns.newResultsWindow", function()
             local window, frames = newWindow()
             window.update(summary({ housingLevelUps = { { level = 3, at = 5000 } } }))
 
-            assert.equal("1", valueFor(rowsOf(frames[1]), "Housing levels +"))
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Housing levels +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            assert.equal("1", valueForHeading(rowsOf(frames[1]), "Housing levels"))
+            expand(frames[1], "Housing levels")
 
             assert.equal("reached", valueFor(rowsOf(frames[1]), "  Level 3"))
         end)
@@ -861,13 +734,38 @@ describe("ns.newResultsWindow", function()
             local lines = rowsOf(frames[1])
             local labels = {}
             for _, entry in ipairs(lines) do
-                labels[#labels + 1] = entry.label
+                -- Without the disclosure icon in front of it, which is markup rather than
+                -- something the heading says.
+                labels[#labels + 1] = (entry.label:gsub("|T.-|t ", ""))
             end
             assert.same({
-                "Loot value", "Gold Δ", "------------------------",
-                "Achievements +", "Currency +", "Mounts +", "Pets +",
-                "Quests +", "Reputation +", "Toys +", "Transmog +",
+                "Loot value", "Gold Δ",
+                "Achievements", "Currency", "Mounts", "Pets",
+                "Quests", "Reputation", "Toys", "Transmog",
             }, labels)
+        end)
+
+        -- What used to be a row of hyphens pretending to be a rule. It is a texture now, so
+        -- it is not a row at all, which is why the labels above run straight from the money
+        -- into the categories.
+        it("separates the money from the categories with a drawn rule", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ mounts = { { id = 1, name = "Alabaster Hyena" } } }))
+
+            -- The header's strip and its underline, and then the one between the blocks.
+            assert.equal(3, #rulesOf(frames[1]))
+            for _, row in ipairs(rowsOf(frames[1])) do
+                assert.is_nil(row.label:match("%-%-%-"))
+            end
+        end)
+
+        it("draws no rule when nothing at all happened", function()
+            local window, frames = newWindow()
+
+            window.update(summary())
+
+            assert.equal(2, #rulesOf(frames[1]))
         end)
 
         it("expands newly collected mounts, pets and toys by name", function()
@@ -878,13 +776,8 @@ describe("ns.newResultsWindow", function()
                 toys = { { id = 3, name = "Katy's Stampwhistle" } },
             }))
 
-            for _, heading in ipairs({ "Mounts +", "Pets +", "Toys +" }) do
-                for _, fontString in ipairs(frames[1].fontStrings) do
-                    if fontString.text == heading then
-                        fontString:run("OnMouseUp", "LeftButton")
-                        break
-                    end
-                end
+            for _, heading in ipairs({ "Mounts", "Pets", "Toys" }) do
+                expand(frames[1], heading)
             end
 
             local lines = rowsOf(frames[1])
@@ -899,12 +792,7 @@ describe("ns.newResultsWindow", function()
             window.update(summary({
                 achievements = { { id = 1, name = "The Loremaster", at = 5000 } },
             }))
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Achievements +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            expand(frames[1], "Achievements")
 
             assert.is_not_nil(valueFor(rowsOf(frames[1]), "  The Loremaster"))
         end)
@@ -922,13 +810,8 @@ describe("ns.newResultsWindow", function()
                     { id = 2, name = longQuest:sub(3), characterFirst = true },
                 },
             }))
-            for _, heading in ipairs({ "Achievements +", "Quests +" }) do
-                for _, fontString in ipairs(frames[1].fontStrings) do
-                    if fontString.text == heading then
-                        fontString:run("OnMouseUp", "LeftButton")
-                        break
-                    end
-                end
+            for _, heading in ipairs({ "Achievements", "Quests" }) do
+                expand(frames[1], heading)
             end
 
             local labels = {}
@@ -946,7 +829,7 @@ describe("ns.newResultsWindow", function()
             for index = 1, 2 do
                 assert.is_false(labels[index].wordWrap)
                 assert.is_false(values[index].wordWrap)
-                assert.equal(136, labels[index].width)
+                assert.equal(144, labels[index].width)
                 assert.equal(92, values[index].width)
             end
         end)
@@ -964,7 +847,7 @@ describe("ns.newResultsWindow", function()
 
             assert.equal(
                 "|cffb373ff1 account|r / |cff59d9732 character|r",
-                valueFor(rowsOf(frames[1]), "Achievements +")
+                valueForHeading(rowsOf(frames[1]), "Achievements")
             )
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Account"))
         end)
@@ -975,12 +858,7 @@ describe("ns.newResultsWindow", function()
                 achievements = { { id = 42, name = "Explore", accountFirst = true } },
             }))
 
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Achievements +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            expand(frames[1], "Achievements")
             for _, fontString in ipairs(frames[1].fontStrings) do
                 if fontString.text == "  Explore" then
                     fontString:run("OnMouseUp", "LeftButton")
@@ -994,12 +872,7 @@ describe("ns.newResultsWindow", function()
             local window, frames = newWindow()
             window.update(summary({ quests = { { id = 7848 } } }))
 
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Quests +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            expand(frames[1], "Quests")
 
             assert.equal("completed", valueFor(rowsOf(frames[1]), "  Quest 7848"))
         end)
@@ -1025,14 +898,9 @@ describe("ns.newResultsWindow", function()
 
             assert.equal(
                 "|cffb373ff1 warband|r / |cff59d9731 character|r",
-                valueFor(rowsOf(frames[1]), "Quests +")
+                valueForHeading(rowsOf(frames[1]), "Quests")
             )
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Quests +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            expand(frames[1], "Quests")
             local lines = rowsOf(frames[1])
             assert.equal("warband first", valueFor(lines, "  Warband discovery"))
             assert.equal("character first", valueFor(lines, "  Alt discovery"))
@@ -1044,12 +912,7 @@ describe("ns.newResultsWindow", function()
                 transmogs = { { id = 19019, sourceID = 11, newAppearance = true } },
             }))
 
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.text == "Transmog +" then
-                    fontString:run("OnMouseUp", "LeftButton")
-                    break
-                end
-            end
+            expand(frames[1], "Transmog")
             for _, fontString in ipairs(frames[1].fontStrings) do
                 if fontString.text == "  Named item 19019" then
                     fontString:run("OnMouseUp", "LeftButton")
