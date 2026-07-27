@@ -1,10 +1,11 @@
 /**
- * The window: five views over one loaded dashboard, and the plumbing behind them.
+ * The window: six views over one loaded dashboard, and the plumbing behind them.
  *
  * Timeline is what happened, Characters is who it happened to, Details is every row of it,
- * Transmog is what the installed game holds, Settings is the plumbing. The first three read the
- * same segments, and every write goes through the backend and comes back as a whole dashboard
- * — so what is on screen is always what was stored, never what the page hoped a write did.
+ * Query is the same history with the questions left open, Transmog is what the installed game
+ * holds, Settings is the plumbing. The first three read the same segments, and every write goes
+ * through the backend and comes back as a whole dashboard — so what is on screen is always what
+ * was stored, never what the page hoped a write did.
  *
  * A view is hidden rather than unmounted when the reader is somewhere else. That is what keeps
  * a scroll position, an unfolded summary and a table's sort where they were left, and it is
@@ -24,6 +25,7 @@ import { createAchievementBook } from "./achievements";
 import { desktop, message } from "./bridge";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
+import { QueryView } from "./queryView";
 import { SegmentModal } from "./segmentModal";
 import type { SegmentModalState } from "./segmentModal";
 import { buildSessions } from "./sessions";
@@ -35,13 +37,14 @@ import type {
   DashboardPayload, Segment, Settings, TransmogPayload,
 } from "./types";
 
-const VIEWS = ["timeline", "characters", "details", "transmog", "settings"] as const;
+const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
 type View = typeof VIEWS[number];
 
 const TAB_LABELS: Record<View, string> = {
   timeline: "Timeline",
   characters: "Characters",
   details: "Details",
+  query: "Query",
   transmog: "Transmog",
   settings: "Settings",
 };
@@ -243,6 +246,17 @@ export function App({ payload, settings }: AppProps): ReactNode {
             open it.</div>
         </header>
         <Details segments={segments} onOpenSegment={openSegment} items={items} />
+      </section>
+
+      <section id="query-view" hidden={view !== "query"}>
+        <QueryView
+          visible={view === "query"}
+          actions={{
+            run: desktop.runQuery,
+            schema: desktop.querySchema,
+            onError: message,
+          }}
+        />
       </section>
 
       <section id="transmog-view" hidden={view !== "transmog"}>
