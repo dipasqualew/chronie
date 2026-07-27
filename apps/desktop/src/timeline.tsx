@@ -16,6 +16,7 @@ import { CaptureFold } from "./captureGallery";
 import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
 import { clock, dayLabel, duration, plural } from "./format";
+import type { ItemBook } from "./items";
 import type { Session } from "./sessions";
 import { CharacterCircle, HighlightList, SegmentButton, classProps, shownHighlights } from "./ui";
 import type { OpenSegment } from "./ui";
@@ -23,12 +24,16 @@ import type { OpenSegment } from "./ui";
 export interface TimelineProps {
   sessions: Session[];
   onOpenSegment: OpenSegment;
+  /** What the game says about an item, for the summaries that unfold into transmog. */
+  items: ItemBook;
   /** The thumbnails the window has already been handed, shared with every other grid. */
   album: CaptureAlbum;
   captures: CaptureActions;
 }
 
-export function Timeline({ sessions, onOpenSegment, album, captures }: TimelineProps): ReactNode {
+export function Timeline(
+  { sessions, onOpenSegment, items, album, captures }: TimelineProps,
+): ReactNode {
   // What the user has opened, kept across repaints: an activity edit redraws the whole view,
   // and having it fold back up under the cursor would be maddening.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -86,6 +91,7 @@ export function Timeline({ sessions, onOpenSegment, album, captures }: TimelineP
               session={session}
               open={expanded.has(session.id)}
               unfolded={unfolded.get(session.id) ?? null}
+              items={items}
               album={album}
               captures={captures}
               showingCaptures={showing.has(session.id)}
@@ -107,6 +113,7 @@ interface SessionCardProps {
   session: Session;
   open: boolean;
   unfolded: string | null;
+  items: ItemBook;
   album: CaptureAlbum;
   captures: CaptureActions;
   showingCaptures: boolean;
@@ -118,7 +125,7 @@ interface SessionCardProps {
 
 function SessionCard(
   {
-    session, open, unfolded, album, captures, showingCaptures, onToggleCaptures,
+    session, open, unfolded, items, album, captures, showingCaptures, onToggleCaptures,
     onToggleSegments, onUnfold, onOpenSegment,
   }: SessionCardProps,
 ): ReactNode {
@@ -152,7 +159,7 @@ function SessionCard(
         </header>
         {shownHighlights(session.highlights).length
           ? <HighlightList
-            entries={session.highlights} scope={session.id} expanded={unfolded}
+            entries={session.highlights} scope={session.id} expanded={unfolded} items={items}
             onUnfold={onUnfold} onOpenSegment={onOpenSegment}
           />
           : <p className="session-quiet">A quiet session — nothing new to show for it.</p>}

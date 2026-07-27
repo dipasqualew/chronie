@@ -18,6 +18,8 @@ import type {
   DashboardPayload,
   IconsPayload,
   InstallResult,
+  ItemDetail,
+  ItemDetailsPayload,
   LogRetention,
   Segment,
   Settings,
@@ -56,6 +58,13 @@ export const desktop = {
   achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock
     ? Promise.resolve({ achievements: mockAchievements(ids) })
     : invoke<AchievementDetailsPayload>("achievement_details", { ids }),
+  // What the game says about a list of items the segments named — the transmog collected, the
+  // pieces an equipment set holds. Batched by the caller rather than asked one item at a time,
+  // because the read behind it opens the game's largest table once per request however many
+  // ids that request carries.
+  itemDetails: (ids: number[]): Promise<ItemDetailsPayload> => mock
+    ? Promise.resolve({ items: mockItems(ids) })
+    : invoke<ItemDetailsPayload>("item_details", { ids }),
   // The pictures a list of rows needs, asked for once the rows are drawn. The backend keeps
   // every texture it has decoded, so this is answered from memory for everything a
   // neighbouring set or an earlier segment already showed.
@@ -306,6 +315,17 @@ function mockAchievements(wanted: number[]): Record<string, AchievementDetail> {
   const found: Record<string, AchievementDetail> = {};
   for (const id of wanted) {
     const detail = mock.achievementDetails[id];
+    if (detail) found[String(id)] = detail;
+  }
+  return found;
+}
+
+/** The items the e2e mock can describe among those asked for, keyed the same way. */
+function mockItems(wanted: number[]): Record<string, ItemDetail> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, ItemDetail> = {};
+  for (const id of wanted) {
+    const detail = mock.itemDetails[id];
     if (detail) found[String(id)] = detail;
   }
   return found;

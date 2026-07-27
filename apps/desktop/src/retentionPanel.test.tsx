@@ -104,9 +104,14 @@ describe("RetentionPanel", () => {
     await waitFor(() => expect(toggle().checked).toBe(false));
     fireEvent.click(toggle());
 
-    await waitFor(() => expect(toggle().checked).toBe(true));
+    // The box flips the moment it is clicked and the window stays out of reach until the
+    // backend has answered, so what is waited for is the answer having landed rather than the
+    // tick — waiting on the tick alone catches the panel mid-write.
+    await waitFor(() => {
+      expect(toggle().checked).toBe(true);
+      expect(window_().disabled).toBe(false);
+    });
     expect(set).toHaveBeenCalledWith(7);
-    expect(window_().disabled).toBe(false);
     expect(state().textContent).toContain("older than 7 days");
   });
 

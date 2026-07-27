@@ -165,6 +165,16 @@ export type HighlightFamily = "milestone" | "tally";
 export interface HighlightEntry {
   /** What the thing is called: an achievement's name, "Level 12", a mount. */
   label: string;
+  /**
+   * The item the entry is about, where it is about one.
+   *
+   * Only the transmog entries have one, and it is what lets an unfolded summary draw the
+   * piece the way the rest of the app draws it — the picture, the name out of the game's own
+   * tables, the colour of its quality — rather than the name the addon happened to catch.
+   * The label is what it falls back to and is never left unset, because an install that can
+   * describe nothing still has to draw a list.
+   */
+  itemId?: number;
   /** The quieter half of the line, when there is one: "account first", "variant". */
   detail: string;
   /** When it happened, where the game recorded a time. */
@@ -299,9 +309,11 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     { event, segment }: Sourced<T>,
     label: string,
     detail = "",
+    itemId?: number,
   ): HighlightEntry => ({
     label,
     detail,
+    itemId,
     at: event.at ?? null,
     character: segment.character,
     segmentId: segment.segmentId,
@@ -371,7 +383,8 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     // the list holds both, because "which of these were new" is the question it answers.
     const items = [...fresh, ...variants].map((sourced) =>
       entry(sourced, sourced.event.name || `Item ${sourced.event.id}`,
-        sourced.event.newAppearance ? "new appearance" : "variant of one owned"));
+        sourced.event.newAppearance ? "new appearance" : "variant of one owned",
+        sourced.event.id));
     out.push({
       kind: "transmog",
       label: fresh.length ? `${fresh.length} new appearance${fresh.length === 1 ? "" : "s"}` : "New transmog source",

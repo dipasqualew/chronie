@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 import { byDay, dayOf } from "./characters";
 import type { CharacterGold, CharacterProfile } from "./characters";
 import { ago, dayLabel, duration, gold, initials, plural, signedGold } from "./format";
+import type { ItemBook } from "./items";
 import {
   HighlightList, SegmentButton, StandingBar, classProps, className, shownHighlights,
 } from "./ui";
@@ -29,9 +30,11 @@ const SCOPE = "character";
 export interface CharactersProps {
   profiles: CharacterProfile[];
   onOpenSegment: OpenSegment;
+  /** What the game says about an item, for the summaries that unfold into transmog. */
+  items: ItemBook;
 }
 
-export function Characters({ profiles, onOpenSegment }: CharactersProps): ReactNode {
+export function Characters({ profiles, onOpenSegment, items }: CharactersProps): ReactNode {
   // Held by name rather than by index: an activity edit repaints the whole view, and the
   // reader should come back to the character they were reading, wherever they have moved to
   // in the roster since.
@@ -67,7 +70,7 @@ export function Characters({ profiles, onOpenSegment }: CharactersProps): ReactN
       <section className="panel roster-detail" id="character-detail" aria-live="polite">
         {showing
           ? <Profile
-            entry={showing} unfolded={unfolded}
+            entry={showing} unfolded={unfolded} items={items}
             onUnfold={(kind) => setUnfolded((open) => (open === kind ? null : kind))}
             // A summary chip, one of the things it unfolded into, and a segment row all open
             // the modal, and all three walk this character's own segments.
@@ -121,12 +124,13 @@ const Stat = ({ label, children }: { label: string; children: ReactNode }): Reac
 interface ProfileProps {
   entry: CharacterProfile;
   unfolded: string | null;
+  items: ItemBook;
   onUnfold: (kind: string) => void;
   onOpenSegment: (segmentId: number) => void;
 }
 
 /** Everything known about the chosen character, and everything they did. */
-function Profile({ entry, unfolded, onUnfold, onOpenSegment }: ProfileProps): ReactNode {
+function Profile({ entry, unfolded, items, onUnfold, onOpenSegment }: ProfileProps): ReactNode {
   const where = entry.places.slice(0, 3).join(", ");
   return <>
     <header className="profile-head" {...classProps(entry.classFile)}>
@@ -160,7 +164,7 @@ function Profile({ entry, unfolded, onUnfold, onOpenSegment }: ProfileProps): Re
     <div className="profile-highlights">
       {shownHighlights(entry.highlights).length
         ? <HighlightList
-          entries={entry.highlights} scope={SCOPE} expanded={unfolded}
+          entries={entry.highlights} scope={SCOPE} expanded={unfolded} items={items}
           onUnfold={onUnfold} onOpenSegment={onOpenSegment}
         />
         : <p className="muted">Nothing gained or collected yet.</p>}

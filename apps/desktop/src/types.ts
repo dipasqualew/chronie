@@ -543,6 +543,42 @@ export interface AchievementDetailsPayload {
   achievements: Record<string, AchievementDetail>;
 }
 
+/* ---------- items, as the game describes them ---------- */
+
+/**
+ * One item in the facts the game keeps about it, out of `Item` and `ItemSparse`.
+ *
+ * Numbers rather than words, deliberately: which subclass of armour is "Leather" and which
+ * slot is "Shoulders" is the window's business, and `items.ts` is where that is decided. An
+ * item this install says nothing about has none of this, which is why every reader of it
+ * starts by asking whether there is one.
+ */
+export interface ItemDetail {
+  id: number;
+  /** What the game calls it. Empty for an item the big table holds no readable row for. */
+  name: string;
+  /** What kind of thing it is: 4 armour, 2 a weapon, and a dozen kinds nothing is worn from. */
+  classId: number;
+  /** Which kind of that kind — for armour, which armour class; for a weapon, which weapon. */
+  subclassId: number;
+  /** Where it is worn: 1 head, 5 chest, 13 a one-hander, 17 a two-hander. Zero for a thing
+   * that is not worn at all. */
+  inventoryType: number;
+  /** The colour the game writes the name in: 0 poor through 5 legendary, 7 heirloom. */
+  quality: number;
+  /** The level needed to equip it. Zero is the ordinary answer. */
+  requiredLevel: number;
+  /** A bit per class, in the game's class order, or 0xFFFF for anybody. */
+  allowableClass: number;
+  /** The picture beside it, as a FileDataID to be asked for through `gameIcons`. */
+  iconFileDataId: number;
+}
+
+export interface ItemDetailsPayload {
+  /** Keyed by the id the segment named, and holding only what this install can describe. */
+  items: Record<string, ItemDetail>;
+}
+
 /**
  * The thumbnails for a grid of captures, keyed by the row id each was asked for by.
  *
@@ -768,6 +804,9 @@ export interface E2EMock {
   /** What the game says about each achievement, keyed by id. An id absent from here is one
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;
+  /** What the game says about each item the segments name, keyed by id, and absent for the
+   * ones an install cannot describe — the same bargain the achievements above make. */
+  itemDetails: Record<number, ItemDetail>;
   /** The screenshots Chronie holds, keyed by capture row id: the thumbnail a grid draws and
    * the full-size picture opening one asks for. An id absent from here is a capture with no
    * image, which is what the real backend answers nothing for. */

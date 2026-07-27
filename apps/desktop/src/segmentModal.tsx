@@ -15,6 +15,8 @@ import { CaptureGallery } from "./captureGallery";
 import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
 import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
+import { GameItem } from "./item";
+import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
 import { eventsOf } from "./types";
@@ -99,7 +101,7 @@ function Earned({ event, book }: { event: AchievementEvent; book: AchievementBoo
  * A slot with nothing on one side is drawn as an em dash rather than left blank, so a slot
  * that was cleared and a slot that was filled read as the two different things they are.
  */
-function Equipsets({ segment }: { segment: Segment }): ReactNode {
+function Equipsets({ segment, items }: { segment: Segment; items: ItemBook }): ReactNode {
   const changes = eventsOf(segment, "equipsetChanges");
   if (!changes.length) return null;
   return (
@@ -119,15 +121,25 @@ function Equipsets({ segment }: { segment: Segment }): ReactNode {
                   return (
                     <li key={item.slot}>
                       <span className="equipset-slot">{line.slot}</span>
+                      {/* The picture and the name, and the item level after them — the facts
+                          are left off, because two items sit side by side in a slot and the
+                          armour class is the same on both of them anyway. */}
                       <span className="equipset-was">
                         {line.previousItemId == null
                           ? <span className="muted">—</span>
-                          : <Wowhead kind="item" id={line.previousItemId}>{line.before}</Wowhead>}
+                          : <GameItem
+                            id={line.previousItemId} name={item.previousItemName} book={items}
+                            facts={false}
+                          >{line.previousLevel
+                            ? <span className="muted">{line.previousLevel}</span>
+                            : null}</GameItem>}
                       </span>
                       <span className="equipset-now">
                         {line.itemId == null
                           ? <span className="muted">—</span>
-                          : <Wowhead kind="item" id={line.itemId}>{line.after}</Wowhead>}
+                          : <GameItem id={line.itemId} name={item.itemName} book={items} facts={false}>
+                            {line.level ? <span className="muted">{line.level}</span> : null}
+                          </GameItem>}
                       </span>
                     </li>
                   );
@@ -301,7 +313,9 @@ function Currencies(
  * The table columns abbreviate; these do not, because this is where somebody comes when the
  * abbreviation was not enough.
  */
-function Lists({ segment, book }: { segment: Segment; book: AchievementBook }): ReactNode {
+function Lists(
+  { segment, book, items }: { segment: Segment; book: AchievementBook; items: ItemBook },
+): ReactNode {
   const encounters = eventsOf(segment, "encounters");
   const achievements = eventsOf(segment, "achievements");
   const levelUps = eventsOf(segment, "levelUps");
@@ -361,21 +375,22 @@ function Lists({ segment, book }: { segment: Segment; book: AchievementBook }): 
       </ul></Section>
       : null}
     {transmogs.length
-      ? <Section title="Transmog"><ul>
+      ? <Section title="Transmog"><ul className="items">
         {transmogs.map((event, index) => (
           <li key={`${event.id}-${index}`}>
-            👘 <Wowhead kind="item" id={event.id}>{event.name || `Item ${event.id}`}</Wowhead>{" "}
-            {event.newAppearance === true
-              ? <span className="appearance-new">new appearance</span>
-              : event.newAppearance === false
-                ? <span className="appearance-variant">variant of one owned</span>
-                : <span className="muted">unknown</span>}
-            {" "}<At event={event} />
+            <GameItem id={event.id} name={event.name} book={items}>
+              {event.newAppearance === true
+                ? <span className="appearance-new">new appearance</span>
+                : event.newAppearance === false
+                  ? <span className="appearance-variant">variant of one owned</span>
+                  : <span className="muted">unknown</span>}
+              <At event={event} />
+            </GameItem>
           </li>
         ))}
       </ul></Section>
       : null}
-    <Equipsets segment={segment} />
+    <Equipsets segment={segment} items={items} />
     {quests.length
       ? <Section title="Quests"><ul>
         {quests.map((event, index) => (
@@ -451,6 +466,11 @@ export interface SegmentModalProps {
    */
   achievements: AchievementBook;
   /**
+   * What the game says about the items a segment names, shared with every other view that
+   * draws one. Each row asks for its own item, so nothing here has to collect ids first.
+   */
+  items: ItemBook;
+  /**
    * What every character on the account was last seen holding, so a gain can be read against
    * the account rather than only against the character that earned it. Absent on a history
    * collected before any character reported, which reads as nothing to add.
@@ -463,7 +483,7 @@ export interface SegmentModalProps {
 
 export function SegmentModal(
   {
-    showing, onStep, onClose, onEditActivities, achievements: book, holdings, album,
+    showing, onStep, onClose, onEditActivities, achievements: book, items, holdings, album,
     captures,
   }: SegmentModalProps,
 ): ReactNode {
@@ -578,7 +598,7 @@ export function SegmentModal(
               <CaptureGallery segments={[segment]} album={album} actions={captures} />
             </Section>
             : null}
-          <Lists segment={segment} book={book} />
+          <Lists segment={segment} book={book} items={items} />
           <Gold segment={segment} holdings={holdings} />
           <Currencies segment={segment} holdings={holdings} />
           <Reputation segment={segment} holdings={holdings} />
