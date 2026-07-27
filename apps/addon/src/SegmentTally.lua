@@ -907,6 +907,10 @@ function ns.newSegmentTally(deps)
                     standing = state and state.standing,
                     current = state and state.current,
                     max = state and state.max,
+                    -- Carried so two characters' standings with the same faction can be
+                    -- compared later; a name on its own does not sort.
+                    rank = state and state.rank,
+                    system = state and state.system,
                 }
                 reputationTotal = reputationTotal + entry.amount
             end

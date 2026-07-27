@@ -397,6 +397,54 @@ const mockDesktop: E2EMock = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
     knownActivityKinds: ["mythic_plus", "progress_raid", "legacy_raid", "levelling"],
+    // What every character was last seen holding, which is the half of the story no single
+    // segment can tell: the tokens on the line belong to one character, and "how many of
+    // these do I have, everywhere" and "has somebody already finished this grind" are
+    // questions about the account.
+    holdings: {
+      currencies: [{
+        id: 7,
+        name: "Glass Token",
+        total: 30000,
+        oldest: EVENING - 3 * 86400,
+        characters: [
+          { character: "Aster-Vale", total: 12450, at: EVENING },
+          { character: "Brin-Hearth", total: 17550, at: EVENING - 3 * 86400 },
+        ],
+      }],
+      factions: [
+        {
+          faction: "Cavern Cartographers",
+          best: {
+            character: "Brin-Hearth", standing: "Revered", current: 3000, max: 21000,
+            rank: 7, system: "reaction", at: EVENING - 3 * 86400,
+          },
+          characters: [
+            {
+              character: "Aster-Vale", standing: "Honored", current: 4200, max: 12000,
+              rank: 6, system: "reaction", at: EVENING,
+            },
+            {
+              character: "Brin-Hearth", standing: "Revered", current: 3000, max: 21000,
+              rank: 7, system: "reaction", at: EVENING - 3 * 86400,
+            },
+          ],
+        },
+        // The one the account leader is standing on: nobody is ahead of this character
+        // because this character is the one out in front, and there is nothing to say.
+        {
+          faction: "Deepwater Wardens",
+          best: {
+            character: "Brin-Hearth", standing: "Exalted", rank: 8, system: "reaction",
+            at: EVENING,
+          },
+          characters: [{
+            character: "Brin-Hearth", standing: "Exalted", rank: 8, system: "reaction",
+            at: EVENING,
+          }],
+        },
+      ],
+    },
     segments: [
       {
         id: "synthetic-003",
@@ -1091,6 +1139,15 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(detail.gainFor("Cavern Cartographers")).toContainText("Honored 4,200 / 12,000");
   });
 
+  // Those two numbers are still one character's. The account's are the ones that decide
+  // whether the grind is worth continuing here at all.
+  await test.step("a gain says what the whole account has, not only this character", async () => {
+    await expect(detail.gainFor("Glass Token")).toContainText("30,000 across 2 characters");
+
+    await expect(detail.gainFor("Cavern Cartographers"))
+      .toContainText("Brin-Hearth is further along: Revered");
+  });
+
   // And when the client said nothing, the window says nothing: no empty bracket after the
   // gain, and no bar at the bottom of a track the character was never on.
   await test.step("and says none of it when the client never said", async () => {
@@ -1104,6 +1161,13 @@ test("digs from a session down into a single segment and back out again", async 
     // bar can only be drawn somewhere, and there is nowhere known to draw this one.
     await expect(detail.gainFor("Deepwater Wardens")).toContainText("Exalted");
     await expect(detail.standingBars()).toHaveCount(0);
+    // Nor does the account line speak when this character is the one out in front: the best
+    // standing on the account is this character's own, and telling somebody they are behind
+    // themselves is worse than saying nothing.
+    await expect(detail.gainFor("Deepwater Wardens")).not.toContainText("further along");
+    // The scrip is held by nobody else, so its account total is the number already on the
+    // line and repeating it would say nothing.
+    await expect(detail.gainFor("Rustward Scrip")).not.toContainText("across");
 
     await detail.previous();
     await expect(detail.title()).toHaveText("Glass Caverns");

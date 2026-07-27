@@ -20,7 +20,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_equipsets.sql"),
     include_str!("../migrations/0005_holdings.sql"),
     include_str!("../migrations/0006_captures.sql"),
-    include_str!("../migrations/0007_combat_logs.sql"),
+    include_str!("../migrations/0007_account_rollups.sql"),
+    include_str!("../migrations/0008_combat_logs.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2270,7 +2271,88 @@ struct Incoming {
     source_size: Option<i64>,
     segments: Vec<Value>,
     lockouts: LockoutFeed,
+    holdings: Value,
     markers: Vec<Marker>,
+}
+
+/// What each character was last seen holding, replacing whatever it last said.
+///
+/// Wholesale per character rather than row by row, for the same reason the addon writes it
+/// that way: this is a snapshot of where one character stands, and half of an old snapshot
+/// beside half of a new one is a position no character was ever in. Only the character the
+/// snapshot belongs to is touched — the client can only ever read the character in front of
+/// it, so nothing here knows anything about the others.
+fn sync_holdings(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    holdings: &Value,
+    now: i64,
+) -> Result<(), String> {
+    for (character, snapshot) in entries(holdings) {
+        let character_id =
+            upsert_character_key(transaction, account_id, character, None, None, now)?;
+        transaction
+            .execute(
+                "DELETE FROM character_currencies WHERE character_id = ?1",
+                [character_id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "DELETE FROM character_standings WHERE character_id = ?1",
+                [character_id],
+            )
+            .map_err(|error| error.to_string())?;
+
+        let currencies = snapshot.get("currencies").cloned().unwrap_or(Value::Null);
+        for (key, held) in entries(&currencies) {
+            // The addon keys these by the client's own currency id, which arrives as a Lua
+            // table key and so as a string. One that is not a number is not a currency.
+            let Ok(currency_id) = key.parse::<i64>() else {
+                continue;
+            };
+            let Some(total) = optional_integer(held, "total") else {
+                continue;
+            };
+            transaction
+                .execute(
+                    "INSERT INTO character_currencies (
+                         character_id, currency_id, name, total, observed_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        character_id,
+                        currency_id,
+                        optional_text(held, "name"),
+                        total,
+                        optional_integer(held, "at")
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        let factions = snapshot.get("factions").cloned().unwrap_or(Value::Null);
+        for (faction, held) in entries(&factions) {
+            transaction
+                .execute(
+                    "INSERT INTO character_standings (
+                         character_id, faction, standing, standing_current, standing_max,
+                         ladder_rank, ladder, observed_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        character_id,
+                        faction,
+                        optional_text(held, "standing"),
+                        optional_integer(held, "current"),
+                        optional_integer(held, "max"),
+                        optional_integer(held, "rank"),
+                        optional_text(held, "system"),
+                        optional_integer(held, "at")
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 pub fn collect(
@@ -2323,6 +2405,7 @@ pub fn collect(
                 .filter_map(normalized)
                 .collect::<Vec<_>>(),
             lockouts: LockoutFeed::read(&saved),
+            holdings: saved.get("holdings").cloned().unwrap_or(Value::Null),
             markers: captures::markers(&saved),
         });
     }
@@ -2359,6 +2442,7 @@ pub fn collect(
             }
         }
         sync_lockouts(&transaction, account_id, &account.lockouts, now)?;
+        sync_holdings(&transaction, account_id, &account.holdings, now)?;
         for marker in &account.markers {
             let character_id = match marker.character.as_deref() {
                 Some(character) => Some(upsert_character_key(
@@ -2835,11 +2919,185 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     }
     drop(statement);
 
+    let holdings = account_holdings(&connection)?;
+
     Ok(serde_json::json!({
         "generatedAt": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         "knownActivityKinds": activity::KNOWN_KINDS,
         "segments": segments,
+        "holdings": holdings,
     }))
+}
+
+/// What the account as a whole holds, aggregated from the per-character snapshots.
+///
+/// Aggregated here rather than in the addon because here it can be done for real: the
+/// database holds every character the account has ever synced, where the client can only see
+/// the one in front of it. The per-character rows travel with the rollup instead of being
+/// summarised away — a total that cannot be broken back down into who holds what is a number
+/// nobody can check, and the ages are what say how much of it is stale.
+fn account_holdings(connection: &Connection) -> Result<Value, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT h.currency_id, h.name, h.total, h.observed_at, c.source_key
+             FROM character_currencies h
+             JOIN characters c ON c.id = h.character_id
+             ORDER BY h.currency_id, c.source_key",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut currencies: Vec<Value> = Vec::new();
+    for row in rows {
+        let (currency_id, name, total, observed_at, character) =
+            row.map_err(|error| error.to_string())?;
+        let holder = serde_json::json!({
+            "character": character,
+            "total": total,
+            "at": observed_at,
+        });
+        match currencies
+            .last_mut()
+            .filter(|entry| entry["id"] == currency_id)
+        {
+            Some(entry) => {
+                entry["total"] = serde_json::json!(entry["total"].as_i64().unwrap_or(0) + total);
+                // The eldest reading in the sum, which is the weakest claim in it.
+                if let Some(at) = observed_at {
+                    if entry["oldest"].as_i64().is_none_or(|oldest| at < oldest) {
+                        entry["oldest"] = serde_json::json!(at);
+                    }
+                }
+                if entry["name"].is_null() {
+                    entry["name"] = serde_json::json!(name);
+                }
+                if let Some(holders) = entry["characters"].as_array_mut() {
+                    holders.push(holder);
+                }
+            }
+            None => currencies.push(serde_json::json!({
+                "id": currency_id,
+                "name": name,
+                "total": total,
+                "oldest": observed_at,
+                "characters": [holder],
+            })),
+        }
+    }
+    drop(statement);
+
+    let mut statement = connection
+        .prepare(
+            "SELECT s.faction, s.standing, s.standing_current, s.standing_max,
+                    s.ladder_rank, s.ladder, s.observed_at, c.source_key
+             FROM character_standings s
+             JOIN characters c ON c.id = s.character_id
+             ORDER BY s.faction, c.source_key",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                serde_json::json!({
+                    "character": row.get::<_, String>(7)?,
+                    "standing": row.get::<_, Option<String>>(1)?,
+                    "current": row.get::<_, Option<i64>>(2)?,
+                    "max": row.get::<_, Option<i64>>(3)?,
+                    "rank": row.get::<_, Option<i64>>(4)?,
+                    "system": row.get::<_, Option<String>>(5)?,
+                    "at": row.get::<_, Option<i64>>(6)?,
+                }),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut factions: Vec<Value> = Vec::new();
+    for row in rows {
+        let (faction, held) = row.map_err(|error| error.to_string())?;
+        match factions
+            .last_mut()
+            .filter(|entry| entry["faction"] == faction)
+        {
+            Some(entry) => {
+                if let Some(seen) = entry["characters"].as_array_mut() {
+                    seen.push(held);
+                }
+            }
+            None => factions.push(serde_json::json!({
+                "faction": faction,
+                "characters": [held],
+            })),
+        }
+    }
+    drop(statement);
+
+    for entry in &mut factions {
+        let seen = entry["characters"].as_array().cloned().unwrap_or_default();
+        entry["best"] = best_standing(&seen);
+    }
+
+    Ok(serde_json::json!({
+        "currencies": currencies,
+        "factions": factions,
+    }))
+}
+
+/// The furthest along any character has been seen with one faction.
+///
+/// Judged on the ladder most of them were read off, and never across two. A rank only means
+/// anything against the same ladder: a client build that could not reach the friendship API
+/// falls back to the reaction ladder, whose ranks run 1 to 8 against a friendship's several
+/// thousand, and ranking those two against each other crowns the worse standing. The addon's
+/// own store decides it the same way, and has to, because it answers the same question
+/// without a database to do it in.
+///
+/// Null when no character's standing carries a rank at all — a faction the client would name
+/// but not place has nothing to be judged on, which is not the same as nobody being ahead.
+fn best_standing(seen: &[Value]) -> Value {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for held in seen {
+        if held["rank"].as_i64().is_some() {
+            if let Some(ladder) = held["system"].as_str() {
+                *counts.entry(ladder).or_default() += 1;
+            }
+        }
+    }
+    // Ties break on the ladder's name so that which one wins never depends on the order the
+    // rows happened to arrive in.
+    let Some(ladder) = counts
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(ladder, _)| ladder.to_string())
+    else {
+        return Value::Null;
+    };
+
+    seen.iter()
+        .filter(|held| {
+            held["rank"].as_i64().is_some() && held["system"].as_str() == Some(ladder.as_str())
+        })
+        .max_by_key(|held| {
+            (
+                held["rank"].as_i64().unwrap_or(0),
+                held["current"].as_i64().unwrap_or(0),
+                // Rows arrive sorted by character, so reversing the name breaks a full tie
+                // towards the first of them and the answer never depends on row order.
+                std::cmp::Reverse(held["character"].as_str().unwrap_or("").to_string()),
+            )
+        })
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 /// Everything the desktop app can do to a segment's activities.
@@ -4433,6 +4691,183 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
     }
 
+    /// An install whose SavedVariables carry the addon's per-character snapshot and nothing
+    /// else. No segments on purpose: what a character holds is a fact about the character,
+    /// and it has to reach the database whether or not that character has filed a segment.
+    fn holdings_install(holdings_lua: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        let saved = wow.join("WTF/Account/TEST/SavedVariables");
+        fs::create_dir_all(&saved).unwrap();
+        fs::write(
+            saved.join("chronie.lua"),
+            format!(r#"ChronieDB = {{ ["holdings"] = {{ {holdings_lua} }} }}"#),
+        )
+        .unwrap();
+        let database = temp.path().join("data/chronie.sqlite3");
+        (temp, wow, database)
+    }
+
+    fn rewrite_holdings(wow: &Path, holdings_lua: &str) {
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            format!(r#"ChronieDB = {{ ["holdings"] = {{ {holdings_lua} }} }} -- touched"#),
+        )
+        .unwrap();
+    }
+
+    const TWO_CHARACTERS: &str = r#"
+        ["Alt-Ravencrest"] = {
+            ["updatedAt"] = 2000000000,
+            ["currencies"] = {
+                [3008] = { ["name"] = "Valorstones", ["total"] = 800, ["at"] = 1999913600 },
+            },
+            ["factions"] = {
+                ["Dream Wardens"] = {
+                    ["standing"] = "Renown 22", ["current"] = 100, ["max"] = 2500,
+                    ["rank"] = 22, ["system"] = "renown", ["at"] = 1999913600,
+                },
+            },
+        },
+        ["Main-Ravencrest"] = {
+            ["updatedAt"] = 2000000000,
+            ["currencies"] = {
+                [3008] = { ["name"] = "Valorstones", ["total"] = 1200, ["at"] = 2000000000 },
+                [2245] = { ["name"] = "Flightstones", ["total"] = 400, ["at"] = 2000000000 },
+            },
+            ["factions"] = {
+                ["Dream Wardens"] = {
+                    ["standing"] = "Renown 8", ["current"] = 500, ["max"] = 2500,
+                    ["rank"] = 8, ["system"] = "renown", ["at"] = 2000000000,
+                },
+            },
+        },
+    "#;
+
+    #[test]
+    fn sums_a_currency_across_every_character_that_holds_any() {
+        let (_temp, wow, database) = holdings_install(TWO_CHARACTERS);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let holdings = &dashboard(&database).unwrap()["holdings"];
+        let valorstones = &holdings["currencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == 3008)
+            .cloned()
+            .unwrap();
+        assert_eq!(valorstones["total"], 2000);
+        assert_eq!(valorstones["name"], "Valorstones");
+        // The total breaks back down into who holds what, and says how old the eldest of
+        // those readings is — a sum nobody can check is a number nobody should trust.
+        assert_eq!(valorstones["characters"].as_array().unwrap().len(), 2);
+        assert_eq!(valorstones["characters"][0]["character"], "Alt-Ravencrest");
+        assert_eq!(valorstones["characters"][0]["total"], 800);
+        assert_eq!(valorstones["oldest"], 1_999_913_600_i64);
+    }
+
+    #[test]
+    fn crowns_the_character_that_has_got_furthest_with_a_faction() {
+        let (_temp, wow, database) = holdings_install(TWO_CHARACTERS);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let holdings = &dashboard(&database).unwrap()["holdings"];
+        let wardens = &holdings["factions"][0];
+        assert_eq!(wardens["faction"], "Dream Wardens");
+        assert_eq!(wardens["best"]["character"], "Alt-Ravencrest");
+        assert_eq!(wardens["best"]["standing"], "Renown 22");
+        assert_eq!(wardens["characters"].as_array().unwrap().len(), 2);
+    }
+
+    /// A build that cannot reach the friendship API falls back to the reaction ladder, whose
+    /// ranks run 1 to 8 against a friendship's several thousand. Judging the two against each
+    /// other would crown whichever ladder counts higher rather than whichever character is
+    /// further along, so the odd reading out is set aside — listed, never crowned.
+    #[test]
+    fn judges_a_faction_on_the_ladder_most_of_its_characters_were_read_off() {
+        let (_temp, wow, database) = holdings_install(
+            r#"
+            ["Main-Ravencrest"] = { ["factions"] = { ["Brann Bronzebeard"] = {
+                ["standing"] = "Best Friend", ["rank"] = 8400, ["system"] = "friendship",
+            } } },
+            ["Second-Ravencrest"] = { ["factions"] = { ["Brann Bronzebeard"] = {
+                ["standing"] = "Pal", ["rank"] = 1200, ["system"] = "friendship",
+            } } },
+            ["Odd-Ravencrest"] = { ["factions"] = { ["Brann Bronzebeard"] = {
+                ["standing"] = "Honored", ["rank"] = 6, ["system"] = "reaction",
+            } } },
+        "#,
+        );
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let brann = &dashboard(&database).unwrap()["holdings"]["factions"][0];
+        assert_eq!(brann["best"]["character"], "Main-Ravencrest");
+        assert_eq!(brann["characters"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn leaves_a_faction_uncrowned_when_no_standing_can_be_placed_on_a_ladder() {
+        let (_temp, wow, database) = holdings_install(
+            r#"["Main-Ravencrest"] = { ["factions"] = { ["Hallowfall Arathi"] = {
+                ["standing"] = "Honored",
+            } } },"#,
+        );
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let arathi = &dashboard(&database).unwrap()["holdings"]["factions"][0];
+        // Null rather than the only row there is: nothing here can be ranked, which is not
+        // the same as this character being the one out in front.
+        assert!(arathi["best"].is_null());
+        assert_eq!(arathi["characters"].as_array().unwrap().len(), 1);
+    }
+
+    /// A snapshot is where one character stands, not a log of where it has stood. Half of an
+    /// old one beside half of a new one is a position no character was ever in.
+    #[test]
+    fn replaces_a_characters_snapshot_rather_than_layering_on_it() {
+        let (_temp, wow, database) = holdings_install(TWO_CHARACTERS);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        rewrite_holdings(
+            &wow,
+            r#"["Main-Ravencrest"] = { ["currencies"] = {
+                [3008] = { ["name"] = "Valorstones", ["total"] = 50, ["at"] = 2000100000 },
+            } },"#,
+        );
+        collect(&wow, &database, 2_000_100_100, Options::default()).unwrap();
+
+        let currencies = dashboard(&database).unwrap()["holdings"]["currencies"]
+            .as_array()
+            .cloned()
+            .unwrap();
+        let valorstones = currencies
+            .iter()
+            .find(|entry| entry["id"] == 3008)
+            .cloned()
+            .unwrap();
+        // 800 from the alt, which said nothing this time and so still stands, and 50 from
+        // the main, which replaced its 1,200 rather than adding to it.
+        assert_eq!(valorstones["total"], 850);
+        // Flightstones went with the snapshot it belonged to.
+        assert!(!currencies.iter().any(|entry| entry["id"] == 2245));
+    }
+
+    #[test]
+    fn has_nothing_to_roll_up_before_any_character_has_reported() {
+        let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
+
+        collect(&wow, &database, 2_000_100_000, Options::default()).unwrap();
+
+        let holdings = &dashboard(&database).unwrap()["holdings"];
+        assert_eq!(holdings["currencies"].as_array().unwrap().len(), 0);
+        assert_eq!(holdings["factions"].as_array().unwrap().len(), 0);
+    }
+
     #[test]
     fn migrations_are_idempotent() {
         let temp = tempfile::tempdir().unwrap();
@@ -4843,10 +5278,10 @@ ChronieDB = {{ ["segments"] = {{
             fs::create_dir_all(database.parent().unwrap()).unwrap();
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
-            for migration in &MIGRATIONS[..6] {
+            for migration in &MIGRATIONS[..7] {
                 transaction.execute_batch(migration).unwrap();
             }
-            transaction.pragma_update(None, "user_version", 6_i64).unwrap();
+            transaction.pragma_update(None, "user_version", 7_i64).unwrap();
             transaction.commit().unwrap();
         }
 

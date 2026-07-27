@@ -231,6 +231,66 @@ export interface DashboardPayload {
   /** The kinds this build's inference can produce, for the editor's picker. */
   knownActivityKinds?: string[];
   segments?: Segment[];
+  /** What every character on the account was last seen holding. */
+  holdings?: AccountHoldings;
+}
+
+/* ---------- what the account holds, as opposed to what one character does ---------- */
+
+/** One character's share of an account total. Mirrors a row of `character_currencies`. */
+export interface CurrencyHolder {
+  character: string;
+  total: number;
+  /** When it was read. Every one of these is last known rather than live. */
+  at?: number | null;
+}
+
+/**
+ * What the whole account holds of one currency.
+ *
+ * The per-character rows travel with the total rather than being summarised away: a sum
+ * nobody can break back down is a number nobody can check, and `oldest` is what says how much
+ * of it might have moved since anybody looked.
+ */
+export interface AccountCurrency {
+  id: number;
+  name?: string | null;
+  total: number;
+  oldest?: number | null;
+  characters: CurrencyHolder[];
+}
+
+/** Where one character stands with a faction. Mirrors a row of `character_standings`. */
+export interface CharacterStanding {
+  character: string;
+  standing?: string | null;
+  current?: number | null;
+  max?: number | null;
+  /**
+   * How far up this faction's own ladder the standing sits, and which ladder that is. A name
+   * cannot be ranked — "Renown 12" and "Honored" do not sort — and a rank only means anything
+   * against the same ladder, so the two always travel together.
+   */
+  rank?: number | null;
+  system?: string | null;
+  at?: number | null;
+}
+
+/**
+ * Where the account as a whole stands with one faction.
+ *
+ * `best` is null when no character's standing could be placed on a ladder at all, which is a
+ * different thing from nobody being ahead.
+ */
+export interface AccountFaction {
+  faction: string;
+  best?: CharacterStanding | null;
+  characters: CharacterStanding[];
+}
+
+export interface AccountHoldings {
+  currencies: AccountCurrency[];
+  factions: AccountFaction[];
 }
 
 /* ---------- transmog ---------- */

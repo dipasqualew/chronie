@@ -1,0 +1,282 @@
+local _, ns = ...
+
+---What one character was last seen holding of one currency.
+---@class CurrencyHolding
+---@field character string "Name-Realm".
+---@field name string What the client called the currency when it last said.
+---@field total integer The holding itself.
+---@field at integer When it was read, in epoch seconds.
+
+---What one character was last seen standing at with one faction.
+---@class StandingHolding : FactionStanding
+---@field character string "Name-Realm".
+---@field at integer When it was read, in epoch seconds.
+
+---Every character's holding of one currency, and what they come to across the account.
+---@class CurrencyRollup
+---@field id integer
+---@field name string
+---@field total integer Summed across every character that has ever reported holding any.
+---@field characters CurrencyHolding[] Sorted by character, so the list never reshuffles.
+---@field oldest integer The least recently read of the holdings the total is built from.
+
+---Where the account as a whole stands with one faction.
+---@class StandingRollup
+---@field faction string
+---@field best StandingHolding The furthest along any character has been seen.
+---@field characters StandingHolding[] Sorted by character.
+
+---@class HoldingsStore
+---@field record fun(character: string, summary: table)
+---@field currency fun(currencyID: integer): CurrencyRollup?
+---@field standing fun(faction: string): StandingRollup?
+
+---@class HoldingsStoreDeps
+---@field db table SavedVariables table; mutated in place so the client persists it.
+---@field now fun(): integer
+
+---What every character on the account was last seen holding, so a number can be read as an
+---account's rather than one character's.
+---
+---SavedVariables are the account's but the client only ever hands us the character in front
+---of it, so this is the same trick `LockoutStore` plays with lockouts: each character writes
+---down what it saw under its own `Name-Realm` key, and reading them all back is what makes
+---"how much of this do I have, everywhere" answerable at all.
+---
+---Two things follow from that and are worth being plain about, because the UI has to be
+---honest about both:
+---
+---* Every entry is **last known**, not live. A character that has not been logged into since
+---  it spent the currency reports what it held when it was last played, and the entry's `at`
+---  is what says how far in the past that was.
+---* It only holds what the addon has **seen**. The client reports a currency's holding as
+---  part of a change to it, and a faction's standing as part of a gain, so a currency this
+---  character has never gained while the addon was loaded is not in here — which is a hole
+---  in the account total, not a zero. Filling it would mean walking the client's own currency
+---  and reputation panes, which is a separate piece of work.
+function ns.newHoldingsStore(deps)
+    local db = deps.db
+    local now = deps.now
+
+    db.holdings = db.holdings or {}
+
+    ---@param character string
+    ---@return table
+    local function entryFor(character)
+        local entry = db.holdings[character] or {}
+        entry.currencies = entry.currencies or {}
+        entry.factions = entry.factions or {}
+        db.holdings[character] = entry
+        return entry
+    end
+
+    ---Which ladder a faction's standings are to be judged on: the one most of the account's
+    ---characters were read off.
+    ---
+    ---Rank only means anything against the same ladder. A client build that could not reach
+    ---the friendship API falls back to the reaction ladder, whose ranks run 1 to 8 against a
+    ---friendship's several thousand, and comparing the two would hand the crown to whichever
+    ---ladder counts higher rather than to whichever character is further along. So the odd
+    ---reading out is set aside rather than ranked, and a tie is broken by name so that which
+    ---ladder wins never depends on the order a Lua table happened to be walked in.
+    ---@param rows StandingHolding[]
+    ---@return string?
+    local function ladderOf(rows)
+        local counts = {}
+        for _, row in ipairs(rows) do
+            if row.rank and row.system then
+                counts[row.system] = (counts[row.system] or 0) + 1
+            end
+        end
+
+        local winner, best = nil, 0
+        for system, count in pairs(counts) do
+            if count > best or (count == best and winner and system < winner) then
+                winner, best = system, count
+            end
+        end
+        return winner
+    end
+
+    ---Which of two observations on the same ladder is further along. Rank ties break on
+    ---progress into the level.
+    ---@param challenger StandingHolding
+    ---@param incumbent StandingHolding?
+    ---@return boolean
+    local function isFurther(challenger, incumbent)
+        if not incumbent then
+            return true
+        end
+        if challenger.rank ~= incumbent.rank then
+            return challenger.rank > incumbent.rank
+        end
+        if (challenger.current or 0) ~= (incumbent.current or 0) then
+            return (challenger.current or 0) > (incumbent.current or 0)
+        end
+        return challenger.character < incumbent.character
+    end
+
+    return {
+        ---Folds what a finished segment saw into this character's snapshot.
+        ---
+        ---Only what the client actually said is written. A gain the client answered with no
+        ---holding leaves the previous holding standing rather than overwriting it with a
+        ---nil — the last number we had is a better answer than none — and the same goes for
+        ---a faction the client would not place.
+        ---@param character string "Name-Realm".
+        ---@param summary table A SegmentSummary.
+        record = function(character, summary)
+            if type(character) ~= "string" or character == "" or type(summary) ~= "table" then
+                return
+            end
+
+            local entry = entryFor(character)
+            local at = now()
+            local touched = false
+
+            for _, gain in ipairs(summary.currencies or {}) do
+                if gain.id and gain.total then
+                    entry.currencies[gain.id] = {
+                        name = gain.name or (entry.currencies[gain.id] or {}).name,
+                        total = gain.total,
+                        at = at,
+                    }
+                    touched = true
+                end
+            end
+
+            for _, gain in ipairs(summary.reputation or {}) do
+                if gain.faction and (gain.standing or gain.rank) then
+                    entry.factions[gain.faction] = {
+                        standing = gain.standing,
+                        current = gain.current,
+                        max = gain.max,
+                        rank = gain.rank,
+                        system = gain.system,
+                        at = at,
+                    }
+                    touched = true
+                end
+            end
+
+            if touched then
+                entry.updatedAt = at
+            end
+        end,
+
+        ---What the whole account holds of one currency, and who holds it.
+        ---
+        ---Nil rather than an empty rollup when no character has ever reported a holding: a
+        ---total of zero is a claim, and the honest answer is that nobody has looked.
+        ---@param currencyID integer
+        ---@return CurrencyRollup?
+        currency = function(currencyID)
+            if not currencyID then
+                return nil
+            end
+
+            local holders = {}
+            local total, name, oldest = 0, nil, nil
+
+            for character, entry in pairs(db.holdings) do
+                local held = (entry.currencies or {})[currencyID]
+                if held and held.total then
+                    total = total + held.total
+                    name = name or held.name
+                    if not oldest or (held.at or 0) < oldest then
+                        oldest = held.at or 0
+                    end
+                    holders[#holders + 1] = {
+                        character = character,
+                        name = held.name,
+                        total = held.total,
+                        at = held.at or 0,
+                    }
+                end
+            end
+
+            if #holders == 0 then
+                return nil
+            end
+
+            table.sort(holders, function(left, right)
+                return left.character < right.character
+            end)
+
+            return {
+                id = currencyID,
+                name = name or "",
+                total = total,
+                characters = holders,
+                oldest = oldest or 0,
+            }
+        end,
+
+        ---Where the account stands with one faction: every character that has been seen with
+        ---it, and the furthest along any of them has been. Nil when none of them has.
+        ---@param faction string
+        ---@return StandingRollup?
+        standing = function(faction)
+            if type(faction) ~= "string" or faction == "" then
+                return nil
+            end
+
+            local seen = {}
+
+            for character, entry in pairs(db.holdings) do
+                local held = (entry.factions or {})[faction]
+                if held then
+                    seen[#seen + 1] = {
+                        character = character,
+                        standing = held.standing,
+                        current = held.current,
+                        max = held.max,
+                        rank = held.rank,
+                        system = held.system,
+                        at = held.at or 0,
+                    }
+                end
+            end
+
+            table.sort(seen, function(left, right)
+                return left.character < right.character
+            end)
+
+            -- A standing with no rank at all — a faction the client would name but not place —
+            -- is kept in the list and never crowned, because there is nothing to crown it on.
+            local ladder = ladderOf(seen)
+            local best
+            for _, row in ipairs(seen) do
+                if row.rank and row.system == ladder and isFurther(row, best) then
+                    best = row
+                end
+            end
+
+            if not best then
+                return nil
+            end
+
+            return { faction = faction, best = best, characters = seen }
+        end,
+    }
+end
+
+---How long ago something was read, short enough to sit on the end of a line.
+---
+---Rounded down to one unit on purpose: this is a staleness warning rather than a clock, and
+---"3d" answers the only question being asked of it — is this recent enough to trust?
+---@param seconds number? Age in seconds; negative or nil reads as "now".
+---@return string
+function ns.formatAge(seconds)
+    seconds = math.max(math.floor(seconds or 0), 0)
+    if seconds < 60 then
+        return "now"
+    end
+    if seconds < 3600 then
+        return string.format("%dm ago", math.floor(seconds / 60))
+    end
+    if seconds < 86400 then
+        return string.format("%dh ago", math.floor(seconds / 3600))
+    end
+    return string.format("%dd ago", math.floor(seconds / 86400))
+end

@@ -62,6 +62,7 @@ const modal = createSegmentModal({
   dialog: $<HTMLDialogElement>("segment-detail"),
   onEditActivities: (segmentId) => openEditor(segmentId),
   achievements,
+  holdings: PAYLOAD.holdings,
 });
 
 const timeline = createTimeline({

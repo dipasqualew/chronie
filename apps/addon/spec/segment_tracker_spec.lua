@@ -42,6 +42,9 @@ describe("ns.newSegmentTracker", function()
             level = function()
                 return options.level
             end,
+            holdings = options.holdings ~= false
+                and ns.newHoldingsStore({ db = db, now = clock.now })
+                or nil,
         })
 
         return {
@@ -326,6 +329,42 @@ describe("ns.newSegmentTracker", function()
             assert.equal(1, #log.all())
             assert.equal("Thrall-Ragnaros", log.all()[1].character)
             assert.equal("Jaina-Draenor", tracker.current().character)
+        end)
+    end)
+
+    -- What a character was left holding is a fact about the character rather than about the
+    -- segment, and segment close is the last moment the addon can write it down: logout
+    -- flushes through the same path, and SavedVariables only reach disk once it has.
+    describe("writing down what the character was left holding", function()
+        it("files the holdings and standings the segment saw", function()
+            local harness = newTracker({ zone = DUNGEON })
+            harness.tracker.sync()
+            harness.tally.currency(3008, 15, "Valorstones", 1200)
+
+            harness.tracker.flush()
+
+            local held = harness.db.holdings["Thrall-Ragnaros"]
+            assert.equal(1200, held.currencies[3008].total)
+            assert.equal(NOW, held.updatedAt)
+        end)
+
+        it("writes nothing down for a segment that saw nothing", function()
+            local harness = newTracker({ zone = WORLD })
+            harness.tracker.sync()
+
+            harness.tracker.flush()
+
+            assert.same({}, harness.db.holdings)
+        end)
+
+        it("files against the character that played the segment, not the one after it", function()
+            local harness = newTracker({ zone = DUNGEON, character = "Thrall-Ragnaros" })
+            harness.tracker.sync()
+            harness.tally.currency(3008, 15, "Valorstones", 1200)
+
+            harness.tracker.flush()
+
+            assert.is_table(harness.db.holdings["Thrall-Ragnaros"])
         end)
     end)
 
