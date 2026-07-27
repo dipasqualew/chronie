@@ -18,8 +18,9 @@
  *
  * The pane above the list opens on the character rather than on nothing, because that is what
  * the set is a set of clothes for: a bare Human Female, asked for once for the whole app and
- * shown for every set after. Picking a row still swaps it for that appearance's own model or
- * its icon — putting the two together is the next piece of work, not this one.
+ * shown for every set after. Picking a row then shows that appearance the way the game itself
+ * would: a helm as the helm, and everything painted onto a body — which is eight of the twelve
+ * slots — on the body, worn.
  */
 
 import { escapeHtml, plural } from "./format";
@@ -33,6 +34,7 @@ import type {
   TransmogModelPayload,
   TransmogSet,
   TransmogSetItemsPayload,
+  WornModelPayload,
 } from "./types";
 
 /**
@@ -133,6 +135,8 @@ export interface TransmogModalOptions {
   loadModel: (displayInfoId: number) => Promise<TransmogModelPayload>;
   /** Asks for the bare body a set opens on. One model for the whole app. */
   loadCharacter: () => Promise<CharacterModelPayload>;
+  /** Asks for that body with one appearance composited onto it, which is how armour is shown. */
+  loadWorn: (displayInfoId: number, displayType: number) => Promise<WornModelPayload>;
   /**
    * Makes the 3D pane. Injected because it is the one thing here that needs a graphics card:
    * a machine without working 3D throws, and the reader gets the icon instead.
@@ -154,7 +158,9 @@ function part(dialog: HTMLDialogElement, selector: string): HTMLElement {
 }
 
 export function createTransmogModal(
-  { dialog, load, loadIcons, loadModel, loadCharacter, createStage = lazyStage }: TransmogModalOptions,
+  {
+    dialog, load, loadIcons, loadModel, loadCharacter, loadWorn, createStage = lazyStage,
+  }: TransmogModalOptions,
 ): TransmogModal {
   // What a set is made of never changes under a running app — it is read out of the
   // installed game — so a set opened twice is read once.
@@ -166,6 +172,9 @@ export function createTransmogModal(
   // The models, by the display they were asked for under. `null` is an answer: this install
   // has nothing to show for that appearance, and asking again would say the same.
   const models = new Map<number, string | null>();
+  // The same, for the bodies wearing one appearance. Kept apart from the models above because
+  // a display id means a different picture in each: the item alone, and the item on somebody.
+  const wornModels = new Map<number, string | null>();
   // The bare body, asked for once and kept for as long as the app runs. It is one model for
   // every set there is, and the read behind it is the game's own storage.
   let character: Promise<CharacterModelPayload> | null = null;
@@ -260,12 +269,12 @@ export function createTransmogModal(
   /* ---------- the preview ---------- */
 
   /**
-   * Shows one appearance as large as the game lets us: a model for the four slots that have
-   * one, and the icon for everything else.
+   * Shows one appearance the way the game itself would: on its own where it has geometry of
+   * its own, and worn on the character where it has none.
    *
    * Which of those it is comes out of `previewFor`, and it is a fact about the game's files
-   * rather than about this install — so an armour row is not a failed model, it is a row that
-   * never had one. The reader is told why in a sentence and shown the picture instead.
+   * rather than about this install. A chestpiece is not a failed model — it is texture painted
+   * onto a body, and the body is where it becomes something to look at.
    */
   function pick(index: number): void {
     const row = rows[index];
@@ -276,21 +285,30 @@ export function createTransmogModal(
     }
 
     const preview = previewFor(row);
-    if (preview.kind !== "model") {
-      return still(row, "note" in preview ? preview.note : "");
+    if (preview.kind === "icon" || preview.kind === "none") {
+      return still(row, preview.note);
     }
 
-    const cached = models.get(preview.displayInfoId);
+    // The two are the same errand with different answers behind them: read one `.glb`, put it
+    // on the stage, and fall back to the icon if there is nothing to put there.
+    const worn = preview.kind === "worn";
+    const known = worn ? wornModels : models;
+    const cached = known.get(preview.displayInfoId);
     if (cached !== undefined) {
-      void showModel(row, cached, mine);
+      void showModel(row, cached, mine, worn);
       return;
     }
 
-    setState("loading", `Reading the model of ${row.label.toLowerCase()}…`);
-    void loadModel(preview.displayInfoId)
+    setState("loading", worn
+      ? `Putting ${row.label.toLowerCase()} on the character…`
+      : `Reading the model of ${row.label.toLowerCase()}…`);
+    const loading = worn
+      ? loadWorn(preview.displayInfoId, preview.displayType)
+      : loadModel(preview.displayInfoId);
+    void loading
       .then((payload) => {
-        models.set(preview.displayInfoId, payload.model);
-        if (mine === asked) void showModel(row, payload.model, mine);
+        known.set(preview.displayInfoId, payload.model);
+        if (mine === asked) void showModel(row, payload.model, mine, worn);
       })
       .catch((error: unknown) => {
         if (mine === asked) still(row, message(error));
@@ -298,12 +316,20 @@ export function createTransmogModal(
   }
 
   /** Puts a loaded model on the stage, or falls back to the icon when there is none. */
-  async function showModel(row: AppearanceRow, glb: string | null, mine: number): Promise<void> {
-    if (glb === null) return still(row, REASONS.absent);
+  async function showModel(
+    row: AppearanceRow,
+    glb: string | null,
+    mine: number,
+    worn: boolean,
+  ): Promise<void> {
+    // Nothing to show: the game gives this install no model for the appearance, or nothing it
+    // could put on a character. The icon and a sentence are what is left either way.
+    if (glb === null) return still(row, worn ? REASONS.unpaintable : REASONS.absent);
     // Either the model would not load or the machine has no working 3D at all — a remote
     // desktop, a virtual machine, a driver the browser has blocklisted. Both leave the reader
     // better off with the icon and a sentence than with an empty rectangle.
-    await onStage(glb, mine, "model", "Drag to turn it.", (error) => still(row, message(error)));
+    const note = worn ? REASONS.worn : "Drag to turn it.";
+    await onStage(glb, mine, worn ? "worn" : "model", note, (error) => still(row, message(error)));
   }
 
   /**

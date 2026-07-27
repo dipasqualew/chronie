@@ -84,6 +84,7 @@ const transmogDetail = createTransmogModal({
   loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
   loadModel: (displayInfoId) => desktop.transmogModel(displayInfoId),
   loadCharacter: () => desktop.characterModel(),
+  loadWorn: (displayInfoId, displayType) => desktop.wornModel(displayInfoId, displayType),
 });
 
 const transmog = createTransmog({

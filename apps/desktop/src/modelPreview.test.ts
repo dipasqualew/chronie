@@ -25,9 +25,9 @@ describe("previewFor", () => {
     });
   });
 
-  // The eight slots in between are texture painted onto the character's body — there is no
-  // mesh to show alone, and on a full set that is most of the rows. Saying so is the whole
-  // difference between "this app cannot do it" and "there is nothing there to do".
+  // The slots in between have no mesh to show alone — they are texture painted onto the
+  // character's body — so they are shown on one. On a full set that is most of the rows, and
+  // it is the difference between a wardrobe of icons and a wardrobe.
   it.each<[string, number]>([
     ["chest", 2],
     ["waist", 3],
@@ -37,19 +37,27 @@ describe("previewFor", () => {
     ["hands", 7],
     ["back", 8],
     ["tabard", 9],
-  ])("shows the %s slot as its icon, and says why", (_, displayType) => {
+    ["shirt", 10],
+  ])("shows the %s slot worn on the character", (_, displayType) => {
     expect(previewFor(appearance({ displayType, hasModel: false }))).toEqual({
-      kind: "icon",
-      iconFileDataId: 130001,
-      note: REASONS.painted,
+      kind: "worn",
+      displayInfoId: 900001,
+      displayType,
     });
   });
 
-  // A weapon slot with no model is not armour painted on a body, so it gets the plainer
-  // reason rather than one that would be untrue of it.
-  it("does not blame the character's skin for a weapon with no model", () => {
+  // A weapon slot with no model is not armour painted on a body, so it is not worn on one —
+  // and it gets the plainer reason rather than one that would be untrue of it.
+  it("does not put a weapon with no model on the character", () => {
     expect(previewFor(appearance({ displayType: 11, hasModel: false })))
-      .toMatchObject({ kind: "icon", note: REASONS.none });
+      .toEqual({ kind: "icon", iconFileDataId: 130001, note: REASONS.none });
+  });
+
+  // The four slots that do have geometry keep showing it. A helm worn on a character would be
+  // a bald head until the attachment work lands, which is less than the helm itself.
+  it("shows a helm as the helm rather than on the character", () => {
+    expect(previewFor(appearance({ displayType: 0, hasModel: true })))
+      .toMatchObject({ kind: "model" });
   });
 
   // An appearance the game encrypts has no icon either — the row knows nothing about it at
