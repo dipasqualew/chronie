@@ -8,21 +8,38 @@ local _, ns = ...
 ---@field standing string? The level's name — "Honored", "Renown 12", "Best Friend".
 ---@field current integer Progress into the current level, never past its end.
 ---@field max integer Reputation the level takes to finish; 0 when the client offered none.
+---@field rank integer? How far up this faction's own ladder the level sits; see below.
+---@field system string? Which ladder that is: "renown", "paragon", "friendship", "reaction".
 
 ---Clamps a bar into shape. The client can report a standing below the level's own floor
 ---for a heartbeat after a level-up, and a value past its ceiling while a paragon reward
 ---waits to be collected; either would draw a bar running off its own ends.
+---
+---`rank` is what makes two characters' standings with the same faction comparable, which
+---is the only thing a name cannot do: "Renown 12" and "Honored" do not sort, and nothing
+---in the client says which of them is further along. It is only ever meaningful against
+---the same faction on the same ladder, which is why `system` travels with it — a rank
+---read off the reaction ladder runs 1 to 8 while a friendship's runs into the thousands,
+---and comparing the two would call the smaller number the worse standing.
 ---@param label string?
 ---@param current number?
 ---@param max number?
+---@param rank number? Monotone within one faction's ladder; higher is further along.
+---@param system string? Which ladder `rank` was read from.
 ---@return FactionStanding?
-local function bar(label, current, max)
+local function bar(label, current, max, rank, system)
     max = math.max(math.floor(max or 0), 0)
     current = math.min(math.max(math.floor(current or 0), 0), max)
     if label == nil and max == 0 then
         return nil
     end
-    return { standing = label, current = current, max = max }
+    return {
+        standing = label,
+        current = current,
+        max = max,
+        rank = rank and math.floor(rank) or nil,
+        system = rank and system or nil,
+    }
 end
 
 ---Reduces whatever the client knows about one faction to a single bar.
@@ -52,24 +69,34 @@ function ns.factionStanding(sources)
         -- built into its renown frames rather than exposed as a string, so this is the one
         -- standing whose name is not localised.
         return bar("Renown " .. renown.renownLevel,
-            renown.renownReputationEarned, renown.renownLevelThreshold)
+            renown.renownReputationEarned, renown.renownLevelThreshold,
+            renown.renownLevel, "renown")
     end
 
     local paragon = sources.paragon
     if paragon and (paragon.threshold or 0) > 0 then
         -- Paragon value accumulates for the life of the character and never resets, so
-        -- what is left over past the last reward is the part the bar shows.
-        return bar("Paragon", (paragon.value or 0) % paragon.threshold, paragon.threshold)
+        -- what is left over past the last reward is the part the bar shows. The rank is
+        -- the reaction the character had to reach to be paragon at all — every paragon
+        -- character sits at the top of the ladder, so rank alone says nothing about which
+        -- of two is further, and the rewards already collected are not on offer here.
+        local reaction = sources.faction and sources.faction.reaction
+        return bar("Paragon", (paragon.value or 0) % paragon.threshold, paragon.threshold,
+            reaction or 8, "paragon")
     end
 
     local friendship = sources.friendship
     if friendship and (friendship.friendshipFactionID or 0) > 0 then
         local floor = friendship.reactionThreshold or 0
         local ceiling = friendship.nextThreshold
+        -- The raw standing rather than a rank index: the client numbers friendship ranks
+        -- nowhere a caller can read, and the reputation behind them only ever goes up.
+        local rank = friendship.standing
         if not ceiling or ceiling <= floor then
-            return bar(friendship.reaction, 1, 1)
+            return bar(friendship.reaction, 1, 1, rank, "friendship")
         end
-        return bar(friendship.reaction, (friendship.standing or 0) - floor, ceiling - floor)
+        return bar(friendship.reaction, (friendship.standing or 0) - floor, ceiling - floor,
+            rank, "friendship")
     end
 
     local faction = sources.faction
@@ -79,9 +106,10 @@ function ns.factionStanding(sources)
     local floor = faction.currentReactionThreshold or 0
     local ceiling = faction.nextReactionThreshold
     if not ceiling or ceiling <= floor then
-        return bar(sources.reactionLabel, 1, 1)
+        return bar(sources.reactionLabel, 1, 1, faction.reaction, "reaction")
     end
-    return bar(sources.reactionLabel, (faction.currentStanding or 0) - floor, ceiling - floor)
+    return bar(sources.reactionLabel, (faction.currentStanding or 0) - floor, ceiling - floor,
+        faction.reaction, "reaction")
 end
 
 ---The function `source[name]`, or nil when this client build does not have it.

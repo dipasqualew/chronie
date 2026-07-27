@@ -29,6 +29,8 @@ local _, ns = ...
 ---@field level fun(): integer?
 ---@field expansions ExpansionIndex? Resolves the location to the expansion that shipped it.
 ---@field experienceState fun(): table? `{ level, xp, xpMax }` right now, for the tally's baseline.
+---@field holdings HoldingsStore? Where this character's holdings and standings are written
+---down for the rest of the account to read.
 
 ---@param character string
 ---@param info InstanceInfo
@@ -65,6 +67,15 @@ function ns.newSegmentTracker(deps)
 
         local kept
         if tally.hasEvents() then
+            local summary = tally.summary()
+            -- Filed before the segment is, and from the same summary: what the character
+            -- was left holding is a fact about the character rather than about the segment,
+            -- and the account's rollup is the only reader of it. Segment close is also the
+            -- last moment it can be written — logout flushes through here too, and
+            -- SavedVariables are only handed to disk once that has happened.
+            if deps.holdings then
+                deps.holdings.record(current.character, summary)
+            end
             kept = segmentLog.record({
                 character = current.character,
                 classFile = current.classFile,
@@ -77,7 +88,7 @@ function ns.newSegmentTracker(deps)
                 latestExpansionTier = current.latestExpansionTier,
                 startedAt = current.startedAt,
                 endedAt = now(),
-                summary = tally.summary(),
+                summary = summary,
             })
         end
 
