@@ -16,7 +16,7 @@
 //!     apps/desktop/fixtures/transmog/helm.glb
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog character \
 //!     apps/desktop/fixtures/transmog/character.glb
-//! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog worn/900012/2 \
+//! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog worn/900012/3 \
 //!     apps/desktop/fixtures/transmog/robe.glb
 //! ```
 

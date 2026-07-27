@@ -1,8 +1,9 @@
 //! Prints the columns around `ItemDisplayInfo.GeosetGroup` for named items in a real install.
 //!
-//! `ModelResourcesID` at 10 and `ModelMaterialResourcesID` at 11 were read off an install;
-//! `GeosetGroup` at 12 and `ModelType` at 13 were taken from the community's definitions and
-//! never checked. This is how that gets settled, and what to run again after a patch.
+//! The table ends in a run of array columns that look alike, and two of them were taken from
+//! the community's definitions rather than read: this is what settled them, on 12.0.5.67, and
+//! what to run again after a patch. `GeosetGroup` is 13 and `ModelType` is 12 — the other way
+//! round from where they were, which is written down in `docs/game-files.md`.
 //!
 //! ```sh
 //! cargo run --example dump_display_columns -- "/Applications/World of Warcraft"
@@ -12,25 +13,26 @@
 //! Pass `--fixtures <dir>` instead to read a directory of `<fdid>.db2` files. With no names it
 //! looks for one item of each of the four shapes that tell the columns apart.
 //!
-//! What right looks like, per row printed:
+//! What right looks like, and each of these rules out something the others do not:
 //!
+//! - **Six values, not two.** The shape line says how many one entry of each column holds.
+//!   `GeosetGroup[6]` against `ModelType[2]` is the whole difference between 13 and 12.
 //! - **Small numbers.** A geoset value is 0 to 98, and the game writes -1 where a row drives
 //!   no geoset at all. A column of five- and six-digit numbers is a resource id, not this.
-//! - **Six of them.** The column is 192 bits wide where the two above it are 64: an array of
-//!   six 32-bit values against their two.
 //! - **A robe that is not a chestpiece.** Both are worn in the chest slot, and the chest
 //!   slot's six values drive sleeves, chest, robe, torso and arm upper in that order. A robe
 //!   leaves the chest group at 0 and puts something in the robe group; a breastplate does the
 //!   opposite. No other column in the table looks like that.
 //!
-//! If the numbers are wrong, the column moved: `transmog::display_column::GEOSET_GROUP` is
-//! what to change, and the symptom in the app is armour that swaps no geometry — a robe
-//! painted over legs that stay bare.
+//! The `worn:` line under each row is what the app itself makes of it, which is the check that
+//! the numbers are being turned into geosets a body could hold. If they are wrong, the column
+//! moved: `transmog::display_column::GEOSET_GROUP` is what to change, and the symptom in the
+//! app is armour that swaps no geometry — a robe painted over legs that stay bare.
 
 use std::collections::HashMap;
 
 use chronie_desktop_lib::db2::Db2;
-use chronie_desktop_lib::{casc, transmog};
+use chronie_desktop_lib::{casc, transmog, worn};
 
 /// `ItemModifiedAppearance` and `ItemAppearance`, the two hops from an item to its display.
 const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
@@ -229,6 +231,27 @@ fn main() {
             let groups = groups_of(display_type);
             if !groups.is_empty() {
                 println!("           a geoset column would read: {}", groups.join(", "));
+            }
+            // And what the app itself makes of the row, which is the other half of the check:
+            // the column can only be right if what comes out of it is geosets the body holds.
+            match worn::of(files.as_ref(), display_info_id, display_type) {
+                Ok(worn) => {
+                    let switched: Vec<String> = worn
+                        .geosets
+                        .iter()
+                        .map(|geoset| format!("{} in group {}", geoset.geoset, geoset.group))
+                        .collect();
+                    println!(
+                        "           worn: {} textures, geosets {}",
+                        worn.textures.len(),
+                        if switched.is_empty() {
+                            "none".to_string()
+                        } else {
+                            switched.join(", ")
+                        }
+                    );
+                }
+                Err(error) => println!("           worn: {error}"),
             }
         }
         if shown == 0 {
