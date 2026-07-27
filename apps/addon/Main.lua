@@ -9,6 +9,9 @@ local addonName, ns = ...
 ---@field unitLevel fun(unit: string): integer?
 ---@field realmName fun(): string
 ---@field now fun(): integer
+---@field after fun(seconds: number, callback: fun()) Runs `callback` once, that many seconds
+---from now. The client's own scheduler, and the only clock in here with a resolution finer
+---than `now`'s whole second.
 ---@field formatDate fun(format: string, timestamp: integer): string
 ---@field getNumSavedInstances fun(): integer
 ---@field getSavedInstanceInfo fun(index: integer): ...
@@ -486,24 +489,43 @@ function ns.main(env)
         return entry
     end
 
-    ---Photographs something worth remembering, if the player's rules say it is one.
+    ---One photograph per moment, taken once the moment has finished announcing itself.
     ---
     ---The limiter is started only once a capture has actually happened. The entry log has
     ---refusals of its own — a press in the same second, a world that has not finished
     ---loading — and spending a minute of silence on a picture that was never taken would
     ---lose the next thing that was genuinely worth one.
+    local captureBurst = ns.newCaptureBurst({
+        after = env.after,
+        capture = function(decision)
+            -- Asked again rather than trusted from when the decision was made. Half a
+            -- second is long enough for the world to have gone away — a keystone that ends
+            -- on time completes the run and then drops a loading screen over the teleport
+            -- out — and the picture that comes back from behind one is a black rectangle.
+            -- Nothing is queued for later: the moment has gone, and the limiter is left
+            -- untouched so the next real one is not silenced by a shot never taken.
+            if not captureTriggers.visible() then
+                return
+            end
+            local entry = capture({ trigger = decision.trigger, achievement = decision.achievement })
+            if entry then
+                captureTriggers.taken()
+            end
+        end,
+    })
+
+    ---Offers something worth remembering to the burst, if the player's rules say it is one.
+    ---
+    ---Everything that can be settled at the instant the event fired is settled here, while
+    ---it is still true: the allowlist, the rate limit and whether the world was on screen.
+    ---What the burst is left holding is a decision that was good when it was made, and all
+    ---it adds is which one of them the moment gets photographed for.
     ---@param event CaptureEvent
-    ---@return EntryRecord?
     local function autoCapture(event)
         local decision = captureTriggers.consider(event)
-        if not decision then
-            return nil
+        if decision then
+            captureBurst.offer(decision)
         end
-        local entry = capture({ trigger = decision.trigger, achievement = decision.achievement })
-        if entry then
-            captureTriggers.taken()
-        end
-        return entry
     end
 
     local segmentWindow = ns.newDetailWindow({
@@ -1124,6 +1146,12 @@ if CreateFrame then
             unitLevel = UnitLevel,
             realmName = GetRealmName,
             now = time,
+            -- Wrapped rather than handed over as a bare reference, so the seam is a plain
+            -- two-argument function a fake can be written against without knowing that the
+            -- client spells it on a namespace table.
+            after = function(seconds, callback)
+                C_Timer.After(seconds, callback)
+            end,
             formatDate = date,
             getNumSavedInstances = GetNumSavedInstances,
             getSavedInstanceInfo = GetSavedInstanceInfo,

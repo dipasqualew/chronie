@@ -610,6 +610,80 @@ function fake.newClock(start)
     return clock
 end
 
+---A stand-in for `C_Timer.After`, with the passage of time left to the test.
+---
+---Nothing here runs on its own. A callback the addon schedules sits in the queue until the
+---test says so, which is what lets a spec assert on the gap — that the shutter has *not*
+---been pressed yet — as easily as on what happens after it.
+---
+---`settle` rather than `advance` is what the specs mostly reach for, and the reason is the
+---clock's resolution. `now` is `time()`, whole seconds, because that is what the client
+---gives the addon and what a screenshot's filename is named after; a half-second window
+---cannot be expressed by moving it at all. So settling runs what is waiting and leaves the
+---clock alone, which is also the truth in the game most of the time: the window opens and
+---closes inside one second, and every entry involved is stamped with it.
+---@param clock table From fake.newClock; what a delay is measured against.
+---@return table `{ after, settle, run, pending }`
+function fake.newScheduler(clock)
+    ---@type table[]
+    local queue = {}
+
+    ---Runs everything in the queue that `accepts` says is due, oldest deadline first, and
+    ---keeps going while running them puts more in — a burst that closes into a capture that
+    ---schedules something else has to reach the end of that chain, not stop one link in. The
+    ---cap is there so a callback that reschedules itself forever fails the test loudly
+    ---instead of hanging the suite.
+    ---@param accepts fun(deadline: number): boolean
+    ---@return integer how many callbacks ran
+    local function drain(accepts)
+        local ran = 0
+        for _ = 1, 100 do
+            local soonest, index
+            for position, entry in ipairs(queue) do
+                if accepts(entry.at) and (not soonest or entry.at < soonest.at) then
+                    soonest, index = entry, position
+                end
+            end
+            if not soonest then
+                return ran
+            end
+            table.remove(queue, index)
+            soonest.callback()
+            ran = ran + 1
+        end
+        error("fake scheduler drained 100 callbacks without emptying: something reschedules itself")
+    end
+
+    return {
+        ---@param seconds number
+        ---@param callback fun()
+        after = function(seconds, callback)
+            queue[#queue + 1] = { at = clock.now() + seconds, callback = callback }
+        end,
+
+        ---Every callback the addon is waiting on runs now, whatever its deadline said.
+        ---@return integer how many ran
+        settle = function()
+            return drain(function()
+                return true
+            end)
+        end,
+
+        ---Only the callbacks the clock has actually reached, for a test that cares which.
+        ---@return integer how many ran
+        run = function()
+            return drain(function(deadline)
+                return deadline <= clock.now()
+            end)
+        end,
+
+        ---@return integer how many callbacks are still waiting
+        pending = function()
+            return #queue
+        end,
+    }
+end
+
 ---A stand-in for the client's `C_Map`, shaped the way the real one answers.
 ---
 ---Both of its refusals are modelled, because both are ordinary rather than exceptional.
@@ -722,6 +796,7 @@ function fake.newEnv(options)
     local specialFrames = options.specialFrames or {}
     local db = options.db or {}
     local clock = options.clock or fake.newClock(options.now or 1000)
+    local scheduler = fake.newScheduler(clock)
     local formatDate, formatDateCalls = fake.newFormatDate()
     local getNumSavedInstances, getSavedInstanceInfo, savedInstanceCalls,
         getSavedInstanceEncounterInfo, encounterCalls = fake.newSavedInstances(options.savedInstances)
@@ -833,6 +908,7 @@ function fake.newEnv(options)
             return options.realmName
         end,
         now = clock.now,
+        after = scheduler.after,
         formatDate = formatDate,
         getNumSavedInstances = getNumSavedInstances,
         getSavedInstanceInfo = getSavedInstanceInfo,
@@ -1041,6 +1117,12 @@ function fake.newEnv(options)
         levelAsked = levelAsked,
         db = db,
         clock = clock,
+        ---Everything the addon has asked the client to run later — see fake.newScheduler.
+        scheduler = scheduler,
+        ---Let every delay the addon is waiting on elapse. What a test calls after firing an
+        ---event whose photograph is taken half a second later.
+        ---@return integer how many callbacks ran
+        settle = scheduler.settle,
         specialFrames = specialFrames,
         formatDateCalls = formatDateCalls,
         slashRegistrations = slashRegistrations,
