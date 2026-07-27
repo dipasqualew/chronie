@@ -38,10 +38,15 @@ function listCell<T>(entries: T[] | undefined, asText: (items: T[]) => string): 
   return `<span title="${escapeHtml(asText(list))}">${escapeHtml(shown)}</span>${rest}`;
 }
 
+// A gain, then where it left the character: the standing a faction now sits at, and the
+// holding a currency was left at. Both are dropped rather than faked when the client had
+// nothing to say, so a row never claims a standing of none or a holding of zero.
 const repText = (gains?: ReputationGain[]): string =>
-  (gains || []).map((gain) => `${gain.faction} +${gain.amount.toLocaleString()}`).join(", ");
+  (gains || []).map((gain) => `${gain.faction} +${gain.amount.toLocaleString()}` +
+    (gain.standing ? ` (${gain.standing})` : "")).join(", ");
 const currencyText = (gains?: CurrencyGain[]): string =>
-  (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}`).join(", ");
+  (gains || []).map((gain) => `${gain.name} ${signed(gain.amount)}` +
+    (gain.total == null ? "" : ` (${gain.total.toLocaleString()})`)).join(", ");
 const achievementText = (earned?: AchievementEvent[]): string =>
   (earned || []).map((event) => `${event.name} (${event.accountFirst ? "account first" : "character first"})`).join(", ");
 const levelUpText = (events?: LevelUpEvent[]): string =>

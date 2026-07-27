@@ -58,6 +58,29 @@ class SegmentDetail {
     return this.dialog.locator(".earned-icon img");
   }
 
+  /**
+   * The line one gain is written on, found by the thing it is a gain of.
+   *
+   * Every section of the modal lists its events, so a gain is a list item wherever it lives,
+   * and the name on it is the only thing a reader would use to find it.
+   */
+  gainFor(name: string): Locator {
+    return this.dialog.getByRole("listitem").filter({ hasText: name });
+  }
+
+  /**
+   * The bar under a reputation gain, addressed the way a screen reader announces it.
+   *
+   * This is the whole reason the standing is drawn as a `<progress>` rather than a pair of
+   * divs: a bar with a name, a value and a length is something the accessibility tree
+   * already carries, so the test can read exactly what a reader is told.
+   */
+  standingBars(name?: string | RegExp): Locator {
+    return name === undefined
+      ? this.dialog.getByRole("progressbar")
+      : this.dialog.getByRole("progressbar", { name });
+  }
+
   next(): Promise<void> {
     return this.dialog.getByRole("button", { name: "Next segment" }).click();
   }
@@ -102,6 +125,41 @@ class ActivityEditor {
   async done(): Promise<void> {
     await this.dialog.getByRole("button", { name: "Done" }).click();
     await expect(this.dialog).toBeHidden();
+  }
+}
+
+/**
+ * The details view: the ledger, where every segment is a row and nothing is summarised away.
+ *
+ * A table is a structure the accessibility tree already describes, so a cell is asked for by
+ * what it says rather than by where it sits; only the count of rows is scoped to the body,
+ * because the header is a row too and is not one of the segments.
+ */
+class DetailsTable {
+  readonly page: Page;
+  readonly rows: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.rows = page.locator("#rows tr");
+  }
+
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Details" }).click();
+    await expect(this.page.getByRole("heading", { name: "Details" })).toBeVisible();
+  }
+
+  search(): Locator {
+    return this.page.getByLabel("Filter segments");
+  }
+
+  character(): Locator {
+    return this.page.getByLabel("Character");
+  }
+
+  /** A cell of the ledger, found the way a reader finds it: by what it says. */
+  cellSaying(text: string): Locator {
+    return this.page.getByRole("cell", { name: text });
   }
 }
 
@@ -267,6 +325,7 @@ class TransmogDetail {
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
+  ledger: DetailsTable;
   transmog: TransmogView;
   transmogDetail: TransmogDetail;
 }>({
@@ -275,6 +334,9 @@ const test = base.extend<{
   },
   editor: async ({ page }, use) => {
     await use(new ActivityEditor(page));
+  },
+  ledger: async ({ page }, use) => {
+    await use(new DetailsTable(page));
   },
   transmog: async ({ page }, use) => {
     await use(new TransmogView(page));
@@ -317,12 +379,23 @@ const mockDesktop: E2EMock = {
         seconds: 1200,
         lootValue: 15000,
         goldDiff: 900,
-        currencyTotal: 0,
-        reputationTotal: 0,
+        currencyTotal: 2,
+        reputationTotal: 50,
         housingXP: 0,
         transmogs: [],
-        currencies: [],
-        reputation: [],
+        // The other half of the story: gains the client said nothing else about. An
+        // item-based currency counted before its first change has no holding to report, and
+        // a faction read off a chat line on a character that has never met it has no
+        // standing. Neither is a holding of zero or a standing at the bottom of a bar, so
+        // neither may draw as one.
+        // A third case sits beside them: a faction the client named a level for and gave no
+        // length to. That is a standing worth printing and a bar with nothing to draw, and a
+        // bar at zero would announce the character as nowhere in a level they are inside.
+        currencies: [{ id: 8, name: "Rustward Scrip", amount: 2 }],
+        reputation: [
+          { faction: "Lamplighters", amount: 10 },
+          { faction: "Deepwater Wardens", amount: 40, standing: "Exalted" },
+        ],
         achievements: [],
         levelUps: [{ level: 9, at: EVENING + 3000 }],
         mounts: [],
@@ -380,8 +453,15 @@ const mockDesktop: E2EMock = {
           },
         ],
         transmogs: [{ id: 101, at: EVENING + 1400, newAppearance: true }],
-        currencies: [{ id: 7, name: "Glass Token", amount: 4 }],
-        reputation: [{ faction: "Cavern Cartographers", amount: 25 }],
+        // Both gains carry where they left the character: the tokens now in the bag, and the
+        // level the faction now sits at with the distance into it. Those are the numbers a
+        // gain on its own cannot give — whether there is enough to buy anything, and how far
+        // "+25" actually moved the standing.
+        currencies: [{ id: 7, name: "Glass Token", amount: 4, total: 12450 }],
+        reputation: [{
+          faction: "Cavern Cartographers", amount: 25,
+          standing: "Honored", current: 4200, max: 12000,
+        }],
         achievements: [
           { id: 9, name: "Into the Light", at: EVENING + 1400, accountFirst: false },
           // One the install can say nothing about, which is what an achievement earned on a
@@ -879,6 +959,35 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(unknown).not.toContainText("points");
   });
 
+  // "+4" and "+25" say what the run paid out and nothing about what that came to. The
+  // holding beside the gain and the bar under the faction are the half that answers it.
+  await test.step("a gain says where it left the character, not only what it was", async () => {
+    await expect(detail.gainFor("Glass Token")).toContainText("+4 (12,450)");
+
+    const standing = detail.standingBars("Honored with Cavern Cartographers");
+    await expect(standing).toHaveJSProperty("value", 4200);
+    await expect(standing).toHaveJSProperty("max", 12000);
+    await expect(detail.gainFor("Cavern Cartographers")).toContainText("Honored 4,200 / 12,000");
+  });
+
+  // And when the client said nothing, the window says nothing: no empty bracket after the
+  // gain, and no bar at the bottom of a track the character was never on.
+  await test.step("and says none of it when the client never said", async () => {
+    await detail.next();
+    await expect(detail.title()).toHaveText("Copperwood Depths");
+
+    await expect(detail.gainFor("Rustward Scrip")).toContainText("+2");
+    await expect(detail.gainFor("Rustward Scrip")).not.toContainText("(");
+    await expect(detail.gainFor("Lamplighters")).toContainText("+10");
+    // The level is worth saying even where its length is unknown; the bar is not, because a
+    // bar can only be drawn somewhere, and there is nowhere known to draw this one.
+    await expect(detail.gainFor("Deepwater Wardens")).toContainText("Exalted");
+    await expect(detail.standingBars()).toHaveCount(0);
+
+    await detail.previous();
+    await expect(detail.title()).toHaveText("Glass Caverns");
+  });
+
   await test.step("next and previous walk the play session, not all of history", async () => {
     await detail.next();
     await expect(detail.title()).toHaveText("Copperwood Depths");
@@ -982,22 +1091,35 @@ test("lets the player correct what Chronie guessed a segment was", async ({ page
   });
 });
 
-test("lists every segment on the details view and filters it", async ({ page, detail }) => {
-  await page.getByRole("button", { name: "Details" }).click();
-  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
-  await expect(page.locator("#rows tr")).toHaveCount(3);
+test("lists every segment on the details view and filters it", async ({ detail, ledger }) => {
+  await ledger.open();
+  await expect(ledger.rows).toHaveCount(3);
 
-  await page.getByLabel("Filter segments").fill("copperwood");
-  await expect(page.locator("#rows tr")).toHaveCount(2);
+  // The ledger abbreviates, but not to the point of dropping what a gain came to: the
+  // holding follows the currency and the standing follows the faction, in the one cell each
+  // of them gets. A gain the client said nothing more about gets nothing more said.
+  await test.step("a gain names what it left behind, where there was anything to name", async () => {
+    await expect(ledger.cellSaying("Glass Token +4 (12,450)")).toBeVisible();
+    await expect(ledger.cellSaying("Cavern Cartographers +25 (Honored)")).toBeVisible();
+    await expect(ledger.cellSaying("Rustward Scrip")).not.toContainText("(");
+    // One cell, both factions: the one the client could not place says only what was gained,
+    // and the one it named a level for says the level even though no bar could be drawn for
+    // it. The table has room for the name and never had room for the bar.
+    await expect(ledger.cellSaying("Lamplighters"))
+      .toHaveText("Lamplighters +10, Deepwater Wardens +40 (Exalted)");
+  });
 
-  await page.getByLabel("Filter segments").fill("");
-  await page.getByLabel("Character").selectOption("Aster-Vale");
-  await expect(page.locator("#rows tr")).toHaveCount(1);
-  await expect(page.locator("#rows")).toContainText("Glass Caverns");
+  await ledger.search().fill("copperwood");
+  await expect(ledger.rows).toHaveCount(2);
+
+  await ledger.search().fill("");
+  await ledger.character().selectOption("Aster-Vale");
+  await expect(ledger.rows).toHaveCount(1);
+  await expect(ledger.rows).toContainText("Glass Caverns");
 
   // From here the modal walks what the table is showing, which is the one row left.
   await test.step("a row opens the same detail the timeline does", async () => {
-    await page.locator("#rows tr").first().click();
+    await ledger.rows.first().click();
     await expect(detail.title()).toHaveText("Glass Caverns");
     await expect(detail.position()).toHaveText("1 of 1");
   });

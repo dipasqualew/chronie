@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_activities.sql"),
     include_str!("../migrations/0003_lockouts.sql"),
     include_str!("../migrations/0004_equipsets.sql"),
+    include_str!("../migrations/0005_holdings.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1129,13 +1130,14 @@ fn insert_outcomes(
         };
         transaction
             .execute(
-                "INSERT INTO currency_gains (segment_id, currency_id, name, amount)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO currency_gains (segment_id, currency_id, name, amount, total)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     segment_id,
                     currency_id,
                     optional_text(event, "name").unwrap_or("Unknown"),
-                    integer(event, "amount")
+                    integer(event, "amount"),
+                    optional_integer(event, "total")
                 ],
             )
             .map_err(|error| error.to_string())?;
@@ -1147,9 +1149,17 @@ fn insert_outcomes(
         };
         transaction
             .execute(
-                "INSERT INTO reputation_gains (segment_id, faction, amount)
-                 VALUES (?1, ?2, ?3)",
-                params![segment_id, faction, integer(event, "amount")],
+                "INSERT INTO reputation_gains (
+                     segment_id, faction, amount, standing, standing_current, standing_max
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    segment_id,
+                    faction,
+                    integer(event, "amount"),
+                    optional_text(event, "standing"),
+                    optional_integer(event, "current"),
+                    optional_integer(event, "max")
+                ],
             )
             .map_err(|error| error.to_string())?;
     }
@@ -1728,7 +1738,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     }
 
     load_rows!(
-        "SELECT segment_id, currency_id, name, amount
+        "SELECT segment_id, currency_id, name, amount, total
          FROM currency_gains ORDER BY segment_id, name",
         "currencies",
         |row| Ok((
@@ -1736,19 +1746,23 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
             serde_json::json!({
                 "id": row.get::<_, i64>(1)?,
                 "name": row.get::<_, String>(2)?,
-                "amount": row.get::<_, i64>(3)?
+                "amount": row.get::<_, i64>(3)?,
+                "total": row.get::<_, Option<i64>>(4)?
             })
         ))
     );
     load_rows!(
-        "SELECT segment_id, faction, amount
+        "SELECT segment_id, faction, amount, standing, standing_current, standing_max
          FROM reputation_gains ORDER BY segment_id, faction",
         "reputation",
         |row| Ok((
             row.get::<_, i64>(0)?,
             serde_json::json!({
                 "faction": row.get::<_, String>(1)?,
-                "amount": row.get::<_, i64>(2)?
+                "amount": row.get::<_, i64>(2)?,
+                "standing": row.get::<_, Option<String>>(3)?,
+                "current": row.get::<_, Option<i64>>(4)?,
+                "max": row.get::<_, Option<i64>>(5)?
             })
         ))
     );
@@ -2614,6 +2628,131 @@ ChronieDB = {{ ["segments"] = {{
             dashboard(&database).unwrap()["segments"][0]["equipsetChanges"],
             serde_json::json!([])
         );
+    }
+
+    /// One segment holding both kinds of gain twice over: once with what the client said the
+    /// character was left with, and once without. The pair is the point — the columns exist
+    /// to tell "the client did not say" apart from "none", and only a file carrying both can
+    /// show that the two survive as different things.
+    const HOLDING_SEGMENT: &str = r#"
+      { ["id"] = "hold-1", ["character"] = "Aster-Vale", ["instance"] = "Glass Caverns",
+        ["instanceType"] = "party", ["endedAt"] = 2000000000, ["startedAt"] = 1999990000,
+        ["currencies"] = {
+          { ["id"] = 3008, ["name"] = "Valorstones", ["amount"] = 15, ["total"] = 12450 },
+          { ["id"] = 2914, ["name"] = "Weathered Relic", ["amount"] = 3 }
+        },
+        ["reputation"] = {
+          { ["faction"] = "Cavern Cartographers", ["amount"] = 250,
+            ["standing"] = "Honored", ["current"] = 4200, ["max"] = 12000 },
+          { ["faction"] = "Lamplighters", ["amount"] = 75 }
+        } }
+    "#;
+
+    /// A gain says what was earned; what the character was left holding is the number that
+    /// says whether it was enough to buy anything, or how far it moved the faction. Both are
+    /// written by the addon and both have to come back out the other side of the database.
+    #[test]
+    fn keeps_what_a_gain_left_the_character_holding() {
+        let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        // Currencies come back ordered by name, so Valorstones leads.
+        let currency = &segment["currencies"][0];
+        assert_eq!(currency["name"], "Valorstones");
+        assert_eq!(currency["amount"], 15);
+        assert_eq!(currency["total"], 12_450);
+
+        let faction = &segment["reputation"][0];
+        assert_eq!(faction["faction"], "Cavern Cartographers");
+        assert_eq!(faction["amount"], 250);
+        assert_eq!(faction["standing"], "Honored");
+        assert_eq!(faction["current"], 4_200);
+        assert_eq!(faction["max"], 12_000);
+    }
+
+    /// The distinction the nullable columns exist for. An item-based currency counted before
+    /// its first change has no holding, and a faction the client will not place has no
+    /// standing — and neither of those is a holding of zero or a standing at the bottom of a
+    /// bar. The key is still there, so nothing downstream has to guess whether it was asked.
+    #[test]
+    fn says_nothing_at_all_rather_than_zero_when_a_gain_carries_no_holding() {
+        let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        let currency = &segment["currencies"][1];
+        assert_eq!(currency["name"], "Weathered Relic");
+        assert_eq!(currency["amount"], 3);
+        assert_eq!(currency["total"], Value::Null);
+        assert!(
+            currency.as_object().expect("a currency object").contains_key("total"),
+            "the key has to be there and null, not missing: {currency}"
+        );
+
+        let faction = &segment["reputation"][1];
+        assert_eq!(faction["faction"], "Lamplighters");
+        assert_eq!(faction["standing"], Value::Null);
+        assert_eq!(faction["current"], Value::Null);
+        assert_eq!(faction["max"], Value::Null);
+        let keys = faction.as_object().expect("a reputation object");
+        for key in ["standing", "current", "max"] {
+            assert!(keys.contains_key(key), "{key} has to be there and null: {faction}");
+        }
+    }
+
+    /// A history collected before the holdings were kept has rows in both tables and no
+    /// columns to put them in. The migration has to widen those tables under the rows that
+    /// are already there rather than demanding a fresh install — and what it cannot know
+    /// about an old row is exactly what a null says.
+    #[test]
+    fn migrates_a_database_written_before_holdings_were_kept() {
+        let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..4] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction
+                .execute_batch(
+                    "INSERT INTO accounts (id, source_key, first_seen_at, last_seen_at)
+                       VALUES (1, 'legacy', 1900000000, 1900000000);
+                     INSERT INTO characters (id, account_id, source_key, name, realm,
+                                             first_seen_at, last_seen_at)
+                       VALUES (1, 1, 'Brin-Vale', 'Brin', 'Vale', 1900000000, 1900000000);
+                     INSERT INTO segments (id, character_id, source_id, ended_day,
+                                           instance_name, instance_type, difficulty_name,
+                                           started_at, ended_at, duration_seconds,
+                                           first_seen_at, last_seen_at)
+                       VALUES (1, 1, 'old-1', '2030-04-14', 'Copperwood', 'none', '',
+                               1899999000, 1900000000, 1000, 1900000000, 1900000000);
+                     INSERT INTO currency_gains (segment_id, currency_id, name, amount)
+                       VALUES (1, 3008, 'Valorstones', 40);
+                     INSERT INTO reputation_gains (segment_id, faction, amount)
+                       VALUES (1, 'Lamplighters', 500);",
+                )
+                .unwrap();
+            transaction.pragma_update(None, "user_version", 4_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let payload = dashboard(&database).unwrap();
+        // Newest first, so the segment just collected leads and the old one follows.
+        assert_eq!(payload["segments"][0]["currencies"][0]["total"], 12_450);
+        let old = &payload["segments"][1];
+        assert_eq!(old["id"], "old-1");
+        assert_eq!(old["currencies"][0]["name"], "Valorstones");
+        assert_eq!(old["currencies"][0]["amount"], 40);
+        assert_eq!(old["currencies"][0]["total"], Value::Null);
+        assert_eq!(old["reputation"][0]["faction"], "Lamplighters");
+        assert_eq!(old["reputation"][0]["amount"], 500);
+        assert_eq!(old["reputation"][0]["standing"], Value::Null);
     }
 
     #[test]
