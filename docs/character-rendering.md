@@ -10,7 +10,8 @@ character's body. There is no mesh to show in isolation.
 
 **Provenance.** Constants marked *verified* were read from build `12.0.5.67` on
 2026-07-26; the attachments, the geoset groups the body actually holds, and the cape on
-2026-07-27. The rest is from [wowdev.wiki](https://wowdev.wiki) and
+2026-07-27; the hands, the shield, and the bone chains that place them on 2026-07-27 as
+well. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
 ## The scope decision, and why it matters
@@ -303,24 +304,61 @@ AFID, BFID
 
 **The position is already in model space.** The format calls it "relative to the bone", and a
 bone's translation track holds one run of keyframes *per animation* — so with none playing there
-is nothing to add. Read off this build, all 43 of the body's attachments state a position
-*exactly equal to their bone's pivot*, which is the same conclusion arriving twice.
+is nothing to add. Read off this build, every attachment that states a position states one
+*exactly equal to its bone's pivot*, which is the same conclusion arriving twice.
 
 **Find an attachment by the id in its record**, not by where it sits in the array: the body's
 43 records are not in id order and the ids run to 74.
 
 The ids are the community's numbering, and the positions this build states for them are what
-say they are right:
+say they are right. `examples/dump_attachments` prints the whole list:
 
 | Id | What | Position, game axes (X forward, Y left, Z up) |
 |---|---|---|
+| 0 | shield | *none stated* — the left forearm, `(-0.059, +0.372, 1.365)` |
+| 1 | hand, right | *none stated* — the right wrist, `(-0.010, -0.566, 1.149)` |
+| 2 | hand, left | *none stated* — the left wrist, `(-0.010, +0.566, 1.149)` |
 | 5 | shoulder, right | `(-0.050, -0.096, 1.631)` |
 | 6 | shoulder, left | `(-0.050, +0.096, 1.631)` |
 | 11 | helm | `(-0.033, 0.000, 1.712)` |
 | 12 | back | `(-0.145, 0.000, 1.540)` |
 
-A mirrored pair at shoulder height, one at the top of the head, one behind the chest — on a
-body whose feet are at Z 0 and whose crown is at Z 1.99.
+A mirrored pair at shoulder height, one at the top of the head, one behind the chest, and a
+mirrored pair at the ends of the arms — on a body whose feet are at Z 0 and whose crown is at
+Z 1.99.
+
+### Ten attachments state no position, and three of them are the ones a weapon needs
+
+The three above are the exception to the paragraph before them, and it is not a small one.
+**The shield, the right hand and the left hold the origin in their records** — as do the two
+spell hands, the base, and four others — **and so do the bones they name.** They are helper
+bones the game *animates* into the hand: with an animation playing, the chain of rotations above
+them carries a point at the origin out to where the fist is, and per-animation translation
+tracks adjust it. A still picture has none of that, so reading the record and stopping puts a
+sword, a shield and everything else a hand holds in a heap between her feet.
+
+What the file still says is where that chain hangs from. **A bone's pivot is in model space and
+in the bind pose it is simply where that bone is** — no parent composition, nothing to
+accumulate — so the first ancestor that states a pivot is the place on the body the attachment
+belongs to:
+
+```
+attachment 1 → bone 193 (origin) → 102 (origin) → 49  = the right wrist
+attachment 2 → bone 198 (origin) → 95  (origin) → 43  = the left wrist
+attachment 0 → bone 188 (origin) → 46  (origin) → 37  = the left forearm, at the elbow joint
+```
+
+**The origin is a sentinel to be generous about.** Bone 102 states `(0, +0.0011, 0)` — a
+rounding of zero rather than a place on a person — and a reader that stopped at "not exactly
+zero" would hang a sword a millimetre off the floor. `m2.rs` treats anything within a centimetre
+of the origin as unstated, which is well under the height of anything real on a body.
+
+**What this does not give is the rotation.** A hand's bone carries no global sequence — the
+table below is the whole of what does — so a weapon is drawn in the axes it was modelled in,
+which is the game's own X forward. On a bind pose whose arms hang at her sides that reads as a
+blade held out level, and it is what the files say without an animation to say otherwise: a
+one-hander and a two-hander in the right hand, a shield across the left forearm. Where it would
+go wrong is subtler than being wrong about a position, and looks like a blade held hilt-first.
 
 ### The bone is not always identity, verified
 

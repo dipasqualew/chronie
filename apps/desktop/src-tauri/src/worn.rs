@@ -42,6 +42,12 @@
 //!
 //! The fourth is the smallest and the only one that takes geometry *away*: a helm hides hair,
 //! ears and facial hair, and `HelmetGeosetData` says which groups, per race.
+//!
+//! And then the one thing none of the four says. A helm hangs where a helm hangs because the
+//! slot decides it, and a **weapon's slot decides nothing**: `ItemAppearance.DisplayType` files
+//! a sword, a bow, a shield and a tome under four numbers that distinguish none of them. Which
+//! hand comes from the item rather than from the display — `ItemSparse.InventoryType`, which
+//! [`crate::transmog`] already reads for the name — and is [`held_in`].
 
 use std::collections::HashMap;
 

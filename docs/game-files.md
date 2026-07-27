@@ -324,7 +324,7 @@ The single most consequential finding, measured across real transmog sets:
 | 0 | head | non-zero | an M2 of its own |
 | 1 | shoulder | non-zero | an M2 of its own |
 | **2–10** | **shirt, chest, waist, legs, feet, wrist, hands, back, tabard** | **0** | **none at all** |
-| 11, 12, 13, 15 | weapons and shields | non-zero | an M2 of its own |
+| 11, 12, 13, 14, 15 | weapons, shields, ammunition | non-zero | an M2 of its own |
 
 Most armour has no model. It is texture painted onto the character's body, plus geoset
 toggles that swap which parts of the body mesh are drawn. On a twelve-piece armour set,
@@ -343,9 +343,56 @@ Swords, staves and daggers are 11, bows and wands 12, shields 13.
 **This is not what the community's definitions say**, which put the chest at 2 and the shirt
 last at 10. Every slot from the chest down sits one higher than that list, because the shirt
 is 2 rather than 10. The set detail view and `worn.rs`'s slot → geoset-group table both follow
-what the install says. 11 upward are still named "weapon or shield" between them rather than
-one by one, because nothing says which of them is the main hand and which the off hand and
-four labelled guesses would read as fact.
+what the install says.
+
+### Which hand: `ItemSparse.InventoryType`, verified
+
+`DisplayType` gets a weapon as far as "a weapon" and no further. 11 is a one-hander and a
+two-hander alike, 15 is a tome and an off-hand weapon, and nothing in any of the four says
+which hand — which is why they were all shown as "weapon or shield" rather than as four
+labelled guesses.
+
+**`ItemSparse.InventoryType` is the way out**, and it costs nothing extra because that table
+is already open for the item's name. It is **column 66**, which was *found* rather than
+trusted: every armour `DisplayType` has exactly one inventory type it can be — a helm is 1, a
+pair of shoulders 3, a cloak 16 — so the right column is the one that agrees with all eleven of
+them at once. On 12.0.5.67, column 66 agrees on 99.83% of the game's 77,356 pieces of armour
+and nothing else in the 68-column table comes within 13%. That search is
+`examples/dump_inventory_types`, and it is what to run again after a patch:
+
+```sh
+cargo run --example dump_inventory_types -- "<install>"
+```
+
+The cross-tab it prints, on that build, is what the naming and the hands both come from:
+
+| `DisplayType` | `InventoryType` | Count | Hand |
+|---|---|---|---|
+| 11 | 13 one-hand | 8,280 | right |
+| 11 | 17 two-hand | 5,573 | right — **one model on one attachment**, not two |
+| 11 | 21 main hand | 220 | right |
+| 11 | 22 off hand | 39 | left |
+| 11 | 23 held in off hand | 231 | left |
+| 11 | 29 profession tool | 151 | right |
+| 12 | 15 ranged | 756 | left — a bow, held where a player holds one |
+| 12 | 25 thrown | 183 | right |
+| 12 | 26 ranged right | 1,851 | right — a gun, a crossbow, a wand |
+| 13 | 14 shield | 1,749 | **neither**: the forearm, attachment 0 |
+| 14 | 24 ammo | 60 | none — arrows are not held |
+| 15 | 23 held in off hand | 1,082 | left |
+| 15 | 30 profession accessory | 7 | left |
+
+Two of those hands are named rather than counted, and are the only guesswork left in it: the
+game keeps 15 and 26 as separate inventory types and calls the second one *ranged right*, which
+is the only thing said anywhere about which hand either goes in. A profession tool and its
+accessory follow the main-hand and off-hand pair beside them. Everything else is the game's own
+word: a shield is a shield and an off hand is an off hand.
+
+**Sheathed is not read at all.** A weapon has two homes — the hand and the back or the hip —
+and `ItemDisplayInfo.SheatheTransformMatrixID` is where the second one's transform lives. The
+detail view shows the drawn weapon, so the sheath attachments (25, 26 and 27 on the body) and
+that column are all deliberately left alone; the trap they set is showing a sword on her back
+while claiming it is in her hand.
 
 ## The character's own skin, verified
 

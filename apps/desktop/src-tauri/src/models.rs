@@ -10,6 +10,12 @@
 //! waist, legs, feet, wrist, hands, back, tabard — has no model at all and is texture painted
 //! onto the character's body, which is the work in `docs/character-rendering.md` rather than
 //! here. Those appearances answer with nothing, and the window keeps showing their icon.
+//!
+//! What is left for this module is narrower than it was, and deliberately so: **every
+//! appearance the game says a place for is now shown worn**, by [`crate::character`]. A model
+//! on its own is what a weapon nothing says a hand for falls back to — an item the game
+//! withholds, and the arrows it files under a weapon slot and nobody holds — because a model
+//! hung at the origin is inside her pelvis and the shape of the thing is better than that.
 
 use std::cell::RefCell;
 
