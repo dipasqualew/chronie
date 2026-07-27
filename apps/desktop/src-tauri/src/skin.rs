@@ -138,6 +138,7 @@ pub struct Skin {
 /// drawn on the flat tone [`crate::character::Atlas::unpainted`] holds — which is what every
 /// body looked like before this chain was read, so the worst case is the old picture rather
 /// than a broken one.
+#[tracing::instrument(name = "skin.of", skip_all)]
 pub fn of(files: &dyn GameFiles) -> Result<Option<Skin>, String> {
     let layers = layers_of(files)?;
     if layers.is_empty() {

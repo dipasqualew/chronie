@@ -498,6 +498,7 @@ pub fn of(
 /// a robe and a pair of legs. Neither is deduplicated on the way in: the priority table is the
 /// game's own answer to the second, and a reader that collapsed by slot first would quietly
 /// drop one of them.
+#[tracing::instrument(name = "worn.of_set", skip_all, fields(pieces = pieces.len()))]
 pub fn of_set(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Worn, String> {
     // Draw order before anything else, because everything below walks this list in order and
     // the textures come out of it stacked. A stable sort, so pieces sharing a layer — the
@@ -703,6 +704,7 @@ struct ModelFiles {
 }
 
 impl ModelFiles {
+    #[tracing::instrument(name = "worn.model_files", skip_all)]
     fn read(files: &dyn GameFiles) -> Result<Self, String> {
         let table = Db2::parse(files.read(MODEL_FILE_DATA)?)?;
         let mut candidates: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -781,6 +783,7 @@ pub fn model_file(files: &dyn GameFiles, resource: u32, slot: usize) -> Result<O
 struct TextureFiles(HashMap<u32, Vec<u32>>);
 
 impl TextureFiles {
+    #[tracing::instrument(name = "worn.texture_files", skip_all)]
     fn read(files: &dyn GameFiles) -> Result<Self, String> {
         let table = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
         let mut named: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -876,6 +879,7 @@ fn hidden_of(files: &dyn GameFiles, drawn: &[(Piece, &Row<'_>)]) -> Result<Vec<u
 /// order the rows, and two appearances that paint the same parts should not differ by the
 /// order their rows happen to sit in. Between appearances the order is the draw order, which is
 /// [`SLOT_LAYER`] and not this.
+#[tracing::instrument(name = "worn.sections", skip_all, fields(display = display_info_id))]
 fn sections(table: &Db2, display_info_id: u32) -> Vec<(u32, u32)> {
     let mut found: Vec<(u32, u32)> = table
         .rows()
@@ -897,6 +901,7 @@ fn sections(table: &Db2, display_info_id: u32) -> Vec<(u32, u32)> {
 /// One function for two tables: `ComponentTextureFileData` and `ComponentModelFileData` are
 /// the same three columns keyed the same way, and the only difference between them is whether
 /// the file behind the id is a picture or a mesh.
+#[tracing::instrument(name = "worn.bodies_in", skip_all, fields(table = table))]
 fn bodies_in(files: &dyn GameFiles, table: u32) -> Result<HashMap<u32, (u32, u32, u32)>, String> {
     let table = Db2::parse(files.read(table)?)?;
     Ok(table

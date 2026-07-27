@@ -170,6 +170,7 @@ impl Atlas {
     ///
     /// Which BLP to hand it is [`crate::skin`]'s question, out of the player's own
     /// customization; this end of it only paints.
+    #[tracing::instrument(name = "atlas.base", skip_all)]
     pub fn base(&mut self, blp: &[u8]) -> Result<(), String> {
         let skin = pixels_of(blp, ATLAS_WIDTH)?;
         self.pixels = image::imageops::resize(&skin, ATLAS_WIDTH, ATLAS_HEIGHT, FilterType::Triangle);
@@ -196,15 +197,18 @@ impl Atlas {
     /// A texture this install cannot produce leaves its part of the body bare rather than
     /// failing the whole character: a chestpiece whose lower torso is missing is still most of
     /// what the reader asked to see, and the alternative is an error where a body should be.
+    #[tracing::instrument(name = "atlas.wear", skip_all, fields(textures = textures.len()))]
     pub fn wear(&mut self, files: &dyn GameFiles, textures: &[ComponentTexture]) {
         for texture in textures {
             let Some(rect) = rect_of(texture.section) else {
                 continue;
             };
-            let Ok(decoded) = files
-                .read(texture.file)
-                .and_then(|blp| pixels_of(&blp, ATLAS_WIDTH))
-            else {
+            let blp = match files.read(texture.file) {
+                Ok(blp) => blp,
+                Err(_) => continue,
+            };
+            let _held = tracing::info_span!("atlas.paint", fdid = texture.file).entered();
+            let Ok(decoded) = pixels_of(&blp, ATLAS_WIDTH) else {
                 continue;
             };
             let scaled =
@@ -261,6 +265,7 @@ pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
 /// whose pieces is one of those has nothing to show, and the window keeps the icons it has. An
 /// outfit of no pieces at all is the same answer arrived at the other way, and is what taking
 /// everything off comes to — the bare body is [`model_of`], and the window already holds it.
+#[tracing::instrument(name = "character.worn_set", skip_all, fields(pieces = pieces.len()))]
 pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Result<Value, String> {
     let worn = crate::worn::of_set(files, pieces)?;
     if worn.is_empty() {
@@ -274,14 +279,22 @@ pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Resu
 ///
 /// `worn` is the one appearance being shown, when there is one. Nothing else about the body
 /// changes with it: the same mesh, the same UVs, the same atlas, one layer deeper.
+#[tracing::instrument(name = "character.glb", skip_all)]
 pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
     let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
     let skin = model
         .skin_file_data_id()
         .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
-    let mesh = dressed(&model.with_skin(&files.read(skin)?)?, worn);
+    let mesh = {
+        let _held = tracing::info_span!("character.dressed").entered();
+        dressed(&model.with_skin(&files.read(skin)?)?, worn)
+    };
 
-    let painted = atlas(files, worn)?.png()?;
+    let painted = {
+        let atlas = atlas(files, worn)?;
+        let _held = tracing::info_span!("character.atlas_png").entered();
+        atlas.png()?
+    };
     let cape = worn.and_then(|worn| worn.cape).and_then(|fdid| decode_file(files, fdid));
     let body = |paint| match paint {
         // The model's own textures, which on a body are the few things not customized.
@@ -310,6 +323,7 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
         })
         .collect();
 
+    let _writing = tracing::info_span!("character.assemble").entered();
     let mut pieces = vec![glb::Piece::only(&mesh, &body)];
     for ((piece, at, _), painter) in hung.iter().zip(painters.iter()) {
         pieces.push(glb::Piece {
@@ -335,6 +349,7 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
 /// piece that cannot be placed — and a pauldron drawn at the origin, which is inside her
 /// pelvis, is worse than a pauldron not drawn.
 #[allow(clippy::type_complexity)]
+#[tracing::instrument(name = "character.hung_on", skip_all)]
 fn hung_on(
     files: &dyn GameFiles,
     body: &Model,
@@ -389,6 +404,7 @@ fn hung_on(
 /// and will not decode: that is either a build whose columns have moved or this app being
 /// wrong about BLP, and a body quietly back to being a mannequin hides both. See
 /// [`crate::skin::of`].
+#[tracing::instrument(name = "character.atlas", skip_all)]
 fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
     let mut atlas = Atlas::unpainted();
     if let Some(skin) = crate::skin::of(files)? {

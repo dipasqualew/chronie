@@ -34,7 +34,20 @@ tauri-plugin-dialog = "2.0.0"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2.0.1"
 tempfile = "3.12.0"
+# Spans, and nothing that collects them. `tracing`'s macros compile to a check against a
+# global that no subscriber has set, so the shipped app carries the instrumentation at
+# roughly the cost of the branch — and `examples/trace_render` is where a subscriber gets
+# installed and the OpenTelemetry stack gets pulled in.
+tracing = "0.1.44"
 wow-blp = "0.3.2"
 
 [dev-dependencies]
+# The collecting half, which only the tracing example builds. Kept out of `[dependencies]`
+# deliberately: OTLP drags in an HTTP client and a protobuf codec, and a segment collector
+# that ships those to draw a character would be paying for a measurement nobody took.
+opentelemetry = "0.32.0"
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
 tempfile = "3.12.0"
+tracing-opentelemetry = "0.33.0"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
