@@ -3,6 +3,7 @@ use crate::captures::{self, Marker, Stored, Wanted};
 use crate::combatlog;
 use crate::icons;
 use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
+use crate::placement;
 use crate::retention;
 use chrono::{DateTime, Datelike, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -29,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0011_gold.sql"),
     include_str!("../migrations/0012_log_retention.sql"),
     include_str!("../migrations/0013_account_wide_currencies.sql"),
+    include_str!("../migrations/0014_position_track.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2294,6 +2296,128 @@ fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/* ---------- placing what the client would not ---------- */
+
+/// Fills in where a capture was taken, from the track, for the captures the client left blank.
+///
+/// This is what the position track is *for*. A screenshot taken in the open world arrives with a
+/// map and a point on it, because `C_Map.GetPlayerMapPosition` answers out there; one taken
+/// inside an instance arrives with the map and nothing else, and the combat log is the only
+/// record of where the player was standing. Screenshots and memories are the same row with the
+/// picture left out, so one pass covers both.
+///
+/// Run after [`ingest_logs`] rather than beside `link_captures`, because both halves have to be
+/// in before either can find the other: the capture arrives at logout, the points that surround
+/// it were read thirty seconds at a time during the session, and a pass placed before the read
+/// would be working from a track that stops short of the moment it is trying to place.
+///
+/// Every unplaced capture is reconsidered on every sync, not only the new ones. A capture read
+/// before the log that covers it — a backlog still being worked through, a marker that arrived
+/// while its session's log was still queued — is placed by whichever later sync finally reads
+/// the points, and nothing has to remember that it is waiting.
+///
+/// The decision itself is [`placement::place`] and is not here. The query below only narrows:
+/// it is allowed to be generous, because the rule re-checks the map and the reach on everything
+/// it is handed.
+fn place_captures(connection: &mut Connection) -> Result<(), String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT c.id, c.captured_at, c.ui_map_id, p.at_ms, p.ui_map_id, p.map_x, p.map_y
+             FROM captures c
+             JOIN log_positions p
+               ON p.at_ms BETWEEN c.captured_at * 1000 - ?1 AND c.captured_at * 1000 + ?1
+             WHERE c.map_x IS NULL AND c.ui_map_id IS NOT NULL",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([placement::REACH_MS], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                placement::Moment {
+                    at_ms: row.get::<_, i64>(1)? * 1000,
+                    ui_map_id: row.get(2)?,
+                },
+                placement::Point {
+                    at_ms: row.get(3)?,
+                    ui_map_id: row.get(4)?,
+                    map_x: row.get(5)?,
+                    map_y: row.get(6)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut wanting: HashMap<i64, (placement::Moment, Vec<placement::Point>)> = HashMap::new();
+    for row in rows {
+        let (capture, moment, point) = row.map_err(|error| error.to_string())?;
+        wanting
+            .entry(capture)
+            .or_insert_with(|| (moment, Vec::new()))
+            .1
+            .push(point);
+    }
+    drop(statement);
+
+    let transaction = connection.transaction().map_err(|error| error.to_string())?;
+    for (capture, (moment, points)) in wanting {
+        let Some(placed) = placement::place(moment, &points) else {
+            continue;
+        };
+        transaction
+            .execute(
+                "UPDATE captures SET map_x = ?2, map_y = ?3 WHERE id = ?1",
+                params![capture, placed.map_x, placed.map_y],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Deletes the points nothing claimed, once they are old enough to be final.
+///
+/// The table is written every five seconds and read by exactly one thing, and almost every row it
+/// holds is a place the player passed through on the way to somewhere nobody photographed. Those
+/// rows are what makes it grow without bound, and this is what stops it.
+///
+/// A point may go when both of these are true:
+///
+/// - it is older than the retention window — the same window the log files are swept on, rather
+///   than a second number to explain. A log old enough to be deleted can produce nothing new, so
+///   what has been derived from it is final;
+/// - no remembered moment is within [`placement::KEEP_MS`] of it. Every capture anchors a window,
+///   whether or not it was placed: the capture the current rule *refused* is exactly the one a
+///   later rule would want the neighbouring points for, and sweeping them would decide that
+///   question permanently in favour of the rule that happens to be written today.
+///
+/// This runs whether or not the log sweeper is switched on, at the configured window when there
+/// is one and at the default otherwise, and the asymmetry is deliberate. Deleting a player's
+/// combat log is irreversible and is theirs to ask for; deleting rows Chronie derived from a file
+/// that is still sitting on disk is not the same act, and an install that has chosen to keep
+/// every log for ever has not thereby asked for a position table that never stops growing.
+///
+/// Nothing here can outrun a capture that has not arrived. A capture is written at logout, within
+/// hours of the points around it; the window is days.
+fn compact_positions(connection: &Connection, retain_days: u32, now: i64) -> Result<usize, String> {
+    let window = i64::from(retain_days.max(retention::MIN_RETAIN_DAYS)) * 86_400;
+    let cutoff_ms = (now - window) * 1000;
+    connection
+        .execute(
+            // The bounds on the anchor are in seconds, because that is what `captures` stores and
+            // what its index is over, and they are widened by a second at each end so that the
+            // truncating division cannot narrow the window it is protecting.
+            "DELETE FROM log_positions
+             WHERE at_ms < ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM captures
+                   WHERE captures.captured_at
+                         BETWEEN (log_positions.at_ms - ?2) / 1000 - 1
+                             AND (log_positions.at_ms + ?2) / 1000 + 1
+               )",
+            params![cutoff_ms, placement::KEEP_MS],
+        )
+        .map_err(|error| error.to_string())
+}
+
 /// Reads what is new in every combat log this install has, and files what it finds.
 ///
 /// Oldest first, on a shared byte budget, so that a backlog is worked through in the order it
@@ -2733,12 +2857,26 @@ pub fn collect(
     // point from the session that just ended waiting another thirty seconds for no reason.
     ingest_logs(&mut connection, wow_path, now)?;
 
+    // With both halves in: the captures this sync filed, and the track that now reaches past the
+    // moment each of them was taken at.
+    place_captures(&mut connection)?;
+
     // Immediately after the read that decides it, and only when somebody has asked for it. A
     // log is eligible because a cursor says it was read to its end, so the sweep is worth
     // nothing before that cursor is up to date and is dangerous if it ever runs instead.
     if let Some(days) = options.retain_log_days {
         sweep_logs(&mut connection, wow_path, days, now)?;
     }
+
+    // Last, because it deletes what the pass above reads, and nothing in the same sync may lose a
+    // point before the capture beside it has had its chance at it.
+    compact_positions(
+        &connection,
+        options
+            .retain_log_days
+            .unwrap_or(retention::DEFAULT_RETAIN_DAYS),
+        now,
+    )?;
 
     // Last of all, and only for images a committed row now names. A file deleted here is one
     // Chronie has already read, copied, hashed, read back and written down.
@@ -6212,6 +6350,17 @@ ChronieDB = {{ ["segments"] = {{
             .timestamp()
     }
 
+    /// A sync run a moment after that night ended, which is when one really runs: the client
+    /// writes SavedVariables at logout and the app syncs seconds later.
+    ///
+    /// It matters to any test that reads the track back. `compact_positions` deletes points older
+    /// than the retention window that nothing remembered, so a `now` set years past the fixture —
+    /// which says nothing about the sync and everything about the number somebody typed — would
+    /// correctly find a whole night's track expired before the test looked at it.
+    fn raid_night_sync() -> i64 {
+        raid_second(20, 30, 0) + 100
+    }
+
     /// A segment covering part of that night, written the way the addon writes one.
     fn night_segment(id: &str, character: &str, from: i64, to: i64) -> String {
         format!(
@@ -6245,7 +6394,7 @@ ChronieDB = {{ ["segments"] = {{
         ));
         plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
 
-        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
 
         assert_eq!(count_of(&database, "log_positions"), 6);
         assert_eq!(count_of(&database, "log_maps"), 1);
@@ -6277,7 +6426,7 @@ ChronieDB = {{ ["segments"] = {{
         ));
         plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
 
-        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
 
         let connection = open_database(&database).unwrap();
         let segment: i64 = connection
@@ -6395,7 +6544,7 @@ ChronieDB = {{ ["segments"] = {{
         let (_temp, wow, database) = synthetic_install(&format!("{bystander}, {played}"));
         plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
 
-        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
 
         let placed = rows_of::<String>(
             &database,
@@ -6415,9 +6564,9 @@ ChronieDB = {{ ["segments"] = {{
             raid_second(20, 30, 0),
         ));
         plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
-        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
 
-        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync() + 100, Options::default()).unwrap();
 
         assert_eq!(count_of(&database, "log_positions"), 6);
         assert_eq!(count_of(&database, "log_fights"), 2);
@@ -6592,7 +6741,7 @@ ChronieDB = {{ ["segments"] = {{
             transaction.commit().unwrap();
         }
 
-        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
 
         assert_eq!(count_of(&database, "log_positions"), 6);
         assert_eq!(count_of(&database, "segments"), 1);
@@ -6605,7 +6754,7 @@ ChronieDB = {{ ["segments"] = {{
     fn attaches_a_track_to_a_visit_that_is_filed_after_it() {
         let (_temp, wow, database) = synthetic_install("");
         plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
-        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
         assert_eq!(count_of(&database, "log_positions"), 6);
         assert_eq!(
             rows_of::<Option<i64>>(&database, "SELECT segment_id FROM log_positions"),
@@ -6621,7 +6770,7 @@ ChronieDB = {{ ["segments"] = {{
                 raid_second(20, 30, 0),
             ),
         );
-        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+        collect(&wow, &database, raid_night_sync() + 100, Options::default()).unwrap();
 
         assert!(rows_of::<Option<i64>>(&database, "SELECT segment_id FROM log_positions")
             .iter()
@@ -6666,6 +6815,308 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(stamped_year("WoWCombatLog-111423_201500.txt"), Some(2023));
         assert_eq!(stamped_year("WoWCombatLog.txt"), None);
         assert_eq!(stamped_year("WoWCombatLog-notadate.txt"), None);
+    }
+
+    /* ---------- placing what the client would not ---------- */
+
+    /// A memory taken inside the raid the fixture log records: the map the client will answer for,
+    /// and no point on it, which is exactly what an entry made inside an instance looks like.
+    ///
+    /// No picture is asked for, because whether a screenshot landed on disk has nothing to do with
+    /// where it was taken — a memory and a screenshot are the same row with the image left out,
+    /// and one pass places both.
+    fn instanced_entry(id: &str, at: i64) -> String {
+        format!(
+            r#"
+      {{ ["id"] = "{id}", ["schema"] = 1, ["at"] = {at},
+        ["character"] = "Alyndra-Ravencrest", ["author"] = "TEST",
+        ["segment"] = "night-1", ["uiMapID"] = 2232, ["note"] = "worth remembering" }}
+    "#
+        )
+    }
+
+    /// The point on the map a capture ended up with, if it ended up with one.
+    fn capture_point(database: &Path, source_id: &str) -> Option<(f64, f64)> {
+        let placed: (Option<f64>, Option<f64>) = open_database(database)
+            .unwrap()
+            .query_row(
+                "SELECT map_x, map_y FROM captures WHERE source_id = ?1",
+                [source_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        placed.0.zip(placed.1)
+    }
+
+    /// The whole reason the track is kept. The client will not answer
+    /// `C_Map.GetPlayerMapPosition` inside an instance, so the entry arrives with a map and
+    /// nothing on it, and the combat log two seconds later is the only record of where the player
+    /// was standing.
+    #[test]
+    fn places_a_capture_the_client_refused_to_place() {
+        let (_temp, wow, database) = capture_install(
+            &instanced_entry("TEST|1|1", raid_second(20, 16, 0)),
+            &night_segment(
+                "night-1",
+                "Alyndra-Ravencrest",
+                raid_second(20, 10, 0),
+                raid_second(20, 30, 0),
+            ),
+        );
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
+
+        // The pull at 20:16:02, two seconds after the entry, at world 4000,-2200 on a map running
+        // 4400..3600 north to south and -2000..-3000 west to east.
+        assert_eq!(capture_point(&database, "TEST|1|1"), Some((0.2, 0.5)));
+    }
+
+    /// The refusal, which matters as much as the placement. A memory made while standing about
+    /// between pulls has its nearest point minutes away, and minutes is long enough to have walked
+    /// into another room — so it keeps the nothing the client gave it.
+    #[test]
+    fn leaves_a_capture_with_no_point_near_it_unplaced() {
+        let (_temp, wow, database) = capture_install(
+            &instanced_entry("TEST|1|1", raid_second(20, 18, 0)),
+            &night_segment(
+                "night-1",
+                "Alyndra-Ravencrest",
+                raid_second(20, 10, 0),
+                raid_second(20, 30, 0),
+            ),
+        );
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
+
+        assert_eq!(capture_point(&database, "TEST|1|1"), None);
+    }
+
+    /// A capture that arrives before the log covering it has been read — a backlog still being
+    /// worked through — is not placed by the sync that files it and must not be given up on. The
+    /// pass reconsiders every unplaced capture, so whichever later sync reads the points places it.
+    #[test]
+    fn places_a_capture_that_was_filed_before_the_log_was_read() {
+        let (_temp, wow, database) = capture_install(
+            &instanced_entry("TEST|1|1", raid_second(20, 16, 0)),
+            &night_segment(
+                "night-1",
+                "Alyndra-Ravencrest",
+                raid_second(20, 10, 0),
+                raid_second(20, 30, 0),
+            ),
+        );
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
+        assert_eq!(capture_point(&database, "TEST|1|1"), None, "no track to place it from yet");
+
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+        collect(&wow, &database, raid_night_sync() + 100, Options::default()).unwrap();
+
+        assert_eq!(capture_point(&database, "TEST|1|1"), Some((0.2, 0.5)));
+    }
+
+    /// A capture the client *did* place is left exactly as it arrived. The track is a fallback for
+    /// what the game refused to say, never a correction to what it said.
+    #[test]
+    fn does_not_move_a_capture_the_client_already_placed() {
+        let stated = format!(
+            r#"
+      {{ ["id"] = "TEST|1|1", ["schema"] = 1, ["at"] = {},
+        ["character"] = "Alyndra-Ravencrest", ["author"] = "TEST",
+        ["segment"] = "night-1", ["uiMapID"] = 2232, ["x"] = 0.9, ["y"] = 0.9 }}
+    "#,
+            raid_second(20, 16, 0)
+        );
+        let (_temp, wow, database) = capture_install(
+            &stated,
+            &night_segment(
+                "night-1",
+                "Alyndra-Ravencrest",
+                raid_second(20, 10, 0),
+                raid_second(20, 30, 0),
+            ),
+        );
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, raid_night_sync(), Options::default()).unwrap();
+
+        assert_eq!(capture_point(&database, "TEST|1|1"), Some((0.9, 0.9)));
+    }
+
+    /* ---------- compacting the track ---------- */
+
+    /// A database holding one log's worth of track and whatever captures a test wants to remember
+    /// moments with, built row by row rather than read out of a fixture — the sweep is a rule
+    /// about times, and a file would only be a slower way of stating them.
+    ///
+    /// `points` are epoch seconds; `captures` likewise. Everything else is the least a row needs
+    /// to satisfy the schema.
+    fn track_database(
+        temp: &tempfile::TempDir,
+        points: &[i64],
+        captures: &[i64],
+    ) -> (PathBuf, Connection) {
+        let database = temp.path().join("data/chronie.sqlite3");
+        let connection = open_database(&database).unwrap();
+        connection
+            .execute(
+                "INSERT INTO combat_logs (id, name, first_seen_at, last_seen_at)
+                 VALUES (1, 'WoWCombatLog-111423_201500.txt', 0, 0)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO accounts (id, source_key, first_seen_at, last_seen_at)
+                 VALUES (1, 'TEST', 0, 0)",
+                [],
+            )
+            .unwrap();
+        for (index, at) in points.iter().enumerate() {
+            connection
+                .execute(
+                    "INSERT INTO log_positions (
+                         log_id, at_ms, actor_guid, actor_name, ui_map_id, world_x, world_y,
+                         map_x, map_y
+                     ) VALUES (1, ?1, 'Player-1', 'Alyndra', 2232, 0, 0, ?2, ?2)",
+                    params![at * 1000, index as f64 / 100.0],
+                )
+                .unwrap();
+        }
+        for (index, at) in captures.iter().enumerate() {
+            connection
+                .execute(
+                    "INSERT INTO captures (
+                         account_id, source_id, captured_at, image_state, first_seen_at,
+                         last_seen_at
+                     ) VALUES (1, ?1, ?2, 'none', 0, 0)",
+                    params![format!("TEST|{index}"), at],
+                )
+                .unwrap();
+        }
+        (database, connection)
+    }
+
+    /// Epoch seconds a whole retention window ago, which is where every point in these tests that
+    /// is meant to be old sits.
+    const LONG_AGO: i64 = SWEEP_NOW - 30 * DAY_SECONDS;
+
+    fn remaining(connection: &Connection) -> Vec<i64> {
+        let mut statement = connection
+            .prepare("SELECT at_ms / 1000 FROM log_positions ORDER BY at_ms")
+            .unwrap();
+        let found = statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        found
+    }
+
+    /// The table with no reader, finally getting one. A month-old track that nothing was taken
+    /// during is every row the sweep exists for.
+    #[test]
+    fn deletes_old_points_no_capture_remembered() {
+        let temp = tempfile::tempdir().unwrap();
+        let (_database, connection) =
+            track_database(&temp, &[LONG_AGO, LONG_AGO + 5, LONG_AGO + 10], &[]);
+
+        let removed = compact_positions(&connection, 7, SWEEP_NOW).unwrap();
+
+        assert_eq!(removed, 3);
+        assert_eq!(remaining(&connection), [] as [i64; 0]);
+    }
+
+    /// The other half of the rule, and the reason it is a window rather than the rows the
+    /// placement happened to read: a capture keeps the whole minute or two around it, so a later
+    /// placement rule — one that interpolates, or reaches further — still has something to be
+    /// written against.
+    #[test]
+    fn keeps_the_track_around_a_remembered_moment() {
+        let temp = tempfile::tempdir().unwrap();
+        let (_database, connection) = track_database(
+            &temp,
+            &[LONG_AGO, LONG_AGO + 60, LONG_AGO + 100, LONG_AGO + 400],
+            &[LONG_AGO + 60],
+        );
+
+        compact_positions(&connection, 7, SWEEP_NOW).unwrap();
+
+        // Everything within two minutes of the capture, and nothing else — the point five
+        // minutes later goes even though it belongs to the same night.
+        assert_eq!(
+            remaining(&connection),
+            [LONG_AGO, LONG_AGO + 60, LONG_AGO + 100]
+        );
+    }
+
+    /// A capture that the placement rule refused anchors a window exactly as one it placed does.
+    /// It is the capture most likely to be wanted by a future rule, and sweeping the points around
+    /// it would settle that question permanently in favour of the rule written today.
+    #[test]
+    fn keeps_the_track_around_a_capture_it_could_not_place() {
+        let temp = tempfile::tempdir().unwrap();
+        // Two moments ten minutes apart, so neither window can be mistaken for the other's, and a
+        // point beside each.
+        let (_database, connection) = track_database(
+            &temp,
+            &[LONG_AGO, LONG_AGO + 600, LONG_AGO + 1_200],
+            &[LONG_AGO, LONG_AGO + 600],
+        );
+        connection
+            .execute(
+                "UPDATE captures SET map_x = 0.5, map_y = 0.5 WHERE captured_at = ?1",
+                [LONG_AGO],
+            )
+            .unwrap();
+
+        compact_positions(&connection, 7, SWEEP_NOW).unwrap();
+
+        assert_eq!(
+            remaining(&connection),
+            [LONG_AGO, LONG_AGO + 600],
+            "the unplaced capture held its window exactly as the placed one did"
+        );
+    }
+
+    /// Nothing recent is touched, whether or not anything was taken during it. A point is
+    /// compacted because it is final, and a point from this week is not final: the capture that
+    /// would claim it may not have been written yet, the client writing that at logout.
+    #[test]
+    fn keeps_every_point_still_inside_the_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let recent = SWEEP_NOW - 3_600;
+        let (_database, connection) = track_database(&temp, &[recent, recent + 5], &[]);
+
+        let removed = compact_positions(&connection, 7, SWEEP_NOW).unwrap();
+
+        assert_eq!(removed, 0);
+        assert_eq!(remaining(&connection), [recent, recent + 5]);
+    }
+
+    /// The window is the one the logs are swept on, and a longer one keeps more — the setting
+    /// being a single number is the whole reason there is nothing else to explain here.
+    #[test]
+    fn compacts_on_the_window_the_logs_are_swept_on() {
+        let temp = tempfile::tempdir().unwrap();
+        let (_database, connection) = track_database(&temp, &[SWEEP_NOW - 10 * DAY_SECONDS], &[]);
+
+        assert_eq!(compact_positions(&connection, 30, SWEEP_NOW).unwrap(), 0);
+        assert_eq!(compact_positions(&connection, 7, SWEEP_NOW).unwrap(), 1);
+    }
+
+    /// A sync on an install that has never turned the log sweeper on still compacts. Keeping the
+    /// player's own logs for ever is a decision about their files; it is not a request for a table
+    /// Chronie derived from them that never stops growing.
+    #[test]
+    fn compacts_the_track_even_when_no_log_is_ever_deleted() {
+        let (_temp, wow, database) = swept_install();
+
+        collect(&wow, &database, SWEEP_NOW, Options::default()).unwrap();
+
+        assert!(exists(&wow, "WoWCombatLog-111423_201500.txt"), "no log was swept");
+        assert_eq!(count_of(&database, "log_positions"), 0);
     }
 
     /* ---------- clearing the logs up again ---------- */
@@ -6745,8 +7196,13 @@ ChronieDB = {{ ["segments"] = {{
     }
 
     /// The file is the source, and what was carried out of it is not. A deleted log leaves its
-    /// positions, its fights and its cursor exactly where they were — the night happened
-    /// whether or not the bytes that recorded it still exist.
+    /// fights and its cursor exactly where they were — the night happened whether or not the
+    /// bytes that recorded it still exist.
+    ///
+    /// The track is the one thing that does not survive it, and deliberately: a log old enough to
+    /// be swept is old enough that the points under it are final, and the ones no capture asked
+    /// about are what `compact_positions` exists to remove. What it leaves is covered by its own
+    /// tests below.
     #[test]
     fn keeps_everything_it_learned_from_a_log_it_deleted() {
         let (_temp, wow, database) = swept_install();
@@ -6776,8 +7232,8 @@ ChronieDB = {{ ["segments"] = {{
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(positions, 6, "the track read out of a log that is now gone");
-        assert_eq!(fights, 2);
+        assert_eq!(positions, 0, "a month-old track nothing remembered was compacted");
+        assert_eq!(fights, 2, "the fights read out of a log that is now gone");
     }
 
     /// Off is off. The same folder, the same ages, and nothing is touched.
