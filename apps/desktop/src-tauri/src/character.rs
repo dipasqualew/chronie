@@ -298,6 +298,10 @@ pub fn worn_model_of(
 ) -> Result<Value, String> {
     let worn = crate::worn::of(files, display_info_id, display_type)?;
     if worn.is_empty() {
+        eprintln!(
+            "Chronie has nothing to put on the character for display {display_info_id} \
+             in slot {display_type}."
+        );
         return Ok(serde_json::json!({
             "displayInfoId": display_info_id,
             "model": Value::Null,
@@ -305,11 +309,43 @@ pub fn worn_model_of(
         }));
     }
     let (glb, painting) = painted_glb_of(files, Some(&worn))?;
+    log_wearing(display_info_id, display_type, &worn, &painting);
     Ok(serde_json::json!({
         "displayInfoId": display_info_id,
         "model": data_url("model/gltf-binary", &glb),
         "missing": unshown(&worn, &painting),
     }))
+}
+
+/// Says out loud what one appearance did to the body.
+///
+/// The window is told what went *wrong*, because that is what a reader can act on. This is the
+/// other half: what went right, which is the half nobody can see and the half that turns "the
+/// armour has no colour" from a symptom into a place. A section resolved to a texture and the
+/// body still looks bare means the paint is landing somewhere the model does not sample; no
+/// sections at all means the chain gave out earlier. Neither is visible on screen and both are
+/// one line here.
+///
+/// stderr, which is where `tauri dev` shows it and where a packaged app keeps it out of the
+/// reader's way, and one block per row picked — which is as often as somebody clicks.
+fn log_wearing(display_info_id: u32, display_type: u32, worn: &Worn, painting: &Painting) {
+    let geosets: Vec<String> = worn.geosets.iter().map(|worn| worn.geoset.to_string()).collect();
+    eprintln!(
+        "Chronie wore display {display_info_id} in slot {display_type}: \
+         {} of {} textures painted, geosets {}",
+        painting.painted,
+        worn.textures.len(),
+        if geosets.is_empty() { "none".into() } else { geosets.join(" ") }
+    );
+    for texture in &worn.textures {
+        eprintln!("  section {} <- texture {}", texture.section, texture.file);
+    }
+    for section in &worn.unpaintable {
+        eprintln!("  section {section} <- nothing: the game's tables name no texture for it");
+    }
+    for line in &painting.missing {
+        eprintln!("  {line}");
+    }
 }
 
 /// Everything the appearance says it does to the body and this install could not show.
