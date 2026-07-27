@@ -3,21 +3,54 @@
 A World of Warcraft addon. Lua 5.1 / LuaJIT semantics — the game client has no
 LuaRocks, no `require`, and no standard library beyond what Blizzard exposes.
 
-## The local WoW install is off limits
+## The local WoW install, when the machine has one
 
-Never search the filesystem for a World of Warcraft installation, and never read
-its files — not the game directory, not `Interface/AddOns`, not
-`WTF/.../SavedVariables`. Do not run `find`, `ls`, `grep`, or any other command
-against those paths, and do not use them to inspect real data or reproduce a bug.
-Reason about the addon from this repository's source and from the fakes in
-`apps/addon/spec/helpers/fake_wow.lua` instead. If a question can only be settled
-by looking at live game data, ask for the relevant snippet rather than going to
-find it.
+Go and look. The game's own files are the only place several of the questions
+this repository asks can actually be settled, and not being allowed to look has
+already cost real time: `wow-m2` was passed over for want of a prototype against
+a real `humanfemale_hd.m2`, and a wrong `ItemDisplayInfo` column survived a long
+time because nothing could be held up against it.
 
-What the desktop app needs to know about the game's own file formats is written
-down in `docs/game-files.md` and `docs/character-rendering.md` — file ids, column
-indices, verified constants and the traps. That is what those documents are for:
-read them instead of going to look.
+The install root is `/Applications/World of Warcraft` on macOS and
+`C:\Program Files (x86)\World of Warcraft` on Windows, but Battle.net lets the
+player put it anywhere, so a second drive — `D:\World of Warcraft`,
+`/Volumes/Games/World of Warcraft` — is ordinary rather than exotic. Under the
+root sit the per-flavour folders `_retail_`, `_classic_`, `_classic_era_` and
+`_ptr_`, and beside them the one shared `Data/` that holds the CASC storage all
+of them read.
+
+Which of the two paths you want depends on what is asking for it.
+`CascFiles::open` wants **the root**, the folder holding `Data/`, because that is
+where the models, textures and DB2 tables are. `resolve_wow_path` and everything
+downstream of it want **`_retail_`**, the folder holding `WTF/`, because that is
+where the addon and its SavedVariables are. The tools already take one:
+
+```sh
+cargo run --example dump_model -- "/Applications/World of Warcraft" 900001 helm.glb
+bun run render worn/712245/5 legs.png --install "/Applications/World of Warcraft"
+```
+
+**A container has no install, and no amount of looking will produce one.** Remote
+runs have no game on the machine; the paths above are simply absent. Check them
+once, and when they are not there stop looking and fall back to the committed
+fixtures under `apps/desktop/fixtures/transmog` — that is what `--fixtures`
+reads, and it is the only mode CI has.
+
+Two things an install does not change. **Nothing in the test suite may read it**:
+tests run from those fixtures and from the fakes in
+`apps/addon/spec/helpers/fake_wow.lua`, always, because a test that passes only
+on a machine with the game installed is a test that fails for everybody else.
+And **the documents come first** — `docs/game-files.md` and
+`docs/character-rendering.md` hold the file ids, column indices, verified
+constants and traps that have already been paid for once. Going to look is for
+the questions they do not answer; when a look settles one, write the answer back
+into them, marked with the build it was read from, the way the rest of those
+documents are.
+
+The SavedVariables under `_retail_/WTF/` are a real person's characters. Reading
+them to understand a bug is the point of being allowed in there; committing one
+as a fixture is not — cut a synthetic file down to the shape that matters
+instead.
 
 ## Every change gets a worktree of its own
 

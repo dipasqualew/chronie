@@ -2,10 +2,10 @@
 
 How the desktop app gets from "a transmog set" to the bytes of a model and a texture.
 
-This exists so that nobody has to go and look. `CLAUDE.md` puts the local World of
-Warcraft install off limits for ordinary work, and these notes are the reason that
-rule costs nothing: everything below was read off a real install once, deliberately,
-and written down.
+This exists so that nobody has to go and look twice. Everything below was read off a
+real install once, deliberately, and written down; going back to the install is for
+the questions it does not answer, and an answer found that way belongs here
+afterwards, marked with the build it came from.
 
 **Provenance.** Verified against build `12.0.5.67` (Midnight) on 2026-07-26, and the array
 columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the same build on
