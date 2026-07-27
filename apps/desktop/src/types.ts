@@ -551,6 +551,9 @@ export interface Settings {
   lastSync?: string | null;
   /** Whether the addon has been asked to start combat logging at login. */
   combatLogging?: boolean;
+  /** After how many days a log Chronie has read to its end is deleted. Absent or null means
+   * nothing is ever deleted, which is what every install starts as. */
+  retainLogDays?: number | null;
 }
 
 /* ---------- combat logging ---------- */
@@ -583,6 +586,49 @@ export interface CombatLogStatus {
   log?: CombatLogFile | null;
   growing: boolean;
   state: CombatLogState;
+}
+
+/* ---------- clearing the logs up again ---------- */
+
+/**
+ * A group of logs, as a number to weigh and a few names to check it against. Mirrors
+ * `retention::Pile` — `count` and `bytes` cover every file, `files` only the first ten.
+ */
+export interface LogPile {
+  count: number;
+  bytes: number;
+  files: CombatLogFile[];
+}
+
+/** One log Chronie deleted, as the record of its going. Mirrors `retention::Gone`. */
+export interface LogDeletion {
+  name: string;
+  bytes: number;
+  modified?: number | null;
+  linesRead: number;
+  retainDays: number;
+  /** Epoch seconds. */
+  deletedAt: number;
+}
+
+/**
+ * What the retention section of Setup is drawn from. Mirrors `retention::Report`.
+ *
+ * `doomed` is computed whether or not `enabled`, because the question worth answering before
+ * somebody turns the sweeper on is which files that would cost them. That preview is the dry
+ * run: it is on screen before the switch, not after the first sweep.
+ */
+export interface LogRetention {
+  enabled: boolean;
+  /** The window in days — in force when `enabled`, and previewed at when not. */
+  days: number;
+  doomed: LogPile;
+  /** Old logs nothing has ever read. Never deleted; always shown. */
+  unread: LogPile;
+  /** Old logs a read has started and not finished. Transient. */
+  unfinished: LogPile;
+  /** What sweeps have actually removed, newest first. */
+  removed: LogDeletion[];
 }
 
 export interface SyncResult {
@@ -683,6 +729,9 @@ export interface E2EMock {
   /** What the install is doing about combat logs. State rather than a fixture: ticking the
    * box in the panel under test advances it, the way the real backend's own answer changes. */
   combatLog: CombatLogStatus;
+  /** What a sweep of the game's Logs folder would do. State rather than a fixture, for the
+   * same reason: turning retention on in the panel has to move what the panel then says. */
+  logRetention: LogRetention;
   chosenPath: string;
   syncResult: SyncResult;
   installResult: InstallResult;

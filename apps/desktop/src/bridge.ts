@@ -15,6 +15,7 @@ import type {
   DashboardPayload,
   IconsPayload,
   InstallResult,
+  LogRetention,
   Segment,
   Settings,
   SyncResult,
@@ -112,6 +113,23 @@ export const desktop = {
       return Promise.resolve(structuredClone(mock.combatLog));
     }
     return invoke<CombatLogStatus>("set_combat_logging", { enabled });
+  },
+  // What a sweep of the game's Logs folder would delete, what it will not touch, and what it
+  // already has. Asked for rather than assumed, because all three change under the app.
+  logRetention: (): Promise<LogRetention> =>
+    mock ? Promise.resolve(structuredClone(mock.logRetention)) : invoke<LogRetention>("log_retention"),
+  // `null` turns the sweeper off. Nothing is deleted by this call: it records a setting, and
+  // the sweep happens on the next sync. The mock moves the same two facts the backend does —
+  // whether it is on, and at what window — and leaves the piles where they are, because what
+  // is in the folder does not change just because somebody ticked a box.
+  setLogRetention: (days: number | null): Promise<LogRetention> => {
+    if (mock) {
+      mock.settings.retainLogDays = days;
+      mock.logRetention.enabled = days !== null;
+      if (days !== null) mock.logRetention.days = days;
+      return Promise.resolve(structuredClone(mock.logRetention));
+    }
+    return invoke<LogRetention>("set_log_retention", { days });
   },
   // Every activity command answers with the whole dashboard, so the window repaints from
   // what was actually stored rather than from what the page hoped the write did. Under the
