@@ -92,6 +92,8 @@
   button.primary { color: white; background: var(--series-1); border-color: var(--series-1); }
   button:disabled { cursor: default; opacity: .4; }
   button:focus-visible, .circle:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+  /* Clear of the rings the circle already wears, or the focus ring reads as one of them. */
+  .circle:focus-visible { outline-offset: 4px; }
   input, select {
     font: inherit; color: var(--text-primary); background: var(--surface-1);
     border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px;
@@ -148,7 +150,9 @@
     font-size: 15px; font-weight: 620; letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
   }
   .session-cast { display: flex; padding-left: 8px; }
-  .session-cast .circle + .circle { margin-left: -9px; }
+  /* The overlap is measured against the rings, not the disc: they stand 3px proud of it on
+     each side, and the -9px this used to be buried the initials of everyone but the last. */
+  .session-cast .circle + .circle { margin-left: -3px; }
   .session-time { margin-left: auto; text-align: right; line-height: 1.25; }
   .session-played {
     display: block; font-size: 19px; font-weight: 640;
@@ -161,10 +165,13 @@
     width: 28px; height: 28px; border-radius: 50%;
     display: inline-grid; place-items: center;
     font-size: 10px; font-weight: 700; letter-spacing: .03em;
-    background: var(--surface-2);
-    background: color-mix(in srgb, var(--class-color) 22%, var(--surface-1));
+    /* Filled with the class colour outright, not washed with it: a 22% tint over the card
+       left every circle the colour of the page, which is the same as no colour at all.
+       The two rings hold a stacked cast apart and give a priest's white an edge. */
+    background: var(--class-color);
     border: 2px solid var(--class-color);
-    color: var(--text-primary);
+    color: var(--class-ink, var(--text-primary));
+    box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px var(--border);
     cursor: default; flex: none;
   }
 

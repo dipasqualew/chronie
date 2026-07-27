@@ -635,6 +635,51 @@ const borderColours = (elements: Locator): Promise<string[]> =>
   elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).borderTopColor));
 
 /**
+ * The colour each of a set of elements is filled with, as the browser resolved it.
+ *
+ * Computed for the same reason the ring is, and more urgently: the markup only ever carries
+ * the class colour as a custom property, and what the fill actually does with that property
+ * lives in the stylesheet. A rule that washed the colour down to nothing, or never named it
+ * at all, is invisible from the markup and plain here.
+ */
+const fillColours = (elements: Locator): Promise<string[]> =>
+  elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).backgroundColor));
+
+/**
+ * The colour each of a set of elements writes its text in, as the browser resolved it.
+ *
+ * The ink is chosen in TypeScript and applied in CSS, so this is the only place the two meet
+ * and the only place the initials can be shown to still read against the fill behind them.
+ */
+const inkColours = (elements: Locator): Promise<string[]> =>
+  elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+
+/**
+ * How much of each element in a row the one after it covers, as a fraction of its own width.
+ * The last has nothing on top of it and so has no fraction of its own.
+ *
+ * Only the browser does layout, so only the browser can say whether a stacked cast still
+ * reads. And the bounding box alone cannot say it: the rings are drawn with `box-shadow`,
+ * which occupies no space, so a circle paints further than it measures. The ring is read
+ * back off the element rather than assumed, which is the point — the overlap has to be
+ * judged against what a circle actually covers, whatever it happens to be wearing.
+ */
+const overlapFractions = (elements: Locator): Promise<number[]> =>
+  elements.evaluateAll((nodes) => {
+    const ringOf = (node: Element): number => {
+      const spreads = [...getComputedStyle(node).boxShadow.matchAll(/(?:-?[\d.]+px\s+){3}(-?[\d.]+)px/g)]
+        .map((layer) => Number(layer[1]));
+      return Math.max(0, ...spreads);
+    };
+    return nodes.slice(0, -1).map((node, index) => {
+      const next = nodes[index + 1]!;
+      const box = node.getBoundingClientRect();
+      const covered = box.right - (next.getBoundingClientRect().left - ringOf(next));
+      return Math.max(0, covered) / box.width;
+    });
+  });
+
+/**
  * The urls the window has asked the operating system to open, in the order it asked.
  *
  * A real browser opening is the one outcome a browser test cannot see, so this stands in for
@@ -672,6 +717,36 @@ test("stitches segments into play sessions and leads with what happened", async 
   await test.step("each character is drawn in their own class colour", async () => {
     await expect(borderColours(sessions(page).first().getByRole("img")))
       .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+  });
+
+  // The version of the step above that only read the border was green for as long as the
+  // fill was a 22% wash of the class colour over the card — every circle the colour of the
+  // page, with a thin coloured ring, and nothing that could tell. So the fill is asserted
+  // outright: mage cyan then druid orange, filled, with the initials in the ink chosen to
+  // read on them. Both of those take the near-black; the white ink belongs to death knight,
+  // demon hunter and shaman, which no fixture casts — `classInk`'s unit tests cover all
+  // thirteen, and this covers the only thing they cannot, which is the stylesheet.
+  await test.step("and filled with it, not merely ringed in it", async () => {
+    const cast = sessions(page).first().getByRole("img");
+
+    await expect(fillColours(cast)).resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+    await expect(inkColours(cast)).resolves.toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
+  });
+
+  // Filling the circles cost them the ring that used to be their outer edge: they now wear
+  // two more, standing 3px proud of the disc on every side. The overlap the stack was tuned
+  // to without them then swallowed every initial but the last — "MAGE, DRUID, PRIEST, ROGUE"
+  // came out as "M. DI PI RO". So the stacking is held to what it is for: a cast that reads.
+  await test.step("and stacked close enough to read as one cast, not so close as to bury it", async () => {
+    const covered = await overlapFractions(sessions(page).first().getByRole("img"));
+
+    expect(covered.length).toBeGreaterThan(0);
+    for (const fraction of covered) {
+      // Overlapping at all is the intent — a row spaced out into separate discs is a
+      // different design, and this is what would notice somebody had drifted into it.
+      expect(fraction).toBeGreaterThan(0);
+      expect(fraction).toBeLessThanOrEqual(1 / 3);
+    }
   });
 
   await test.step("both kinds of time are reported, because they differ", async () => {
