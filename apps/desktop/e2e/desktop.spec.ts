@@ -574,9 +574,11 @@ const mockDesktop: E2EMock = {
   // model and this install holds no file for, which is a row that has to fall back to its
   // icon rather than show an error.
   transmogModels: {
-    900001: fixtureModel(),
-    900007: fixtureModel(),
+    900001: fixtureModel("helm.glb"),
+    900007: fixtureModel("helm.glb"),
   },
+  // The body every set detail opens on, before anything is worn.
+  characterModel: fixtureModel("character.glb"),
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
@@ -589,17 +591,16 @@ const mockDesktop: E2EMock = {
 };
 
 /**
- * The `.glb` the backend's own converter writes for the fixture helm, as the data URL a
- * command would answer with.
+ * A `.glb` the backend's own converter wrote, as the data URL a command would answer with.
  *
- * Written by `cargo run --example dump_model`, and held to what the converter currently
- * produces by a test in `models.rs`. Using the real output rather than a hand-made stand-in
- * is the point: this is the only place anything reads the glTF this app writes, so it is the
- * only place that can say three.js accepts it.
+ * Written by `cargo run --example dump_model`, and held to what the converters currently
+ * produce by tests in `models.rs` and `character.rs`. Using the real output rather than a
+ * hand-made stand-in is the point: this is the only place anything reads the glTF this app
+ * writes, so it is the only place that can say three.js accepts it.
  */
-function fixtureModel(): string {
+function fixtureModel(name: string): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  const glb = readFileSync(join(here, "..", "fixtures", "transmog", "helm.glb"));
+  const glb = readFileSync(join(here, "..", "fixtures", "transmog", name));
   return `data:model/gltf-binary;base64,${glb.toString("base64")}`;
 }
 
@@ -966,10 +967,21 @@ test("shows the game's transmog sets by collection and filters them", async ({
   // Only heads, shoulders, weapons and shields have geometry of their own. The pane is where
   // that difference shows: a helm is a model to turn around, a chestpiece is its icon and a
   // sentence saying why, and neither of them is an error.
-  await test.step("picking an appearance with a model shows it in 3D", async () => {
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
-    await expect(transmogDetail.note()).toHaveText("Choose an appearance to see it up close.");
+  // Most of a set has no model of its own, so the pane opens on the thing all of it is drawn
+  // on: a bare body, before anything is worn.
+  await test.step("opening a set shows the character everything is worn on", async () => {
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
+    await expect(transmogDetail.note()).toHaveText("Nothing is worn yet. Drag to turn it.");
+    await expect(transmogDetail.canvas()).toBeVisible();
 
+    // 7 × 88: the fixture body holds eleven geosets and a bare one draws seven of them, and
+    // every part is drawn out of the same 88 vertices the whole model shares. Which makes this
+    // the geoset selection, counted from the far end of the pipe — a variant drawn alongside
+    // its default reads as 8 × 88, and a default that went missing as 6 × 88.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "616");
+  });
+
+  await test.step("picking an appearance with a model shows it in 3D", async () => {
     await transmogDetail.pick("Head", "Tideglass Crown");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
     await expect(transmogDetail.canvas()).toBeVisible();
@@ -1041,7 +1053,8 @@ test("shows the game's transmog sets by collection and filters them", async ({
     await transmog.klass().selectOption("");
     await transmog.card("Emberforge Plate").click();
     await expect(transmogDetail.named("Emberforge Plate")).toBeVisible();
-    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "empty");
+    // Back to the body, on a stage that has had a helm and an icon on it since.
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
 
     await transmogDetail.pick("Weapon or shield", "Emberforge Bulwark");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");

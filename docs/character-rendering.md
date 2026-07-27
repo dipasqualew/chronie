@@ -81,6 +81,16 @@ agree exactly.
 
 ## Compositing
 
+**The base skin is the one hop of this that is not resolved.** Which BLP a character's skin
+is comes out of the player's own customization — `ChrCustomizationChoice` →
+`ChrCustomizationElement` → `ChrCustomizationMaterial` → `TextureFileData` — and none of
+those four tables' column positions have been read off an install the way the chains in
+[game-files.md](game-files.md#the-chain-verified) were. Until they have been,
+`character.rs` allocates the atlas and leaves it a flat tone; `Atlas::base` is written and
+tested and is the one function that changes when they are. That is the same bar
+`GeosetGroup[6]` is held to, and for the same reason: four guessed indices in a row would
+paint the body with whatever the guess landed on and call it a skin.
+
 1. Allocate `2048 × 1024` RGBA.
 2. Blit the base skin BLP over the whole buffer.
 3. For the one item being shown, for each `ComponentSection` it supplies (via
@@ -159,6 +169,13 @@ for each group the item drives:
     hide  group*100 .. group*100+99
     show  group*100 + resolved value
 ```
+
+The first two lines are `character::bare`, which is `geoset == 0 || geoset % 100 == 1`: value
+1 is every group's "nothing here" — bare arms, bare legs, bare feet, no helm, no cape, no
+belt — and geoset 0 is the skin, the one id with no group of its own. The file holds every
+variant of every group at once, so drawing them all is what puts two pairs of legs in the
+same trousers. All three ways of getting this wrong show up as geometry rather than as an
+error: too much and limbs double and z-fight, too little and they go missing.
 
 **Priority is not needed for single-item rendering** — see the scope note above. When
 assembled outfits arrive, the table is at
