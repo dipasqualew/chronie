@@ -417,6 +417,53 @@ class CombatLoggingPanel {
   }
 }
 
+/**
+ * The screenshots: a grid wherever captures are shown, and the one somebody opened.
+ *
+ * A tile is addressed by what it opens rather than by its position, because "the screenshot
+ * from Glass Caverns at 22:03" is what a reader is looking for and is the only thing a screen
+ * reader will read out. The grid is scoped to whatever it was drawn in — a session card or the
+ * segment modal — since the same component draws both.
+ */
+class Screenshots {
+  readonly page: Page;
+  readonly viewer: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.viewer = page.locator("#capture-viewer");
+  }
+
+  tilesIn(scope: Locator): Locator {
+    return scope.getByRole("button", { name: /Open the screenshot/ });
+  }
+
+  /** Opens an evening's pictures on a session card, which is folded away until asked for. */
+  async unfold(card: Locator): Promise<Locator> {
+    await card.getByRole("button", { name: /screenshots?/ }).click();
+    return this.tilesIn(card);
+  }
+
+  async open(tile: Locator): Promise<void> {
+    await tile.click();
+    await expect(this.viewer).toBeVisible();
+  }
+
+  note(): Locator {
+    return this.viewer.getByLabel("Note", { exact: true });
+  }
+
+  /** The picture itself, which arrives after the dialog does. */
+  picture(): Locator {
+    return this.viewer.locator("img");
+  }
+
+  async close(): Promise<void> {
+    await this.viewer.getByRole("button", { name: "Close screenshot" }).click();
+    await expect(this.viewer).toBeHidden();
+  }
+}
+
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
@@ -425,6 +472,7 @@ const test = base.extend<{
   transmog: TransmogView;
   transmogDetail: TransmogDetail;
   combat: CombatLoggingPanel;
+  shots: Screenshots;
 }>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
@@ -447,12 +495,28 @@ const test = base.extend<{
   combat: async ({ page }, use) => {
     await use(new CombatLoggingPanel(page));
   },
+  shots: async ({ page }, use) => {
+    await use(new Screenshots(page));
+  },
 });
 
 // Two evenings: the first is a keystone run followed two minutes later by an alt, which is
 // the case that has to fold into one play session; the second is a day earlier and must not.
 const EVENING = 1785063600;
 const NIGHT_BEFORE = 1784977200;
+
+// Two tiny pictures, so the tile and the thing behind it can be told apart on screen. Real
+// PNGs rather than placeholder strings: the browser has to actually decode what the backend
+// hands over, and a `data:` URL that only looks like one would pass a test the app fails.
+const THUMBNAIL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElE" +
+  "QVR4nGPQqDgBRww4OQBBxhDhzXmo9QAAAABJRU5ErkJggg==";
+const FULL_SIZE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAEUlE" +
+  "QVR4nGM4EaWBFTEMpAQAQEQ94cz6peQAAAAASUVORK5CYII=";
+
+// The note is the most user-supplied string in the application, and this is the shape that
+// proves it: typed by a person, containing markup, and drawn in three places — the tile, the
+// viewer, and the tooltip that is handed HTML rather than a value in a React tree.
+const NOTED = "<b>first</b> Yogg kill";
 
 // Typed as the real backend's answers, so a fixture that has drifted from what a command
 // actually returns fails the type check rather than the assertion three steps later.
@@ -542,6 +606,12 @@ const mockDesktop: E2EMock = {
         // A third case sits beside them: a faction the client named a level for and gave no
         // length to. That is a standing worth printing and a bar with nothing to draw, and a
         // bar at zero would announce the character as nowhere in a level they are inside.
+        // The alt's own picture, so an evening's fold has captures from more than one of its
+        // segments and the grid is a session's rather than a segment's.
+        captures: [{
+          id: 33, sourceId: "TEST|3|33", at: EVENING + 2000, imageState: "stored",
+          byteSize: 2_411_902, sourceName: "WoWScrnShot_072626_190000.jpg",
+        }],
         currencies: [{ id: 8, name: "Rustward Scrip", amount: 2 }],
         reputation: [
           { faction: "Lamplighters", amount: 10 },
@@ -567,6 +637,20 @@ const mockDesktop: E2EMock = {
             confidence: 1,
             metadata: { dungeon: "Glass Caverns", keystoneLevel: 14, timed: true },
           },
+        ],
+        // Three captures covering everything a tile has to be able to say: a picture with a
+        // note somebody typed, an automatic one Chronie took by itself, and a marker whose
+        // file was never found — which is a row to explain rather than a blank tile.
+        captures: [
+          {
+            id: 11, sourceId: "TEST|1|11", at: EVENING + 1400, imageState: "stored",
+            note: NOTED, byteSize: 3_204_112, sourceName: "WoWScrnShot_072626_183020.jpg",
+          },
+          {
+            id: 12, sourceId: "TEST|1|12", at: EVENING + 1450, imageState: "stored",
+            trigger: "accountFirstAchievement", achievementId: 77, byteSize: 3_100_000,
+          },
+          { id: 13, sourceId: "TEST|1|13", at: EVENING + 1500, imageState: "missing" },
         ],
         keystone: { level: 14, completed: true, onTime: true, upgrades: 1 },
         encounters: [{ id: 900, name: "The Curator", at: EVENING + 400, success: true }],
@@ -821,6 +905,14 @@ const mockDesktop: E2EMock = {
       iconFileDataId: 250001,
       faction: -1,
     },
+  },
+  // The screenshots Chronie holds, keyed by the row id a tile asks for them by. 13 is absent
+  // on purpose: it is the marker whose file was never found, which the real backend answers
+  // nothing for and which has to draw as an explanation rather than as a broken picture.
+  captureImages: {
+    11: { thumbnail: THUMBNAIL, full: FULL_SIZE, byteSize: 3_204_112 },
+    12: { thumbnail: THUMBNAIL, full: FULL_SIZE, byteSize: 3_100_000 },
+    33: { thumbnail: THUMBNAIL, full: FULL_SIZE, byteSize: 2_411_902 },
   },
   // The models, as the backend hands them over: a `.glb` in a data URL, keyed by the display
   // the appearance named. 900002 is missing on purpose — a shoulder the tables say has a
@@ -1288,6 +1380,128 @@ test("digs from a session down into a single segment and back out again", async 
   });
 
   await detail.close();
+});
+
+/**
+ * The photographs of an evening, which is what the rest of this history is a caption for.
+ *
+ * The whole loop in one test, because the pieces only mean anything together: an evening's
+ * pictures fold out of the card that summarised it, one of them opens full size, the sentence
+ * under it can be rewritten, and the thing itself can be thrown away.
+ */
+test("shows an evening's screenshots, and lets one be annotated or deleted", async ({
+  page, shots, detail,
+}) => {
+  const card = sessions(page).first();
+
+  await test.step("the card counts them, and says how many are only markers", async () => {
+    // Four captures in the evening across two segments, and one of them is a marker whose
+    // file was never found — which is said on the way in rather than discovered by counting.
+    await expect(card.getByRole("button", { name: /screenshots/ }))
+      .toContainText("3 screenshots · 1 without a file");
+  });
+
+  const tiles = await shots.unfold(card);
+  await expect(tiles).toHaveCount(4);
+
+  // The pictures cross the bridge as `data:` URLs and the browser has to decode them, which is
+  // the half a fixture of placeholder strings would not have proved.
+  await test.step("each tile fills with the picture Chronie holds", async () => {
+    await expect(card.locator(".capture-thumb img")).toHaveCount(3);
+    await expect(card.locator(".capture-thumb img").first())
+      .toHaveJSProperty("naturalWidth", 4);
+  });
+
+  // A note is typed by a person and drawn in three places. React writes it as a value in two
+  // of them; the floating tooltip is handed HTML, which is the one that has to escape it.
+  await test.step("a note containing markup is text on the tile and in the tooltip", async () => {
+    await expect(tiles.first()).toContainText(NOTED);
+    await expect(tiles.first().locator("b")).toHaveCount(0);
+
+    await tiles.first().hover();
+    const tip = page.locator("#tooltip");
+    await expect(tip).toBeVisible();
+    // One `<b>`, which is the tooltip's own — the note's would be a second, and its text
+    // would have lost the tags rather than showing them.
+    await expect(tip.locator("b")).toHaveCount(1);
+    await expect(tip.locator("b")).toHaveText(NOTED);
+  });
+
+  await test.step("a marker with no file says so instead of showing a broken picture", async () => {
+    await expect(tiles.nth(2)).toContainText("could not find the file");
+    await shots.open(tiles.nth(2));
+    await expect(shots.picture()).toHaveCount(0);
+    await expect(shots.viewer).toContainText("could not find the file");
+    await shots.close();
+  });
+
+  await test.step("opening one shows the picture at the size it was taken", async () => {
+    await shots.open(tiles.first());
+    await expect(shots.picture()).toHaveJSProperty("naturalWidth", 8);
+    await expect(shots.viewer).toContainText("Aster-Vale · Glass Caverns");
+    await expect(shots.viewer).toContainText("3.1 MB");
+    await expect(shots.viewer.locator(".detail-position")).toHaveText("1 of 4");
+  });
+
+  await test.step("and the reader can walk the evening from inside it", async () => {
+    await shots.viewer.getByRole("button", { name: "Next screenshot" }).click();
+    await expect(shots.viewer.locator(".detail-position")).toHaveText("2 of 4");
+    // The one Chronie took by itself says which rule asked for it, which is the whole
+    // difference between it and one somebody pressed the key for.
+    await expect(shots.viewer).toContainText("Taken for an account first");
+    await shots.viewer.getByRole("button", { name: "Previous screenshot" }).click();
+    await expect(shots.viewer.locator(".detail-position")).toHaveText("1 of 4");
+  });
+
+  await test.step("the note can be rewritten, and the tile says what was stored", async () => {
+    await expect(shots.note()).toHaveValue(NOTED);
+    await shots.note().fill("Yogg-Saron, no lights");
+    await shots.viewer.getByRole("button", { name: "Save note" }).click();
+
+    await expect(tiles.first()).toContainText("Yogg-Saron, no lights");
+    await expect(tiles.first()).not.toContainText(NOTED);
+  });
+
+  await test.step("and cleared, which is a note nobody wrote rather than an empty one", async () => {
+    await shots.viewer.getByRole("button", { name: "Clear note" }).click();
+
+    await expect(shots.note()).toHaveValue("");
+    await expect(tiles.first()).not.toContainText("Yogg-Saron");
+    // With no note the tile falls back to where it was taken, which is the next best caption.
+    await expect(tiles.first()).toContainText("Glass Caverns");
+  });
+
+  // Deleting takes a file with it and cannot be undone, so it is asked about first — and the
+  // question says the picture goes as well as the entry.
+  await test.step("deleting asks first, and says the picture goes with it", async () => {
+    await shots.viewer.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(shots.viewer.getByRole("alert"))
+      .toContainText("The picture is deleted from Chronie's storage");
+
+    await shots.viewer.getByRole("button", { name: "Keep it" }).click();
+    await expect(shots.viewer.getByRole("alert")).toHaveCount(0);
+    await expect(tiles).toHaveCount(4);
+  });
+
+  await test.step("and then does both halves", async () => {
+    await shots.viewer.getByRole("button", { name: "Delete", exact: true }).click();
+    await shots.viewer.getByRole("button", { name: "Yes, delete it" }).click();
+
+    await expect(shots.viewer).toBeHidden();
+    await expect(tiles).toHaveCount(3);
+    await expect(card.getByRole("button", { name: /screenshots/ }))
+      .toContainText("2 screenshots · 1 without a file");
+  });
+
+  // The same pictures, filed where they were taken: a session's grid is the evening's, and a
+  // segment's is its own.
+  await test.step("a segment shows only the screenshots taken during it", async () => {
+    await card.getByRole("button", { name: "2 segments" }).click();
+    await detail.openFromTimeline("Brin-Hearth", "Copperwood Depths");
+
+    await expect(shots.tilesIn(detail.dialog)).toHaveCount(1);
+    await detail.close();
+  });
 });
 
 // What happened to an equipment set is a chip like any other milestone, and the thing it

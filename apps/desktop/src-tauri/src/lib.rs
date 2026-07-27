@@ -478,6 +478,51 @@ fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value
     load_dashboard(&state.database_path())
 }
 
+/// The two ways somebody changes a capture, answering with the whole dashboard for the same
+/// reason the activity edits do: what ends up on screen is what was stored, never what the
+/// window hoped the write did. Which matters more here than anywhere — a note that looked
+/// saved and was not is a sentence somebody will not think to type again.
+#[tauri::command]
+fn set_capture_note(
+    capture_id: i64,
+    note: String,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    collector::set_capture_note(
+        &state.database_path(),
+        capture_id,
+        &note,
+        Utc::now().timestamp(),
+    )?;
+    load_dashboard(&state.database_path())
+}
+
+#[tauri::command]
+fn delete_capture(capture_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+    collector::delete_capture(&state.database_path(), capture_id, Utc::now().timestamp())?;
+    load_dashboard(&state.database_path())
+}
+
+/// The pictures a grid of captures needs, asked for once the rows are drawn.
+///
+/// Async, and not for the bridge's sake: the first look at an evening's captures decodes and
+/// re-encodes a screenshot apiece, which is tens of milliseconds each and would hold the main
+/// thread for the length of the grid. Every one after that is a file read, because the
+/// thumbnails are kept beside the images they were made from.
+#[tauri::command]
+async fn capture_thumbnails(
+    capture_ids: Vec<i64>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    collector::capture_thumbnails(&state.database_path(), &capture_ids)
+}
+
+/// One capture at the size it was taken, which is what opening a picture asks for.
+#[tauri::command]
+async fn capture_image(capture_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+    collector::capture_image(&state.database_path(), capture_id)
+}
+
 /// The one file in the addon the app writes rather than copies: what it has been asked to do.
 ///
 /// This is the whole channel between the two halves. The app already lays the addon folder
@@ -925,6 +970,10 @@ pub fn run() {
             update_activity,
             delete_activity,
             reset_activities,
+            set_capture_note,
+            delete_capture,
+            capture_thumbnails,
+            capture_image,
             wifi_receive_start,
             wifi_receive_stop,
             wifi_receive_status,

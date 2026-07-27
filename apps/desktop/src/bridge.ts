@@ -7,6 +7,9 @@ import type {
   Activity,
   ActivityMetadata,
   AppUpdateResult,
+  Capture,
+  CaptureImagePayload,
+  CaptureThumbnailsPayload,
   CharacterModelPayload,
   CombatLogStatus,
   DashboardPayload,
@@ -134,6 +137,39 @@ export const desktop = {
   resetActivities: (segmentId: number): Promise<DashboardPayload> => mock
     ? Promise.resolve(mockEdit(bySegment(segmentId), (activities) => activities.splice(0)))
     : invoke<DashboardPayload>("reset_activities", { segmentId }),
+  // The two ways a capture changes, answering with the whole dashboard the way the activity
+  // edits do — so a note that looked saved and was not cannot happen. The mock edits its own
+  // stored dashboard, which is the same "write, then repaint from storage" flow.
+  setCaptureNote: (captureId: number, note: string): Promise<DashboardPayload> => mock
+    ? Promise.resolve(mockCaptureEdit(captureId, (captures, at) => {
+      const found = captures[at];
+      // The backend cleans a note by the addon's own rules; the mock does the half of that a
+      // test can tell apart from a working field — trimming, and no note at all for nothing.
+      if (found) found.note = note.trim() || null;
+    }))
+    : invoke<DashboardPayload>("set_capture_note", { captureId, note }),
+  deleteCapture: (captureId: number): Promise<DashboardPayload> => mock
+    ? Promise.resolve(mockCaptureEdit(captureId, (captures, at) => {
+      captures.splice(at, 1);
+      if (mock) delete mock.captureImages[captureId];
+    }))
+    : invoke<DashboardPayload>("delete_capture", { captureId }),
+  // The pictures a grid needs, asked for once the tiles are drawn. Answered from a cache on
+  // disk after the first look at an evening, which is why asking for a whole grid is cheap.
+  captureThumbnails: (captureIds: number[]): Promise<CaptureThumbnailsPayload> => mock
+    ? Promise.resolve({ thumbnails: mockThumbnails(captureIds) })
+    : invoke<CaptureThumbnailsPayload>("capture_thumbnails", { captureIds }),
+  // One capture at the size it was taken, which is a few megabytes and is therefore asked for
+  // only when somebody opens it.
+  captureImage: (captureId: number): Promise<CaptureImagePayload> => {
+    if (mock) {
+      const held = mock.captureImages[captureId];
+      return Promise.resolve(held
+        ? { id: captureId, image: held.full, byteSize: held.byteSize }
+        : { id: captureId, image: null });
+    }
+    return invoke<CaptureImagePayload>("capture_image", { captureId });
+  },
   installAddon: (): Promise<InstallResult> =>
     mock ? Promise.resolve(mock.installResult) : invoke<InstallResult>("install_addon"),
   checkForAppUpdate: (): Promise<AppUpdateResult> =>
@@ -235,6 +271,33 @@ function mockAchievements(wanted: number[]): Record<string, AchievementDetail> {
     if (detail) found[String(id)] = detail;
   }
   return found;
+}
+
+/** The thumbnails the e2e mock holds among those asked for, keyed the way icons are. */
+function mockThumbnails(wanted: number[]): Record<string, string> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, string> = {};
+  for (const id of wanted) {
+    const held = mock.captureImages[id];
+    if (held) found[String(id)] = held.thumbnail;
+  }
+  return found;
+}
+
+/**
+ * Applies an edit to the capture with a given id wherever it sits in the mock's dashboard, and
+ * hands back a fresh copy — the same flow `mockEdit` gives the activity commands.
+ */
+function mockCaptureEdit(
+  captureId: number,
+  apply: (captures: Capture[], at: number) => void,
+): DashboardPayload {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  for (const segment of mock.dashboard.segments || []) {
+    const at = (segment.captures || []).findIndex((capture) => capture.id === captureId);
+    if (at >= 0) apply(segment.captures ?? [], at);
+  }
+  return structuredClone(mock.dashboard);
 }
 
 /** Drops the guess for a kind the user has just taken over, mirroring the backend's rule. */
