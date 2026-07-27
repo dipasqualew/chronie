@@ -120,15 +120,20 @@ end
 ---out of an event handler — which is exactly what happened at every reputation gain on
 ---the build in issue #44, where `C_Reputation.GetFactionDataByName` was not defined.
 ---A standing the client will not tell us is worth losing; a Lua error is not.
+---
+---Shared rather than kept here because the rule is the client's rather than reputation's:
+---`ns.readHoldings` walks two panes at logout and reaches for six of these, and every one
+---of them is a function some build could be without.
 ---@param source table?
 ---@param name string
 ---@return function?
-local function callable(source, name)
+function ns.callable(source, name)
     if type(source) ~= "table" or type(source[name]) ~= "function" then
         return nil
     end
     return source[name]
 end
+local callable = ns.callable
 
 ---Finds one faction's data table by the name the chat message called it.
 ---
@@ -159,28 +164,29 @@ local function findFaction(reputation, faction)
     return nil
 end
 
----Asks the client everything it knows about one faction and reduces it to a single bar.
+---Asks the client everything else it knows about one faction it has already handed over,
+---and reduces the lot to a single bar.
 ---
 ---This is `ns.factionStanding`'s outward-facing half: gathering the four systems' answers
 ---from four different namespaces, so that the choosing between them stays pure. Written
 ---the same way as `ns.readMapPosition` — the client tables arrive as arguments, so the
 ---whole thing is drivable from a spec without a game running.
+---
+---Split from `ns.readFactionState` because there are two ways to arrive here. A gain names
+---its faction and has to be looked up; a walk of the reputation pane is handed each row
+---already, and looking every one of them up again by a name it just read would be the same
+---work done twice.
 ---@param clients table? `{ reputation = C_Reputation, majorFaction = C_MajorFactionData,
 ---gossip = C_GossipInfo, reactionLabel = fun(reaction: integer): string? }`
----@param faction string? The faction's localised name, as the chat message named it.
+---@param data table? One faction's data, in `GetFactionDataByIndex`'s shape.
 ---@return FactionStanding?
-function ns.readFactionState(clients, faction)
-    if type(faction) ~= "string" or faction == "" then
+function ns.readFactionStanding(clients, data)
+    if type(data) ~= "table" then
         return nil
     end
     clients = clients or {}
 
     local reputation = clients.reputation
-    local data = findFaction(reputation, faction)
-    if not data then
-        return nil
-    end
-
     local renown, friendship, paragon
     local factionID = data.factionID
     if factionID then
@@ -215,4 +221,16 @@ function ns.readFactionState(clients, faction)
         paragon = paragon,
         reactionLabel = reactionLabel,
     })
+end
+
+---Where the character stands with the faction a chat message just named.
+---@param clients table? As `ns.readFactionStanding` takes them.
+---@param faction string? The faction's localised name, as the chat message named it.
+---@return FactionStanding?
+function ns.readFactionState(clients, faction)
+    if type(faction) ~= "string" or faction == "" then
+        return nil
+    end
+    clients = clients or {}
+    return ns.readFactionStanding(clients, findFaction(clients.reputation, faction))
 end

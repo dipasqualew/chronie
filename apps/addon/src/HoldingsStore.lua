@@ -66,15 +66,18 @@ local _, ns = ...
 ---* Every entry is **last known**, not live. A character that has not been logged into since
 ---  it spent the currency reports what it held when it was last played, and the entry's `at`
 ---  is what says how far in the past that was.
----* It only holds what the addon has **seen**. The client reports a currency's holding as
----  part of a change to it, and a faction's standing as part of a gain, so a currency this
----  character has never gained while the addon was loaded is not in here — which is a hole
----  in the account total, not a zero. Filling it would mean walking the client's own currency
----  and reputation panes, which is a separate piece of work.
+---* It only holds what the character was **there for**. A segment reports a currency as part
+---  of a change to it and a faction as part of a gain, so on segments alone a currency this
+---  character has never gained while the addon was loaded would not be in here — a hole in
+---  the account total rather than a zero. `ns.readHoldings` is what closes that: it walks
+---  the client's own currency and reputation panes at every zoning-in and again at logout
+---  and hands the lot to `record`, which is why the same call takes both. What it still
+---  cannot reach is what those panes are not showing — a collapsed group, and every legacy
+---  reputation, which the pane hides by default.
 ---
----Gold is the exception to the second of those. `GetMoney` answers outright rather than only
----as part of a change, so a wallet is read whole at every segment close and is a hole only
----for a character that has not been played since the addon started keeping them. The warband
+---Gold sits outside both of those. `GetMoney` answers outright rather than only as part of a
+---change, so a wallet is read whole at every segment close — but only at a close that files,
+---so a character that logs in, wanders and logs out has still never reported one. The warband
 ---bank is kept beside the wallets rather than inside them: every character reads the same
 ---pot, so filing it per character would add it to the account's worth once per alt.
 function ns.newHoldingsStore(deps)

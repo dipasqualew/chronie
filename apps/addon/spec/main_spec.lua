@@ -3195,6 +3195,148 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("the whole wallet and reputation pane", function()
+        local PANE = {
+            currencies = {
+                { id = 2245, name = "Flightstones", total = 5000 },
+                { id = 3008, name = "Valorstones", total = 0 },
+            },
+            reputation = {
+                {
+                    faction = "The Consortium",
+                    standing = "Honored",
+                    current = 3000,
+                    max = 12000,
+                    rank = 6,
+                    system = "reaction",
+                },
+            },
+        }
+
+        -- The hole this closes. A currency only ever reached the snapshot as part of a
+        -- change to it, so an alt sitting on 5,000 Flightstones contributed nothing to the
+        -- account's Flightstones until the next time it earned one — and it is absent from
+        -- the currency's list rather than recorded as holding none, which is a hole rather
+        -- than a zero.
+        it("writes down what the panes hold, with no gain having been watched at all", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                held = PANE,
+            })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local entry = recorded.db.holdings["Thrall-Ragnaros"]
+            assert.same({ name = "Flightstones", total = 5000, at = 1700000000 },
+                entry.currencies[2245])
+            assert.same({
+                standing = "Honored",
+                current = 3000,
+                max = 12000,
+                rank = 6,
+                system = "reaction",
+                at = 1700000000,
+            }, entry.factions["The Consortium"])
+        end)
+
+        -- Zero is the reading that watching could never produce: nothing announces a
+        -- balance the character no longer has, so a spent-out currency would otherwise go
+        -- on being counted at whatever it was last seen at.
+        it("records a currency the character has none of as none", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                held = PANE,
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(0, recorded.db.holdings["Thrall-Ragnaros"].currencies[3008].total)
+        end)
+
+        it("reads the panes again on the way out, after the last event the client sent",
+            function()
+                local _, recorded = boot({
+                    playerName = "Thrall",
+                    realmName = "Ragnaros",
+                    now = 1700000000,
+                    instanceType = "party",
+                    held = PANE,
+                })
+                recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+                -- Spent with no event to announce it, so only the logout read can find it.
+                recorded.setHeld({
+                    currencies = { { id = 2245, name = "Flightstones", total = 250 } },
+                })
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.equal(250, recorded.db.holdings["Thrall-Ragnaros"].currencies[2245].total)
+            end)
+
+        -- The walk only ever adds. A pane the client will not answer for — one the server
+        -- has not sent yet, a build that has moved the call — is not an empty wallet, and
+        -- every other character's rollup is about to read these numbers.
+        it("leaves what was already written standing when the panes say nothing", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                instanceType = "party",
+                held = PANE,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setHeld(nil)
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            local entry = recorded.db.holdings["Thrall-Ragnaros"]
+            assert.equal(5000, entry.currencies[2245].total)
+            assert.is_table(entry.factions["The Consortium"])
+        end)
+
+        -- Gold is on neither pane. It answers outright and is already read whole at every
+        -- segment close, so a sweep that touched it could only ever be a worse reading than
+        -- the one already there — and the sweep runs after the close, where clobbering it
+        -- is exactly what a careless one would do.
+        it("leaves the wallet to the segment that closes it", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                instanceType = "party",
+                money = 100000,
+                held = PANE,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setMoney(125000)
+            recorded.frame:fire("PLAYER_MONEY")
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(125000, recorded.db.holdings["Thrall-Ragnaros"].gold.total)
+        end)
+
+        -- The seam is read through `env.heldSweep`, so a harness that predates it — or a
+        -- client build the walk could not be wired for — has to boot and run rather than
+        -- raise on the way out, which is the one moment nothing could be recovered from.
+        it("survives an environment that does not offer the seam at all", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            recorded.env.heldSweep = nil
+
+            assert.has_no.errors(function()
+                recorded.frame:fire("PLAYER_LOGIN")
+                recorded.frame:fire("PLAYER_ENTERING_WORLD")
+                recorded.frame:fire("PLAYER_LOGOUT")
+            end)
+            assert.same({}, recorded.db.holdings)
+        end)
+    end)
+
     describe("the /chronie segments slash command", function()
         it("opens from the minimap button", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })

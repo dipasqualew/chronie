@@ -38,6 +38,8 @@ local addonName, ns = ...
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
 ---@field factionState fun(faction: string): FactionStanding? Where the character stands with one
 ---faction, by its localised name: the level, and how far into it they are.
+---@field heldSweep fun(): HeldSweep Everything the character is holding, read off the client's
+---currency and reputation panes rather than out of what the addon watched it earn.
 ---@field ownedItemCount fun(itemID: integer): integer Grand total owned across bags and every bank,
 ---the warband bank included, so internal transfers leave it unchanged.
 ---@field getCursorItem fun(): (integer?, string?) Item held on the cursor: id and name, or nil.
@@ -157,6 +159,24 @@ function ns.main(env)
     ---rather than writing down as a balance of zero.
     local function readWarbandGold()
         holdings.recordWarband(env.warbandMoney and env.warbandMoney())
+    end
+
+    ---Files everything the character is holding, rather than only what it was watched
+    ---earning.
+    ---
+    ---A segment only ever knows about a currency the client announced a change to and a
+    ---faction it announced a gain with, so on its own the snapshot starts as holes and
+    ---fills in one currency per character over weeks of play. This walks the client's own
+    ---panes instead and hands the lot to the same `record` a finished segment goes through
+    ---— nothing downstream can tell the two apart, and nothing downstream needs to.
+    ---
+    ---It only ever adds: a pane the client will not answer for leaves whatever was last
+    ---written standing rather than clearing it.
+    local function sweepHoldings()
+        if not env.heldSweep then
+            return
+        end
+        holdings.record(currentCharacter(), env.heldSweep())
     end
 
     local resultsWindow = ns.newResultsWindow({
@@ -710,6 +730,14 @@ function ns.main(env)
         -- After the tracker, never before: a change is filed against the open segment, and
         -- at login there is no open segment until sync() has made one.
         syncEquipsets()
+        -- Read here rather than at PLAYER_LOGIN, which is the earliest the character can be
+        -- named but not the earliest the panes are populated: a currency list the server has
+        -- not sent yet reads as empty, and an empty read at login would be indistinguishable
+        -- from a character that genuinely holds nothing. This fires on the far side of every
+        -- loading screen there is, login included, and again at every zone boundary, which
+        -- costs a walk of two short lists and keeps the snapshot current through the session
+        -- rather than only at its ends.
+        sweepHoldings()
         resultsWindow.update(tally.summary())
         resultsWindow.show()
     end
@@ -785,6 +813,10 @@ function ns.main(env)
     dispatcher.on("PLAYER_LOGOUT", function()
         readWarbandGold()
         segmentTracker.flush()
+        -- After the flush, so the walk's complete reading is the one left standing where the
+        -- two overlap. This is the freshest the snapshot will ever be — whatever it says here
+        -- is what every other character's rollup reads until this one is played again.
+        sweepHoldings()
         -- And the last chance for an offer to resolve, which matters for exactly one shape of
         -- entry. An engaged prompt has no deadline — the clock is not paused, it is gone — so a
         -- memory whose box still holds focus is a row with no note that nothing will ever come
@@ -1029,6 +1061,21 @@ if CreateFrame then
             return list
         end
 
+        ---The four namespaces a standing has to be assembled out of, in the bag the pure
+        ---readers take them in. A fresh table each call, because the sweep adds the
+        ---currency pane to its own copy and nothing else should inherit it.
+        ---@return table
+        local function reputationClients()
+            return {
+                reputation = C_Reputation,
+                majorFaction = C_MajorFactionData,
+                gossip = C_GossipInfo,
+                reactionLabel = function(reaction)
+                    return _G["FACTION_STANDING_LABEL" .. reaction]
+                end,
+            }
+        end
+
         ns.app = ns.main({
             createFrame = CreateFrame,
             print = print,
@@ -1212,14 +1259,15 @@ if CreateFrame then
             -- Three namespaces answer that question and ns.readFactionState knows which to
             -- believe; all this does is hand it the client tables to ask.
             factionState = function(faction)
-                return ns.readFactionState({
-                    reputation = C_Reputation,
-                    majorFaction = C_MajorFactionData,
-                    gossip = C_GossipInfo,
-                    reactionLabel = function(reaction)
-                        return _G["FACTION_STANDING_LABEL" .. reaction]
-                    end,
-                }, faction)
+                return ns.readFactionState(reputationClients(), faction)
+            end,
+            -- The same tables, plus the currency pane, asked to name everything rather than
+            -- one thing. This is what makes an account total the account's: a character is
+            -- otherwise only ever recorded holding what it was watched earning.
+            heldSweep = function()
+                local clients = reputationClients()
+                clients.currency = C_CurrencyInfo
+                return ns.readHoldings(clients)
             end,
             -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
             -- store the character owns, so moving the item between them never shifts the total.
