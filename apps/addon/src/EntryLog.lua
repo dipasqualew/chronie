@@ -100,7 +100,10 @@ function ns.newEntryLog(deps)
             local at = now()
             local hasImage = options.hasImage and true or false
 
-            if hasImage and lastImageAt and at - lastImageAt < cooldown then
+            -- Only a clock that has moved forward, and not far enough. A clock that jumped
+            -- backwards — a resync mid-session — must not lock the binding out for however
+            -- long it went back by; the ids stay unique through it either way.
+            if hasImage and lastImageAt and at >= lastImageAt and at - lastImageAt < cooldown then
                 return nil
             end
 

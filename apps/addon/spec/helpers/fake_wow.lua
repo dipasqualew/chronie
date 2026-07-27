@@ -721,6 +721,12 @@ function fake.newEnv(options)
     -- How many times the addon reached for the shutter. There is nothing else to observe:
     -- the real Screenshot() is asynchronous and writes a file the addon can never see.
     local screenshots = 0
+    -- The client's own unique id for the logged-in character. `false` models every moment
+    -- before the world has loaded, where the client will not name the player at all.
+    local playerGUID = options.playerGUID
+    if playerGUID == nil then
+        playerGUID = "Player-970-0002FD1B"
+    end
 
     local env = {
         createFrame = createFrame,
@@ -869,7 +875,7 @@ function fake.newEnv(options)
         previewTransmog = function() end,
         openTransmogCollection = function() end,
         playerGUID = function()
-            return options.playerGUID or "Player-970-0002FD1B"
+            return playerGUID or nil
         end,
         mapState = function()
             if not mapPosition then
