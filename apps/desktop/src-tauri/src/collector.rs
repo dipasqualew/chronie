@@ -2160,6 +2160,12 @@ fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
                  JOIN segments s ON p.at_ms / 1000 BETWEEN s.started_at AND s.ended_at
                  JOIN characters c ON c.id = s.character_id
                  WHERE p.segment_id IS NULL
+                   -- Nothing outside the span history covers can land in it, and this is what
+                   -- keeps the pass from costing anything at all on an install that has read
+                   -- a season of logs and has no segments yet: with no segments the pair is
+                   -- NULL, the comparison is NULL, and no row is considered.
+                   AND p.at_ms / 1000 BETWEEN (SELECT MIN(started_at) FROM segments)
+                                          AND (SELECT MAX(ended_at) FROM segments)
              )
              UPDATE log_positions SET segment_id = (
                  SELECT segment FROM ranked
