@@ -1,5 +1,5 @@
 /**
- * The two halves of moving a history between machines, as they appear in Setup.
+ * The two halves of moving a history between machines, as they appear in Settings.
  *
  * Sending is a list of the Chronies found waiting, plus somewhere to type an address for the
  * networks where a broadcast never arrives. Receiving is a switch that starts a machine
@@ -34,7 +34,7 @@ export interface WifiActions {
 
 export interface WifiPanelProps {
   actions: WifiActions;
-  /** Whether Setup is on screen. A machine left waiting is watched wherever the reader has
+  /** Whether the category holding it is on screen. A machine left waiting is watched wherever the reader has
    * wandered to, because what lands on it replaces every view. */
   visible: boolean;
 }

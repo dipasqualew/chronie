@@ -1,5 +1,5 @@
 /**
- * The retention section of Setup: a switch, a number of days, and the files that would go.
+ * The retention section of Settings: a switch, a number of days, and the files that would go.
  *
  * The list is the point. Deleting a combat log is the one thing Chronie does that cannot be
  * undone, and the first sweep on a machine that has been logging for a year could take the

@@ -391,7 +391,28 @@ class Outfit {
 }
 
 /**
- * The combat logging panel on Setup: one switch, and what the install is really doing.
+ * Settings, which is a rail of categories and one pane. Everything else on this page that
+ * lives under Settings opens through here, so the two clicks are written down once.
+ */
+class SettingsPage {
+  readonly page: Page;
+
+  constructor(page: Page) {
+    this.page = page;
+  }
+
+  /** Opens Settings on a given category, addressed by the name on the rail. */
+  async open(category: string): Promise<void> {
+    await this.page.getByRole("button", { name: "Settings", exact: true }).click();
+    await this.page
+      .getByRole("navigation", { name: "Settings categories" })
+      .getByRole("button", { name: category })
+      .click();
+  }
+}
+
+/**
+ * The combat logging panel on Settings: one switch, and what the install is really doing.
  *
  * The panel is a landmark and is found by its name, and everything inside it by role — the
  * checkbox by the label beside it, the state line by its being a live region. Nothing here
@@ -407,7 +428,7 @@ class CombatLoggingPanel {
   }
 
   async open(): Promise<void> {
-    await this.page.getByRole("button", { name: "Setup" }).click();
+    await new SettingsPage(this.page).open("Combat logs");
     await expect(this.panel).toBeVisible();
   }
 
@@ -470,8 +491,8 @@ class Screenshots {
 }
 
 /**
- * The retention panel on Setup: a switch, a number of days, and — the reason the panel exists
- * — the files a sweep would take, by name, before anybody agrees to it.
+ * The retention panel on Settings: a switch, a number of days, and — the reason the panel
+ * exists — the files a sweep would take, by name, before anybody agrees to it.
  */
 class LogRetentionPanel {
   readonly page: Page;
@@ -483,7 +504,7 @@ class LogRetentionPanel {
   }
 
   async open(): Promise<void> {
-    await this.page.getByRole("button", { name: "Setup" }).click();
+    await new SettingsPage(this.page).open("Combat logs");
     await expect(this.panel).toBeVisible();
   }
 
@@ -503,6 +524,47 @@ class LogRetentionPanel {
   }
 }
 
+/**
+ * The screenshots category of Settings: what photographs itself, and what is kept of it.
+ *
+ * Every control is addressed by the moment it is about — "a mount added to the collection" —
+ * because that is what somebody is looking for and what a screen reader announces. The two
+ * halves of the panel are one region, and the state lines are live regions inside it.
+ */
+class CaptureSettingsPanel {
+  readonly page: Page;
+  readonly panel: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.panel = page.getByRole("region", { name: "Screenshots" });
+  }
+
+  async open(): Promise<void> {
+    await new SettingsPage(this.page).open("Screenshots");
+    await expect(this.panel).toBeVisible();
+  }
+
+  /** One rule's box, named by the moment it photographs. */
+  trigger(moment: string | RegExp): Locator {
+    return this.panel.getByRole("checkbox", { name: moment });
+  }
+
+  /** One of the four things Chronie can keep of a picture. */
+  quality(level: string | RegExp): Locator {
+    return this.panel.getByRole("radio", { name: level });
+  }
+
+  originals(): Locator {
+    return this.panel.getByRole("checkbox", { name: "Leave the game’s own copy where it is" });
+  }
+
+  /** What the panel says about the rules as they stand, which is announced as it changes. */
+  state(): Locator {
+    return this.panel.getByRole("status");
+  }
+}
+
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
@@ -512,6 +574,7 @@ const test = base.extend<{
   outfit: Outfit;
   combat: CombatLoggingPanel;
   retention: LogRetentionPanel;
+  captureSettings: CaptureSettingsPanel;
   shots: Screenshots;
 }>({
   detail: async ({ page }, use) => {
@@ -537,6 +600,9 @@ const test = base.extend<{
   },
   retention: async ({ page }, use) => {
     await use(new LogRetentionPanel(page));
+  },
+  captureSettings: async ({ page }, use) => {
+    await use(new CaptureSettingsPanel(page));
   },
   shots: async ({ page }, use) => {
     await use(new Screenshots(page));
@@ -1043,6 +1109,12 @@ const mockDesktop: E2EMock = {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
     combatLogging: false,
+    // What a fresh install photographs, plus a name this build has no rule for — the state a
+    // hand-edited settings file or a newer addon leaves, and the one the panel must not
+    // quietly delete the first time somebody ticks anything.
+    captureTriggers: ["accountFirstAchievement", "somethingNewer"],
+    captureQuality: "balanced",
+    keepOriginalScreenshots: false,
   },
   // An install that has never been asked to log: the setting is off, and the game's own
   // config happens to have the advanced box ticked already, which is the case that proves
@@ -1224,6 +1296,23 @@ const combatLoggingSetting = (page: Page): Promise<boolean | undefined> =>
 /** And what it was told to keep logs for, which is `null` while it is told to keep them all. */
 const retainDaysSetting = (page: Page): Promise<number | null | undefined> =>
   page.evaluate(() => window.__Chronie_E2E__?.settings.retainLogDays ?? null);
+
+/**
+ * The screenshot settings as the backend was actually told to store them.
+ *
+ * Read back for the same reason the combat logging one is: a control that reports a setting it
+ * never saved looks identical on screen to one that did, and the whole of this feature is a
+ * page of controls whose only effect is what they wrote.
+ */
+const captureSettingsStored = (page: Page): Promise<{
+  triggers: string[];
+  quality?: string;
+  keepOriginals?: boolean;
+}> => page.evaluate(() => ({
+  triggers: window.__Chronie_E2E__?.settings.captureTriggers ?? [],
+  quality: window.__Chronie_E2E__?.settings.captureQuality,
+  keepOriginals: window.__Chronie_E2E__?.settings.keepOriginalScreenshots,
+}));
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {
@@ -2200,11 +2289,11 @@ test("browses the game's transmog sets and dresses the character in them", async
   });
 });
 
-test("drives setup, sync, addon installation, and app update checks", async (
-  { page, combat, retention },
+test("drives settings, sync, addon installation, and app update checks", async (
+  { page, combat, retention, captureSettings },
 ) => {
-  await page.getByRole("button", { name: "Setup" }).click();
-  await expect(page.getByRole("heading", { name: "Setup" })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   await expect(page.getByLabel("Game folder")).toHaveValue("C:\\Games\\Example MMO\\_retail_");
 
   await page.getByRole("button", { name: "Browse…" }).click();
@@ -2222,10 +2311,77 @@ test("drives setup, sync, addon installation, and app update checks", async (
   await page.getByRole("button", { name: "Check for app update" }).click();
   await expect(page.locator("#setup-status")).toHaveText("Chronie is up to date.");
 
+  // The rules the addon acts on, which are the reason this category exists. What is on screen
+  // has to be what the install is running — a panel of unticked boxes on an install that
+  // photographs account firsts is telling somebody the opposite of what is happening.
+  await test.step("the screenshot rules show what the install is actually running", async () => {
+    await captureSettings.open();
+
+    await expect(captureSettings.trigger(/An achievement nobody on this account had/))
+      .toBeChecked();
+    await expect(captureSettings.trigger(/Every achievement this character earns/))
+      .not.toBeChecked();
+    await expect(captureSettings.state()).toContainText("one kind of moment");
+    await expect(captureSettings.state()).toContainText("at most one a minute");
+  });
+
+  await test.step("ticking a rule saves the whole list", async () => {
+    await captureSettings.trigger(/A mount added to the collection/).check();
+
+    await expect(captureSettings.state()).toContainText("2 kinds of moment");
+    // The unrecognised name is still there: the panel writes the whole list from its own
+    // boxes, and a settings file somebody edited by hand must survive being written over.
+    await expect(captureSettingsStored(page)).resolves.toMatchObject({
+      triggers: ["accountFirstAchievement", "mount", "somethingNewer"],
+    });
+    await expect(captureSettings.panel).toContainText("somethingNewer");
+  });
+
+  // The addon offers a moment to the narrow rule first and the broad one second, so ticking
+  // the broad one leaves the narrow one doing nothing on its own. Two ticked boxes where one
+  // is inert is a state somebody would otherwise sit and stare at.
+  await test.step("and says when a broader rule already covers a narrower one", async () => {
+    await captureSettings.trigger(/Every achievement this character earns/).check();
+
+    await expect(captureSettings.panel)
+      .toContainText("Already covered by “Every achievement this character earns”");
+    await expect(captureSettings.trigger(/An achievement nobody on this account had/))
+      .toBeChecked();
+  });
+
+  // The half of the panel the desktop app acts on rather than the game. The default is a
+  // re-encode, because the store is forever and the client writes megabytes a shot.
+  await test.step("what is kept of a picture is a choice, and the default is not the raw file", async () => {
+    await expect(captureSettings.quality(/Fits a retina display/)).toBeChecked();
+    await expect(captureSettings.panel).toContainText("2560 pixels on the long side");
+    await expect(captureSettings.panel)
+      .toContainText("Nothing already in the store is re-compressed");
+
+    await captureSettings.quality(/Exactly what the game wrote/).check();
+
+    await expect(captureSettingsStored(page)).resolves.toMatchObject({ quality: "original" });
+  });
+
+  // The two opposite risks: a folder that never stops growing, and a folder somebody has
+  // curated for years losing files. Which one is running has to be on screen.
+  await test.step("and so is whether the game keeps its own copy", async () => {
+    await expect(captureSettings.panel)
+      .toContainText("Chronie deletes the game’s copy once it holds a verified one of its own.");
+
+    await captureSettings.originals().check();
+
+    await expect(captureSettings.panel).toContainText("its Screenshots folder goes on growing");
+    await expect(captureSettingsStored(page)).resolves.toMatchObject({
+      quality: "original",
+      keepOriginals: true,
+    });
+  });
+
   // What a combat log costs has to be readable before anybody ticks the box, not after the
   // first raid night has filled a disk — so the warning being on screen beside an untouched
   // switch is the thing asserted, rather than anything that happens once it is on.
   await test.step("combat logging is off, and says what turning it on would cost", async () => {
+    await combat.open();
     await expect(combat.toggle()).not.toBeChecked();
     await expect(combat.state())
       .toHaveText("Combat logging is off. Nothing is being written and nothing is using disk.");
@@ -2305,7 +2461,7 @@ test("drives setup, sync, addon installation, and app update checks", async (
  * holding: one click must not be enough to hand a history over.
  */
 test("finds another Chronie on the network and offers this history to it", async ({ page }) => {
-  await page.getByRole("button", { name: "Setup" }).click();
+  await new SettingsPage(page).open("Move this history");
   const sending = page.getByRole("region", { name: "Send this history" });
 
   await sending.getByRole("button", { name: "Look for Chronies" }).click();
@@ -2330,7 +2486,7 @@ test("finds another Chronie on the network and offers this history to it", async
  * standing between a reader and that.
  */
 test("takes a history from another Chronie only once somebody agrees", async ({ page }) => {
-  await page.getByRole("button", { name: "Setup" }).click();
+  await new SettingsPage(page).open("Move this history");
   const receiving = page.getByRole("region", { name: "Receive a history" });
   const offer = page.locator("#wifi-offer");
 
