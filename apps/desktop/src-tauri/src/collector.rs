@@ -1887,13 +1887,16 @@ fn upsert_log(
                  byte_size = excluded.byte_size,
                  head_hash = excluded.head_hash,
                  head_bytes = excluded.head_bytes,
-                 -- Reset by a restart, because the lines before it were counted against a
-                 -- file this row is no longer the cursor for.
+                 -- Reset by a restart, because the lines counted before it were counted
+                 -- against a file this row is no longer the cursor for. `?7` is whether this
+                 -- read restarted, not how many times this file ever has, so the count it
+                 -- feeds is added to rather than replaced — a log rotated twice has restarted
+                 -- twice, and the second one resets the tally exactly as the first did.
                  lines_read = CASE
-                     WHEN ?7 > combat_logs.restarts THEN excluded.lines_read
+                     WHEN ?7 = 1 THEN excluded.lines_read
                      ELSE combat_logs.lines_read + excluded.lines_read
                  END,
-                 restarts = excluded.restarts,
+                 restarts = combat_logs.restarts + ?7,
                  advanced = CASE
                      WHEN combat_logs.advanced = 1 THEN 1
                      ELSE COALESCE(excluded.advanced, combat_logs.advanced)
@@ -2085,8 +2088,11 @@ fn store_fight(
         .map_err(|error| error.to_string())?;
     transaction
         .query_row(
+            // Ordered, because the row just written is the only one this can mean and a fight
+            // with no beginning is not covered by the unique key that would otherwise say so.
             "SELECT id FROM log_fights
-             WHERE log_id = ?1 AND kind = ?2 AND encounter_id IS ?3 AND started_at IS ?4",
+             WHERE log_id = ?1 AND kind = ?2 AND encounter_id IS ?3 AND started_at IS ?4
+             ORDER BY id DESC LIMIT 1",
             params![log_id, kind, fight.encounter_id, fight.started_at],
             |row| row.get(0),
         )
@@ -4735,6 +4741,30 @@ ChronieDB = {{ ["segments"] = {{
             "SELECT DISTINCT name FROM log_fights ORDER BY name",
         );
         assert_eq!(names, ["Fyrakk the Blazing", "Gnarlroot"]);
+    }
+
+    /// A log rotated more than once. The tally of restarts is a count and not a flag, and the
+    /// line count it resets has to be reset by the second rotation exactly as by the first —
+    /// otherwise the number quietly becomes the sum of two files that never coexisted.
+    #[test]
+    fn counts_every_rotation_rather_than_the_first_one() {
+        let (_temp, wow, database) = synthetic_install("");
+        plant_log(&wow, "rotated-before.txt", "WoWCombatLog.txt");
+        collect(&wow, &database, 1_718_300_100, Options::default()).unwrap();
+        plant_log(&wow, "rotated-after.txt", "WoWCombatLog.txt");
+        collect(&wow, &database, 1_718_300_200, Options::default()).unwrap();
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog.txt");
+
+        collect(&wow, &database, 1_718_300_300, Options::default()).unwrap();
+
+        let (restarts, lines): (i64, i64) = open_database(&database)
+            .unwrap()
+            .query_row("SELECT restarts, lines_read FROM combat_logs", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(restarts, 2);
+        assert_eq!(lines, 28, "the tally carried lines from a file that is gone");
     }
 
     /// A log with advanced logging off carries no positions and no map bounds, and every other
