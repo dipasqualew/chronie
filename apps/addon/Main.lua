@@ -916,36 +916,17 @@ if CreateFrame then
             end,
             -- Chat is the only place a reputation gain is announced, and it names the faction
             -- rather than identifying it, so the standing has to be looked up by that name.
-            -- Which of the client's reputation systems answers for a faction decides what its
-            -- bar means; gathering all of their answers here keeps the choosing in
-            -- ns.factionStanding, where it can be tested without a client.
+            -- Three namespaces answer that question and ns.readFactionState knows which to
+            -- believe; all this does is hand it the client tables to ask.
             factionState = function(faction)
-                if not faction then
-                    return nil
-                end
-                local data = C_Reputation.GetFactionDataByName(faction)
-                if not data then
-                    return nil
-                end
-                local factionID = data.factionID
-                local renown, friendship, paragon
-                if factionID then
-                    if C_Reputation.IsMajorFaction(factionID) then
-                        renown = C_MajorFactionData.GetMajorFactionData(factionID)
-                    end
-                    friendship = C_GossipInfo.GetFriendshipReputation(factionID)
-                    if C_Reputation.IsFactionParagon(factionID) then
-                        local value, threshold = C_Reputation.GetFactionParagonInfo(factionID)
-                        paragon = { value = value, threshold = threshold }
-                    end
-                end
-                return ns.factionStanding({
-                    faction = data,
-                    renown = renown,
-                    friendship = friendship,
-                    paragon = paragon,
-                    reactionLabel = data.reaction and _G["FACTION_STANDING_LABEL" .. data.reaction] or nil,
-                })
+                return ns.readFactionState({
+                    reputation = C_Reputation,
+                    majorFaction = C_MajorFactionData,
+                    gossip = C_GossipInfo,
+                    reactionLabel = function(reaction)
+                        return _G["FACTION_STANDING_LABEL" .. reaction]
+                    end,
+                }, faction)
             end,
             -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
             -- store the character owns, so moving the item between them never shifts the total.

@@ -925,6 +925,7 @@ mod tests {
         // the busted specs above all — can ride along into somebody's game folder.
         let mut expected = files_listed_in_the_toc();
         expected.push("chronie.toc".to_string());
+        expected.push("Bindings.xml".to_string());
         expected.sort();
         let mut bundled: Vec<String> = BUNDLED_ADDON
             .iter()
@@ -949,6 +950,10 @@ mod tests {
         let installed = addon_folder(&retail);
         assert!(installed.join("Main.lua").is_file());
         assert!(!installed.join("spec").exists());
+        // The one file the .toc does not account for. The client loads it by name from the
+        // addon's root folder, so it has to land there even though no manifest names it —
+        // and if it does not, the player's capture key silently stops existing.
+        assert!(installed.join("Bindings.xml").is_file());
         assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
         let lua_modules = fs::read_dir(installed.join("src"))
             .unwrap()

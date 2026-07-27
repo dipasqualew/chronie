@@ -35,4 +35,8 @@ src/ReportCommand.lua
 src/ReportWindow.lua
 src/CombatLogging.lua
 Main.lua
-Bindings.xml
+
+# Bindings.xml is deliberately absent. The client loads it by that name from the addon's
+# root folder on its own, before it reads this file; naming it here hands the same file to
+# the ordinary UI XML parser as well, which does not know what a <Binding> is and reports
+# it as unrecognised XML at every login.

@@ -120,6 +120,36 @@ CI is something you reach through the pull request and nowhere else. Do not push
 a branch that has no pull request open on it just to get a run, and do not go
 reading runs that no pull request accounts for.
 
+## A bug is a missing test before it is a broken line
+
+When the work is a bug — an issue labelled one, a reported Lua error, a stack
+trace, anything that says "this does not behave as it should" — the first commit
+of the change is a test that fails for exactly the reason the report describes.
+Run it and watch it fail before you touch the code that makes it pass. A fix
+written first and covered afterwards proves only that the code you just wrote
+does what you just wrote; a test written first proves the bug was real, that you
+understood it, and that it cannot come back unnoticed.
+
+Put the test at the level the bug actually lives at, and only at that level:
+
+- A wrong value out of a function, a missing nil guard, an API the client build
+  does not have — **unit**, against the module, with the outside world injected.
+  If the buggy code sits somewhere a unit test cannot reach, that is the bug
+  telling you to extract it into a pure module first.
+- A file the game or the app parses rather than executes, a manifest, a shape
+  crossing the Rust/TypeScript boundary — **contract**, asserting on the file or
+  the serialised shape itself.
+- Something only visible once the pieces are wired together — **integration**,
+  booting the addon through `spec/helpers/addon_loader.lua` or the app through
+  its own entry point.
+- Something a player or a user would see and nothing smaller would catch —
+  **e2e**, driving the real thing from outside.
+
+One bug usually earns one test. Reach for a bigger level than the bug needs and
+the suite gets slower and vaguer for no more coverage; reach for a smaller one
+than it needs and the test passes while the bug survives. `/test` describes what
+each level means here.
+
 ## Checks
 
 `./scripts/check.sh` runs luacheck, busted, the Rust collector tests, the TypeScript

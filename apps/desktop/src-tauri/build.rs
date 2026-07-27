@@ -1,5 +1,9 @@
 use std::{env, fs, path::PathBuf};
 
+/// The keybinding file, which the game client loads by this exact name from the addon's
+/// root folder and which the .toc therefore must not mention.
+const BINDINGS: &str = "Bindings.xml";
+
 fn main() {
     embed_addon();
     tauri_build::build()
@@ -14,6 +18,12 @@ fn main() {
 /// The .toc decides what goes in. It is the addon's own manifest, the list the game client
 /// itself loads, so anything else under `apps/addon` — the busted specs above all — is not
 /// part of the addon and has no business in either the binary or the game folder.
+///
+/// Bindings.xml is the one exception, and it is the client's exception rather than ours:
+/// the client loads it by name from the addon's root folder without consulting the .toc,
+/// and listing it there as well gets it parsed a second time as ordinary UI XML, which
+/// fails loudly at every login. So it ships without being named, and this is the only
+/// place that knows it.
 fn embed_addon() {
     let addon = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
         .join("../../addon")
@@ -23,7 +33,10 @@ fn embed_addon() {
     println!("cargo:rerun-if-changed={}", toc.display());
 
     let manifest = fs::read_to_string(&toc).expect("the addon should have a chronie.toc");
-    let mut entries = vec![entry(&toc, "chronie.toc")];
+    let bindings = addon.join(BINDINGS);
+    println!("cargo:rerun-if-changed={}", bindings.display());
+    assert!(bindings.is_file(), "the addon should have a {BINDINGS} for the client to find");
+    let mut entries = vec![entry(&toc, "chronie.toc"), entry(&bindings, BINDINGS)];
     for line in manifest.lines() {
         let listed = line.trim();
         if listed.is_empty() || listed.starts_with('#') {
@@ -35,6 +48,13 @@ fn embed_addon() {
         assert!(
             !relative.starts_with('/') && !relative.split('/').any(|part| part == ".."),
             "chronie.toc lists a path outside the addon: {listed}"
+        );
+        // Named here as well as loaded by the client, it would both ride into the bundle
+        // twice and produce the login errors of issue #44. Caught at build time because
+        // neither symptom is visible until somebody launches the game.
+        assert!(
+            relative != BINDINGS,
+            "chronie.toc must not list {BINDINGS}; the client loads it by name on its own"
         );
         let source = addon.join(&relative);
         println!("cargo:rerun-if-changed={}", source.display());

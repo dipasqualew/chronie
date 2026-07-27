@@ -1057,8 +1057,6 @@ describe("addon integration", function()
             end
         end)
 
-        -- The last Lua file rather than the last entry: Bindings.xml sits after it, and
-        -- the client's XML parser cares nothing for where in the list it appears.
         it("loads Main.lua last, so the modules exist when it wires them", function()
             local lua = {}
             for _, path in ipairs(loader.tocFiles()) do
@@ -1072,10 +1070,10 @@ describe("addon integration", function()
     end)
 
     -- Bindings.xml is the only file in the tree the client parses rather than executes,
-    -- so nothing about it can be proved by loading the addon. What these check is that
-    -- the .toc still names it and that every token inside it is one the addon labels —
-    -- a binding whose BINDING_NAME_ global is missing shows up in the Key Bindings panel
-    -- as a raw CHRONIE_SHOUTY_TOKEN, which is a bug only a player would ever notice.
+    -- so nothing about it can be proved by loading the addon. What these check is where
+    -- the file sits and that every token inside it is one the addon labels — a binding
+    -- whose BINDING_NAME_ global is missing shows up in the Key Bindings panel as a raw
+    -- CHRONIE_SHOUTY_TOKEN, which is a bug only a player would ever notice.
     describe("the capture keybinding", function()
         local BINDINGS = "Bindings.xml"
 
@@ -1091,13 +1089,22 @@ describe("addon integration", function()
             return bindings
         end
 
-        it("is listed in the .toc, so the client loads it at all", function()
-            local listed = {}
-            for _, path in ipairs(loader.tocFiles()) do
-                listed[path] = true
-            end
+        -- loader.read resolves against the addon folder and fails loudly if the file is
+        -- not there, which is the whole assertion: the client finds Bindings.xml by that
+        -- name in that folder or the player has no keybinding.
+        it("sits in the addon's root folder, which is where the client looks for it", function()
+            assert.is_string(loader.read(BINDINGS))
+        end)
 
-            assert.is_true(listed[BINDINGS] == true, BINDINGS .. " is missing from chronie.toc")
+        -- The client loads Bindings.xml by name, on its own, before it reads the .toc at
+        -- all. Naming it in the .toc as well hands the same file to the ordinary UI XML
+        -- parser, which knows nothing of <Binding> and says so three times at every login:
+        -- "Unrecognized XML: Binding", then one line for each attribute. Issue #44.
+        it("is not listed in the .toc, which would parse it a second time as UI XML", function()
+            for _, path in ipairs(loader.tocFiles()) do
+                assert.is_not_equal(BINDINGS, path,
+                    BINDINGS .. " is listed in chronie.toc; the client already loads it by name")
+            end
         end)
 
         it("declares a binding that takes a screenshot", function()
