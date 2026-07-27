@@ -3,6 +3,7 @@ use crate::captures::{self, Marker, Stored, Wanted};
 use crate::combatlog;
 use crate::icons;
 use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
+use crate::retention;
 use chrono::{DateTime, Datelike, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0009_capture_subjects.sql"),
     include_str!("../migrations/0010_capture_notes.sql"),
     include_str!("../migrations/0011_gold.sql"),
+    include_str!("../migrations/0012_log_retention.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -45,6 +47,11 @@ pub struct Options {
     /// growing — but taking files out of a folder somebody has been curating for years is
     /// not a thing to make unrecoverable by design, so it stays a choice.
     pub keep_originals: bool,
+    /// After how many days a combat log Chronie has read to its end is deleted. `None` — the
+    /// default — deletes nothing at all, and is what every install starts as: a folder somebody
+    /// has been logging into since before Chronie existed is not one to start emptying without
+    /// being asked to.
+    pub retain_log_days: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2330,6 +2337,126 @@ fn ingest_logs(connection: &mut Connection, wow_path: &Path, now: i64) -> Result
     Ok(())
 }
 
+/* ---------- clearing up after the client ---------- */
+
+/// How far reading got into every log Chronie has a row for, keyed on the name the folder uses.
+///
+/// This is the whole of what the retention rule is allowed to believe about what has been
+/// ingested. It comes off the same row the incremental reader keeps its cursor on, so "read to
+/// the end" here and "read to the end" there cannot drift apart into two different claims.
+fn log_cursors(connection: &Connection) -> Result<HashMap<String, retention::Cursor>, String> {
+    let mut statement = connection
+        .prepare("SELECT name, byte_offset, byte_size, lines_read FROM combat_logs")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                retention::Cursor {
+                    offset: row.get::<_, i64>(1)?.max(0) as u64,
+                    size: row.get::<_, i64>(2)?.max(0) as u64,
+                    lines: row.get(3)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut cursors = HashMap::new();
+    for row in rows {
+        let (name, cursor) = row.map_err(|error| error.to_string())?;
+        cursors.insert(name, cursor);
+    }
+    Ok(cursors)
+}
+
+/// Deletes the logs the rule says may go, and writes down every one that went.
+///
+/// Called after [`ingest_logs`] and never before it, which is the ordering the whole feature
+/// rests on: a log becomes deletable by being read, so the read that makes this pass's decisions
+/// is the one that just happened rather than the one from thirty seconds ago.
+///
+/// The record is committed for each file as soon as its unlink returns, rather than once at the
+/// end. A crash halfway through a sweep then leaves a folder missing three files and a ledger
+/// naming three files, instead of a folder missing three and a ledger naming none.
+///
+/// A file that will not delete — held open by the client, read-only, gone already — is left
+/// alone and tried again on the next sweep. Nothing else in the folder is punished for it.
+fn sweep_logs(
+    connection: &mut Connection,
+    wow_path: &Path,
+    retain_days: u32,
+    now: i64,
+) -> Result<(), String> {
+    let cursors = log_cursors(connection)?;
+    let plan = retention::plan(&combatlog::logs(wow_path), &cursors, retain_days, now);
+    for found in &plan.doomed {
+        if fs::remove_file(&found.path).is_err() {
+            continue;
+        }
+        let lines = cursors
+            .get(&found.file.name)
+            .map(|cursor| cursor.lines)
+            .unwrap_or_default();
+        connection
+            .execute(
+                "INSERT INTO log_deletions (
+                     name, bytes, modified_at, lines_read, retain_days, deleted_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    found.file.name,
+                    found.file.bytes as i64,
+                    found.file.modified,
+                    lines,
+                    retain_days,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// What a sweep would do to this install right now, what it will not touch, and what it has
+/// already done.
+///
+/// Computed whether or not the sweeper is switched on, because the question worth answering
+/// before somebody turns it on is which files that would cost them — and the only honest answer
+/// names them. `retain_days` is `None` when the setting is off, and the preview is then taken at
+/// the default window.
+pub fn retention_report(
+    database_path: &Path,
+    wow_path: Option<&Path>,
+    retain_days: Option<u32>,
+    now: i64,
+) -> Result<retention::Report, String> {
+    let days = retain_days.unwrap_or(retention::DEFAULT_RETAIN_DAYS);
+    let connection = open_database(database_path)?;
+    let logs = wow_path.map(combatlog::logs).unwrap_or_default();
+    let plan = retention::plan(&logs, &log_cursors(&connection)?, days, now);
+    let mut report = retention::Report::of(&plan, retain_days.is_some(), days);
+    let mut statement = connection
+        .prepare(
+            "SELECT name, bytes, modified_at, lines_read, retain_days, deleted_at
+             FROM log_deletions ORDER BY deleted_at DESC, id DESC LIMIT ?1",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([retention::SHOWN as i64], |row| {
+            Ok(retention::Gone {
+                name: row.get(0)?,
+                bytes: row.get::<_, i64>(1)?.max(0) as u64,
+                modified: row.get(2)?,
+                lines_read: row.get(3)?,
+                retain_days: row.get::<_, i64>(4)?.max(0) as u32,
+                deleted_at: row.get(5)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        report.removed.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(report)
+}
+
 /// One account's SavedVariables file, parsed and ready to be written to the database.
 struct Incoming {
     source_key: String,
@@ -2590,6 +2717,13 @@ pub fn collect(
     // during needs that visit to exist — and a sync that read a log first would leave every
     // point from the session that just ended waiting another thirty seconds for no reason.
     ingest_logs(&mut connection, wow_path, now)?;
+
+    // Immediately after the read that decides it, and only when somebody has asked for it. A
+    // log is eligible because a cursor says it was read to its end, so the sweep is worth
+    // nothing before that cursor is up to date and is dangerous if it ever runs instead.
+    if let Some(days) = options.retain_log_days {
+        sweep_logs(&mut connection, wow_path, days, now)?;
+    }
 
     // Last of all, and only for images a committed row now names. A file deleted here is one
     // Chronie has already read, copied, hashed, read back and written down.
@@ -4958,6 +5092,7 @@ ChronieDB = {{ ["segments"] = {{
         // sync reading and hashing it all over again.
         let keep = Options {
             keep_originals: true,
+            ..Options::default()
         };
         let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
         screenshot(&wow, "111423_120000", b"a picture of Ulduar");
@@ -5269,6 +5404,7 @@ ChronieDB = {{ ["segments"] = {{
             2_000_000_100,
             Options {
                 keep_originals: true,
+                ..Options::default()
             },
         )
         .unwrap();

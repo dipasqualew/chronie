@@ -11,6 +11,7 @@ pub mod icons;
 pub mod logfile;
 pub mod m2;
 pub mod models;
+pub mod retention;
 pub mod skin;
 pub mod transmog;
 pub mod wifi;
@@ -59,10 +60,16 @@ struct Settings {
     wow_path: Option<String>,
     last_sync: Option<String>,
     /// Whether the addon should start combat logging at login. Off unless somebody has
-    /// deliberately turned it on: a raid night is hundreds of megabytes, and nothing in
-    /// Chronie deletes an old log yet.
+    /// deliberately turned it on: a raid night is hundreds of megabytes, and Chronie only
+    /// clears up after itself once `retain_log_days` says it may.
     #[serde(default)]
     combat_logging: bool,
+    /// After how many days a combat log Chronie has read to its end is deleted. `None` — the
+    /// default — deletes nothing, and is what every install starts as, because the first sweep
+    /// on a machine that has been logging since before Chronie existed would take all of it.
+    /// Turning it on is a decision somebody makes with the preview in front of them.
+    #[serde(default)]
+    retain_log_days: Option<u32>,
     /// Whether the game keeps its own copy of a screenshot Chronie has ingested. Off, so the
     /// game's folder stops growing — but taking files out of a folder somebody has been
     /// curating for years is not a thing to make unrecoverable by design, and turning this on
@@ -83,6 +90,7 @@ impl Default for Settings {
             wow_path: None,
             last_sync: None,
             combat_logging: false,
+            retain_log_days: None,
             keep_original_screenshots: false,
             capture_triggers: default_capture_triggers(),
         }
@@ -169,6 +177,7 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
             configured_wow_path(&settings)?,
             collector::Options {
                 keep_originals: settings.keep_original_screenshots,
+                retain_log_days: settings.retain_log_days,
             },
         )
     };
@@ -426,6 +435,50 @@ fn set_combat_logging(
         install_bundled_addon(&state)?;
     }
     combat_log_status(&state)
+}
+
+/* ---------- clearing the logs up again ---------- */
+
+/// What a sweep would delete right now, what it will not touch, and what it has already taken.
+///
+/// Answered whether or not the sweeper is on, because this is the dry run: the panel shows the
+/// files and the size before the switch is thrown, so the first sweep on somebody's machine is
+/// a thing they agreed to rather than a thing they discovered afterwards.
+fn retention_report(state: &AppState) -> Result<retention::Report, String> {
+    let (wow_path, retain_days) = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        (configured_wow_path(&settings).ok(), settings.retain_log_days)
+    };
+    collector::retention_report(
+        &state.database_path(),
+        wow_path.as_deref(),
+        retain_days,
+        Utc::now().timestamp(),
+    )
+}
+
+#[tauri::command]
+fn log_retention(state: State<'_, AppState>) -> Result<retention::Report, String> {
+    retention_report(&state)
+}
+
+/// Turns the sweeper on at a given window, or off.
+///
+/// `days` is `None` for off. Nothing is deleted here — the setting is recorded, and the sweep
+/// happens on the next sync, immediately after the read that decides what is eligible. The
+/// answer is the report again, so the panel repaints from what is now true rather than from
+/// what the click hoped.
+#[tauri::command]
+fn set_log_retention(
+    days: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<retention::Report, String> {
+    {
+        let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        settings.retain_log_days = days.map(|days| days.max(retention::MIN_RETAIN_DAYS));
+        state.save(&settings)?;
+    }
+    retention_report(&state)
 }
 
 /// The four ways a user can correct the app's guess about what a segment was.
@@ -964,6 +1017,8 @@ pub fn run() {
             sync_now,
             combat_logging,
             set_combat_logging,
+            log_retention,
+            set_log_retention,
             install_addon,
             check_for_app_update,
             add_activity,
