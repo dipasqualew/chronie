@@ -12,6 +12,7 @@ import { activityFields, activityLabel, fieldValue, parseMetadata } from "./acti
 import type { ActivityField } from "./activities";
 import { buildSessions } from "./sessions";
 import { createAchievementBook } from "./achievements";
+import { createCombatLogging } from "./combatLog";
 import { createDetails } from "./details";
 import { createSegmentModal } from "./segmentModal";
 import { createTimeline } from "./timeline";
@@ -396,6 +397,21 @@ $("check-update").addEventListener("click", (event) =>
   void run(pressed(event), desktop.checkForAppUpdate,
     (result) => result.updated ? `Chronie ${result.version} is ready; restart to finish.` : "Chronie is up to date."));
 
+/* ---------- combat logging ---------- */
+
+const combatLog = createCombatLogging({
+  elements: {
+    toggle: $<HTMLInputElement>("combat-logging"),
+    state: $("combat-log-state"),
+    detail: $("combat-log-detail"),
+  },
+  actions: {
+    status: desktop.combatLogging,
+    set: desktop.setCombatLogging,
+    onError: message,
+  },
+});
+
 /* ---------- moving the history between machines ---------- */
 
 const wifi = createWifiSync({
@@ -437,6 +453,14 @@ repaint();
 show(settings.wowPath ? "timeline" : "setup");
 await wifi.refresh();
 wifi.watch(() => !$("setup-view").hidden);
+// Only while Setup is open: an answer nobody is reading is a directory listing for nothing,
+// and the background sync is already taking its own look every thirty seconds.
+// The switch is set from the saved setting before anything is asked of the install, because
+// the ask fails outright until a game folder has been chosen — and on that first run the
+// switch still has to show what Chronie was told, rather than resetting itself to off.
+$<HTMLInputElement>("combat-logging").checked = settings.combatLogging === true;
+await combatLog.refresh();
+combatLog.watch(() => !$("setup-view").hidden);
 
 if (!globalThis.__Chronie_E2E__) {
   const segmentSignature = JSON.stringify(SEGMENTS.map((segment) => [segment.id, segment.endedAt]));

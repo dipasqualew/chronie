@@ -8,6 +8,7 @@ import type {
   ActivityMetadata,
   AppUpdateResult,
   CharacterModelPayload,
+  CombatLogStatus,
   DashboardPayload,
   IconsPayload,
   InstallResult,
@@ -86,6 +87,22 @@ export const desktop = {
   },
   syncNow: (): Promise<SyncResult> =>
     mock ? Promise.resolve(mock.syncResult) : invoke<SyncResult>("sync_now"),
+  // What the install is really doing about combat logs — read from the game's own config and
+  // its Logs folder, not from the setting, which is why it is worth asking repeatedly.
+  combatLogging: (): Promise<CombatLogStatus> =>
+    mock ? Promise.resolve(structuredClone(mock.combatLog)) : invoke<CombatLogStatus>("combat_logging"),
+  // Answers with the state the change leaves behind rather than an acknowledgement, so the
+  // panel repaints from what the install now says. The mock advances its own state the way
+  // the backend does: the setting moves, and nothing about the game's config moves with it.
+  setCombatLogging: (enabled: boolean): Promise<CombatLogStatus> => {
+    if (mock) {
+      mock.settings.combatLogging = enabled;
+      mock.combatLog.requested = enabled;
+      mock.combatLog.state = mockCombatLogState(mock.combatLog);
+      return Promise.resolve(structuredClone(mock.combatLog));
+    }
+    return invoke<CombatLogStatus>("set_combat_logging", { enabled });
+  },
   // Every activity command answers with the whole dashboard, so the window repaints from
   // what was actually stored rather than from what the page hoped the write did. Under the
   // e2e mock the same shape is produced by editing the mock's dashboard in place.
@@ -160,6 +177,17 @@ export const desktop = {
     }))
     : invoke<WifiReceiveStatus>("wifi_answer_offer", { accepted }),
 };
+
+/**
+ * Which state the mock's install is in once the setting has moved, mirroring the rule in
+ * `combatlog::status`: the setting decides only whether anything was asked for, and the
+ * game's own config and log files decide the rest.
+ */
+function mockCombatLogState(status: CombatLogStatus): CombatLogStatus["state"] {
+  if (!status.requested) return "off";
+  if (status.advanced !== true) return "basic";
+  return status.growing ? "advanced" : "stale";
+}
 
 /**
  * Advances the e2e mock's receiving half and hands back a fresh copy, the way the real

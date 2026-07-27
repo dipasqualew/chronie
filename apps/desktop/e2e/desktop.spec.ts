@@ -322,12 +322,45 @@ class TransmogDetail {
   }
 }
 
+/**
+ * The combat logging panel on Setup: one switch, and what the install is really doing.
+ *
+ * The panel is a landmark and is found by its name, and everything inside it by role — the
+ * checkbox by the label beside it, the state line by its being a live region. Nothing here
+ * knows an id or a class, so the panel can be rebuilt and this still addresses it.
+ */
+class CombatLoggingPanel {
+  readonly page: Page;
+  readonly panel: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.panel = page.getByRole("region", { name: "Combat logging" });
+  }
+
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Setup" }).click();
+    await expect(this.panel).toBeVisible();
+  }
+
+  /** The one box somebody has to tick themselves, named by the label wrapped around it. */
+  toggle(): Locator {
+    return this.panel.getByRole("checkbox", { name: "Start combat logging when I log in" });
+  }
+
+  /** Where the panel says where this install stands, which is announced as it changes. */
+  state(): Locator {
+    return this.panel.getByRole("status");
+  }
+}
+
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
   ledger: DetailsTable;
   transmog: TransmogView;
   transmogDetail: TransmogDetail;
+  combat: CombatLoggingPanel;
 }>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
@@ -343,6 +376,9 @@ const test = base.extend<{
   },
   transmogDetail: async ({ page }, use) => {
     await use(new TransmogDetail(page));
+  },
+  combat: async ({ page }, use) => {
+    await use(new CombatLoggingPanel(page));
   },
 });
 
@@ -680,6 +716,18 @@ const mockDesktop: E2EMock = {
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
     lastSync: "2026-07-26T11:58:00Z",
+    combatLogging: false,
+  },
+  // An install that has never been asked to log: the setting is off, and the game's own
+  // config happens to have the advanced box ticked already, which is the case that proves
+  // the panel reports the setting and the install as two separate facts.
+  combatLog: {
+    requested: false,
+    advanced: true,
+    source: "WTF/Account/EXAMPLE/config-cache.wtf",
+    log: null,
+    growing: false,
+    state: "off",
   },
   chosenPath: "D:\\Games\\Example MMO",
   syncResult: { segmentCount: 3, added: 1, updated: 1 },
@@ -800,6 +848,15 @@ const openedUrls = (page: Page): Promise<string[]> =>
 /** The addresses this window has offered its history to, in the order it offered. */
 const sentTo = (page: Page): Promise<string[]> =>
   page.evaluate(() => window.__Chronie_E2E__?.wifi.sentTo ?? []);
+
+/**
+ * What the backend was actually told to store about combat logging.
+ *
+ * The switch on screen says what the window drew; this says what it wrote — and a control
+ * that reports a setting it never saved is the failure worth having both.
+ */
+const combatLoggingSetting = (page: Page): Promise<boolean | undefined> =>
+  page.evaluate(() => window.__Chronie_E2E__?.settings.combatLogging);
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {
@@ -1339,7 +1396,7 @@ test("shows the game's transmog sets by collection and filters them", async ({
   });
 });
 
-test("drives setup, sync, addon installation, and app update checks", async ({ page }) => {
+test("drives setup, sync, addon installation, and app update checks", async ({ page, combat }) => {
   await page.getByRole("button", { name: "Setup" }).click();
   await expect(page.getByRole("heading", { name: "Setup" })).toBeVisible();
   await expect(page.getByLabel("Game folder")).toHaveValue("C:\\Games\\Example MMO\\_retail_");
@@ -1358,6 +1415,39 @@ test("drives setup, sync, addon installation, and app update checks", async ({ p
 
   await page.getByRole("button", { name: "Check for app update" }).click();
   await expect(page.locator("#setup-status")).toHaveText("Chronie is up to date.");
+
+  // What a combat log costs has to be readable before anybody ticks the box, not after the
+  // first raid night has filled a disk — so the warning being on screen beside an untouched
+  // switch is the thing asserted, rather than anything that happens once it is on.
+  await test.step("combat logging is off, and says what turning it on would cost", async () => {
+    await expect(combat.toggle()).not.toBeChecked();
+    await expect(combat.state())
+      .toHaveText("Combat logging is off. Nothing is being written and nothing is using disk.");
+    await expect(combat.panel).toContainText("a raid night is hundreds of megabytes");
+    await expect(combat.panel).toContainText("Chronie does not delete old logs yet");
+    await expect(combatLoggingSetting(page)).resolves.toBe(false);
+  });
+
+  // Ticking it moves the setting and nothing else: the game's own config already has advanced
+  // logging on, and no log has been written, so what the install honestly is now is set up
+  // and waiting — which is what the panel has to say rather than "on".
+  await test.step("ticking it turns the setting on and reports what that actually leaves", async () => {
+    await combat.toggle().check();
+
+    await expect(combat.toggle()).toBeChecked();
+    await expect(combat.state()).toContainText("Advanced combat logging is set up");
+    await expect(combat.state()).toContainText("no combat log at all yet");
+    // The line is coloured from this, and the colour is half of what the sentence means.
+    await expect(combat.state()).toHaveAttribute("data-state", "stale");
+    await expect(combatLoggingSetting(page)).resolves.toBe(true);
+  });
+
+  // The sentence is a claim about this install, so the panel shows what it read it from.
+  await test.step("and shows the evidence it read that from", async () => {
+    await expect(combat.panel).toContainText("No combat log found in the game's Logs folder.");
+    await expect(combat.panel)
+      .toContainText("Advanced logging reads on in WTF/Account/EXAMPLE/config-cache.wtf.");
+  });
 });
 
 /**

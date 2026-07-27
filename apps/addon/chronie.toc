@@ -5,6 +5,7 @@
 ## Version: 0.7.0
 ## SavedVariables: ChronieDB
 
+src/Settings.lua
 src/Logger.lua
 src/EventDispatcher.lua
 src/LockoutScanner.lua
@@ -32,5 +33,6 @@ src/CurrencyItems.lua
 src/CurrencyWindow.lua
 src/ReportCommand.lua
 src/ReportWindow.lua
+src/CombatLogging.lua
 Main.lua
 Bindings.xml

@@ -63,6 +63,11 @@ BINDING_NAME_CHRONIE_CAPTURE = "Take a screenshot"
 ---@field mapState fun(): MapPosition? Where the player is standing, when the client says.
 ---@field screenshot fun() Take a screenshot. Asynchronous: the file lands a moment later,
 ---and the addon can never see it, so nothing may wait on or confirm it.
+---@field loggingCombat fun(enable: boolean?): boolean Client LoggingCombat: starts or stops
+---combat logging when passed a value, and reports the current state either way.
+---@field getCVar fun(name: string): string? Reads a client setting.
+---@field setCVar fun(name: string, value: string): any Writes one. Protected settings ignore
+---this or raise, which is why nothing may assume the write took.
 ---@field lootSelfFormats string[] Self-loot chat templates, most specific first.
 ---@field factionIncreaseFormats string[] Reputation-increase chat templates.
 ---@field uiParent table
@@ -251,6 +256,15 @@ function ns.main(env)
         playerGUID = env.playerGUID,
     })
 
+    -- ns.settings is what the desktop app wrote into this installed copy; the bundle's own
+    -- src/Settings.lua is the defaults for a copy nothing has configured.
+    local combatLogging = ns.newCombatLogging({
+        settings = ns.settings,
+        loggingCombat = env.loggingCombat,
+        getCVar = env.getCVar,
+        setCVar = env.setCVar,
+    })
+
     local entryLog = ns.newEntryLog({
         db = env.db,
         now = env.now,
@@ -388,7 +402,7 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /chronie locks | results | segments | currency | report | events")
+            logger.info("usage: /chronie locks | results | segments | currency | report | log | events")
         end,
     })
     ---Names every event this client build refused, so a wrong or since-renamed event name
@@ -450,6 +464,11 @@ function ns.main(env)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
     end)
+    -- Asks the client rather than repeating what login decided, so this stays true after
+    -- somebody has changed either switch by hand since.
+    router.add("log", function()
+        logger.info(combatLogging.describe(combatLogging.state()))
+    end)
 
     local minimapButton = ns.newMinimapButton({
         createFrame = env.createFrame,
@@ -485,6 +504,14 @@ function ns.main(env)
         -- moment the client will name the player at all, and an entry authored by nobody
         -- is not something a later release could repair.
         accountIdentity.id()
+        -- Logging does not survive a session: whatever was on last time is off again now,
+        -- so the setting has to be re-asserted at every login rather than once ever. Said
+        -- out loud only when it was asked for, because a player who has not turned it on
+        -- does not need a line about it every time they log in.
+        local logging = combatLogging.apply()
+        if logging.requested then
+            logger.info(combatLogging.describe(logging))
+        end
         reportUnsupportedEvents()
     end)
 
@@ -688,6 +715,7 @@ function ns.main(env)
         currencyWindow = currencyWindow,
         accountIdentity = accountIdentity,
         entryLog = entryLog,
+        combatLogging = combatLogging,
         capture = capture,
     }
 end
@@ -981,6 +1009,11 @@ if CreateFrame then
                 return ns.readMapPosition(C_Map)
             end,
             screenshot = Screenshot,
+            loggingCombat = LoggingCombat,
+            -- C_CVar is the modern home of both; the bare globals are still defined and are
+            -- what older clients have, so each is taken from whichever this build offers.
+            getCVar = C_CVar and C_CVar.GetCVar or GetCVar,
+            setCVar = C_CVar and C_CVar.SetCVar or SetCVar,
             -- Every way an item can land in the player's own bags, because each one is
             -- vendor value the segment should count. "You receive loot:" alone misses most
             -- of it: quest rewards, container contents and anything pushed straight to a
