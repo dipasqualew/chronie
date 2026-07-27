@@ -1,10 +1,16 @@
 name: check
 
-# The same gate humans run locally (./scripts/check.sh): luacheck, busted, then the
-# desktop backend and frontend suites. Runs on every push and pull request so the
-# "zero warnings, zero failures" rule is enforced, not just remembered.
+# The same gate humans run locally (./scripts/check.sh), one suite to a runner. The three
+# need nothing from each other, so what a pull request waits on is the slowest of them
+# rather than the sum, and the Lua and frontend jobs no longer sit behind a Rust toolchain
+# they never use.
+#
+# Pull requests only, plus main itself. Every branch here has a pull request open on it from
+# its first push — running on `push` as well meant two runs of everything for the same
+# commit, competing for runners and for the same Rust cache key.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # Only the newest commit on a ref is worth checking; superseded runs just queue behind it.
@@ -13,30 +19,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  lua:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       # WoW runs Lua 5.1; the rocks have to be built against it to match game semantics.
-      - name: Install system dependencies
+      # Nothing here needs the GTK and WebKit tree the desktop app links against.
+      - name: Install Lua 5.1
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libayatana-appindicator3-dev \
-            liblua5.1-0-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            lua5.1 \
-            luarocks
+          sudo apt-get install -y build-essential liblua5.1-0-dev lua5.1 luarocks
 
       - name: Install luacheck and busted
         run: |
           sudo luarocks install luacheck
           sudo luarocks install busted
+
+      - run: ./scripts/check-lua.sh
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # What the tauri crate links against. The frontend is not built for a debug run — that
+      # configuration points at `devUrl` — so this job needs no bun and no node_modules.
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
 
       # Without this the whole dependency tree (tauri, reqwest, bundled SQLite) is
       # recompiled from scratch on every push.
@@ -45,6 +63,13 @@ jobs:
           workspaces: apps/desktop/src-tauri
           shared-key: desktop-debug
           cache-on-failure: true
+
+      - run: ./scripts/check-rust.sh
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -62,5 +87,4 @@ jobs:
       - name: Install browser test dependencies
         run: node apps/desktop/node_modules/@playwright/test/cli.js install --with-deps chromium
 
-      - name: Run checks
-        run: ./scripts/check.sh
+      - run: ./scripts/check-frontend.sh

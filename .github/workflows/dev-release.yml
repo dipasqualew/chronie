@@ -48,12 +48,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Local\ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-
       - name: Set rolling version and release configuration
         id: release-config
         shell: pwsh
@@ -73,18 +67,16 @@ jobs:
           $config | ConvertTo-Json -Depth 20 | Set-Content $path
           "signed=$($signed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
-      - name: Test frontend
-        working-directory: apps/desktop
-        run: bun run test
-
-      - name: Test desktop experience
-        working-directory: apps/desktop
-        run: |
-          node node_modules/@playwright/test/cli.js install chromium
-          bun run test:e2e
-
-      # Release profile on purpose: `tauri build` below compiles the same dependency tree,
-      # and a debug run here would build every crate a second time for nothing.
+      # The frontend suites are not run again here. jsdom and headless Chromium behave the
+      # same on either operating system, so a second pass on Windows costs the release forty
+      # seconds and tells nobody anything `check` did not already say on the push to main
+      # that started this run.
+      #
+      # The backend is a different matter — paths, the WoW install root and the
+      # SavedVariables folder under it are the half of this app that only Windows exercises,
+      # and this is the only runner that ever does. Release profile on purpose: `tauri build`
+      # below compiles the same dependency tree, and a debug run here would build every crate
+      # a second time for nothing.
       - name: Test backend
         run: cargo test --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 
