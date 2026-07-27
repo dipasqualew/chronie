@@ -16,6 +16,11 @@ import {
   Box3,
   DirectionalLight,
   Group,
+  type Material,
+  type Mesh,
+  MeshBasicMaterial,
+  type MeshStandardMaterial,
+  NoToneMapping,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
@@ -25,7 +30,7 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-import { framingDistance } from "./modelPreview";
+import { cameraFor, framingDistance, type View } from "./modelPreview";
 
 /** How wide a view the camera takes, in degrees. Narrow enough that a helm keeps its shape
  * rather than bulging the way a wide angle makes close things bulge. */
@@ -38,6 +43,23 @@ export interface ModelStage {
   dispose(): void;
 }
 
+export interface StageOptions {
+  /**
+   * Draw every texture as the colour it actually holds: no lights, no tone mapping, no
+   * shading of any kind.
+   *
+   * The lit stage below is for looking at, and it is a bad instrument. A key light at 2.2
+   * over an ambient at 1.1, through ACES tone mapping, moves every colour it draws — a flat
+   * tan body comes out near white, which is how "the armour has no colour" was once read off
+   * a screenshot that had colour in it. Something measuring what is on the model wants the
+   * texture back unaltered, and this is that: same loader, same geometry, same pictures, and
+   * the shading taken out from under them.
+   */
+  unlit?: boolean;
+  /** Where the camera sits once a model has been framed. */
+  view?: View;
+}
+
 /**
  * A stage inside `container`, sized to it and kept sized to it.
  *
@@ -45,13 +67,16 @@ export interface ModelStage {
  * desktop, a virtual machine without a GPU, a driver the browser has blocklisted. The caller
  * shows the icon instead, the same as for an appearance that has no model.
  */
-export function createModelStage(container: HTMLElement): ModelStage {
+export function createModelStage(container: HTMLElement, options: StageOptions = {}): ModelStage {
+  const unlit = options.unlit ?? false;
+  const view = options.view ?? "default";
+
   const renderer = new WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   // The textures come out of the game already lit — the shading a player sees on a helm is
   // painted into it — so the tone mapping is only here to keep the highlights of the one
   // light below from clipping.
-  renderer.toneMapping = ACESFilmicToneMapping;
+  renderer.toneMapping = unlit ? NoToneMapping : ACESFilmicToneMapping;
   renderer.outputColorSpace = SRGBColorSpace;
   container.replaceChildren(renderer.domElement);
 
@@ -61,10 +86,12 @@ export function createModelStage(container: HTMLElement): ModelStage {
 
   // Two lights and no more: a key from over the reader's shoulder so that turning the model
   // shows its shape, and enough ambient that the side facing away is still legible.
-  const key = new DirectionalLight(0xffffff, 2.2);
-  key.position.set(1.4, 2, 2.5);
-  scene.add(key);
-  scene.add(new AmbientLight(0xffffff, 1.1));
+  if (!unlit) {
+    const key = new DirectionalLight(0xffffff, 2.2);
+    key.position.set(1.4, 2, 2.5);
+    scene.add(key);
+    scene.add(new AmbientLight(0xffffff, 1.1));
+  }
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -101,15 +128,35 @@ export function createModelStage(container: HTMLElement): ModelStage {
    * A canvas says nothing about whether the file in it parsed into geometry — an empty scene
    * and a helm draw the same blank rectangle to everything but an eye. This is what the
    * browser tests read, and what to look at first when a model comes up empty.
+   *
+   * The pictures are counted for the same reason, one layer further in. A `.glb` carries its
+   * textures inside itself, and the loader turns each into a `blob:` URL and loads it back
+   * through an `<img>` — a hop with a page's Content Security Policy across it, and one that
+   * fails silently: the texture object is made either way, and a model whose every image was
+   * refused draws in flat white with no error anywhere. `blank` is that, counted.
    */
   function announce(loaded: Group | null): void {
     let drawn = 0;
+    const seen = new Set<unknown>();
+    let pictures = 0;
+    let blank = 0;
     loaded?.traverse((object) => {
-      const geometry = (object as { geometry?: { attributes?: { position?: { count: number } } } })
-        .geometry;
-      drawn += geometry?.attributes?.position?.count ?? 0;
+      const part = object as {
+        geometry?: { attributes?: { position?: { count: number } } };
+        material?: unknown;
+      };
+      drawn += part.geometry?.attributes?.position?.count ?? 0;
+      for (const material of [part.material].flat()) {
+        const map = (material as { map?: { image?: { width?: number } } } | undefined)?.map;
+        if (!map || seen.has(map)) continue;
+        seen.add(map);
+        if ((map.image?.width ?? 0) > 0) pictures += 1;
+        else blank += 1;
+      }
     });
     container.dataset.vertices = String(drawn);
+    container.dataset.pictures = String(pictures);
+    container.dataset.blank = String(blank);
   }
 
   /** Centres the model on the origin and backs the camera off far enough to hold all of it. */
@@ -119,12 +166,45 @@ export function createModelStage(container: HTMLElement): ModelStage {
     const radius = box.getSize(new Vector3()).length() / 2;
     loaded.position.sub(centre);
 
-    const distance = framingDistance(radius, FIELD_OF_VIEW);
-    // Slightly above and to the side, because an item seen exactly head on reads as a
-    // silhouette and the whole point of showing it in 3D is that it has a shape.
-    camera.position.set(distance * 0.45, distance * 0.25, distance);
+    // Slightly above and to the side by default, because an item seen exactly head on reads
+    // as a silhouette and the whole point of showing it in 3D is that it has a shape.
+    camera.position.set(...cameraFor(view, framingDistance(radius, FIELD_OF_VIEW)));
     controls.target.set(0, 0, 0);
     controls.update();
+  }
+
+  /**
+   * Swaps every material a model arrived with for one that only ever shows its own texture.
+   *
+   * glTF's materials are physical ones, so the picture on a part is the *input* to a lighting
+   * model rather than the thing drawn. `MeshBasicMaterial` has no lighting model at all, which
+   * is what makes the pixel on screen the texel in the file — the property anything measuring
+   * a render needs and no lit material can offer.
+   *
+   * The maps are carried over rather than copied: the loader owns them, `discard` disposes
+   * them, and a texture uploaded twice is the expensive half of showing a body.
+   */
+  function flatten(loaded: Group): void {
+    const swap = (material: Material): Material => {
+      const lit = material as MeshStandardMaterial;
+      const flat = new MeshBasicMaterial({
+        map: lit.map,
+        color: lit.color,
+        transparent: lit.transparent,
+        opacity: lit.opacity,
+        alphaTest: lit.alphaTest,
+        side: lit.side,
+      });
+      lit.dispose();
+      return flat;
+    };
+    loaded.traverse((object) => {
+      const mesh = object as Partial<Mesh>;
+      if (!mesh.material) return;
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(swap)
+        : swap(mesh.material);
+    });
   }
 
   /**
@@ -156,6 +236,7 @@ export function createModelStage(container: HTMLElement): ModelStage {
         new GLTFLoader().parse(bytes, "", (loaded) => {
           if (model) discard(model);
           model = loaded.scene;
+          if (unlit) flatten(model);
           frameModel(model);
           scene.add(model);
           announce(model);

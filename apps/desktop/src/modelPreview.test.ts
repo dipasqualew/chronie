@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { framingDistance, glbBytes, previewFor, REASONS, type Previewable } from "./modelPreview";
+import {
+  cameraFor,
+  framingDistance,
+  glbBytes,
+  previewFor,
+  REASONS,
+  type Previewable,
+} from "./modelPreview";
 
 /** One appearance with only the fields a test cares about spelled out. */
 const appearance = (fields: Partial<Previewable> = {}): Previewable => ({
@@ -110,5 +117,32 @@ describe("framingDistance", () => {
   // would put the camera inside it.
   it("keeps its distance from something with almost no size at all", () => {
     expect(framingDistance(0, 35)).toBeGreaterThan(0);
+  });
+});
+
+describe("cameraFor", () => {
+  // The window's own view, unchanged. It is the one a reader sees on every model, and it is
+  // deliberately off every axis: an item seen exactly head on reads as a silhouette.
+  it("leaves the view the window opens on where it has always been", () => {
+    expect(cameraFor("default", 10)).toEqual([4.5, 2.5, 10]);
+  });
+
+  // The named ones are square to the axes, which is what makes a render asked for twice the
+  // same picture twice — the property the whole point of `scripts/render-model.ts` rests on.
+  it("puts a named view square on its axis, the whole distance away", () => {
+    expect(cameraFor("front", 3)).toEqual([0, 0, 3]);
+    expect(cameraFor("back", 3)).toEqual([0, 0, -3]);
+    expect(cameraFor("left", 3)).toEqual([-3, 0, 0]);
+    expect(cameraFor("right", 3)).toEqual([3, 0, 0]);
+  });
+
+  // Every named view is exactly the framing distance from the middle, so one model photographed
+  // from four sides is photographed at one scale. `default` is the exception and is meant to be:
+  // it is a direction the window chose rather than a unit vector.
+  it("keeps every named view the same distance out", () => {
+    const length = (at: [number, number, number]): number => Math.hypot(...at);
+    for (const view of ["front", "back", "left", "right"] as const) {
+      expect(length(cameraFor(view, 7))).toBeCloseTo(7);
+    }
   });
 });

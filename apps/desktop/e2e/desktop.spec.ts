@@ -1032,6 +1032,29 @@ test("runs under the content policy the packaged window runs under", async ({ pa
   // been stamped with that same nonce. A body drawn in the browser default is what a
   // mis-stamped nonce looks like, and it would take every assertion about colour with it.
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(246, 245, 242)");
+
+  // The two policies are written out by hand in two files, and only one of them is ever
+  // served to anything that could complain. The packaged one is the product's, and the day it
+  // grants less than this one does is the day the suite goes back to being more permissive
+  // than the window — which is how a model with every texture refused shipped green.
+  //
+  // Not equality: the served policy legitimately carries the nonces above, the dev server's
+  // websocket and its port. What has to hold is that nothing the page needs is missing from
+  // the one the reader actually runs under.
+  const packaged: string = JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "tauri.conf.json"),
+      "utf8",
+    ),
+  ).app.security.csp;
+  for (const directive of ["connect-src", "img-src"]) {
+    const granted = (policy: string): string[] =>
+      policy.split(";").find((one) => one.trim().startsWith(directive))?.trim().split(/\s+/) ?? [];
+    // `blob:` by name, because it is the one every picture in every `.glb` arrives through —
+    // as a `fetch` on Chromium and as an `<img>` on WebKit, so both directives or neither.
+    expect(granted(packaged), `${directive} in tauri.conf.json`).toContain("blob:");
+    expect(granted(csp), `${directive} as served`).toContain("blob:");
+  }
 });
 
 test("stitches segments into play sessions and leads with what happened", async ({ page }) => {
@@ -1648,6 +1671,23 @@ test("shows the game's transmog sets by collection and filters them", async ({
     // character draws, out of the vertices the whole model shares. A robe that arrived as
     // geometry of its own would be a fraction of that.
     await expect(transmogDetail.stage()).toHaveAttribute("data-vertices", "1360");
+
+    // And the armour has a colour on it. Geometry was all this ever asked for, and geometry
+    // is the half that was never in doubt: a body with every texture refused draws the exact
+    // shape of the robe in flat white and answers 1360 to the line above.
+    //
+    // The refusing is the page's Content Security Policy. A `.glb` carries its pictures
+    // inside itself, three.js hands each one to the browser as a `blob:` URL, and a policy
+    // naming neither `blob:` nor a wildcard turns every one of them away — through
+    // `connect-src`, because the loader fetches them rather than pointing an `<img>` at them.
+    // It costs a warning on the console and nothing else: the model loads, the parts draw,
+    // and the armour is the colour of nothing.
+    //
+    // Which is why this is here and not in a unit test. The atlas is right, the UVs read it,
+    // the `.glb` carries it, and every one of those can be checked without a browser. The
+    // only place the picture is refused is a real page under the real policy.
+    await expect(transmogDetail.stage()).toHaveAttribute("data-pictures", "1");
+    await expect(transmogDetail.stage()).toHaveAttribute("data-blank", "0");
   });
 
   // The tables say this shoulder has a model and the install holds no file for it, which is

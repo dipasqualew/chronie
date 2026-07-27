@@ -84,3 +84,39 @@ export function framingDistance(radius: number, fov: number): number {
   const half = (fov / 2) * (Math.PI / 180);
   return Math.max(radius / Math.tan(half), 0.1) * 1.4;
 }
+
+/** Where a model can be looked at from. */
+export type View = "default" | "front" | "back" | "left" | "right";
+
+/**
+ * Which way the camera sits, per named view, as a direction from the model's middle.
+ *
+ * `default` is the one the window opens on and is deliberately not square to anything: an
+ * item seen exactly head on reads as a silhouette, and the whole point of showing it in 3D is
+ * that it has a shape. The four named ones are square on purpose — they are what a render
+ * asked for twice has to produce the same picture from.
+ *
+ * They name where the camera goes and not which way the model is facing, and on a character
+ * the two are not the same: M2 is X-forward, so `right` is the view a character looks out of
+ * and `front` is its left shoulder. Naming them after the axes is the only version of this
+ * that stays true for a helm, a cloak and a body at once.
+ */
+const DIRECTIONS: Record<View, [number, number, number]> = {
+  default: [0.45, 0.25, 1],
+  front: [0, 0, 1],
+  back: [0, 0, -1],
+  left: [-1, 0, 0],
+  right: [1, 0, 0],
+};
+
+/**
+ * Where to put a camera that is `distance` from a model, looking at it from `view`.
+ *
+ * The named views are unit directions scaled by the distance. `default` is left at the
+ * offsets the window has always used rather than normalised to them, because normalising it
+ * would move the camera the reader is used to for the sake of a tidier rule.
+ */
+export function cameraFor(view: View, distance: number): [number, number, number] {
+  const [x, y, z] = DIRECTIONS[view];
+  return [x * distance, y * distance, z * distance];
+}

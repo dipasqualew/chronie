@@ -41,10 +41,18 @@ and Mechagnome carry extra geoset groups and limb handling worth avoiding.
 |---|---|---|
 | `ChrModel.ID` | 2 | community |
 | `CharComponentTextureLayoutID` | **104** | **verified** |
-| Model FileDataID | 1000764 (`humanfemale_hd.m2`) | community |
+| Model FileDataID | 1000764 (`humanfemale_hd.m2`) | community, **rendered** |
 | Composite atlas size | **2048 × 1024** | **verified** |
 
 `humanfemale.m2` (119563) is the *vanilla* model. Retail uses the `_hd` one.
+
+**The two community values have now been rendered, which is not the same as read.** Nothing
+here has opened `ChrModel` — but 1000764 parses as a Human Female body, and a leg appearance
+composited into layout 104's sections 5 and 6 comes out painted on that body's legs and
+nowhere else (`scripts/render-model.ts`, display 712245, build 12.0.5.67). Three guesses in a
+row landing armour on the right limb is not proof of the ids, and it does rule out the failure
+they were suspected of. `dump_paint` prints the arithmetic behind it: which of the body's parts
+survive geoset selection, and which of the layout's rectangles those parts' UVs actually read.
 
 The atlas size comes from `ChrModelMaterial` where the layout is 104 and
 `TextureType == 1`; observed on this build as `[layout 104, texType 1, 2048, 1024]`.
@@ -243,6 +251,26 @@ it. **Type 1 is the composited body atlas** — that is where the work above get
 
 Materials: flag `0x04` means two-sided (disable backface culling). Blend mode 0 is opaque,
 1 is alpha-test at 0.5, 2 is alpha blend; treat anything else as blend.
+
+## The trap between a correct `.glb` and a picture
+
+A `.glb` carries its textures inside its own binary chunk, and three.js does not read them
+out of it. It wraps each one in a `Blob`, takes a `blob:` URL for it, and loads that back
+through the browser — with `fetch` where `createImageBitmap` exists and with an `<img>` where
+it does not, which is `connect-src` on Chromium and `img-src` on WebKit older than Safari 17.
+So a Content Security Policy naming neither `blob:` nor a wildcard refuses every picture in
+every model, and the platform decides which of the two directives does the refusing.
+
+**It costs a console warning and nothing else.** `GLTFLoader` does not fail the parse over a
+texture it could not fetch; it drops the map and carries on, so the model loads, every part
+draws, and the whole thing is glTF's default colour. That is what "the armour has no colour"
+was: a bare body in flat white, indistinguishable by eye from the flat tan an unpainted atlas
+gives, with a correct atlas and correct UVs behind it the entire time.
+
+Both directives carry `blob:` now, in `tauri.conf.json` and in the dev/preview server's copy
+in `vite.config.ts`. `scripts/render-model.ts` is the instrument that found it and is what to
+reach for next time — it draws a model to a PNG offscreen, through the app's own viewer and
+under the app's own policy, from an install or from the committed fixtures.
 
 ## BLP
 
