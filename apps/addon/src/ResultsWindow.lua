@@ -26,8 +26,12 @@ local _, ns = ...
 ---@field now fun(): integer? Current time, for saying how old an account-wide figure is.
 ---@field accountStanding fun(faction: string): StandingRollup? Where the account as a whole
 ---stands with a faction, so a grind already finished elsewhere says so.
+---@field accountCurrency fun(id: integer): CurrencyRollup? What the whole account holds of a
+---currency, so a gain can be read against the balance it lands on.
 ---@field character fun(): string? "Name-Realm" of whoever is playing, so the account rollup
 ---can leave out the character whose own numbers are already on the line above.
+---@field tooltip table? The global GameTooltip. Given one, a faction opens the whole account's
+---standings with it on hover; without one the panel simply has nothing to hover.
 ---@field title string|fun(summary: SegmentSummary): string?
 ---@field navigate fun(delta: integer)? Walk to another view: -1 towards the session total,
 ---+1 back through the segments already played. Given one, the header grows an arrow at each
@@ -95,15 +99,24 @@ local EXPAND_ICON = "|TInterface\\Buttons\\UI-PlusButton-Up:12:12:0:-1|t "
 local COLLAPSE_ICON = "|TInterface\\Buttons\\UI-MinusButton-Up:12:12:0:-1|t "
 local REVIEWED_ICON = "|TInterface\\RaidFrame\\ReadyCheck-Ready:12:12:0:-1|t "
 
----Groups a count's digits in threes, because a reputation bar reads in five figures and
----an unbroken run of them is unreadable at this font size.
+---Groups a count's digits in threes. Lives in `AccountTooltip.lua` because the bar caption
+---and the tooltip over it have to print the same number the same way.
 ---@param value number?
 ---@return string
 local function group(value)
-    local rounded = math.floor(math.abs(value or 0) + 0.5)
-    local digits = tostring(rounded):reverse():gsub("(%d%d%d)", "%1,"):gsub(",$", "")
-    return ((value or 0) < 0 and "-" or "") .. digits:reverse()
+    return ns.groupDigits(value)
 end
+
+-- Which colour each kind of tooltip line is drawn in. Purple is the account's and green the
+-- character's, the same as everywhere else on the panel, so the figure for the whole account
+-- and the row belonging to whoever is playing are recognisable before either is read.
+local TOOLTIP_ROLE_COLORS = {
+    total = ACCOUNT_COLOR,
+    you = CHARACTER_COLOR,
+    other = VALUE_COLOR,
+    note = LABEL_COLOR,
+    blank = LABEL_COLOR,
+}
 
 ---@param deps ResultsWindowDeps
 ---@return ResultsWindow
@@ -282,6 +295,38 @@ function ns.newResultsWindow(deps)
         return bar.back, bar.fill, bar.text
     end
 
+    ---Opens the client's own tooltip over the panel, drawn from content a pure module built.
+    ---
+    ---The owner is the panel rather than the row the pointer is on, and the anchor is the
+    ---cursor rather than the row's edge. `SetOwner` wants a frame, and every row here is a
+    ---font string — so anchoring to the cursor is what puts the tooltip beside the line being
+    ---pointed at without inventing a hit-area frame per row to hang it off.
+    ---@param content AccountTooltipContent?
+    local function showTooltip(content)
+        local tooltip = deps.tooltip
+        if not tooltip or not content then
+            return
+        end
+        tooltip:SetOwner(frame, "ANCHOR_CURSOR")
+        tooltip:AddLine(content.title, TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
+        for _, entry in ipairs(content.lines) do
+            local color = TOOLTIP_ROLE_COLORS[entry.role] or VALUE_COLOR
+            if entry.right then
+                tooltip:AddDoubleLine(entry.left, entry.right,
+                    color[1], color[2], color[3], color[1], color[2], color[3])
+            else
+                tooltip:AddLine(entry.left, color[1], color[2], color[3])
+            end
+        end
+        tooltip:Show()
+    end
+
+    local function hideTooltip()
+        if deps.tooltip then
+            deps.tooltip:Hide()
+        end
+    end
+
     ---A hairline across the body, used where a run of dashes used to be. It sits on BORDER
     ---with the header's chrome, so the bars keep BACKGROUND and ARTWORK to themselves.
     ---@param index integer
@@ -345,7 +390,35 @@ function ns.newResultsWindow(deps)
             value:EnableMouse(action ~= nil)
             label:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
             value:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
+            -- Cleared on every line rather than only where one was set. Rows are pooled, so a
+            -- font string that was a faction a moment ago would otherwise still open that
+            -- faction's tooltip now that the same row is drawing a mount.
+            label:SetScript("OnEnter", nil)
+            label:SetScript("OnLeave", nil)
+            value:SetScript("OnEnter", nil)
+            value:SetScript("OnLeave", nil)
             y = y - LINE
+        end
+
+        ---Hangs a tooltip on the line just drawn.
+        ---
+        ---Separate from `line` rather than another argument to it, because only two of the
+        ---panel's dozen kinds of row have one and both want the row already placed: the
+        ---content is built here, at render, so a row with nothing to say never becomes a
+        ---mouse-enabled dead spot on a frame the player drags by.
+        ---@param content AccountTooltipContent?
+        local function hover(content)
+            if not deps.tooltip or not content then
+                return
+            end
+            local label, value = rowAt(used)
+            for _, region in ipairs({ label, value }) do
+                region:EnableMouse(true)
+                region:SetScript("OnEnter", function()
+                    showTooltip(content)
+                end)
+                region:SetScript("OnLeave", hideTooltip)
+            end
         end
 
         ---A progress bar occupying a line of its own, under the row it belongs to.
@@ -514,8 +587,17 @@ function ns.newResultsWindow(deps)
                 for _, gain in ipairs(currencies) do
                     -- What the segment earned, and only that. What the character is left
                     -- holding afterwards, and what the rest of the account holds beside it,
-                    -- are the desktop app's questions.
+                    -- are one hover away rather than on the line: a balance is the largest
+                    -- number here and the one that changes least, so it is answered when it
+                    -- is asked for.
                     line("  " .. gain.name, (gain.amount >= 0 and "+" or "") .. group(gain.amount), REP_COLOR)
+                    hover(ns.currencyTooltip({
+                        name = gain.name,
+                        gain = gain,
+                        rollup = deps.accountCurrency and deps.accountCurrency(gain.id),
+                        character = deps.character and deps.character(),
+                        now = deps.now and deps.now(),
+                    }))
                 end
             end
         end
@@ -576,6 +658,16 @@ function ns.newResultsWindow(deps)
             if expanded.reputation then
                 for _, gain in ipairs(reputation) do
                     line("  " .. gain.faction, "+" .. group(gain.amount), REP_COLOR)
+                    -- The whole account's standings with this faction, which the "best" line
+                    -- below only reports when somebody else is ahead. Silence there means
+                    -- "you are in front", and silence is not a thing anybody can read.
+                    hover(ns.standingTooltip({
+                        faction = gain.faction,
+                        gain = gain,
+                        rollup = deps.accountStanding and deps.accountStanding(gain.faction),
+                        character = deps.character and deps.character(),
+                        now = deps.now and deps.now(),
+                    }))
                     -- Only factions the client could place get a bar. A gain parsed out of
                     -- chat for a faction the client will not name — an account-wide line
                     -- read on a character that has never met them — has nowhere to sit.
@@ -670,8 +762,18 @@ function ns.newResultsWindow(deps)
         end
 
         for index = used + 1, #rows do
-            rows[index].label:Hide()
-            rows[index].value:Hide()
+            -- Taken off screen and taken out of the mouse's way in the same breath. A hidden
+            -- font string cannot be pointed at or clicked, so leaving the handlers on would
+            -- do no harm today — but the pool's invariant is that a row carries only what the
+            -- line it is currently drawing put there, and a row that is only harmless because
+            -- it happens to be hidden is the exception that makes the rule unreadable.
+            for _, region in ipairs({ rows[index].label, rows[index].value }) do
+                region:Hide()
+                region:EnableMouse(false)
+                region:SetScript("OnMouseUp", nil)
+                region:SetScript("OnEnter", nil)
+                region:SetScript("OnLeave", nil)
+            end
         end
 
         for index = usedBars + 1, #bars do

@@ -213,6 +213,8 @@ function ns.main(env)
         now = env.now,
         character = currentCharacter,
         accountStanding = holdings.standing,
+        accountCurrency = holdings.currency,
+        tooltip = env.tooltip,
     })
 
     local segmentLog = ns.newSegmentLog({

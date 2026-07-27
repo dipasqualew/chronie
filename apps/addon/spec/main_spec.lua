@@ -2893,6 +2893,79 @@ describe("addon integration", function()
             assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
         end)
 
+        -- Where the rest of the account stands is three parts wired together — the store that
+        -- remembers every character, the module that reduces them to lines, and the panel that
+        -- draws them — and only the whole addon says whether the panel was handed a tooltip to
+        -- draw them in and a rollup to draw from. Neither is visible to a unit test of either
+        -- end, and the panel without them is silently a panel with no hover at all.
+        it("opens the whole account's standings over a faction the segment gained", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                -- A clock far enough from the epoch that a reading two days old is a real
+                -- time rather than one before the world began.
+                now = 1700000000,
+                factions = {
+                    ["Argent Dawn"] = {
+                        standing = "Honored",
+                        current = 3000,
+                        max = 12000,
+                        rank = 6,
+                        system = "reaction",
+                    },
+                },
+                db = {
+                    holdings = {
+                        ["Jaina-Ragnaros"] = {
+                            factions = {
+                                ["Argent Dawn"] = {
+                                    standing = "Exalted",
+                                    current = 1,
+                                    max = 1,
+                                    rank = 8,
+                                    system = "reaction",
+                                    at = 1700000000 - 2 * 24 * 60 * 60,
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire(
+                "CHAT_MSG_COMBAT_FACTION_CHANGE",
+                "Your Argent Dawn reputation has increased by 40."
+            )
+
+            local frame = panelFrame(recorded)
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and (fontString.text or ""):find("Reputation", 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and fontString.justify == "LEFT"
+                    and (fontString.text or ""):find("Argent Dawn", 1, true) then
+                    fontString:run("OnEnter")
+                    break
+                end
+            end
+
+            local drawn = {}
+            for _, line in ipairs(recorded.tooltip.lines) do
+                drawn[#drawn + 1] = line.right and (line.text .. " → " .. line.right) or line.text
+            end
+            assert.same({
+                "Argent Dawn",
+                "Best → Exalted  1 / 1 · Jaina",
+                " ",
+                "Jaina · 2d ago → Exalted  1 / 1",
+                "Thrall (you) → Honored  3,000 / 12,000",
+            }, drawn)
+        end)
+
         it("registers the events that feed the segment panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
