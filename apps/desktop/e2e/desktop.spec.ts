@@ -1838,6 +1838,15 @@ test("lists every segment on the details view and filters it", async ({ detail, 
       .toHaveText("Lamplighters +10, Deepwater Wardens +40 (Exalted)");
   });
 
+  // The ledger abbreviates but does not number: an item the addon could put no name to is
+  // looked up here too, in one request for the whole table rather than a picture per cell.
+  await test.step("a transmog source is named rather than numbered", async () => {
+    await expect(ledger.cellSaying("Wanderer's Mantle (new)")).toBeVisible();
+    await expect(ledger.view).not.toContainText("Item 101");
+    // And the one this install cannot describe keeps the name the addon caught.
+    await expect(ledger.cellSaying("Storm Cloak (variant)")).toBeVisible();
+  });
+
   await ledger.search().fill("copperwood");
   await expect(ledger.rows).toHaveCount(2);
 

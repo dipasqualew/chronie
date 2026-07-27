@@ -242,7 +242,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
           <div className="sub">Every segment on its own row. Click a column to sort, a row to
             open it.</div>
         </header>
-        <Details segments={segments} onOpenSegment={openSegment} />
+        <Details segments={segments} onOpenSegment={openSegment} items={items} />
       </section>
 
       <section id="transmog-view" hidden={view !== "transmog"}>

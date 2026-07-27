@@ -6,11 +6,12 @@
  * through the table's current order rather than through a play session.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import type { ReactNode } from "react";
 
 import { equipsetDetail, equipsetTitle } from "./equipsets";
 import { clock, duration, gold, signed, signedGold } from "./format";
+import type { ItemBook } from "./items";
 import { eventsOf } from "./types";
 import type {
   AchievementEvent,
@@ -206,6 +207,24 @@ function columnsFor(segments: Segment[]): Column[] {
   });
 }
 
+/**
+ * A segment whose transmog events carry whatever the game could be asked about them.
+ *
+ * Only the ones the addon caught no name for, and only the name: the ledger has room for a
+ * name and never had room for anything else. An item this install cannot describe keeps what
+ * it had, which is the id, and the cell reads as it always did.
+ */
+function withItemNames(segment: Segment, items: ItemBook): Segment {
+  const transmogs = eventsOf(segment, "transmogs");
+  if (!transmogs.some((event) => !event.name)) return segment;
+  return {
+    ...segment,
+    transmogs: transmogs.map((event) => (event.name
+      ? event
+      : { ...event, name: items.detail(event.id)?.name || null })),
+  };
+}
+
 /** Ordering within one column, where both values are always of the same kind. */
 function ascendingOrder(a: SortValue, b: SortValue): number {
   const greater = typeof a === "number" && typeof b === "number" ? a > b : String(a) > String(b);
@@ -215,13 +234,21 @@ function ascendingOrder(a: SortValue, b: SortValue): number {
 export interface DetailsProps {
   segments: Segment[];
   /**
+   * What the game says about the items the rows name.
+   *
+   * The ledger draws them as text rather than as the rows the rest of the app uses — every
+   * column here is abbreviated and a picture per cell would drown a table — but a name is a
+   * name, and "Item 101" in a cell is no more use than it was anywhere else.
+   */
+  items: ItemBook;
+  /**
    * Given the segment to show and the rows in their current order, so the modal's next and
    * previous follow whatever the reader had sorted and filtered to.
    */
   onOpenSegment: OpenSegment;
 }
 
-export function Details({ segments, onOpenSegment }: DetailsProps): ReactNode {
+export function Details({ segments, onOpenSegment, items }: DetailsProps): ReactNode {
   const [term, setTerm] = useState("");
   const [character, setCharacter] = useState("");
   const [day, setDay] = useState("");
@@ -236,6 +263,18 @@ export function Details({ segments, onOpenSegment }: DetailsProps): ReactNode {
     () => [...new Set(segments.map((entry) => entry.day))].sort().reverse(), [segments],
   );
 
+  // The book is a cache outside React, so a name arriving changes nothing React would notice.
+  const [learned, redraw] = useReducer((count: number) => count + 1, 0);
+  // Everything the table could name, in one request: the ids come out of the whole history
+  // rather than the filtered rows, because filtering is instant and a second request per
+  // filter would not be. A history with no transmog in it asks for nothing.
+  const named = useMemo(
+    () => [...new Set(segments.flatMap((segment) =>
+      eventsOf(segment, "transmogs").filter((event) => !event.name).map((event) => event.id)))],
+    [segments],
+  );
+  useEffect(() => items.learn(named, redraw), [items, named]);
+
   const rows = useMemo(() => {
     const wanted = term.trim().toLowerCase();
     const filtered = segments.filter((segment) =>
@@ -244,12 +283,18 @@ export function Details({ segments, onOpenSegment }: DetailsProps): ReactNode {
       (!wanted || `${segment.instance} ${segment.character} ${segment.difficulty}`.toLowerCase().includes(wanted)));
 
     const column = columns.find((entry) => entry.key === sortKey) || columns[0];
-    return filtered.sort((left, right) => {
+    const sorted = filtered.sort((left, right) => {
       const a = column.sort(left), b = column.sort(right);
       if (a === b) return left.id < right.id ? -1 : 1;
       return ascendingOrder(a, b) * (ascending ? 1 : -1);
     });
-  }, [segments, columns, term, character, day, sortKey, ascending]);
+    // What the addon could not name at the time, named now. A copy rather than a change: the
+    // segment on screen belongs to the dashboard everything else is drawn from, and the rows
+    // this view hands to the modal are its own.
+    return named.length ? sorted.map((segment) => withItemNames(segment, items)) : sorted;
+    // `learned` is what puts the names in: the book answered, and the rows are rebuilt from it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments, columns, term, character, day, sortKey, ascending, items, named, learned]);
 
   // A filter narrowed to something no longer on offer would leave the table empty with no way
   // back, so a value this history has stopped holding falls back to "all".
