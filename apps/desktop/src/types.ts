@@ -420,6 +420,14 @@ export interface TransmogAppearance {
   appearanceId: number;
   /** Which slot it fills: 0 head, 1 shoulder, 2–10 the rest of the armour, 11 up weapons. */
   displayType: number;
+  /**
+   * Where the game says the item is worn, out of `ItemSparse`: 1 head, 13 a one-hander, 14 a
+   * shield, 17 a two-hander, 22 an off hand. Zero where the game withholds the item.
+   *
+   * For a weapon it is the only thing that says which hand, because the four display types
+   * above cover a sword, a bow, a shield and a tome between them and distinguish none of it.
+   */
+  inventoryType: number;
   displayInfoId: number;
   /** The game's icon for it, as a FileDataID, or zero when it names none. */
   iconFileDataId: number;

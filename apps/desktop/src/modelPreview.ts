@@ -6,21 +6,23 @@
  * three.js half is thin on purpose, and everything decidable without a canvas is decided here.
  */
 
+import { isHeld } from "./transmogModal";
+
 /** What the preview pane is showing. */
 export type Preview =
   | { kind: "model"; displayInfoId: number }
-  | { kind: "worn"; displayInfoId: number; displayType: number }
+  | { kind: "worn"; displayInfoId: number; displayType: number; inventoryType: number }
   | { kind: "icon"; iconFileDataId: number; note: string }
   | { kind: "none"; note: string };
 
 /**
  * What the pane says about what it is showing, and why it is not showing something else.
  *
- * Every armour slot is now shown the way the game itself shows it, which is on a body — the
- * helm on her head rather than floating in front of her — so what is left of the old
- * explanations is the two ways an install can hold nothing to put there. `absent` is a slot
- * with geometry whose file is missing, and `unpaintable` a slot without one whose every
- * texture was painted for a body this app does not draw.
+ * Every slot is now shown the way the game itself shows it, which is on a body — the helm on
+ * her head rather than floating in front of her, the sword in her hand — so what is left of
+ * the old explanations is the two ways an install can hold nothing to put there. `absent` is
+ * a slot with geometry whose file is missing, and `unpaintable` a slot without one whose
+ * every texture was painted for a body this app does not draw.
  */
 export const REASONS = {
   worn: "Worn on the character. Drag to turn it.",
@@ -33,6 +35,7 @@ export const REASONS = {
 /** The appearances a preview needs to tell apart, which is less than a row carries. */
 export interface Previewable {
   displayType: number;
+  inventoryType: number;
   displayInfoId: number;
   iconFileDataId: number;
   hasModel: boolean;
@@ -42,28 +45,33 @@ export interface Previewable {
 /**
  * The display types worn on the body: every armour slot, head through tabard.
  *
- * Everything above them is a weapon or a shield, which hangs off a hand and raises questions
- * of its own — so those are still shown on their own, and are the only appearances that are.
+ * Everything above them is a weapon or a shield, and where one of those goes is a question the
+ * display type does not answer — see [`isHeld`], which asks the item instead.
  */
-const WORN_ON = (displayType: number): boolean => displayType >= 0 && displayType <= 10;
+const ARMOUR = (displayType: number): boolean => displayType >= 0 && displayType <= 10;
 
 /**
  * How one appearance is best shown: on a character, on its own, or as a picture.
  *
- * The order is the point, and it is the other way round from what it used to be. **Every
- * armour slot is shown worn**, whether or not it has geometry: a helm has a model and the
- * only place that model means anything is on a head, so showing it in mid-air said less about
- * the appearance than showing it where the game puts it. What is left on its own is a weapon,
- * and what is left as a picture is a weapon the tables have no model for and a row the game
- * encrypts, neither of which is worth a character.
+ * The order is the point. **Every appearance the game says a place for is shown worn**,
+ * whether or not it has geometry: a helm has a model and the only place that model means
+ * anything is on a head, and a sword means as little in mid-air as a helm does. So armour goes
+ * on the body by its slot, and a weapon goes there when the item says which hand it is held
+ * in.
+ *
+ * What is left on its own is a weapon the game says no hand for — arrows, and an item whose
+ * row the game withholds — because a model at the origin is inside her pelvis and a model
+ * beside the window is at least the shape of the thing. What is left as a picture is an
+ * appearance with no model at all and a row the game encrypts.
  */
 export function previewFor(appearance: Previewable): Preview {
   if (appearance.withheld) return { kind: "none", note: REASONS.withheld };
-  if (WORN_ON(appearance.displayType)) {
+  if (ARMOUR(appearance.displayType) || isHeld(appearance.displayType, appearance.inventoryType)) {
     return {
       kind: "worn",
       displayInfoId: appearance.displayInfoId,
       displayType: appearance.displayType,
+      inventoryType: appearance.inventoryType,
     };
   }
   if (appearance.hasModel) return { kind: "model", displayInfoId: appearance.displayInfoId };

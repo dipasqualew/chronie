@@ -155,7 +155,9 @@ fn describe(paint: Paint) -> String {
 /// The appearance: the geosets it switches on, and every texture it paints, resolved and read.
 fn wearing(files: &dyn GameFiles, display: u32, slot: u32) -> Worn {
     println!("\n== display {display}, worn in slot {slot} ==\n");
-    let worn = match worn::of(files, display, slot) {
+    // Nothing is worn in a hand here: what this tool prints is what a body is painted with, and
+    // the inventory type only says which hand a weapon goes in.
+    let worn = match worn::of(files, display, slot, 0) {
         Ok(worn) => worn,
         Err(error) => {
             eprintln!("Could not read what display {display} wears: {error}");

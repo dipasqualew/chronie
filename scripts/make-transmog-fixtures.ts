@@ -166,22 +166,27 @@ const transmogSetItem: TableSpec = {
         [203, 71007, 0],
         [203, 71008, 0],
         [203, 71009, 1],
+        // Set 204 is the weapon rack: a one-hander, a two-hander, a shield and a thing held in
+        // the other hand, which between them are every place on a body a weapon goes.
         [204, 71010, 0],
+        [204, 71014, 0],
+        [204, 71015, 0],
+        [204, 71016, 0],
         // 71012 is only described in an encrypted section of `ItemModifiedAppearance`, so
         // set 205 has two appearances and can only name one of them.
         [205, 71011, 0],
         [205, 71012, 0],
         [206, 71013, 0],
       ],
-      idList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-      // A fourteenth appearance for set 201, stored as row 1 again — so the set holds the
-      // same appearance twice, and a detail view has to show four rows rather than three.
-      copies: [[14, 1]],
+      idList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+      // One more appearance for set 201, stored as row 1 again — so the set holds the same
+      // appearance twice, and a detail view has to show four rows rather than three.
+      copies: [[17, 1]],
     },
     {
       key: 0x91ce07b4a2d5f36en,
       rows: [[900, 71900, 0]],
-      idList: [15],
+      idList: [18],
     },
   ],
 };
@@ -225,6 +230,9 @@ const itemModifiedAppearance: TableSpec = {
         [71010, 30010, 0, 80010, 0, 2],
         [71011, 30011, 0, 80011, 0, 1],
         [71013, 30013, 0, 80013, 0, 1],
+        [71014, 30014, 0, 80014, 1, 2],
+        [71015, 30015, 0, 80015, 2, 2],
+        [71016, 30016, 0, 80016, 3, 2],
       ],
     },
     {
@@ -281,8 +289,18 @@ const itemAppearance: TableSpec = {
         [3, 900900, 130008],
         // An appearance the table gives no icon at all.
         [2, 900008, 0],
+        // The rest of the weapon rack, and what says the display type cannot be the answer:
+        // the two-hander is filed under 11 exactly like the one-hander above, the shield
+        // under 13, and the thing held in the other hand under 15. Which hand each goes in
+        // is `ItemSparse.InventoryType` and nothing here.
+        [11, 900014, 130007],
+        [13, 900015, 130007],
+        [15, 900007, 130007],
       ],
-      idList: [80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013],
+      idList: [
+        80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013,
+        80014, 80015, 80016,
+      ],
     },
     {
       key: 0x6b02e9f43d78a1c5n,
@@ -355,8 +373,9 @@ const itemDisplayInfo: TableSpec = {
       offsetBits: 256,
       sizeBits: 3,
       arrayCount: 2,
-      // Three runs of two: no model, a one-handed model, a two-handed one.
-      palette: [0, 0, 1, 0, 2, 3],
+      // Four runs of two: no model, a one-handed model, a two-handed one, and a display
+      // whose only model is in the second slot.
+      palette: [0, 0, 1, 0, 2, 3, 0, 1],
     }, // ModelType[2]
     { storage: Storage.plain, offsetBits: 264, sizeBits: 192 }, // GeosetGroup[6]
     { storage: Storage.plain, offsetBits: 456, sizeBits: 192 }, // AttachmentGeosetGroup[6]
@@ -423,10 +442,19 @@ const itemDisplayInfo: TableSpec = {
         // the body already carries. Its geoset value switches that cloak on.
         [0, 18, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51015, 0], [0, 0], [1, 0, 0, 0, 0, 0],
           NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        // A second weapon, so that a one-hander and a two-hander are different models rather
+        // than the same one hung twice.
+        [0, 19, 0, 0, 0, 0, 0, 0, 0, 0, [41005, 0], [51011, 0], [1, 0], [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        // And a weapon that keeps its model in the *second* slot, which a reader that took
+        // element zero would call a shield with no geometry. Armour has a second slot because
+        // shoulders come in pairs; a weapon has one model and it can be in either.
+        [0, 20, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41004], [0, 51008], [0, 1], [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
       ],
       idList: [
         900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008, 900009, 900010, 900011,
-        900012, 900013,
+        900012, 900013, 900014, 900015,
       ],
     },
     {
@@ -527,14 +555,42 @@ const itemDisplayInfoMaterialRes: TableSpec = {
  * column's declared position would find the quality of an item whose name is short somewhere
  * inside the name of the next one.
  *
- * **The column positions below are the community's rather than this repository's.** The five
- * strings and their order are what [WoWDBDefs] lists for the shipping builds, and unlike the
- * chains in `docs/game-files.md` none of it was read off an install — the columns after them
- * are filler of the right shape. `Display_lang` reading as something other than a name is
- * therefore the first thing to suspect if a patch ever empties the detail view's labels.
+ * **The string positions below are the community's rather than this repository's.** The five
+ * strings and their order are what [WoWDBDefs] lists for the shipping builds, and none of that
+ * was read off an install. `Display_lang` reading as something other than a name is therefore
+ * the first thing to suspect if a patch ever empties the detail view's labels.
+ *
+ * **`InventoryType` is not**: column 66 was found on 12.0.5.67 by `dump_inventory_types`, and
+ * it is where a weapon says which hand it goes in. So the fixture puts it there too, sixty
+ * columns past the strings — which is the distance a reader has to walk a variable-length
+ * record to reach it, and the whole of what makes reading it different from reading a name.
+ * The columns in between are filler of the right shape.
  *
  * [WoWDBDefs]: https://github.com/wowdev/WoWDBDefs
  */
+/** Where the column that says which hand a weapon goes in sits, as the install keeps it. */
+const ITEM_INVENTORY_TYPE = 66;
+
+/**
+ * One item, as the game lays one out: the numbers this app reads, and filler in between.
+ *
+ * The filler is not padding for its own sake. `ItemSparse` writes its strings into the record,
+ * so nothing past them sits at a fixed place, and the columns after a name are what say a
+ * reader walked it rather than trusting an offset — see the two rows below whose names are of
+ * different lengths.
+ */
+function item(
+  name: string,
+  description: string,
+  itemLevel: number,
+  quality: number,
+  inventoryType: number,
+): Array<number | string> {
+  const row: Array<number | string> = [0, description, "", "", "", name, itemLevel, quality];
+  while (row.length < ITEM_INVENTORY_TYPE) row.push(row.length);
+  row.push(inventoryType);
+  return row;
+}
 const itemSparse: TableSpec = {
   fileDataId: FILE_DATA_ID.itemSparse,
   layoutHash: 0x0bd4e7a2,
@@ -557,40 +613,59 @@ const itemSparse: TableSpec = {
     { storage: Storage.plain, offsetBits: 192, sizeBits: 32 }, // Display_lang
     { storage: Storage.plain, offsetBits: 224, sizeBits: 32 }, // ItemLevel
     { storage: Storage.plain, offsetBits: 256, sizeBits: 8 }, // OverallQualityID
-    { storage: Storage.plain, offsetBits: 264, sizeBits: 8 }, // InventoryType
+    // The sixty columns of item between the quality and where it is worn, laid out so that
+    // the one this app reads is where the install keeps it.
+    ...Array.from({ length: ITEM_INVENTORY_TYPE - 8 }, (_, index) => ({
+      storage: Storage.plain,
+      offsetBits: 264 + index * 32,
+      sizeBits: 32,
+    })),
+    {
+      storage: Storage.plain,
+      offsetBits: 264 + (ITEM_INVENTORY_TYPE - 8) * 32,
+      sizeBits: 8,
+    }, // InventoryType
   ],
   sections: [
     {
       key: 0n,
-      // AllowableRace, the four alternate display names the game almost never fills in, the
-      // name itself, and then the three numbers that have to survive the walk past them.
       rows: [
-        [0, "", "", "", "", "Tideglass Crown", 447, 4, 1],
-        [0, "", "", "", "", "Tideglass Mantle", 447, 4, 3],
+        item("Tideglass Crown", "", 447, 4, 1),
+        item("Tideglass Mantle", "", 447, 4, 3),
         // The one item with a description, so that two rows of the same shape are still
         // different lengths and the offset map is doing something.
-        [0, "Woven from the glass the tide leaves behind.", "", "", "", "Tideglass Robe", 450, 4, 5],
-        [0, "", "", "", "", "Tideglass Sandals", 447, 3, 8],
-        [0, "", "", "", "", "Tideglass Gloves", 447, 3, 10],
-        [0, "", "", "", "", "Emberforge Helm", 489, 4, 1],
-        [0, "", "", "", "", "Emberforge Pauldrons", 489, 4, 3],
-        [0, "", "", "", "", "Emberforge Breastplate", 502, 5, 5],
-        [0, "", "", "", "", "Emberforge Greaves", 489, 4, 7],
-        [0, "", "", "", "", "Emberforge Bulwark", 502, 5, 13],
+        item("Tideglass Robe", "Woven from the glass the tide leaves behind.", 450, 4, 5),
+        item("Tideglass Sandals", "", 447, 3, 8),
+        item("Tideglass Gloves", "", 447, 3, 10),
+        item("Emberforge Helm", "", 489, 4, 1),
+        item("Emberforge Pauldrons", "", 489, 4, 3),
+        item("Emberforge Breastplate", "", 502, 5, 5),
+        item("Emberforge Greaves", "", 489, 4, 7),
+        // The weapon rack, and the whole reason this column is read: four appearances the
+        // game files under three display types and would otherwise say nothing else about.
+        // 13 is a one-hander, 17 a two-hander, 14 a shield and 23 a thing held in the other
+        // hand — which is four different places on a body.
+        item("Emberforge Blade", "", 502, 5, 13),
+        item("Emberforge Greatsword", "", 502, 5, 17),
+        item("Emberforge Aegis", "", 502, 5, 14),
+        item("Emberforge Censer", "", 502, 5, 23),
         // An item the game holds a row for and no name in it, which is what a reader has to
         // fall back from rather than draw as a blank.
-        [0, "", "", "", "", "", 421, 1, 4],
+        item("", "", 421, 1, 4),
       ],
-      idList: [30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30013],
+      idList: [
+        30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015,
+        30016, 30013,
+      ],
     },
     {
       // Encrypted, so the items of the sets the game has not released cannot be named — and
       // neither can 30011, whose appearance the readable tables do describe.
       key: 0x4e91d2c73b05a86fn,
       rows: [
-        [0, "", "", "", "", "Duskwoven Cowl", 528, 4, 1],
-        [0, "", "", "", "", "Duskwoven Wraps", 528, 4, 9],
-        [0, "", "", "", "", "Unreleased Trinket", 600, 5, 12],
+        item("Duskwoven Cowl", "", 528, 4, 1),
+        item("Duskwoven Wraps", "", 528, 4, 9),
+        item("Unreleased Trinket", "", 600, 5, 12),
       ],
       idList: [30011, 30012, 30900],
     },
@@ -1384,6 +1459,20 @@ interface AttachmentSpec {
   rotation?: readonly [number, number, number, number];
   scale?: readonly [number, number, number];
   animated?: boolean;
+  /**
+   * The bones above this attachment's own, nearest first, as the pivots each of them states.
+   *
+   * This is how the game writes the three attachments a weapon needs. The shield, the right
+   * hand and the left state **no position at all** on the retail body, and neither do the
+   * bones they name: they are helpers the game animates into place, and a still picture has no
+   * animation to do it with. What the file still says is where that chain hangs from, so a
+   * reader falls back to the first ancestor that states a pivot — and a fixture without a
+   * chain to walk cannot tell that reader from one that leaves a sword at the origin, which on
+   * a character is between her feet.
+   *
+   * A link of `null` is a bone that states no pivot either, so the walk has to keep going.
+   */
+  chain?: ReadonlyArray<readonly [number, number, number] | null>;
 }
 
 /**
@@ -1436,7 +1525,16 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
   const BONE = 88;
   const bonesAt = HEADER;
   const trailer = new Bytes();
-  const trailerAt = bonesAt + attachments.length * BONE;
+  // One bone per attachment, and then the chains hanging above the ones that state no
+  // position of their own. Where the first of an attachment's ancestors sits is arithmetic
+  // rather than a patch: every bone is the same 88 bytes.
+  const chains = attachments.map((attachment) => attachment.chain ?? []);
+  const ancestorsAt = chains.map(
+    (_, index) =>
+      attachments.length + chains.slice(0, index).reduce((total, chain) => total + chain.length, 0),
+  );
+  const boneCount = attachments.length + chains.reduce((total, chain) => total + chain.length, 0);
+  const trailerAt = bonesAt + boneCount * BONE;
 
   /** One track's keyframes, and where the two nested arrays naming them begin. */
   interface Keys { times: number; values: number }
@@ -1482,10 +1580,23 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
     }
   };
 
+  /** One bone with nothing to say: no tracks, and a pivot and a parent given to it. */
+  const plain = (pivot: readonly [number, number, number], parent: number): void => {
+    bones.u32(0xffffffff);
+    bones.u32(0x0200);
+    bones.u16(parent);
+    bones.u16(0);
+    bones.u32(0);
+    for (let track = 0; track < 3; track += 1) emit(false, null);
+    for (const axis of pivot) bones.f32(axis);
+  };
+
   attachments.forEach((attachment, index) => {
     bones.u32(0xffffffff); // key bone id: none
     bones.u32(0x0200); // flags, as every bone on the real body carries
-    bones.u16(0xffff); // no parent, which keeps every chain here one bone long
+    // A chain says the attachment is placed by its ancestors rather than by itself, which is
+    // what the hands and the shield do; everything else hangs off a bone of its own.
+    bones.u16(chains[index]!.length > 0 ? ancestorsAt[index]! : 0xffff);
     bones.u16(0);
     bones.u32(0);
     emit(false, null); // translation, which the attachment's own position stands in for
@@ -1493,9 +1604,15 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
     emit(!attachment.animated, keys[index]!.scale);
     for (const axis of attachment.at) bones.f32(axis); // the pivot, which is where it is
   });
+  chains.forEach((chain, index) => {
+    chain.forEach((pivot, step) => {
+      const last = step === chain.length - 1;
+      plain(pivot ?? [0, 0, 0], last ? 0xffff : ancestorsAt[index]! + step + 1);
+    });
+  });
 
   const skb1 = new Bytes();
-  skb1.u32(attachments.length);
+  skb1.u32(boneCount);
   skb1.u32(bonesAt);
   skb1.u32(0); // the key-bone lookup, which nothing here has one of
   skb1.u32(0);
@@ -1529,6 +1646,10 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
  * pair, and the back is behind. What a test reads is the position after the Z-up to Y-up turn
  * `m2.rs` makes — `(x, y, z)` becomes `(x, z, -y)` — so the helm arrives at `[0, 4, 0]` and
  * the left shoulder, which is up the game's Y, at `[0, 3, -2]`.
+ *
+ * The game's own left and right are the sign of that Y, so a weapon's three attachments follow
+ * the shoulders': the right hand is down the game's Y like the right shoulder, and the left
+ * hand and the shield are up it.
  */
 const ATTACHMENTS: readonly AttachmentSpec[] = [
   // The back, whose bone holds a rotation and a scale in an *ordinary* track — one run of keys
@@ -1548,10 +1669,20 @@ const ATTACHMENTS: readonly AttachmentSpec[] = [
   // as `(0, 0, -0.707, 0.707)` and not as itself.
   { id: 6, at: [0, 2, 3], rotation: [0, HALF_ROOT_TWO, 0, HALF_ROOT_TWO], scale: [0.5, 0.5, 0.5] },
   { id: 11, at: [0, 0, 4] }, // the helm, whose bone says nothing — as the real one's does not
-  { id: 1, at: [6, 0, 0] }, // a hand, which nothing in this app asks for
+  // The right hand, and the shape the retail body gives all three of a weapon's attachments:
+  // the record states the origin, its own bone states the origin, and the place it belongs to
+  // is the first ancestor that states one. The link in between is a millimetre off the origin,
+  // which the real body has too — a rounding of zero rather than a place on a person, and what
+  // a reader that stops at "not exactly zero" would hang a sword off.
+  { id: 1, at: [0, 0, 0], chain: [[0, 0.001, 0], [1, -3, 1]] },
   // The right shoulder: a scale and no rotation, which is the other way a bone can be half
   // silent. Three different lengths, so that the axes being permuted shows up here too.
   { id: 5, at: [0, -2, 3], scale: [1, 2, 4] },
+  // The left hand, whose chain is one bone and states nothing in between.
+  { id: 2, at: [0, 0, 0], chain: [[1, 3, 1]] },
+  // The shield, which is neither hand: on the real body it hangs off the left forearm, two
+  // helper bones up. A chain that states nothing until its end is what makes the walk a walk.
+  { id: 0, at: [0, 0, 0], chain: [null, [0, 3, 2]] },
 ];
 
 /**

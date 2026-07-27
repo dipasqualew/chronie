@@ -811,7 +811,7 @@ const mockDesktop: E2EMock = {
       {
         id: 203, name: "Emberforge Plate", group: "Emberforge Armory", groupId: 2,
         classMask: 0x0023, expansionId: 4, parentId: 0, flags: 2, uiOrder: 5,
-        patchIntroduced: 100300, itemCount: 5,
+        patchIntroduced: 100300, itemCount: 6,
       },
       {
         id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe", groupId: 1,
@@ -836,20 +836,24 @@ const mockDesktop: E2EMock = {
       appearances: [
         {
           modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
-          displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+          displayType: 0, inventoryType: 1,
+          displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         // The set names the same appearance twice, which is why the card counts four.
         {
           modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
-          displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+          displayType: 0, inventoryType: 1,
+          displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
           modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle", appearanceId: 80002,
-          displayType: 1, displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
+          displayType: 1, inventoryType: 3,
+          displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
         },
         {
           modifiedAppearanceId: 71003, itemId: 30003, name: "Tideglass Robe", appearanceId: 80003,
-          displayType: 3, displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
+          displayType: 3, inventoryType: 5,
+          displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
         },
       ],
     },
@@ -861,45 +865,61 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71004, itemId: 30004, name: "Tideglass Sandals",
           appearanceId: 80004,
-          displayType: 6, displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
+          displayType: 6, inventoryType: 8,
+          displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
         },
         {
           modifiedAppearanceId: 71005, itemId: 30005, name: "Tideglass Gloves", appearanceId: 80005,
-          displayType: 8, displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
+          displayType: 8, inventoryType: 10,
+          displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
         },
       ],
     },
     // The set whose appearances span several slots, which is what the list is grouped by.
     203: {
       setId: 203,
-      readCount: 5,
+      readCount: 6,
       withheldCount: 0,
       appearances: [
         {
           modifiedAppearanceId: 71006, itemId: 30006, name: "Emberforge Helm", appearanceId: 80006,
-          displayType: 0, displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+          displayType: 0, inventoryType: 1,
+          displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
           modifiedAppearanceId: 71007, itemId: 30007, name: "Emberforge Pauldrons",
           appearanceId: 80007,
-          displayType: 1, displayInfoId: 900009, iconFileDataId: 130002, hasModel: true,
+          displayType: 1, inventoryType: 3,
+          displayInfoId: 900009, iconFileDataId: 130002, hasModel: true,
         },
         {
           modifiedAppearanceId: 71008, itemId: 30008, name: "Emberforge Breastplate",
           appearanceId: 80008,
-          displayType: 3, displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
+          displayType: 3, inventoryType: 5,
+          displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
         },
         {
           modifiedAppearanceId: 71009, itemId: 30009, name: "Emberforge Greaves",
           appearanceId: 80009,
-          displayType: 5, displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
+          displayType: 5, inventoryType: 7,
+          displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
         },
-        // A weapon: the other half of what the game gives geometry to, and the half whose
-        // display type the community definitions do not pin down well enough to name.
+        // A weapon, which the game files under a display type that says only "a weapon" —
+        // and beside it where the item is worn, which is what says the right hand.
         {
-          modifiedAppearanceId: 71010, itemId: 30010, name: "Emberforge Bulwark",
+          modifiedAppearanceId: 71010, itemId: 30010, name: "Emberforge Blade",
           appearanceId: 80010,
-          displayType: 11, displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
+          displayType: 11, inventoryType: 13,
+          displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
+        },
+        // And one whose item the game withholds, so nothing says a hand — or a name. That
+        // is the one appearance left that is still shown on its own: a model at the origin
+        // would be inside her pelvis, and the shape of the thing is better than nothing.
+        {
+          modifiedAppearanceId: 71017, itemId: 30017, name: "",
+          appearanceId: 80017,
+          displayType: 12, inventoryType: 0,
+          displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
       ],
     },
@@ -912,11 +932,13 @@ const mockDesktop: E2EMock = {
       appearances: [
         {
           modifiedAppearanceId: 71011, itemId: 30011, name: "", appearanceId: 80011,
-          displayType: 3, displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
+          displayType: 3, inventoryType: 5,
+          displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
         },
         {
           modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0,
-          displayType: 0, displayInfoId: 0, iconFileDataId: 0, hasModel: false,
+          displayType: 0, inventoryType: 1,
+          displayInfoId: 0, iconFileDataId: 0, hasModel: false,
         },
       ],
     },
@@ -981,6 +1003,10 @@ const mockDesktop: E2EMock = {
   // a pair of gloves whose every texture was painted for a body this app does not draw.
   wornModels: {
     900001: fixtureModel("worn-helm.glb"),
+    // The weapon, which is worn like everything else now: the mock keys these by the display
+    // alone, so the hand the window asked for is the unit tests' business rather than this
+    // file's — what this says is that a weapon reaches the character at all.
+    900007: fixtureModel("worn-helm.glb"),
     900012: fixtureModel("robe.glb"),
     900003: fixtureModel("robe.glb"),
     900004: fixtureModel("robe.glb"),
@@ -2067,7 +2093,15 @@ test("shows the game's transmog sets by collection and filters them", async ({
     // Back to the body, on a stage that has had a helm and an icon on it since.
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "character");
 
-    await transmogDetail.pick("Weapon or shield", "Emberforge Bulwark");
+    // Named by where the game says it is worn rather than by the display type it shares
+    // with every other weapon in the game, and held rather than floating.
+    await transmogDetail.pick("One-hand", "Emberforge Blade");
+    await expect(transmogDetail.preview()).toHaveAttribute("data-state", "worn");
+    await expect(transmogDetail.canvas()).toBeVisible();
+
+    // And the one the game withholds the item for, which is the only appearance left that is
+    // shown on its own: nothing says a hand, so there is nowhere on her to put it.
+    await transmogDetail.pick("Weapon or shield", "Item 30017");
     await expect(transmogDetail.preview()).toHaveAttribute("data-state", "model");
     await expect(transmogDetail.canvas()).toBeVisible();
     await transmogDetail.close();

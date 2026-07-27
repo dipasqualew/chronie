@@ -11,6 +11,7 @@ import {
 /** One appearance with only the fields a test cares about spelled out. */
 const appearance = (fields: Partial<Previewable> = {}): Previewable => ({
   displayType: 0,
+  inventoryType: 1,
   displayInfoId: 900001,
   iconFileDataId: 130001,
   hasModel: true,
@@ -39,15 +40,35 @@ describe("previewFor", () => {
       kind: "worn",
       displayInfoId: 900001,
       displayType,
+      inventoryType: 1,
     });
   });
 
-  // What is left on its own is a weapon, which hangs off a hand and is another issue.
-  it.each<[string, number]>([
-    ["a weapon", 11],
-    ["a shield", 15],
-  ])("shows %s as a model of its own", (_, displayType) => {
-    expect(previewFor(appearance({ displayType }))).toEqual({
+  // And a weapon is worn too, once something says which hand — which the display type never
+  // does and the item always does. All four of the game's weapon slots reach the character.
+  it.each<[string, number, number]>([
+    ["a one-hander", 11, 13],
+    ["a two-hander", 11, 17],
+    ["a shield", 13, 14],
+    ["a bow", 12, 15],
+    ["a tome in the other hand", 15, 23],
+  ])("shows %s held on the character", (_, displayType, inventoryType) => {
+    expect(previewFor(appearance({ displayType, inventoryType }))).toEqual({
+      kind: "worn",
+      displayInfoId: 900001,
+      displayType,
+      inventoryType,
+    });
+  });
+
+  // What is left on its own is a weapon nothing says a place for: an item the game withholds,
+  // and the arrows it files under a weapon slot and nobody holds. A model at the origin would
+  // be inside her pelvis, so the shape of the thing beside her is the better answer.
+  it.each<[string, number, number]>([
+    ["an item the game withholds", 11, 0],
+    ["ammunition", 14, 24],
+  ])("shows %s as a model of its own", (_, displayType, inventoryType) => {
+    expect(previewFor(appearance({ displayType, inventoryType }))).toEqual({
       kind: "model",
       displayInfoId: 900001,
     });
@@ -56,7 +77,7 @@ describe("previewFor", () => {
   // A weapon slot with no model is not armour painted on a body, so it is not worn on one —
   // and it gets the plainer reason rather than one that would be untrue of it.
   it("does not put a weapon with no model on the character", () => {
-    expect(previewFor(appearance({ displayType: 11, hasModel: false })))
+    expect(previewFor(appearance({ displayType: 11, inventoryType: 0, hasModel: false })))
       .toEqual({ kind: "icon", iconFileDataId: 130001, note: REASONS.none });
   });
 

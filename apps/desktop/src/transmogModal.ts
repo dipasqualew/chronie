@@ -25,19 +25,70 @@ import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
  *
  * Read off an install item by item, and recorded in `docs/game-files.md`: a shirt is 2 and a
  * chestpiece 3, where the community's list puts a chestpiece at 2 and a shirt last. The
- * values past this list are weapons and shields, which nothing pins down well enough to name
- * one by one.
+ * values past this list are the weapons and the shields, and this is where the numbering runs
+ * out — 11 is a sword and a two-hander alike, 15 is a tome and a shield is 13.
  */
 const SLOTS = [
   "Head", "Shoulder", "Shirt", "Chest", "Waist", "Legs", "Feet", "Wrist", "Hands", "Back",
   "Tabard",
 ] as const;
 
-/** The display types that are a weapon or a shield rather than a piece of armour. */
-const WEAPONRY = new Set([11, 12, 13, 15]);
+/**
+ * What the game calls each place a weapon can be worn, as `ItemSparse.InventoryType` says it.
+ *
+ * **This is what four display types cannot tell a reader.** `DisplayType` files every weapon
+ * and shield in the game under 11, 12, 13 and 15, and nothing in the community's definitions
+ * pins down which is a main hand and which an off hand — which is why all four used to be
+ * shown as "Weapon or shield" rather than as four labelled guesses. `InventoryType` is the
+ * game's own answer to "where does this go" and needs no guessing: counted on 12.0.5.67 with
+ * `examples/dump_inventory_types`, display type 13 is 1,749 shields and nothing else, and the
+ * 8,280 one-handers and 5,573 two-handers filed under 11 say which they are here.
+ *
+ * `docs/game-files.md` has the whole cross-tab. A hand of `null` is a thing the game files
+ * under a weapon slot and nobody holds — arrows, and an item the game withholds.
+ */
+const WORN_IN: Record<number, { readonly name: string; readonly hand: "right" | "left" | null }> = {
+  13: { name: "One-hand", hand: "right" },
+  14: { name: "Shield", hand: "left" },
+  15: { name: "Ranged", hand: "left" },
+  17: { name: "Two-hand", hand: "right" },
+  21: { name: "Main hand", hand: "right" },
+  22: { name: "Off hand", hand: "left" },
+  23: { name: "Held in off hand", hand: "left" },
+  24: { name: "Ammo", hand: null },
+  25: { name: "Thrown", hand: "right" },
+  26: { name: "Ranged", hand: "right" },
+  29: { name: "Profession tool", hand: "right" },
+  30: { name: "Profession accessory", hand: "left" },
+};
 
-export function slotName(displayType: number): string {
-  return SLOTS[displayType] ?? (WEAPONRY.has(displayType) ? "Weapon or shield" : `Slot ${displayType}`);
+/** The display types that are a weapon or a shield rather than a piece of armour. */
+const WEAPONRY = new Set([11, 12, 13, 14, 15]);
+
+/**
+ * What a row calls its slot: the armour slot it fills, or where a weapon is worn.
+ *
+ * A weapon the game says nothing about falls back to what the display type says on its own,
+ * which is only that it is a weapon of some kind — the same sentence the view used to give all
+ * four of them.
+ */
+export function slotName(displayType: number, inventoryType = 0): string {
+  const armour = SLOTS[displayType];
+  if (armour) return armour;
+  if (!WEAPONRY.has(displayType)) return `Slot ${displayType}`;
+  return WORN_IN[inventoryType]?.name ?? "Weapon or shield";
+}
+
+/**
+ * Whether the character can be shown holding this, which is not the same as it being a weapon.
+ *
+ * The hand comes out of the same table as the name and is the backend's `worn::held_in` read
+ * from the other end: it puts a one-hander on the right hand's attachment, an off-hand on the
+ * left's and a shield on the forearm's. Where the game says nothing there is nowhere to put
+ * the model, and the window shows it on its own instead.
+ */
+export function isHeld(displayType: number, inventoryType: number): boolean {
+  return WEAPONRY.has(displayType) && (WORN_IN[inventoryType]?.hand ?? null) !== null;
 }
 
 /** One appearance as a row reads it, with everything the markup needs already decided. */
@@ -50,6 +101,8 @@ export interface AppearanceRow {
   appearanceId: number;
   /** Which slot the game says it fills, which is what decides whether it has geometry. */
   displayType: number;
+  /** And where it is worn, which for a weapon is what decides which hand holds it. */
+  inventoryType: number;
   /** What the backend is asked for when the row is picked, and how a model is keyed. */
   displayInfoId: number;
   /** Which texture is the row's picture, or zero when the game names none for it. */
@@ -71,13 +124,14 @@ export function appearanceRows(payload: TransmogSetItemsPayload): AppearanceRow[
   return (payload.appearances || []).map((appearance: TransmogAppearance) => {
     const withheld = !appearance.itemId;
     return {
-      slot: withheld ? "Unknown slot" : slotName(appearance.displayType),
+      slot: withheld ? "Unknown slot" : slotName(appearance.displayType, appearance.inventoryType),
       label: withheld
         ? "The game keeps this appearance encrypted"
         : appearance.name || `Item ${appearance.itemId}`,
       itemId: appearance.itemId,
       appearanceId: appearance.appearanceId,
       displayType: appearance.displayType,
+      inventoryType: appearance.inventoryType,
       displayInfoId: appearance.displayInfoId,
       iconFileDataId: appearance.iconFileDataId,
       hasModel: appearance.hasModel,

@@ -59,6 +59,10 @@ const ELEMENT_BITS: u32 = 32;
 /// How many items to print per name asked for. Enough to see past one encrypted display.
 const PER_NAME: usize = 3;
 
+/// What `worn::of` is told about where an item is worn, which for a piece of armour is nothing:
+/// the inventory type is how a weapon says which hand, and armour's slot already says the rest.
+const NOT_A_WEAPON: u32 = 0;
+
 /// The largest number a geoset value can be: `group × 100 + value`, so 99 is the next group.
 const LARGEST_VALUE: i32 = 98;
 
@@ -234,7 +238,8 @@ fn main() {
             }
             // And what the app itself makes of the row, which is the other half of the check:
             // the column can only be right if what comes out of it is geosets the body holds.
-            match worn::of(files.as_ref(), display_info_id, display_type) {
+            // Nothing is worn in a hand here: the columns this tool is about are armour's.
+            match worn::of(files.as_ref(), display_info_id, display_type, NOT_A_WEAPON) {
                 Ok(worn) => {
                     let switched: Vec<String> = worn
                         .geosets
