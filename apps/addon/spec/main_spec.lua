@@ -4,13 +4,24 @@ local fake = require("fake_wow")
 describe("addon integration", function()
     ---Boot the addon exactly as the client does: every .toc file, in order,
     ---then hand ns.main a fake outside world.
-    ---@param options table? `{ playerName = string?, addonName = string? }`
+    ---
+    ---`options.settings` is what the desktop app wrote into this installed copy, applied
+    ---the way the installer does it — over the defaults src/Settings.lua carries, before
+    ---anything reads them. Each boot loads its own namespace, so one test's settings can
+    ---never reach another's.
+    ---@param options table? `{ playerName = string?, addonName = string?, settings = table? }`
     local function boot(options)
         options = options or {}
         local ns = loader.load(options.addonName)
+        for key, value in pairs(options.settings or {}) do
+            ns.settings[key] = value
+        end
         local env, recorded = fake.newEnv(options)
         local app = ns.main(env)
         recorded.frame = recorded.frames[1]
+        -- Kept so a test can change a client switch by hand after login, the way the
+        -- player typing /combatlog does, rather than only observing what the addon did.
+        recorded.env = env
         return app, recorded
     end
 
@@ -29,6 +40,7 @@ describe("addon integration", function()
             assert.is_function(ns.newLockoutWindow)
             assert.is_function(ns.newCurrencyItems)
             assert.is_function(ns.newCurrencyWindow)
+            assert.is_function(ns.newCombatLogging)
             assert.is_function(ns.main)
         end)
 
@@ -36,6 +48,15 @@ describe("addon integration", function()
             local ns = loader.load()
 
             assert.is_nil(ns.app)
+        end)
+
+        -- What a copy nobody has configured ends up with: the desktop app overwrites this
+        -- file at install time, so the bundle's own values are the defaults and every one
+        -- of them costs the player something they have not asked for.
+        it("carries settings with combat logging off until something says otherwise", function()
+            local ns = loader.load()
+
+            assert.is_false(ns.settings.combatLogging)
         end)
     end)
 
@@ -2361,14 +2382,14 @@ describe("addon integration", function()
             assert.is_nil(visible["Deadmines"])
         end)
 
-        it("names segments, currency, report and events in the usage text", function()
+        it("names segments, currency, report, log and events in the usage text", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("nonsense")
 
             assert.equal(
                 "|cff33ff99chronie|r: usage: /chronie locks | results | segments | currency "
-                    .. "| report | events",
+                    .. "| report | log | events",
                 recorded.lines[1]
             )
         end)
@@ -2664,6 +2685,90 @@ describe("addon integration", function()
             recorded.slashRegistrations[1].handler("results")
 
             assert.is_true(#recorded.frames > 1)
+        end)
+    end)
+
+    describe("combat logging", function()
+        local ADVANCED = "advancedCombatLogging"
+
+        ---@param options table?
+        ---@return table app, table recorded
+        local function bootLogging(options)
+            options = options or {}
+            options.playerName = options.playerName or "Thrall"
+            options.realmName = options.realmName or "Ragnaros"
+            return boot(options)
+        end
+
+        -- Logging does not survive a session, so the setting has to be re-asserted at
+        -- every login rather than once ever.
+        it("turns both switches on at login when the setting asks for it", function()
+            local _, recorded = bootLogging({ settings = { combatLogging = true } })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.is_true(recorded.isLogging())
+            assert.equal("1", recorded.cvar(ADVANCED))
+        end)
+
+        it("says logging is on, with advanced logging, once it is", function()
+            local _, recorded = bootLogging({ settings = { combatLogging = true } })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.equal(
+                "|cff33ff99chronie|r: combat logging is on, with advanced combat logging.",
+                recorded.lines[1]
+            )
+        end)
+
+        -- The default install: a player who never turned this on gets no log and no line
+        -- about it, which is why the login handler stays silent by default.
+        it("leaves the client alone at login when the setting is off", function()
+            local _, recorded = bootLogging()
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.is_false(recorded.isLogging())
+            assert.same({}, recorded.setCVarCalls)
+            assert.same({}, recorded.lines)
+        end)
+
+        it("still logs, and tells the player what to tick, on a client refusing the CVar", function()
+            local _, recorded = bootLogging({
+                settings = { combatLogging = true },
+                protectedCVars = { [ADVANCED] = "raise" },
+            })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.is_true(recorded.isLogging())
+            assert.is_nil(recorded.cvar(ADVANCED))
+            assert.equal(1, #recorded.lines)
+            assert.is_truthy(recorded.lines[1]:find("Advanced Combat Logging", 1, true))
+            assert.is_truthy(recorded.lines[1]:find("Network", 1, true))
+        end)
+
+        it("reports the client's own state on /chronie log", function()
+            local _, recorded = bootLogging({ combatLogging = true })
+
+            recorded.slashRegistrations[1].handler("log")
+
+            assert.equal(1, #recorded.lines)
+            assert.is_truthy(recorded.lines[1]:find("did not ask for it", 1, true))
+        end)
+
+        -- Asked of the client every time rather than remembered from login, so a switch
+        -- the player has thrown by hand since is what the answer describes.
+        it("reflects logging the player stopped by hand after login", function()
+            local _, recorded = bootLogging({ settings = { combatLogging = true } })
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            recorded.env.loggingCombat(false)
+            recorded.slashRegistrations[1].handler("log")
+
+            assert.is_false(recorded.isLogging())
+            assert.is_truthy(recorded.lines[2]:find("not logging", 1, true))
         end)
     end)
 end)

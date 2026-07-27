@@ -32,6 +32,22 @@ folder, then select **Install or update addon**. That button downloads the publi
 Select **Sync now** after `/reload` or logging out; Chronie also checks
 SavedVariables every 30 seconds in the background.
 
+## Combat logging
+
+Setup's **Combat logging** switch asks the addon to start the game's combat log at
+login, and to tick **Advanced Combat Logging** — the setting that puts positions and
+map ids into the log rather than only names and numbers.
+
+It is off until you turn it on, because it is not cheap: a raid night is hundreds of
+megabytes, and Chronie does not delete old logs. Clearing out the game's `Logs`
+folder is still yours to do.
+
+The panel reports what the install is actually doing rather than what it was asked
+to do — the setting as the game's own config records it, and whether a file in
+`Logs` is really growing. If your client refuses to let an addon write the CVar, the
+panel says so and names the box to tick yourself. In game, `/chronie log` asks the
+same question of the client directly.
+
 ## Move a history to another machine
 
 Setup's **Sync over WiFi** hands one Chronie's whole database to another one on the

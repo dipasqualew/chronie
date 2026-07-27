@@ -12,7 +12,7 @@
  * actually thinks rather than what a click hoped it did.
  */
 
-import { escapeHtml, plural } from "./format";
+import { escapeHtml, fileSize, plural } from "./format";
 import type { WifiOffer, WifiPeer, WifiReceipt, WifiReceiveStatus } from "./types";
 
 export interface WifiElements {
@@ -41,18 +41,6 @@ export interface WifiActions {
   onReplaced: () => void;
   /** Anything that went wrong, in the words the backend used. */
   onError: (error: unknown) => string;
-}
-
-/** A database's size the way a person judges "is that mine?" — never more than three digits. */
-export function fileSize(bytes: number): string {
-  const units = ["bytes", "KB", "MB", "GB"];
-  let value = Math.max(bytes || 0, 0);
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return unit === 0 ? `${Math.round(value)} bytes` : `${value.toFixed(1)} ${units[unit]}`;
 }
 
 /**

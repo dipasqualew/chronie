@@ -356,6 +356,23 @@
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .status { color: var(--text-secondary); min-height: 21px; }
 
+  /* ---------- combat logging ---------- */
+
+  /* Bigger than the labels above it, because this one is a decision rather than a field. */
+  .setup label.check {
+    display: flex; align-items: center; gap: 9px; margin: 14px 0 10px;
+    font-size: 14px; color: var(--text-primary); cursor: pointer;
+  }
+  .setup label.check input { width: 15px; height: 15px; cursor: pointer; }
+  /* The two states that are not what the reader asked for say so in colour as well as in
+     words: on-but-not-advanced writes a log with nothing useful in it, and stale means
+     nothing is being written at all. */
+  #combat-log-state[data-state="advanced"] { color: var(--ok); }
+  #combat-log-state[data-state="basic"],
+  #combat-log-state[data-state="stale"] { color: var(--bad); }
+  #combat-log-detail { margin-top: 6px; }
+  #combat-log-detail div + div { margin-top: 2px; }
+
   /* ---------- sync over wifi ---------- */
 
   .wifi-halves {
@@ -611,6 +628,23 @@
         out of step. The button above only does it again now, without waiting for a restart.</p>
       <p id="last-sync" class="sub"></p>
     </div>
+
+    <!-- A landmark rather than a plain panel, so the section a reader is being asked to make
+         a decision in is one they can reach and address by its name. -->
+    <section class="panel setup" aria-labelledby="combat-log-heading">
+      <h2 id="combat-log-heading">Combat logging</h2>
+      <p class="sub">The game can write every combat event to a file, with the positions
+        Chronie needs to say where something happened. It is off unless you turn it on here,
+        because it is not cheap: <strong>a raid night is hundreds of megabytes</strong>, and
+        Chronie does not delete old logs yet — clearing out the game's <strong>Logs</strong>
+        folder is still yours to do.</p>
+      <label class="check">
+        <input id="combat-logging" type="checkbox">
+        Start combat logging when I log in
+      </label>
+      <p id="combat-log-state" class="status" role="status"></p>
+      <div id="combat-log-detail" class="sub"></div>
+    </section>
 
     <div class="panel setup">
       <h2>Sync over WiFi</h2>

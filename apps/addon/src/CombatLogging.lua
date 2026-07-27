@@ -58,12 +58,13 @@ function ns.newCombatLogging(deps)
         state = read,
 
         apply = function()
-            if not read().requested then
+            local before = read()
+            if not before.requested then
                 -- Deliberately turns nothing off. The setting says whether Chronie starts
                 -- logging, not whether the player is allowed to: somebody who switched
                 -- logging on for their own reasons this session should not find that a
                 -- Chronie setting they never touched silently stopped it.
-                return read()
+                return before
             end
 
             -- pcall because a protected CVar raises from insecure code on some client builds
@@ -81,7 +82,8 @@ function ns.newCombatLogging(deps)
                     or "combat logging is off. Turn it on in Chronie's Setup screen."
             end
             if not state.logging then
-                return "combat logging was asked for but this client is not logging."
+                return "combat logging was asked for but this client is not logging. "
+                    .. "/reload to have Chronie ask again."
             end
             if not state.advanced then
                 return "combat logging is on, but advanced combat logging is not, so the log "

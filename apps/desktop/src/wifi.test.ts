@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileSize, offerSentence, receiptSentence, receiveSentence } from "./wifi";
+import { offerSentence, receiptSentence, receiveSentence } from "./wifi";
 import type { WifiOffer, WifiReceiveStatus } from "./types";
 
 const offer = (overrides: Partial<WifiOffer> = {}): WifiOffer => ({
@@ -20,16 +20,6 @@ const status = (overrides: Partial<WifiReceiveStatus> = {}): WifiReceiveStatus =
   offer: null,
   outcome: null,
   ...overrides,
-});
-
-describe("fileSize", () => {
-  it("never shows more digits than a person is judging by", () => {
-    expect(fileSize(0)).toBe("0 bytes");
-    expect(fileSize(900)).toBe("900 bytes");
-    expect(fileSize(4096)).toBe("4.0 KB");
-    expect(fileSize(4_404_019)).toBe("4.2 MB");
-    expect(fileSize(3_221_225_472)).toBe("3.0 GB");
-  });
 });
 
 describe("offerSentence", () => {
