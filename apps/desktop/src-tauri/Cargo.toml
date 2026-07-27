@@ -23,7 +23,11 @@ hex = "0.4.3"
 # of `screenshotFormat` and not something Chronie gets to assume either way. Default features
 # would pull in a dozen decoders nothing here will ever be handed.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga"] }
-rusqlite = { version = "0.32.1", features = ["bundled"] }
+# `hooks` is not a hook in the ordinary sense here: it is what carries `progress_handler`,
+# which is the only way to put a clock on a query somebody typed themselves. It pulls in no
+# dependencies of its own — the feature exists to keep the C callbacks out of builds that
+# never register one.
+rusqlite = { version = "0.32.1", features = ["bundled", "hooks"] }
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.122"
 sha2 = "0.10.8"
