@@ -11,13 +11,23 @@ describe("ns.newResultsWindow", function()
     ---Build the window with fake frames and deps, recording what it loads and saves.
     ---`loadPoint` returns whatever the test planted, so both the default and the
     ---restored-position paths are drivable.
-    ---@param options table? `{ name = string?, point = { string, number, number }? }`
-    ---@return table window, table frames, table recorded `{ saved, loadCalls }`
+    ---`options.navigate` switches the header's arrows on, the way Main.lua does when there
+    ---is a strip of views to walk; every delta they are clicked with lands in
+    ---`recorded.navigated`.
+    ---@param options table? `{ name = string?, point = { string, number, number }?, navigate = boolean?,
+    ---title = string|fun(summary: SegmentSummary): string? }`
+    ---@return table window, table frames, table recorded `{ saved, loadCalls, navigated }`
     local function newWindow(options)
         options = options or {}
         local createFrame, frames = fake.newCreateFrame()
-        local recorded = { saved = {}, loadCalls = 0, achievements = {}, previews = {}, collections = {} }
+        local recorded = {
+            saved = {}, loadCalls = 0, achievements = {}, previews = {}, collections = {}, navigated = {},
+        }
         local window = ns.newResultsWindow({
+            title = options.title,
+            navigate = options.navigate and function(delta)
+                recorded.navigated[#recorded.navigated + 1] = delta
+            end or nil,
             createFrame = createFrame,
             uiParent = { name = "UIParent" },
             name = options.name or NAME,
@@ -160,6 +170,28 @@ describe("ns.newResultsWindow", function()
             end
         end
         return drawn
+    end
+
+    ---The header's own font strings: the two arrows, named by the glyphs they are drawn
+    ---with, and the title. They are the only font strings the panel builds without a
+    ---justification — every row and every bar caption declares one — which is exactly what
+    ---keeps them out of `rowsOf` and `barsOf`.
+    ---@param frame table
+    ---@return table `{ back = table?, forward = table?, title = table }`
+    local function headerOf(frame)
+        local header = {}
+        for _, fontString in ipairs(frame.fontStrings) do
+            if fontString.justify == nil then
+                if fontString.text == "«" then
+                    header.back = fontString
+                elseif fontString.text == "»" then
+                    header.forward = fontString
+                else
+                    header.title = fontString
+                end
+            end
+        end
+        return header
     end
 
     ---@param lines table[]
@@ -955,7 +987,9 @@ describe("ns.newResultsWindow", function()
         -- Everything on screen at once, expanded, is what makes this one assertion cover the
         -- whole panel rather than the one row the bug was reported against.
         it("draws every row in characters the game's font actually has", function()
-            local window, frames = newWindow()
+            -- Built with the arrows on and standing on a dated view, so the header's own
+            -- strings — the two chevrons and a title carrying a separator — are swept too.
+            local window, frames = newWindow({ navigate = true })
             window.update(summary({
                 lootValue = 1234,
                 goldDiff = -500,
@@ -975,7 +1009,7 @@ describe("ns.newResultsWindow", function()
                 housingItems = { { id = 7, name = "Iron Sconce", warbandFirst = true } },
                 housingXP = 250,
                 housingLevelUps = { { level = 3 } },
-            }))
+            }), { kind = "record", key = "record:1", title = "Deadmines · 12m ago", index = 3, count = 4 })
             for _, heading in ipairs({
                 "Achievements", "Currency", "Level ups", "Mounts", "Pets", "Quests",
                 "Reputation", "Toys", "Housing items", "Housing levels", "Transmog",
@@ -991,6 +1025,135 @@ describe("ns.newResultsWindow", function()
                         "undrawable character in " .. tostring(fontString.text))
                 end
             end
+        end)
+    end)
+
+    describe("the arrows through the session", function()
+        local GOLD = { 1, 0.82, 0 }
+        -- An arrow with nowhere left to go is dimmed rather than taken away, so the header
+        -- keeps the same shape at the ends of the strip as it has in the middle of it.
+        local SPENT = { 0.35, 0.35, 0.38 }
+
+        ---One view off the strip, as ns.newSegmentViews hands it over.
+        ---@param overrides table?
+        ---@return SegmentView
+        local function view(overrides)
+            local base = { kind = "live", key = "live", title = "Deadmines", index = 2, count = 3 }
+            for key, value in pairs(overrides or {}) do
+                base[key] = value
+            end
+            return base
+        end
+
+        -- The panel predates having anywhere to walk to, and every other caller of it still
+        -- has nothing: without a navigate dep it shows what it is handed and nothing else.
+        it("draws no arrows at all when there is nowhere to walk to", function()
+            local window, frames = newWindow()
+
+            window.update(summary())
+
+            local header = headerOf(frames[1])
+            assert.is_nil(header.back)
+            assert.is_nil(header.forward)
+        end)
+
+        for _, case in ipairs({
+            { glyph = "«", towards = "the session total", delta = -1 },
+            { glyph = "»", towards = "the segments already played", delta = 1 },
+        }) do
+            it("walks towards " .. case.towards .. " when " .. case.glyph .. " is clicked", function()
+                local window, frames, recorded = newWindow({ navigate = true })
+                window.update(summary(), view())
+
+                local header = headerOf(frames[1])
+                local arrow = case.delta < 0 and header.back or header.forward
+                arrow:run("OnMouseUp", "LeftButton")
+
+                assert.same({ case.delta }, recorded.navigated)
+            end)
+        end
+
+        -- The view's name is the only thing on screen saying which of several is being
+        -- looked at, so it outranks whatever the panel was built with.
+        it("says what the view it is standing on is called", function()
+            local window, frames = newWindow({ navigate = true, title = "Current Segment" })
+
+            window.update(summary(), view({ title = "Session · 3 segments" }))
+
+            assert.equal("Session · 3 segments", headerOf(frames[1]).title.text)
+        end)
+
+        it("still says what it was built with while it is handed no view", function()
+            local window, frames = newWindow({ navigate = true, title = "Current Segment" })
+
+            window.update(summary())
+
+            assert.equal("Current Segment", headerOf(frames[1]).title.text)
+        end)
+
+        for _, case in ipairs({
+            {
+                what = "somewhere to go in either direction",
+                view = view({ index = 2, count = 3 }), back = GOLD, forward = GOLD,
+            },
+            {
+                what = "the session total, with nothing before it",
+                view = view({ index = 1, count = 3 }), back = SPENT, forward = GOLD,
+            },
+            {
+                what = "the oldest segment, with nothing behind it",
+                view = view({ index = 3, count = 3 }), back = GOLD, forward = SPENT,
+            },
+            {
+                what = "the only view there is",
+                view = view({ index = 1, count = 1 }), back = SPENT, forward = SPENT,
+            },
+        }) do
+            it("lights the arrows for " .. case.what, function()
+                local window, frames = newWindow({ navigate = true })
+
+                window.update(summary(), case.view)
+
+                local header = headerOf(frames[1])
+                assert.same(case.back, header.back.color)
+                assert.same(case.forward, header.forward.color)
+            end)
+        end
+
+        -- A panel handed no view at all cannot be anywhere but where it is, so neither
+        -- arrow leads anywhere and neither is lit.
+        it("dims both arrows when it is handed no view to place itself on", function()
+            local window, frames = newWindow({ navigate = true })
+
+            window.update(summary())
+
+            local header = headerOf(frames[1])
+            assert.same(SPENT, header.back.color)
+            assert.same(SPENT, header.forward.color)
+        end)
+
+        -- The body is read out of the frame by justification and by texture layer, and the
+        -- arrows are new font strings on the same frame. A missing SetJustifyH on one of
+        -- them would show up as a phantom row in every other test in this file.
+        it("keeps the arrows out of the rows, the bars and the rules the body is made of", function()
+            local plain, plainFrames = newWindow()
+            local arrowed, arrowedFrames = newWindow({ navigate = true })
+            local drawn = summary({
+                lootValue = 1234,
+                reputationTotal = 250,
+                reputation = {
+                    { faction = "Argent Dawn", amount = 250, standing = "Honored", current = 1, max = 2 },
+                },
+            })
+
+            plain.update(drawn)
+            arrowed.update(drawn, view())
+            expand(plainFrames[1], "Reputation")
+            expand(arrowedFrames[1], "Reputation")
+
+            assert.same(rowsOf(plainFrames[1]), rowsOf(arrowedFrames[1]))
+            assert.same(barsOf(plainFrames[1]), barsOf(arrowedFrames[1]))
+            assert.equal(#rulesOf(plainFrames[1]), #rulesOf(arrowedFrames[1]))
         end)
     end)
 

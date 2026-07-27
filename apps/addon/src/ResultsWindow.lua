@@ -8,7 +8,9 @@ local _, ns = ...
 ---@field hide fun()
 ---@field toggle fun()
 ---@field isShown fun(): boolean
----@field update fun(summary: SegmentSummary) Repaint; builds the frame on first use.
+---@field update fun(summary: SegmentSummary, view: SegmentView?) Repaint; builds the frame on
+---first use. The view, when there is one, says which of several the panel is standing on,
+---and is what the arrows in the header are drawn from.
 
 ---@class ResultsWindowDeps
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
@@ -27,6 +29,9 @@ local _, ns = ...
 ---@field character fun(): string? "Name-Realm" of whoever is playing, so the account rollup
 ---can leave out the character whose own numbers are already on the line above.
 ---@field title string|fun(summary: SegmentSummary): string?
+---@field navigate fun(delta: integer)? Walk to another view: -1 towards the session total,
+---+1 back through the segments already played. Given one, the header grows an arrow at each
+---end; without one the panel shows whatever it is handed and nothing else.
 ---@field closable boolean?
 ---@field specialFrames string[]?
 ---@field frameStrata string?
@@ -49,8 +54,15 @@ local RULE_LINE = 11
 -- two read as one entry, and takes a whole line of its own so the standing fits on it.
 local BAR_HEIGHT = 11
 local BAR_INDENT = 10
+-- Room for one arrow at each end of the header strip, which the title is then squeezed
+-- between rather than drawn over.
+local ARROW_WIDTH = 14
 
 local TITLE_COLOR = { 1, 0.82, 0 }
+-- An arrow with nowhere left to go is dimmed rather than taken away, so the header keeps
+-- the same shape at the ends of the strip as it has in the middle of it.
+local ARROW_COLOR = { 1, 0.82, 0 }
+local ARROW_SPENT_COLOR = { 0.35, 0.35, 0.38 }
 local HEADING_COLOR = { 0.93, 0.91, 0.85 }
 local LABEL_COLOR = { 0.68, 0.68, 0.7 }
 local VALUE_COLOR = { 1, 1, 1 }
@@ -105,7 +117,9 @@ function ns.newResultsWindow(deps)
     ---@type table[] Hairlines drawn between blocks of the body.
     local rules = {}
     local frame, title
-    local latest
+    ---@type table?, table?
+    local backArrow, forwardArrow
+    local latest, latestView
     local expanded = {
         transmogs = false,
         currencies = false,
@@ -173,12 +187,42 @@ function ns.newResultsWindow(deps)
         underline:SetWidth(WIDTH - 2)
         underline:SetHeight(RULE_HEIGHT)
 
+        local middle = -1 - HEADER_HEIGHT / 2
+        local arrows = 0
+
+        -- The arrows are font strings with a mouse handler on them, the same as every
+        -- clickable row in the body: the panel is text on a rectangle, and a button widget
+        -- in the header would be the only piece of client chrome anywhere on it.
+        if deps.navigate then
+            arrows = ARROW_WIDTH
+            backArrow = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            backArrow:SetPoint("LEFT", frame, "TOPLEFT", PADDING - 2, middle)
+            backArrow:SetWidth(ARROW_WIDTH)
+            backArrow:SetWordWrap(false)
+            backArrow:SetText("«")
+            backArrow:EnableMouse(true)
+            backArrow:SetScript("OnMouseUp", function()
+                deps.navigate(-1)
+            end)
+
+            forwardArrow = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            forwardArrow:SetPoint("RIGHT", frame, "TOPRIGHT",
+                -PADDING + 2 - (deps.closable and HEADER_HEIGHT or 0), middle)
+            forwardArrow:SetWidth(ARROW_WIDTH)
+            forwardArrow:SetWordWrap(false)
+            forwardArrow:SetText("»")
+            forwardArrow:EnableMouse(true)
+            forwardArrow:SetScript("OnMouseUp", function()
+                deps.navigate(1)
+            end)
+        end
+
         title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        title:SetPoint("LEFT", frame, "TOPLEFT", PADDING, -1 - HEADER_HEIGHT / 2)
+        title:SetPoint("LEFT", frame, "TOPLEFT", PADDING + arrows, middle)
         title:SetWordWrap(false)
         -- Clipped rather than wrapped, and clear of the close button when there is one: a
         -- long "Character — Instance" title must not run out under it.
-        title:SetWidth(WIDTH - PADDING * 2 - (deps.closable and HEADER_HEIGHT or 0))
+        title:SetWidth(WIDTH - PADDING * 2 - arrows * 2 - (deps.closable and HEADER_HEIGHT or 0))
         title:SetText(type(deps.title) == "string" and deps.title or "Current Segment")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
 
@@ -254,8 +298,21 @@ function ns.newResultsWindow(deps)
 
     ---@param summary SegmentSummary
     local function render(summary)
-        if type(deps.title) == "function" then
+        -- A view names itself — "Session", the zone being played, a zone left an hour ago —
+        -- and that name outranks anything the panel was built with, because it is the only
+        -- thing on screen saying which of them is being looked at.
+        if latestView and latestView.title then
+            title:SetText(latestView.title)
+        elseif type(deps.title) == "function" then
             title:SetText(deps.title(summary) or "Segment Details")
+        end
+        if backArrow and forwardArrow then
+            local index = latestView and latestView.index or 1
+            local count = latestView and latestView.count or 1
+            local earlier = index > 1 and ARROW_COLOR or ARROW_SPENT_COLOR
+            local later = index < count and ARROW_COLOR or ARROW_SPENT_COLOR
+            backArrow:SetTextColor(earlier[1], earlier[2], earlier[3])
+            forwardArrow:SetTextColor(later[1], later[2], later[3])
         end
         local y = -HEADER_HEIGHT - RULE_HEIGHT - PADDING
         local used = 0
@@ -632,11 +689,17 @@ function ns.newResultsWindow(deps)
 
     return {
         ---@param summary SegmentSummary
-        update = function(summary)
+        ---@param view SegmentView?
+        update = function(summary, view)
             if not frame then
                 build()
             end
-            local segmentKey = summary.id or summary.startedAt
+            latestView = view
+            -- Which segment the ticks against reviewed transmogs belong to. A filed record
+            -- carries its own identity; a live tally has none, so the view it is being
+            -- drawn as stands in — walking off the open segment and back onto it is a
+            -- fresh look at the same list.
+            local segmentKey = summary.id or summary.startedAt or (view and view.key)
             local transmogCount = #(summary.transmogs or {})
             if (segmentKey and reviewedSegmentKey and segmentKey ~= reviewedSegmentKey)
                 or transmogCount < lastTransmogCount then

@@ -179,10 +179,22 @@ function ns.main(env)
         holdings.record(currentCharacter(), env.heldSweep())
     end
 
-    local resultsWindow = ns.newResultsWindow({
+    -- Declared before the panel and filled in after the log and the tracker they read from,
+    -- because the panel is built first and its arrows have to reach them.
+    ---@type SegmentViews
+    local segmentViews
+    ---Draws whichever view the arrows are standing on.
+    local renderResults
+    local resultsWindow
+
+    resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         name = "ChronieResultsWindow",
+        navigate = function(delta)
+            segmentViews.move(delta)
+            renderResults()
+        end,
         formatMoney = ns.formatMoney,
         loadPoint = function()
             local saved = env.db.resultsWindow
@@ -279,6 +291,29 @@ function ns.main(env)
         experienceState = env.experienceState,
         holdings = holdings,
     })
+
+    -- What the panel can be pointed at: the session's total, the segment being played, and
+    -- every segment already finished this session. The default is the open segment, which is
+    -- what it showed before there was anything else to show.
+    segmentViews = ns.newSegmentViews({
+        liveSummary = tally.summary,
+        liveLocation = function()
+            local open = segmentTracker.current()
+            return open and open.instance
+        end,
+        liveStart = function()
+            local open = segmentTracker.current()
+            return open and open.startedAt
+        end,
+        segments = segmentLog.all,
+        character = currentCharacter,
+        now = env.now,
+    })
+
+    function renderResults()
+        local view = segmentViews.selected()
+        resultsWindow.update(view.summary, view)
+    end
 
     local accountIdentity = ns.newAccountIdentity({
         db = env.db,
@@ -545,7 +580,7 @@ function ns.main(env)
     ---churn hidden font strings.
     local function refreshResults()
         if resultsWindow.isShown() then
-            resultsWindow.update(tally.summary())
+            renderResults()
         end
     end
 
@@ -596,7 +631,7 @@ function ns.main(env)
         if resultsWindow.isShown() then
             resultsWindow.hide()
         else
-            resultsWindow.update(tally.summary())
+            renderResults()
             resultsWindow.show()
         end
     end)
@@ -736,7 +771,7 @@ function ns.main(env)
         -- costs a walk of two short lists and keeps the snapshot current through the session
         -- rather than only at its ends.
         sweepHoldings()
-        resultsWindow.update(tally.summary())
+        renderResults()
         resultsWindow.show()
     end
     dispatcher.on("PLAYER_ENTERING_WORLD", syncSegment)

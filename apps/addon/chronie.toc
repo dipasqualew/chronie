@@ -22,6 +22,7 @@ src/FactionStanding.lua
 src/HoldingsSweep.lua
 src/HoldingsStore.lua
 src/SegmentTally.lua
+src/SegmentViews.lua
 src/ResultsWindow.lua
 src/MinimapButton.lua
 src/SegmentLog.lua
