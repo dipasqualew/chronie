@@ -57,6 +57,7 @@ describe("ns.newResultsWindow", function()
             end,
             accountCurrency = options.accountCurrency,
             accountStanding = options.accountStanding,
+            accountGold = options.accountGold,
         })
         return window, frames, recorded
     end
@@ -263,6 +264,116 @@ describe("ns.newResultsWindow", function()
             window.update(summary({ goldDiff = -500 }))
 
             assert.equal("$-500", valueFor(rowsOf(frames[1]), "Gold Δ"))
+        end)
+
+        -- The balance beside the movement, because they answer different questions: what this
+        -- hour was worth, and what the character is left holding after it.
+        it("renders the wallet the difference landed on", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ goldDiff = -500, wallet = 12000 }))
+
+            assert.equal("$12000", valueFor(rowsOf(frames[1]), "Wallet"))
+        end)
+
+        it("leaves the wallet off a tally that has not read one", function()
+            local window, frames = newWindow()
+
+            window.update(summary({ goldDiff = -500 }))
+
+            assert.is_nil(valueFor(rowsOf(frames[1]), "Wallet"))
+        end)
+
+        it("shows what the whole account is worth under the wallet", function()
+            local window, frames = newWindow({
+                accountGold = function()
+                    return {
+                        characters = {
+                            { character = "Alt-Ravencrest", total = 40000, at = NOW - 3 * 24 * 60 * 60 },
+                            { character = "Main-Ravencrest", total = 12000, at = NOW },
+                        },
+                        wallets = 52000,
+                        warband = 500000,
+                        warbandAt = NOW,
+                        total = 552000,
+                        oldest = NOW - 3 * 24 * 60 * 60,
+                    }
+                end,
+            })
+
+            window.update(summary({ wallet = 12000 }))
+
+            local lines = rowsOf(frames[1])
+            -- Dated by the eldest reading it is built from, because a total made partly of
+            -- three-day-old numbers should not read as though it were all current.
+            assert.equal("$552000, 3d ago", valueFor(lines, "    account"))
+            assert.equal("$500000", valueFor(lines, "    warband bank"))
+        end)
+
+        it("leaves the account total off when the wallet is all there is", function()
+            local window, frames = newWindow({
+                accountGold = function()
+                    return {
+                        characters = { { character = "Main-Ravencrest", total = 12000, at = NOW } },
+                        wallets = 12000,
+                        total = 12000,
+                        oldest = NOW,
+                    }
+                end,
+            })
+
+            window.update(summary({ wallet = 12000 }))
+
+            -- It would be the same number as the line above it, said twice.
+            local lines = rowsOf(frames[1])
+            assert.is_nil(valueFor(lines, "    account"))
+            assert.is_nil(valueFor(lines, "    warband bank"))
+        end)
+
+        -- A character part way through its first ever segment is not in the rollup yet: its
+        -- snapshot is written when the segment closes. The account really is worth less than
+        -- what is in front of it at that moment, and saying so out loud reads as nonsense.
+        it("leaves the account total off while it is behind the wallet beside it", function()
+            local window, frames = newWindow({
+                accountGold = function()
+                    return {
+                        characters = { { character = "Alt-Ravencrest", total = 4000, at = NOW } },
+                        wallets = 4000,
+                        total = 4000,
+                        oldest = NOW,
+                    }
+                end,
+            })
+
+            window.update(summary({ wallet = 12000 }))
+
+            assert.is_nil(valueFor(rowsOf(frames[1]), "    account"))
+        end)
+
+        -- An account with alts but an empty bank is worth more than this wallet and has
+        -- nothing in the pot, so the total is worth a line and the pot is not.
+        it("names the warband bank only when there is something in it", function()
+            local window, frames = newWindow({
+                accountGold = function()
+                    return {
+                        characters = {
+                            { character = "Alt-Ravencrest", total = 40000, at = NOW },
+                            { character = "Main-Ravencrest", total = 12000, at = NOW },
+                        },
+                        wallets = 52000,
+                        warband = 0,
+                        warbandAt = NOW,
+                        total = 52000,
+                        oldest = NOW,
+                    }
+                end,
+            })
+
+            window.update(summary({ wallet = 12000 }))
+
+            local lines = rowsOf(frames[1])
+            assert.equal("$52000", valueFor(lines, "    account"))
+            assert.is_nil(valueFor(lines, "    warband bank"))
         end)
 
         it("renders the transmog event count", function()

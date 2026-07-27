@@ -81,6 +81,174 @@ describe("ns.newHoldingsStore", function()
         end)
     end)
 
+    describe("the gold a character was left holding", function()
+        it("writes the balance down against the moment it was read", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({ wallet = 125000 }))
+
+            assert.same({ total = 125000, at = NOW }, db.holdings["Alt-Ravencrest"].gold)
+        end)
+
+        -- Unlike a currency, which is only ever reported as part of a gain, the wallet is read
+        -- whole every time. A balance of zero is therefore a reading and not a silence, and it
+        -- has to be able to overwrite a fortune the character has since spent.
+        it("lets a character that spent everything say so", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({ wallet = 125000 }))
+            store.record("Alt-Ravencrest", summary({ wallet = 0 }))
+
+            assert.equal(0, db.holdings["Alt-Ravencrest"].gold.total)
+        end)
+
+        -- Refused on the same terms the warband pot refuses it: no wallet holds less than
+        -- nothing, so this is a broken reading rather than a poor character.
+        it("refuses a balance below zero, which no wallet has", function()
+            local store, db = newStore()
+            store.record("Alt-Ravencrest", summary({ wallet = 125000 }))
+
+            store.record("Alt-Ravencrest", summary({ wallet = -1 }))
+
+            assert.equal(125000, db.holdings["Alt-Ravencrest"].gold.total)
+        end)
+
+        it("keeps the last balance when the summary carried none", function()
+            local store, db, clock = newStore()
+
+            store.record("Alt-Ravencrest", summary({ wallet = 125000 }))
+            clock.advance(DAY)
+            store.record("Alt-Ravencrest", summary())
+
+            -- Nothing was said this time, and the number we already had is a better answer
+            -- than none — including the stamp, which is when it was actually true.
+            assert.same({ total = 125000, at = NOW }, db.holdings["Alt-Ravencrest"].gold)
+        end)
+    end)
+
+    describe("the warband bank's own gold", function()
+        it("writes the pot down against the moment it was read", function()
+            local store, db = newStore()
+
+            store.recordWarband(500000)
+
+            assert.same({ gold = 500000, at = NOW }, db.warband)
+        end)
+
+        it("records an emptied bank, because zero is a balance somebody read", function()
+            local store, db = newStore()
+            store.recordWarband(500000)
+
+            store.recordWarband(0)
+
+            assert.same({ gold = 0, at = NOW }, db.warband)
+        end)
+
+        -- A client build with no warband bank hands back nothing at all, and a nothing must
+        -- never be filed as an emptied pot: the last real reading is the better answer, and
+        -- every other character on the account is about to read it.
+        for _, case in ipairs({
+            { what = "a client that has no warband bank at all", amount = nil },
+            { what = "an answer that is not a number", amount = "lots" },
+            { what = "a balance below zero, which no pot has", amount = -1 },
+        }) do
+            it("leaves the last reading standing for " .. case.what, function()
+                local store, db = newStore()
+                store.recordWarband(500000)
+
+                store.recordWarband(case.amount)
+
+                assert.same({ gold = 500000, at = NOW }, db.warband)
+            end)
+        end
+    end)
+
+    describe("what the account is worth in gold", function()
+        -- The mistake this rollup exists to prevent. Every character reads the same pot, so a
+        -- total built by adding it in per character would be out by the size of the roster.
+        it("adds every wallet together and the one shared pot exactly once", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({ wallet = 125000 }))
+            store.record("Alt-Ravencrest", summary({ wallet = 40000 }))
+            store.record("Bank-Ravencrest", summary({ wallet = 35000 }))
+            store.recordWarband(500000)
+
+            local rollup = store.gold()
+
+            assert.equal(200000, rollup.wallets)
+            assert.equal(500000, rollup.warband)
+            assert.equal(700000, rollup.total)
+            assert.equal(3, #rollup.characters)
+            -- Sorted, so a panel drawing the list never reshuffles it between renders.
+            assert.equal("Alt-Ravencrest", rollup.characters[1].character)
+            assert.equal("Bank-Ravencrest", rollup.characters[2].character)
+            assert.equal("Main-Ravencrest", rollup.characters[3].character)
+        end)
+
+        it("is the wallets alone when no warband bank has ever answered", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({ wallet = 125000 }))
+
+            local rollup = store.gold()
+
+            assert.equal(125000, rollup.total)
+            assert.is_nil(rollup.warband)
+            assert.is_nil(rollup.warbandAt)
+        end)
+
+        it("is the pot alone when it is all anybody has read", function()
+            local store = newStore()
+
+            store.recordWarband(500000)
+
+            local rollup = store.gold()
+
+            assert.equal(0, rollup.wallets)
+            assert.equal(500000, rollup.total)
+            assert.same({}, rollup.characters)
+        end)
+
+        -- The eldest reading is the weakest claim in the sum, and the number the panel warns
+        -- with. It is the character last played weeks ago as often as it is the pot.
+        it("dates the total by the eldest wallet in it", function()
+            local store, _, clock = newStore()
+
+            store.record("Alt-Ravencrest", summary({ wallet = 40000 }))
+            clock.advance(3 * DAY)
+            store.record("Main-Ravencrest", summary({ wallet = 125000 }))
+            store.recordWarband(500000)
+
+            assert.equal(NOW, store.gold().oldest)
+        end)
+
+        it("dates it by the warband reading when that is the stale one", function()
+            local store, _, clock = newStore()
+
+            store.recordWarband(500000)
+            clock.advance(3 * DAY)
+            store.record("Main-Ravencrest", summary({ wallet = 125000 }))
+
+            local rollup = store.gold()
+
+            assert.equal(NOW, rollup.oldest)
+            assert.equal(NOW, rollup.warbandAt)
+        end)
+
+        it("says nothing at all before any balance has been read", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                currencies = { { id = 3008, name = "Valorstones", amount = 15, total = 1200 } },
+            }))
+
+            -- Not a total of zero: nobody has looked, which is a different claim, and one
+            -- that would draw an account with gold in it as an account with none.
+            assert.is_nil(store.gold())
+        end)
+    end)
+
     describe("the account's total of a currency", function()
         it("sums every character that has reported holding any", function()
             local store, db, clock = newStore()

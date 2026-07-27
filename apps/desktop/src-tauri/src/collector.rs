@@ -5261,6 +5261,149 @@ ChronieDB = {{ ["segments"] = {{
         let holdings = &dashboard(&database).unwrap()["holdings"];
         assert_eq!(holdings["currencies"].as_array().unwrap().len(), 0);
         assert_eq!(holdings["factions"].as_array().unwrap().len(), 0);
+        // Null rather than a total of nought: a history nobody has read a wallet into has
+        // not claimed the account is broke, it has simply never been asked.
+        assert!(holdings["gold"].is_null());
+    }
+
+    /// The same install as `holdings_install`, plus the account's own warband pot.
+    ///
+    /// The pot sits at the top level of the file rather than inside `holdings`, because the
+    /// addon keys `holdings` by character and a "warband" entry in there would arrive at the
+    /// collector as a character of that name.
+    fn gold_install(
+        holdings_lua: &str,
+        warband_lua: &str,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        let saved = wow.join("WTF/Account/TEST/SavedVariables");
+        fs::create_dir_all(&saved).unwrap();
+        fs::write(
+            saved.join("chronie.lua"),
+            format!(
+                r#"ChronieDB = {{ ["holdings"] = {{ {holdings_lua} }},
+                   ["warband"] = {warband_lua} }}"#
+            ),
+        )
+        .unwrap();
+        let database = temp.path().join("data/chronie.sqlite3");
+        (temp, wow, database)
+    }
+
+    /// Three characters carrying different amounts, read at different moments — which is the
+    /// ordinary case, because a roster is a set of characters last played on different days.
+    const THREE_WALLETS: &str = r#"
+        ["Alt-Ravencrest"] = { ["gold"] = { ["total"] = 40000, ["at"] = 1999913600 } },
+        ["Bank-Ravencrest"] = { ["gold"] = { ["total"] = 35000, ["at"] = 2000000000 } },
+        ["Main-Ravencrest"] = { ["gold"] = { ["total"] = 125000, ["at"] = 2000000000 } },
+    "#;
+
+    /// The mistake the whole design exists to prevent. Every character reads the same warband
+    /// bank, so a total that folded the pot into each character's row would be out by the size
+    /// of the roster — and out by more the more alts somebody has.
+    #[test]
+    fn adds_the_wallets_up_and_counts_the_warband_bank_exactly_once() {
+        let (_temp, wow, database) =
+            gold_install(THREE_WALLETS, r#"{ ["gold"] = 500000, ["at"] = 1999900000 }"#);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let gold = &dashboard(&database).unwrap()["holdings"]["gold"];
+        assert_eq!(gold["wallets"], 200_000);
+        assert_eq!(gold["warband"], 500_000);
+        assert_eq!(gold["total"], 700_000);
+        // The sum breaks back down into who holds what, sorted, so a reader can check it.
+        assert_eq!(gold["characters"].as_array().unwrap().len(), 3);
+        assert_eq!(gold["characters"][0]["character"], "Alt-Ravencrest");
+        assert_eq!(gold["characters"][0]["total"], 40_000);
+        // The pot's reading is the eldest of the four and ages the total like a wallet does.
+        assert_eq!(gold["warbandAt"], 1_999_900_000_i64);
+        assert_eq!(gold["oldest"], 1_999_900_000_i64);
+    }
+
+    /// A newer reading of one live pot is simply a better one, and a wallet the character has
+    /// spent from must be able to fall. Neither is a movement to be added to what came before.
+    #[test]
+    fn replaces_a_balance_rather_than_adding_to_it() {
+        let (_temp, wow, database) =
+            gold_install(THREE_WALLETS, r#"{ ["gold"] = 500000, ["at"] = 1999900000 }"#);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            r#"ChronieDB = { ["holdings"] = {
+                 ["Main-Ravencrest"] = { ["gold"] = { ["total"] = 0, ["at"] = 2000100000 } },
+               }, ["warband"] = { ["gold"] = 10000, ["at"] = 2000100000 } } -- touched"#,
+        )
+        .unwrap();
+        collect(&wow, &database, 2_000_100_100, Options::default()).unwrap();
+
+        let gold = &dashboard(&database).unwrap()["holdings"]["gold"];
+        // The main spent everything it had; the two who said nothing this time still stand.
+        assert_eq!(gold["wallets"], 75_000);
+        assert_eq!(gold["warband"], 10_000);
+        assert_eq!(gold["total"], 85_000);
+    }
+
+    /// An account whose client has no warband bank to ask reports the wallets and says
+    /// nothing about a pot, rather than adding a zero nobody read.
+    #[test]
+    fn reports_the_wallets_alone_when_no_warband_bank_has_answered() {
+        let (_temp, wow, database) = holdings_install(
+            r#"["Main-Ravencrest"] = { ["gold"] = { ["total"] = 125000, ["at"] = 2000000000 } },"#,
+        );
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let gold = &dashboard(&database).unwrap()["holdings"]["gold"];
+        assert_eq!(gold["total"], 125_000);
+        assert!(gold["warband"].is_null());
+        assert!(gold["warbandAt"].is_null());
+    }
+
+    /// A history collected before gold was a balance has no tables to put one in. The
+    /// migration has to add them under the rows already there rather than demanding a fresh
+    /// install — and what it cannot know about that history is exactly what a null says.
+    #[test]
+    fn migrates_a_database_written_before_gold_was_kept() {
+        let (_temp, wow, database) = gold_install(
+            THREE_WALLETS,
+            r#"{ ["gold"] = 500000, ["at"] = 1999900000 }"#,
+        );
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..9] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction
+                .execute_batch(
+                    "INSERT INTO accounts (id, source_key, first_seen_at, last_seen_at)
+                       VALUES (1, 'legacy', 1900000000, 1900000000);
+                     INSERT INTO characters (id, account_id, source_key, name, realm,
+                                             first_seen_at, last_seen_at)
+                       VALUES (1, 1, 'Brin-Vale', 'Brin', 'Vale', 1900000000, 1900000000);",
+                )
+                .unwrap();
+            transaction.pragma_update(None, "user_version", 9_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+        // Nothing read yet under the old schema: a character with a history and no balance.
+        assert!(dashboard(&database).unwrap()["holdings"]["gold"].is_null());
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        // And the same database, migrated in place, carrying the readings that just arrived.
+        let gold = &dashboard(&database).unwrap()["holdings"]["gold"];
+        assert_eq!(gold["total"], 700_000);
+        // Brin-Vale predates the reading and has no row, which is not a wallet of nothing.
+        assert!(!gold["characters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|holder| holder["character"] == "Brin-Vale"));
     }
 
     #[test]

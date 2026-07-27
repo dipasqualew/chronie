@@ -182,10 +182,11 @@ function ns.newHoldingsStore(deps)
                 end
             end
 
-            -- Zero is a real balance rather than a missing reading, so this is guarded on the
-            -- type alone: a character that has genuinely spent everything must be able to say
-            -- so, or the account total keeps counting gold that is no longer there.
-            if type(summary.wallet) == "number" then
+            -- Zero is a real balance rather than a missing reading: a character that has
+            -- genuinely spent everything must be able to say so, or the account total keeps
+            -- counting gold that is no longer there. Below zero is not a balance at all — no
+            -- wallet holds one — and is refused on the same terms the warband pot refuses it.
+            if type(summary.wallet) == "number" and summary.wallet >= 0 then
                 entry.gold = { total = summary.wallet, at = at }
                 touched = true
             end

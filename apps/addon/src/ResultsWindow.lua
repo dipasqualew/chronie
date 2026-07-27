@@ -330,17 +330,21 @@ function ns.newResultsWindow(deps)
 
         ---What the account is worth in gold, under the wallet this segment moved.
         ---
-        ---Drawn only when it is a different number from the wallet directly above — a lone
-        ---character with an empty warband bank is worth exactly what is in its pocket, and
-        ---saying so twice takes a line to say nothing. The wallets and the pot are named
-        ---separately because they answer different questions: one is what the roster is
-        ---sitting on, the other is what any of them can reach from a bank.
+        ---Drawn only when it is worth *more* than the wallet directly above, which covers two
+        ---cases at once. A lone character with an empty warband bank is worth exactly what is
+        ---in its pocket, and saying so twice takes a line to say nothing. And a character part
+        ---way through its first ever segment is not in the rollup yet — its snapshot is
+        ---written when the segment closes — so the account would otherwise read as poorer than
+        ---the pocket it is standing next to, which is true of the rollup and nonsense on
+        ---screen. The wallets and the pot are named separately because they answer different
+        ---questions: one is what the roster is sitting on, the other is what any of them can
+        ---reach from a bank.
         local function accountGoldLines()
             if not deps.accountGold then
                 return
             end
             local rollup = deps.accountGold()
-            if not rollup or rollup.total == (summary.wallet or 0) then
+            if not rollup or rollup.total <= (summary.wallet or 0) then
                 return
             end
             line("    account", deps.formatMoney(rollup.total) .. staleness(rollup.oldest),

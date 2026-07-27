@@ -210,6 +210,19 @@ describe("ns.newSegmentTally", function()
 
             assert.equal(200, tally.summary().goldDiff)
         end)
+
+        -- The balance as well as the movement. The diff is a fact about the segment; where it
+        -- landed is a fact about the character, and it is what the account's worth is built
+        -- from — a roster cannot be summed out of diffs it may have missed one of.
+        it("reports the wallet the difference landed on", function()
+            local tally = newTally()
+            tally.begin(1000)
+
+            tally.money(1500)
+            tally.money(1200)
+
+            assert.equal(1200, tally.summary().wallet)
+        end)
     end)
 
     describe("item value looted", function()

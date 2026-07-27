@@ -2498,6 +2498,107 @@ describe("addon integration", function()
         end)
     end)
 
+    -- The pot belongs to the account rather than to any character, and it is only ever worth
+    -- anything to the app once it is in SavedVariables — which the client writes on the way
+    -- out and at no other moment. So what matters here is not that the store was called but
+    -- that the number is in the file, from each of the three moments the addon reads it.
+    describe("the warband bank's gold", function()
+        it("has read nothing before the client has said anything", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            assert.is_nil(recorded.db.warband)
+        end)
+
+        -- A character can be played for weeks without ever standing at a bank, and the pot is
+        -- still part of what the account is worth. Reading it once at login is what keeps a
+        -- roster from being short by the bank's whole balance.
+        it("reads the pot at login, without waiting for anybody to open a bank", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                warbandMoney = 500000,
+            })
+
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            assert.same({ gold = 500000, at = 1700000000 }, recorded.db.warband)
+        end)
+
+        it("writes the new balance down when the pot changes under any character", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                warbandMoney = 500000,
+            })
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            recorded.setWarbandMoney(620000)
+            recorded.frame:fire("ACCOUNT_MONEY")
+
+            assert.equal(620000, recorded.db.warband.gold)
+        end)
+
+        it("registers the event that keeps the pot current", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            assert.equal(1, recorded.frame.registered.ACCOUNT_MONEY)
+        end)
+
+        -- Logout is the freshest reading there is and the last one that can reach the file,
+        -- because SavedVariables are only written on the way out. The number left here is what
+        -- every other character's rollup reads until one of them logs in again.
+        it("re-reads the pot on the way out, after the last event the client sent", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                warbandMoney = 500000,
+                instanceType = "party",
+            })
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            -- Changed with no event to announce it, so only the logout read can find it.
+            recorded.setWarbandMoney(750000)
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(750000, recorded.db.warband.gold)
+        end)
+
+        it("leaves the last reading standing on a client that has no warband bank", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                warbandMoney = 500000,
+            })
+            recorded.frame:fire("PLAYER_LOGIN")
+
+            -- A build without C_Bank answers nothing at all, and nothing is not an empty
+            -- bank: every other character on the account is about to read this number.
+            recorded.setWarbandMoney(nil)
+            recorded.frame:fire("ACCOUNT_MONEY")
+
+            assert.equal(500000, recorded.db.warband.gold)
+        end)
+
+        -- The seam is read through `env.warbandMoney and ...`, so a client this addon was
+        -- installed beside without one has to boot and run rather than raise on the event.
+        it("survives an environment that does not offer the seam at all", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            recorded.env.warbandMoney = nil
+
+            assert.has_no.errors(function()
+                recorded.frame:fire("PLAYER_LOGIN")
+                recorded.frame:fire("ACCOUNT_MONEY")
+                recorded.frame:fire("PLAYER_LOGOUT")
+            end)
+            assert.is_nil(recorded.db.warband)
+        end)
+    end)
+
     describe("the /chronie segments slash command", function()
         it("opens from the minimap button", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
