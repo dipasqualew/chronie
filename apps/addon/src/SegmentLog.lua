@@ -71,6 +71,20 @@ local _, ns = ...
 local DAY = 24 * 60 * 60
 local DEFAULT_RETAIN_DAYS = 7
 
+---The identity a segment is filed under.
+---
+---Exported rather than inlined into record() because it is not only the log that needs
+---it: anything holding a link to a segment — an entry, and whatever else comes to point
+---at one — has to compute the same string, and two hand-written copies of a join like
+---this drift the first time one of them gains a field.
+---@param character string?
+---@param startedAt integer?
+---@param instance string?
+---@return string
+function ns.segmentId(character, startedAt, instance)
+    return table.concat({ tostring(character or ""), tostring(startedAt or ""), tostring(instance or "") }, "|")
+end
+
 ---@param deps SegmentLogDeps
 ---@return SegmentLog
 function ns.newSegmentLog(deps)
@@ -122,7 +136,7 @@ function ns.newSegmentLog(deps)
             local startedAt = visit.startedAt or endedAt
 
             local record = {
-                id = table.concat({ visit.character, tostring(startedAt), visit.instance }, "|"),
+                id = ns.segmentId(visit.character, startedAt, visit.instance),
                 character = visit.character,
                 classFile = visit.classFile,
                 level = visit.level,

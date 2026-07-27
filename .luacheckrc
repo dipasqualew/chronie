@@ -12,6 +12,7 @@ read_globals = {
     "UnitName",
     "UnitClass",
     "UnitLevel",
+    "UnitGUID",
     "UnitXP",
     "UnitXPMax",
     "C_ChallengeMode",
@@ -49,6 +50,8 @@ read_globals = {
     "C_PetJournal",
     "C_ToyBox",
     "C_HousingCatalog",
+    "C_Map",
+    "Screenshot",
     "GetAchievementInfo",
     "AchievementFrame_LoadUI",
     "AchievementFrame",
@@ -79,6 +82,11 @@ read_globals = {
 globals = {
     "ChronieDB", -- SavedVariables
     "SlashCmdList",
+    -- What Bindings.xml refers to: the two labels the Key Bindings panel reads, and the
+    -- function the key itself runs.
+    "BINDING_HEADER_CHRONIE",
+    "BINDING_NAME_CHRONIE_CAPTURE",
+    "ChronieCapture",
 }
 
 exclude_files = { ".luacheckrc" }

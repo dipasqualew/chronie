@@ -1036,10 +1036,226 @@ describe("addon integration", function()
             end
         end)
 
+        -- The last Lua file rather than the last entry: Bindings.xml sits after it, and
+        -- the client's XML parser cares nothing for where in the list it appears.
         it("loads Main.lua last, so the modules exist when it wires them", function()
-            local files = loader.tocFiles()
+            local lua = {}
+            for _, path in ipairs(loader.tocFiles()) do
+                if path:match("%.lua$") then
+                    lua[#lua + 1] = path
+                end
+            end
 
-            assert.equal("Main.lua", files[#files])
+            assert.equal("Main.lua", lua[#lua])
+        end)
+    end)
+
+    -- Bindings.xml is the only file in the tree the client parses rather than executes,
+    -- so nothing about it can be proved by loading the addon. What these check is that
+    -- the .toc still names it and that every token inside it is one the addon labels —
+    -- a binding whose BINDING_NAME_ global is missing shows up in the Key Bindings panel
+    -- as a raw CHRONIE_SHOUTY_TOKEN, which is a bug only a player would ever notice.
+    describe("the capture keybinding", function()
+        local BINDINGS = "Bindings.xml"
+
+        ---@return table<string, string> binding name -> the header it sits under
+        local function declaredBindings()
+            local bindings = {}
+            for attributes in loader.read(BINDINGS):gmatch("<Binding%s+([^>]-)>") do
+                local name = attributes:match('name%s*=%s*"([^"]+)"')
+                local header = attributes:match('header%s*=%s*"([^"]+)"')
+                assert.is_truthy(name, "a <Binding> in " .. BINDINGS .. " has no name")
+                bindings[name] = header
+            end
+            return bindings
+        end
+
+        it("is listed in the .toc, so the client loads it at all", function()
+            local listed = {}
+            for _, path in ipairs(loader.tocFiles()) do
+                listed[path] = true
+            end
+
+            assert.is_true(listed[BINDINGS] == true, BINDINGS .. " is missing from chronie.toc")
+        end)
+
+        it("declares a binding that takes a screenshot", function()
+            assert.is_truthy(declaredBindings()["CHRONIE_CAPTURE"])
+        end)
+
+        it("labels every binding it declares, and the header each one sits under", function()
+            loader.load()
+
+            for name, header in pairs(declaredBindings()) do
+                assert.is_string(_G["BINDING_NAME_" .. name],
+                    "BINDING_NAME_" .. name .. " is not declared, so the panel shows the raw token")
+                assert.is_string(_G["BINDING_HEADER_" .. header],
+                    "BINDING_HEADER_" .. header .. " is not declared, so the panel shows the raw token")
+            end
+        end)
+
+        it("files the bindings under a Chronie header", function()
+            loader.load()
+
+            assert.equal("Chronie", _G.BINDING_HEADER_CHRONIE)
+        end)
+
+        it("runs nothing when the addon has not wired itself up", function()
+            -- The binding body's own guard, transcribed: a key pressed during login must
+            -- not reach into a half-built addon.
+            local body = loader.read(BINDINGS):match("<Binding[^>]->(.-)</Binding>")
+
+            assert.is_truthy(body:match("if%s+ChronieCapture%s+then"))
+        end)
+    end)
+
+    describe("taking a screenshot", function()
+        ---Boot, log in and enter the world, which is every precondition a capture has:
+        ---an account minted, a segment open and the client willing to name a map.
+        ---@param options table?
+        ---@return table app, table recorded
+        local function bootInWorld(options)
+            options = options or {}
+            options.playerName = options.playerName or "Thrall"
+            options.realmName = options.realmName or "Ragnaros"
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            return app, recorded
+        end
+
+        it("exposes the capture the keybinding calls", function()
+            local app = bootInWorld()
+
+            assert.is_function(app.capture)
+        end)
+
+        it("writes an entry and takes the picture", function()
+            local app, recorded = bootInWorld()
+
+            local entry = app.capture()
+
+            assert.equal(1, recorded.screenshots())
+            assert.same({ entry }, recorded.db.entries)
+        end)
+
+        it("stamps the entry with who was playing and which account they are", function()
+            local app, recorded = bootInWorld({ playerName = "Jaina", realmName = "Draenor" })
+
+            local entry = app.capture()
+
+            assert.equal("Jaina-Draenor", entry.character)
+            assert.equal(recorded.db.account.id, entry.author)
+        end)
+
+        it("records where the character was standing", function()
+            local app, recorded = bootInWorld()
+            recorded.setMap({ uiMapID = 84, x = 0.25, y = 0.75 })
+
+            local entry = app.capture()
+
+            assert.equal(84, entry.uiMapID)
+            assert.equal(0.25, entry.x)
+            assert.equal(0.75, entry.y)
+        end)
+
+        it("records the map alone where the client gives no position", function()
+            local app, recorded = bootInWorld()
+            recorded.setMap({ uiMapID = 2296 })
+
+            local entry = app.capture()
+
+            assert.equal(2296, entry.uiMapID)
+            assert.is_nil(entry.x)
+            assert.is_nil(entry.y)
+        end)
+
+        -- The link is the whole point of the record: a capture inherits its location,
+        -- class, level and difficulty from the segment rather than restating them.
+        it("links the entry to the segment that was open", function()
+            local app, recorded = bootInWorld({ instanceName = "Ulduar", instanceType = "raid" })
+
+            local entry = app.capture()
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(recorded.db.segments[1].id, entry.segment)
+        end)
+
+        -- Standing still and taking a photograph moves no counter, so without the tally
+        -- being told, the tracker would drop the segment and the link would dangle.
+        it("makes the segment worth filing, even when nothing else happened in it", function()
+            local app, recorded = bootInWorld()
+
+            app.capture()
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.equal(1, #recorded.db.segments)
+        end)
+
+        it("files nothing for a segment where no capture was taken either", function()
+            local _, recorded = bootInWorld()
+
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            assert.same({}, recorded.db.segments)
+        end)
+
+        -- Screenshot filenames resolve to the second, so a second marker in that second
+        -- could only ever resolve to the wrong picture. Note that no picture is taken:
+        -- an image with no marker reads downstream as somebody else's photograph.
+        it("refuses a second press inside the same second, shutter and all", function()
+            local app, recorded = bootInWorld()
+            app.capture()
+
+            assert.is_nil(app.capture())
+            assert.equal(1, recorded.screenshots())
+            assert.equal(1, #recorded.db.entries)
+        end)
+
+        it("allows the next press a second later", function()
+            local app, recorded = bootInWorld()
+            app.capture()
+
+            recorded.clock.advance(1)
+
+            assert.is_table(app.capture())
+            assert.equal(2, recorded.screenshots())
+        end)
+
+        it("takes no picture before the world has loaded and the account has a name", function()
+            local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros", playerGUID = false })
+
+            assert.is_nil(app.capture())
+            assert.equal(0, recorded.screenshots())
+            assert.same({}, recorded.db.entries)
+        end)
+
+        -- Every character on the account authors as the account, which is what makes an
+        -- entry shareable later without saying which alt happened to be logged in.
+        it("keeps one author across two characters sharing the file", function()
+            local db = {}
+            local first = bootInWorld({ db = db, playerName = "Thrall", realmName = "Ragnaros" })
+            local mine = first.capture()
+
+            local second = bootInWorld({ db = db, playerName = "Jaina", realmName = "Draenor" })
+            local theirs = second.capture()
+
+            assert.equal(mine.author, theirs.author)
+            assert.not_equal(mine.id, theirs.id)
+        end)
+
+        it("survives the entries outliving the segment they were taken in", function()
+            local app, recorded = bootInWorld()
+            app.capture()
+            recorded.frame:fire("PLAYER_LOGOUT")
+
+            -- Eight days on, the segment has been pruned out of the rolling window and
+            -- the photograph has not: that is why entries are a store of their own.
+            recorded.clock.advance(8 * 24 * 60 * 60)
+            app.segmentLog.prune()
+
+            assert.same({}, recorded.db.segments)
+            assert.equal(1, #recorded.db.entries)
         end)
     end)
 

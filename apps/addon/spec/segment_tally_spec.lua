@@ -1462,6 +1462,37 @@ describe("ns.newSegmentTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
+        -- Standing somewhere taking a photograph leaves every other counter at rest, so
+        -- without this the tracker would drop the segment on the way out and the entry
+        -- pointing at it would link to something that was never filed.
+        it("is true once an entry is recorded", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.entry()
+
+            assert.is_true(tally.hasEvents())
+        end)
+
+        it("does not count an entry recorded before a segment opened", function()
+            local tally = newTally()
+
+            tally.entry()
+            tally.begin(0)
+
+            assert.is_false(tally.hasEvents())
+        end)
+
+        it("does not carry one segment's entries into the next", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.entry()
+            tally.leave()
+
+            tally.begin(0)
+
+            assert.is_false(tally.hasEvents())
+        end)
+
         -- A currency that is earned then wholly spent nets to zero, but the segment did
         -- see the currency move, so it is still worth keeping.
         it("stays true for a currency that nets back to zero", function()

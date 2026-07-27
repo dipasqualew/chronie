@@ -1,0 +1,17 @@
+<Bindings>
+    <!--
+        The only reason this file exists: a key the player can press mid-pull. A slash
+        command is not usable when both hands are busy, which is precisely when something
+        worth photographing tends to be happening.
+
+        The header and the binding's name are labelled by BINDING_HEADER_CHRONIE and
+        BINDING_NAME_CHRONIE_CAPTURE, declared in Main.lua. Without those globals the Key
+        Bindings panel shows these raw tokens instead.
+
+        ChronieCapture is set once the addon has wired itself together, so a key pressed
+        before then does nothing rather than firing into a half-built addon.
+    -->
+    <Binding name="CHRONIE_CAPTURE" header="CHRONIE">
+        if ChronieCapture then ChronieCapture() end
+    </Binding>
+</Bindings>
