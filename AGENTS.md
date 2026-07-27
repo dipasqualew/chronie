@@ -181,6 +181,15 @@ module is where the tests earn their keep.
 Python collector, watches SavedVariables, persists permanent history in embedded
 SQLite, and installs the addon. Its frontend replaces the standalone HTML report.
 
+The frontend is React. `index.html` carries the stylesheet and nothing else —
+everything below `#root` is drawn from `src/main.tsx`. A view is a `.tsx`
+component and the logic behind it is a `.ts` module beside it, the same split the
+addon's frames and pure modules use and for the same reason: `sessions.ts`,
+`characters.ts`, `transmog.ts`, `combatLog.ts` and `wifi.ts` are where the rules
+live and where the tests are, and the components over them only draw. Nothing
+builds markup out of strings, so nothing has to remember to escape a name out of
+the game.
+
 The frontend, its tests and this repository's own scripts are TypeScript, under
 `strict`. There is no JavaScript left in the tree and no new file should add any.
 The shapes the Rust backend serialises are written down once in

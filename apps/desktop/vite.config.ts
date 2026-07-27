@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vitest/config";
 // The server types come from vite itself; `vitest/config` re-exports the config surface and
@@ -52,7 +53,10 @@ function tauriCsp(): Plugin {
     // page would carry a nonce the shipped policy has never heard of.
     apply: "serve",
     configureServer: policy,
-    transformIndexHtml: stamp,
+    // Last, so that the tags other plugins inject are stamped too. React's dev server adds a
+    // refresh preamble as an inline `<script>`, and a preamble the nonce missed is a blank
+    // window under this policy — the one place a stricter dev server would be a worse one.
+    transformIndexHtml: { order: "post", handler: stamp },
     // `vite preview` serves the build as static files, so nothing transforms its HTML on the
     // way out and the stamping has to happen here. This is the server the browser suite
     // runs against, which makes it the one that has to match the product.
@@ -69,7 +73,7 @@ function tauriCsp(): Plugin {
 
 export default defineConfig({
   clearScreen: false,
-  plugins: [tauriCsp()],
+  plugins: [react(), tauriCsp()],
   server: {
     port: 1420,
     strictPort: true,
@@ -85,6 +89,9 @@ export default defineConfig({
     sourcemap: Boolean(process.env.TAURI_DEBUG),
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // The views are components now, so the unit tests render them. jsdom is the smallest
+    // thing that can hold one; the pure modules beside them neither notice nor need it.
+    environment: "jsdom",
   },
 });

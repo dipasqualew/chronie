@@ -1,5 +1,5 @@
 /**
- * The characters view: who has been played, and what is known about each of them.
+ * Who has been played, and what is known about each of them.
  *
  * The timeline asks "what happened", the ledger asks "which segment"; this one asks "who".
  * A history is nearly always several characters deep and every other view cuts across them —
@@ -12,15 +12,12 @@
  * so a segment reads identically wherever it is met.
  *
  * `buildCharacters` is pure — segments and account holdings in, profiles out — which is where
- * the folding rules are tested. Everything below it is the drawing.
+ * the folding rules are tested. The drawing over it is `charactersView.tsx`.
  */
 
-import { ago, dayLabel, duration, escapeHtml, gold, initials, plural, signedGold } from "./format";
 import { highlights } from "./sessions";
 import type { Highlight } from "./sessions";
-import type { OpenSegment } from "./timeline";
 import type { AccountHoldings, CharacterStanding, Segment } from "./types";
-import { classAttr, className, highlightList, segmentButton, standingBar } from "./ui";
 
 /**
  * What one character is holding of a currency, against what the whole account holds.
@@ -167,204 +164,8 @@ function factionsOf(name: string, holdings?: AccountHoldings): CharacterFaction[
     .sort((left, right) => (right.rank ?? -1) - (left.rank ?? -1) || (left.faction < right.faction ? -1 : 1));
 }
 
-/* ---------- the view ---------- */
-
-export interface CharactersElements {
-  /** The line under the heading saying how much of a roster this is. */
-  meta: HTMLElement;
-  /** The roster down the left. */
-  list: HTMLElement;
-  /** The chosen character's own page, on the right. */
-  detail: HTMLElement;
-}
-
-export interface CharactersOptions {
-  elements: CharactersElements;
-  /**
-   * Given the segment to show and the character's own segments, so the modal's next and
-   * previous walk that character's history rather than everybody's.
-   */
-  onOpenSegment: OpenSegment;
-}
-
-export interface CharactersView {
-  render: (segments: Segment[], holdings?: AccountHoldings) => void;
-}
-
-/** Only one summary is ever unfolded here, so its panels need only one namespace. */
-const SCOPE = "character";
-
-export function createCharacters({ elements, onOpenSegment }: CharactersOptions): CharactersView {
-  let profiles: CharacterProfile[] = [];
-  // Held by name rather than by index: an activity edit repaints the whole view, and the
-  // reader should come back to the character they were reading, wherever they have moved to
-  // in the roster since.
-  let chosen: string | null = null;
-  let unfolded: string | null = null;
-
-  const current = (): CharacterProfile | undefined =>
-    profiles.find((entry) => entry.name === chosen) ?? profiles[0];
-
-  function draw(): void {
-    const showing = current();
-    chosen = showing?.name ?? null;
-
-    elements.list.innerHTML = profiles.length
-      ? `<ul class="roster-list">${profiles
-        .map((entry) => `<li>${rosterEntry(entry, entry.name === chosen)}</li>`).join("")}</ul>`
-      : '<p class="empty">No characters yet. Play for a bit and Chronie will fill this in.</p>';
-    elements.detail.innerHTML = showing
-      ? page(showing, unfolded)
-      : '<p class="empty">Nothing to show until a character has been played.</p>';
-
-    elements.list.querySelectorAll<HTMLElement>("[data-character]").forEach((button) => {
-      button.addEventListener("click", () => {
-        if (button.dataset.character === chosen) return;
-        chosen = button.dataset.character ?? null;
-        // A summary unfolded on one character means nothing on the next, so picking somebody
-        // else starts them folded rather than opening a panel nobody asked for.
-        unfolded = null;
-        draw();
-      });
-    });
-    elements.detail.querySelectorAll<HTMLElement>("[data-unfold]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const kind = button.dataset.unfold;
-        unfolded = unfolded === kind ? null : kind ?? null;
-        draw();
-      });
-    });
-    // A summary chip, one of the things it unfolded into, and a segment row all open the
-    // modal, and all three walk the same list: this character's own segments.
-    elements.detail.querySelectorAll<HTMLElement>("[data-open-segment]").forEach((button) => {
-      button.addEventListener("click", () => {
-        onOpenSegment(Number(button.dataset.openSegment), showing?.segments || []);
-      });
-    });
-  }
-
-  return {
-    render(segments, holdings) {
-      profiles = buildCharacters(segments, holdings);
-      elements.meta.textContent = profiles.length
-        ? [
-          plural(profiles.length, "character"),
-          plural(profiles.reduce((total, entry) => total + entry.segmentCount, 0), "segment"),
-          `${duration(profiles.reduce((total, entry) => total + entry.seconds, 0))} played`,
-        ].join(" · ")
-        : "Nothing collected yet.";
-      draw();
-    },
-  };
-}
-
-/**
- * One character in the roster: the class circle, who they are, and the numbers worth reading
- * without opening them.
- *
- * The circle is decorative here, unlike the one on a session card — the row spells the name
- * out beside it, and a focusable thing inside a button is a thing a keyboard cannot reach
- * past. The whole entry is the button instead, named with everything the eye gets.
- */
-function rosterEntry(entry: CharacterProfile, chosen: boolean): string {
-  const facts = [
-    `${className(entry.classFile)}${entry.level == null ? "" : ` · level ${entry.level}`}`,
-    `${duration(entry.seconds)} played`,
-    plural(entry.segmentCount, "segment"),
-    `last played ${ago(entry.lastSeen)}`,
-  ];
-  return `<button type="button" class="roster-entry" data-character="${escapeHtml(entry.name)}"
-    ${classAttr(entry.classFile)} aria-pressed="${chosen}"
-    aria-label="${escapeHtml(`${entry.name}, ${facts.join(", ")}`)}">
-    <span class="circle" aria-hidden="true">${escapeHtml(initials(entry.name))}</span>
-    <span class="roster-who">
-      <span class="roster-name">${escapeHtml(entry.name)}</span>
-      <span class="roster-class muted">${escapeHtml(facts[0])}</span>
-    </span>
-    <span class="roster-numbers">
-      <span class="roster-played">${escapeHtml(duration(entry.seconds))}</span>
-      <span class="muted">${escapeHtml(plural(entry.segmentCount, "segment"))}</span>
-    </span>
-  </button>`;
-}
-
-/** One row of the fact grid: dropped entirely rather than drawn as a dash when unknown. */
-const stat = (label: string, value: string): string =>
-  `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`;
-
-/** Everything known about the chosen character, and everything they did. */
-function page(entry: CharacterProfile, unfolded: string | null): string {
-  const where = entry.places.slice(0, 3).join(", ");
-  return `<header class="profile-head" ${classAttr(entry.classFile)}>
-    <span class="circle" aria-hidden="true">${escapeHtml(initials(entry.name))}</span>
-    <div>
-      <h2>${escapeHtml(entry.name)}</h2>
-      <p class="sub">${escapeHtml(className(entry.classFile))}${
-        entry.level == null ? "" : ` · level ${escapeHtml(entry.level)}`
-      } · last played ${escapeHtml(ago(entry.lastSeen))}</p>
-    </div>
-  </header>
-  <dl class="profile-stats">
-    ${stat("Played", escapeHtml(duration(entry.seconds)))}
-    ${stat("Segments", escapeHtml(String(entry.segmentCount)))}
-    ${stat("Days", escapeHtml(String(entry.dayCount)))}
-    ${stat("First seen", escapeHtml(dayLabel(dayOf(entry.firstSeen))))}
-    ${stat("Looted", `<span class="gold">${escapeHtml(gold(entry.lootValue))}</span>`)}
-    ${stat("Wallet", `<span class="${entry.goldDiff < 0 ? "loss" : "gold"}">${
-      escapeHtml(signedGold(entry.goldDiff))}</span>`)}
-  </dl>
-  ${where ? `<p class="profile-where sub">Mostly in ${escapeHtml(where)}</p>` : ""}
-  <div class="profile-highlights">${
-    highlightList(entry.highlights, { scope: SCOPE, expanded: unfolded }) ||
-    '<p class="muted">Nothing gained or collected yet.</p>'}</div>
-  ${currencySection(entry)}
-  ${factionSection(entry)}
-  <section class="detail-section profile-segments">
-    <h3>${escapeHtml(plural(entry.segmentCount, "segment"))}</h3>
-    ${byDay(entry.segments).map((group) => `<section class="profile-day">
-      <h4>${escapeHtml(dayLabel(group.day))}</h4>
-      <ol class="segment-rows">${group.segments
-        .map((segment) => `<li>${segmentButton(segment)}</li>`).join("")}</ol>
-    </section>`).join("")}
-  </section>`;
-}
-
-/**
- * What the character is carrying, against what the account has altogether.
- *
- * The account total is only worth saying when somebody else holds some too: on a currency
- * only this character has ever picked up, it is the number already on the line.
- */
-function currencySection(entry: CharacterProfile): string {
-  if (!entry.currencies.length) return "";
-  return `<section class="detail-section">
-    <h3>Currencies</h3>
-    <ul>${entry.currencies.map((held) => {
-      const elsewhere = held.accountTotal > held.total
-        ? ` · ${held.accountTotal.toLocaleString()} across the account`
-        : "";
-      const read = held.at ? ` · read ${ago(held.at)}` : "";
-      return `<li>🪙 ${escapeHtml(held.name)} <strong>${escapeHtml(held.total.toLocaleString())}</strong>
-        <span class="muted">${escapeHtml(elsewhere + read)}</span></li>`;
-    }).join("")}</ul>
-  </section>`;
-}
-
-/** Where the character stands with everyone they have met, and where they lead the account. */
-function factionSection(entry: CharacterProfile): string {
-  if (!entry.factions.length) return "";
-  return `<section class="detail-section">
-    <h3>Reputation</h3>
-    <ul>${entry.factions.map((standing) => `<li>
-      🎖️ ${escapeHtml(standing.faction)}
-      ${standing.leads ? '<span class="chip">furthest on the account</span>' : ""}
-      ${standingBar(standing, standing.faction)}
-    </li>`).join("")}</ul>
-  </section>`;
-}
-
 /** The day a moment falls on, in the `YYYY-MM-DD` a segment writes its own day as. */
-function dayOf(epoch: number): string {
+export function dayOf(epoch: number): string {
   const date = new Date(epoch * 1000);
   const pad = (value: number): string => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;

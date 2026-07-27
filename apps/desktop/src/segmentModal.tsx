@@ -1,0 +1,513 @@
+/**
+ * One segment, in full, with a way through to the ones either side of it.
+ *
+ * The timeline, the roster and the details table each hand this the list a segment sits in —
+ * a play session, a character's history, the current sort and filter — so "next" always means
+ * the next one in whatever the reader was already looking at.
+ */
+
+import { useCallback, useEffect, useReducer, useRef } from "react";
+import type { ReactNode } from "react";
+
+import { achievementIds, achievementLine } from "./achievements";
+import type { AchievementBook } from "./achievements";
+import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
+import { highlights } from "./sessions";
+import { ago, clock, dayLabel, duration, plural, signed } from "./format";
+import { eventsOf } from "./types";
+import type {
+  AccountCurrency, AccountFaction, AccountHoldings, AchievementEvent, Segment,
+} from "./types";
+import {
+  ActivityChip, ClassDot, HighlightList, StandingBar, className, locationType, shownHighlights,
+} from "./ui";
+
+/** Everything the modal is showing, or nothing at all when it is closed. */
+export interface SegmentModalState {
+  /** The list to walk, which is whichever list the segment was opened from. */
+  order: Segment[];
+  index: number;
+}
+
+const Wowhead = (
+  { kind, id, children }: { kind: string; id: number; children: ReactNode },
+): ReactNode => (
+  <a href={`https://www.wowhead.com/${kind}=${encodeURIComponent(id)}`}
+    target="_blank" rel="noopener noreferrer">{children}</a>
+);
+
+const At = ({ event }: { event: { at?: number | null } }): ReactNode =>
+  (event.at ? <span className="muted">{clock(event.at)}</span> : null);
+
+/** A section of the modal, or nothing when the segment has no events of that kind. */
+function Section(
+  { title, children }: { title: string; children: ReactNode },
+): ReactNode {
+  return (
+    <section className="detail-section">
+      <h3>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The achievements, drawn from what the game says about them rather than only from what the
+ * segment recorded.
+ *
+ * This is the one section whose contents are not in the segment. A row starts as the name the
+ * addon caught — which is what the app showed before the game's tables were being read at all
+ * — and fills in as the lookup comes back: what had to be done, what it granted, where it
+ * sits, what it was worth, and the picture the game shows beside it.
+ */
+function Earned({ event, book }: { event: AchievementEvent; book: AchievementBook }): ReactNode {
+  const line = achievementLine(event, book.detail(event.id));
+  const icon = book.icon(event.id);
+  const facts = [line.category, line.worth, line.side && `${line.side} only`, line.first]
+    .filter(Boolean);
+  // The icon is decorative: the row names the achievement beside it, and a picture that
+  // announced itself as well would have a screen reader read every row twice. The frame is
+  // drawn whether or not there is anything in it yet, so the column never goes ragged.
+  return (
+    <li className="earned-item">
+      <span className="earned-icon">{icon ? <img src={icon} alt="" /> : null}</span>
+      <div>
+        <p className="earned-name">
+          🏆 <Wowhead kind="achievement" id={event.id}>{line.title}</Wowhead> <At event={event} />
+        </p>
+        {line.description ? <p className="earned-what">{line.description}</p> : null}
+        {line.reward ? <p className="earned-reward">{line.reward}</p> : null}
+        <p className="earned-facts">
+          {facts.map((fact) => <span className="chip" key={fact}>{fact}</span>)}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * What happened to the character's equipment sets, slot by slot.
+ *
+ * This is the one section whose rows are lists of their own: a change is a set and the slots
+ * it moved, and the slots are the part somebody opens the modal for. The summary line above
+ * them says what the chip said; the rows underneath say which items, which is what the chip
+ * could not.
+ *
+ * A slot with nothing on one side is drawn as an em dash rather than left blank, so a slot
+ * that was cleared and a slot that was filled read as the two different things they are.
+ */
+function Equipsets({ segment }: { segment: Segment }): ReactNode {
+  const changes = eventsOf(segment, "equipsetChanges");
+  if (!changes.length) return null;
+  return (
+    <Section title="Equipment sets">
+      <ul className="equipsets">
+        {changes.map((change, index) => (
+          <li className="equipset" key={`${change.setId}-${index}`}>
+            <p className="equipset-name">
+              🎽 {equipsetTitle(change)}{" "}
+              <span className="muted">{equipsetDetail(change)}</span> <At event={change} />
+            </p>
+            {(change.items || []).length === 0
+              ? null
+              : <ul className="equipset-slots">
+                {(change.items || []).map((item) => {
+                  const line = equipsetSlotLine(item);
+                  return (
+                    <li key={item.slot}>
+                      <span className="equipset-slot">{line.slot}</span>
+                      <span className="equipset-was">
+                        {line.previousItemId == null
+                          ? <span className="muted">—</span>
+                          : <Wowhead kind="item" id={line.previousItemId}>{line.before}</Wowhead>}
+                      </span>
+                      <span className="equipset-now">
+                        {line.itemId == null
+                          ? <span className="muted">—</span>
+                          : <Wowhead kind="item" id={line.itemId}>{line.after}</Wowhead>}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * What some other character has already done with the faction, when one has done more.
+ *
+ * The question this answers is whether grinding the faction on this character is worth
+ * anything, so it only speaks when the answer is "somebody else has already got further". The
+ * account best is computed across every character including this one, so a best belonging to
+ * the segment's own character means nobody is ahead and there is nothing to say.
+ *
+ * The age travels with it because none of this is live: it is what that character was holding
+ * when it was last played, and a standing read months ago is a weaker claim than a name alone
+ * would suggest.
+ */
+function AccountStanding(
+  { faction, character }: { faction: AccountFaction | undefined; character: string },
+): ReactNode {
+  const best = faction?.best;
+  if (!best || best.character === character || !best.standing) return null;
+  const when = best.at ? ` · read ${ago(best.at)}` : "";
+  return (
+    <p className="rep-account muted">
+      {best.character} is further along: {best.standing}{when}
+    </p>
+  );
+}
+
+/**
+ * The reputation gains, each with the standing it left behind.
+ *
+ * A section of its own rather than a one-line formatter, because the bar is a block under the
+ * gain rather than something that fits on the end of it.
+ */
+function Reputation(
+  { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
+): ReactNode {
+  const gains = eventsOf(segment, "reputation");
+  if (!gains.length) return null;
+  const byFaction = new Map((holdings?.factions || []).map((entry) => [entry.faction, entry]));
+  return (
+    <Section title="Reputation">
+      <ul>
+        {gains.map((gain) => (
+          <li key={gain.faction}>
+            🎖️ {gain.faction} <span className="muted">{signed(gain.amount)}</span> <At event={gain} />
+            <StandingBar standing={gain} faction={gain.faction} />
+            <AccountStanding faction={byFaction.get(gain.faction)} character={segment.character} />
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * What the whole account holds of a currency this segment earned.
+ *
+ * Only when somebody else holds some too: on an account of one, or a currency only this
+ * character has ever picked up, the account total is the number already on the line and saying
+ * it twice adds nothing.
+ *
+ * The eldest reading in the sum is the one named, because it is the weakest claim in it — a
+ * total built partly from numbers a month old should not read as though it were all current.
+ */
+function AccountTotal({ held }: { held: AccountCurrency | undefined }): ReactNode {
+  if (!held || held.characters.length < 2) return null;
+  const eldest = held.oldest ? `, eldest read ${ago(held.oldest)}` : "";
+  return <> <span className="account-total">
+    · {held.total.toLocaleString()} across {plural(held.characters.length, "character")}{eldest}
+  </span></>;
+}
+
+function Currencies(
+  { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
+): ReactNode {
+  const gains = eventsOf(segment, "currencies");
+  if (!gains.length) return null;
+  return (
+    <Section title="Currency">
+      <ul>
+        {gains.map((gain) => (
+          // What the segment earned, then what the character was left holding, then what the
+          // account holds altogether. The second is the number that decides whether the first
+          // is enough to buy anything; the third is the one no single character can answer.
+          // Both are absent rather than zero when nobody has said.
+          <li key={gain.id}>
+            🪙 {gain.name} <span className="muted">
+              {signed(gain.amount)}{gain.total == null ? "" : ` (${gain.total.toLocaleString()})`}
+            </span>
+            <AccountTotal held={(holdings?.currencies || []).find((entry) => entry.id === gain.id)} />
+            {" "}<At event={gain} />
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * The plain lists: a heading, and one line per event.
+ *
+ * The table columns abbreviate; these do not, because this is where somebody comes when the
+ * abbreviation was not enough.
+ */
+function Lists({ segment, book }: { segment: Segment; book: AchievementBook }): ReactNode {
+  const encounters = eventsOf(segment, "encounters");
+  const achievements = eventsOf(segment, "achievements");
+  const levelUps = eventsOf(segment, "levelUps");
+  const mounts = eventsOf(segment, "mounts");
+  const pets = eventsOf(segment, "pets");
+  const toys = eventsOf(segment, "toys");
+  const transmogs = eventsOf(segment, "transmogs");
+  const quests = eventsOf(segment, "quests");
+  const housingItems = eventsOf(segment, "housingItems");
+  const housingLevelUps = eventsOf(segment, "housingLevelUps");
+  return <>
+    {encounters.length
+      ? <Section title="Encounters"><ul>
+        {encounters.map((event, index) => (
+          <li key={`${event.id}-${index}`}>
+            {event.name || `Encounter ${event.id}`}{" "}
+            <span className={event.success ? "ok" : "loss"}>{event.success ? "killed" : "wipe"}</span>
+            {event.groupSize ? <> <span className="muted">{plural(event.groupSize, "player")}</span></> : null}
+            {" "}<At event={event} />
+          </li>
+        ))}
+      </ul></Section>
+      : null}
+    {achievements.length
+      ? <Section title="Achievements"><ul className="earned">
+        {achievements.map((event, index) =>
+          <Earned key={`${event.id}-${index}`} event={event} book={book} />)}
+      </ul></Section>
+      : null}
+    {levelUps.length
+      ? <Section title="Level ups"><ul>
+        {levelUps.map((event, index) =>
+          <li key={index}>⬆️ Level {event.level} <At event={event} /></li>)}
+      </ul></Section>
+      : null}
+    {mounts.length
+      ? <Section title="Mounts"><ul>
+        {mounts.map((event, index) => (
+          <li key={`${event.id}-${index}`}>
+            🐎 {event.name || `Mount ${event.id}`} <At event={event} />
+          </li>
+        ))}
+      </ul></Section>
+      : null}
+    {pets.length
+      ? <Section title="Pets"><ul>
+        {pets.map((event, index) => (
+          <li key={`${event.id}-${index}`}>🐾 {event.name || `Pet ${event.id}`} <At event={event} /></li>
+        ))}
+      </ul></Section>
+      : null}
+    {toys.length
+      ? <Section title="Toys"><ul>
+        {toys.map((event, index) => (
+          <li key={`${event.id}-${index}`}>🧸 {event.name || `Toy ${event.id}`} <At event={event} /></li>
+        ))}
+      </ul></Section>
+      : null}
+    {transmogs.length
+      ? <Section title="Transmog"><ul>
+        {transmogs.map((event, index) => (
+          <li key={`${event.id}-${index}`}>
+            👘 <Wowhead kind="item" id={event.id}>{event.name || `Item ${event.id}`}</Wowhead>{" "}
+            {event.newAppearance === true
+              ? <span className="appearance-new">new appearance</span>
+              : event.newAppearance === false
+                ? <span className="appearance-variant">variant of one owned</span>
+                : <span className="muted">unknown</span>}
+            {" "}<At event={event} />
+          </li>
+        ))}
+      </ul></Section>
+      : null}
+    <Equipsets segment={segment} />
+    {quests.length
+      ? <Section title="Quests"><ul>
+        {quests.map((event, index) => (
+          <li key={`${event.id}-${index}`}>
+            📜 <Wowhead kind="quest" id={event.id}>{event.name || `Quest ${event.id}`}</Wowhead>
+            {event.accountFirst ? <> <span className="muted">account first</span></> : null}
+            {" "}<At event={event} />
+          </li>
+        ))}
+      </ul></Section>
+      : null}
+    {housingItems.length
+      ? <Section title="Housing"><ul>
+        {housingItems.map((event, index) => (
+          <li key={`${event.id}-${index}`}>
+            🪑 {event.name || `Decor ${event.id}`}{" "}
+            <span className="muted">{event.warbandFirst ? "warband first" : "already known"}</span>
+            {" "}<At event={event} />
+          </li>
+        ))}
+      </ul></Section>
+      : null}
+    {housingLevelUps.length
+      ? <Section title="Housing levels"><ul>
+        {housingLevelUps.map((event, index) =>
+          <li key={index}>🏡 Housing level {event.level} <At event={event} /></li>)}
+      </ul></Section>
+      : null}
+  </>;
+}
+
+function Keystone({ segment }: { segment: Segment }): ReactNode {
+  const run = segment.keystone;
+  if (!run) return null;
+  const outcome = !run.completed
+    ? <span className="loss">abandoned</span>
+    : run.onTime === false
+      ? <span className="loss">depleted</span>
+      : <span className="ok">timed</span>;
+  return (
+    <Section title="Keystone">
+      <p>
+        🔑 <strong>+{run.level}</strong> {outcome}
+        {run.upgrades ? ` · +${run.upgrades} upgrade${run.upgrades === 1 ? "" : "s"}` : ""}
+        {run.durationMs ? <> <span className="muted">{duration(run.durationMs / 1000)}</span></> : null}
+      </p>
+    </Section>
+  );
+}
+
+function Experience({ segment }: { segment: Segment }): ReactNode {
+  const gained = segment.experience;
+  if (!gained) return null;
+  return (
+    <Section title="Experience">
+      <p>
+        {signed(gained.gained)} XP · {Math.round(gained.percent * 10) / 10}% of a level
+        {gained.endLevel == null ? null : <> <span className="muted">now level {gained.endLevel}</span></>}
+      </p>
+    </Section>
+  );
+}
+
+export interface SegmentModalProps {
+  /** What the modal is showing, or null when it is closed. */
+  showing: SegmentModalState | null;
+  onStep: (by: number) => void;
+  onClose: () => void;
+  onEditActivities: (segmentId: number) => void;
+  /**
+   * What the game says about the achievements a segment names. Passed in so the modal is
+   * drivable without a backend, and asked only for the segment on screen.
+   */
+  achievements: AchievementBook;
+  /**
+   * What every character on the account was last seen holding, so a gain can be read against
+   * the account rather than only against the character that earned it. Absent on a history
+   * collected before any character reported, which reads as nothing to add.
+   */
+  holdings?: AccountHoldings;
+}
+
+export function SegmentModal(
+  { showing, onStep, onClose, onEditActivities, achievements: book, holdings }: SegmentModalProps,
+): ReactNode {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  // The book is not state — it is a cache outside React, shared with every other segment the
+  // reader opens — so a lookup landing has nothing to change that React would notice. This is
+  // what draws the words and then the pictures as each of them arrives.
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
+
+  const segment = showing?.order[showing.index];
+
+  // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
+  // element is driven here — opened when there is a segment to show, and closed when there is
+  // not. The reverse direction is `onClose`: Escape closes a dialog without asking anybody.
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (segment && !element.open) element.showModal();
+    if (!segment && element.open) element.close();
+  }, [segment]);
+
+  // The lookup runs after the segment is on screen, because reading the game's own files takes
+  // about a second and everything else about the segment is already in hand. Each half of it —
+  // the words, then the pictures — redraws when it lands.
+  useEffect(() => {
+    if (!segment) return;
+    const wanted = achievementIds(segment);
+    // Asking again costs nothing: the book keeps what it has already been told and what it has
+    // already asked about, so a repeat is filtered down to nothing before it reaches a backend.
+    if (wanted.length) void book.learn(wanted, redraw);
+  }, [segment, book]);
+
+  const step = useCallback((by: number) => {
+    onStep(by);
+    body.current?.scrollTo({ top: 0 });
+  }, [onStep]);
+
+  const facts = segment
+    ? [
+      `${dayLabel(segment.day)} · ${clock(segment.startedAt)} – ${clock(segment.endedAt)}`,
+      duration(segment.seconds),
+    ]
+    : [];
+
+  const summary = segment ? highlights([segment]) : [];
+  const activities = segment?.activities || [];
+
+  return (
+    <dialog
+      id="segment-detail" aria-labelledby="segment-detail-title" ref={dialog}
+      onClose={onClose}
+      // Arrow keys are what a reader reaches for once they realise the modal walks a list, and
+      // nothing inside it wants them: the body scrolls, it does not select.
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") step(-1);
+        if (event.key === "ArrowRight") step(1);
+      }}
+    >
+      <div className="detail-head">
+        <div>
+          <h2 className="detail-title" id="segment-detail-title">{segment?.instance ?? ""}</h2>
+          <span className="detail-position">
+            {showing ? `${showing.index + 1} of ${showing.order.length}` : ""}
+          </span>
+        </div>
+        <div className="detail-nav">
+          <button
+            type="button" aria-label="Previous segment"
+            disabled={!showing || showing.index === 0} onClick={() => step(-1)}
+          >‹</button>
+          <button
+            type="button" aria-label="Next segment"
+            disabled={!showing || showing.index >= showing.order.length - 1} onClick={() => step(1)}
+          >›</button>
+          <button type="button" aria-label="Close segment" onClick={onClose}>Close</button>
+        </div>
+      </div>
+      <div className="detail-body" ref={body}>
+        {segment ? <>
+          <p className="detail-who">
+            <ClassDot classFile={segment.classFile} /><strong>{segment.character}</strong>{" "}
+            <span className="muted">
+              {className(segment.classFile)}
+              {segment.level == null ? "" : ` · level ${segment.level}`}
+            </span>
+          </p>
+          <p className="detail-facts">
+            {facts.join(" · ")} · <span className="badge">{locationType(segment)}</span>
+            {segment.difficulty ? ` · ${segment.difficulty}` : ""}
+          </p>
+          <div className="detail-activities">
+            {activities.length
+              ? activities.map((activity, index) =>
+                <ActivityChip key={activity.id ?? index} activity={activity} />)
+              : <span className="muted">No activity recorded</span>}
+            <button type="button" onClick={() => onEditActivities(segment.segmentId)}>
+              Edit activities
+            </button>
+          </div>
+          <Keystone segment={segment} />
+          <Experience segment={segment} />
+          <div className="detail-highlights">
+            {shownHighlights(summary, { milestones: false }).length
+              ? <HighlightList entries={summary} milestones={false} interactive={false} />
+              : <p className="muted">Nothing was gained or collected in this segment.</p>}
+          </div>
+          <Lists segment={segment} book={book} />
+          <Currencies segment={segment} holdings={holdings} />
+          <Reputation segment={segment} holdings={holdings} />
+        </> : null}
+      </div>
+    </dialog>
+  );
+}

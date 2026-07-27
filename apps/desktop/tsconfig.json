@@ -4,6 +4,10 @@
     // The window's code, the unit tests beside it and the browser tests over it all run in
     // (or drive) a browser, so they share one project rather than three that could drift.
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // The views are React components, and nothing here compiles: `react-jsx` is what lets
+    // `tsc` read a `.tsx` file without every file importing React for the sake of the
+    // transform Vite and Vitest have already applied.
+    "jsx": "react-jsx",
     "types": ["vite/client", "node"]
   },
   "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"]
