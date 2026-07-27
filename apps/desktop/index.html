@@ -509,6 +509,14 @@
     appearance: none; border: none; border-radius: 4px;
     background: var(--surface-2); color: var(--ok);
   }
+  /* What the rest of the account has already done with the faction, and what it holds of
+     the currency. Set below the line it belongs to rather than beside it: this is context
+     for the number above, and it must never be mistaken for the number itself. */
+  .detail-section .rep-account {
+    margin: 2px 0 0 12px; font-size: 12px;
+  }
+  .account-total { color: var(--text-secondary); font-size: 12px; }
+
   .rep-bar::-webkit-progress-bar { background: var(--surface-2); border-radius: 4px; }
   .rep-bar::-webkit-progress-value { background: var(--ok); border-radius: 4px; }
   .rep-bar::-moz-progress-bar { background: var(--ok); border-radius: 4px; }

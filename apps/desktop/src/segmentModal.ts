@@ -10,9 +10,12 @@ import { achievementIds, achievementLine } from "./achievements";
 import type { AchievementBook } from "./achievements";
 import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
 import { highlights } from "./sessions";
-import { clock, dayLabel, duration, escapeHtml, plural, signed } from "./format";
+import { ago, clock, dayLabel, duration, escapeHtml, plural, signed } from "./format";
 import { eventsOf } from "./types";
-import type { AchievementEvent, EventListKey, EventOf, ReputationGain, Segment } from "./types";
+import type {
+  AccountCurrency, AccountFaction, AccountHoldings, AchievementEvent, EventListKey, EventOf,
+  ReputationGain, Segment,
+} from "./types";
 import { activityChip, classDot, className, highlightList, locationType } from "./ui";
 
 const wowhead = (kind: string, id: number, text: string): string =>
@@ -178,17 +181,40 @@ function standingBar(event: ReputationGain): string {
  * A section of its own rather than a one-line formatter, because the bar is a block under
  * the gain rather than something that fits on the end of it.
  */
-function reputation(): Section {
+/**
+ * What some other character has already done with the faction, when one has done more.
+ *
+ * The question this answers is whether grinding the faction on this character is worth
+ * anything, so it only speaks when the answer is "somebody else has already got further".
+ * The account best is computed across every character including this one, so a best belonging
+ * to the segment's own character means nobody is ahead and there is nothing to say.
+ *
+ * The age travels with it because none of this is live: it is what that character was holding
+ * when it was last played, and a standing read months ago is a weaker claim than a name alone
+ * would suggest.
+ */
+function accountStanding(faction: AccountFaction | undefined, character: string): string {
+  const best = faction?.best;
+  if (!best || best.character === character || !best.standing) return "";
+  const when = best.at ? ` · read ${ago(best.at)}` : "";
+  return `<p class="rep-account muted">
+    ${escapeHtml(best.character)} is further along: ${escapeHtml(best.standing)}${escapeHtml(when)}
+  </p>`;
+}
+
+function reputation(holdings?: AccountHoldings): Section {
   return {
     title: "Reputation",
     render: (segment) => {
       const gains = eventsOf(segment, "reputation");
       if (!gains.length) return "";
+      const byFaction = new Map((holdings?.factions || []).map((entry) => [entry.faction, entry]));
       return `<section class="detail-section">
         <h3>Reputation</h3>
         <ul>${gains.map((gain) => `<li>
           🎖️ ${escapeHtml(gain.faction)} <span class="muted">${escapeHtml(signed(gain.amount))}</span> ${at(gain)}
           ${standingBar(gain)}
+          ${accountStanding(byFaction.get(gain.faction), segment.character)}
         </li>`).join("")}</ul>
       </section>`;
     },
@@ -196,11 +222,28 @@ function reputation(): Section {
 }
 
 /**
+ * What the whole account holds of a currency this segment earned.
+ *
+ * Only when somebody else holds some too: on an account of one, or a currency only this
+ * character has ever picked up, the account total is the number already on the line and
+ * saying it twice adds nothing.
+ *
+ * The eldest reading in the sum is the one named, because it is the weakest claim in it — a
+ * total built partly from numbers a month old should not read as though it were all current.
+ */
+function accountTotal(held: AccountCurrency | undefined): string {
+  if (!held || held.characters.length < 2) return "";
+  const eldest = held.oldest ? `, eldest read ${ago(held.oldest)}` : "";
+  return ` <span class="account-total">· ${held.total.toLocaleString()} across ` +
+    `${escapeHtml(plural(held.characters.length, "character"))}${escapeHtml(eldest)}</span>`;
+}
+
+/**
  * Every list of events a segment can carry, and how each one reads in full. The table
  * columns abbreviate; this is the place that does not, because it is where someone comes
  * when the abbreviation was not enough.
  */
-const sections = (book: AchievementBook): Section[] => [
+const sections = (book: AchievementBook, holdings?: AccountHoldings): Section[] => [
   section({
     key: "encounters",
     title: "Encounters",
@@ -244,13 +287,15 @@ const sections = (book: AchievementBook): Section[] => [
   section({
     key: "currencies",
     title: "Currency",
-    // What the segment earned, then what the character was left holding. The second is the
-    // number that decides whether the first is enough to buy anything, and it is absent
-    // rather than zero when the client never said what the holding was.
+    // What the segment earned, then what the character was left holding, then what the
+    // account holds altogether. The second is the number that decides whether the first is
+    // enough to buy anything; the third is the one no single character can answer. Both are
+    // absent rather than zero when nobody has said.
     line: (event) => `🪙 ${escapeHtml(event.name)} <span class="muted">${escapeHtml(signed(event.amount))}` +
-      `${event.total == null ? "" : ` (${event.total.toLocaleString()})`}</span>`,
+      `${event.total == null ? "" : ` (${event.total.toLocaleString()})`}</span>` +
+      accountTotal((holdings?.currencies || []).find((entry) => entry.id === event.id)),
   }),
-  reputation(),
+  reputation(holdings),
 ];
 
 export interface SegmentModalOptions {
@@ -261,6 +306,12 @@ export interface SegmentModalOptions {
    * drivable without a backend, and asked only for the segment on screen.
    */
   achievements: AchievementBook;
+  /**
+   * What every character on the account was last seen holding, so a gain can be read against
+   * the account rather than only against the character that earned it. Absent on a history
+   * collected before any character reported, which reads as nothing to add.
+   */
+  holdings?: AccountHoldings;
 }
 
 export interface SegmentModal {
@@ -278,7 +329,7 @@ function part<T extends Element = HTMLElement>(dialog: HTMLDialogElement, select
 }
 
 export function createSegmentModal(
-  { dialog, onEditActivities, achievements: book }: SegmentModalOptions,
+  { dialog, onEditActivities, achievements: book, holdings }: SegmentModalOptions,
 ): SegmentModal {
   // The list is held rather than copied out of, so that a repaint after an edit finds the
   // same neighbours the reader was navigating a moment ago.
@@ -321,7 +372,7 @@ export function createSegmentModal(
     part<HTMLButtonElement>(dialog, '[data-role="prev"]').disabled = index === 0;
     part<HTMLButtonElement>(dialog, '[data-role="next"]').disabled = index >= order.length - 1;
     part(dialog, ".detail-title").textContent = segment.instance;
-    part(dialog, ".detail-body").innerHTML = body(segment, book);
+    part(dialog, ".detail-body").innerHTML = body(segment, book, holdings);
     dialog.querySelector("[data-edit-activities]")
       ?.addEventListener("click", () => onEditActivities(segment.segmentId));
 
@@ -349,7 +400,7 @@ export function createSegmentModal(
   return { open, refresh, current, isOpen: () => dialog.open };
 }
 
-function body(segment: Segment, book: AchievementBook): string {
+function body(segment: Segment, book: AchievementBook, holdings?: AccountHoldings): string {
   const facts = [
     `${escapeHtml(dayLabel(segment.day))} · ${escapeHtml(clock(segment.startedAt))} – ${escapeHtml(clock(segment.endedAt))}`,
     escapeHtml(duration(segment.seconds)),
@@ -374,7 +425,7 @@ function body(segment: Segment, book: AchievementBook): string {
     <div class="detail-highlights">${
       highlightList(highlights([segment]), { milestones: false }) ||
       '<p class="muted">Nothing was gained or collected in this segment.</p>'}</div>
-    ${sections(book).map((entry) => entry.render(segment)).join("")}
+    ${sections(book, holdings).map((entry) => entry.render(segment)).join("")}
   `;
 }
 
