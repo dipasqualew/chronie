@@ -630,6 +630,15 @@ impl Reader {
 
         let (facts, consumed, more) = self.consume(&mut file, start)?;
         let facts = self.finish(facts, &carried);
+        // Measured again, because the file is being written to while this reads it and the
+        // size taken above is already old. A cursor recording a size smaller than its own
+        // offset would have the next read declare the file truncated and start it over — on
+        // a file whose only crime was growing between two lines of this function.
+        let size = file
+            .metadata()
+            .map_err(|error| format!("Could not measure {}: {error}", path.display()))?
+            .len()
+            .max(start + consumed);
         Ok(Reading {
             cursor: Cursor {
                 offset: start + consumed,
@@ -1910,6 +1919,14 @@ mod tests {
             assert!(
                 reading.facts.lines > 0,
                 "{} produced no records at all",
+                path.display()
+            );
+            // The invariant the next read's truncation check rests on. A cursor whose size is
+            // behind its own offset says the file shrank, and the only file that would be
+            // true of is one nobody wrote.
+            assert!(
+                reading.cursor.offset <= reading.cursor.size,
+                "{} left a cursor pointing past the end of its own file",
                 path.display()
             );
             read += 1;
