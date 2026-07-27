@@ -183,16 +183,22 @@ pub struct Wanted {
 
 /// Which file belongs to which marker.
 ///
-/// Two rules, and the second exists because `Screenshot()` is asynchronous: the addon reads
-/// the clock when the key is pressed, and the client names the file when it finally writes
-/// it, which can be the far side of a second boundary. So an exact stamp wins outright, and
-/// only a marker left without one will look one second forward — never backward, because a
-/// file cannot be written before the key that asked for it was pressed.
+/// An exact stamp wins outright, and a marker left without one is widened by a second in
+/// either direction. Both directions are real, because the addon writes markers at two
+/// different moments relative to the file:
+///
+/// * It asks for a shot of its own — an achievement, a level up — and stamps the marker
+///   before calling the client's asynchronous `Screenshot()`, which names the file when it
+///   eventually writes it. The file can land on the **next** second.
+/// * The player takes a screenshot themselves and the addon hears `SCREENSHOT_SUCCEEDED`,
+///   which arrives once the file has already been named. The marker can be stamped a second
+///   **after** the file it belongs to.
 ///
 /// No file is ever handed to two markers, and every exact match is settled before any
 /// widened one is considered, so a widened match can never steal the file that another
-/// marker names exactly. Ties are broken on the ids, so the same folder and the same markers
-/// always pair the same way.
+/// marker names exactly. Forward is tried before backward for no deeper reason than that
+/// the passes have to be ordered somehow, and both are settled the same way. Ties are
+/// broken on the ids, so the same folder and the same markers always pair the same way.
 pub fn pair(wanted: &[Wanted], shots: &[Shot]) -> HashMap<String, PathBuf> {
     let mut by_stamp: BTreeMap<&str, Vec<&Path>> = BTreeMap::new();
     for shot in shots {
@@ -209,14 +215,18 @@ pub fn pair(wanted: &[Wanted], shots: &[Shot]) -> HashMap<String, PathBuf> {
 
     let mut claimed: HashSet<&Path> = HashSet::new();
     let mut paired: HashMap<String, PathBuf> = HashMap::new();
-    for pass in [Pass::Exact, Pass::NextSecond] {
+    for pass in [Pass::Exact, Pass::NextSecond, Pass::PreviousSecond] {
         for want in &ordered {
             if paired.contains_key(&want.source_id) {
                 continue;
             }
             let stamp = match pass {
                 Pass::Exact => want.stamp.clone(),
-                Pass::NextSecond => match next_second(&want.stamp) {
+                Pass::NextSecond => match shifted(&want.stamp, 1) {
+                    Some(stamp) => stamp,
+                    None => continue,
+                },
+                Pass::PreviousSecond => match shifted(&want.stamp, -1) {
                     Some(stamp) => stamp,
                     None => continue,
                 },
@@ -238,16 +248,17 @@ pub fn pair(wanted: &[Wanted], shots: &[Shot]) -> HashMap<String, PathBuf> {
 enum Pass {
     Exact,
     NextSecond,
+    PreviousSecond,
 }
 
-/// The stamp one second later, computed on the stamp itself rather than on the epoch beside
+/// The stamp `seconds` away, computed on the stamp itself rather than on the epoch beside
 /// it. The stamp is local time as the machine that took the shot understood it, and stepping
 /// through it directly is the only arithmetic that cannot be wrong about which local time
 /// the file was named in.
-fn next_second(stamp: &str) -> Option<String> {
+fn shifted(stamp: &str, seconds: i64) -> Option<String> {
     chrono::NaiveDateTime::parse_from_str(stamp, STAMP_FORMAT)
         .ok()?
-        .checked_add_signed(chrono::TimeDelta::seconds(1))
+        .checked_add_signed(chrono::TimeDelta::seconds(seconds))
         .map(|moment| moment.format(STAMP_FORMAT).to_string())
 }
 
@@ -753,6 +764,9 @@ mod tests {
         );
     }
 
+    /// A capture Chronie asked for: the marker is stamped when the addon reaches for the
+    /// shutter, and the asynchronous `Screenshot()` names the file whenever it gets round to
+    /// writing it — which can be the far side of a second boundary.
     #[test]
     fn takes_the_next_second_when_the_client_named_the_file_late() {
         let shots = [shot("WoWScrnShot_111423_120001.jpg")];
@@ -763,17 +777,43 @@ mod tests {
         );
     }
 
+    /// And a capture the player asked for, which is the other direction and just as real:
+    /// the client names the file, then fires SCREENSHOT_SUCCEEDED, and only then does the
+    /// addon read the clock and write the marker. The file is the older of the two.
     #[test]
-    fn never_reaches_backwards_for_a_file_written_before_the_key_was_pressed() {
+    fn takes_the_previous_second_when_the_marker_was_written_after_the_file() {
         let shots = [shot("WoWScrnShot_111423_115959.jpg")];
-        assert!(pair(&[wanted("a", "111423_120000")], &shots).is_empty());
+        let paired = pair(&[wanted("a", "111423_120000")], &shots);
+        assert_eq!(
+            paired.get("a"),
+            Some(&PathBuf::from("WoWScrnShot_111423_115959.jpg"))
+        );
+    }
+
+    /// Two seconds either way is not a coincidence worth trusting: at that distance the file
+    /// is somebody else's screenshot far more often than it is this marker's.
+    #[test]
+    fn reaches_no_further_than_a_second_in_either_direction() {
+        for name in [
+            "WoWScrnShot_111423_115958.jpg",
+            "WoWScrnShot_111423_120002.jpg",
+        ] {
+            let shots = [shot(name)];
+            assert!(
+                pair(&[wanted("a", "111423_120000")], &shots).is_empty(),
+                "{name} was paired with a marker two seconds away"
+            );
+        }
     }
 
     #[test]
-    fn steps_a_second_across_a_minute_and_an_hour() {
-        assert_eq!(next_second("111423_115959").as_deref(), Some("111423_120000"));
-        assert_eq!(next_second("111423_235959").as_deref(), Some("111523_000000"));
-        assert_eq!(next_second("nonsense"), None);
+    fn steps_a_second_across_a_minute_and_an_hour_in_both_directions() {
+        assert_eq!(shifted("111423_115959", 1).as_deref(), Some("111423_120000"));
+        assert_eq!(shifted("111423_235959", 1).as_deref(), Some("111523_000000"));
+        assert_eq!(shifted("111423_120000", -1).as_deref(), Some("111423_115959"));
+        assert_eq!(shifted("111523_000000", -1).as_deref(), Some("111423_235959"));
+        assert_eq!(shifted("nonsense", 1), None);
+        assert_eq!(shifted("nonsense", -1), None);
     }
 
     #[test]
@@ -795,6 +835,39 @@ mod tests {
         assert_eq!(
             paired.get("b"),
             Some(&PathBuf::from("WoWScrnShot_111423_120001.jpg"))
+        );
+    }
+
+    /// The same rule the other way round. The marker that names this file exactly is the one
+    /// that gets it, and the marker a second later — which would reach back onto it — is
+    /// left with nothing rather than taking a picture that is demonstrably not its own.
+    #[test]
+    fn leaves_the_early_marker_the_file_the_late_one_would_have_reached_back_for() {
+        let shots = [shot("WoWScrnShot_111423_120000.jpg")];
+        let paired = pair(
+            &[wanted("a", "111423_120001"), wanted("b", "111423_120000")],
+            &shots,
+        );
+        assert_eq!(
+            paired.get("b"),
+            Some(&PathBuf::from("WoWScrnShot_111423_120000.jpg"))
+        );
+        assert_eq!(paired.get("a"), None);
+    }
+
+    /// Two markers reaching for the same file from opposite sides. Whichever of them takes
+    /// it, the other must be left unpaired: one file, one marker, always.
+    #[test]
+    fn hands_a_widened_file_to_only_one_of_the_two_markers_reaching_for_it() {
+        let shots = [shot("WoWScrnShot_111423_120000.jpg")];
+        let paired = pair(
+            &[wanted("a", "111423_115959"), wanted("b", "111423_120001")],
+            &shots,
+        );
+        assert_eq!(paired.len(), 1);
+        assert_eq!(
+            paired.values().next(),
+            Some(&PathBuf::from("WoWScrnShot_111423_120000.jpg"))
         );
     }
 
