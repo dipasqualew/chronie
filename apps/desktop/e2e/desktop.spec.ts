@@ -282,9 +282,30 @@ class TransmogView {
     return this.card(name).getByRole("listitem");
   }
 
-  /** The way through to the item an appearance came from. */
+  /**
+   * The way through to the item an appearance came from, which is the corner of its row.
+   *
+   * Named in full rather than by the item alone: the link is a drawn glyph with no text of
+   * its own, so "Tideglass Mantle on Wowhead" is the whole of what a screen reader announces
+   * and matching less of it would also match the row's own button.
+   */
   link(set: string, label: string): Locator {
-    return this.card(set).getByRole("link", { name: label });
+    return this.card(set).getByRole("link", { name: `${label} on Wowhead`, exact: true });
+  }
+
+  /**
+   * The item's own name on a row, which is the largest thing on it and what a reader aims at.
+   *
+   * By its text rather than by a class, because the point of asking for it separately is that
+   * a reader clicking the words gets the piece put on — the whole row is one button.
+   */
+  name(set: string, label: string): Locator {
+    return this.card(set).getByText(label, { exact: true });
+  }
+
+  /** The one box above the grid: whether the rows with nowhere to go are left out. */
+  hideUnwearable(): Locator {
+    return this.view.getByRole("checkbox", { name: "Hide what she cannot wear" });
   }
 
   /**
@@ -2037,7 +2058,10 @@ test("browses the game's transmog sets and dresses the character in them", async
   // The change this whole view was rebuilt for: an appearance clicked in a set goes onto the
   // body, and the body is still there with the set still open behind it.
   await test.step("picking an appearance puts it on the character", async () => {
-    await transmog.wear("Tideglass Regalia", "Chest", "Tideglass Robe").click();
+    // Clicked by the item's own name, which is the largest thing on the row and the one a
+    // reader aims at — and which used to be the link out, so that the one part of the row
+    // anybody would click was the one part that did not dress her.
+    await transmog.name("Tideglass Regalia", "Tideglass Robe").click();
     await expect(outfit.slots()).toHaveText([/Chest.*Tideglass Robe.*Tideglass Regalia/s]);
     await expect(outfit.summary()).toHaveText("1 of 13 slots filled");
     await expect(outfit.note()).toHaveText("Worn on the character. Drag to turn it.");
@@ -2063,6 +2087,15 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(outfit.stage()).toHaveAttribute("data-blank", "0");
   });
 
+  // And the other half of that bargain: the corner of the row is the only part of it that
+  // leaves. Taking it hands the url to the operating system and leaves her dressed exactly as
+  // she was, rather than taking the piece back off on the way out.
+  await test.step("the corner of a row leaves for Wowhead without undressing her", async () => {
+    await transmog.link("Tideglass Regalia", "Tideglass Robe").click();
+    await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30003");
+    await expect(outfit.slots()).toHaveText([/Chest.*Tideglass Robe.*Tideglass Regalia/s]);
+  });
+
   // And the acceptance for the redesign itself: a piece out of one set and a piece out of
   // another, on one body at once, with both sets open behind them. A dialog made this the
   // hard way round — the first set had to be closed before the second could be reached.
@@ -2074,7 +2107,9 @@ test("browses the game's transmog sets and dresses the character in them", async
       /Chest.*Tideglass Robe.*Tideglass Regalia/s,
     ]);
     await expect(transmog.rows("Tideglass Regalia")).toHaveCount(4);
-    await expect(transmog.rows("Emberforge Plate")).toHaveCount(6);
+    // Five of that set's six: the sixth is filed under a weapon slot with nothing saying a
+    // hand, so it has nowhere on her to go and is left out until somebody asks for it.
+    await expect(transmog.rows("Emberforge Plate")).toHaveCount(5);
 
     // A body *and* a helm: 9 × 152 for the body — one part fewer than bare, because the helm
     // covers the hair — plus the helm's own eight vertices. Two nodes in one scene is the
@@ -2155,13 +2190,23 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(outfit.stage()).toHaveAttribute("data-vertices", "1520");
   });
 
-  // The card promises two appearances and the game encrypts one of them outright, so the
-  // list has to hold a row it can say nothing about rather than come up a row short.
-  await test.step("an appearance the game withholds still takes a row and says so", async () => {
+  // An appearance the game encrypts is one of the two there is nowhere on her to put, so the
+  // list leaves it out — and the card still accounts for it, because its own count includes
+  // it and a list shorter than the number above it is what a reader would have to explain.
+  await test.step("an appearance the game withholds is left out, and counted", async () => {
     await transmog.openSet("Duskwoven Shroud");
-    await expect(transmog.rows("Duskwoven Shroud")).toHaveCount(2);
+    await expect(transmog.rows("Duskwoven Shroud")).toHaveCount(1);
     await expect(transmog.card("Duskwoven Shroud"))
       .toContainText("2 appearances · 1 the game keeps encrypted");
+    await expect(transmog.card("Duskwoven Shroud"))
+      .toContainText("1 appearance hidden, with nowhere on her to go");
+  });
+
+  // And the box is for the reader who wants to see what a set is really made of: the row it
+  // can say nothing about comes back, and says so where its name would be.
+  await test.step("unticking the box hands back the rows a set really holds", async () => {
+    await transmog.hideUnwearable().uncheck();
+    await expect(transmog.rows("Duskwoven Shroud")).toHaveCount(2);
     await expect(transmog.card("Duskwoven Shroud"))
       .toContainText("The game keeps this appearance encrypted");
     // The other row got as far as an item and no further: the game encrypts that item's own
@@ -2189,14 +2234,27 @@ test("browses the game's transmog sets and dresses the character in them", async
     await outfit.clear();
   });
 
-  // The one appearance in the fixtures with nowhere on a body to go: the game withholds its
-  // item, so nothing says which hand — and a button that did nothing when clicked would be
-  // worse than one that says why it cannot.
+  // The other appearance in the fixtures with nowhere on a body to go: it is filed under a
+  // weapon slot and nothing says which hand — and a button that did nothing when clicked
+  // would be worse than one that says why it cannot. The box is still unticked from the step
+  // above, which is what a set opened afterwards has to obey as well.
   await test.step("an appearance there is nowhere to put says so instead of going on", async () => {
     await transmog.openSet("Emberforge Plate");
+    await expect(transmog.rows("Emberforge Plate")).toHaveCount(6);
     await expect(transmog.card("Emberforge Plate"))
       .toContainText("The game gives this appearance no place on a character.");
     await expect(transmog.wear("Emberforge Plate", "Weapon or shield", "Item 30017")).toBeDisabled();
+  });
+
+  // And ticking it again takes that row back out of an open set, which is the half that says
+  // the box governs what is drawn rather than having only reached the set once.
+  await test.step("ticking the box again puts the placeless row away", async () => {
+    await transmog.hideUnwearable().check();
+    await expect(transmog.rows("Emberforge Plate")).toHaveCount(5);
+    await expect(transmog.wear("Emberforge Plate", "Weapon or shield", "Item 30017"))
+      .toHaveCount(0);
+    await expect(transmog.card("Emberforge Plate"))
+      .toContainText("1 appearance hidden, with nowhere on her to go");
   });
 });
 

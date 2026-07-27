@@ -394,6 +394,30 @@ detail view shows the drawn weapon, so the sheath attachments (25, 26 and 27 on 
 that column are all deliberately left alone; the trap they set is showing a sword on her back
 while claiming it is in her hand.
 
+### A row with no name and no place, counted
+
+Two symptoms in the transmog view are one fact about the chain: **an appearance whose
+`ItemSparse` row cannot be read has no name and no inventory type**, so it draws as
+"Item 254538" and — if it is a weapon, where the display type says nothing about which hand —
+as "the game gives this appearance no place on a character". Reading the name and reading the
+hand are the same lookup, so they fail together and never separately.
+
+Counted on `12.0.5.67823` on 2026-07-27, over all 72,141 rows of `TransmogSetItem`:
+
+| | Rows | What the view shows |
+|---|---|---|
+| `ItemModifiedAppearance` withheld | 122 | "The game keeps this appearance encrypted" |
+| No `ItemSparse` row, so no name | 188 | `Item <id>`, across 24 sets |
+| No place on a character | 3 | all in set 2201, items 184919–184921 |
+
+So both are rare, and neither is this app losing something the install holds: 171,898 of the
+table's 171,964 rows parse, and the missing items are the ones Blizzard encrypts. Anything
+much larger than these numbers is a *reader* fault — the name column having moved under a
+patch, or `InventoryType` no longer at 66 — and the two dumps above are what tell the two
+apart. The one thing that looks like this and is not is an app built before the reader learned
+to read `InventoryType` at all: every weapon in the game then lands under "no place on a
+character", because nothing says which hand any of them goes in.
+
 ## The character's own skin, verified
 
 What an item paints is above; what the body already *is* comes from somewhere else entirely.

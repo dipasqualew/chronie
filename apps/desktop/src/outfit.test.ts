@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NOTHING_ON, isWorn, outfitSummary, piecesOf, placeName, placeOf, takeOff, toggle, wear,
-  wearSet, wearable, wornPieces,
+  NOTHING_ON, isWorn, onlyWearable, outfitSummary, piecesOf, placeName, placeOf, takeOff, toggle,
+  wear, wearSet, wearable, wornPieces,
 } from "./outfit";
 import type { AppearanceRow } from "./transmogModal";
 import type { TransmogSet } from "./types";
@@ -76,6 +76,24 @@ describe("placeOf", () => {
   ])("has nowhere to put %s", (_what, fields) => {
     expect(placeOf(row(fields))).toBeNull();
     expect(wearable(row(fields))).toBe(false);
+  });
+});
+
+describe("onlyWearable", () => {
+  // The two the game itself has nothing to put anywhere, in among the pieces they cannot be
+  // worn beside. Both are dead weight in a list a reader is clicking down — a disabled button
+  // and a sentence apologising for it — which is why the browser leaves them out by default.
+  it("drops the rows there is nowhere on her to put, and keeps the rest in the set's order", () => {
+    const arrows = row({ displayType: 11, inventoryType: 24, label: "A quiver of arrows" });
+    const encrypted = row({ withheld: true, label: "Something the game encrypts" });
+    expect(onlyWearable([HELM, arrows, ROBE, encrypted, SWORD]).map((kept) => kept.label))
+      .toEqual(["A helm", "A robe", "A sword"]);
+  });
+
+  // Which is nearly every set there is: on 12.0.5.67823 three rows in the whole game have no
+  // place against the 72,141 the sets name, so hiding must cost an ordinary set nothing.
+  it("leaves a set with a place for everything exactly as it was", () => {
+    expect(onlyWearable([HELM, ROBE, SWORD])).toEqual([HELM, ROBE, SWORD]);
   });
 });
 

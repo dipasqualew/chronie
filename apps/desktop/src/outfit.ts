@@ -81,6 +81,21 @@ export function wearable(row: Placeable): boolean {
   return placeOf(row) !== null;
 }
 
+/**
+ * The rows of a set that have a place on the character, in the order the set lists them.
+ *
+ * What is left out is the two the game itself has nothing to put anywhere — an appearance it
+ * keeps encrypted, and a thing filed under a weapon slot that nobody holds — and both are
+ * dead weight in a list a reader is clicking down: they are a disabled button and a sentence
+ * saying why, repeated among the pieces they cannot be worn beside. Rare, too: on
+ * 12.0.5.67823 three rows in the whole game have no place, against 72,141 the sets name. So
+ * the browser hides them by default and says how many it hid, and the checkbox is for the
+ * reader who wants to see what a set is really made of.
+ */
+export function onlyWearable(rows: AppearanceRow[]): AppearanceRow[] {
+  return rows.filter((row) => wearable(row));
+}
+
 /** What the list beside the character calls a place. */
 export function placeName(place: string, row?: Placeable): string {
   if (HANDS[place]) return HANDS[place];
