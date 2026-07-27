@@ -81,9 +81,13 @@ export function CaptureGallery({ segments, album, actions }: CaptureGalleryProps
           </li>
         ))}
       </ul>
-      <CaptureViewer
-        moments={moments}
+      {/* Mounted only while something is open, because more than one grid can be on screen at
+          once — an evening unfolded on its card, and a segment's own in the modal over it —
+          and two dialogs answering to one id is one id too many. */}
+      {index >= 0 ? <CaptureViewer
+        moment={moments[index]}
         index={index}
+        count={moments.length}
         actions={actions}
         onStep={(by) => {
           const next = moments[index + by];
@@ -94,7 +98,7 @@ export function CaptureGallery({ segments, album, actions }: CaptureGalleryProps
           album.forget(captureId);
           setOpen(null);
         }}
-      />
+      /> : null}
     </div>
   );
 }
@@ -139,9 +143,11 @@ function CaptureTile({ moment, thumbnail, onOpen }: TileProps): ReactNode {
 }
 
 interface ViewerProps {
-  moments: CapturedMoment[];
-  /** Which of them is open, or -1 when none is. */
+  /** The one that is open. The viewer is not mounted at all when none is. */
+  moment: CapturedMoment;
+  /** Where it sits in the grid it was opened from, and how long that grid is. */
   index: number;
+  count: number;
   actions: CaptureActions;
   onStep: (by: number) => void;
   onClose: () => void;
@@ -161,32 +167,27 @@ interface ViewerProps {
  * away does not follow them onto the next one.
  */
 function CaptureViewer(
-  { moments, index, actions, onStep, onClose, onDeleted }: ViewerProps,
+  { moment, index, count, actions, onStep, onClose, onDeleted }: ViewerProps,
 ): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
-  const moment = moments[index];
-  const capture = moment?.capture;
+  const capture = moment.capture;
   const [image, setImage] = useState<CaptureImagePayload | null>(null);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [confirming, setConfirming] = useState(false);
 
-  // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
-  // element is driven here. The reverse direction is `onClose`: Escape closes a dialog without
-  // asking anybody, and the grid behind has to find out.
+  // `showModal` is the dialog's own state and React has no prop for it, so the element is
+  // driven here, once, as it mounts. The reverse direction is `onClose`: Escape closes a dialog
+  // without asking anybody, and the grid behind has to find out.
   useEffect(() => {
     const element = dialog.current;
-    if (!element) return;
-    if (capture && !element.open) element.showModal();
-    if (!capture && element.open) element.close();
-  }, [capture]);
+    if (element && !element.open) element.showModal();
+  }, []);
 
-  const sourceId = capture?.sourceId;
-  const captureId = capture?.id;
-  const stored = capture?.note || "";
+  const { sourceId, id: captureId, note: stored } = capture;
   useEffect(() => {
-    setTyped(stored);
+    setTyped(stored || "");
     setStatus("");
     setConfirming(false);
   // Keyed on which capture is open rather than on the note: a repaint carrying the note that
@@ -196,7 +197,6 @@ function CaptureViewer(
 
   useEffect(() => {
     setImage(null);
-    if (captureId == null) return;
     let current = true;
     void actions.loadImage(captureId)
       .then((payload) => { if (current) setImage(payload); })
@@ -217,10 +217,6 @@ function CaptureViewer(
       setBusy(false);
     }
   }, [actions]);
-
-  if (!capture || !moment) {
-    return <dialog id="capture-viewer" ref={dialog} onClose={onClose} />;
-  }
 
   const missing = missingReason(capture);
   const shown = image?.image ?? null;
@@ -244,7 +240,7 @@ function CaptureViewer(
       <div className="detail-head">
         <div>
           <h2 className="detail-title" id="capture-viewer-title">{moment.segment.instance}</h2>
-          <span className="detail-position">{index + 1} of {moments.length}</span>
+          <span className="detail-position">{index + 1} of {count}</span>
         </div>
         <div className="detail-nav">
           <button
@@ -253,7 +249,7 @@ function CaptureViewer(
           >‹</button>
           <button
             type="button" aria-label="Next screenshot"
-            disabled={index >= moments.length - 1} onClick={() => onStep(1)}
+            disabled={index >= count - 1} onClick={() => onStep(1)}
           >›</button>
           <button type="button" aria-label="Close screenshot" onClick={onClose}>Close</button>
         </div>

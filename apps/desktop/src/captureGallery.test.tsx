@@ -127,6 +127,23 @@ describe("CaptureGallery", () => {
     expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(0);
   });
 
+  // The other way a picture can be absent, and the one the row cannot predict: it says the
+  // file is stored and the file has gone from under it — restored onto another machine, or
+  // reached by a database that arrived over WiFi without the store behind it. The row carries
+  // a hash and a size precisely so this is detectable and can be said rather than drawn as an
+  // image that never loads.
+  it("says so when the file has gone from under a row that says it is there", async () => {
+    gallery([capture()], {
+      loadImage: (captureId) => Promise.resolve<CaptureImagePayload>({ id: captureId, image: null }),
+    });
+
+    fireEvent.click(tiles()[0]);
+
+    await waitFor(() =>
+      expect(viewer().textContent).toContain("no longer on disk"));
+    expect(viewer().querySelector("img")).toBeNull();
+  });
+
   it("asks for the full-size picture only once one is opened", async () => {
     const loadImage = vi.fn((captureId: number) =>
       Promise.resolve<CaptureImagePayload>({ id: captureId, image: FULL_SIZE, byteSize: 12 }));
