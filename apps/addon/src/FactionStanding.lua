@@ -83,3 +83,108 @@ function ns.factionStanding(sources)
     end
     return bar(sources.reactionLabel, (faction.currentStanding or 0) - floor, ceiling - floor)
 end
+
+---The function `source[name]`, or nil when this client build does not have it.
+---
+---Every reputation call below goes through here rather than being called directly. The
+---client's API is not a fixed surface: a build can drop a function, move it to another
+---namespace, or never have had it, and calling one that is not there throws a Lua error
+---out of an event handler — which is exactly what happened at every reputation gain on
+---the build in issue #44, where `C_Reputation.GetFactionDataByName` was not defined.
+---A standing the client will not tell us is worth losing; a Lua error is not.
+---@param source table?
+---@param name string
+---@return function?
+local function callable(source, name)
+    if type(source) ~= "table" or type(source[name]) ~= "function" then
+        return nil
+    end
+    return source[name]
+end
+
+---Finds one faction's data table by the name the chat message called it.
+---
+---By name where the client offers it. Where it does not, the reputation list is walked
+---instead — the same tables, reached the long way round. That walk only sees the rows the
+---pane is currently showing, so a faction under a collapsed header is invisible to it;
+---the caller then keeps whatever standing it had rather than showing none.
+---@param reputation table? The client's `C_Reputation`.
+---@param faction string
+---@return table? faction data, in `GetFactionDataByName`'s shape
+local function findFaction(reputation, faction)
+    local byName = callable(reputation, "GetFactionDataByName")
+    if byName then
+        return byName(faction)
+    end
+
+    local count = callable(reputation, "GetNumFactions")
+    local byIndex = callable(reputation, "GetFactionDataByIndex")
+    if not count or not byIndex then
+        return nil
+    end
+    for index = 1, count() or 0 do
+        local data = byIndex(index)
+        if data and data.name == faction then
+            return data
+        end
+    end
+    return nil
+end
+
+---Asks the client everything it knows about one faction and reduces it to a single bar.
+---
+---This is `ns.factionStanding`'s outward-facing half: gathering the four systems' answers
+---from four different namespaces, so that the choosing between them stays pure. Written
+---the same way as `ns.readMapPosition` — the client tables arrive as arguments, so the
+---whole thing is drivable from a spec without a game running.
+---@param clients table? `{ reputation = C_Reputation, majorFaction = C_MajorFactionData,
+---gossip = C_GossipInfo, reactionLabel = fun(reaction: integer): string? }`
+---@param faction string? The faction's localised name, as the chat message named it.
+---@return FactionStanding?
+function ns.readFactionState(clients, faction)
+    if type(faction) ~= "string" or faction == "" then
+        return nil
+    end
+    clients = clients or {}
+
+    local reputation = clients.reputation
+    local data = findFaction(reputation, faction)
+    if not data then
+        return nil
+    end
+
+    local renown, friendship, paragon
+    local factionID = data.factionID
+    if factionID then
+        local isMajor = callable(reputation, "IsMajorFaction")
+        local majorData = callable(clients.majorFaction, "GetMajorFactionData")
+        if isMajor and majorData and isMajor(factionID) then
+            renown = majorData(factionID)
+        end
+
+        local friendshipFor = callable(clients.gossip, "GetFriendshipReputation")
+        if friendshipFor then
+            friendship = friendshipFor(factionID)
+        end
+
+        local isParagon = callable(reputation, "IsFactionParagon")
+        local paragonInfo = callable(reputation, "GetFactionParagonInfo")
+        if isParagon and paragonInfo and isParagon(factionID) then
+            local value, threshold = paragonInfo(factionID)
+            paragon = { value = value, threshold = threshold }
+        end
+    end
+
+    local reactionLabel
+    if data.reaction and type(clients.reactionLabel) == "function" then
+        reactionLabel = clients.reactionLabel(data.reaction)
+    end
+
+    return ns.factionStanding({
+        faction = data,
+        renown = renown,
+        friendship = friendship,
+        paragon = paragon,
+        reactionLabel = reactionLabel,
+    })
+end

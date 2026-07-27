@@ -328,6 +328,17 @@ export interface TransmogModelPayload {
 }
 
 /**
+ * The character with one appearance worn on it, as a `.glb` in a data URL.
+ *
+ * The same shape as an appearance's own model, and `null` means the same thing: there is
+ * nothing to show and the window keeps the icon. What differs is what arrives when there is —
+ * the whole body, its atlas painted with this appearance's textures and its geosets switched
+ * to the variants the appearance drives. Which is the only way the game itself draws a
+ * chestpiece: there is no chestpiece, there is a character wearing one.
+ */
+export type WornModelPayload = TransmogModelPayload;
+
+/**
  * The character an appearance is worn on, bare, as a `.glb` in a data URL.
  *
  * One model for the whole app — a Human Female, because gear is authored to look right on
@@ -492,6 +503,10 @@ export interface E2EMock {
   transmogModels: Record<number, string>;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
+  /** The body with one appearance composited onto it, keyed by display info id. An id absent
+   * from here is an appearance this install can put on nobody, which the real backend answers
+   * with `null`. */
+  wornModels: Record<number, string>;
   /** The decoded icons, keyed the way whatever named them named them. An id absent from here
    * is an icon the install cannot show, which is a row the real backend answers nothing for. */
   gameIcons: Record<number, string>;

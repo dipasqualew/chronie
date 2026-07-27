@@ -15,6 +15,7 @@
 import {
   AlphaType,
   bgraPixels,
+  bodyPixels,
   Bytes,
   dxtBlocks,
   emit,
@@ -22,6 +23,7 @@ import {
   palettePixels,
   Storage,
   type IconSpec,
+  type Paint,
   type TableSpec,
 } from "./db2-fixtures";
 
@@ -37,6 +39,7 @@ const FILE_DATA_ID = {
   itemSparse: 1572924,
   modelFileData: 1337833,
   textureFileData: 982459,
+  componentTextureFileData: 1278239,
 } as const;
 
 /* ---------- the tables ---------- */
@@ -254,7 +257,9 @@ const itemAppearance: TableSpec = {
       rows: [
         [0, 900001, 130001],
         [1, 900002, 130002],
-        [2, 900003, 130003],
+        // The robe, which is the chest slot and a display of its own: same slot as the
+        // breastplate below and a different set of geosets under it.
+        [2, 900012, 130003],
         [5, 900004, 130004],
         [7, 900005, 130005],
         [0, 900001, 130001],
@@ -293,9 +298,15 @@ const itemAppearance: TableSpec = {
  * **Two of the column positions below are the game's own and the rest are not.**
  * `ModelResourcesID` at 10 and `ModelMaterialResourcesID` at 11 were read off a real install
  * and are written down in `docs/game-files.md`; the columns before them are filler of the
- * right shape, and `GeosetGroup` and `ModelType` sit where they do only so that something
- * reads them. Nothing outside a test may depend on those two positions until they are
- * verified the way 10 and 11 were.
+ * right shape, and `GeosetGroup` and `ModelType` sit where they do only because that is where
+ * the community's definitions put them. `docs/character-rendering.md` says what rests on the
+ * geoset one and what a wrong guess would look like on screen.
+ *
+ * **`GeosetGroup` holds values, not group numbers.** Which group an element drives is decided
+ * by the slot the item fills and the element's position — a chestpiece's first element is
+ * sleeves, its second the chest — and the element itself says *which variant* of that group.
+ * So the numbers below are small, and `docs/character-rendering.md` is where the two groups
+ * that do not follow the ordinary `group × 100 + (1 + value)` are written down.
  */
 const itemDisplayInfo: TableSpec = {
   fileDataId: FILE_DATA_ID.itemDisplayInfo,
@@ -333,40 +344,52 @@ const itemDisplayInfo: TableSpec = {
       // Flags, then the eight scalars nothing reads, HelmetGeosetVis, and then the four
       // arrays: models, materials, geoset groups, model types.
       rows: [
-        // A helm: one model slot, and the two geoset groups a helm drives.
-        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [27, 21, 0, 0, 0, 0], [1, 0]],
+        // A helm: one model slot, the helm group switched to its second variant, and a skull
+        // element of -1 — which the game writes where a row drives no geoset at all, and
+        // which read as a value would ask the body for its hundred-and-somethingth skull.
+        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [2, -1, 0, 0, 0, 0], [1, 0]],
         // Shoulders: both model slots used, left and right.
-        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [26, 0, 0, 0, 0, 0], [2, 3]],
-        // A chestpiece: no model at all, and five geoset groups it does drive.
-        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [8, 10, 13, 22, 28, 0], [0, 0]],
-        // Boots, gloves and legs: armour, so no model either.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [5, 20, 0, 0, 0, 0], [0, 0]],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [4, 23, 0, 0, 0, 0], [0, 0]],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [11, 9, 13, 0, 0, 0], [0, 0]],
+        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [1, 0, 0, 0, 0, 0], [2, 3]],
+        // A chestpiece: no model at all, and the two of its five groups this body has —
+        // sleeves over the bare arms, and a chest piece over the bare torso.
+        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [1, 1, 0, 0, 0, 0], [0, 0]],
+        // Boots: the first element is the boot itself, and the second is the feet group whose
+        // zero means "booted" rather than "bare" — the exception a reader has to know about.
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [1, 0, 0, 0, 0, 0], [0, 0]],
+        // Gloves: a slot this body holds no geoset for at all, so it is texture and nothing
+        // else — which is what most of a wardrobe does to most of a mesh.
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [1, 0, 0, 0, 0, 0], [0, 0]],
+        // Legs, whose first element is the trousers.
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [3, 0, 0, 0, 0, 0], [0, 0]],
         // A weapon, which is geometry and nothing else.
         [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [0, 0, 0, 0, 0, 0], [1, 0]],
         // A shirt: nothing at all beyond its material.
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0, 0, 0, 0, 0], [0, 0]],
         // Shoulders that keep their model in the second slot only, which is exactly what a
         // reader that stops at element zero calls "no model at all".
-        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [26, 0, 0, 0, 0, 0], [2, 3]],
+        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [1, 0, 0, 0, 0, 0], [2, 3]],
         // A display naming a model resource no file in this install belongs to, which is what
         // a partial download looks like from here.
-        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [27, 0, 0, 0, 0, 0], [1, 0]],
+        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [2, 0, 0, 0, 0, 0], [1, 0]],
         // One whose file is there and is not a model, which is the other kind of wrong and
         // has to read differently: an install missing a file is ordinary, an unreadable file
         // is this app being wrong about the format.
-        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [27, 0, 0, 0, 0, 0], [1, 0]],
+        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [2, 0, 0, 0, 0, 0], [1, 0]],
+        // A robe, which is the chest slot again and the one that shows why the groups are
+        // worth getting right: it leaves the chest group bare and switches on the robe group
+        // instead, which is the skirt that hangs over the legs.
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51014, 0], [1, 0, 1, 0, 0, 0], [0, 0]],
       ],
       idList: [
         900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008, 900009, 900010, 900011,
+        900012,
       ],
     },
     {
       // Encrypted, so an appearance pointing here knows its slot and nothing more.
       key: 0x5d38af0c9e142b76n,
       rows: [
-        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [27, 0, 0, 0, 0, 0], [1, 0]],
+        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [2, 0, 0, 0, 0, 0], [1, 0]],
       ],
       idList: [900900],
     },
@@ -396,27 +419,43 @@ const itemDisplayInfoMaterialRes: TableSpec = {
     {
       key: 0n,
       // Section numbers are the game's own: 0 arms upper, 1 arms lower, 2 hands,
-      // 3 torso upper, 4 torso lower, 5 legs upper, 6 legs lower, 7 feet.
+      // 3 torso upper, 4 torso lower, 5 legs upper, 6 legs lower, 7 feet, 8 accessory.
       rows: [
+        // The chestpiece: both arms and both halves of the torso.
         [3, 52001],
         [0, 52002],
-        [4, 52003],
-        [5, 52004],
-        [6, 52005],
-        [7, 52006],
-        [2, 52007],
+        [1, 52003],
+        [4, 52004],
+        // The robe: the torso, and the legs its skirt hangs over.
+        [3, 52005],
+        [5, 52006],
+        [6, 52007],
+        // The boots, whose third row is section 8 — a section the layout this app renders
+        // has no rectangle for, which is a row to drop rather than an error to raise.
+        [7, 52008],
+        [6, 52009],
+        [8, 52010],
+        // The gloves, whose only texture the game keeps for a body this is not.
+        [2, 52011],
+        // The shirt, whose texture no install here holds.
+        [3, 52012],
       ],
-      idList: [1, 2, 3, 4, 5, 6, 7],
-      // The chestpiece owns four of these, the boots two and the gloves one — and the
-      // display they belong to is only ever written here.
+      idList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      // Which display each row belongs to is written *only* here, in a block beside the
+      // records rather than in a column of them.
       relationships: [
         [900003, 0],
         [900003, 1],
         [900003, 2],
-        [900002, 3],
-        [900002, 4],
-        [900001, 5],
-        [900003, 6],
+        [900003, 3],
+        [900012, 4],
+        [900012, 5],
+        [900012, 6],
+        [900004, 7],
+        [900004, 8],
+        [900004, 9],
+        [900005, 10],
+        [900008, 11],
       ],
     },
     {
@@ -561,7 +600,15 @@ const modelFileData: TableSpec = {
   ],
 };
 
-/** `TextureFileData` — the same, for the `.blp`s a material resource names. */
+/**
+ * `TextureFileData` — the same, for the `.blp`s a material resource names.
+ *
+ * The 51xxx materials are the items' own, one texture each: a model asks for one picture and
+ * that is the picture. The 52xxx ones are the body textures armour is painted on a character
+ * with, and they are the reason this table cannot be read as "the file with the lowest id":
+ * material 52001 names two files, and the lower of them is the one for a body this app never
+ * draws. Which is which is not in this table at all — see `componentTextureFileData` below.
+ */
 const textureFileData: TableSpec = {
   fileDataId: FILE_DATA_ID.textureFileData,
   layoutHash: 0x83b1e5d0,
@@ -583,13 +630,88 @@ const textureFileData: TableSpec = {
         [1, 0, 51002], // the same material at a second usage, numbered above the first
         [0, 0, 51008], // the weapon's
         [0, 0, 51011], // the second-slot shoulder's
+        // The body textures. 52001 is the material with a picture per body: the lower id is
+        // the one this app must not use, so a reader that took the first file, or the
+        // smallest, paints the character with somebody else's chest.
+        [0, 0, 52001], // the chestpiece's torso, for a body this app never draws
+        [0, 0, 52001], // and the one it does
+        [0, 0, 52002], // the chestpiece's upper arms, which nothing says a body for
+        [0, 0, 52003], // its lower arms
+        [0, 0, 52004], // its lower torso
+        [0, 0, 52005], // the robe's torso
+        [0, 0, 52006], // the robe's upper legs
+        [0, 0, 52007], // its lower legs
+        [0, 0, 52008], // the boots' feet
+        [0, 0, 52009], // the boots' lower legs
+        [0, 0, 52010], // the boots' accessory section, which the layout puts nowhere
+        [0, 0, 52011], // the gloves' hands, kept for a body this is not
+        [0, 0, 52012], // the shirt's torso, which no install here holds the file for
       ],
-      idList: [150004, 150002, 150102, 150005, 150003],
+      idList: [
+        150004, 150002, 150102, 150005, 150003,
+        151001, 151002, 151003, 151004, 151005, 151006, 151007, 151008, 151009, 151010, 151011,
+        151012, 151013,
+      ],
     },
     {
       key: 0x6e2d90c4ba175f83n,
       rows: [[0, 0, 51900]],
       idList: [150900],
+    },
+  ],
+};
+
+/**
+ * `ComponentTextureFileData` — which body each of a material's textures was painted for.
+ *
+ * A material resource can name several files, and this is the only table that says which is
+ * which: a gender, a class and a race per file, keyed by the FileDataID itself. A reader that
+ * skipped it would paint a Human Female with whichever file happened to be first.
+ *
+ * `GenderIndex` is 0 male, 1 female, 2 none and 3 any, following wow.export's
+ * `DBComponentTextureFileData`; a class of 0 is every class. Most textures have no row here at
+ * all, which is not the same as being excluded — it is a texture nothing was said about, and
+ * it is what the majority of the game's armour uses.
+ *
+ * **These column positions are the community's and were not read off an install**, like
+ * `ItemSparse`'s and unlike the chains in `docs/game-files.md`.
+ */
+const componentTextureFileData: TableSpec = {
+  fileDataId: FILE_DATA_ID.componentTextureFileData,
+  layoutHash: 0xb32b030a,
+  tableHash: 0x7f0c4a19,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 8 }, // GenderIndex
+    { storage: Storage.plain, offsetBits: 8, sizeBits: 8 }, // ClassID
+    { storage: Storage.plain, offsetBits: 16, sizeBits: 8 }, // RaceID
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        // The two halves of the trap: the same material, one texture per body, and the one
+        // this app wants is the one with the higher id.
+        [0, 0, 1], // 151001, male
+        [1, 0, 1], // 151002, female
+        // A texture the game marks as fitting any body, which is how most armour that has a
+        // row here at all is marked.
+        [3, 0, 0], // 151006, the robe's upper legs
+        // A texture kept for a body this app never draws, and no female counterpart beside
+        // it — so the section it belongs to is one this character simply cannot wear.
+        [0, 0, 1], // 151012, the gloves' hands
+      ],
+      idList: [151001, 151002, 151006, 151012],
+    },
+    {
+      // Encrypted, so the file it describes arrives untagged: nothing says which body it was
+      // painted for, and a reader that treated silence as exclusion would drop a texture the
+      // game does ship.
+      key: 0x2d70b95c14ea836fn,
+      rows: [[1, 0, 1]],
+      idList: [151007],
     },
   ],
 };
@@ -968,11 +1090,12 @@ const models: ModelSpec[] = [
  * A body is not a bigger item model — it is the three things an item model never exercises,
  * and the fixture exists to hold each of them:
  *
- * - **Geosets.** Nine of the eleven cubes are a group's variants, of which exactly one is what
+ * - **Geosets.** All but two of the cubes are a group's variants, of which exactly one is what
  *   a body with nothing on it draws. Every group here has a `…01` — bare arms, bare legs, bare
  *   feet, no helm — beside the variant an item would switch on instead. A reader that drew all
  *   of them would put two pairs of legs in the same trousers, which is what doubled geometry
- *   and z-fighting look like from the outside.
+ *   and z-fighting look like from the outside. The groups are the ones the fixture's own items
+ *   drive: sleeves, chest, robe, trousers, boot, feet and helm.
  * - **The `level` trap, on a part that has to be there.** The head sits past the first 64k of
  *   the index list, and it is one of the parts a bare body draws — so a reader that ignores
  *   the level does not merely draw something spare, it draws the head from the wrong vertices.
@@ -982,13 +1105,13 @@ const models: ModelSpec[] = [
  *   the reason type 1 has to be told from "not a file": painting hair with the body atlas
  *   would be as wrong as painting it with nothing, and much harder to notice.
  *
- * Nothing here is copied from the game. It is eleven cubes with the game's own numbering on
+ * Nothing here is copied from the game. It is seventeen cubes with the game's own numbering on
  * them.
  */
 const characterModel: ModelSpec = {
   fileDataId: 1000764,
   skinFileDataId: 1000765,
-  cubes: 11,
+  cubes: 17,
   // Written backwards into the combo list, so combo 1 reaches the skin and combo 0 the hair.
   textures: [
     { kind: 1, fileDataId: 0 }, // the composited body atlas
@@ -1017,6 +1140,17 @@ const characterModel: ModelSpec = {
     { cube: 9, from: 0, count: 36, material: 1, level: 0, geoset: 101, combo: 0 },
     // Group 21, the skull, past the first 64k indices.
     { cube: 10, from: 0, count: 36, material: 0, level: 1, geoset: 2101, combo: 1 },
+    // Group 10, the chest: bare, and the piece a chestpiece switches on.
+    { cube: 11, from: 0, count: 36, material: 0, level: 0, geoset: 1001, combo: 1 },
+    { cube: 12, from: 0, count: 36, material: 0, level: 0, geoset: 1002, combo: 1 },
+    // Group 13, the robe — the skirt a robe hangs over the legs, and the nothing that is
+    // there the rest of the time.
+    { cube: 13, from: 0, count: 36, material: 0, level: 0, geoset: 1301, combo: 1 },
+    { cube: 14, from: 0, count: 36, material: 0, level: 0, geoset: 1302, combo: 1 },
+    // Group 5, the boot. Boots drive this *and* group 20 above, which is the pair that says
+    // whether a reader applied every group an item names or stopped at the first.
+    { cube: 15, from: 0, count: 36, material: 0, level: 0, geoset: 501, combo: 1 },
+    { cube: 16, from: 0, count: 36, material: 0, level: 0, geoset: 502, combo: 1 },
   ],
 };
 
@@ -1063,7 +1197,59 @@ const icons: IconSpec[] = [
     fileDataId: 160001, encoding: Encoding.dxt, alphaBits: 0,
     alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
   },
+  ...bodyTextures(),
 ];
+
+/**
+ * The pictures armour is painted onto a body with: one per row of `ItemDisplayInfoMaterialRes`
+ * that resolves to a file, each in colours of its own.
+ *
+ * A colour per texture is the whole point. Every one of these lands in a *different rectangle*
+ * of one 2048 × 1024 atlas, and the ways that goes wrong — a section blitted into its
+ * neighbour's rectangle, a texture that never arrived, the wrong body's copy of a material —
+ * all produce an atlas rather than an error. Naming the colours is what lets a test say which
+ * picture is where.
+ *
+ * Two of them carry a second band, for the two traps compositing sets:
+ *
+ * - The chestpiece's upper arms are half transparent, which is the sleeveless chestpiece from
+ *   `docs/character-rendering.md`: copied rather than blended, it punches a hole in the arm.
+ * - Its torso is two opaque bands, whose seam is a hard edge under a nearest-neighbour scale
+ *   and a run of blends under the linear one these need.
+ */
+function bodyTextures(): IconSpec[] {
+  const opaque = ([red, green, blue]: readonly [number, number, number]): Paint =>
+    [red, green, blue, 255] as const;
+  const CLEAR: Paint = [0, 0, 0, 0];
+
+  const painted: Array<[number, Paint, Paint]> = [
+    // The chestpiece's torso, for a body this app never draws, and then for the one it does.
+    [151001, opaque([180, 90, 30]), opaque([180, 90, 30])],
+    [151002, opaque([40, 160, 220]), opaque([220, 60, 140])],
+    [151003, opaque([90, 200, 60]), CLEAR], // its upper arms, half of them not there at all
+    [151004, opaque([120, 40, 200]), opaque([120, 40, 200])], // its lower arms
+    [151005, opaque([30, 210, 170]), opaque([30, 210, 170])], // its lower torso
+    [151006, opaque([240, 130, 20]), opaque([240, 130, 20])], // the robe's torso
+    [151007, opaque([70, 20, 190]), opaque([70, 20, 190])], // the robe's upper legs
+    [151008, opaque([200, 240, 40]), opaque([200, 240, 40])], // its lower legs
+    [151009, opaque([20, 100, 240]), opaque([20, 100, 240])], // the boots' feet
+    [151010, opaque([150, 30, 90]), opaque([150, 30, 90])], // the boots' lower legs
+    // The boots' accessory section, which the layout has no rectangle for — so this is the
+    // one texture here that is resolved, read, and then has nowhere to go.
+    [151011, opaque([110, 190, 240]), opaque([110, 190, 240])],
+    // The gloves' hands, which `ComponentTextureFileData` keeps for a body this is not — so
+    // this one is resolved as far as a file and then excluded by what that table says.
+    [151012, opaque([230, 200, 90]), opaque([230, 200, 90])],
+  ];
+
+  return painted.map(([fileDataId, top, bottom]) => ({
+    fileDataId,
+    encoding: Encoding.bgra,
+    alphaBits: 8,
+    alphaType: 0,
+    body: bodyPixels(top, bottom),
+  }));
+}
 
 
 /* ---------- go ---------- */
@@ -1080,6 +1266,7 @@ emit("transmog", {
     itemSparse,
     modelFileData,
     textureFileData,
+    componentTextureFileData,
   ],
   icons,
   raw: [
