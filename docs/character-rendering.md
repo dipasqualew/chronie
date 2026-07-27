@@ -45,6 +45,20 @@ names the shirt and the shirt drives nothing at all. The one contest that fires 
 13, where a robe worn on the chest beats a pair of legs — which is what "a set with a robe
 in it puts the robe over the legs rather than beside them" comes to.
 
+**A set is renderable from an install without the app running**, which is the only way to
+put either table in front of real data — nothing in the test suite may read one. `set/<id>`
+walks a `TransmogSet` the same way the window does and hands the whole outfit over:
+
+```sh
+bun run render set/5570 augur.png --install "/Applications/World of Warcraft" --view right
+cargo run --example dump_model -- "/Applications/World of Warcraft" set/5613 plate.glb
+```
+
+Sets 5570 and 5613 on build 12.0.5.67 are what this was checked against on 2026-07-27: a
+Silvermoon cloth set whose robe hangs over its legs, and a Thalassian plate set of 59
+appearances, which is every contest the table can stage at once. Both come out with one part
+per geoset group.
+
 **Priority never leaves a group unowned.** The floor below — a group is only taken over
 when the body holds the geoset asked for — is what keeps an unverified column from costing
 a limb, and resolution must not become a second way to lose one. A winner whose value this
