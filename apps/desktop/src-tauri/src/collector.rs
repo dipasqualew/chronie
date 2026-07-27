@@ -1,10 +1,11 @@
 use crate::activity;
+use crate::captures::{self, Marker, Stored, Wanted};
 use chrono::{DateTime, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -16,6 +17,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003_lockouts.sql"),
     include_str!("../migrations/0004_equipsets.sql"),
     include_str!("../migrations/0005_holdings.sql"),
+    include_str!("../migrations/0006_captures.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -25,6 +27,16 @@ pub struct SyncResult {
     pub added: usize,
     pub updated: usize,
     pub segment_count: usize,
+}
+
+/// What a sync is allowed to do to the folders it reads.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Options {
+    /// Leave the game's own copy of a screenshot where it was, once Chronie holds one of its
+    /// own. Off by default, because the point of ingesting is that the game's folder stops
+    /// growing — but taking files out of a folder somebody has been curating for years is
+    /// not a thing to make unrecoverable by design, so it stays a choice.
+    pub keep_originals: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1500,6 +1512,248 @@ fn upsert_segment(
     Ok(existing.is_none())
 }
 
+/// Where Chronie keeps the images it has taken custody of: its own folder beside its own
+/// database, so that a backup of one is a backup of the other.
+pub fn store_root(database_path: &Path) -> PathBuf {
+    database_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(captures::STORE_FOLDER)
+}
+
+/// One capture's image, copied into the store and verified, waiting for the row that names
+/// it to be committed before the original is touched.
+struct Ingested {
+    stored: Stored,
+    source_name: String,
+    original: PathBuf,
+}
+
+/// Which markers are still hoping for a file.
+///
+/// A capture whose image is already in the store is deliberately not among them. `db.entries`
+/// is never pruned and the whole of it is re-read whenever anything in the file changes, so
+/// without this every sync after any change would go back to the folder and re-hash every
+/// original still sitting in it. Nothing about the row is at stake — `upsert_capture` will
+/// not let an image be un-stored — it is the work that is not worth doing twice.
+///
+/// A row an earlier sync could not find a file for is, on the other hand, worth another look:
+/// the client writes an image asynchronously and may not have finished when the folder was
+/// read, and a folder can be restored.
+fn wanted_images(connection: &Connection, markers: &[&Marker]) -> Result<Vec<Wanted>, String> {
+    let mut state = connection
+        .prepare("SELECT image_state FROM captures WHERE source_id = ?1")
+        .map_err(|error| error.to_string())?;
+    let mut wanted = Vec::new();
+    let mut seen = HashSet::new();
+    for marker in markers {
+        let Some(stamp) = marker.stamp.clone() else {
+            continue;
+        };
+        if !marker.wants_image || !seen.insert(marker.source_id.clone()) {
+            continue;
+        }
+        let stored = state
+            .query_row([&marker.source_id], |row| row.get::<_, String>(0))
+            .optional()
+            .map_err(|error| error.to_string())?
+            .is_some_and(|found| found == "stored");
+        if !stored {
+            wanted.push(Wanted {
+                source_id: marker.source_id.clone(),
+                stamp,
+            });
+        }
+    }
+    drop(state);
+
+    let mut unresolved = connection
+        .prepare(
+            "SELECT source_id, stamp FROM captures
+             WHERE image_state = 'missing' AND stamp IS NOT NULL",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = unresolved
+        .query_map([], |row| {
+            Ok(Wanted {
+                source_id: row.get(0)?,
+                stamp: row.get(1)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let row = row.map_err(|error| error.to_string())?;
+        if seen.insert(row.source_id.clone()) {
+            wanted.push(row);
+        }
+    }
+    Ok(wanted)
+}
+
+/// Finds the images this sync's markers are asking for and copies them into the store.
+///
+/// Everything here happens before the transaction opens, and the deletion of the originals
+/// happens after it commits. That order is the whole safety argument: killed between the copy
+/// and the commit, the game's folder is untouched and the worst that survives is an unnamed
+/// file in the store that the next sync writes over; killed after the commit, the row already
+/// points at a verified copy. There is no moment at which the only copy of an image is one
+/// nothing has recorded.
+///
+/// One image that cannot be copied does not fail the sync. Its row says `missing`, which is
+/// the honest thing to show and is retried next time, and the rest of the segments are worth
+/// more than the tidiness of refusing them all over one unreadable file.
+fn ingest_images(
+    connection: &Connection,
+    wow_path: &Path,
+    store_root: &Path,
+    markers: &[&Marker],
+) -> Result<HashMap<String, Ingested>, String> {
+    let wanted = wanted_images(connection, markers)?;
+    if wanted.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let shots = captures::folder(&wow_path.join(captures::GAME_FOLDER));
+    let mut ingested = HashMap::new();
+    for (source_id, path) in captures::pair(&wanted, &shots) {
+        let Ok(stored) = captures::store(&path, store_root) else {
+            continue;
+        };
+        ingested.insert(
+            source_id,
+            Ingested {
+                stored,
+                source_name: path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                original: path,
+            },
+        );
+    }
+    Ok(ingested)
+}
+
+/// Writes down one entry the addon recorded.
+///
+/// Keyed on the addon's own id and upserted, which is what makes ingesting the same capture
+/// twice impossible however many times the same unchanged file is read. The file columns are
+/// left to `record_images`: a row is the marker, and the image is something that may arrive
+/// with it, later, or never.
+///
+/// `image_state` only ever moves towards `stored`. A row that already has an image keeps it
+/// even though this sync went looking for nothing, because the marker that is being read
+/// again is the same marker whose image was taken custody of the first time.
+fn upsert_capture(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    character_id: Option<i64>,
+    marker: &Marker,
+    now: i64,
+) -> Result<(), String> {
+    let state = if marker.wants_image { "missing" } else { "none" };
+    transaction
+        .execute(
+            "INSERT INTO captures (
+                 account_id, source_id, schema, character_id, author, segment_source_id,
+                 captured_at, stamp, ui_map_id, map_x, map_y, image_state,
+                 first_seen_at, last_seen_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+             ON CONFLICT(source_id) DO UPDATE SET
+                 account_id = excluded.account_id,
+                 schema = excluded.schema,
+                 character_id = COALESCE(excluded.character_id, captures.character_id),
+                 author = COALESCE(excluded.author, captures.author),
+                 segment_source_id = COALESCE(
+                     excluded.segment_source_id, captures.segment_source_id
+                 ),
+                 captured_at = excluded.captured_at,
+                 stamp = COALESCE(excluded.stamp, captures.stamp),
+                 ui_map_id = COALESCE(excluded.ui_map_id, captures.ui_map_id),
+                 map_x = COALESCE(excluded.map_x, captures.map_x),
+                 map_y = COALESCE(excluded.map_y, captures.map_y),
+                 image_state = CASE
+                     WHEN captures.image_state = 'stored' THEN 'stored'
+                     ELSE excluded.image_state
+                 END,
+                 last_seen_at = excluded.last_seen_at",
+            params![
+                account_id,
+                marker.source_id,
+                marker.schema,
+                character_id,
+                marker.author,
+                marker.segment,
+                marker.captured_at,
+                marker.stamp,
+                marker.ui_map_id,
+                marker.x,
+                marker.y,
+                state,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Records the images this sync took custody of, whichever sync wrote the rows they belong
+/// to. Run after the markers, so that a capture read for the first time already has a row for
+/// its image to land on.
+fn record_images(
+    transaction: &Transaction<'_>,
+    ingested: &HashMap<String, Ingested>,
+    now: i64,
+) -> Result<(), String> {
+    for (source_id, image) in ingested {
+        transaction
+            .execute(
+                "UPDATE captures SET
+                     image_state = 'stored',
+                     file_path = ?2,
+                     source_name = ?3,
+                     byte_size = ?4,
+                     content_hash = ?5,
+                     ingested_at = ?6,
+                     last_seen_at = ?6
+                 WHERE source_id = ?1",
+                params![
+                    source_id,
+                    image.stored.file_path,
+                    image.source_name,
+                    image.stored.byte_size,
+                    image.stored.content_hash,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Attaches captures to the segments they were taken in, as and when those segments arrive.
+///
+/// The link is text in the file — `character|startedAt|instance`, built the same way the
+/// segment log builds it — and it cannot always be resolved when the capture is read: a
+/// screenshot taken in a segment the client had not finished filing arrives beside a segment
+/// list that does not mention it yet. So resolving is not part of writing the capture. It is
+/// this, run after every sync's segments are in, over every capture still waiting for one.
+fn link_captures(transaction: &Transaction<'_>) -> Result<(), String> {
+    transaction
+        .execute(
+            "UPDATE captures SET segment_id = (
+                 SELECT segments.id FROM segments
+                 WHERE segments.character_id = captures.character_id
+                   AND segments.source_id = captures.segment_source_id
+             )
+             WHERE segment_id IS NULL
+               AND segment_source_id IS NOT NULL
+               AND character_id IS NOT NULL",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /// One account's SavedVariables file, parsed and ready to be written to the database.
 struct Incoming {
     source_key: String,
@@ -1507,9 +1761,15 @@ struct Incoming {
     source_size: Option<i64>,
     segments: Vec<Value>,
     lockouts: LockoutFeed,
+    markers: Vec<Marker>,
 }
 
-pub fn collect(wow_path: &Path, database_path: &Path, now: i64) -> Result<SyncResult, String> {
+pub fn collect(
+    wow_path: &Path,
+    database_path: &Path,
+    now: i64,
+    options: Options,
+) -> Result<SyncResult, String> {
     let mut connection = open_database(database_path)?;
     let mut incoming = Vec::new();
     for path in account_files(wow_path) {
@@ -1554,8 +1814,19 @@ pub fn collect(wow_path: &Path, database_path: &Path, now: i64) -> Result<SyncRe
                 .filter_map(normalized)
                 .collect::<Vec<_>>(),
             lockouts: LockoutFeed::read(&saved),
+            markers: captures::markers(&saved),
         });
     }
+
+    // Before the transaction, on purpose: an image is copied and proved before any row claims
+    // it exists, and the game's own copy is deleted only once that row has been committed.
+    let store_root = store_root(database_path);
+    let markers: Vec<&Marker> = incoming
+        .iter()
+        .flat_map(|account| account.markers.iter())
+        .collect();
+    let ingested = ingest_images(&connection, wow_path, &store_root, &markers)?;
+    drop(markers);
 
     let transaction = connection
         .transaction()
@@ -1579,8 +1850,33 @@ pub fn collect(wow_path: &Path, database_path: &Path, now: i64) -> Result<SyncRe
             }
         }
         sync_lockouts(&transaction, account_id, &account.lockouts, now)?;
+        for marker in &account.markers {
+            let character_id = match marker.character.as_deref() {
+                Some(character) => Some(upsert_character_key(
+                    &transaction,
+                    account_id,
+                    character,
+                    None,
+                    None,
+                    now,
+                )?),
+                None => None,
+            };
+            upsert_capture(&transaction, account_id, character_id, marker, now)?;
+        }
     }
+    record_images(&transaction, &ingested, now)?;
+    link_captures(&transaction)?;
     transaction.commit().map_err(|error| error.to_string())?;
+
+    // Last of all, and only for images a committed row now names. A file deleted here is one
+    // Chronie has already read, copied, hashed, read back and written down.
+    if !options.keep_originals {
+        for image in ingested.values() {
+            let _ = fs::remove_file(&image.original);
+        }
+    }
+
     let segment_count: usize = connection
         .query_row("SELECT COUNT(*) FROM segments", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
@@ -2329,7 +2625,7 @@ ChronieDB = {{ ["segments"] = {{
         )
         .unwrap();
         let database = temp.path().join("data/chronie.sqlite3");
-        let result = collect(&wow, &database, now).unwrap();
+        let result = collect(&wow, &database, now, Options::default()).unwrap();
         assert_eq!(result.added, 2);
         assert_eq!(result.updated, 0);
         assert_eq!(result.segment_count, 2);
@@ -2369,7 +2665,7 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!((appearances, sources), (1, 1));
         drop(connection);
 
-        let unchanged = collect(&wow, &database, now + 1).unwrap();
+        let unchanged = collect(&wow, &database, now + 1, Options::default()).unwrap();
         assert_eq!(unchanged.added, 0);
         assert_eq!(unchanged.updated, 0);
         assert_eq!(unchanged.segment_count, 2);
@@ -2379,7 +2675,7 @@ ChronieDB = {{ ["segments"] = {{
             r#"ChronieDB = { ["segments"] = {} }"#,
         )
         .unwrap();
-        let result = collect(&wow, &database, now + DAY_SECONDS).unwrap();
+        let result = collect(&wow, &database, now + DAY_SECONDS, Options::default()).unwrap();
         assert_eq!(result.segment_count, 2);
         assert_eq!(dashboard(&database).unwrap()["segments"][1]["id"], "old");
     }
@@ -2459,7 +2755,7 @@ ChronieDB = {{ ["segments"] = {{
     fn stores_what_happened_to_an_equipment_set_and_what_each_slot_holds() {
         let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
 
-        collect(&wow, &database, 2_000_100_000).unwrap();
+        collect(&wow, &database, 2_000_100_000, Options::default()).unwrap();
 
         let payload = dashboard(&database).unwrap();
         // Newest first, so the edit leads and the creation follows.
@@ -2485,7 +2781,7 @@ ChronieDB = {{ ["segments"] = {{
     fn reads_what_a_slot_replaced_out_of_the_row_behind_it() {
         let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
 
-        collect(&wow, &database, 2_000_100_000).unwrap();
+        collect(&wow, &database, 2_000_100_000, Options::default()).unwrap();
 
         let payload = dashboard(&database).unwrap();
         let edit = &payload["segments"][0]["equipsetChanges"][0]["items"][0];
@@ -2514,7 +2810,7 @@ ChronieDB = {{ ["segments"] = {{
         "#;
         let (_temp, wow, database) = synthetic_install(cleared);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let item = &dashboard(&database).unwrap()["segments"][0]["equipsetChanges"][0]["items"][0];
         assert_eq!(item["slot"], 1);
@@ -2535,7 +2831,7 @@ ChronieDB = {{ ["segments"] = {{
         "#;
         let (_temp, wow, database) = synthetic_install(empty);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let change = &dashboard(&database).unwrap()["segments"][0]["equipsetChanges"][0];
         assert_eq!(change["kind"], "created");
@@ -2563,7 +2859,7 @@ ChronieDB = {{ ["segments"] = {{
         "#;
         let (_temp, wow, database) = synthetic_install(shared);
 
-        collect(&wow, &database, 2_000_100_000).unwrap();
+        collect(&wow, &database, 2_000_100_000, Options::default()).unwrap();
 
         let payload = dashboard(&database).unwrap();
         // Brann's creation is newest. It must not have inherited Aster's item as its before.
@@ -2577,10 +2873,10 @@ ChronieDB = {{ ["segments"] = {{
     #[test]
     fn does_not_double_a_change_when_the_same_segment_is_synced_again() {
         let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
-        collect(&wow, &database, 2_000_100_000).unwrap();
+        collect(&wow, &database, 2_000_100_000, Options::default()).unwrap();
 
         touch(&wow, EQUIPSET_SEGMENTS);
-        collect(&wow, &database, 2_000_100_001).unwrap();
+        collect(&wow, &database, 2_000_100_001, Options::default()).unwrap();
 
         let connection = open_database(&database).unwrap();
         let changes: i64 = connection
@@ -2609,7 +2905,7 @@ ChronieDB = {{ ["segments"] = {{
         "#;
         let (_temp, wow, database) = synthetic_install(nonsense);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let segment = &dashboard(&database).unwrap()["segments"][0];
         assert_eq!(segment["equipsetChanges"], serde_json::json!([]));
@@ -2622,7 +2918,7 @@ ChronieDB = {{ ["segments"] = {{
     fn gives_a_segment_that_saw_no_set_change_an_empty_list() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         assert_eq!(
             dashboard(&database).unwrap()["segments"][0]["equipsetChanges"],
@@ -2655,7 +2951,7 @@ ChronieDB = {{ ["segments"] = {{
     fn keeps_what_a_gain_left_the_character_holding() {
         let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let segment = &dashboard(&database).unwrap()["segments"][0];
         // Currencies come back ordered by name, so Valorstones leads.
@@ -2680,7 +2976,7 @@ ChronieDB = {{ ["segments"] = {{
     fn says_nothing_at_all_rather_than_zero_when_a_gain_carries_no_holding() {
         let (_temp, wow, database) = synthetic_install(HOLDING_SEGMENT);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let segment = &dashboard(&database).unwrap()["segments"][0];
         let currency = &segment["currencies"][1];
@@ -2740,7 +3036,7 @@ ChronieDB = {{ ["segments"] = {{
             transaction.commit().unwrap();
         }
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let payload = dashboard(&database).unwrap();
         // Newest first, so the segment just collected leads and the old one follows.
@@ -2767,7 +3063,7 @@ ChronieDB = {{ ["segments"] = {{
         "#;
         let (_temp, wow, database) = synthetic_install(keystone);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let segment = &dashboard(&database).unwrap()["segments"][0];
         assert_eq!(segment["keystone"]["level"], 14);
@@ -2785,7 +3081,7 @@ ChronieDB = {{ ["segments"] = {{
     fn stores_encounters_with_their_wipes_and_guesses_a_legacy_raid() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         let segment = &dashboard(&database).unwrap()["segments"][0];
         assert_eq!(segment["encounters"].as_array().unwrap().len(), 2);
@@ -2800,7 +3096,7 @@ ChronieDB = {{ ["segments"] = {{
     #[test]
     fn keeps_manual_activities_and_deletions_across_a_resync() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
         let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
             .as_i64()
             .unwrap();
@@ -2827,7 +3123,7 @@ ChronieDB = {{ ["segments"] = {{
         .unwrap();
 
         touch(&wow, RAID_SEGMENT);
-        collect(&wow, &database, 2_000_000_400).unwrap();
+        collect(&wow, &database, 2_000_000_400, Options::default()).unwrap();
 
         let after = activities_of(&database);
         let kinds: Vec<&str> = after
@@ -2846,7 +3142,7 @@ ChronieDB = {{ ["segments"] = {{
     #[test]
     fn editing_a_guess_adopts_it_so_the_next_sync_leaves_it_alone() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
         let inferred_id = activities_of(&database)[0]["id"].as_i64().unwrap();
 
         update_activity(
@@ -2858,7 +3154,7 @@ ChronieDB = {{ ["segments"] = {{
         )
         .unwrap();
         touch(&wow, RAID_SEGMENT);
-        collect(&wow, &database, 2_000_000_200).unwrap();
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
 
         let after = activities_of(&database);
         assert_eq!(after.len(), 1, "unexpected extra activities: {after:?}");
@@ -2873,7 +3169,7 @@ ChronieDB = {{ ["segments"] = {{
     #[test]
     fn rebuilds_untouched_guesses_on_every_sync() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
         assert_eq!(activities_of(&database)[0]["metadata"]["bossesKilled"], 1);
 
         // The same segment, filed again after the group killed a second boss.
@@ -2884,7 +3180,7 @@ ChronieDB = {{ ["segments"] = {{
                 r#"{ ["id"] = 746, ["name"] = "Ignis", ["success"] = true }"#,
             ),
         );
-        collect(&wow, &database, 2_000_000_100).unwrap();
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
 
         let after = activities_of(&database);
         assert_eq!(after.len(), 1);
@@ -2899,7 +3195,7 @@ ChronieDB = {{ ["segments"] = {{
     #[test]
     fn resetting_a_segment_restores_the_guesses_from_stored_state() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
         let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
             .as_i64()
             .unwrap();
@@ -2937,7 +3233,7 @@ ChronieDB = {{ ["segments"] = {{
               ["upgrades"] = 0, ["durationMs"] = 2400000 } }
         "#;
         let (_temp, wow, database) = synthetic_install(keystone);
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
         let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
             .as_i64()
             .unwrap();
@@ -2971,7 +3267,7 @@ ChronieDB = {{ ["segments"] = {{
             transaction.commit().unwrap();
         }
 
-        collect(&wow, &database, 2_000_000_000).unwrap();
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         assert_eq!(activities_of(&database)[0]["kind"], "legacy_raid");
     }
@@ -2984,7 +3280,7 @@ ChronieDB = {{ ["segments"] = {{
         fs::create_dir_all(&saved).unwrap();
         fs::write(saved.join("chronie.lua"), format!("ChronieDB = {{ {body} }}")).unwrap();
         let database = temp.join("data/chronie.sqlite3");
-        collect(&wow, &database, now).unwrap();
+        collect(&wow, &database, now, Options::default()).unwrap();
         database
     }
 
@@ -3175,7 +3471,7 @@ ChronieDB = {{ ["segments"] = {{
                     ["expiry"] = 2000100000 } } } }"#,
         )
         .unwrap();
-        collect(&wow, &database, 2_000_300_000).unwrap();
+        collect(&wow, &database, 2_000_300_000, Options::default()).unwrap();
 
         assert_eq!(
             lockouts_of(&database)
@@ -3202,7 +3498,7 @@ ChronieDB = {{ ["segments"] = {{
                  ["characters"] = { ["Aster-Vale"] = { } } }"#,
         )
         .unwrap();
-        collect(&wow, &database, 2_000_300_000).unwrap();
+        collect(&wow, &database, 2_000_300_000, Options::default()).unwrap();
 
         assert_eq!(count_of(&database, "lockouts"), 0);
         assert_eq!(count_of(&database, "lockout_activities"), 2);
@@ -3221,7 +3517,7 @@ ChronieDB = {{ ["segments"] = {{
                  ["kind"] = "raid" } } }"#,
         )
         .unwrap();
-        collect(&wow, &database, 2_000_300_000).unwrap();
+        collect(&wow, &database, 2_000_300_000, Options::default()).unwrap();
 
         assert_eq!(cadence_of(&database, "Ulduar"), "weekly");
     }
@@ -3293,12 +3589,332 @@ ChronieDB = {{ ["segments"] = {{
         .unwrap();
         let database = temp.path().join("data/chronie.sqlite3");
 
-        let result = collect(&wow, &database, 2_000_000_000).unwrap();
+        let result = collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
 
         assert_eq!(result.added, 1);
         assert_eq!(count_of(&database, "lockouts"), 1);
         // One character, reached from both directions.
         assert_eq!(count_of(&database, "characters"), 1);
+    }
+
+    /// A segment a capture can name, written the way the addon builds the link:
+    /// `character|startedAt|instance`.
+    const CAPTURE_SEGMENT: &str = r#"
+      { ["id"] = "Aster-Vale|1999990000|Ulduar", ["character"] = "Aster-Vale",
+        ["instance"] = "Ulduar", ["instanceType"] = "raid",
+        ["startedAt"] = 1999990000, ["endedAt"] = 2000000000, ["seconds"] = 10000 }
+    "#;
+
+    /// One capture of that segment, taken at a stamp the tests can name a file after.
+    const CAPTURE_ENTRY: &str = r#"
+      { ["id"] = "TEST|2000000000|1", ["schema"] = 1, ["at"] = 2000000000,
+        ["stamp"] = "111423_120000", ["character"] = "Aster-Vale", ["author"] = "TEST",
+        ["segment"] = "Aster-Vale|1999990000|Ulduar", ["uiMapID"] = 350,
+        ["x"] = 0.25, ["y"] = 0.5, ["hasImage"] = true }
+    "#;
+
+    /// A wow folder with all three of the places a capture lives on disk: the entries store,
+    /// the segments beside it, and the folder the client leaves its screenshots in.
+    fn capture_install(
+        entries_lua: &str,
+        segments_lua: &str,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        fs::create_dir_all(wow.join("WTF/Account/TEST/SavedVariables")).unwrap();
+        fs::create_dir_all(wow.join(captures::GAME_FOLDER)).unwrap();
+        let database = temp.path().join("data/chronie.sqlite3");
+        write_saved(&wow, entries_lua, segments_lua, "");
+        (temp, wow, database)
+    }
+
+    /// The same store rewritten. The trailing note is what makes the file look different to a
+    /// collector that skips a source whose size and timestamp are unchanged.
+    fn write_saved(wow: &Path, entries_lua: &str, segments_lua: &str, note: &str) {
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            format!(
+                r#"ChronieDB = {{ ["segments"] = {{ {segments_lua} }},
+                                  ["entries"] = {{ {entries_lua} }} }} {note}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    /// A file in the game's screenshot folder, under the name the client would give it.
+    fn screenshot(wow: &Path, stamp: &str, bytes: &[u8]) -> PathBuf {
+        let path = wow
+            .join(captures::GAME_FOLDER)
+            .join(format!("WoWScrnShot_{stamp}.jpg"));
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// One capture row: its rowid, what Chronie has of the image, where it put it, and the
+    /// segment it ended up attached to.
+    fn capture_row(database: &Path, source_id: &str) -> (i64, String, Option<String>, Option<i64>) {
+        open_database(database)
+            .unwrap()
+            .query_row(
+                "SELECT id, image_state, file_path, segment_id FROM captures
+                 WHERE source_id = ?1",
+                [source_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+    }
+
+    /// How many images the store is holding, sharded directories and all.
+    fn stored_files(root: &Path) -> usize {
+        let Ok(listing) = fs::read_dir(root) else {
+            return 0;
+        };
+        listing
+            .flatten()
+            .map(|entry| {
+                if entry.path().is_dir() {
+                    stored_files(&entry.path())
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+
+    #[test]
+    fn takes_custody_of_the_image_a_marker_names() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        let original = screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let connection = open_database(&database).unwrap();
+        let (file_path, hash, size, name, map, x, y, segment): (
+            String,
+            String,
+            i64,
+            String,
+            i64,
+            f64,
+            f64,
+            i64,
+        ) = connection
+            .query_row(
+                "SELECT c.file_path, c.content_hash, c.byte_size, c.source_name, c.ui_map_id,
+                        c.map_x, c.map_y, s.id
+                 FROM captures c JOIN segments s ON s.id = c.segment_id",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(size, 19);
+        assert_eq!(name, "WoWScrnShot_111423_120000.jpg");
+        assert_eq!((map, x, y), (350, 0.25, 0.5));
+        assert!(segment > 0, "attached to the segment it was taken in");
+
+        let stored = store_root(&database).join(&file_path);
+        assert_eq!(fs::read(&stored).unwrap(), b"a picture of Ulduar");
+        assert!(
+            file_path.starts_with(&format!("{}/", &hash[..2])),
+            "named for its own contents: {file_path}"
+        );
+        assert!(!original.exists(), "the game's copy is moved, not left");
+    }
+
+    #[test]
+    fn ingests_the_same_capture_only_once_however_often_it_is_read() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let first = capture_row(&database, "TEST|2000000000|1");
+
+        // The same entries and the same segment, read again because something else in the
+        // file changed. The image it names is long gone from the game's folder by now, which
+        // is exactly the trap: nothing here may conclude the image is missing.
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "captures"), 1);
+        // The same rowid, so the row was never deleted and rebuilt the way a segment's
+        // children are — which is the whole reason captures are not one of them.
+        assert_eq!(capture_row(&database, "TEST|2000000000|1"), first);
+        assert_eq!(stored_files(&store_root(&database)), 1);
+    }
+
+    #[test]
+    fn does_not_go_back_for_an_image_it_already_holds() {
+        // With the originals kept, the file a stored capture names is still sitting in the
+        // game's folder, and nothing but the record of having already taken it stops the next
+        // sync reading and hashing it all over again.
+        let keep = Options {
+            keep_originals: true,
+        };
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, keep).unwrap();
+
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_200, keep).unwrap();
+
+        let ingested_at: i64 = open_database(&database)
+            .unwrap()
+            .query_row("SELECT ingested_at FROM captures", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(ingested_at, 2_000_000_100, "taken custody of once");
+    }
+
+    #[test]
+    fn records_a_marker_whose_file_cannot_be_found() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "missing");
+        assert_eq!(file_path, None);
+    }
+
+    #[test]
+    fn looks_again_for_an_image_that_was_not_there_the_first_time() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "missing");
+
+        // Written afterwards, and SavedVariables untouched — so this sync reads no markers at
+        // all and still has to go looking on behalf of the row that is waiting.
+        screenshot(&wow, "111423_120000", b"late");
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored");
+        assert_eq!(
+            fs::read(store_root(&database).join(file_path.unwrap())).unwrap(),
+            b"late"
+        );
+    }
+
+    #[test]
+    fn attaches_a_capture_to_a_segment_that_arrives_after_it() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, "");
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let (_, state, _, segment) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored", "the image does not wait for the segment");
+        assert_eq!(segment, None);
+
+        write_saved(&wow, CAPTURE_ENTRY, CAPTURE_SEGMENT, "-- touched");
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert!(capture_row(&database, "TEST|2000000000|1").3.is_some());
+    }
+
+    #[test]
+    fn keeps_a_capture_after_the_segment_it_named_is_gone() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        open_database(&database)
+            .unwrap()
+            .execute("DELETE FROM segments", [])
+            .unwrap();
+
+        // Unattached, not deleted. The link is a link; the photograph is nobody's child.
+        let (_, state, file_path, segment) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored");
+        assert_eq!(segment, None);
+        assert!(store_root(&database).join(file_path.unwrap()).is_file());
+    }
+
+    #[test]
+    fn records_an_entry_that_asked_for_no_picture() {
+        let note = r#"
+          { ["id"] = "TEST|2000000000|2", ["at"] = 2000000000,
+            ["stamp"] = "111423_120000", ["character"] = "Aster-Vale", ["author"] = "TEST" }
+        "#;
+        let (_temp, wow, database) = capture_install(note, CAPTURE_SEGMENT);
+        let bystander = screenshot(&wow, "111423_120000", b"somebody else's shot");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|2");
+        assert_eq!(state, "none");
+        assert_eq!(file_path, None);
+        assert!(bystander.exists(), "an entry with no image claims no file");
+    }
+
+    #[test]
+    fn leaves_the_players_own_archive_where_it_is() {
+        let (_temp, wow, database) = capture_install("", CAPTURE_SEGMENT);
+        let archive = [
+            screenshot(&wow, "010119_080000", b"a screenshot from 2019"),
+            screenshot(&wow, "070420_211500", b"and one from 2020"),
+            screenshot(&wow, "111423_120000", b"and one from today"),
+        ];
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        // Marker-driven, all the way down. Thousands of files nothing has a marker for are
+        // not orphans to be swept up; ingesting them is a different feature entirely.
+        assert_eq!(count_of(&database, "captures"), 0);
+        assert_eq!(stored_files(&store_root(&database)), 0);
+        assert!(archive.iter().all(|path| path.is_file()));
+    }
+
+    #[test]
+    fn keeps_the_games_own_copy_when_the_setting_asks_it_to() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        let original = screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(
+            &wow,
+            &database,
+            2_000_000_100,
+            Options {
+                keep_originals: true,
+            },
+        )
+        .unwrap();
+
+        let (_, state, file_path, _) = capture_row(&database, "TEST|2000000000|1");
+        assert_eq!(state, "stored");
+        assert_eq!(fs::read(&original).unwrap(), b"a picture of Ulduar");
+        assert_eq!(
+            fs::read(store_root(&database).join(file_path.unwrap())).unwrap(),
+            b"a picture of Ulduar"
+        );
+    }
+
+    #[test]
+    fn migrates_a_database_written_before_captures_were_kept() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..5] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction.pragma_update(None, "user_version", 5_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(capture_row(&database, "TEST|2000000000|1").1, "stored");
     }
 
     #[test]
