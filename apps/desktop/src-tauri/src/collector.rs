@@ -22,6 +22,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0006_captures.sql"),
     include_str!("../migrations/0007_account_rollups.sql"),
     include_str!("../migrations/0008_combat_logs.sql"),
+    include_str!("../migrations/0009_capture_subjects.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1660,8 +1661,8 @@ fn upsert_capture(
             "INSERT INTO captures (
                  account_id, source_id, schema, character_id, author, segment_source_id,
                  captured_at, stamp, ui_map_id, map_x, map_y, image_state,
-                 first_seen_at, last_seen_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+                 trigger_name, achievement_source_id, first_seen_at, last_seen_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
              ON CONFLICT(source_id) DO UPDATE SET
                  account_id = excluded.account_id,
                  schema = excluded.schema,
@@ -1679,6 +1680,10 @@ fn upsert_capture(
                      WHEN captures.image_state = 'stored' THEN 'stored'
                      ELSE excluded.image_state
                  END,
+                 trigger_name = COALESCE(excluded.trigger_name, captures.trigger_name),
+                 achievement_source_id = COALESCE(
+                     excluded.achievement_source_id, captures.achievement_source_id
+                 ),
                  last_seen_at = excluded.last_seen_at",
             params![
                 account_id,
@@ -1693,6 +1698,8 @@ fn upsert_capture(
                 marker.x,
                 marker.y,
                 state,
+                marker.trigger,
+                marker.achievement,
                 now,
             ],
         )
@@ -1752,6 +1759,39 @@ fn link_captures(transaction: &Transaction<'_>) -> Result<(), String> {
              WHERE segment_id IS NULL
                AND segment_source_id IS NOT NULL
                AND character_id IS NOT NULL",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Attaches a capture to the achievement it was taken for.
+///
+/// The same shape as `link_captures` above and for the same first reason — an achievement
+/// earned in a segment the client had not finished filing arrives before the row for it — but
+/// with one difference that matters: this is re-resolved every time rather than only where
+/// the link is still NULL.
+///
+/// `achievements` rows are children of a segment, and `clear_outcomes` deletes and reinserts
+/// the children of every segment the file still describes on every single sync. Their rowids
+/// therefore do not survive one. A link written once and left alone would be pointing at
+/// whatever row happens to hold that number by the next sync, which is a wrong picture
+/// against a real achievement — far worse than no picture at all. So the link is derived
+/// afresh from the achievement id the addon wrote down, which is the only identity here that
+/// does not move.
+///
+/// Run after `link_captures`, because the segment is half of what identifies the achievement.
+fn link_capture_achievements(transaction: &Transaction<'_>) -> Result<(), String> {
+    transaction
+        .execute(
+            "UPDATE captures SET achievement_id = (
+                 SELECT achievements.id FROM achievements
+                 WHERE achievements.segment_id = captures.segment_id
+                   AND achievements.achievement_id = captures.achievement_source_id
+                 ORDER BY achievements.position
+                 LIMIT 1
+             )
+             WHERE achievement_source_id IS NOT NULL",
             [],
         )
         .map_err(|error| error.to_string())?;
@@ -2460,6 +2500,7 @@ pub fn collect(
     }
     record_images(&transaction, &ingested, now)?;
     link_captures(&transaction)?;
+    link_capture_achievements(&transaction)?;
     transaction.commit().map_err(|error| error.to_string())?;
 
     // After the segments are in, because attaching a position to the visit it was recorded
@@ -4610,6 +4651,192 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(state, "stored");
         assert_eq!(segment, None);
         assert!(store_root(&database).join(file_path.unwrap()).is_file());
+    }
+
+    /// The same segment, with the account-first achievement that earned the photograph in it.
+    /// A second achievement beside it, so that a link landing on "the segment's achievements"
+    /// rather than on one of them is a test failure rather than a coincidence.
+    const CAPTURE_SEGMENT_WITH_ACHIEVEMENTS: &str = r#"
+      { ["id"] = "Aster-Vale|1999990000|Ulduar", ["character"] = "Aster-Vale",
+        ["instance"] = "Ulduar", ["instanceType"] = "raid",
+        ["startedAt"] = 1999990000, ["endedAt"] = 2000000000, ["seconds"] = 10000,
+        ["achievements"] = {
+          { ["id"] = 4000, ["name"] = "Glory of the Raider", ["at"] = 1999995000,
+            ["accountFirst"] = false },
+          { ["id"] = 4001, ["name"] = "Observed", ["at"] = 2000000000,
+            ["accountFirst"] = true } } }
+    "#;
+
+    /// The same segment with another beside it, which is what makes a rebuild actually
+    /// renumber. SQLite hands a reinserted row `max(rowid) + 1`, so a segment rebuilt on its
+    /// own gets its old numbers straight back and one rebuilt next to a neighbour does not —
+    /// and a database with one segment in it is not the case worth being right about.
+    const CAPTURE_SEGMENTS_SIDE_BY_SIDE: &str = r#"
+      { ["id"] = "Aster-Vale|1999990000|Ulduar", ["character"] = "Aster-Vale",
+        ["instance"] = "Ulduar", ["instanceType"] = "raid",
+        ["startedAt"] = 1999990000, ["endedAt"] = 2000000000, ["seconds"] = 10000,
+        ["achievements"] = {
+          { ["id"] = 4000, ["name"] = "Glory of the Raider", ["at"] = 1999995000,
+            ["accountFirst"] = false },
+          { ["id"] = 4001, ["name"] = "Observed", ["at"] = 2000000000,
+            ["accountFirst"] = true } } },
+      { ["id"] = "Aster-Vale|1999980000|Naxxramas", ["character"] = "Aster-Vale",
+        ["instance"] = "Naxxramas", ["instanceType"] = "raid",
+        ["startedAt"] = 1999980000, ["endedAt"] = 1999989000, ["seconds"] = 9000,
+        ["achievements"] = {
+          { ["id"] = 4002, ["name"] = "The Undying", ["at"] = 1999989000,
+            ["accountFirst"] = true } } }
+    "#;
+
+    /// A capture Chronie took by itself, filed against the second of those achievements.
+    const CAPTURE_ENTRY_OF_ACHIEVEMENT: &str = r#"
+      { ["id"] = "TEST|2000000000|1", ["schema"] = 1, ["at"] = 2000000000,
+        ["stamp"] = "111423_120000", ["character"] = "Aster-Vale", ["author"] = "TEST",
+        ["segment"] = "Aster-Vale|1999990000|Ulduar", ["uiMapID"] = 350,
+        ["x"] = 0.25, ["y"] = 0.5, ["hasImage"] = true,
+        ["trigger"] = "accountFirstAchievement", ["achievement"] = 4001 }
+    "#;
+
+    /// What a capture says it is of: the rule that fired it, the achievement id the addon
+    /// wrote down, and the achievement row that id resolved to.
+    fn capture_subject(
+        database: &Path,
+        source_id: &str,
+    ) -> (Option<String>, Option<i64>, Option<i64>) {
+        open_database(database)
+            .unwrap()
+            .query_row(
+                "SELECT trigger_name, achievement_source_id, achievement_id FROM captures
+                 WHERE source_id = ?1",
+                [source_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn files_an_automatic_capture_against_the_achievement_it_was_taken_for() {
+        let (_temp, wow, database) = capture_install(
+            CAPTURE_ENTRY_OF_ACHIEVEMENT,
+            CAPTURE_SEGMENT_WITH_ACHIEVEMENTS,
+        );
+        screenshot(&wow, "111423_120000", b"a picture of Observed");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let (trigger, source, achievement) = capture_subject(&database, "TEST|2000000000|1");
+        assert_eq!(trigger.as_deref(), Some("accountFirstAchievement"));
+        assert_eq!(source, Some(4001));
+
+        // The one it names, not merely one of the segment's.
+        let earned: i64 = open_database(&database)
+            .unwrap()
+            .query_row(
+                "SELECT achievements.achievement_id FROM achievements
+                 JOIN captures ON captures.achievement_id = achievements.id",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(earned, 4001);
+        assert!(achievement.is_some());
+    }
+
+    /// A pressed capture carries no trigger, and that absence is what tells the two apart.
+    #[test]
+    fn leaves_a_pressed_capture_saying_it_is_of_nothing() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY, CAPTURE_SEGMENT);
+        screenshot(&wow, "111423_120000", b"a picture of Ulduar");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(
+            capture_subject(&database, "TEST|2000000000|1"),
+            (None, None, None)
+        );
+    }
+
+    /// The reason the link is re-resolved rather than written once: `clear_outcomes` deletes
+    /// and reinserts the achievements of every segment the file still describes, on every
+    /// single sync. Their rowids do not survive one, so a link left alone would end up
+    /// pointing at whatever row inherited its number — a real achievement, and the wrong one.
+    #[test]
+    fn follows_the_achievement_through_the_rebuild_every_sync_does_to_it() {
+        let (_temp, wow, database) = capture_install(
+            CAPTURE_ENTRY_OF_ACHIEVEMENT,
+            CAPTURE_SEGMENTS_SIDE_BY_SIDE,
+        );
+        screenshot(&wow, "111423_120000", b"a picture of Observed");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let first = capture_subject(&database, "TEST|2000000000|1").2.unwrap();
+
+        write_saved(
+            &wow,
+            CAPTURE_ENTRY_OF_ACHIEVEMENT,
+            CAPTURE_SEGMENTS_SIDE_BY_SIDE,
+            "-- touched",
+        );
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        let rebuilt = capture_subject(&database, "TEST|2000000000|1").2.unwrap();
+        assert_ne!(
+            rebuilt, first,
+            "the rebuild was expected to move the row this test is about"
+        );
+        let earned: i64 = open_database(&database)
+            .unwrap()
+            .query_row(
+                "SELECT achievement_id FROM achievements WHERE id = ?1",
+                [rebuilt],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(earned, 4001, "the link followed the row rather than the id");
+    }
+
+    /// Same reason a capture can arrive before its segment: the achievement is filed by the
+    /// segment list, and a marker written in a session whose segment is still open beats it.
+    #[test]
+    fn attaches_a_capture_to_an_achievement_that_arrives_after_it() {
+        let (_temp, wow, database) = capture_install(CAPTURE_ENTRY_OF_ACHIEVEMENT, "");
+        screenshot(&wow, "111423_120000", b"a picture of Observed");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        let (trigger, source, achievement) = capture_subject(&database, "TEST|2000000000|1");
+        assert_eq!(trigger.as_deref(), Some("accountFirstAchievement"));
+        assert_eq!(source, Some(4001), "the id it is waiting to resolve");
+        assert_eq!(achievement, None);
+
+        write_saved(
+            &wow,
+            CAPTURE_ENTRY_OF_ACHIEVEMENT,
+            CAPTURE_SEGMENT_WITH_ACHIEVEMENTS,
+            "-- touched",
+        );
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert!(capture_subject(&database, "TEST|2000000000|1").2.is_some());
+    }
+
+    /// A segment ages out of the rolling week and takes its achievements with it. The
+    /// photograph is nobody's child: it is left unattached, and it still says what it was of.
+    #[test]
+    fn keeps_a_capture_after_the_achievement_it_named_is_gone() {
+        let (_temp, wow, database) = capture_install(
+            CAPTURE_ENTRY_OF_ACHIEVEMENT,
+            CAPTURE_SEGMENT_WITH_ACHIEVEMENTS,
+        );
+        screenshot(&wow, "111423_120000", b"a picture of Observed");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let connection = open_database(&database).unwrap();
+        connection.execute("DELETE FROM achievements", []).unwrap();
+
+        let (trigger, source, achievement) = capture_subject(&database, "TEST|2000000000|1");
+        assert_eq!(achievement, None, "the foreign key let go rather than held");
+        assert_eq!(trigger.as_deref(), Some("accountFirstAchievement"));
+        assert_eq!(source, Some(4001));
+        assert_eq!(count_of(&database, "captures"), 1);
     }
 
     #[test]
