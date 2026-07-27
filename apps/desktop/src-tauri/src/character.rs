@@ -73,6 +73,22 @@ struct Rect {
     height: u32,
 }
 
+/// What compositing an appearance actually managed.
+///
+/// The count is not the interesting half; the sentences are. Every one of them is a thing the
+/// appearance says it paints and this install could not — and until this existed, all of them
+/// were a `continue` in a loop, which is why a body with nothing on it and a body the game
+/// paints nothing for looked the same from the outside. The window shows them to the reader,
+/// so they are worded for somebody looking at a character that is barer than they expected
+/// rather than for somebody reading a log.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Painting {
+    /// How many of the appearance's textures landed in the atlas.
+    pub painted: usize,
+    /// One line per part of the body that stayed as it was, saying why.
+    pub missing: Vec<String>,
+}
+
 /// Where each `ComponentSection` lands, for `CharComponentTextureLayoutID` 104.
 ///
 /// Read off `CharComponentTextureSections` on build 12.0.5.67 and tabulated in
@@ -185,23 +201,35 @@ impl Atlas {
     /// A texture this install cannot produce leaves its part of the body bare rather than
     /// failing the whole character: a chestpiece whose lower torso is missing is still most of
     /// what the reader asked to see, and the alternative is an error where a body should be.
-    pub fn wear(&mut self, files: &dyn GameFiles, textures: &[ComponentTexture]) {
+    pub fn wear(&mut self, files: &dyn GameFiles, textures: &[ComponentTexture]) -> Painting {
+        let mut report = Painting::default();
         for texture in textures {
             let Some(rect) = rect_of(texture.section) else {
+                // Section 8, and nothing else. The layout has nowhere to put it, which is a
+                // fact about this body rather than a loss the reader could act on, so it is
+                // dropped as quietly as it always was.
                 continue;
             };
-            let Ok(decoded) = files
+            let decoded = match files
                 .read(texture.file)
                 .and_then(|blp| pixels_of(&blp, ATLAS_WIDTH))
-            else {
-                continue;
+            {
+                Ok(decoded) => decoded,
+                Err(why) => {
+                    report
+                        .missing
+                        .push(format!("{}: {why}", name_of(texture.section)));
+                    continue;
+                }
             };
             let scaled =
                 image::imageops::resize(&decoded, rect.width, rect.height, FilterType::Triangle);
             // `overlay` composites source-over, which is the blend the paragraph above is
             // about; `replace` is the copy that would take the holes with it.
             image::imageops::overlay(&mut self.pixels, &scaled, i64::from(rect.x), i64::from(rect.y));
+            report.painted += 1;
         }
+        report
     }
 
     /// The atlas as PNG bytes, which is the one picture format a `.glb` carries and a browser
@@ -217,6 +245,25 @@ impl Atlas {
             )
             .map_err(|error| format!("the body atlas would not encode: {error}"))?;
         Ok(png)
+    }
+}
+
+/// What a reader would call the part of the body a section covers.
+///
+/// The layout numbers them and the reader does not, so a sentence about section 6 says nothing
+/// to the person looking at the legs it did not paint.
+fn name_of(section: u32) -> &'static str {
+    match section {
+        0 => "the upper arms",
+        1 => "the lower arms",
+        2 => "the hands",
+        3 => "the upper torso",
+        4 => "the lower torso",
+        5 => "the upper legs",
+        6 => "the lower legs",
+        7 => "the feet",
+        9 | 10 => "the scalp",
+        _ => "one part of the body",
     }
 }
 
@@ -251,13 +298,43 @@ pub fn worn_model_of(
 ) -> Result<Value, String> {
     let worn = crate::worn::of(files, display_info_id, display_type)?;
     if worn.is_empty() {
-        return Ok(serde_json::json!({ "displayInfoId": display_info_id, "model": Value::Null }));
+        return Ok(serde_json::json!({
+            "displayInfoId": display_info_id,
+            "model": Value::Null,
+            "missing": Vec::<String>::new(),
+        }));
     }
-    let glb = glb_of(files, Some(&worn))?;
+    let (glb, painting) = painted_glb_of(files, Some(&worn))?;
     Ok(serde_json::json!({
         "displayInfoId": display_info_id,
         "model": data_url("model/gltf-binary", &glb),
+        "missing": unshown(&worn, &painting),
     }))
+}
+
+/// Everything the appearance says it does to the body and this install could not show.
+///
+/// Three ways that happens and the reader can tell none of them apart by looking, so each says
+/// which part of the body it cost and why: a section the game's tables put no file behind, a
+/// file that would not read or decode, and — the quiet one — an appearance whose whole
+/// texture chain came back empty while its geosets did not. That last is a character wearing
+/// the *shape* of a piece of armour in the colour of bare skin, which is exactly the thing
+/// nobody could account for before this said so.
+fn unshown(worn: &Worn, painting: &Painting) -> Vec<String> {
+    let mut missing: Vec<String> = worn
+        .unpaintable
+        .iter()
+        .map(|section| format!("{}: the game's tables name no texture for it", name_of(*section)))
+        .collect();
+    missing.extend(painting.missing.iter().cloned());
+    if worn.textures.is_empty() && !worn.geosets.is_empty() {
+        missing.push(
+            "this appearance changes the shape of the body and paints nothing on it: the game's \
+             tables give it no textures at all"
+                .into(),
+        );
+    }
+    missing
 }
 
 /// The `.glb` bytes themselves — which is what `dump_model` writes to a file.
@@ -265,6 +342,14 @@ pub fn worn_model_of(
 /// `worn` is the one appearance being shown, when there is one. Nothing else about the body
 /// changes with it: the same mesh, the same UVs, the same atlas, one layer deeper.
 pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
+    painted_glb_of(files, worn).map(|(glb, _)| glb)
+}
+
+/// The same, keeping what the compositing managed — which is what the window is told.
+pub fn painted_glb_of(
+    files: &dyn GameFiles,
+    worn: Option<&Worn>,
+) -> Result<(Vec<u8>, Painting), String> {
     let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
     let skin = model
         .skin_file_data_id()
@@ -276,18 +361,20 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
 
     // No base skin: see `Atlas::base` for what is missing and why.
     let mut atlas = Atlas::unpainted();
-    if let Some(worn) = worn {
-        atlas.wear(files, &worn.textures);
-    }
+    let painting = match worn {
+        Some(worn) => atlas.wear(files, &worn.textures),
+        None => Painting::default(),
+    };
     let painted = atlas.png()?;
 
-    glb::write(&mesh, &|paint| match paint {
+    let glb = glb::write(&mesh, &|paint| match paint {
         // The model's own textures, which on a body are the few things not customized.
         Paint::File(fdid) => decode_file(files, fdid),
         Paint::Supplied(BODY_TEXTURE) => Some(painted.clone()),
         // Hair, eyes and jewelry: real texture types this composites nothing for.
         Paint::Supplied(_) => None,
-    })
+    })?;
+    Ok((glb, painting))
 }
 
 /// The mesh with only the parts a body wearing this — or nothing — draws.
@@ -640,6 +727,78 @@ mod tests {
         // The shirt's only texture is a file the fixture directory deliberately omits.
         let atlas = atlas_of((900_008, 10));
         assert_eq!(middle_of(&atlas, 3), UNPAINTED);
+    }
+
+    // And says so. Bare is the right thing to draw and the wrong thing to draw silently: a
+    // reader looking at an unpainted torso cannot tell a file this install lacks from an
+    // appearance the game paints nothing for, and until this was reported neither could
+    // anybody else without running a tool over the install.
+    #[test]
+    fn says_which_part_of_the_body_a_texture_it_could_not_read_cost() {
+        let files = fixture_files();
+        let worn = crate::worn::of(&files, 900_008, 2).unwrap();
+        let report = Atlas::unpainted().wear(&files, &worn.textures);
+        assert_eq!(report.painted, 0);
+        assert_eq!(report.missing.len(), 1, "{:?}", report.missing);
+        assert!(report.missing[0].starts_with("the upper torso: "), "{:?}", report.missing);
+    }
+
+    // The section the layout has nowhere to put is the one silence that stays: it costs the
+    // reader nothing and there is nothing they could do about it. The boots carry one, and
+    // the two sections that do land are still counted.
+    #[test]
+    fn keeps_quiet_about_the_section_this_body_has_no_room_for() {
+        let files = fixture_files();
+        let worn = crate::worn::of(&files, BOOTS.0, BOOTS.1).unwrap();
+        let report = Atlas::unpainted().wear(&files, &worn.textures);
+        assert_eq!(report.painted, 2);
+        assert_eq!(report.missing, Vec::<String>::new());
+    }
+
+    // What the window is handed, which is where all of this was going: the model, and every
+    // part of the body the appearance says it paints that this install could not.
+    #[test]
+    fn tells_the_window_what_it_could_not_paint() {
+        let answer = worn_model_of(&fixture_files(), 900_008, 2).unwrap();
+        assert!(answer["model"].is_string());
+        let missing = answer["missing"].as_array().expect("the answer carries the list");
+        assert_eq!(missing.len(), 1);
+        assert!(missing[0].as_str().unwrap().starts_with("the upper torso: "));
+
+        // An appearance that paints everything it names says nothing, rather than saying so.
+        assert_eq!(
+            worn_model_of(&fixture_files(), ROBE.0, ROBE.1).unwrap()["missing"],
+            serde_json::json!([])
+        );
+    }
+
+    // The quiet one, and the reason the sentence exists at all: an appearance whose geosets
+    // switch geometry on and whose texture chain comes back empty. That is a character wearing
+    // the shape of a piece of armour in the colour of bare skin — which is what a body with
+    // boots on and no colour anywhere actually is, and it used to arrive with no explanation.
+    #[test]
+    fn says_so_when_an_appearance_changes_the_shape_of_the_body_and_paints_nothing() {
+        // The helm's display drives a geoset and has no row in `ItemDisplayInfoMaterialRes`.
+        let worn = crate::worn::of(&fixture_files(), 900_001, 0).unwrap();
+        assert!(worn.textures.is_empty() && !worn.geosets.is_empty());
+        let missing = unshown(&worn, &Painting::default());
+        assert_eq!(missing.len(), 1);
+        assert!(missing[0].contains("paints nothing on it"), "{missing:?}");
+    }
+
+    // A section the game's tables name and no file can be found for is the third way, and it
+    // is the one that says which part of the body went without rather than only that one did.
+    #[test]
+    fn names_the_part_of_the_body_no_file_could_be_found_for() {
+        let worn = Worn {
+            textures: Vec::new(),
+            geosets: Vec::new(),
+            unpaintable: vec![7],
+        };
+        assert_eq!(
+            unshown(&worn, &Painting::default()),
+            vec!["the feet: the game's tables name no texture for it"]
+        );
     }
 
     // The whole module as the window asks for it: a body with an appearance on it, still one

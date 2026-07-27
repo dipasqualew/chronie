@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { framingDistance, glbBytes, previewFor, REASONS, type Previewable } from "./modelPreview";
+import {
+  framingDistance,
+  glbBytes,
+  previewFor,
+  REASONS,
+  wornNote,
+  type Previewable,
+} from "./modelPreview";
 
 /** One appearance with only the fields a test cares about spelled out. */
 const appearance = (fields: Partial<Previewable> = {}): Previewable => ({
@@ -90,6 +97,28 @@ describe("glbBytes", () => {
   it("refuses anything that is not a model", () => {
     expect(() => glbBytes("data:image/png;base64,iVBORw0KGgo=")).toThrow(/not a model/);
     expect(() => glbBytes("")).toThrow(/not a model/);
+  });
+});
+
+describe("wornNote", () => {
+  // The ordinary case, which is most of them: it is worn, and there is nothing to explain.
+  it("says only that it is worn when the whole appearance was painted", () => {
+    expect(wornNote([])).toBe(REASONS.worn);
+  });
+
+  // The case this exists for. A body wearing the shape of a piece of armour in the colour of
+  // bare skin is indistinguishable from a working one, from an install missing a file, and
+  // from a bug — and the reader cannot tell which without being told.
+  it("says which parts of the body went unpainted, in the backend's own words", () => {
+    const note = wornNote(["the feet: the game's tables name no texture for it"]);
+    expect(note).toContain(REASONS.worn);
+    expect(note).toContain("One part of the body could not be painted");
+    expect(note).toContain("the feet: the game's tables name no texture for it");
+  });
+
+  it("counts them when there is more than one", () => {
+    expect(wornNote(["the feet: gone", "the hands: gone"]))
+      .toContain("2 parts of the body could not be painted — the feet: gone; the hands: gone.");
   });
 });
 

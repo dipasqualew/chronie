@@ -24,7 +24,7 @@
  */
 
 import { escapeHtml, plural } from "./format";
-import { glbBytes, previewFor, REASONS } from "./modelPreview";
+import { glbBytes, previewFor, REASONS, wornNote } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
 import { classLabel, expansionName, patchName } from "./transmog";
 import type {
@@ -174,7 +174,7 @@ export function createTransmogModal(
   const models = new Map<number, string | null>();
   // The same, for the bodies wearing one appearance. Kept apart from the models above because
   // a display id means a different picture in each: the item alone, and the item on somebody.
-  const wornModels = new Map<number, string | null>();
+  const wornModels = new Map<number, { model: string | null; missing: string[] }>();
   // The bare body, asked for once and kept for as long as the app runs. It is one model for
   // every set there is, and the read behind it is the game's own storage.
   let character: Promise<CharacterModelPayload> | null = null;
@@ -292,23 +292,39 @@ export function createTransmogModal(
     // The two are the same errand with different answers behind them: read one `.glb`, put it
     // on the stage, and fall back to the icon if there is nothing to put there.
     const worn = preview.kind === "worn";
-    const known = worn ? wornModels : models;
-    const cached = known.get(preview.displayInfoId);
-    if (cached !== undefined) {
-      void showModel(row, cached, mine, worn);
-      return;
+    if (worn) {
+      const cached = wornModels.get(preview.displayInfoId);
+      if (cached !== undefined) {
+        void showModel(row, cached.model, mine, true, cached.missing);
+        return;
+      }
+    } else {
+      const cached = models.get(preview.displayInfoId);
+      if (cached !== undefined) {
+        void showModel(row, cached, mine, false);
+        return;
+      }
     }
 
     setState("loading", worn
       ? `Putting ${row.label.toLowerCase()} on the character…`
       : `Reading the model of ${row.label.toLowerCase()}…`);
-    const loading = worn
-      ? loadWorn(preview.displayInfoId, preview.displayType)
-      : loadModel(preview.displayInfoId);
-    void loading
+    if (worn) {
+      void loadWorn(preview.displayInfoId, preview.displayType)
+        .then((payload) => {
+          const missing = payload.missing || [];
+          wornModels.set(preview.displayInfoId, { model: payload.model, missing });
+          if (mine === asked) void showModel(row, payload.model, mine, true, missing);
+        })
+        .catch((error: unknown) => {
+          if (mine === asked) still(row, message(error));
+        });
+      return;
+    }
+    void loadModel(preview.displayInfoId)
       .then((payload) => {
-        known.set(preview.displayInfoId, payload.model);
-        if (mine === asked) void showModel(row, payload.model, mine, worn);
+        models.set(preview.displayInfoId, payload.model);
+        if (mine === asked) void showModel(row, payload.model, mine, false);
       })
       .catch((error: unknown) => {
         if (mine === asked) still(row, message(error));
@@ -321,6 +337,7 @@ export function createTransmogModal(
     glb: string | null,
     mine: number,
     worn: boolean,
+    missing: string[] = [],
   ): Promise<void> {
     // Nothing to show: the game gives this install no model for the appearance, or nothing it
     // could put on a character. The icon and a sentence are what is left either way.
@@ -328,7 +345,7 @@ export function createTransmogModal(
     // Either the model would not load or the machine has no working 3D at all — a remote
     // desktop, a virtual machine, a driver the browser has blocklisted. Both leave the reader
     // better off with the icon and a sentence than with an empty rectangle.
-    const note = worn ? REASONS.worn : "Drag to turn it.";
+    const note = worn ? wornNote(missing) : "Drag to turn it.";
     await onStage(glb, mine, worn ? "worn" : "model", note, (error) => still(row, message(error)));
   }
 

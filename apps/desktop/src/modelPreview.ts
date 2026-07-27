@@ -30,6 +30,25 @@ export const REASONS = {
   unpaintable: "This install holds nothing to paint this slot onto the character with.",
 } as const;
 
+/**
+ * What to say under a character wearing one appearance.
+ *
+ * Ordinarily just that it is worn. When the backend could not put some of it on the body it
+ * says which parts and why, because the alternative is what this app used to do: draw a
+ * character in the shape of a piece of armour and the colour of bare skin, and leave the
+ * reader to work out whether that was the armour, the install, or a bug. None of those three
+ * looks any different from the others, and only the app is in a position to tell them apart.
+ *
+ * The reasons are the backend's own words rather than a code translated here — they name a
+ * part of the body and the thing that went wrong with it, and a second copy of that vocabulary
+ * on this side would only be a second place for it to go stale.
+ */
+export function wornNote(missing: string[]): string {
+  if (missing.length === 0) return REASONS.worn;
+  const parts = missing.length === 1 ? "One part" : `${missing.length} parts`;
+  return `${REASONS.worn} ${parts} of the body could not be painted — ${missing.join("; ")}.`;
+}
+
 /** The appearances a preview needs to tell apart, which is less than a row carries. */
 export interface Previewable {
   displayType: number;

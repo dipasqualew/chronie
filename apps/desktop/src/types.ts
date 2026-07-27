@@ -336,7 +336,20 @@ export interface TransmogModelPayload {
  * to the variants the appearance drives. Which is the only way the game itself draws a
  * chestpiece: there is no chestpiece, there is a character wearing one.
  */
-export type WornModelPayload = TransmogModelPayload;
+export interface WornModelPayload extends TransmogModelPayload {
+  /**
+   * Everything the appearance says it does to the body and this install could not show, one
+   * sentence per part of the body, ready to be read out.
+   *
+   * Empty is the ordinary answer. What it is not is a synonym for "fine": a chestpiece can
+   * arrive with a model, switch every geoset it drives, and paint none of them, and the
+   * difference between that and a working one is nothing a reader could see. So the backend
+   * says which parts went without and why — a section its tables name no texture for, a file
+   * this install does not hold, a texture that would not decode — rather than compositing what
+   * it can and leaving the rest to be noticed.
+   */
+  missing: string[];
+}
 
 /**
  * The character an appearance is worn on, bare, as a `.glb` in a data URL.

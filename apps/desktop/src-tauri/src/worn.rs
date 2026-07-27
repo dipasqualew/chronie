@@ -147,15 +147,27 @@ pub struct Geoset {
 pub struct Worn {
     pub textures: Vec<ComponentTexture>,
     pub geosets: Vec<Geoset>,
+    /// The sections the appearance says it paints and this install can put no file behind.
+    ///
+    /// Kept rather than dropped because the reader is looking at the result: a body barer
+    /// than the icon beside it is a question, and an app that cannot answer it sends somebody
+    /// to run a tool. A section in here is one `TextureFileData` names no texture for at all,
+    /// which is a hole in the chain rather than a texture that would not decode — that one is
+    /// [`crate::character::Atlas::wear`]'s to report.
+    pub unpaintable: Vec<u32>,
 }
 
 impl Worn {
     /// Whether this install can say anything at all about how the appearance is worn.
     ///
     /// Empty is an ordinary answer rather than a failure: the game encrypts the displays of
-    /// content it has not shipped, and a slot whose only texture was painted for another body
-    /// resolves to nothing. Either way there is nothing to put on the character, and the
-    /// window is better off showing the appearance's icon.
+    /// content it has not shipped, and a build whose tables this app cannot follow says
+    /// nothing about a display it does hold. Either way there is nothing to put on the
+    /// character, and the window is better off showing the appearance's icon.
+    ///
+    /// [`Worn::unpaintable`] is not part of it. A section this install can put no file behind
+    /// is a thing the appearance *does* and this install cannot show, which is worth saying
+    /// out loud rather than counting as silence.
     pub fn is_empty(&self) -> bool {
         self.textures.is_empty() && self.geosets.is_empty()
     }
@@ -168,10 +180,10 @@ impl Worn {
 /// rather than from another table, because the appearance is what knows its own slot.
 pub fn of(files: &dyn GameFiles, display_info_id: u32, display_type: u32) -> Result<Worn, String> {
     let materials = sections(files, display_info_id)?;
-    let textures = if materials.is_empty() {
+    let (textures, unpaintable) = if materials.is_empty() {
         // Neither of the two tables below is worth opening for an appearance that paints
         // nothing: `TextureFileData` is a row per texture the client owns.
-        Vec::new()
+        (Vec::new(), Vec::new())
     } else {
         resolve(files, &materials)?
     };
@@ -183,7 +195,11 @@ pub fn of(files: &dyn GameFiles, display_info_id: u32, display_type: u32) -> Res
         .map(|display| geosets_of(&display, display_type))
         .unwrap_or_default();
 
-    Ok(Worn { textures, geosets })
+    Ok(Worn {
+        textures,
+        geosets,
+        unpaintable,
+    })
 }
 
 /// The sections an appearance paints, as `(section, material resource)`.
@@ -208,8 +224,11 @@ fn sections(files: &dyn GameFiles, display_info_id: u32) -> Result<Vec<(u32, u32
     Ok(found)
 }
 
-/// The one texture per section that was painted for this body.
-fn resolve(files: &dyn GameFiles, materials: &[(u32, u32)]) -> Result<Vec<ComponentTexture>, String> {
+/// The one texture per section that was painted for this body, and the sections with none.
+fn resolve(
+    files: &dyn GameFiles,
+    materials: &[(u32, u32)],
+) -> Result<(Vec<ComponentTexture>, Vec<u32>), String> {
     let textures = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
     // Every file each material names, lowest first — which is the order the ranking below
     // falls back on when nothing distinguishes two candidates.
@@ -239,16 +258,31 @@ fn resolve(files: &dyn GameFiles, materials: &[(u32, u32)]) -> Result<Vec<Compon
         })
         .collect();
 
-    Ok(materials
-        .iter()
-        .filter_map(|(section, material)| {
-            let file = for_this_body(candidates.get(material)?, &bodies)?;
-            Some(ComponentTexture {
+    Ok(chosen(materials, &candidates, &bodies))
+}
+
+/// Which file each section is painted with, given everything the tables said.
+///
+/// Separated from the reading above so that it can be held to account without a game: it is
+/// the half where a wrong answer is a bare body rather than an error, and the tables it reads
+/// are two hundred thousand rows nobody can put in a test.
+fn chosen(
+    materials: &[(u32, u32)],
+    candidates: &HashMap<u32, Vec<u32>>,
+    bodies: &HashMap<u32, (u32, u32, u32)>,
+) -> (Vec<ComponentTexture>, Vec<u32>) {
+    let mut textures = Vec::new();
+    let mut unpaintable = Vec::new();
+    for (section, material) in materials {
+        match candidates.get(material).and_then(|files| for_this_body(files, bodies)) {
+            Some(file) => textures.push(ComponentTexture {
                 section: *section,
                 file,
-            })
-        })
-        .collect())
+            }),
+            None => unpaintable.push(*section),
+        }
+    }
+    (textures, unpaintable)
 }
 
 /// Which of a material's textures was painted for the body this app draws.
@@ -259,6 +293,20 @@ fn resolve(files: &dyn GameFiles, materials: &[(u32, u32)]) -> Result<Vec<Compon
 ///
 /// A candidate the table says nothing about is the fallback rather than a reject, and it is
 /// what most of the game's armour is: one texture, no row, worn by everybody.
+///
+/// **And a texture the table keeps for another body is the last resort rather than a reject**,
+/// which is a deliberate reversal: this used to leave the section unpainted rather than dress
+/// a Human Female in a Human Male's chest. Two things say the other way round is better. The
+/// visible one is that the sections of a body are the same rectangles whichever body they were
+/// painted for, so the failure is slightly wrong art in the right place, against a bare limb.
+/// The load-bearing one is that the three columns this decision is made on are the community's
+/// and have never been read off an install — `docs/game-files.md` says so — so a build that
+/// moved them turns every candidate into somebody else's and paints nothing at all. That is
+/// precisely the fault this cannot be allowed to have: silent, total, and looking exactly like
+/// an appearance that has no textures.
+///
+/// Which is not a reason to stop wanting the columns checked. It is a reason for being wrong
+/// about them to cost a shade of armour rather than the whole character.
 fn for_this_body(candidates: &[u32], bodies: &HashMap<u32, (u32, u32, u32)>) -> Option<u32> {
     let mut best: Option<(u32, u32)> = None;
     for file in candidates {
@@ -276,6 +324,7 @@ fn for_this_body(candidates: &[u32], bodies: &HashMap<u32, (u32, u32, u32)>) -> 
     }
     best.map(|(_, file)| file)
         .or_else(|| candidates.iter().find(|file| !bodies.contains_key(file)).copied())
+        .or_else(|| candidates.first().copied())
 }
 
 /// The geosets a display switches on, for the slot it is worn in.
@@ -408,15 +457,46 @@ mod tests {
         assert!(painted(&worn(ROBE, CHEST)).contains(&(3, 151_006)));
     }
 
-    // The other side of the same table: a material whose only texture was painted for a body
-    // this is not leaves that section unpainted, rather than dressing a Human Female in it.
+    // The other side of the same table, and the one this module changed its mind about: a
+    // material whose only texture the game marks for another body is painted anyway. The
+    // sections are the same rectangles whichever body a texture was authored for, so this is
+    // slightly wrong art where there used to be a bare hand — and if the three columns the
+    // judgement rests on ever move, it is the difference between armour in the wrong shade and
+    // a character with nothing on it.
     #[test]
-    fn paints_nothing_where_the_only_texture_belongs_to_another_body() {
+    fn paints_another_body_s_texture_rather_than_leaving_a_section_bare() {
         let gloves = worn(GLOVES, HANDS);
-        assert_eq!(painted(&gloves), vec![]);
+        assert_eq!(painted(&gloves), vec![(2, 151_012)]);
+        assert!(gloves.unpaintable.is_empty());
         // The groups it drives are still read and still answered for: whether this particular
         // body holds geometry for them is the compositor's business, not this module's.
         assert_eq!(switched(&gloves), vec![402, 2301]);
+    }
+
+    // The order the three rules are tried in, which is the whole of the decision and is worth
+    // stating without a game behind it. 20 is the file the table calls female, 30 the one it
+    // says nothing about, 40 the one it keeps for a male body.
+    #[test]
+    fn prefers_this_body_then_an_untagged_texture_then_any_texture_at_all() {
+        let bodies = HashMap::from([(20, (FEMALE, 0, 1)), (40, (0, 0, 1)), (50, (0, 0, 1))]);
+        assert_eq!(for_this_body(&[40, 30, 20], &bodies), Some(20));
+        assert_eq!(for_this_body(&[40, 30], &bodies), Some(30));
+        // Nothing fits, so the section is painted with what there is rather than left bare.
+        assert_eq!(for_this_body(&[40, 50], &bodies), Some(40));
+        // And nothing at all is still nothing: there is no file to paint it with.
+        assert_eq!(for_this_body(&[], &bodies), None);
+    }
+
+    // A material `TextureFileData` names no file for leaves its section unpainted, and the
+    // section is kept rather than dropped — a body barer than the icon beside it is a question
+    // the window has to be able to answer.
+    #[test]
+    fn says_which_sections_no_file_could_be_found_for() {
+        let bodies = HashMap::new();
+        let candidates = HashMap::from([(52_001, vec![151_001])]);
+        let (textures, unpaintable) = chosen(&[(3, 52_001), (4, 52_002)], &candidates, &bodies);
+        assert_eq!(textures, vec![ComponentTexture { section: 3, file: 151_001 }]);
+        assert_eq!(unpaintable, vec![4]);
     }
 
     // The robe is the one that says the groups are worth getting right: same slot as the

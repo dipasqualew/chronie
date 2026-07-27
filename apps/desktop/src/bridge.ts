@@ -70,7 +70,7 @@ export const desktop = {
   // of their own are shown. The slot goes across beside the display id: it is what says which
   // geoset groups the appearance drives, and only the appearance knows it.
   wornModel: (displayInfoId: number, displayType: number): Promise<WornModelPayload> => mock
-    ? Promise.resolve({ displayInfoId, model: mock.wornModels[displayInfoId] ?? null })
+    ? Promise.resolve({ displayInfoId, model: mock.wornModels[displayInfoId] ?? null, missing: [] })
     : invoke<WornModelPayload>("worn_model", { displayInfoId, displayType }),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
