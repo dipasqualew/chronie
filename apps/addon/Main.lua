@@ -399,6 +399,15 @@ function ns.main(env)
         -- The same reason a capture does this: an evening spent standing somewhere writing
         -- notes leaves every other counter at rest, and the tracker drops a segment that saw
         -- nothing — taking the segment the memory links to down with it.
+        --
+        -- Counted now rather than once the memory is known to have survived, and the entry
+        -- discarded below does not give it back. That is the lesser of the two wrongs on offer.
+        -- The tally credits whichever segment is open when it is called, and by the time a
+        -- memory is abandoned the player may have moved on — so counting it late would either
+        -- credit the wrong segment or, if the original has been flushed and dropped in the
+        -- meantime, leave a surviving memory pointing at a segment that was never filed. A
+        -- segment filed thin because somebody began a note and thought better of it is a fair
+        -- description of the evening; a memory linked to nothing is a broken row.
         tally.entry()
 
         if note then
@@ -776,6 +785,13 @@ function ns.main(env)
     dispatcher.on("PLAYER_LOGOUT", function()
         readWarbandGold()
         segmentTracker.flush()
+        -- And the last chance for an offer to resolve, which matters for exactly one shape of
+        -- entry. An engaged prompt has no deadline — the clock is not paused, it is gone — so a
+        -- memory whose box still holds focus is a row with no note that nothing will ever come
+        -- back to expire. Left alone it is written to disk as a memory of nothing. Nobody loses
+        -- anything to this: text that was never submitted was never a note, and a photograph is
+        -- a record with or without one.
+        entryPrompt.dismiss()
     end)
 
     -- Every one of these events folds something into the running tally and then wants the
