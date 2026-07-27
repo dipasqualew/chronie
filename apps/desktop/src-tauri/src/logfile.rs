@@ -1201,6 +1201,11 @@ mod tests {
             ("20:15:30.123-0500", Some(-5 * 3600)),
             ("20:15:30.123+0530", Some(5 * 3600 + 1800)),
             ("20:15:30.123+2", Some(2 * 3600)),
+            // What a 12.0.7 client actually writes: no sign at all when the offset is east.
+            ("16:24:38.4081", Some(3600)),
+            ("16:24:38.4080", Some(0)),
+            ("16:24:38.40810", Some(10 * 3600)),
+            ("16:24:38.4080530", Some(5 * 3600 + 1800)),
             ("20:15:30.123", None),
         ];
         for (time, expected) in cases {
@@ -1358,6 +1363,124 @@ mod tests {
         };
 
         assert_eq!(flat.normalize(100.0, 0.0), None);
+    }
+
+    /* ---------- the one log a client actually wrote ---------- */
+
+    /// Every other fixture in the folder was written by hand from a documented layout, which
+    /// is exactly the kind of source that is right until an expansion moves something. These
+    /// tests are the ones that answer to a file a 12.0.7 client produced.
+    ///
+    /// The stamp is the first thing it settles, and it settles it against what was assumed:
+    /// the fraction is milliseconds, three digits, and what looks like a fourth is a UTC
+    /// offset written with no sign on it. Every line of the file ends in that `1`, which no
+    /// fourth digit of a fraction would.
+    #[test]
+    fn reads_the_stamp_a_real_client_writes() {
+        let (stamp, payload) = split_line(
+            "7/27/2026 16:24:33.3011  COMBAT_LOG_VERSION,22,ADVANCED_LOG_ENABLED,1,BUILD_VERSION,12.0.7,PROJECT_ID,1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            stamp,
+            Stamp {
+                month: 7,
+                day: 27,
+                year: Some(2026),
+                hour: 16,
+                minute: 24,
+                second: 33,
+                millis: 301,
+                offset: Some(3600),
+            }
+        );
+        assert!(payload.starts_with("COMBAT_LOG_VERSION,22,"));
+    }
+
+    /// And the instant that comes out of it, which is the whole point of reading the offset:
+    /// a log written at 16:24 in London is 15:24 UTC, and a reader that took the `1` for a
+    /// fraction would have placed it an hour late on any machine but the one that wrote it.
+    #[test]
+    fn places_a_real_log_at_the_instant_it_was_written() {
+        let facts = read("real-client.txt", 2026);
+
+        assert_eq!(
+            facts.first_at,
+            Some(moment((2026, 7, 27), (16, 24, 33), 1) + 301)
+        );
+        assert_eq!(
+            facts.last_at,
+            Some(moment((2026, 7, 27), (16, 24, 54), 1) + 82)
+        );
+        assert_eq!(facts.lines, 35);
+        assert_eq!(facts.advanced_declared, Some(true));
+        assert!(facts.advanced_seen);
+    }
+
+    /// The advanced block found by shape rather than by a count. A 12.0.7 client writes two
+    /// fields more than the layout these fixtures were written from, so the position is
+    /// fourteen fields into the block and not twelve — and the events that carry one are the
+    /// same events as before, `SWING_` nine fields in and `SPELL_` twelve.
+    #[test]
+    fn finds_the_position_in_a_block_two_fields_longer_than_the_old_one() {
+        let facts = read("real-client.txt", 2026);
+
+        let track: Vec<(i64, f64, f64)> = facts
+            .positions
+            .iter()
+            .map(|point| (point.at, point.world_x, point.world_y))
+            .collect();
+        assert_eq!(
+            track,
+            [
+                (moment((2026, 7, 27), (16, 24, 38), 1) + 408, -3420.47, 4526.44),
+                (moment((2026, 7, 27), (16, 24, 45), 1) + 207, -3383.77, 4498.26),
+                (moment((2026, 7, 27), (16, 24, 51), 1) + 78, -3382.32, 4518.92),
+            ]
+        );
+        assert_eq!(facts.positions[0].facing, Some(0.5276));
+        assert_eq!(facts.positions[0].actor_name, "Vaeliss-Ravencrest-EU");
+        // The lines whose advanced block describes what was being hit rather than who was
+        // hitting it. Both of the pulls in the file have one, and neither is the player.
+        assert!(facts
+            .positions
+            .iter()
+            .all(|point| point.actor_guid == "Player-1305-0A5B6C7D"));
+    }
+
+    /// The conversion, against a place that can be checked. These positions were recorded
+    /// among the Auchenai in the Bone Wastes, which is the middle of Terokkar Forest and a
+    /// little south of it — and that is where they land. Swap the axes and the same points
+    /// come out at `0.67, 0.47`, out in the east of the zone, which is the failure this was
+    /// most at risk of and the one nothing in the file alone would have caught.
+    #[test]
+    fn puts_a_real_position_where_it_really_was() {
+        let facts = read("real-client.txt", 2026);
+
+        assert_eq!(facts.maps.len(), 2, "the client states its map more than once");
+        let bounds = &facts.maps[0];
+        assert_eq!(bounds.ui_map_id, 108);
+        assert_eq!(bounds.name, "Terokkar Forest");
+        // Wider than it is tall, which is Terokkar's map and is what says the width is the
+        // world's Y span rather than its X.
+        assert_eq!(bounds.x0 - bounds.x1, 3600.0);
+        assert!(bounds.y0 - bounds.y1 > bounds.x0 - bounds.x1);
+
+        let placed: Vec<(f64, f64)> = facts
+            .positions
+            .iter()
+            .map(|point| (round(point.map_x.unwrap()), round(point.map_y.unwrap())))
+            .collect();
+        assert_eq!(placed, [(0.473, 0.672), (0.479, 0.662), (0.475, 0.662)]);
+        assert!(facts.positions.iter().all(|point| point.ui_map_id == Some(108)));
+    }
+
+    /// Real bounds are not round, so a real point does not normalise to anything a test can
+    /// state exactly. Three decimals is a tenth of a percent of the way across a zone, which
+    /// is finer than any question asked of these coordinates.
+    fn round(value: f64) -> f64 {
+        (value * 1000.0).round() / 1000.0
     }
 
     /* ---------- a raid night ---------- */
