@@ -26,10 +26,12 @@ local _, ns = ...
 ---What happened, as the handler that folded it into the tally already knows it.
 ---@class CaptureEvent
 ---@field kind string Which of the rules below to ask: "achievement", "levelUp", "mount",
----"pet", "toy" or "keystone".
----@field id integer? The achievement, mount, pet species or toy the event was about.
+---"pet", "toy", "keystone" or "transmog".
+---@field id integer? The achievement, mount, pet species, toy or item the event was about.
 ---@field accountFirst boolean? For an achievement: nobody on this account had it before.
 ---@field onTime boolean? For a keystone: the run beat the timer.
+---@field newAppearance boolean? For a transmog: the look is new to the collection rather
+---than another item that wears one already owned.
 
 ---What a capture would be, when one is worth taking.
 ---@class CaptureDecision
@@ -92,6 +94,15 @@ local RULES = {
             return { "keystoneOnTime", "keystone" }
         end
         return { "keystone" }
+    end,
+    -- The same shape as the achievement, and for the same reason: a bag emptied at a vendor
+    -- collects a dozen sources and one of them is a look nobody had. "A new appearance" is
+    -- worth a picture in a way "another item that wears one I own" is not.
+    transmog = function(event)
+        if event.newAppearance then
+            return { "newAppearance", "transmog" }
+        end
+        return { "transmog" }
     end,
 }
 

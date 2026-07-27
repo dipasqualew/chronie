@@ -76,6 +76,12 @@ struct Settings {
     /// leaves every original where it was while Chronie still holds a verified copy.
     #[serde(default)]
     keep_original_screenshots: bool,
+    /// How much of each screenshot the store keeps once Chronie has taken custody of it. See
+    /// `captures::Quality`; a settings file that predates this gets the same re-encoding
+    /// default a new install does, because the store is forever and a folder of untouched 4K
+    /// PNGs is the thing this exists to stop.
+    #[serde(default)]
+    capture_quality: captures::Quality,
     /// Which things worth remembering photograph themselves — see `ns.newCaptureTriggers` in
     /// the addon for what each name means. A settings file that does not mention it gets the
     /// conservative default rather than an empty list, so an install that predates this
@@ -92,6 +98,7 @@ impl Default for Settings {
             combat_logging: false,
             retain_log_days: None,
             keep_original_screenshots: false,
+            capture_quality: captures::Quality::default(),
             capture_triggers: default_capture_triggers(),
         }
     }
@@ -178,6 +185,7 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
             collector::Options {
                 keep_originals: settings.keep_original_screenshots,
                 retain_log_days: settings.retain_log_days,
+                capture_quality: settings.capture_quality,
             },
         )
     };
@@ -471,6 +479,59 @@ fn set_log_retention(
         state.save(&settings)?;
     }
     retention_report(&state)
+}
+
+/* ---------- what photographs itself, and what is kept of it ---------- */
+
+/// Which things worth remembering take a picture of themselves.
+///
+/// The list is the addon's to act on, so it only means anything once it is in the game folder
+/// — which is why this reinstalls straight away rather than waiting for the next launch, the
+/// same way combat logging does. Unknown names are not rejected here: `settings_module` drops
+/// anything that is not a plain name on the way into the Lua, and a rule this build does not
+/// have simply never fires.
+///
+/// Answers with the whole of the settings, so the page repaints from what was stored rather
+/// than from what the click hoped.
+#[tauri::command]
+fn set_capture_triggers(
+    triggers: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Settings, String> {
+    let (saved, configured) = {
+        let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        settings.capture_triggers = triggers;
+        state.save(&settings)?;
+        (settings.clone(), configured_wow_path(&settings).is_ok())
+    };
+    // Skipped rather than failed with no game folder yet, for the same reason the combat
+    // logging switch skips it: the setting is recorded either way, and the install that runs
+    // when a folder is finally chosen carries it.
+    if configured {
+        install_bundled_addon(&state)?;
+    }
+    Ok(saved)
+}
+
+/// What Chronie does with a screenshot once it has found the file: how much of it to keep,
+/// and whether the game keeps its own copy too.
+///
+/// The two travel together because they are one decision about disk — the store's size and
+/// the game folder's — and neither reaches the addon at all, so nothing is reinstalled. Both
+/// only ever apply to the *next* ingestion; a picture already in the store stays exactly as it
+/// was taken custody of, which is the honest behaviour: nothing here goes back and recompresses
+/// something the player already has.
+#[tauri::command]
+fn set_capture_storage(
+    quality: captures::Quality,
+    keep_originals: bool,
+    state: State<'_, AppState>,
+) -> Result<Settings, String> {
+    let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+    settings.capture_quality = quality;
+    settings.keep_original_screenshots = keep_originals;
+    state.save(&settings)?;
+    Ok(settings.clone())
 }
 
 /// The four ways a user can correct the app's guess about what a segment was.
@@ -1010,6 +1071,8 @@ pub fn run() {
             set_combat_logging,
             log_retention,
             set_log_retention,
+            set_capture_triggers,
+            set_capture_storage,
             install_addon,
             check_for_app_update,
             add_activity,
@@ -1261,6 +1324,37 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"captureTriggers": []}"#).unwrap();
 
         assert!(settings.capture_triggers.is_empty());
+    }
+
+    /// A settings file written before there was anything to say about screenshot storage gets
+    /// the same answer a new install does: re-encode, and take the game's copy away once
+    /// Chronie holds one of its own.
+    #[test]
+    fn reads_a_settings_file_that_predates_screenshot_storage_as_the_default() {
+        let settings: Settings = serde_json::from_str(r#"{"wowPath": "/games/wow"}"#).unwrap();
+
+        assert_eq!(settings.capture_quality, captures::Quality::Balanced);
+        assert!(!settings.keep_original_screenshots);
+    }
+
+    /// And both cross the settings file under the names the window uses, because the window is
+    /// what writes them — a rename on either side that the other did not make is a control
+    /// that silently stops saving.
+    #[test]
+    fn round_trips_the_screenshot_storage_settings_through_the_file() {
+        let settings = Settings {
+            capture_quality: captures::Quality::Original,
+            keep_original_screenshots: true,
+            ..Settings::default()
+        };
+
+        let written = serde_json::to_string(&settings).unwrap();
+
+        assert!(written.contains(r#""captureQuality":"original""#), "{written}");
+        assert!(written.contains(r#""keepOriginalScreenshots":true"#), "{written}");
+        let read: Settings = serde_json::from_str(&written).unwrap();
+        assert_eq!(read.capture_quality, captures::Quality::Original);
+        assert!(read.keep_original_screenshots);
     }
 
     #[test]

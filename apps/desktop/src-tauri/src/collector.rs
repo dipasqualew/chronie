@@ -53,6 +53,9 @@ pub struct Options {
     /// has been logging into since before Chronie existed is not one to start emptying without
     /// being asked to.
     pub retain_log_days: Option<u32>,
+    /// How much of each screenshot the store keeps. See [`captures::Quality`]; the default is
+    /// a re-encode, because the store is forever and the game writes megabytes a shot.
+    pub capture_quality: captures::Quality,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1623,6 +1626,7 @@ fn ingest_images(
     wow_path: &Path,
     store_root: &Path,
     markers: &[&Marker],
+    quality: captures::Quality,
 ) -> Result<HashMap<String, Ingested>, String> {
     let wanted = wanted_images(connection, markers)?;
     if wanted.is_empty() {
@@ -1631,7 +1635,7 @@ fn ingest_images(
     let shots = captures::folder(&wow_path.join(captures::GAME_FOLDER));
     let mut ingested = HashMap::new();
     for (source_id, path) in captures::pair(&wanted, &shots) {
-        let Ok(stored) = captures::store(&path, store_root) else {
+        let Ok(stored) = captures::store(&path, store_root, quality) else {
             continue;
         };
         ingested.insert(
@@ -2668,7 +2672,13 @@ pub fn collect(
         .flat_map(|account| account.markers.iter())
         .filter(|marker| !deleted.contains(&marker.source_id))
         .collect();
-    let ingested = ingest_images(&connection, wow_path, &store_root, &markers)?;
+    let ingested = ingest_images(
+        &connection,
+        wow_path,
+        &store_root,
+        &markers,
+        options.capture_quality,
+    )?;
     drop(markers);
 
     let transaction = connection

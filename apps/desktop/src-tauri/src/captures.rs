@@ -3,8 +3,8 @@
 //! The addon cannot see the filesystem. It presses the client's own `Screenshot()` and
 //! writes down what it knew at that moment — including the local time, formatted exactly the
 //! way the client names its files. Everything after that happens here: find the file that
-//! marker is talking about, copy it into a directory Chronie owns, and prove the copy is
-//! byte for byte what was found.
+//! marker is talking about, put a copy of it into a directory Chronie owns — at whatever
+//! [`Quality`] the player asked for — and prove the copy is byte for byte what was written.
 //!
 //! **The file and the marker do not arrive together.** The image lands the instant the key
 //! is pressed; the marker sits in SavedVariables until the client writes it at logout or
@@ -21,6 +21,7 @@ use image::{
     codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageFormat, ImageReader,
     Limits,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -272,6 +273,61 @@ pub struct Stored {
     pub byte_size: i64,
 }
 
+/// How much of a screenshot Chronie keeps once it has taken custody of it.
+///
+/// The game writes a 4K PNG on a lot of installs, which is ten megabytes of a corridor. A
+/// player who photographs an evening's worth of achievements every week is handing Chronie a
+/// folder that only ever grows, and the pictures are looked at in a grid and in a modal — not
+/// printed. So the default is a re-encode rather than the file itself, and `Original` is there
+/// for somebody who disagrees, because "keep exactly what the game wrote" is a legitimate
+/// thing to want and is what every install did before this setting existed.
+///
+/// Named rather than numbered: a quality slider is a number nobody can predict the effect of,
+/// and each of these says what it does to a screenshot in one sentence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Quality {
+    /// The file the game wrote, byte for byte. The only setting that keeps a PNG a PNG.
+    Original,
+    /// Every pixel, re-encoded. A 4K screenshot stays 4K and loses most of its bytes.
+    High,
+    /// Fits a retina display, which is what these are looked at on.
+    #[default]
+    Balanced,
+    /// Fits a laptop screen. For somebody keeping years of them.
+    Small,
+}
+
+/// What re-encoding at a given quality does: how long the longest side may be, and how hard
+/// the JPEG encoder is allowed to push.
+struct Recode {
+    edge: u32,
+    quality: u8,
+}
+
+impl Quality {
+    /// The re-encode this level asks for, or `None` for the file exactly as it was found.
+    fn recode(self) -> Option<Recode> {
+        match self {
+            Self::Original => None,
+            // No bound worth writing: `shrink` never upscales, so an edge nothing can exceed
+            // means "leave the size alone" without a second code path saying so.
+            Self::High => Some(Recode {
+                edge: u32::MAX,
+                quality: 90,
+            }),
+            Self::Balanced => Some(Recode {
+                edge: 2560,
+                quality: 80,
+            }),
+            Self::Small => Some(Recode {
+                edge: 1600,
+                quality: 70,
+            }),
+        }
+    }
+}
+
 /// Copies one image into the store and proves the copy.
 ///
 /// Copy, verify, and only then — much later, and by the caller, once the row naming the file
@@ -280,15 +336,28 @@ pub struct Stored {
 /// version of this worth that risk.
 ///
 /// The name in the store is the content hash, which makes the store self-verifying and makes
-/// re-ingesting an identical image a no-op rather than a second copy of the same bytes.
-pub fn store(source: &Path, root: &Path) -> Result<Stored, String> {
-    let bytes =
+/// re-ingesting an identical image a no-op rather than a second copy of the same bytes. The
+/// hash is of what is *stored*, not of what was read, which is what keeps that true at every
+/// quality: the store answers for the bytes it holds.
+///
+/// Two rules govern the re-encode, and both are about never being worse than doing nothing.
+/// A file the encoder cannot read — a TGA the decoder chokes on, something that is not an
+/// image at all — is stored exactly as found rather than refused, because the picture matters
+/// more than the setting. And a re-encode that came out *larger* than the original is thrown
+/// away, which is the ordinary outcome for a small PNG and for a JPEG the client already
+/// compressed harder than this would.
+pub fn store(source: &Path, root: &Path, quality: Quality) -> Result<Stored, String> {
+    let found =
         fs::read(source).map_err(|error| format!("Could not read {}: {error}", source.display()))?;
+    let (bytes, suffix) = match recoded(&found, source, quality) {
+        Some(smaller) => (smaller, ".jpg".to_string()),
+        None => (found, extension(source)),
+    };
     let content_hash = digest(&bytes);
     // Sharded on the first byte of the hash, because a store nobody prunes ends up holding
     // every screenshot somebody ever took and a single directory of those is a slow one.
     let shard = &content_hash[..2];
-    let name = format!("{content_hash}{}", extension(source));
+    let name = format!("{content_hash}{suffix}");
     let file_path = format!("{shard}/{name}");
     let destination = root.join(shard).join(&name);
 
@@ -322,6 +391,24 @@ pub fn store(source: &Path, root: &Path) -> Result<Stored, String> {
         content_hash,
         byte_size: i64::try_from(bytes.len()).unwrap_or(0),
     })
+}
+
+/// The bytes to store instead of the ones that were found, when there are any.
+///
+/// `None` covers all three ways there is nothing better to store than the original: the level
+/// asked for the file untouched, the encoder could not read it, or what came back was bigger
+/// than what went in. The caller stores what it read in every one of those cases, which is why
+/// this is the only place the re-encode can go wrong and nothing downstream has to know.
+fn recoded(bytes: &[u8], source: &Path, quality: Quality) -> Option<Vec<u8>> {
+    let recode = quality.recode()?;
+    let smaller = encode(
+        bytes,
+        ImageFormat::from_path(source).ok(),
+        recode.edge,
+        recode.quality,
+    )
+    .ok()?;
+    (smaller.len() < bytes.len()).then_some(smaller)
 }
 
 /// Whether the store already holds exactly these bytes at this path.
@@ -555,6 +642,17 @@ pub fn thumbnail(root: &Path, file_path: &str, content_hash: &str) -> Result<Vec
 /// Never upscaled. A capture smaller than a thumbnail is re-encoded at its own size, because
 /// the point of this is the number of bytes crossing the bridge and not a uniform grid.
 pub fn shrink(bytes: &[u8], hint: Option<ImageFormat>, edge: u32) -> Result<Vec<u8>, String> {
+    encode(bytes, hint, edge, THUMBNAIL_QUALITY)
+}
+
+/// The same, at a stated encoder quality — which is what makes one function serve both the
+/// thumbnails, where the size is the whole point, and the store, where it is a setting.
+fn encode(
+    bytes: &[u8],
+    hint: Option<ImageFormat>,
+    edge: u32,
+    quality: u8,
+) -> Result<Vec<u8>, String> {
     let guessed = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()
@@ -585,7 +683,7 @@ pub fn shrink(bytes: &[u8], hint: Option<ImageFormat>, edge: u32) -> Result<Vec<
     // JPEG carries no alpha channel, so the pixels are flattened to RGB first rather than
     // handed to an encoder that would refuse them. A screenshot has no transparency to lose.
     let mut jpeg = Vec::new();
-    JpegEncoder::new_with_quality(&mut Cursor::new(&mut jpeg), THUMBNAIL_QUALITY)
+    JpegEncoder::new_with_quality(&mut Cursor::new(&mut jpeg), quality)
         .encode_image(&DynamicImage::ImageRgb8(scaled.to_rgb8()))
         .map_err(|error| format!("Chronie could not shrink this image: {error}"))?;
     Ok(jpeg)
@@ -598,8 +696,9 @@ pub fn format_of(file_path: &str) -> Option<ImageFormat> {
 
 /// What the window is told an image is, for the `data:` URL it has to be handed as.
 ///
-/// The stored bytes are the game's own file untouched, so this is the original's format and
-/// not Chronie's — a thumbnail is always a JPEG and says so at the point it is made.
+/// Read off the stored name rather than assumed, which is what makes it right at every
+/// [`Quality`]: a file kept as the game wrote it is still a PNG and says so, and one Chronie
+/// re-encoded was named `.jpg` at the moment it was written.
 pub fn mime_of(file_path: &str) -> &'static str {
     match format_of(file_path) {
         Some(ImageFormat::Png) => "image/png",
@@ -948,7 +1047,7 @@ mod tests {
         fs::write(&source, b"a picture").unwrap();
         let root = temp.path().join("store");
 
-        let stored = store(&source, &root).unwrap();
+        let stored = store(&source, &root, Quality::Original).unwrap();
 
         assert_eq!(stored.byte_size, 9);
         assert_eq!(stored.content_hash, digest(b"a picture"));
@@ -969,8 +1068,8 @@ mod tests {
         fs::write(&first, b"a picture").unwrap();
         fs::write(&second, b"a picture").unwrap();
 
-        let one = store(&first, &root).unwrap();
-        let two = store(&second, &root).unwrap();
+        let one = store(&first, &root, Quality::Original).unwrap();
+        let two = store(&second, &root, Quality::Original).unwrap();
 
         assert_eq!(one, two);
     }
@@ -981,10 +1080,10 @@ mod tests {
         let root = temp.path().join("store");
         let source = temp.path().join("WoWScrnShot_111423_120000.jpg");
         fs::write(&source, b"a picture").unwrap();
-        let stored = store(&source, &root).unwrap();
+        let stored = store(&source, &root, Quality::Original).unwrap();
 
         fs::write(root.join(&stored.file_path), b"something else").unwrap();
-        let again = store(&source, &root).unwrap();
+        let again = store(&source, &root, Quality::Original).unwrap();
 
         assert_eq!(again, stored);
         assert_eq!(
@@ -996,7 +1095,12 @@ mod tests {
     #[test]
     fn refuses_an_image_that_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        let error = store(&temp.path().join("gone.jpg"), &temp.path().join("store")).unwrap_err();
+        let error = store(
+            &temp.path().join("gone.jpg"),
+            &temp.path().join("store"),
+            Quality::Original,
+        )
+        .unwrap_err();
         assert!(error.contains("gone.jpg"), "{error}");
     }
 
@@ -1274,7 +1378,7 @@ mod tests {
         let root = temp.path().join("store");
         let source = temp.path().join("WoWScrnShot_111423_120000.jpg");
         fs::write(&source, painted(1000, 500, ImageFormat::Jpeg)).unwrap();
-        let stored = store(&source, &root).unwrap();
+        let stored = store(&source, &root, Quality::Original).unwrap();
 
         let first = thumbnail(&root, &stored.file_path, &stored.content_hash).unwrap();
         assert_eq!(sized(&first).0, THUMBNAIL_EDGE);
@@ -1295,7 +1399,7 @@ mod tests {
         let root = temp.path().join("store");
         let source = temp.path().join("WoWScrnShot_111423_120000.jpg");
         fs::write(&source, painted(1000, 500, ImageFormat::Jpeg)).unwrap();
-        let stored = store(&source, &root).unwrap();
+        let stored = store(&source, &root, Quality::Original).unwrap();
         thumbnail(&root, &stored.file_path, &stored.content_hash).unwrap();
         let cached = root
             .join(THUMBNAIL_FOLDER)
@@ -1308,5 +1412,144 @@ mod tests {
         assert!(!cached.exists());
         // And doing it again is what was asked for rather than a failure: the file is gone.
         discard(&root, &stored.file_path, Some(&stored.content_hash)).unwrap();
+    }
+
+    /* ---------- how much of a screenshot the store keeps ---------- */
+
+    /// A picture that does not compress, which is what a screenshot of a game actually is.
+    ///
+    /// `painted` draws a smooth gradient, and PNG stores one of those in almost nothing — so a
+    /// gradient re-encodes *larger* as a JPEG and the store correctly keeps the original,
+    /// which is the opposite of what these tests are trying to observe. Deterministic noise is
+    /// the honest stand-in: a lossless encoder can do nothing with it and a lossy one can.
+    fn noisy(width: u32, height: u32, format: ImageFormat) -> Vec<u8> {
+        let mut image = image::RgbImage::new(width, height);
+        let mut seed: u32 = 0x1234_5678;
+        for pixel in image.pixels_mut() {
+            let mut next = || {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (seed >> 24) as u8
+            };
+            *pixel = image::Rgb([next(), next(), next()]);
+        }
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgb8(image)
+            .write_to(&mut Cursor::new(&mut bytes), format)
+            .unwrap();
+        bytes
+    }
+
+    /// One screenshot written into a fresh store at a given quality, and what came back.
+    fn stored_at(quality: Quality, bytes: &[u8], name: &str) -> (tempfile::TempDir, Stored, Vec<u8>) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("store");
+        let source = temp.path().join(name);
+        fs::write(&source, bytes).unwrap();
+        let stored = store(&source, &root, quality).unwrap();
+        let held = fs::read(root.join(&stored.file_path)).unwrap();
+        (temp, stored, held)
+    }
+
+    /// A 2800-pixel PNG is what a lot of installs actually write, and it is the case the whole
+    /// setting exists for: every level below `Original` has to leave the store holding
+    /// materially less than the client did, and the two that name a size have to hit it.
+    #[test]
+    fn keeps_as_much_of_a_screenshot_as_the_quality_asks_for() {
+        let png = noisy(2800, 1400, ImageFormat::Png);
+        for (quality, edge) in [
+            (Quality::High, 2800),
+            (Quality::Balanced, 2560),
+            (Quality::Small, 1600),
+        ] {
+            let (_temp, stored, held) =
+                stored_at(quality, &png, "WoWScrnShot_111423_120000.png");
+
+            assert_eq!(sized(&held).0, edge, "{quality:?}");
+            assert!(held.len() < png.len(), "{quality:?} did not save anything");
+            // Re-encoded, so it is a JPEG and is named as one — which is what `mime_of` then
+            // tells the window, and what stops it being handed a `.png` full of JPEG.
+            assert!(stored.file_path.ends_with(".jpg"), "{quality:?}");
+            assert_eq!(mime_of(&stored.file_path), "image/jpeg", "{quality:?}");
+        }
+    }
+
+    /// And the level that says "the file the game wrote" means it, extension and all.
+    #[test]
+    fn keeps_the_client_s_own_file_untouched_at_the_original_quality() {
+        let png = noisy(2800, 1400, ImageFormat::Png);
+
+        let (_temp, stored, held) =
+            stored_at(Quality::Original, &png, "WoWScrnShot_111423_120000.png");
+
+        assert_eq!(held, png);
+        assert!(stored.file_path.ends_with(".png"));
+        assert_eq!(mime_of(&stored.file_path), "image/png");
+    }
+
+    /// The store is content-addressed, and it has to stay addressed by what it is holding
+    /// rather than by what was read — otherwise the name is a claim about bytes nothing has.
+    #[test]
+    fn names_a_re_encoded_file_for_the_bytes_it_actually_holds() {
+        let png = noisy(1200, 600, ImageFormat::Png);
+
+        let (_temp, stored, held) =
+            stored_at(Quality::Balanced, &png, "WoWScrnShot_111423_120000.png");
+
+        assert_ne!(held, png, "the re-encode was expected to change the bytes");
+        assert_eq!(stored.content_hash, digest(&held));
+        assert_eq!(stored.byte_size, held.len() as i64);
+        assert!(stored.file_path.starts_with(&format!("{}/", &stored.content_hash[..2])));
+    }
+
+    /// A picture already smaller than the encoder would make it is left alone. Compressing a
+    /// 64-pixel PNG into a larger JPEG would be paying for the setting and getting nothing.
+    #[test]
+    fn keeps_the_original_when_re_encoding_would_only_make_it_bigger() {
+        let png = painted(64, 32, ImageFormat::Png);
+
+        let (_temp, stored, held) =
+            stored_at(Quality::Small, &png, "WoWScrnShot_111423_120000.png");
+
+        assert_eq!(held, png);
+        assert!(stored.file_path.ends_with(".png"));
+    }
+
+    /// The picture matters more than the setting. A file the decoder cannot read — a damaged
+    /// header, a format this build was not compiled with — is stored as found rather than
+    /// dropped, because the alternative is losing a screenshot over a preference.
+    #[test]
+    fn keeps_a_file_it_cannot_decode_exactly_as_it_found_it() {
+        let (_temp, stored, held) = stored_at(
+            Quality::Balanced,
+            b"not an image at all",
+            "WoWScrnShot_111423_120000.jpg",
+        );
+
+        assert_eq!(held, b"not an image at all");
+        assert_eq!(stored.byte_size, 19);
+    }
+
+    /// What an install that has never been told otherwise does, which is the whole of the
+    /// issue's "acceptable quality, least space": a re-encode rather than the client's file.
+    #[test]
+    fn defaults_to_re_encoding_rather_than_to_the_client_s_own_file() {
+        assert_eq!(Quality::default(), Quality::Balanced);
+        assert!(Quality::default().recode().is_some());
+        assert!(Quality::Original.recode().is_none());
+    }
+
+    /// The names cross into a settings file on disk and back, so they are part of the contract
+    /// rather than an implementation detail of the enum.
+    #[test]
+    fn reads_and_writes_the_quality_by_the_name_the_settings_file_uses() {
+        for (quality, name) in [
+            (Quality::Original, "\"original\""),
+            (Quality::High, "\"high\""),
+            (Quality::Balanced, "\"balanced\""),
+            (Quality::Small, "\"small\""),
+        ] {
+            assert_eq!(serde_json::to_string(&quality).unwrap(), name);
+            assert_eq!(serde_json::from_str::<Quality>(name).unwrap(), quality);
+        }
     }
 }
