@@ -11,6 +11,9 @@ import type { ReactNode } from "react";
 
 import { achievementIds, achievementLine } from "./achievements";
 import type { AchievementBook } from "./achievements";
+import { CaptureGallery } from "./captureGallery";
+import type { CaptureActions } from "./captureGallery";
+import type { CaptureAlbum } from "./captures";
 import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, plural, signed } from "./format";
@@ -394,10 +397,16 @@ export interface SegmentModalProps {
    * collected before any character reported, which reads as nothing to add.
    */
   holdings?: AccountHoldings;
+  /** The thumbnails the window has already been handed, shared with every other grid. */
+  album: CaptureAlbum;
+  captures: CaptureActions;
 }
 
 export function SegmentModal(
-  { showing, onStep, onClose, onEditActivities, achievements: book, holdings }: SegmentModalProps,
+  {
+    showing, onStep, onClose, onEditActivities, achievements: book, holdings, album,
+    captures,
+  }: SegmentModalProps,
 ): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -503,6 +512,13 @@ export function SegmentModal(
               ? <HighlightList entries={summary} milestones={false} interactive={false} />
               : <p className="muted">Nothing was gained or collected in this segment.</p>}
           </div>
+          {/* Above the lists, because a photograph of the evening is what somebody opens a
+              segment for when there is one, and the lists are what they read afterwards. */}
+          {(segment.captures || []).length
+            ? <Section title="Screenshots">
+              <CaptureGallery segments={[segment]} album={album} actions={captures} />
+            </Section>
+            : null}
           <Lists segment={segment} book={book} />
           <Currencies segment={segment} holdings={holdings} />
           <Reputation segment={segment} holdings={holdings} />

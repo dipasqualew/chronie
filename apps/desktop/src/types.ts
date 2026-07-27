@@ -132,6 +132,53 @@ export interface EquipsetChangeEvent {
   items?: EquipsetSlotChange[];
 }
 
+/**
+ * What Chronie has of a capture's image. Mirrors the `image_state` column.
+ *
+ * Three states rather than a boolean, because the three reasons there is no picture are three
+ * different things to tell somebody: `none` is an entry that never asked for one — a note
+ * rather than a screenshot — `missing` is a marker whose file could not be found, and `stored`
+ * is a picture Chronie holds and is about to hand over.
+ */
+export type CaptureImageState = "none" | "stored" | "missing";
+
+/**
+ * One thing somebody thought was worth remembering, and whatever Chronie has of the picture.
+ *
+ * A capture is not a child of the segment the way the other event lists are: the row survives
+ * a re-sync, the file it points at is one Chronie has taken custody of, and the segment is a
+ * link rather than an owner. What it is doing on the segment here is the same thing it is
+ * doing in the database — saying where it was taken.
+ */
+export interface Capture {
+  /** The database row id, which is what a note or a deletion is filed against. */
+  id: number;
+  /** The addon's own id for the entry, unique across accounts. */
+  sourceId: string;
+  /** Epoch second. What the pictures of an evening are ordered by. */
+  at: number;
+  /** The same moment in local time, as the client names its files: "MMDDYY_HHMMSS". */
+  stamp?: string | null;
+  imageState: CaptureImageState;
+  /**
+   * What somebody said about it, typed in game or in this window. The most user-supplied
+   * string in the application, and the only one that has ever been typed rather than read off
+   * something the game said.
+   */
+  note?: string | null;
+  /** The rule that fired it by itself, absent when a person pressed the key. */
+  trigger?: string | null;
+  /** The achievement it was taken for, as the game numbers it, when it was taken for one. */
+  achievementId?: number | null;
+  byteSize?: number | null;
+  /** What the game called the file before Chronie took it. */
+  sourceName?: string | null;
+  uiMapId?: number | null;
+  /** Normalised across the map, 0..1, and absent together. */
+  mapX?: number | null;
+  mapY?: number | null;
+}
+
 export interface EncounterEvent {
   id: number;
   name?: string | null;
@@ -209,6 +256,7 @@ export interface Segment {
   experience?: ExperienceGain | null;
   keystone?: KeystoneRun | null;
   activities?: Activity[];
+  captures?: Capture[];
   encounters?: EncounterEvent[];
   equipsetChanges?: EquipsetChangeEvent[];
   transmogs?: TransmogEvent[];
@@ -444,6 +492,33 @@ export interface AchievementDetailsPayload {
   achievements: Record<string, AchievementDetail>;
 }
 
+/**
+ * The thumbnails for a grid of captures, keyed by the row id each was asked for by.
+ *
+ * `data:` URLs, for the same reason the icons are: the window has no origin to load a file
+ * from, and every byte it draws comes across the command bridge. A capture that could not be
+ * made into a thumbnail — no image, or a file that has gone missing under the row — is simply
+ * absent, because a tile with no picture and a tile whose picture has not arrived yet draw the
+ * same placeholder.
+ */
+export interface CaptureThumbnailsPayload {
+  thumbnails: Record<string, string>;
+}
+
+/**
+ * One capture at the size it was taken, as a `data:` URL.
+ *
+ * `null` is an ordinary answer rather than a failure: an entry that asked for no picture, a
+ * marker whose file was never found, and a file that has disappeared from under a row that
+ * says it is there all arrive this way, and the viewer says so instead of showing a broken
+ * image.
+ */
+export interface CaptureImagePayload {
+  id: number;
+  image: string | null;
+  byteSize?: number;
+}
+
 export interface Settings {
   wowPath?: string | null;
   lastSync?: string | null;
@@ -573,6 +648,10 @@ export interface E2EMock {
   /** What the game says about each achievement, keyed by id. An id absent from here is one
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;
+  /** The screenshots Chronie holds, keyed by capture row id: the thumbnail a grid draws and
+   * the full-size picture opening one asks for. An id absent from here is a capture with no
+   * image, which is what the real backend answers nothing for. */
+  captureImages: Record<number, E2ECaptureImage>;
   settings: Settings;
   /** What the install is doing about combat logs. State rather than a fixture: ticking the
    * box in the panel under test advances it, the way the real backend's own answer changes. */
@@ -584,6 +663,13 @@ export interface E2EMock {
   /** Where a link handed to the operating system is recorded instead, in the order asked. */
   openedUrls: string[];
   wifi: E2EWifi;
+}
+
+/** One capture's pictures as the mock holds them: the tile, and the thing behind it. */
+export interface E2ECaptureImage {
+  thumbnail: string;
+  full: string;
+  byteSize: number;
 }
 
 /**
