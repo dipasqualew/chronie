@@ -11,6 +11,7 @@ pub mod icons;
 pub mod logfile;
 pub mod m2;
 pub mod models;
+pub mod skin;
 pub mod transmog;
 pub mod wifi;
 pub mod worn;
