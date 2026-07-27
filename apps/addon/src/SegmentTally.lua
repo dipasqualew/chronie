@@ -16,7 +16,8 @@ local _, ns = ...
 ---@field itemInfoReceived fun(itemID: integer) Price the loot that was parked waiting on this
 ---item's data and fold it in.
 ---@field reputation fun(message: string) Add a faction-change chat line's gain.
----@field currency fun(currencyType: integer, change: integer, name: string?) Record a currency change.
+---@field currency fun(currencyType: integer, change: integer, name: string?, total: integer?) Record a
+---currency change, and the character's holding of it once the change had landed.
 ---@field currencyItem fun(itemID: integer, total: integer, name: string?) Fold an item-based currency's
 ---owned total into the same per-currency tallies, as a change from its segment baseline.
 ---@field achievement fun(id: integer, name: string?, at: integer, accountFirst: boolean?)
@@ -46,11 +47,16 @@ local _, ns = ...
 ---@class ReputationGain
 ---@field faction string
 ---@field amount integer
+---@field standing string? The level the character stood at when it last gained with this
+---faction — "Honored", "Renown 12" — when the client had one to report.
+---@field current integer? Progress into that level.
+---@field max integer? Reputation that level takes to finish.
 
 ---@class CurrencyGain
 ---@field id integer
 ---@field name string
 ---@field amount integer Net change over the segment; may be negative.
+---@field total integer? The character's holding after the last change seen this segment.
 
 ---@class AchievementEvent
 ---@field id integer
@@ -152,6 +158,9 @@ local _, ns = ...
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---nil means the client has not cached the item yet — distinct from 0, which means the item
 ---genuinely cannot be sold.
+---@field factionState fun(faction: string): FactionStanding? Where the character stands with
+---one faction right now. Absent, or nil for a faction the client cannot place, leaves the
+---gain as a bare amount.
 
 -- Lua-pattern magic characters, escaped so literal chunks of a printf template match verbatim.
 local MAGIC = "([%^%$%(%)%.%[%]%*%+%-%?%%])"
@@ -254,6 +263,7 @@ end
 function ns.newSegmentTally(deps)
     deps = deps or {}
     local itemSellPrice = deps.itemSellPrice or function() return 0 end
+    local factionState = deps.factionState or function() return nil end
 
     local lootPatterns = compileAll(deps.lootFormats)
     local factionPatterns = compileAll(deps.factionFormats)
@@ -418,6 +428,10 @@ function ns.newSegmentTally(deps)
             end
         end,
 
+        ---Folds a faction-change chat line into that faction's running gain, and asks the
+        ---client where the character now stands with it. The standing is re-read on every
+        ---gain rather than once, so a segment that carries a faction from Friendly to
+        ---Honored reports where it ended up rather than where it started.
         ---@param message string
         reputation = function(message)
             if not segment.active then
@@ -425,7 +439,15 @@ function ns.newSegmentTally(deps)
             end
             local faction, amount = parse(message, factionPatterns)
             if faction and amount then
-                segment.reputation[faction] = (segment.reputation[faction] or 0) + amount
+                local entry = segment.reputation[faction]
+                if not entry then
+                    entry = { amount = 0 }
+                    segment.reputation[faction] = entry
+                end
+                entry.amount = entry.amount + amount
+                -- A client that answers once and not again leaves the last answer standing,
+                -- rather than dropping a faction back to a bare number mid-segment.
+                entry.state = factionState(faction) or entry.state
             end
         end,
 
@@ -435,7 +457,8 @@ function ns.newSegmentTally(deps)
         ---@param currencyType integer
         ---@param change integer
         ---@param name string?
-        currency = function(currencyType, change, name)
+        ---@param total integer? What the character holds now that the change has landed.
+        currency = function(currencyType, change, name, total)
             if not segment.active or not currencyType or not change or change == 0 then
                 return
             end
@@ -449,6 +472,9 @@ function ns.newSegmentTally(deps)
                 entry.name = name
             end
             entry.amount = entry.amount + change
+            if total then
+                entry.total = total
+            end
         end,
 
         ---Folds an item-based currency into the same per-currency tallies as a real
@@ -490,6 +516,9 @@ function ns.newSegmentTally(deps)
                 entry.name = name
             end
             entry.amount = entry.amount + change
+            -- The count that drove the change is also the holding to report: it already
+            -- spans every store the character can reach.
+            entry.total = total
         end,
 
         ---@param id integer
@@ -848,9 +877,16 @@ function ns.newSegmentTally(deps)
         summary = function()
             local reputation = {}
             local reputationTotal = 0
-            for faction, amount in pairs(segment.reputation) do
-                reputation[#reputation + 1] = { faction = faction, amount = amount }
-                reputationTotal = reputationTotal + amount
+            for faction, entry in pairs(segment.reputation) do
+                local state = entry.state
+                reputation[#reputation + 1] = {
+                    faction = faction,
+                    amount = entry.amount,
+                    standing = state and state.standing,
+                    current = state and state.current,
+                    max = state and state.max,
+                }
+                reputationTotal = reputationTotal + entry.amount
             end
             table.sort(reputation, function(left, right)
                 return left.faction < right.faction
@@ -859,7 +895,12 @@ function ns.newSegmentTally(deps)
             local currencies = {}
             local currencyTotal = 0
             for _, entry in pairs(segment.currencies) do
-                currencies[#currencies + 1] = { id = entry.id, name = entry.name, amount = entry.amount }
+                currencies[#currencies + 1] = {
+                    id = entry.id,
+                    name = entry.name,
+                    amount = entry.amount,
+                    total = entry.total,
+                }
                 currencyTotal = currencyTotal + entry.amount
             end
             table.sort(currencies, function(left, right)

@@ -17,8 +17,8 @@ local _, ns = ...
 ---flattening it into the parent would lose which slot went with which item.
 ns.segmentEventSpecs = {
     transmogs       = { "id", "at", "sourceID", "appearanceID", "newAppearance" },
-    currencies      = { "id", "name", "amount" },
-    reputation      = { "faction", "amount" },
+    currencies      = { "id", "name", "amount", "total" },
+    reputation      = { "faction", "amount", "standing", "current", "max" },
     achievements    = { "id", "name", "at", "accountFirst" },
     levelUps        = { "level", "at" },
     mounts          = { "id", "name", "at", "guid" },

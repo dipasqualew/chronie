@@ -33,6 +33,10 @@ local LINE = 15
 local COLUMN_GAP = 8
 local VALUE_WIDTH = 92
 local SUMMARY_VALUE_WIDTH = 140
+-- A reputation bar sits under the faction it belongs to, indented past its name so the
+-- two read as one entry, and takes a whole line of its own so the standing fits on it.
+local BAR_HEIGHT = 11
+local BAR_INDENT = 10
 
 local TITLE_COLOR = { 1, 0.82, 0 }
 local LABEL_COLOR = { 0.7, 0.7, 0.7 }
@@ -44,9 +48,22 @@ local ACCOUNT_COLOR = { 0.7, 0.45, 1 }
 local CHARACTER_COLOR = { 0.35, 0.85, 0.45 }
 local VARIANT_COLOR = { 0.7, 0.45, 1 }
 
+local BAR_BACK_COLOR = { 0.14, 0.14, 0.14, 0.9 }
+local BAR_FILL_COLOR = { 0.24, 0.55, 0.29, 0.95 }
+
 local ACCOUNT_HEX = "|cffb373ff"
 local CHARACTER_HEX = "|cff59d973"
 local COLOR_END = "|r"
+
+---Groups a count's digits in threes, because a reputation bar reads in five figures and
+---an unbroken run of them is unreadable at this font size.
+---@param value number?
+---@return string
+local function group(value)
+    local rounded = math.floor(math.abs(value or 0) + 0.5)
+    local digits = tostring(rounded):reverse():gsub("(%d%d%d)", "%1,"):gsub(",$", "")
+    return ((value or 0) < 0 and "-" or "") .. digits:reverse()
+end
 
 ---@param deps ResultsWindowDeps
 ---@return ResultsWindow
@@ -55,6 +72,8 @@ function ns.newResultsWindow(deps)
 
     ---@type { label: table, value: table }[]
     local rows = {}
+    ---@type { back: table, fill: table, text: table }[]
+    local bars = {}
     local frame, title
     local latest
     local expanded = {
@@ -143,6 +162,27 @@ function ns.newResultsWindow(deps)
         return row.label, row.value
     end
 
+    ---A progress bar: an unfilled track, the filled part of it, and a caption centred over
+    ---both. The caption is deliberately centred rather than left or right justified, which
+    ---is what tells it apart from the label/value pairs every other row is made of.
+    ---@param index integer
+    ---@return table back, table fill, table text
+    local function barAt(index)
+        local bar = bars[index]
+        if not bar then
+            local back = frame:CreateTexture(nil, "BACKGROUND")
+            local fill = frame:CreateTexture(nil, "ARTWORK")
+            local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            back:SetColorTexture(BAR_BACK_COLOR[1], BAR_BACK_COLOR[2], BAR_BACK_COLOR[3], BAR_BACK_COLOR[4])
+            fill:SetColorTexture(BAR_FILL_COLOR[1], BAR_FILL_COLOR[2], BAR_FILL_COLOR[3], BAR_FILL_COLOR[4])
+            text:SetJustifyH("CENTER")
+            text:SetWordWrap(false)
+            bar = { back = back, fill = fill, text = text }
+            bars[index] = bar
+        end
+        return bar.back, bar.fill, bar.text
+    end
+
     ---@param summary SegmentSummary
     local function render(summary)
         if type(deps.title) == "function" then
@@ -150,6 +190,7 @@ function ns.newResultsWindow(deps)
         end
         local y = -PADDING - LINE - 4
         local used = 0
+        local usedBars = 0
 
         ---@param text string
         ---@param valueText string
@@ -175,6 +216,36 @@ function ns.newResultsWindow(deps)
             value:EnableMouse(action ~= nil)
             label:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
             value:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
+            y = y - LINE
+        end
+
+        ---A progress bar occupying a line of its own, under the row it belongs to.
+        ---@param current integer How far into the level the character is.
+        ---@param max integer How long the level is; zero draws an empty track.
+        ---@param caption string Drawn over the bar.
+        local function bar(current, max, caption)
+            usedBars = usedBars + 1
+            local back, fill, text = barAt(usedBars)
+            local width = WIDTH - PADDING * 2 - BAR_INDENT
+            local fraction = max > 0 and math.min(current / max, 1) or 0
+            back:SetPoint("TOPLEFT", PADDING + BAR_INDENT, y)
+            back:SetWidth(width)
+            back:SetHeight(BAR_HEIGHT)
+            back:Show()
+            fill:SetPoint("TOPLEFT", PADDING + BAR_INDENT, y)
+            fill:SetHeight(BAR_HEIGHT)
+            if fraction > 0 then
+                -- Kept off zero once any progress exists at all: a sliver still reads as
+                -- "started", where a bar of no width reads as an untouched level.
+                fill:SetWidth(math.max(math.floor(width * fraction), 1))
+                fill:Show()
+            else
+                fill:Hide()
+            end
+            text:SetPoint("TOPLEFT", PADDING + BAR_INDENT, y - 1)
+            text:SetWidth(width)
+            text:SetText(caption)
+            text:Show()
             y = y - LINE
         end
 
@@ -255,7 +326,12 @@ function ns.newResultsWindow(deps)
                 end)
             if expanded.currencies then
                 for _, gain in ipairs(currencies) do
-                    line("  " .. gain.name, (gain.amount >= 0 and "+" or "") .. gain.amount, REP_COLOR)
+                    -- What the segment earned, then what the character is left holding —
+                    -- the second is the number that decides whether the first is enough
+                    -- to buy anything, and the client's own counters are read the same way.
+                    local change = (gain.amount >= 0 and "+" or "") .. group(gain.amount)
+                    local held = gain.total and (change .. " (" .. group(gain.total) .. ")") or change
+                    line("  " .. gain.name, held, REP_COLOR)
                 end
             end
         end
@@ -328,7 +404,19 @@ function ns.newResultsWindow(deps)
                 end)
             if expanded.reputation then
                 for _, gain in ipairs(reputation) do
-                    line("  " .. gain.faction, "+" .. gain.amount, REP_COLOR)
+                    line("  " .. gain.faction, "+" .. group(gain.amount), REP_COLOR)
+                    -- Only factions the client could place get a bar. A gain parsed out of
+                    -- chat for a faction the client will not name — an account-wide line
+                    -- read on a character that has never met them — has nowhere to sit.
+                    if gain.standing or (gain.max or 0) > 0 then
+                        local current, max = gain.current or 0, gain.max or 0
+                        local caption = gain.standing or ""
+                        if max > 0 then
+                            caption = (caption ~= "" and caption .. "  " or "")
+                                .. group(current) .. " / " .. group(max)
+                        end
+                        bar(current, max, caption)
+                    end
                 end
             end
         end
@@ -419,6 +507,12 @@ function ns.newResultsWindow(deps)
         for index = used + 1, #rows do
             rows[index].label:Hide()
             rows[index].value:Hide()
+        end
+
+        for index = usedBars + 1, #bars do
+            bars[index].back:Hide()
+            bars[index].fill:Hide()
+            bars[index].text:Hide()
         end
 
         frame:SetHeight(-y + PADDING)

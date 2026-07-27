@@ -1250,6 +1250,33 @@ describe("addon integration", function()
             )
         end)
 
+        it("carries the standing the client reports for the faction that gained", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                factions = {
+                    ["Argent Dawn"] = { standing = "Honored", current = 3000, max = 12000 },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire(
+                "CHAT_MSG_COMBAT_FACTION_CHANGE",
+                "Your Argent Dawn reputation has increased by 40."
+            )
+
+            assert.same({
+                {
+                    faction = "Argent Dawn",
+                    amount = 40,
+                    standing = "Honored",
+                    current = 3000,
+                    max = 12000,
+                },
+            }, app.tally.summary().reputation)
+        end)
+
         it("records a newly collected transmog item from its source event", function()
             local app, recorded = boot({
                 playerName = "Thrall",
@@ -1446,11 +1473,12 @@ describe("addon integration", function()
             })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            -- currencyType, quantity, quantityChange — the client hands the change over.
+            -- currencyType, quantity, quantityChange — the client hands over both the
+            -- change and what the character is left holding.
             recorded.frame:fire("CURRENCY_DISPLAY_UPDATE", 1166, 30, 15)
 
             assert.same(
-                { { id = 1166, name = "Timewarped Badge", amount = 15 } },
+                { { id = 1166, name = "Timewarped Badge", amount = 15, total = 30 } },
                 app.tally.summary().currencies
             )
         end)
@@ -1469,7 +1497,7 @@ describe("addon integration", function()
             recorded.frame:fire("BAG_UPDATE_DELAYED")
 
             assert.same(
-                { { id = 5001, name = "Bloody Token", amount = 15 } },
+                { { id = 5001, name = "Bloody Token", amount = 15, total = 55 } },
                 app.tally.summary().currencies
             )
         end)

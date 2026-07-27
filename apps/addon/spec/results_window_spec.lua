@@ -102,6 +102,34 @@ describe("ns.newResultsWindow", function()
         return lines
     end
 
+    ---The progress bars on screen, in creation order. A bar is a track, the filled part of
+    ---it and a caption centred over both; the caption is the one font string the window
+    ---centres, which is what keeps it out of the label/value rows above.
+    ---@param frame table
+    ---@return table[] `{ { caption = string, filled = number, width = number }, ... }`
+    local function barsOf(frame)
+        local captions = {}
+        for _, fontString in ipairs(frame.fontStrings) do
+            if fontString.shown and fontString.justify == "CENTER" then
+                captions[#captions + 1] = fontString.text
+            end
+        end
+        -- Bars are pooled as a track/fill pair each, handed out in order, so the pair at
+        -- 2n-1 and 2n is the nth bar and the ones still on screen come first.
+        local drawn = {}
+        for index = 1, math.floor(#frame.textures / 2) do
+            local back, fill = frame.textures[index * 2 - 1], frame.textures[index * 2]
+            if back.shown then
+                drawn[#drawn + 1] = {
+                    caption = captions[#drawn + 1],
+                    width = back.width,
+                    filled = fill.shown and fill.width or 0,
+                }
+            end
+        end
+        return drawn
+    end
+
     ---@param lines table[]
     ---@param label string
     ---@return string? the value paired with the first row carrying that label
@@ -285,6 +313,105 @@ describe("ns.newResultsWindow", function()
             assert.is_nil(valueFor(rowsOf(frames[1]), "  Timbermaw Hold"))
         end)
 
+        ---Expand a heading by clicking it, the way a player reaches the detail under it.
+        ---@param frame table
+        ---@param heading string
+        local function expand(frame, heading)
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.text == heading then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    return
+                end
+            end
+            error("no row labelled " .. heading .. " to expand")
+        end
+
+        it("draws a bar under each faction, filled to where the character stands", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                reputationTotal = 250,
+                reputation = {
+                    {
+                        faction = "Argent Dawn",
+                        amount = 250,
+                        standing = "Honored",
+                        current = 6000,
+                        max = 12000,
+                    },
+                },
+            }))
+
+            expand(frames[1], "Reputation +")
+
+            local bars = barsOf(frames[1])
+            assert.equal(1, #bars)
+            assert.equal("Honored  6,000 / 12,000", bars[1].caption)
+            assert.equal(bars[1].width / 2, bars[1].filled)
+        end)
+
+        it("draws a full bar for a faction with nothing left to earn", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                reputationTotal = 40,
+                reputation = {
+                    { faction = "Argent Dawn", amount = 40, standing = "Exalted", current = 1, max = 1 },
+                },
+            }))
+
+            expand(frames[1], "Reputation +")
+
+            local bars = barsOf(frames[1])
+            assert.equal("Exalted  1 / 1", bars[1].caption)
+            assert.equal(bars[1].width, bars[1].filled)
+        end)
+
+        it("draws an empty bar rather than none at the start of a level", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                reputationTotal = 40,
+                reputation = {
+                    { faction = "Argent Dawn", amount = 40, standing = "Revered", current = 0, max = 21000 },
+                },
+            }))
+
+            expand(frames[1], "Reputation +")
+
+            local bars = barsOf(frames[1])
+            assert.equal(1, #bars)
+            assert.equal(0, bars[1].filled)
+        end)
+
+        it("draws no bar for a faction the client could not place", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                reputationTotal = 40,
+                reputation = { { faction = "Argent Dawn", amount = 40 } },
+            }))
+
+            expand(frames[1], "Reputation +")
+
+            assert.same({}, barsOf(frames[1]))
+            assert.equal("+40", valueFor(rowsOf(frames[1]), "  Argent Dawn"))
+        end)
+
+        -- Bars are pooled the same way rows are, so one drawn for a busier summary has to
+        -- come off screen when a later, quieter one no longer has a faction for it.
+        it("takes leftover bars off screen when a later summary has fewer factions", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                reputationTotal = 60,
+                reputation = {
+                    { faction = "Argent Dawn", amount = 40, standing = "Honored", current = 1, max = 2 },
+                    { faction = "Timbermaw Hold", amount = 20, standing = "Friendly", current = 1, max = 4 },
+                },
+            }))
+            expand(frames[1], "Reputation +")
+
+            window.update(summary({ reputation = {} }))
+
+            assert.same({}, barsOf(frames[1]))
+        end)
+
         it("hides currency until one changed", function()
             local window, frames = newWindow()
 
@@ -314,6 +441,30 @@ describe("ns.newResultsWindow", function()
             local lines = rowsOf(frames[1])
             assert.equal("+7", valueFor(lines, "  Honor"))
             assert.equal("-3", valueFor(lines, "  Valor"))
+        end)
+
+        it("shows what the character holds beside what the segment earned", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                currencyTotal = 7,
+                currencies = { { id = 1, name = "Honor", amount = 7, total = 12450 } },
+            }))
+
+            expand(frames[1], "Currency +")
+
+            assert.equal("+7 (12,450)", valueFor(rowsOf(frames[1]), "  Honor"))
+        end)
+
+        it("shows a spend against the holding it left behind", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                currencyTotal = -300,
+                currencies = { { id = 1, name = "Honor", amount = -300, total = 1200 } },
+            }))
+
+            expand(frames[1], "Currency +")
+
+            assert.equal("-300 (1,200)", valueFor(rowsOf(frames[1]), "  Honor"))
         end)
 
         it("hides achievements until one was earned", function()
