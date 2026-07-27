@@ -259,6 +259,11 @@ export function App({ payload, settings }: AppProps): ReactNode {
             set: desktop.setCombatLogging,
             onError: message,
           }}
+          retention={{
+            status: desktop.logRetention,
+            set: desktop.setLogRetention,
+            onError: message,
+          }}
           wifi={{
             discover: desktop.wifiDiscover,
             send: desktop.wifiSend,

@@ -464,6 +464,40 @@ class Screenshots {
   }
 }
 
+/**
+ * The retention panel on Setup: a switch, a number of days, and — the reason the panel exists
+ * — the files a sweep would take, by name, before anybody agrees to it.
+ */
+class LogRetentionPanel {
+  readonly page: Page;
+  readonly panel: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.panel = page.getByRole("region", { name: "Deleting old combat logs" });
+  }
+
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Setup" }).click();
+    await expect(this.panel).toBeVisible();
+  }
+
+  toggle(): Locator {
+    return this.panel.getByRole("checkbox", {
+      name: "Delete combat logs Chronie has finished reading",
+    });
+  }
+
+  /** How long a log is kept, which is a number and is addressed as one. */
+  days(): Locator {
+    return this.panel.getByRole("spinbutton", { name: "Keep logs for" });
+  }
+
+  state(): Locator {
+    return this.panel.getByRole("status");
+  }
+}
+
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
@@ -472,6 +506,7 @@ const test = base.extend<{
   transmog: TransmogView;
   transmogDetail: TransmogDetail;
   combat: CombatLoggingPanel;
+  retention: LogRetentionPanel;
   shots: Screenshots;
 }>({
   detail: async ({ page }, use) => {
@@ -494,6 +529,9 @@ const test = base.extend<{
   },
   combat: async ({ page }, use) => {
     await use(new CombatLoggingPanel(page));
+  },
+  retention: async ({ page }, use) => {
+    await use(new LogRetentionPanel(page));
   },
   shots: async ({ page }, use) => {
     await use(new Screenshots(page));
@@ -962,6 +1000,31 @@ const mockDesktop: E2EMock = {
     growing: false,
     state: "off",
   },
+  // A folder in the state that makes retention worth having and worth being careful with: two
+  // old logs Chronie has read to the end of, and one older still that it has never read — the
+  // raid night somebody logged before Chronie was watching, which must survive any sweep and
+  // has to be on screen saying so.
+  logRetention: {
+    enabled: false,
+    days: 7,
+    doomed: {
+      count: 2,
+      bytes: 402_653_184,
+      files: [
+        { name: "WoWCombatLog-071026_201500.txt", bytes: 268_435_456, modified: EVENING - 30 * 86400 },
+        { name: "WoWCombatLog-071126_193000.txt", bytes: 134_217_728, modified: EVENING - 29 * 86400 },
+      ],
+    },
+    unread: {
+      count: 1,
+      bytes: 1_073_741_824,
+      files: [
+        { name: "WoWCombatLog-032526_204500.txt", bytes: 1_073_741_824, modified: EVENING - 120 * 86400 },
+      ],
+    },
+    unfinished: { count: 0, bytes: 0, files: [] },
+    removed: [],
+  },
   chosenPath: "D:\\Games\\Example MMO",
   syncResult: { segmentCount: 3, added: 1, updated: 1 },
   installResult: { version: "0.8.0-dev" },
@@ -1102,6 +1165,10 @@ const sentTo = (page: Page): Promise<string[]> =>
  */
 const combatLoggingSetting = (page: Page): Promise<boolean | undefined> =>
   page.evaluate(() => window.__Chronie_E2E__?.settings.combatLogging);
+
+/** And what it was told to keep logs for, which is `null` while it is told to keep them all. */
+const retainDaysSetting = (page: Page): Promise<number | null | undefined> =>
+  page.evaluate(() => window.__Chronie_E2E__?.settings.retainLogDays ?? null);
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {
@@ -2026,7 +2093,9 @@ test("shows the game's transmog sets by collection and filters them", async ({
   });
 });
 
-test("drives setup, sync, addon installation, and app update checks", async ({ page, combat }) => {
+test("drives setup, sync, addon installation, and app update checks", async (
+  { page, combat, retention },
+) => {
   await page.getByRole("button", { name: "Setup" }).click();
   await expect(page.getByRole("heading", { name: "Setup" })).toBeVisible();
   await expect(page.getByLabel("Game folder")).toHaveValue("C:\\Games\\Example MMO\\_retail_");
@@ -2054,7 +2123,8 @@ test("drives setup, sync, addon installation, and app update checks", async ({ p
     await expect(combat.state())
       .toHaveText("Combat logging is off. Nothing is being written and nothing is using disk.");
     await expect(combat.panel).toContainText("a raid night is hundreds of megabytes");
-    await expect(combat.panel).toContainText("Chronie does not delete old logs yet");
+    await expect(combat.panel)
+      .toContainText("Chronie deletes nothing out of the game's Logs folder unless the panel");
     await expect(combatLoggingSetting(page)).resolves.toBe(false);
   });
 
@@ -2077,6 +2147,47 @@ test("drives setup, sync, addon installation, and app update checks", async ({ p
     await expect(combat.panel).toContainText("No combat log found in the game's Logs folder.");
     await expect(combat.panel)
       .toContainText("Advanced logging reads on in WTF/Account/EXAMPLE/config-cache.wtf.");
+  });
+
+  // Deleting a combat log is the one thing Chronie does that cannot be undone, so what would
+  // go has to be readable — by name — while the switch is still off. A summary printed after
+  // the first sweep would be a report of a decision nobody was given the chance to make.
+  await test.step("deleting old logs is off, and names what turning it on would take", async () => {
+    await expect(retention.toggle()).not.toBeChecked();
+    await expect(retention.state()).toContainText("Chronie deletes no combat logs");
+    await expect(retention.state()).toContainText("Turning this on at 7 days would delete 2 logs");
+    await expect(retention.panel).toContainText("Would go on the next sync:");
+    await expect(retention.panel).toContainText("WoWCombatLog-071026_201500.txt");
+    await expect(retention.panel).toContainText("WoWCombatLog-071126_193000.txt");
+    await expect(retainDaysSetting(page)).resolves.toBeNull();
+  });
+
+  // The gigabyte nothing has ever read is the file this whole feature is careful about. It is
+  // never swept, and a tool that skipped it silently would be indistinguishable from one that
+  // was not running — so it is named, sized, and handed back to the reader.
+  await test.step("and says which old logs it will never delete by itself", async () => {
+    await expect(retention.panel).toContainText("1 log, 1.0 GB");
+    await expect(retention.panel).toContainText("never been read by Chronie");
+    await expect(retention.panel).toContainText("These are never deleted. Removing them is yours to do.");
+    await expect(retention.panel).toContainText("Never deleted by Chronie:");
+    await expect(retention.panel).toContainText("WoWCombatLog-032526_204500.txt");
+  });
+
+  await test.step("turning it on records the window and says what goes next sync", async () => {
+    await retention.toggle().check();
+
+    await expect(retention.toggle()).toBeChecked();
+    await expect(retainDaysSetting(page)).resolves.toBe(7);
+    await expect(retention.state()).toContainText("older than 7 days");
+    await expect(retention.state()).toContainText("2 logs, 384.0 MB go on the next sync");
+    await expect(retention.panel).toContainText("Going on the next sync:");
+
+    // A longer window is the same feature with a different number, and it has to reach the
+    // setting rather than only the box it was typed into.
+    await retention.days().fill("30");
+    await retention.days().blur();
+    await expect(retainDaysSetting(page)).resolves.toBe(30);
+    await expect(retention.state()).toContainText("older than 30 days");
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * Setup: the plumbing. Where the game is, what Chronie should do about it, and the two
+ * Setup: the plumbing. Where the game is, what Chronie should do about it, and the
  * panels that are features in their own right.
  *
  * Every button here reports what happened in the one status line beneath them, because every
@@ -12,6 +12,8 @@ import type { ReactNode } from "react";
 
 import { CombatLogPanel } from "./combatLogPanel";
 import type { CombatLogActions } from "./combatLogPanel";
+import { RetentionPanel } from "./retentionPanel";
+import type { RetentionActions } from "./retentionPanel";
 import { WifiPanel } from "./wifiPanel";
 import type { WifiActions } from "./wifiPanel";
 import type { AppUpdateResult, InstallResult, Settings, SyncResult } from "./types";
@@ -32,13 +34,14 @@ export interface SetupProps {
   settings: Settings;
   actions: SetupActions;
   combatLog: CombatLogActions;
+  retention: RetentionActions;
   wifi: WifiActions;
-  /** Whether Setup is the view on screen, which is what the two panels poll on. */
+  /** Whether Setup is the view on screen, which is what the panels poll on. */
   visible: boolean;
 }
 
 export function Setup(
-  { settings, actions, combatLog, wifi, visible }: SetupProps,
+  { settings, actions, combatLog, retention, wifi, visible }: SetupProps,
 ): ReactNode {
   const [path, setPath] = useState(settings.wowPath || "");
   const [saying, setSaying] = useState("");
@@ -124,6 +127,9 @@ export function Setup(
 
     <CombatLogPanel
       actions={combatLog} requested={settings.combatLogging === true} visible={visible}
+    />
+    <RetentionPanel
+      actions={retention} days={settings.retainLogDays ?? null} visible={visible}
     />
     <WifiPanel actions={wifi} visible={visible} />
   </>;

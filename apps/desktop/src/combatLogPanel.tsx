@@ -3,8 +3,8 @@
  * really doing.
  *
  * The switch is off until somebody deliberately turns it on, and the copy beside it says what
- * turning it on costs before they do — a raid night is hundreds of megabytes and nothing in
- * Chronie deletes an old log yet, so the number is the reader's to carry.
+ * turning it on costs before they do — a raid night is hundreds of megabytes, and Chronie only
+ * clears them up once the panel below this one has been told it may.
  *
  * Everything below the switch is reporting rather than promising, and `combatLog.ts` is where
  * the wording lives.
@@ -110,9 +110,9 @@ export function CombatLogPanel({ actions, requested, visible }: CombatLogPanelPr
       <h2 id="combat-log-heading">Combat logging</h2>
       <p className="sub">The game can write every combat event to a file, with the positions
         Chronie needs to say where something happened. It is off unless you turn it on here,
-        because it is not cheap: <strong>a raid night is hundreds of megabytes</strong>, and
-        Chronie does not delete old logs yet — clearing out the game&apos;s <strong>Logs</strong>
-        {" "}folder is still yours to do.</p>
+        because it is not cheap: <strong>a raid night is hundreds of megabytes</strong>. Chronie
+        deletes nothing out of the game&apos;s <strong>Logs</strong> folder unless the panel
+        below this one is turned on as well.</p>
       <label className="check">
         <input
           id="combat-logging" type="checkbox" checked={checked} disabled={busy}

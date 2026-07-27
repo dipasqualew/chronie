@@ -6489,4 +6489,215 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(stamped_year("WoWCombatLog.txt"), None);
         assert_eq!(stamped_year("WoWCombatLog-notadate.txt"), None);
     }
+
+    /* ---------- clearing the logs up again ---------- */
+
+    /// When the sweep runs, in the same epoch seconds every other test in here uses.
+    const SWEEP_NOW: i64 = 2_000_000_100;
+
+    /// Backdates a planted log the way the filesystem dates one written weeks ago. The age is
+    /// the only thing the rule reads off a file, and nothing in a fixture's contents affects
+    /// it — which is the point, the content timestamps being the unreliable ones.
+    fn backdate(wow: &Path, name: &str, at: i64) {
+        fs::File::options()
+            .write(true)
+            .open(wow.join("Logs").join(name))
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(at as u64))
+            .unwrap();
+    }
+
+    fn exists(wow: &Path, name: &str) -> bool {
+        wow.join("Logs").join(name).is_file()
+    }
+
+    /// A folder with an old log, a slightly less old one, and a current one, all read.
+    fn swept_install() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let (temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+        plant_log(&wow, "mythic-plus.txt", "WoWCombatLog-120223_190000.txt");
+        plant_log(&wow, "advanced-off.txt", "WoWCombatLog-112123_210300.txt");
+        backdate(&wow, "WoWCombatLog-111423_201500.txt", SWEEP_NOW - 30 * DAY_SECONDS);
+        backdate(&wow, "WoWCombatLog-112123_210300.txt", SWEEP_NOW - 20 * DAY_SECONDS);
+        backdate(&wow, "WoWCombatLog-120223_190000.txt", SWEEP_NOW - 3_600);
+        (temp, wow, database)
+    }
+
+    /// The ordinary case, through the sync that does it: two logs read to their end weeks ago
+    /// go, the one the client is writing stays, and the going is written down.
+    #[test]
+    fn deletes_the_old_logs_it_has_read_and_records_every_one() {
+        let (_temp, wow, database) = swept_install();
+
+        collect(
+            &wow,
+            &database,
+            SWEEP_NOW,
+            Options {
+                retain_log_days: Some(7),
+                ..Options::default()
+            },
+        )
+        .unwrap();
+
+        assert!(!exists(&wow, "WoWCombatLog-111423_201500.txt"));
+        assert!(!exists(&wow, "WoWCombatLog-112123_210300.txt"));
+        assert!(exists(&wow, "WoWCombatLog-120223_190000.txt"), "the active log");
+        let deleted = rows_of::<String>(
+            &database,
+            "SELECT name FROM log_deletions ORDER BY name",
+        );
+        assert_eq!(
+            deleted,
+            ["WoWCombatLog-111423_201500.txt", "WoWCombatLog-112123_210300.txt"]
+        );
+        let (bytes, lines, days, at): (i64, i64, i64, i64) = open_database(&database)
+            .unwrap()
+            .query_row(
+                "SELECT bytes, lines_read, retain_days, deleted_at FROM log_deletions
+                 WHERE name = 'WoWCombatLog-111423_201500.txt'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert!(bytes > 0, "the record has to say what was lost");
+        assert_eq!(lines, 28, "and that it had been read");
+        assert_eq!(days, 7);
+        assert_eq!(at, SWEEP_NOW);
+    }
+
+    /// The file is the source, and what was carried out of it is not. A deleted log leaves its
+    /// positions, its fights and its cursor exactly where they were — the night happened
+    /// whether or not the bytes that recorded it still exist.
+    #[test]
+    fn keeps_everything_it_learned_from_a_log_it_deleted() {
+        let (_temp, wow, database) = swept_install();
+
+        collect(
+            &wow,
+            &database,
+            SWEEP_NOW,
+            Options {
+                retain_log_days: Some(7),
+                ..Options::default()
+            },
+        )
+        .unwrap();
+
+        // The cursor row survives the file, and so does everything hanging off it — which is
+        // the whole reason the sweeper does not delete that row along with the bytes.
+        assert_eq!(count_of(&database, "combat_logs"), 3);
+        let (positions, fights): (i64, i64) = open_database(&database)
+            .unwrap()
+            .query_row(
+                "SELECT
+                     (SELECT COUNT(*) FROM log_positions WHERE log_id = logs.id),
+                     (SELECT COUNT(*) FROM log_fights WHERE log_id = logs.id)
+                 FROM combat_logs logs WHERE name = 'WoWCombatLog-111423_201500.txt'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(positions, 6, "the track read out of a log that is now gone");
+        assert_eq!(fights, 2);
+    }
+
+    /// Off is off. The same folder, the same ages, and nothing is touched.
+    #[test]
+    fn deletes_nothing_at_all_until_somebody_turns_it_on() {
+        let (_temp, wow, database) = swept_install();
+
+        collect(&wow, &database, SWEEP_NOW, Options::default()).unwrap();
+
+        assert!(exists(&wow, "WoWCombatLog-111423_201500.txt"));
+        assert!(exists(&wow, "WoWCombatLog-112123_210300.txt"));
+        assert_eq!(count_of(&database, "log_deletions"), 0);
+    }
+
+    /// The case the whole feature is built around. Three weeks of logs somebody wrote before
+    /// Chronie could read one: old enough by any window, and read by nothing. A sweeper that
+    /// went by age would take all of them, permanently, and nobody would find out until they
+    /// went looking for a raid night that no longer exists.
+    #[test]
+    fn never_deletes_an_old_log_that_was_never_ingested() {
+        let (_temp, wow, database) = swept_install();
+        let mut connection = open_database(&database).unwrap();
+
+        sweep_logs(&mut connection, &wow, 7, SWEEP_NOW).unwrap();
+
+        assert!(exists(&wow, "WoWCombatLog-111423_201500.txt"));
+        assert!(exists(&wow, "WoWCombatLog-112123_210300.txt"));
+        assert!(exists(&wow, "WoWCombatLog-120223_190000.txt"));
+        assert_eq!(count_of(&database, "log_deletions"), 0);
+    }
+
+    /// And it says so. An un-ingested pile is surfaced rather than swept or hidden, because it
+    /// is somebody's decision to make and they cannot make it without being told.
+    #[test]
+    fn surfaces_the_old_logs_it_will_not_touch() {
+        let (_temp, wow, database) = swept_install();
+
+        let report = retention_report(&database, Some(&wow), None, SWEEP_NOW).unwrap();
+
+        assert!(!report.enabled, "off, and previewing what turning it on would do");
+        assert_eq!(report.days, retention::DEFAULT_RETAIN_DAYS);
+        assert_eq!(report.doomed.count, 0);
+        assert_eq!(report.unread.count, 2);
+        assert_eq!(
+            report.unread.files.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            ["WoWCombatLog-111423_201500.txt", "WoWCombatLog-112123_210300.txt"]
+        );
+    }
+
+    /// Once they have been read the same two files move to the other pile, and the report is
+    /// what a reader is shown before the switch is thrown.
+    #[test]
+    fn previews_what_a_sweep_would_delete_before_it_is_switched_on() {
+        let (_temp, wow, database) = swept_install();
+        collect(&wow, &database, SWEEP_NOW, Options::default()).unwrap();
+
+        let report = retention_report(&database, Some(&wow), None, SWEEP_NOW).unwrap();
+
+        assert_eq!(report.doomed.count, 2);
+        assert!(report.doomed.bytes > 0);
+        assert_eq!(report.unread.count, 0);
+    }
+
+    /// The ledger is what the report shows afterwards, so "Chronie deleted my logs" has an
+    /// answer sitting on the screen that did it.
+    #[test]
+    fn reports_what_it_has_already_deleted() {
+        let (_temp, wow, database) = swept_install();
+        collect(
+            &wow,
+            &database,
+            SWEEP_NOW,
+            Options {
+                retain_log_days: Some(7),
+                ..Options::default()
+            },
+        )
+        .unwrap();
+
+        let report = retention_report(&database, Some(&wow), Some(7), SWEEP_NOW).unwrap();
+
+        assert!(report.enabled);
+        assert_eq!(report.removed.len(), 2);
+        assert_eq!(report.doomed.count, 0, "there is nothing left to take");
+        assert_eq!(report.removed[0].retain_days, 7);
+        assert_eq!(report.removed[0].deleted_at, SWEEP_NOW);
+    }
+
+    /// Before a game folder has been chosen there is no folder to look in, and the honest
+    /// report is an empty one rather than a failure.
+    #[test]
+    fn reports_nothing_when_there_is_no_install_to_look_at() {
+        let (_temp, _wow, database) = swept_install();
+
+        let report = retention_report(&database, None, None, SWEEP_NOW).unwrap();
+
+        assert_eq!(report.doomed.count, 0);
+        assert_eq!(report.unread.count, 0);
+        assert!(report.removed.is_empty());
+    }
 }
