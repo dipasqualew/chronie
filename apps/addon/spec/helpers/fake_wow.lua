@@ -44,6 +44,11 @@ fake.KNOWN_EVENTS = {
     "QUEST_ACCEPTED",
     "QUEST_LOG_UPDATE",
     "QUEST_TURNED_IN",
+    -- Read out of the 12.0.5.67823 client's own event table, where all three sit together:
+    -- SCREENSHOT_STARTED, SCREENSHOT_SUCCEEDED and SCREENSHOT_FAILED. The addon subscribes
+    -- to the two that resolve a shot; the third says only that one has begun.
+    "SCREENSHOT_FAILED",
+    "SCREENSHOT_SUCCEEDED",
     "TRANSMOG_COLLECTION_SOURCE_ADDED",
     "UPDATE_INSTANCE_INFO",
     "ZONE_CHANGED_NEW_AREA",
@@ -757,8 +762,6 @@ function fake.newEnv(options)
     -- How many times the addon reached for the shutter. There is nothing else to observe:
     -- the real Screenshot() is asynchronous and writes a file the addon can never see.
     local screenshots = 0
-    ---Which bindings the addon asked the player's key for.
-    local bindingKeysAsked = {}
     -- The client's own unique id for the logged-in character. `false` models every moment
     -- before the world has loaded, where the client will not name the player at all.
     local playerGUID = options.playerGUID
@@ -937,13 +940,6 @@ function fake.newEnv(options)
         screenshot = function()
             screenshots = screenshots + 1
         end,
-        -- What the player has bound to one of the addon's own bindings. Defaults to nothing
-        -- bound, which is what every player has until they go and bind something, and is the
-        -- case anything naming a key in front of them has to cope with.
-        bindingKey = function(action)
-            bindingKeysAsked[#bindingKeysAsked + 1] = action
-            return (options.bindingKeys or {})[action]
-        end,
         loggingCombat = function(enable)
             if enable ~= nil then
                 logging = enable and true or false
@@ -1103,8 +1099,6 @@ function fake.newEnv(options)
         end,
         ---Every write the addon attempted, refused ones included.
         setCVarCalls = setCVarCalls,
-        ---Which of its own bindings the addon looked up a key for.
-        bindingKeysAsked = bindingKeysAsked,
         ---@return integer how many times the addon asked the client for raid info
         raidInfoRequests = function()
             return raidInfoRequests

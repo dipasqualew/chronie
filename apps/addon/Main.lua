@@ -1,14 +1,5 @@
 local addonName, ns = ...
 
--- The Key Bindings panel builds its list out of globals: BINDING_HEADER_<header> titles
--- the section and BINDING_NAME_<name> labels the row inside it. Both refer to the tokens
--- in Bindings.xml, and without them the panel shows those raw tokens to the player. They
--- are declared here, at file scope, because the panel reads them whenever it is opened —
--- which may be long before or entirely without the addon having wired itself up.
-BINDING_HEADER_CHRONIE = "Chronie"
-BINDING_NAME_CHRONIE_CAPTURE = "Take a screenshot"
-BINDING_NAME_CHRONIE_ANNOTATE = "Add a note to what was just captured"
-
 ---Everything the addon needs from the outside world, in one injectable bag.
 ---@class WowEnv
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
@@ -63,9 +54,9 @@ BINDING_NAME_CHRONIE_ANNOTATE = "Add a note to what was just captured"
 ---@field playerGUID fun(): string? UnitGUID("player"), the client's own unique character id.
 ---@field mapState fun(): MapPosition? Where the player is standing, when the client says.
 ---@field screenshot fun() Take a screenshot. Asynchronous: the file lands a moment later,
----and the addon can never see it, so nothing may wait on or confirm it.
----@field bindingKey fun(action: string): string? Which key the player has bound to one of
----the addon's own bindings, or nil when they have bound none.
+---and the addon can never see it, so nothing may wait on or confirm it. What says it
+---landed is SCREENSHOT_SUCCEEDED, which the client fires for the player's own screenshot
+---key just the same — see ns.newScreenshotWatch for how the two are told apart.
 ---@field loggingCombat fun(enable: boolean?): boolean Client LoggingCombat: starts or stops
 ---combat logging when passed a value, and reports the current state either way.
 ---@field getCVar fun(name: string): string? Reads a client setting.
@@ -323,9 +314,6 @@ function ns.main(env)
         onDismiss = entryPrompt.dismiss,
         onRelease = entryPrompt.release,
         tick = entryPrompt.tick,
-        bindingKey = function()
-            return env.bindingKey and env.bindingKey("CHRONIE_ANNOTATE")
-        end,
     })
 
     -- ns.settings again: which things are worth a photograph is the player's list, not
@@ -335,7 +323,12 @@ function ns.main(env)
         now = env.now,
     })
 
-    ---Takes a Chronie screenshot: what the keybinding in Bindings.xml runs.
+    -- Which of the screenshots the client reports are Chronie's own. Everything else is one
+    -- the player took with the client's own screenshot key, which is the whole reason the
+    -- addon listens: see the SCREENSHOT_SUCCEEDED handler below.
+    local screenshotWatch = ns.newScreenshotWatch({ now = env.now })
+
+    ---Takes a Chronie screenshot: the shutter the addon presses for itself.
     ---
     ---The marker is written first and the shutter fired second, and only if the marker
     ---was actually written. Screenshot() is asynchronous and the addon cannot see the
@@ -343,8 +336,8 @@ function ns.main(env)
     ---the file to the marker by the second in its name. Firing the shutter for an entry
     ---the log refused would leave an image with no marker to claim it, which reads to the
     ---desktop side as a photograph somebody else took.
-    ---@param options EntryOptions? What fired it, when something other than a key did.
-    ---@return EntryRecord? entry nil when the log refused the press.
+    ---@param options EntryOptions? What fired it, when something other than a person did.
+    ---@return EntryRecord? entry nil when the log refused it.
     local function capture(options)
         options = options or {}
         options.hasImage = true
@@ -356,6 +349,9 @@ function ns.main(env)
         -- taking a picture leaves every other counter at rest, and the tracker drops a
         -- segment that saw nothing.
         tally.entry()
+        -- Claimed before the shutter, never after: the event can be back before the next
+        -- line of this function runs, and an unclaimed success is recorded as the player's.
+        screenshotWatch.fired()
         env.screenshot()
         -- Offered for every capture, the automatic ones included: a picture Chronie took
         -- by itself is exactly the kind that wants a sentence saying why it was worth
@@ -658,6 +654,42 @@ function ns.main(env)
         end
     end
 
+    -- The player photographing something themselves, with the client's own screenshot key.
+    --
+    -- This is how a picture the player took becomes a Chronie entry, and it is why the
+    -- addon has no capture key of its own: every player already has one bound, it works
+    -- while both hands are busy, and the client tells anyone listening that it fired. The
+    -- entry is written when the file lands rather than when the key went down, which is the
+    -- closest the addon can stand to the moment the client stamped the filename it will be
+    -- paired with.
+    --
+    -- Nothing here asks whether the world was on screen. That question belongs to the
+    -- automatic triggers, which decide for themselves and can be wrong about a black
+    -- rectangle nobody wanted; a player pressing the key during a cinematic means it.
+    dispatcher.on("SCREENSHOT_SUCCEEDED", function()
+        if screenshotWatch.claim() then
+            -- One of Chronie's own, which already has its marker and its offer. Recording
+            -- it again here is the double entry this watch exists to prevent.
+            return
+        end
+        local entry = entryLog.record({ hasImage = true })
+        if not entry then
+            return
+        end
+        -- The same two things a capture Chronie asked for gets, and for the same reasons:
+        -- the segment has to survive being an evening where nothing else happened, and the
+        -- sentence about a picture is worth most in the seconds after it was taken.
+        tally.entry()
+        entryPrompt.offer(entry)
+    end)
+
+    -- A shot that never landed: the disk is full, or the client gave up on it. There is
+    -- nothing to record, and the only thing that matters is letting the claim go, so the
+    -- player's next screenshot is judged on its own rather than mistaken for this one.
+    dispatcher.on("SCREENSHOT_FAILED", function()
+        screenshotWatch.claim()
+    end)
+
     -- Logging out or reloading is the last chance to file a segment: SavedVariables are
     -- only written to disk on the way out, so an unfiled segment would never be exported.
     -- The warband pot is re-read on the way past for the same reason — this is the freshest
@@ -861,9 +893,9 @@ function ns.main(env)
         combatLogging = combatLogging,
         capture = capture,
         captureTriggers = captureTriggers,
+        screenshotWatch = screenshotWatch,
         entryPrompt = entryPrompt,
         entryToast = entryToast,
-        annotate = entryToast.engage,
     }
 end
 
@@ -1156,11 +1188,6 @@ if CreateFrame then
                 return ns.readMapPosition(C_Map)
             end,
             screenshot = Screenshot,
-            -- Two keys can be bound to one action; the toast has room to name one, and the
-            -- first is the one the Key Bindings panel shows as the primary.
-            bindingKey = function(action)
-                return (GetBindingKey(action))
-            end,
             loggingCombat = LoggingCombat,
             -- C_CVar is the modern home of both; the bare globals are still defined and are
             -- what older clients have, so each is taken from whichever this build offers.
@@ -1191,10 +1218,5 @@ if CreateFrame then
             minimap = Minimap,
             db = ChronieDB,
         })
-
-        -- What the keybindings in Bindings.xml call. Published only now, so a key pressed
-        -- during login runs nothing rather than reaching a half-built addon.
-        ChronieCapture = ns.app.capture
-        ChronieAnnotate = ns.app.annotate
     end)
 end

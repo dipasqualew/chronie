@@ -16,8 +16,8 @@ local _, ns = ...
 ---requirement of the feature rather than a preference: a focused edit box swallows every
 ---keybind the player has, so a prompt that focused itself would be a note-taking feature
 ---that eats an interrupt mid-pull. The offer is passive by construction — it becomes an
----edit box only when `engage` is called, and `engage` is called only by a deliberate act,
----a click on the toast or a key pressed on purpose.
+---edit box only when `engage` is called, and `engage` is called only by a deliberate act:
+---a click on the toast.
 ---
 ---**The offer expires.** A capture is annotatable for a few seconds and then it is not;
 ---the toast goes and the entry is filed with no note. There is deliberately no queue of

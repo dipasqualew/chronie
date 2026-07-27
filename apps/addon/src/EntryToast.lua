@@ -10,10 +10,10 @@ local _, ns = ...
 ---
 ---**It never takes keyboard focus on its own.** `SetAutoFocus(false)` on the box and a box
 ---that is not even shown until `engage` are the two halves of that, and `engage` is
----reached only from a click on the toast or from the key the player bound to it. Until
----then the toast cannot consume a keystroke, which is the whole point: this appears while
----the player is doing something else, and a focused edit box swallows every keybind they
----have — including the interrupt they were about to press.
+---reached only from a click on the toast. Until then the toast cannot consume a keystroke,
+---which is the whole point: this appears while the player is doing something else — a
+---screenshot is most often taken mid-fight — and a focused edit box swallows every keybind
+---they have, including the interrupt they were about to press.
 ---
 ---Escape gets two routes on purpose. A focused box answers it through `OnEscapePressed`,
 ---and the frame is in `UISpecialFrames`, which is what closes it when the box is not
@@ -22,8 +22,8 @@ local _, ns = ...
 ---@class EntryToast
 ---@field show fun(entry: EntryRecord) Offer to annotate this entry.
 ---@field hide fun()
----@field engage fun() The deliberate act: turn the offer into a focused box. What the
----keybinding calls, and what a click on the toast calls.
+---@field engage fun() The deliberate act: turn the offer into a focused box. What a click
+---on the toast calls, and the only thing that reaches it.
 ---@field isShown fun(): boolean
 
 ---@class EntryToastDeps
@@ -36,7 +36,6 @@ local _, ns = ...
 ---@field onDismiss fun() The toast went away with nothing written.
 ---@field onRelease fun() The box lost focus without submitting.
 ---@field tick fun() Driven from OnUpdate; how the offer expires.
----@field bindingKey fun(): string? The key bound to engaging, when the player has bound one.
 
 local WIDTH = 300
 local HEIGHT = 74
@@ -49,6 +48,12 @@ local ANCHOR_Y = -170
 local TITLE_COLOR = { 1, 0.82, 0 }
 local HINT_COLOR = { 0.7, 0.7, 0.7 }
 
+---Clicking is the only way in, so the toast can say so plainly. Chronie binds no keys —
+---the screenshot that put this toast on screen was taken with the client's own — and a
+---hint naming a key the player would have had to find and bind for themselves helps
+---nobody.
+local OFFER_HINT = "Click to add a note."
+
 ---@param deps EntryToastDeps
 ---@return EntryToast
 function ns.newEntryToast(deps)
@@ -56,17 +61,6 @@ function ns.newEntryToast(deps)
     local name = deps.name or "ChronieEntryToast"
 
     local frame, title, hint, box
-
-    ---What to press, said in whatever way is true for this player. A key nobody has bound
-    ---must not be described as if they had.
-    ---@return string
-    local function offerHint()
-        local key = deps.bindingKey and deps.bindingKey()
-        if key then
-            return "Click, or press " .. key .. ", to add a note."
-        end
-        return "Click to add a note."
-    end
 
     ---The box is shown only from engage, so hiding it here is what guarantees a toast
     ---never reappears already focused on the last thing that was typed into it.
@@ -170,7 +164,7 @@ function ns.newEntryToast(deps)
             -- The picture is optional: the same toast offers a note on a capture and on a
             -- moment nobody photographed, and says which of the two it is looking at.
             title:SetText(entry.hasImage and "Screenshot taken." or "Moment marked.")
-            hint:SetText(offerHint())
+            hint:SetText(OFFER_HINT)
             frame:Show()
         end,
 

@@ -21,8 +21,9 @@ function loader.tocFiles()
 end
 
 ---Reads one file out of the addon folder, so a test can assert on something the client
----parses rather than executes — Bindings.xml being the only one of those today, and it is
----not in the .toc at all, because the client finds it by name.
+---parses rather than executes. Nothing in the tree is that today — the Bindings.xml that
+---used to be is gone — so this is reached only from `load` below, and only if the .toc
+---ever lists something that is not Lua.
 ---@param relative string A path inside the addon folder.
 ---@return string contents
 function loader.read(relative)

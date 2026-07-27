@@ -1066,7 +1066,6 @@ mod tests {
         // the busted specs above all — can ride along into somebody's game folder.
         let mut expected = files_listed_in_the_toc();
         expected.push("chronie.toc".to_string());
-        expected.push("Bindings.xml".to_string());
         expected.sort();
         let mut bundled: Vec<String> = BUNDLED_ADDON
             .iter()
@@ -1091,10 +1090,6 @@ mod tests {
         let installed = addon_folder(&retail);
         assert!(installed.join("Main.lua").is_file());
         assert!(!installed.join("spec").exists());
-        // The one file the .toc does not account for. The client loads it by name from the
-        // addon's root folder, so it has to land there even though no manifest names it —
-        // and if it does not, the player's capture key silently stops existing.
-        assert!(installed.join("Bindings.xml").is_file());
         assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
         let lua_modules = fs::read_dir(installed.join("src"))
             .unwrap()
@@ -1239,6 +1234,27 @@ mod tests {
         // The backup is the install's own scaffolding; leaving it behind would put a second
         // copy of the addon in the folder the game scans.
         assert!(!retail.join("Interface").join("AddOns").join(".chronie-backup").exists());
+    }
+
+    /// The particular file that had to go, and the reason the install being a swap rather
+    /// than a copy matters. An older Chronie shipped a Bindings.xml, which the client loads
+    /// by name out of the addon's root folder without consulting any manifest — so a copy
+    /// that only wrote this build's files over the top would leave it sitting there, still
+    /// declaring a header on two bindings and still saying so in red at every login (issue
+    /// #69). The staged folder never contains one, and the folder is what is swapped in.
+    #[test]
+    fn leaves_no_keybinding_file_from_an_older_copy_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let installed = addon_folder(&retail);
+        fs::create_dir_all(&installed).unwrap();
+        let stale = installed.join("Bindings.xml");
+        fs::write(&stale, b"<Bindings><Binding name=\"CHRONIE_CAPTURE\" /></Bindings>\n").unwrap();
+
+        replace_addon(&retail, &Settings::default()).unwrap();
+
+        assert!(!stale.exists(), "an older copy's Bindings.xml survived the install");
+        assert!(installed.join("Main.lua").is_file(), "the new copy did not land");
     }
 
     #[test]

@@ -89,13 +89,6 @@ read_globals = {
 globals = {
     "ChronieDB", -- SavedVariables
     "SlashCmdList",
-    -- What Bindings.xml refers to: the two labels the Key Bindings panel reads, and the
-    -- function the key itself runs.
-    "BINDING_HEADER_CHRONIE",
-    "BINDING_NAME_CHRONIE_CAPTURE",
-    "BINDING_NAME_CHRONIE_ANNOTATE",
-    "ChronieCapture",
-    "ChronieAnnotate",
 }
 
 exclude_files = { ".luacheckrc" }
