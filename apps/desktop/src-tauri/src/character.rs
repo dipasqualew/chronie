@@ -39,7 +39,7 @@ use serde_json::Value;
 use crate::casc::GameFiles;
 use crate::glb;
 use crate::icons::{data_url, pixels_of, png_of};
-use crate::m2::{Mesh, Model, Paint};
+use crate::m2::{self, Mesh, Model, Paint};
 use crate::worn::{ComponentTexture, Geoset, Worn};
 
 /// `humanfemale_hd.m2`, from the community listfile.
@@ -64,6 +64,21 @@ const ATLAS_HEIGHT: u32 = 1024;
 /// rather than painted with this, which is the difference between hair that is grey and hair
 /// with somebody's kneecap on it.
 const BODY_TEXTURE: u32 = 1;
+
+/// The one exception to that, and the only slot whose geometry is the body's own: **type 2 is
+/// the cape.**
+///
+/// A back appearance names no model at all. What it names is a picture, and the cloak it goes
+/// on is geoset group 15 of the body — which asks for this type and which nothing else on
+/// `humanfemale_hd` does, read off 12.0.5.67. So a cape is a geoset switched on and one
+/// texture bound, and it needs neither an attachment nor a file of its own.
+const CAPE_TEXTURE: u32 = 2;
+
+/// The largest picture worth handing a model that hangs off the body.
+///
+/// The atlas is the biggest thing the game paints anything with, so an item's own texture has
+/// no business being larger — the same bound `models` puts on a model shown alone.
+const LARGEST_TEXTURE: u32 = 2048;
 
 /// One rectangle of the atlas: where a part of the body is painted.
 struct Rect {
@@ -264,20 +279,100 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
     let skin = model
         .skin_file_data_id()
         .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
-    let mesh = dressed(
-        &model.with_skin(&files.read(skin)?)?,
-        worn.map_or(&[], |worn| worn.geosets.as_slice()),
-    );
+    let mesh = dressed(&model.with_skin(&files.read(skin)?)?, worn);
 
     let painted = atlas(files, worn)?.png()?;
-
-    glb::write(&mesh, &|paint| match paint {
+    let cape = worn.and_then(|worn| worn.cape).and_then(|fdid| decode_file(files, fdid));
+    let body = |paint| match paint {
         // The model's own textures, which on a body are the few things not customized.
         Paint::File(fdid) => decode_file(files, fdid),
         Paint::Supplied(BODY_TEXTURE) => Some(painted.clone()),
+        Paint::Supplied(CAPE_TEXTURE) => cape.clone(),
         // Hair, eyes and jewelry: real texture types this composites nothing for.
         Paint::Supplied(_) => None,
-    })
+    };
+
+    // Held in three lists rather than in the pieces themselves because a piece borrows both
+    // its mesh and the closure that paints it, and each of those closures owns a picture of
+    // its own — a helm's texture is not a shoulder's and neither is the atlas.
+    let hung = hung_on(files, &model, worn)?;
+    let painters: Vec<Box<dyn Fn(Paint) -> Option<Vec<u8>>>> = hung
+        .iter()
+        .map(|(_, _, texture)| {
+            let texture = texture.clone();
+            let painter: Box<dyn Fn(Paint) -> Option<Vec<u8>>> = Box::new(move |paint| match paint {
+                // An item's model wants the one picture, whatever type it asked for. Only a
+                // body declares several and has to tell them apart.
+                Paint::File(fdid) => decode_file(files, fdid),
+                Paint::Supplied(_) => texture.clone(),
+            });
+            painter
+        })
+        .collect();
+
+    let mut pieces = vec![glb::Piece::only(&mesh, &body)];
+    for ((piece, at, _), painter) in hung.iter().zip(painters.iter()) {
+        pieces.push(glb::Piece {
+            mesh: piece,
+            at: at.position,
+            rotation: at.rotation,
+            scale: at.scale,
+            picture: painter.as_ref(),
+        });
+    }
+    glb::write(&pieces)
+}
+
+/// The geometry an appearance hangs off the body: a mesh, where it goes, and its picture.
+///
+/// Where it goes comes out of the body's own skeleton rather than the item — an item's model
+/// is authored around the attachment it belongs on, so a helm's vertices sit around the origin
+/// and mean nothing until the head's position is added to them.
+///
+/// Two absences, and they are not the same. A body with no skeleton is this app being wrong
+/// about a file every character in the game has one of, and is worth saying so about. An
+/// attachment the skeleton does not name, or a model file this install does not hold, is a
+/// piece that cannot be placed — and a pauldron drawn at the origin, which is inside her
+/// pelvis, is worse than a pauldron not drawn.
+#[allow(clippy::type_complexity)]
+fn hung_on(
+    files: &dyn GameFiles,
+    body: &Model,
+    worn: Option<&Worn>,
+) -> Result<Vec<(Mesh, m2::Attachment, Option<Vec<u8>>)>, String> {
+    let wanted = worn.map_or(&[][..], |worn| worn.models.as_slice());
+    if wanted.is_empty() {
+        // The skeleton is 16 MB on a real install, and most of a wardrobe hangs nothing.
+        return Ok(Vec::new());
+    }
+    let skeleton = body
+        .skeleton_file_data_id()
+        .ok_or("the character model names no skeleton, so nothing says where a helm goes")?;
+    let attachments = m2::attachments(&files.read(skeleton)?)?;
+
+    let mut hung = Vec::with_capacity(wanted.len());
+    for model in wanted {
+        let Some(at) = attachments
+            .iter()
+            .find(|attachment| attachment.id == model.attachment)
+            .copied()
+        else {
+            continue;
+        };
+        let Ok(bytes) = files.read(model.file) else {
+            continue;
+        };
+        let parsed = Model::parse(&bytes)?;
+        let skin = parsed
+            .skin_file_data_id()
+            .ok_or("a worn model names no skin profile, so nothing says how to draw it")?;
+        let mesh = parsed.with_skin(&files.read(skin)?)?;
+        let texture = model.texture.and_then(|fdid| {
+            files.read(fdid).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
+        });
+        hung.push((mesh, at, texture));
+    }
+    Ok(hung)
 }
 
 /// The one picture the whole body is painted out of: her own skin, and the appearance over it.
@@ -319,10 +414,21 @@ fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
 /// in it is the worst of those — a leg that is simply absent — and this turns it into the body
 /// as it was, which reads as an appearance that changed nothing.
 ///
+/// And then the third thing, which only a helm does: **a group taken away rather than swapped.**
+/// `Worn::hidden` is the groups `HelmetGeosetData` says the helm covers — hair, ears, a beard —
+/// and every variant in them goes, because there is no variant of hair that fits under a helm.
+///
+/// The trap is that hair is **group 0**, and geoset 0 is the body itself. Read off 12.0.5.67:
+/// `humanfemale_hd` carries hairstyles as geosets 1 to 33, and the skin as 0 — so hiding "the
+/// whole hundred" of group 0 without excepting the one id that has no group takes the character
+/// with the hair. That is the difference between a helmed woman and an empty pane.
+///
 /// The vertices are left whole rather than compacted down to the ones the surviving parts
 /// use. They are shared by every part, a body has tens of thousands of them, and the indices
 /// would all have to be renumbered to save loading the ones the hidden geosets pointed at.
-fn dressed(mesh: &Mesh, geosets: &[Geoset]) -> Mesh {
+fn dressed(mesh: &Mesh, worn: Option<&Worn>) -> Mesh {
+    let geosets = worn.map_or(&[][..], |worn| worn.geosets.as_slice());
+    let hidden = worn.map_or(&[][..], |worn| worn.hidden.as_slice());
     let taken: Vec<&Geoset> = geosets
         .iter()
         .filter(|worn| mesh.parts.iter().any(|part| part.geoset == worn.geoset))
@@ -331,9 +437,15 @@ fn dressed(mesh: &Mesh, geosets: &[Geoset]) -> Mesh {
         Some(worn) => geoset == worn.geoset,
         None => bare(geoset),
     };
+    let covered = |geoset: u16| geoset != 0 && hidden.contains(&(geoset / 100));
     Mesh {
         vertices: mesh.vertices.clone(),
-        parts: mesh.parts.iter().filter(|part| shown(part.geoset)).cloned().collect(),
+        parts: mesh
+            .parts
+            .iter()
+            .filter(|part| shown(part.geoset) && !covered(part.geoset))
+            .cloned()
+            .collect(),
     }
 }
 
@@ -362,24 +474,34 @@ mod tests {
     const CHESTPIECE: (u32, u32) = (900_003, 3);
     const BOOTS: (u32, u32) = (900_004, 6);
     const ROBE: (u32, u32) = (900_012, 3);
+    /// And the four with geometry of their own, which are the ones that hang off her.
+    const HELM: (u32, u32) = (900_001, 0);
+    const SHOULDERS: (u32, u32) = (900_002, 1);
+    const CAPE: (u32, u32) = (900_013, 9);
 
     fn mesh() -> Mesh {
-        worn_mesh(&[])
+        worn_mesh(&Worn::default())
     }
 
-    /// The body as it is drawn with a given set of geosets switched on.
-    fn worn_mesh(geosets: &[Geoset]) -> Mesh {
+    /// The body as it is drawn with a given appearance on it.
+    fn worn_mesh(worn: &Worn) -> Mesh {
         let files = fixture_files();
         let model = Model::parse(&files.read(HUMAN_FEMALE).unwrap()).unwrap();
         let skin = model.skin_file_data_id().unwrap();
-        dressed(&model.with_skin(&files.read(skin).unwrap()).unwrap(), geosets)
+        dressed(&model.with_skin(&files.read(skin).unwrap()).unwrap(), Some(worn))
     }
 
-    /// The geosets the fixture's own tables say an appearance switches on.
-    fn geosets_of((display_info_id, display_type): (u32, u32)) -> Vec<Geoset> {
-        crate::worn::of(&fixture_files(), display_info_id, display_type)
-            .unwrap()
-            .geosets
+    /// The body as it is drawn with a given set of geosets switched on and nothing else.
+    fn geoset_mesh(geosets: &[Geoset]) -> Mesh {
+        worn_mesh(&Worn {
+            geosets: geosets.to_vec(),
+            ..Default::default()
+        })
+    }
+
+    /// What the fixture's own tables say an appearance does to the body.
+    fn worn_of((display_info_id, display_type): (u32, u32)) -> Worn {
+        crate::worn::of(&fixture_files(), display_info_id, display_type).unwrap()
     }
 
     /// The geosets a body ends up drawing, which is what the whole selection comes down to.
@@ -417,6 +539,12 @@ mod tests {
         atlas.get_pixel(rect.x + rect.width / 2, rect.y + rect.height / 4).0
     }
 
+    /// The scene the window is handed for one appearance worn on the body.
+    fn worn_scene(appearance: (u32, u32)) -> Value {
+        let worn = worn_of(appearance);
+        scene(&glb_of(&fixture_files(), Some(&worn)).unwrap())
+    }
+
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
     fn scene(bytes: &[u8]) -> Value {
         let length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
@@ -427,12 +555,13 @@ mod tests {
     // here" and 0 is the skin; everything else is a variant an item switches on.
     #[test]
     fn draws_the_skin_and_one_default_per_group() {
-        // The skin, bare arms, bare legs, bare feet, no helm, hair, the skull.
-        for shown in [0, 801, 1101, 2001, 2701, 101, 2101, 1501, 1801] {
+        // The skin, bare arms, bare legs, bare feet, no helm, the first hairstyle, the skull.
+        for shown in [0, 801, 1101, 2001, 2701, 1, 2101, 1501, 1801] {
             assert!(bare(shown), "{shown} is a default and has to be drawn");
         }
-        // Sleeves, trousers, boots, a helm, a cape, a belt: what an item switches on instead.
-        for hidden in [802, 804, 1102, 1104, 2002, 2005, 2702, 2703, 1502, 1802] {
+        // Sleeves, trousers, boots, a helm, a cape, a belt, another hairstyle: what an item
+        // switches on instead, or what the player picked instead.
+        for hidden in [802, 804, 1102, 1104, 2002, 2005, 2702, 2703, 1502, 1802, 2] {
             assert!(!bare(hidden), "{hidden} is an item's variant and has to be hidden");
         }
     }
@@ -445,10 +574,12 @@ mod tests {
     fn draws_each_part_of_the_body_once() {
         let body = mesh();
         let geosets = drawn(&body);
-        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 101, 1001, 1301, 501, 2101]);
+        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 1, 1001, 1301, 501, 2101]);
 
-        // One group, one part. Group 0 is the skin, which is the id with no group of its own.
-        let mut groups: Vec<u16> = geosets.iter().map(|geoset| geoset / 100).collect();
+        // One group, one part — for every group but the hair's, which is group 0 and which
+        // the skin shares because the skin is the one geoset with no group of its own.
+        let mut groups: Vec<u16> = geosets.iter().filter(|geoset| **geoset != 0)
+            .map(|geoset| geoset / 100).collect();
         groups.sort_unstable();
         let mut distinct = groups.clone();
         distinct.dedup();
@@ -475,13 +606,13 @@ mod tests {
     fn paints_the_body_with_the_atlas_and_leaves_the_hair_alone() {
         let asked = std::cell::RefCell::new(Vec::new());
         let mesh = mesh();
-        glb::write(&mesh, &|paint| {
+        glb::write(&[glb::Piece::only(&mesh, &|paint| {
             asked.borrow_mut().push(paint);
             match paint {
                 Paint::Supplied(BODY_TEXTURE) => Some(b"the atlas".to_vec()),
                 _ => None,
             }
-        })
+        })])
         .unwrap();
         // Once each, however many parts share them: the body's six parts ask for one atlas.
         assert_eq!(asked.into_inner(), vec![Paint::Supplied(1), Paint::Supplied(6)]);
@@ -611,19 +742,19 @@ mod tests {
     fn swaps_the_bare_default_of_each_group_an_appearance_drives() {
         // Sleeves in place of bare arms, a chest in place of the bare torso.
         assert_eq!(
-            drawn(&worn_mesh(&geosets_of(CHESTPIECE))),
-            vec![0, 802, 1101, 2001, 2701, 101, 1002, 1301, 501, 2101]
+            drawn(&worn_mesh(&worn_of(CHESTPIECE))),
+            vec![0, 802, 1101, 2001, 2701, 1, 1002, 1301, 501, 2101]
         );
         // The boot itself and the booted feet: two groups from one item, and the feet group is
         // the one whose zero means booted rather than bare.
         assert_eq!(
-            drawn(&worn_mesh(&geosets_of(BOOTS))),
-            vec![0, 801, 1101, 2002, 2701, 101, 1001, 1301, 502, 2101]
+            drawn(&worn_mesh(&worn_of(BOOTS))),
+            vec![0, 801, 1101, 2002, 2701, 1, 1001, 1301, 502, 2101]
         );
         // The robe leaves the chest bare and hangs a skirt over the legs instead.
         assert_eq!(
-            drawn(&worn_mesh(&geosets_of(ROBE))),
-            vec![0, 802, 1101, 2001, 2701, 101, 1001, 1302, 501, 2101]
+            drawn(&worn_mesh(&worn_of(ROBE))),
+            vec![0, 802, 1101, 2001, 2701, 1, 1001, 1302, 501, 2101]
         );
     }
 
@@ -634,9 +765,10 @@ mod tests {
     fn draws_no_more_parts_dressed_than_bare() {
         let bare = mesh().parts.len();
         for appearance in [CHESTPIECE, BOOTS, ROBE] {
-            let body = worn_mesh(&geosets_of(appearance));
+            let body = worn_mesh(&worn_of(appearance));
             assert_eq!(body.parts.len(), bare, "{appearance:?}");
-            let mut groups: Vec<u16> = drawn(&body).iter().map(|geoset| geoset / 100).collect();
+            let mut groups: Vec<u16> = drawn(&body).iter().filter(|geoset| **geoset != 0)
+                .map(|geoset| geoset / 100).collect();
             groups.sort_unstable();
             let mut distinct = groups.clone();
             distinct.dedup();
@@ -650,7 +782,7 @@ mod tests {
     #[test]
     fn leaves_a_group_alone_when_the_body_holds_nothing_it_asks_for() {
         let absent = [Geoset { group: 11, geoset: 1177 }, Geoset { group: 4, geoset: 402 }];
-        assert_eq!(drawn(&worn_mesh(&absent)), drawn(&mesh()));
+        assert_eq!(drawn(&geoset_mesh(&absent)), drawn(&mesh()));
     }
 
     // The compositing half: each texture into the rectangle the layout gives its section, and
@@ -757,6 +889,93 @@ mod tests {
         }
     }
 
+    /* ---------- wearing the four slots that have geometry ---------- */
+
+    // The acceptance, for a helm: it is on her head rather than in mid-air. A node of its own
+    // with a translation on it, and the translation is the head attachment the body's skeleton
+    // states — which is what says the position came out of the game's files rather than out of
+    // an eyeball. An item left at the origin would be inside her pelvis.
+    #[test]
+    fn puts_a_helm_on_her_head() {
+        let scene = worn_scene(HELM);
+        assert_eq!(
+            scene["nodes"],
+            serde_json::json!([
+                { "mesh": 0 },
+                { "mesh": 1, "translation": [0.0, 4.0, 0.0] },
+            ])
+        );
+        // Geometry, not merely a node: the helm's own cube, whole.
+        assert_eq!(scene["meshes"][1]["primitives"].as_array().unwrap().len(), 1);
+    }
+
+    // And for a pair of shoulders: two pads, on the two shoulders, either side of her. One pad
+    // twice is what reading a single model resource and hanging it off both attachments looks
+    // like, so what this reads is that the two nodes hold *different* meshes as well as
+    // different positions.
+    #[test]
+    fn puts_a_pad_on_each_shoulder_rather_than_one_pad_twice() {
+        let scene = worn_scene(SHOULDERS);
+        let nodes = scene["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[1]["translation"], serde_json::json!([0.0, 3.0, -2.0]));
+        assert_eq!(nodes[2]["translation"], serde_json::json!([0.0, 3.0, 2.0]));
+        assert_ne!(nodes[1]["mesh"], nodes[2]["mesh"]);
+
+        // Each with a picture of its own, which is the other half of two pads rather than one:
+        // the body's atlas, and then one texture per pad.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 3);
+    }
+
+    // A cape is the odd one: geometry the body already carries, and all the appearance brings
+    // is the picture that goes on it. So there is no extra node at all — one mesh, one more
+    // part in it, and a second image beside the atlas.
+    #[test]
+    fn hangs_a_cape_off_her_back_without_a_model_to_hang() {
+        let scene = worn_scene(CAPE);
+        assert_eq!(scene["nodes"].as_array().unwrap().len(), 1);
+        assert!(drawn(&worn_mesh(&worn_of(CAPE))).contains(&1502));
+        // The atlas and the cloak's own picture. A cape whose texture went unresolved is a
+        // black sheet rather than an error, which is why the count is what this reads.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
+    }
+
+    // The other half of the acceptance, and the trap under it. A helm hides hair, and hair is
+    // **group 0** — the same hundred the skin is in. Hiding the group without excepting geoset
+    // 0 takes the whole character with the hairstyle, which is an empty pane rather than a
+    // helmed woman.
+    #[test]
+    fn a_helm_that_hides_hair_hides_it_and_leaves_the_body_on() {
+        let bare = drawn(&mesh());
+        assert!(bare.contains(&1), "a bare body wears the first hairstyle");
+
+        let helmed = drawn(&worn_mesh(&worn_of(HELM)));
+        assert!(!helmed.contains(&1), "the helm covers the hair");
+        assert!(helmed.contains(&0), "and not the body it is attached to");
+        // The whole hundred, not only the one variant a bare body happened to draw.
+        assert!(!helmed.contains(&2));
+        // And nothing else: the helm's own group swaps as any item's does, and every other
+        // group is where a bare body left it.
+        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 2101]);
+    }
+
+    // Taking it off puts the hair back, which is the same sentence read the other way: the
+    // hiding belongs to the appearance and not to the body.
+    #[test]
+    fn taking_the_helm_off_puts_the_hair_back() {
+        assert_eq!(drawn(&worn_mesh(&Worn::default())), drawn(&mesh()));
+        assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&1), true);
+    }
+
+    // A model the install does not hold leaves the body without it rather than dropping it at
+    // the origin, which on a character is inside her pelvis. Display 900010 names a model
+    // resource whose file the fixture deliberately omits.
+    #[test]
+    fn leaves_out_a_worn_model_this_install_cannot_read() {
+        let scene = worn_scene((900_010, HELM.1));
+        assert_eq!(scene["nodes"].as_array().unwrap().len(), 1);
+    }
+
     // The browser tests load `character.glb` into three.js, which is the only place anything
     // actually reads what this module writes. That is worth nothing if the file has drifted
     // from what the converter now produces, so this is what ties the two together:
@@ -765,12 +984,19 @@ mod tests {
     //         character apps/desktop/fixtures/transmog/character.glb
     //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
     //         worn/900012/3 apps/desktop/fixtures/transmog/robe.glb
+    //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
+    //         worn/900001/0 apps/desktop/fixtures/transmog/worn-helm.glb
+    //
+    // `worn-helm.glb` is the one with more than one node in it, which is the shape three.js
+    // had never been handed before this: a body, and a helm sitting above it on a translation.
     #[test]
     fn writes_the_glbs_the_browser_tests_load() {
-        let robe = crate::worn::of(&fixture_files(), ROBE.0, ROBE.1).unwrap();
+        let robe = worn_of(ROBE);
+        let helm = worn_of(HELM);
         for (name, written) in [
             ("character.glb", glb_of(&fixture_files(), None).unwrap()),
             ("robe.glb", glb_of(&fixture_files(), Some(&robe)).unwrap()),
+            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm)).unwrap()),
         ] {
             let committed = std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

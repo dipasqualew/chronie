@@ -5,9 +5,12 @@
 //! which textures the model wants and how they are blended — plus two chunks beside it that
 //! replace what used to be filenames: `SFID` names the `.skin` files and `TXID` the textures.
 //!
-//! What is deliberately not read: bones, sequences, `M2Track`s, `.anim` files, particles,
-//! ribbons, cameras and lights. A vertex position in an M2 is already the bind pose, so a
-//! still picture of an item needs none of it.
+//! What is deliberately not read: sequences, `M2Track`s, `.anim` files, particles, ribbons,
+//! cameras and lights. A vertex position in an M2 is already the bind pose, so a still picture
+//! of an item needs none of it.
+//!
+//! What *is* read beyond the geometry is where a piece of gear hangs off a body — see
+//! [`attachments`], and the `.skel` file it takes rather than the model.
 //!
 //! Two traps, both written down in `docs/character-rendering.md` and both silent:
 //!
@@ -25,6 +28,8 @@
 const MD21: &[u8; 4] = b"MD21";
 const SFID: &[u8; 4] = b"SFID";
 const TXID: &[u8; 4] = b"TXID";
+/// The `.skel` file this model keeps its skeleton in, when it keeps one there at all.
+const SKID: &[u8; 4] = b"SKID";
 
 /// What the `MD21` payload starts with, which is the pre-Legion file's own magic.
 const MD20: &[u8; 4] = b"MD20";
@@ -57,7 +62,45 @@ mod batch_field {
     pub const TEXTURE_COMBO: usize = 16;
 }
 
+/// The two chunks of a `.skel` this reads, and where their lists sit inside them.
+///
+/// A `.skel` is chunked the same way an M2 is. `SKA1` holds the two arrays the game's own
+/// `M2Attachment` block used to — the attachments themselves, then a lookup table from
+/// attachment id to index which nothing here needs, because the id travels in the record — and
+/// `SKB1` holds the bones, of which this reads the one each attachment names.
+///
+/// Their offsets, like `MD21`'s, count from the chunk's own data rather than from the file.
+const SKA1: &[u8; 4] = b"SKA1";
+const SKB1: &[u8; 4] = b"SKB1";
+const ATTACHMENTS: usize = 0;
+const BONES: usize = 0;
+
+/// Where the fields of one `M2Attachment` this reads sit, in bytes.
+mod attachment_field {
+    pub const ID: usize = 0;
+    pub const BONE: usize = 4;
+    pub const POSITION: usize = 8;
+}
+
+/// The same for one `M2CompBone`. The two tracks are the ones that can still be doing something
+/// with nothing playing — see [`bound_to_a_global_sequence`].
+mod bone_field {
+    pub const ROTATION: usize = 0x24;
+    pub const SCALE: usize = 0x38;
+}
+
+/// Where the pieces of one `M2Track` sit, in bytes.
+///
+/// A track is an interpolation type, the global sequence it is bound to, and then two arrays
+/// *of arrays* — one entry per animation, each holding that animation's keyframes.
+mod track_field {
+    pub const GLOBAL_SEQUENCE: usize = 2;
+    pub const VALUES: usize = 12;
+}
+
 /// Sizes of the records those lists hold, in bytes.
+const ATTACHMENT_SIZE: usize = 40;
+const BONE_SIZE: usize = 88;
 const VERTEX_SIZE: usize = 48;
 const TEXTURE_SIZE: usize = 16;
 const MATERIAL_SIZE: usize = 4;
@@ -126,6 +169,38 @@ pub struct Part {
     pub two_sided: bool,
 }
 
+/// A place on a body where a piece of gear hangs, and how the thing hanging there sits.
+///
+/// All three are in the viewer's axes, and together they are what a still picture needs.
+///
+/// **The position is already in model space.** The format states it as "relative to the bone",
+/// and the bone's own translation track is per-animation, so with nothing playing there is
+/// nothing to add. Read off build 12.0.5.67: all 43 of `humanfemale_hd`'s attachments state a
+/// position exactly equal to their bone's pivot, which is the same reading arriving twice.
+///
+/// **The rotation and the scale are not.** They come off the bone, and this is the half that
+/// looks like it can be skipped and cannot: an attachment bone can carry rotation and scale
+/// tracks bound to a *global sequence*, which runs whether or not an animation does. On this
+/// body 35 of 203 bones carry one, and every one of them is an attachment's own bone — the two
+/// shoulders hold a constant scale of `0.62` and a mirrored 35° roll. Ignore them and a pair of
+/// pauldrons is drawn half again too large and lying flat.
+///
+/// The helm's bone and the back's carry nothing at all, which is why those two look right
+/// either way and why this was worth measuring rather than eyeballing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Attachment {
+    /// The community's numbering: 5 and 6 are the shoulders, 11 the helm, 12 the back.
+    pub id: u32,
+    pub position: [f32; 3],
+    /// A quaternion, `[x, y, z, w]`, which is the order glTF states one in.
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
+
+/// What an attachment whose bone says nothing leaves the thing hanging off it at.
+const NO_ROTATION: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+const NO_SCALE: [f32; 3] = [1.0, 1.0, 1.0];
+
 /// A model and one of its skin profiles, resolved into something drawable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mesh {
@@ -151,6 +226,8 @@ pub struct Model {
     materials: Vec<(u16, u16)>,
     /// `SFID`: the skin profiles, most detailed first.
     skins: Vec<u32>,
+    /// `SKID`: the `.skel` this model's bones and attachments were moved out into.
+    skeleton: Option<u32>,
 }
 
 impl Model {
@@ -159,6 +236,7 @@ impl Model {
         let mut md21: Option<&[u8]> = None;
         let mut skins: Vec<u32> = Vec::new();
         let mut texture_files: Vec<u32> = Vec::new();
+        let mut skeleton: Option<u32> = None;
 
         let mut at = 0usize;
         while at + 8 <= bytes.len() {
@@ -175,6 +253,7 @@ impl Model {
                 // shorter than it says. Its own length is what bounds the read.
                 SFID => skins = read_u32s(payload),
                 TXID => texture_files = read_u32s(payload),
+                SKID => skeleton = read_u32s(payload).first().copied().filter(|id| *id != 0),
                 _ => {}
             }
             at = start.saturating_add(size);
@@ -196,6 +275,7 @@ impl Model {
             texture_combos,
             materials,
             skins,
+            skeleton,
         })
     }
 
@@ -205,6 +285,16 @@ impl Model {
     /// low-detail ones. A model shown on its own in a window is only ever worth the first.
     pub fn skin_file_data_id(&self) -> Option<u32> {
         self.skins.first().copied().filter(|id| *id != 0)
+    }
+
+    /// The `.skel` holding this model's skeleton, which is where its attachments are.
+    ///
+    /// A character's are not in the model at all: `humanfemale_hd`'s own bone and attachment
+    /// arrays are both empty and its `SKID` names a 16 MB file that holds them, along with
+    /// every animation. That is the only shape this app has to read — an item's model has
+    /// nothing to attach anything to — so [`attachments`] takes a skeleton and not a model.
+    pub fn skeleton_file_data_id(&self) -> Option<u32> {
+        self.skeleton
     }
 
     /// The textures the model owns, as FileDataIDs, without the slots it leaves to the item.
@@ -313,7 +403,123 @@ impl Model {
     }
 }
 
+/// Where each piece of gear hangs off a body, out of that body's `.skel`.
+///
+/// The `SKA1` chunk holds what the pre-Legion header held at offset `0xf0`: a count-and-offset
+/// pair naming a run of 40-byte records, each an attachment id, the bone it hangs off, and a
+/// position. The bone is then looked up in `SKB1` for the two things it can still be saying
+/// with nothing playing — see [`Attachment`].
+///
+/// A skeleton with no `SKA1` is not an error, and neither is one with no `SKB1`: every
+/// character body has both, and this is what says so for the file that turns out not to.
+pub fn attachments(skeleton: &[u8]) -> Result<Vec<Attachment>, String> {
+    let Some(ska1) = chunk_named(skeleton, SKA1) else {
+        return Ok(Vec::new());
+    };
+    let bones = chunk_named(skeleton, SKB1);
+    let array = array_at(ska1, ATTACHMENTS)?;
+    let mut found = Vec::with_capacity(array.count);
+    for index in 0..array.count {
+        let record = array.record(ska1, index, ATTACHMENT_SIZE)?;
+        let bone = read_u16(record, attachment_field::BONE)? as usize;
+        let (rotation, scale) = match bones {
+            Some(bones) => how_the_bone_sits(bones, bone)?,
+            None => (NO_ROTATION, NO_SCALE),
+        };
+        found.push(Attachment {
+            id: read_u32(record, attachment_field::ID)?,
+            position: y_up(read_vector(record, attachment_field::POSITION)?),
+            rotation,
+            scale,
+        });
+    }
+    Ok(found)
+}
+
+/// The rotation and scale a bone applies with no animation playing.
+///
+/// A bone this skeleton does not declare leaves both at rest, which is the same answer as a
+/// bone that says nothing — an attachment naming a bone past the end of the array is a file to
+/// draw something from anyway rather than one to refuse.
+fn how_the_bone_sits(bones: &[u8], which: usize) -> Result<([f32; 4], [f32; 3]), String> {
+    let array = array_at(bones, BONES)?;
+    if which >= array.count {
+        return Ok((NO_ROTATION, NO_SCALE));
+    }
+    let bone = array.record(bones, which, BONE_SIZE)?;
+    // The record is a slice of `bones`, and a track's arrays are offsets into the whole chunk,
+    // so the two are read against different things on purpose.
+    let track = |field: usize| -> Result<Option<usize>, String> {
+        bound_to_a_global_sequence(bones, bone, field)
+    };
+
+    let rotation = match track(bone_field::ROTATION)? {
+        Some(at) => y_up_quaternion(read_quaternion(bones, at)?),
+        None => NO_ROTATION,
+    };
+    let scale = match track(bone_field::SCALE)? {
+        // A scale is three lengths rather than a direction, so the axes are permuted without
+        // the sign the position and the rotation take.
+        Some(at) => {
+            let [x, y, z] = read_vector(bones, at)?;
+            [x, z, y]
+        }
+        None => NO_SCALE,
+    };
+    Ok((rotation, scale))
+}
+
+/// Where a bone's track keeps its first value, when the track is one that plays regardless.
+///
+/// **This is the whole of the finding, and it is a correction.** A still picture of a model is
+/// its bind pose, and a bone's ordinary tracks hold one array of keyframes per animation — with
+/// none playing there is nothing to read out of them, which is why bones are otherwise skipped.
+/// A track bound to a *global sequence* is not one of those: it runs on the world's clock and
+/// applies whether anything is playing or not, and it is where the game keeps the fact that a
+/// pauldron sits at 62% and tilted.
+///
+/// The first keyframe is what a still picture takes. On `humanfemale_hd` the shoulders' 593
+/// keys are all the same value, so which is taken does not arise — but time zero is the honest
+/// answer to "what does this look like", and it is the one a reader can defend.
+fn bound_to_a_global_sequence(
+    bones: &[u8],
+    bone: &[u8],
+    field: usize,
+) -> Result<Option<usize>, String> {
+    if read_u16(bone, field + track_field::GLOBAL_SEQUENCE)? == NO_GLOBAL_SEQUENCE {
+        return Ok(None);
+    }
+    // One array per animation, each holding that animation's keys. A global sequence has the
+    // one array, and taking the first of however many there are is what a still picture wants.
+    let per_animation = array_at(bone, field + track_field::VALUES)?;
+    if per_animation.count == 0 {
+        return Ok(None);
+    }
+    let keys = array_at(bones, per_animation.offset)?;
+    Ok((keys.count != 0).then_some(keys.offset))
+}
+
+/// What the game writes in a track's global sequence when it is bound to none.
+const NO_GLOBAL_SEQUENCE: u16 = u16::MAX;
+
 /* ---------- reading the pieces ---------- */
+
+/// The payload of the first chunk with this magic, bounded by the file's own length.
+fn chunk_named<'a>(bytes: &'a [u8], magic: &[u8; 4]) -> Option<&'a [u8]> {
+    let mut at = 0usize;
+    while at + 8 <= bytes.len() {
+        let size = read_u32(bytes, at + 4).ok()? as usize;
+        let start = at + 8;
+        // A chunk that runs past the end of the file is a truncated download rather than a
+        // chunk, and what is there of it is still worth reading.
+        let end = start.saturating_add(size).min(bytes.len());
+        if &bytes[at..at + 4] == magic {
+            return bytes.get(start.min(bytes.len())..end);
+        }
+        at = start.saturating_add(size);
+    }
+    None
+}
 
 /// A count-and-offset pair, which is how every list in an M2 or a skin is written.
 struct Md21Array {
@@ -387,6 +593,36 @@ fn y_up([x, y, z]: [f32; 3]) -> [f32; 3] {
     [x, z, -y]
 }
 
+/// The same turn applied to a rotation rather than to a point.
+///
+/// A quaternion is an axis and an angle. Turning the axes turns the axis and leaves the angle
+/// alone, so this is [`y_up`] on the first three components and `w` untouched — which holds
+/// only because the conversion is a proper rotation rather than a mirror.
+fn y_up_quaternion([x, y, z, w]: [f32; 4]) -> [f32; 4] {
+    let [x, y, z] = y_up([x, y, z]);
+    [x, y, z, w]
+}
+
+/// One `M2CompQuat`: four `int16`s, each a component of a unit quaternion.
+///
+/// The encoding wraps rather than scaling: a non-negative number is the bottom half of the
+/// range and a negative one the top, so `22800` is `-0.304` and `-9599` is `+0.707`. Reading it
+/// as a plain fraction of `32767` gets the sign right about half the time, which is a pauldron
+/// rotated into her neck rather than an error.
+fn read_quaternion(bytes: &[u8], at: usize) -> Result<[f32; 4], String> {
+    let mut components = [0.0f32; 4];
+    for (index, component) in components.iter_mut().enumerate() {
+        let raw = read_u16(bytes, at + index * 2)? as i16;
+        let shifted = if raw < 0 {
+            f32::from(raw) + 32768.0
+        } else {
+            f32::from(raw) - 32767.0
+        };
+        *component = shifted / 32767.0;
+    }
+    Ok(components)
+}
+
 fn read_vector(bytes: &[u8], at: usize) -> Result<[f32; 3], String> {
     Ok([
         read_f32(bytes, at)?,
@@ -447,6 +683,28 @@ mod tests {
     /// The character body, which is the only fixture with geosets and several texture types.
     const CHARACTER: u32 = 1_000_764;
     const CHARACTER_SKIN: u32 = 1_000_765;
+    /// And the skeleton beside it, which is the only fixture with attachments.
+    const SKELETON: u32 = 1_000_766;
+
+    /// The attachments this app asks for, as the community numbers them.
+    const RIGHT_SHOULDER: u32 = 5;
+    const LEFT_SHOULDER: u32 = 6;
+    const HELM_ATTACHMENT: u32 = 11;
+    const BACK: u32 = 12;
+
+    /// The attachment with that id, which is how anything finds one — the records are not in
+    /// id order and the ids run well past the end of the list.
+    fn found(attachments: &[Attachment], id: u32) -> Attachment {
+        *attachments
+            .iter()
+            .find(|attachment| attachment.id == id)
+            .unwrap_or_else(|| panic!("the body has attachment {id}"))
+    }
+
+    /// Two rotations that are the same rotation, to within what an `int16` can say.
+    fn close(left: [f32; 4], right: [f32; 4]) -> bool {
+        left.iter().zip(right).all(|(one, other)| (one - other).abs() < 0.0001)
+    }
 
     fn model(fdid: u32) -> Model {
         Model::parse(&fixture_files().read(fdid).unwrap()).unwrap()
@@ -542,7 +800,10 @@ mod tests {
         let types: Vec<Paint> = body.parts.iter().map(|part| part.paint).collect();
         // Every part but the hair is the composited body atlas, which is type 1.
         assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 16);
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 1);
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 2);
+        // And the cape, which is the third: a body wears one item picture out of its own
+        // geometry, and it is neither the atlas nor the hair.
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(2)).count(), 1);
     }
 
     // The geoset is what says whether a part of a body is drawn at all, and it is the one
@@ -554,8 +815,8 @@ mod tests {
         assert_eq!(
             geosets,
             vec![
-                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 101, 1001, 1002, 1301, 1302,
-                501, 502, 2101,
+                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 1, 2, 1001, 1002, 1301, 1302,
+                501, 502, 1502, 2101,
             ]
         );
         // An item is drawn whole, and says so by belonging to no geoset.
@@ -585,6 +846,111 @@ mod tests {
         // The cloak's batch list holds a second layer over its only submesh.
         let mesh = mesh(140003, 141003);
         assert_eq!(mesh.parts.len(), 3);
+    }
+
+    // Where a helm goes, which is the one thing beyond geometry this reads — and it does not
+    // read it out of the model at all. A retail character's own attachment array is empty and
+    // its `SKID` names the file that holds them, so the fixture body is built the same way and
+    // a reader that looked only at the header would find a body nothing can be hung off.
+    #[test]
+    fn reads_where_gear_hangs_off_a_body_out_of_its_skeleton() {
+        let body = model(CHARACTER);
+        let skeleton = body
+            .skeleton_file_data_id()
+            .expect("the body names a skeleton");
+        assert_eq!(skeleton, SKELETON);
+        let attachments = attachments(&fixture_files().read(skeleton).unwrap()).unwrap();
+
+        let at = |id: u32| found(&attachments, id).position;
+        // The helm is highest, the two shoulders are a mirrored pair either side of her, and
+        // the back is behind — all in the viewer's axes, which is the turn `y_up` makes.
+        assert_eq!(at(HELM_ATTACHMENT), [0.0, 4.0, 0.0]);
+        assert_eq!(at(LEFT_SHOULDER), [0.0, 3.0, -2.0]);
+        assert_eq!(at(RIGHT_SHOULDER), [0.0, 3.0, 2.0]);
+        assert_eq!(at(BACK), [-1.0, 2.0, 0.0]);
+    }
+
+    // The half that looks skippable and is not. A bone's ordinary tracks hold a run of
+    // keyframes per animation, and with none playing there is nothing in them — but a track
+    // bound to a **global sequence** runs on the world's clock and applies regardless. That is
+    // where the game keeps the fact that a pauldron is worn at 62% of the size it was modelled
+    // and rolled outward; ignore it and both pads are half again too large and lying flat.
+    #[test]
+    fn reads_the_scale_and_the_tilt_a_bone_holds_whatever_is_playing() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let left = found(&attachments, LEFT_SHOULDER);
+        assert_eq!(left.scale, [0.5, 0.5, 0.5]);
+        // A quarter turn about the game's Y, which is the axis the turn into the viewer's axes
+        // negates: (0, 0.707, 0, 0.707) has to arrive as (0, 0, -0.707, 0.707).
+        assert!(close(left.rotation, [0.0, 0.0, -std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2]));
+
+        // A bone can hold one and not the other, and a scale is three lengths rather than a
+        // direction — so the axes are permuted without the sign a position takes.
+        let right = found(&attachments, RIGHT_SHOULDER);
+        assert_eq!(right.scale, [1.0, 4.0, 2.0]);
+        assert_eq!(right.rotation, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    // And the other side of the same rule, which is the one that is easy to get backwards: a
+    // rotation and a scale in an *ordinary* track belong to animations, none of which is
+    // playing. Read as though they applied, the fixture's cloak arrives quarter-turned and at
+    // a fifth of its size.
+    #[test]
+    fn leaves_alone_what_a_bone_only_does_while_something_is_playing() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let back = found(&attachments, BACK);
+        assert_eq!(back.scale, [1.0, 1.0, 1.0]);
+        assert_eq!(back.rotation, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    // A bone that says nothing at all leaves what hangs off it where it was modelled, which is
+    // what the helm's own bone does on the real body and on this one.
+    #[test]
+    fn leaves_at_rest_what_hangs_off_a_bone_with_nothing_to_say() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let helm = found(&attachments, HELM_ATTACHMENT);
+        assert_eq!(helm.scale, [1.0, 1.0, 1.0]);
+        assert_eq!(helm.rotation, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    // The compression, which wraps rather than scaling: a non-negative `int16` is the bottom
+    // half of the range and a negative one the top. Read as a plain fraction of 32767 the sign
+    // comes out right about half the time, which is a pauldron rotated into her neck.
+    #[test]
+    fn decompresses_a_quaternion_the_way_the_game_packs_one() {
+        let packed = |values: [i16; 4]| {
+            let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+            read_quaternion(&bytes, 0).unwrap()
+        };
+        assert_eq!(packed([0, 0, 0, -1]), [-1.0, -1.0, -1.0, 1.0]);
+        assert_eq!(packed([32767, 32767, 32767, 32767]), [0.0; 4]);
+        // The two the real body's right shoulder carries, to four places.
+        assert!(close(packed([22800, 32767, -32040, -1563]), [-0.3042, 0.0, 0.0222, 0.9523]));
+    }
+
+    // An attachment is found by the id in its record and not by where it sits in the array.
+    // The fixture disagrees about the two deliberately: the helm is id 11 and the third
+    // record, so a reader that indexed by id would run off the end of a five-entry list — and
+    // one that indexed by position would hang the helm off her back.
+    #[test]
+    fn finds_an_attachment_by_its_id_rather_than_by_its_place_in_the_list() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let ids: Vec<u32> = attachments.iter().map(|attachment| attachment.id).collect();
+        assert_eq!(ids, vec![BACK, LEFT_SHOULDER, HELM_ATTACHMENT, 1, RIGHT_SHOULDER]);
+    }
+
+    // An item's model hangs things off nothing and says so, and a file with no attachments in
+    // it is a fact about the file rather than a failure — a body is the only model here that
+    // has any.
+    #[test]
+    fn says_nothing_about_attachments_for_a_model_that_has_none() {
+        assert_eq!(model(HELM).skeleton_file_data_id(), None);
+        assert_eq!(attachments(b"").unwrap(), Vec::new());
+        // A skeleton whose chunks are none this reader knows, which is the same answer.
+        let mut chunked = b"SKL1".to_vec();
+        chunked.extend_from_slice(&4u32.to_le_bytes());
+        chunked.extend_from_slice(b"junk");
+        assert_eq!(attachments(&chunked).unwrap(), Vec::new());
     }
 
     #[test]

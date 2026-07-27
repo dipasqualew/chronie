@@ -304,7 +304,12 @@ export function TransmogDetail(
   ): Promise<void> {
     // Nothing to show: the game gives this install no model for the appearance, or nothing it
     // could put on a character. The icon and a sentence are what is left either way.
-    if (glb === null) return showStill(row, worn ? REASONS.unpaintable : REASONS.absent);
+    // Two ways an install can hold nothing to show, and they are not the same sentence. A
+    // slot with geometry is missing a *file*; one without is missing every picture its
+    // textures name, which is what a body painted for somebody else leaves behind.
+    if (glb === null) {
+      return showStill(row, row.hasModel ? REASONS.absent : REASONS.unpaintable);
+    }
     // Either the model would not load or the machine has no working 3D at all — a remote
     // desktop, a virtual machine, a driver the browser has blocklisted. Both leave the reader
     // better off with the icon and a sentence than with an empty rectangle.

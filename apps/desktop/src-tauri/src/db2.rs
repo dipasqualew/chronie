@@ -1083,7 +1083,7 @@ mod tests {
             .collect();
         // Row nine is the one that keeps a model only in its second slot, and reading the
         // column as one number is exactly how that gets missed.
-        assert_eq!(first, vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0, 41006, 41007, 0]);
+        assert_eq!(first, vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0, 41006, 41007, 0, 0]);
     }
 
     // The elements past the first are the reason this exists: a shoulder set keeps a model
@@ -1115,6 +1115,8 @@ mod tests {
                 vec![41006, 0],
                 vec![41007, 0],
                 vec![0, 0],
+                // The cape, which is the slot that has geometry without having a model.
+                vec![0, 0],
             ]
         );
 
@@ -1144,6 +1146,7 @@ mod tests {
                 vec![2, 0, 0, 0, 0, 0],
                 vec![2, 0, 0, 0, 0, 0],
                 vec![1, 0, 1, 0, 0, 0],
+                vec![1, 0, 0, 0, 0, 0],
             ]
         );
     }
@@ -1176,6 +1179,7 @@ mod tests {
                 vec![1, 0],
                 vec![1, 0],
                 vec![0, 0],
+                vec![0, 0],
             ]
         );
     }
@@ -1197,7 +1201,7 @@ mod tests {
         assert_eq!(shape(display::GEOSET_GROUP).size_bits, 192);
         assert_eq!(shape(display::GEOSET_GROUP).array_count, 0);
 
-        assert_eq!(table.column_count(), 14);
+        assert_eq!(table.column_count(), 16);
         assert_eq!(table.column_shape(table.column_count()), None);
     }
 
@@ -1208,7 +1212,7 @@ mod tests {
             .rows()
             .map(|row| row.element(display::FLAGS, 0, 32))
             .collect();
-        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         // Asking past the end says so rather than running into the next column.
         for row in table.rows() {
             assert_eq!(row.element(display::FLAGS, 1, 32), 0);

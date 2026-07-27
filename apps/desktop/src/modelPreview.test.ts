@@ -19,37 +19,37 @@ const appearance = (fields: Partial<Previewable> = {}): Previewable => ({
 });
 
 describe("previewFor", () => {
-  // The four slots with geometry of their own. Everything this app can show in 3D is here.
-  it.each<[string, number]>([
-    ["a helm", 0],
-    ["a shoulder", 1],
-    ["a weapon", 11],
-    ["a shield", 15],
-  ])("shows %s as a model", (_, displayType) => {
-    expect(previewFor(appearance({ displayType }))).toEqual({
-      kind: "model",
-      displayInfoId: 900001,
-    });
-  });
-
-  // The slots in between have no mesh to show alone — they are texture painted onto the
-  // character's body — so they are shown on one. On a full set that is most of the rows, and
-  // it is the difference between a wardrobe of icons and a wardrobe.
-  it.each<[string, number]>([
-    ["chest", 2],
-    ["waist", 3],
-    ["legs", 4],
-    ["feet", 5],
-    ["wrist", 6],
-    ["hands", 7],
-    ["back", 8],
-    ["tabard", 9],
-    ["shirt", 10],
-  ])("shows the %s slot worn on the character", (_, displayType) => {
-    expect(previewFor(appearance({ displayType, hasModel: false }))).toEqual({
+  // Every armour slot, head through tabard, is shown on the body — including the two that
+  // have a mesh of their own. That is the whole of the decision this used to make: a helm has
+  // geometry and the only place that geometry means anything is on a head.
+  it.each<[string, number, boolean]>([
+    ["head", 0, true],
+    ["shoulder", 1, true],
+    ["shirt", 2, false],
+    ["chest", 3, false],
+    ["waist", 4, false],
+    ["legs", 5, false],
+    ["feet", 6, false],
+    ["wrist", 7, false],
+    ["hands", 8, false],
+    ["back", 9, false],
+    ["tabard", 10, false],
+  ])("shows the %s slot worn on the character", (_, displayType, hasModel) => {
+    expect(previewFor(appearance({ displayType, hasModel }))).toEqual({
       kind: "worn",
       displayInfoId: 900001,
       displayType,
+    });
+  });
+
+  // What is left on its own is a weapon, which hangs off a hand and is another issue.
+  it.each<[string, number]>([
+    ["a weapon", 11],
+    ["a shield", 15],
+  ])("shows %s as a model of its own", (_, displayType) => {
+    expect(previewFor(appearance({ displayType }))).toEqual({
+      kind: "model",
+      displayInfoId: 900001,
     });
   });
 
@@ -58,13 +58,6 @@ describe("previewFor", () => {
   it("does not put a weapon with no model on the character", () => {
     expect(previewFor(appearance({ displayType: 11, hasModel: false })))
       .toEqual({ kind: "icon", iconFileDataId: 130001, note: REASONS.none });
-  });
-
-  // The four slots that do have geometry keep showing it. A helm worn on a character would be
-  // a bald head until the attachment work lands, which is less than the helm itself.
-  it("shows a helm as the helm rather than on the character", () => {
-    expect(previewFor(appearance({ displayType: 0, hasModel: true })))
-      .toMatchObject({ kind: "model" });
   });
 
   // An appearance the game encrypts has no icon either — the row knows nothing about it at

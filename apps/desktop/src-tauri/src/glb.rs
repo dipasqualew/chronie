@@ -8,6 +8,12 @@
 //!
 //! The pictures are asked for rather than passed in, because several parts of a model share
 //! one texture and decoding a BLP twice is the expensive half of the work.
+//!
+//! A scene holds several [`Piece`]s rather than one mesh, because a dressed character is a body
+//! and the helm hanging off it — different files, different textures, and a translation between
+//! them. Keeping them apart rather than welding them into one vertex list is what lets each ask
+//! for its own pictures: `Paint::Supplied(2)` means the body's cape to the character and the
+//! item's only texture to a shoulder pad, and a merged mesh would have nowhere to put that.
 
 use std::collections::HashMap;
 
@@ -24,14 +30,50 @@ const GLB_VERSION: u32 = 2;
 const CHUNK_JSON: u32 = 0x4e4f_534a;
 const CHUNK_BIN: u32 = 0x004e_4942;
 
-/// A `.glb` for one mesh, with every texture it uses embedded in it.
+/// One mesh in a scene, and where it sits.
 ///
 /// `picture` answers with the PNG bytes for a paint, or nothing when this install cannot show
 /// it — a texture the game withholds, or one in an encoding the decoder does not read. A part
 /// whose picture is missing keeps its geometry and loses its colour, which is worth far more
-/// than refusing to show the model at all.
-pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<Vec<u8>, String> {
-    if mesh.vertices.is_empty() || mesh.parts.is_empty() {
+/// than refusing to show the model at all. It belongs to the piece rather than to the scene
+/// because a paint means different things to a body and to the helm on it.
+pub struct Piece<'a> {
+    pub mesh: &'a Mesh,
+    /// Where the mesh's own origin goes, in the viewer's axes. `[0.0; 3]` for a model that is
+    /// the whole of what is being shown; an attachment's position for one hanging off a body.
+    pub at: [f32; 3],
+    /// How it sits there: a quaternion `[x, y, z, w]` and three lengths. An attachment can
+    /// carry both — a pauldron sits at 62% and rolled outward — and a model shown on its own
+    /// carries neither.
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+    pub picture: &'a dyn Fn(Paint) -> Option<Vec<u8>>,
+}
+
+/// What a piece with nothing to say about how it sits carries. glTF's own defaults, so both are
+/// left out of the file entirely rather than written as the identity.
+const AT_REST: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+const FULL_SIZE: [f32; 3] = [1.0, 1.0, 1.0];
+
+impl<'a> Piece<'a> {
+    /// The one piece a model shown on its own is.
+    pub fn only(mesh: &'a Mesh, picture: &'a dyn Fn(Paint) -> Option<Vec<u8>>) -> Self {
+        Self {
+            mesh,
+            at: [0.0; 3],
+            rotation: AT_REST,
+            scale: FULL_SIZE,
+            picture,
+        }
+    }
+}
+
+/// A `.glb` for a scene, with every texture every piece of it uses embedded in it.
+pub fn write(pieces: &[Piece<'_>]) -> Result<Vec<u8>, String> {
+    if pieces.iter().any(|piece| piece.mesh.vertices.is_empty() || piece.mesh.parts.is_empty()) {
+        return Err("the model holds no geometry".into());
+    }
+    if pieces.is_empty() {
         return Err("the model holds no geometry".into());
     }
 
@@ -45,15 +87,65 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
         ..Default::default()
     };
 
+    // Shared by every piece: item textures are authored small and shown large, and
+    // nearest-neighbour would show the reader the texels rather than the armour.
+    let sampler = root.push(gltf_json::texture::Sampler {
+        mag_filter: Some(Valid(gltf_json::texture::MagFilter::Linear)),
+        min_filter: Some(Valid(gltf_json::texture::MinFilter::LinearMipmapLinear)),
+        wrap_s: Valid(gltf_json::texture::WrappingMode::Repeat),
+        wrap_t: Valid(gltf_json::texture::WrappingMode::Repeat),
+        ..Default::default()
+    });
+
+    let mut nodes = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let node = write_piece(&mut root, &mut bin, sampler, piece);
+        nodes.push(node);
+    }
+
+    let scene = root.push(gltf_json::Scene {
+        nodes,
+        extensions: None,
+        extras: Default::default(),
+    });
+    root.scene = Some(scene);
+
+    let bytes = bin.finish();
+    root.buffers.push(gltf_json::Buffer {
+        byte_length: USize64::from(bytes.len()),
+        // No URI at all is what says "the binary chunk of this very file".
+        uri: None,
+        extensions: None,
+        extras: Default::default(),
+    });
+
+    let json = root
+        .to_string()
+        .map_err(|error| format!("the model would not serialise: {error}"))?;
+    Ok(container(json.into_bytes(), bytes))
+}
+
+/// One piece as a node of its own, holding a mesh of its own.
+///
+/// A node rather than vertices moved into place: the translation is stated once for the whole
+/// mesh, which is what glTF is for, and the positions stay the ones the game wrote.
+fn write_piece(
+    root: &mut gltf_json::Root,
+    bin: &mut Binary,
+    sampler: gltf_json::Index<gltf_json::texture::Sampler>,
+    piece: &Piece<'_>,
+) -> gltf_json::Index<gltf_json::Node> {
+    let mesh = piece.mesh;
+
     /* The vertices, as three lists the parts all share. */
     let positions: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.position).collect();
     let normals: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.normal).collect();
     let uvs: Vec<[f32; 2]> = mesh.vertices.iter().map(|vertex| vertex.uv).collect();
 
     let count = mesh.vertices.len();
-    let position_view = bin.view(&mut root, floats(&positions), Some(ARRAY_BUFFER));
-    let normal_view = bin.view(&mut root, floats(&normals), Some(ARRAY_BUFFER));
-    let uv_view = bin.view(&mut root, floats(&uvs), Some(ARRAY_BUFFER));
+    let position_view = bin.view(root, floats(&positions), Some(ARRAY_BUFFER));
+    let normal_view = bin.view(root, floats(&normals), Some(ARRAY_BUFFER));
+    let uv_view = bin.view(root, floats(&uvs), Some(ARRAY_BUFFER));
 
     let (low, high) = extent(&positions);
     let position = root.push(accessor(
@@ -79,24 +171,14 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
     ));
 
     /* One primitive per part, each with the material and picture it asked for. */
-    let sampler = root.push(gltf_json::texture::Sampler {
-        // Item textures are authored small and shown large; nearest-neighbour would show the
-        // reader the texels rather than the armour.
-        mag_filter: Some(Valid(gltf_json::texture::MagFilter::Linear)),
-        min_filter: Some(Valid(gltf_json::texture::MinFilter::LinearMipmapLinear)),
-        wrap_s: Valid(gltf_json::texture::WrappingMode::Repeat),
-        wrap_t: Valid(gltf_json::texture::WrappingMode::Repeat),
-        ..Default::default()
-    });
-
     let mut painted: HashMap<Paint, Option<gltf_json::Index<gltf_json::Texture>>> = HashMap::new();
     let mut primitives = Vec::with_capacity(mesh.parts.len());
     for part in &mesh.parts {
         let texture = match painted.get(&part.paint) {
             Some(known) => *known,
             None => {
-                let made = picture(part.paint).map(|png| {
-                    let view = bin.view(&mut root, png, None);
+                let made = (piece.picture)(part.paint).map(|png| {
+                    let view = bin.view(root, png, None);
                     let image = root.push(gltf_json::Image {
                         buffer_view: Some(view),
                         mime_type: Some(gltf_json::image::MimeType("image/png".into())),
@@ -117,7 +199,7 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
         };
 
         let indices = bin.view(
-            &mut root,
+            root,
             part.indices.iter().flat_map(|index| index.to_le_bytes()).collect(),
             Some(ELEMENT_ARRAY_BUFFER),
         );
@@ -181,30 +263,16 @@ pub fn write(mesh: &Mesh, picture: &dyn Fn(Paint) -> Option<Vec<u8>>) -> Result<
         extras: Default::default(),
         weights: None,
     });
-    let node = root.push(gltf_json::Node {
+    root.push(gltf_json::Node {
         mesh: Some(drawn),
+        // Each left out entirely where it is the default, so that a model shown on its own
+        // writes exactly the file it always did.
+        translation: (piece.at != [0.0; 3]).then_some(piece.at),
+        rotation: (piece.rotation != AT_REST)
+            .then_some(gltf_json::scene::UnitQuaternion(piece.rotation)),
+        scale: (piece.scale != FULL_SIZE).then_some(piece.scale),
         ..Default::default()
-    });
-    let scene = root.push(gltf_json::Scene {
-        nodes: vec![node],
-        extensions: None,
-        extras: Default::default(),
-    });
-    root.scene = Some(scene);
-
-    let bytes = bin.finish();
-    root.buffers.push(gltf_json::Buffer {
-        byte_length: USize64::from(bytes.len()),
-        // No URI at all is what says "the binary chunk of this very file".
-        uri: None,
-        extensions: None,
-        extras: Default::default(),
-    });
-
-    let json = root
-        .to_string()
-        .map_err(|error| format!("the model would not serialise: {error}"))?;
-    Ok(container(json.into_bytes(), bytes))
+    })
 }
 
 /// The two `target` values a buffer view can declare, which tell a loader what the bytes are
@@ -385,7 +453,7 @@ mod tests {
     #[test]
     fn writes_a_glb_a_loader_can_read() {
         let mesh = mesh(HELM, HELM_SKIN);
-        let glb = write(&mesh, &always(b"a picture")).unwrap();
+        let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let Parsed { json, bin } = parse(&glb);
 
         assert_eq!(json["asset"]["version"], "2.0");
@@ -406,7 +474,7 @@ mod tests {
     #[test]
     fn puts_the_vertices_where_the_accessors_say_they_are() {
         let mesh = mesh(HELM, HELM_SKIN);
-        let glb = write(&mesh, &always(b"a picture")).unwrap();
+        let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let Parsed { json, bin } = parse(&glb);
 
         let accessor = &json["accessors"][0];
@@ -433,7 +501,8 @@ mod tests {
     // glTF requires them for that reason. Without them a model opens somewhere off screen.
     #[test]
     fn states_the_box_the_model_occupies() {
-        let glb = write(&mesh(HELM, HELM_SKIN), &always(b"a picture")).unwrap();
+        let mesh = mesh(HELM, HELM_SKIN);
+        let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let json = parse(&glb).json;
         assert_eq!(json["accessors"][0]["min"], serde_json::json!([-1.0, -1.0, -1.0]));
         assert_eq!(json["accessors"][0]["max"], serde_json::json!([1.0, 1.0, 1.0]));
@@ -442,7 +511,8 @@ mod tests {
     // The picture travels inside the file, because the window has no origin to load one from.
     #[test]
     fn embeds_every_texture_in_the_file_itself() {
-        let glb = write(&mesh(HELM, HELM_SKIN), &always(b"a picture")).unwrap();
+        let mesh = mesh(HELM, HELM_SKIN);
+        let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let Parsed { json, bin } = parse(&glb);
         assert_eq!(json["images"][0]["mimeType"], "image/png");
         assert_eq!(json["images"][0]["uri"], Value::Null);
@@ -460,10 +530,10 @@ mod tests {
     fn decodes_a_texture_once_however_many_parts_want_it() {
         let mesh = mesh(CLOAK, CLOAK_SKIN);
         let asked = std::cell::RefCell::new(Vec::new());
-        let glb = write(&mesh, &|paint| {
+        let glb = write(&[Piece::only(&mesh, &|paint| {
             asked.borrow_mut().push(paint);
             Some(b"a picture".to_vec())
-        })
+        })])
         .unwrap();
 
         assert_eq!(mesh.parts.len(), 3);
@@ -475,7 +545,8 @@ mod tests {
     // with a grey rectangle behind it, so the material has to carry it across.
     #[test]
     fn carries_each_part_s_blending_into_its_material() {
-        let glb = write(&mesh(CLOAK, CLOAK_SKIN), &always(b"a picture")).unwrap();
+        let mesh = mesh(CLOAK, CLOAK_SKIN);
+        let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let materials = parse(&glb).json["materials"].clone();
         let modes: Vec<(&str, bool)> = materials
             .as_array()
@@ -493,11 +564,60 @@ mod tests {
         assert_eq!(materials[1]["alphaCutoff"], 0.5);
     }
 
+    // A scene of several pieces, which is what a dressed character is. Each gets a node with
+    // its own mesh and its own translation, and — the reason they are pieces rather than one
+    // welded vertex list — its own answer to the same paint. A shared picture callback would
+    // paint the helm with the body's atlas, which is geometry that looks right and a picture
+    // that is nonsense.
+    #[test]
+    fn puts_each_piece_in_a_node_of_its_own_with_its_own_pictures() {
+        let body = mesh(CLOAK, CLOAK_SKIN);
+        let hung = mesh(HELM, HELM_SKIN);
+        let glb = write(&[
+            Piece::only(&body, &always(b"the body")),
+            Piece {
+                mesh: &hung,
+                at: [0.0, 4.0, -2.0],
+                rotation: [0.0, 0.0, 0.5f32.sqrt(), 0.5f32.sqrt()],
+                scale: [0.62, 0.62, 0.62],
+                picture: &always(b"the helm"),
+            },
+        ])
+        .unwrap();
+        let Parsed { json, bin } = parse(&glb);
+
+        assert_eq!(json["scenes"][0]["nodes"], serde_json::json!([0, 1]));
+        // No translation at all on the piece that has none, so a model shown on its own still
+        // writes the file it always did.
+        assert_eq!(json["nodes"][0], serde_json::json!({ "mesh": 0 }));
+        assert_eq!(json["nodes"][1]["mesh"], 1);
+        assert_eq!(json["nodes"][1]["translation"], serde_json::json!([0.0, 4.0, -2.0]));
+        // How it sits there as well as where, because a pauldron is worn smaller than it was
+        // modelled and rolled outward, and both come off the body's own skeleton.
+        assert_eq!(json["nodes"][1]["scale"], serde_json::json!([0.62, 0.62, 0.62]));
+        let turned = json["nodes"][1]["rotation"].as_array().unwrap().clone();
+        assert_eq!(turned[0], 0.0);
+        assert!((turned[2].as_f64().unwrap() - 0.5f64.sqrt()).abs() < 1e-6, "{turned:?}");
+
+        // Two meshes, two sets of vertices, and two pictures — one per piece rather than one
+        // shared between them.
+        assert_eq!(json["meshes"].as_array().unwrap().len(), 2);
+        assert_eq!(json["images"].as_array().unwrap().len(), 2);
+        let picture = |at: usize| {
+            let view = &json["bufferViews"][json["images"][at]["bufferView"].as_u64().unwrap() as usize];
+            let from = view["byteOffset"].as_u64().unwrap() as usize;
+            bin[from..from + view["byteLength"].as_u64().unwrap() as usize].to_vec()
+        };
+        assert_eq!(picture(0), b"the body");
+        assert_eq!(picture(1), b"the helm");
+    }
+
     // A texture the install cannot show is not a reason to withhold the geometry: an
     // untextured helm still says what shape the helm is.
     #[test]
     fn writes_a_part_whose_picture_could_not_be_decoded() {
-        let glb = write(&mesh(HELM, HELM_SKIN), &|_| None).unwrap();
+        let mesh = mesh(HELM, HELM_SKIN);
+        let glb = write(&[Piece::only(&mesh, &|_| None)]).unwrap();
         let json = parse(&glb).json;
         assert_eq!(json["images"], Value::Null);
         assert_eq!(
@@ -513,6 +633,8 @@ mod tests {
             vertices: Vec::new(),
             parts: Vec::new(),
         };
-        assert!(write(&empty, &always(b"")).unwrap_err().contains("no geometry"));
+        let error = write(&[Piece::only(&empty, &always(b""))]).unwrap_err();
+        assert!(error.contains("no geometry"), "{error}");
+        assert!(write(&[]).unwrap_err().contains("no geometry"));
     }
 }
