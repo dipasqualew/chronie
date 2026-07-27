@@ -16,6 +16,9 @@ import type {
   TransmogModelPayload,
   TransmogPayload,
   TransmogSetItemsPayload,
+  WifiPeer,
+  WifiReceipt,
+  WifiReceiveStatus,
 } from "./types";
 
 const mock = globalThis.__Chronie_E2E__;
@@ -105,7 +108,62 @@ export const desktop = {
     mock ? Promise.resolve(mock.installResult) : invoke<InstallResult>("install_addon"),
   checkForAppUpdate: (): Promise<AppUpdateResult> =>
     mock ? Promise.resolve(mock.appUpdate) : invoke<AppUpdateResult>("check_for_app_update"),
+  // Only the Chronies on this network that are waiting for a database answer, so this is a
+  // short list and every entry in it can be sent to.
+  wifiDiscover: (): Promise<WifiPeer[]> =>
+    mock ? Promise.resolve(structuredClone(mock.wifi.peers)) : invoke<WifiPeer[]>("wifi_discover"),
+  // Waits on somebody at the other machine reading an offer and answering it, so this call
+  // is measured in minutes rather than milliseconds.
+  wifiSend: (address: string): Promise<WifiReceipt> => {
+    if (mock) {
+      mock.wifi.sentTo.push(address);
+      return Promise.resolve(structuredClone(mock.wifi.receipt));
+    }
+    return invoke<WifiReceipt>("wifi_send", { address });
+  },
+  wifiReceiveStart: (): Promise<WifiReceiveStatus> => mock
+    ? Promise.resolve(mockReceive((status) => {
+      status.listening = true;
+      status.outcome = null;
+      // The fixture's sender is already knocking, which is what a test needs to reach the
+      // one screen in this feature that matters.
+      status.offer = mock.wifi.incoming ? structuredClone(mock.wifi.incoming) : null;
+    }))
+    : invoke<WifiReceiveStatus>("wifi_receive_start"),
+  wifiReceiveStop: (): Promise<WifiReceiveStatus> => mock
+    ? Promise.resolve(mockReceive((status) => {
+      status.listening = false;
+      status.offer = null;
+      status.addresses = [];
+    }))
+    : invoke<WifiReceiveStatus>("wifi_receive_stop"),
+  wifiReceiveStatus: (): Promise<WifiReceiveStatus> =>
+    mock ? Promise.resolve(mockReceive(() => {})) : invoke<WifiReceiveStatus>("wifi_receive_status"),
+  wifiAnswerOffer: (accepted: boolean): Promise<WifiReceiveStatus> => mock
+    ? Promise.resolve(mockReceive((status) => {
+      const waiting = status.offer;
+      if (!waiting) throw new Error("There is no database waiting to be accepted.");
+      status.offer = null;
+      status.outcome = accepted
+        ? {
+          stored: true,
+          message: `Replaced this history with ${waiting.offer.device}'s: ` +
+            `${waiting.offer.segmentCount} segments across ${waiting.offer.characterCount} characters.`,
+        }
+        : { stored: false, message: `Turned down the database from ${waiting.offer.device}.` };
+    }))
+    : invoke<WifiReceiveStatus>("wifi_answer_offer", { accepted }),
 };
+
+/**
+ * Advances the e2e mock's receiving half and hands back a fresh copy, the way the real
+ * station answers every call with its whole state.
+ */
+function mockReceive(advance: (status: WifiReceiveStatus) => void): WifiReceiveStatus {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  advance(mock.wifi.status);
+  return structuredClone(mock.wifi.status);
+}
 
 /** A set the e2e mock says nothing about, which the real backend would answer for. */
 const emptySet = (setId: number): TransmogSetItemsPayload =>

@@ -359,6 +359,56 @@ export interface AppUpdateResult {
   version: string;
 }
 
+/* ---------- moving the history between machines ---------- */
+
+/** A Chronie found waiting on this network. Mirrors `wifi::Peer`. */
+export interface WifiPeer {
+  device: string;
+  /** `host:port`, which is also what a person may type in by hand. */
+  address: string;
+}
+
+/** What a sender says about the database it is offering. Mirrors `wifi::Offer`. */
+export interface WifiOffer {
+  protocol: number;
+  device: string;
+  segmentCount: number;
+  characterCount: number;
+  newestDay?: string | null;
+  bytes: number;
+}
+
+/** An offer on this machine's screen, waiting to be answered. Mirrors `wifi::Waiting`. */
+export interface WifiWaiting {
+  offer: WifiOffer;
+  from: string;
+  /** True once it has been accepted and the bytes are on their way. */
+  receiving: boolean;
+}
+
+/** The last thing that happened to the receiving half. Mirrors `wifi::Outcome`. */
+export interface WifiOutcome {
+  stored: boolean;
+  message: string;
+}
+
+/** Everything the receiving panel is drawn from. Mirrors `wifi::ReceiveStatus`. */
+export interface WifiReceiveStatus {
+  listening: boolean;
+  device: string;
+  addresses: string[];
+  port: number;
+  offer?: WifiWaiting | null;
+  outcome?: WifiOutcome | null;
+}
+
+/** What became of a database this machine sent. Mirrors `wifi::Receipt`. */
+export interface WifiReceipt {
+  stored: boolean;
+  reason: string;
+  segmentCount: number;
+}
+
 /**
  * The whole backend, stubbed, as the end-to-end tests install it on `window`. Typing it here
  * rather than in the spec is what makes a fixture that has drifted from a command's real
@@ -385,6 +435,22 @@ export interface E2EMock {
   appUpdate: AppUpdateResult;
   /** Where a link handed to the operating system is recorded instead, in the order asked. */
   openedUrls: string[];
+  wifi: E2EWifi;
+}
+
+/**
+ * The WiFi station, stubbed. `status` is state rather than a fixture: the mock advances it
+ * the way the backend's own station would, so the page under test walks the same
+ * start-offer-answer path a real transfer takes.
+ */
+export interface E2EWifi {
+  peers: WifiPeer[];
+  receipt: WifiReceipt;
+  status: WifiReceiveStatus;
+  /** The offer that turns up once this Chronie starts waiting, if the fixture has one. */
+  incoming?: WifiWaiting | null;
+  /** Where a database was offered, in the order offered. */
+  sentTo: string[];
 }
 
 /**

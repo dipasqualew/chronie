@@ -8,6 +8,7 @@ pub mod icons;
 pub mod m2;
 pub mod models;
 pub mod transmog;
+pub mod wifi;
 
 use achievements::AchievementBook;
 use chrono::Utc;
@@ -47,6 +48,15 @@ struct Settings {
 struct AppState {
     data_dir: PathBuf,
     settings: Mutex<Settings>,
+    /// Held for as long as anything is rewriting the database as a whole. The collector's
+    /// own writes are transactions SQLite serialises for us; replacing the file underneath
+    /// them is not, so the two are kept apart here rather than raced.
+    database: Arc<Mutex<()>>,
+    /// The half of WiFi sync that waits. Idle until somebody asks for it, and holding no
+    /// socket at all until then.
+    station: wifi::Station,
+    /// What this machine calls itself, which is how it is named on the other one's screen.
+    device: String,
     /// The icons decoded so far. Shared rather than owned, because reading the game's files
     /// happens on a worker thread that outlives the command that started it.
     icons: Arc<IconCache>,
@@ -110,7 +120,11 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings)?
     };
+    // Not while a database arriving over the network is being put in place, which would
+    // otherwise have this writing into a file that is about to stop existing.
+    let held = state.database.lock().map_err(|_| "Database lock failed.")?;
     let result = collector::collect(&wow_path, &state.database_path(), Utc::now().timestamp())?;
+    drop(held);
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.last_sync = Some(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
     state.save(&settings)?;
@@ -387,6 +401,68 @@ fn install_addon(state: State<'_, AppState>) -> Result<InstallResult, String> {
     install_bundled_addon(&state)
 }
 
+/* ---------- moving the history between machines ---------- */
+
+/// Starts waiting for a database from another Chronie on this network, and stops again.
+///
+/// Waiting is something a person switches on for as long as it takes, not something the app
+/// does in the background: a machine that is always listening is one that can always be
+/// asked to throw its history away.
+#[tauri::command]
+fn wifi_receive_start(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, String> {
+    state.station.start()
+}
+
+#[tauri::command]
+fn wifi_receive_stop(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, String> {
+    state.station.stop()
+}
+
+/// What the receiving half is doing, asked for on a timer while the panel is open. Polled
+/// rather than pushed because the whole of it is three fields, and a window that asks is a
+/// window that cannot miss the one event that mattered.
+#[tauri::command]
+fn wifi_receive_status(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, String> {
+    state.station.status()
+}
+
+/// The answer to the offer on screen. `false` is a first-class outcome, not a cancel.
+#[tauri::command]
+fn wifi_answer_offer(
+    accepted: bool,
+    state: State<'_, AppState>,
+) -> Result<wifi::ReceiveStatus, String> {
+    state.station.answer(accepted)
+}
+
+/// The Chronies on this network that are waiting for a database.
+///
+/// Async because it spends a second or so listening for answers, which on the main thread
+/// would be a second of frozen window.
+#[tauri::command]
+async fn wifi_discover() -> Result<Vec<wifi::Peer>, String> {
+    tauri::async_runtime::spawn_blocking(wifi::discover)
+        .await
+        .map_err(|error| format!("Looking for other Chronies did not finish: {error}"))?
+}
+
+/// Offers this machine's database to the Chronie at `address`, and sends it if they agree.
+///
+/// Async and off the main thread for the same reason, only more so: this waits on somebody
+/// walking to another computer.
+#[tauri::command]
+async fn wifi_send(address: String, state: State<'_, AppState>) -> Result<wifi::Receipt, String> {
+    let database_path = state.database_path();
+    let data_dir = state.data_dir.clone();
+    let device = state.device.clone();
+    let database = Arc::clone(&state.database);
+    tauri::async_runtime::spawn_blocking(move || {
+        wifi::send(&database_path, &data_dir, &device, &address, &database)
+    })
+    .await
+    .map_err(|error| format!("The transfer did not finish: {error}"))?
+}
+
 #[tauri::command]
 async fn check_for_app_update(
     app: AppHandle,
@@ -574,8 +650,18 @@ pub fn run() {
             if json_path.is_file() {
                 fs::remove_file(json_path)?;
             }
+            let database: Arc<Mutex<()>> = Arc::default();
+            let device = wifi::device_name();
             let state = AppState {
                 settings: Mutex::new(load_settings(&data_dir.join("settings.json"))),
+                station: wifi::Station::new(
+                    database_path,
+                    data_dir.clone(),
+                    device.clone(),
+                    Arc::clone(&database),
+                ),
+                device,
+                database,
                 data_dir,
                 icons: Arc::default(),
                 achievements: Arc::default(),
@@ -619,6 +705,12 @@ pub fn run() {
             update_activity,
             delete_activity,
             reset_activities,
+            wifi_receive_start,
+            wifi_receive_stop,
+            wifi_receive_status,
+            wifi_answer_offer,
+            wifi_discover,
+            wifi_send,
         ])
         .run(context);
     if let Err(error) = result {

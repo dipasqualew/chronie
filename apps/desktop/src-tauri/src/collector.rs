@@ -1,7 +1,7 @@
 use crate::activity;
 use chrono::{DateTime, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
     collections::HashMap,
@@ -466,6 +466,137 @@ fn migrate(connection: &mut Connection) -> Result<(), String> {
 
 pub fn initialize(database_path: &Path) -> Result<(), String> {
     open_database(database_path).map(|_| ())
+}
+
+/// What a database holds, in the terms somebody deciding what to do with it would use.
+///
+/// This is what travels ahead of a database being handed to another machine: the receiver is
+/// about to lose everything it has, and "1,204 segments up to the 26th" is the only thing
+/// that tells them whether that is the trade they meant to make.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub segment_count: i64,
+    pub character_count: i64,
+    /// The last day anything was recorded on. `None` for a database holding no segments.
+    pub newest_day: Option<String>,
+}
+
+/// A file beside `path` with `suffix` appended to its whole name — how SQLite names the
+/// write-ahead log and shared-memory files that belong to a database.
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// Writes a self-contained copy of a live database to `destination`.
+///
+/// Not a file copy: the database runs in WAL mode, so the bytes on disk are only half the
+/// story until the log is folded back in, and copying the three files separately at three
+/// different moments is how a torn database is made. `VACUUM INTO` asks SQLite for a
+/// consistent snapshot of the whole thing as one plain file, which is both the correct copy
+/// and the compact one — no free pages and no log to carry.
+pub fn snapshot(database_path: &Path, destination: &Path) -> Result<(), String> {
+    let target = destination
+        .to_str()
+        .ok_or("The snapshot's path is not text SQLite can be given.")?;
+    // SQLite refuses to write over an existing file, which is the right rule and the wrong
+    // one for a scratch file the caller has already made.
+    if destination.exists() {
+        fs::remove_file(destination).map_err(|error| error.to_string())?;
+    }
+    let connection = open_database(database_path)?;
+    connection
+        .execute("VACUUM INTO ?1", params![target])
+        .map(|_| ())
+        .map_err(|error| format!("Could not copy the database: {error}"))
+}
+
+/// Reads a database file without touching it, and refuses anything that is not one of ours.
+///
+/// Deliberately not [`open_database`]: this is the gate a database arriving from another
+/// machine has to pass, and opening it the ordinary way would migrate it — writing to a file
+/// that has not yet earned the right to replace anything. A schema newer than this build
+/// understands is refused here rather than half-read later.
+pub fn summarize(database_path: &Path) -> Result<Summary, String> {
+    let connection = Connection::open_with_flags(
+        database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| format!("Could not open the database: {error}"))?;
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|_| "That file is not a Chronie database.".to_string())?;
+    if version == 0 {
+        return Err("That file is not a Chronie database.".into());
+    }
+    if version > SCHEMA_VERSION {
+        return Err(format!(
+            "That database was written by a newer Chronie (schema {version}, this build reads {SCHEMA_VERSION}). Update this Chronie first."
+        ));
+    }
+    let counts = connection
+        .query_row(
+            "SELECT
+                 (SELECT COUNT(*) FROM segments),
+                 (SELECT COUNT(*) FROM characters),
+                 (SELECT MAX(ended_day) FROM segments)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| "That database has no Chronie history in it.".to_string())?;
+    Ok(Summary {
+        segment_count: counts.0,
+        character_count: counts.1,
+        newest_day: counts.2,
+    })
+}
+
+/// Puts `incoming` in place of the app's database, keeping the old one beside it.
+///
+/// The replacement is judged before anything is moved, so a file that turns out not to be a
+/// database leaves the existing history exactly where it was. What is displaced is not
+/// deleted either: it is checkpointed so the file stands on its own, then renamed aside as
+/// `chronie.replaced.sqlite3`, which is what somebody who accepted the wrong transfer needs.
+/// The stale log beside it goes, though — leaving one would have SQLite replay another
+/// database's writes onto this one.
+pub fn install_database(incoming: &Path, database_path: &Path) -> Result<Summary, String> {
+    let summary = summarize(incoming)?;
+    if let Some(parent) = database_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let replaced = database_path.with_extension("replaced.sqlite3");
+    if database_path.is_file() {
+        if let Ok(connection) = Connection::open(database_path) {
+            let _ = connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        }
+        if replaced.exists() {
+            fs::remove_file(&replaced).map_err(|error| error.to_string())?;
+        }
+        fs::rename(database_path, &replaced)
+            .map_err(|error| format!("Could not set the old database aside: {error}"))?;
+    }
+    let _ = fs::remove_file(sidecar(database_path, "-wal"));
+    let _ = fs::remove_file(sidecar(database_path, "-shm"));
+    let restore = || {
+        if replaced.is_file() {
+            let _ = fs::rename(&replaced, database_path);
+        }
+    };
+    if let Err(error) = fs::rename(incoming, database_path) {
+        restore();
+        return Err(format!("Could not put the new database in place: {error}"));
+    }
+    // The sender may be an older build, in which case what has just landed is an older
+    // schema. Carrying it forward is the same thing that happens to a database this app
+    // has had all along.
+    if let Err(error) = open_database(database_path) {
+        let _ = fs::remove_file(database_path);
+        restore();
+        return Err(error);
+    }
+    Ok(summary)
 }
 
 fn account_key(path: &Path) -> Option<String> {

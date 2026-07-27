@@ -32,6 +32,24 @@ folder, then select **Install or update addon**. That button downloads the publi
 Select **Sync now** after `/reload` or logging out; Chronie also checks
 SavedVariables every 30 seconds in the background.
 
+## Move a history to another machine
+
+Setup's **Sync over WiFi** hands one Chronie's whole database to another one on the
+same network — a desktop's collection onto a laptop, or a spare machine kept as a
+copy. On the machine that is to receive it, select **Wait for a database**. On the
+machine sending, select **Look for Chronies**, pick the one that is waiting, and
+select **Send history**. Nothing moves until somebody on the receiving machine
+reads what is being offered and accepts it.
+
+Accepting replaces the receiving machine's history rather than merging into it. What
+it displaces is not deleted: the old database is left beside the new one as
+`chronie.replaced.sqlite3` in the app's data folder.
+
+Only a Chronie that is waiting can be sent to or even found, and the transfer is
+neither encrypted nor authenticated — it is a transfer between two machines in one
+home, guarded by somebody being at both of them. Chronie listens on port 51571 for
+as long as it is waiting and not a moment longer.
+
 ## Development
 
 Prerequisites: [Bun](https://bun.sh/), Rust, and the platform prerequisites from

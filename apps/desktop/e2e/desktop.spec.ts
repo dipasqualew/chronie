@@ -604,6 +604,34 @@ const mockDesktop: E2EMock = {
   installResult: { version: "0.8.0-dev" },
   appUpdate: { updated: false, version: "0.1.0" },
   openedUrls: [],
+  // One other Chronie on the network waiting for a database, and one sender knocking at this
+  // one the moment it starts waiting. Both halves of a transfer are on this page, which is
+  // the only place the two ever meet in a test.
+  wifi: {
+    peers: [{ device: "Study desktop", address: "192.168.1.20:51571" }],
+    receipt: { stored: true, reason: "", segmentCount: 1204 },
+    status: {
+      listening: false,
+      device: "Kitchen laptop",
+      addresses: ["192.168.1.31:51571"],
+      port: 51571,
+      offer: null,
+      outcome: null,
+    },
+    incoming: {
+      from: "192.168.1.20",
+      receiving: false,
+      offer: {
+        protocol: 1,
+        device: "Study desktop",
+        segmentCount: 1204,
+        characterCount: 3,
+        newestDay: "2026-07-26",
+        bytes: 4_404_019,
+      },
+    },
+    sentTo: [],
+  },
 };
 
 /**
@@ -687,6 +715,10 @@ const overlapFractions = (elements: Locator): Promise<number[]> =>
  */
 const openedUrls = (page: Page): Promise<string[]> =>
   page.evaluate(() => window.__Chronie_E2E__?.openedUrls ?? []);
+
+/** The addresses this window has offered its history to, in the order it offered. */
+const sentTo = (page: Page): Promise<string[]> =>
+  page.evaluate(() => window.__Chronie_E2E__?.wifi.sentTo ?? []);
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((mock) => {
@@ -1191,5 +1223,73 @@ test("drives setup, sync, addon installation, and app update checks", async ({ p
 
   await page.getByRole("button", { name: "Check for app update" }).click();
   await expect(page.locator("#setup-status")).toHaveText("Chronie is up to date.");
+});
+
+/**
+ * The whole of WiFi sync from the sending machine's side.
+ *
+ * Choosing a Chronie fills its address in rather than sending to it, which is the rule worth
+ * holding: one click must not be enough to hand a history over.
+ */
+test("finds another Chronie on the network and offers this history to it", async ({ page }) => {
+  await page.getByRole("button", { name: "Setup" }).click();
+  const sending = page.getByRole("region", { name: "Send this history" });
+
+  await sending.getByRole("button", { name: "Look for Chronies" }).click();
+  await expect(page.locator("#wifi-send-status")).toHaveText("Found 1 Chronie waiting.");
+  await expect(sending.getByRole("button", { name: /Study desktop/ })).toBeVisible();
+
+  await sending.getByRole("button", { name: /Study desktop/ }).click();
+  await expect(page.getByLabel("Address")).toHaveValue("192.168.1.20:51571");
+  await expect(sentTo(page)).resolves.toEqual([]);
+
+  await sending.getByRole("button", { name: "Send history" }).click();
+  await expect(page.locator("#wifi-send-status"))
+    .toHaveText("Sent to 192.168.1.20:51571: it now holds 1204 segments.");
+  await expect(sentTo(page)).resolves.toEqual(["192.168.1.20:51571"]);
+});
+
+/**
+ * The receiving side, which is where the destructive click lives.
+ *
+ * What the offer says is asserted rather than only that it appeared: accepting throws away
+ * everything the machine has collected, and the sentence above the button is the only thing
+ * standing between a reader and that.
+ */
+test("takes a history from another Chronie only once somebody agrees", async ({ page }) => {
+  await page.getByRole("button", { name: "Setup" }).click();
+  const receiving = page.getByRole("region", { name: "Receive a history" });
+  const offer = page.locator("#wifi-offer");
+
+  await expect(page.locator("#wifi-receive-status")).toContainText("Not waiting");
+  await expect(offer).toBeHidden();
+
+  await receiving.getByRole("button", { name: "Wait for a database" }).click();
+  await expect(offer).toBeVisible();
+  await expect(page.locator("#wifi-offer-text")).toContainText("Study desktop (192.168.1.20)");
+  await expect(page.locator("#wifi-offer-text")).toContainText("1204 segments across 3 characters");
+  await expect(page.locator("#wifi-offer-text")).toContainText("4.2 MB");
+  await expect(page.locator("#wifi-offer-text"))
+    .toContainText("replaces everything this Chronie has collected");
+
+  await test.step("declining leaves this history where it was", async () => {
+    await offer.getByRole("button", { name: "Decline" }).click();
+    await expect(offer).toBeHidden();
+    await expect(page.locator("#wifi-receive-status"))
+      .toContainText("Turned down the database from Study desktop.");
+  });
+
+  await test.step("accepting says what replaced what", async () => {
+    // Stopping and starting again is how the panel gets a second offer, which is also how
+    // somebody would recover from having declined the transfer they actually wanted.
+    await receiving.getByRole("button", { name: "Stop waiting" }).click();
+    await receiving.getByRole("button", { name: "Wait for a database" }).click();
+    await expect(offer).toBeVisible();
+
+    await offer.getByRole("button", { name: "Accept and replace" }).click();
+    await expect(offer).toBeHidden();
+    await expect(page.locator("#wifi-receive-status"))
+      .toContainText("Replaced this history with Study desktop's: 1204 segments");
+  });
 });
 

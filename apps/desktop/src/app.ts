@@ -21,6 +21,7 @@ import { duration, escapeHtml, plural } from "./format";
 import { installExternalLinks } from "./links";
 import type { ActivityMetadata, DashboardPayload, Segment } from "./types";
 import { installTooltip } from "./ui";
+import { createWifiSync } from "./wifi";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -394,12 +395,47 @@ $("check-update").addEventListener("click", (event) =>
   void run(pressed(event), desktop.checkForAppUpdate,
     (result) => result.updated ? `Chronie ${result.version} is ready; restart to finish.` : "Chronie is up to date."));
 
+/* ---------- moving the history between machines ---------- */
+
+const wifi = createWifiSync({
+  elements: {
+    find: $<HTMLButtonElement>("wifi-find"),
+    peers: $("wifi-peers"),
+    address: $<HTMLInputElement>("wifi-address"),
+    send: $<HTMLButtonElement>("wifi-send"),
+    sendStatus: $("wifi-send-status"),
+    wait: $<HTMLButtonElement>("wifi-wait"),
+    receiveStatus: $("wifi-receive-status"),
+    offer: $("wifi-offer"),
+    offerText: $("wifi-offer-text"),
+    accept: $<HTMLButtonElement>("wifi-accept"),
+    decline: $<HTMLButtonElement>("wifi-decline"),
+  },
+  actions: {
+    discover: desktop.wifiDiscover,
+    send: desktop.wifiSend,
+    startWaiting: desktop.wifiReceiveStart,
+    stopWaiting: desktop.wifiReceiveStop,
+    status: desktop.wifiReceiveStatus,
+    answer: desktop.wifiAnswerOffer,
+    // Every view on screen is of a history that has just been replaced, and folding a whole
+    // new database into the page in flight is not worth inventing — the window starts again
+    // from what is now stored.
+    onReplaced: () => {
+      if (!globalThis.__Chronie_E2E__) setTimeout(() => window.location.reload(), 1200);
+    },
+    onError: message,
+  },
+});
+
 /* ---------- go ---------- */
 
 repaint();
 // Nothing can be collected until the game folder is known, so a first run opens on the one
 // screen that can do anything about it rather than on an empty timeline.
 show(settings.wowPath ? "timeline" : "setup");
+await wifi.refresh();
+wifi.watch(() => !$("setup-view").hidden);
 
 if (!globalThis.__Chronie_E2E__) {
   const segmentSignature = JSON.stringify(SEGMENTS.map((segment) => [segment.id, segment.endedAt]));
