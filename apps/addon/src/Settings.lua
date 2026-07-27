@@ -13,6 +13,11 @@ local _, ns = ...
 ---@class ChronieSettings
 ---@field combatLogging boolean Whether to start combat logging at login. Off by default: a
 ---raid night of combat log is hundreds of megabytes, and nothing deletes it again yet.
+---@field captureTriggers string[] Which things worth remembering take a picture of
+---themselves — see ns.newCaptureTriggers for what each name means. Conservative rather than
+---empty: "the first time this account ever did this" is rare enough to be worth a
+---photograph every time, which "an achievement fired" is not.
 ns.settings = {
     combatLogging = false,
+    captureTriggers = { "accountFirstAchievement" },
 }

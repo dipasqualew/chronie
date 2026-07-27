@@ -27,6 +27,7 @@ src/SegmentLog.lua
 src/AccountIdentity.lua
 src/MapPosition.lua
 src/EntryLog.lua
+src/CaptureTriggers.lua
 src/EquipsetLedger.lua
 src/SegmentTracker.lua
 src/SegmentTable.lua
