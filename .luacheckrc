@@ -16,6 +16,7 @@ read_globals = {
     "UnitXP",
     "UnitXPMax",
     "C_ChallengeMode",
+    "C_Timer",
     "GetRealmName",
     "GetNumSavedInstances",
     "GetSavedInstanceInfo",

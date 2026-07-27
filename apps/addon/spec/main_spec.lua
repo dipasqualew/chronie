@@ -1870,6 +1870,7 @@ describe("addon integration", function()
             local _, recorded = bootWithTriggers()
 
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
 
             assert.equal(1, recorded.screenshots())
             local entry = recorded.db.entries[1]
@@ -1903,14 +1904,16 @@ describe("addon integration", function()
             assert.equal(0, recorded.screenshots())
         end)
 
-        -- Thirty achievements in a minute is one memory, not thirty pictures of the same
-        -- corridor. Two seconds apart, so the entry log's own one-second cooldown is not
-        -- what is being measured here.
+        -- Thirty achievements over a minute is one memory, not thirty pictures of the same
+        -- corridor. Two seconds apart and settled one at a time, so each opens and closes a
+        -- window of its own: what refuses the other twenty-nine here is the rate limit, and
+        -- the burst below is what covers the ones that arrive together.
         it("takes one picture of a raid clear rather than thirty", function()
             local _, recorded = bootWithTriggers()
 
             for id = 1, 30 do
                 recorded.frame:fire("ACHIEVEMENT_EARNED", id, false)
+                recorded.settle()
                 recorded.clock.advance(2)
             end
 
@@ -1918,12 +1921,58 @@ describe("addon integration", function()
             assert.equal(1, #recorded.db.entries)
         end)
 
+        -- The acceptance criterion for the burst, and the case the rate limit above cannot
+        -- speak for: a boss kill earning the boss, the wing and the meta all in the same
+        -- instant is one photograph, and it would be one even with no rate limit at all.
+        it("takes one picture of a moment that fires four triggers at once", function()
+            local _, recorded = bootWithTriggers({ "achievement", "mount", "toy" })
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 1, true)
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 2, true)
+            recorded.frame:fire("NEW_MOUNT_ADDED", 1234)
+            recorded.frame:fire("NEW_TOY_ADDED", 999)
+            recorded.settle()
+
+            assert.equal(1, recorded.screenshots())
+            assert.equal(1, #recorded.db.entries)
+        end)
+
+        -- Nothing is photographed in the frame the event arrived in. The client has not
+        -- drawn the alert yet and whatever was just killed is still falling over.
+        it("waits for the moment to finish before pressing the shutter", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+
+            assert.equal(0, recorded.screenshots())
+            assert.same({}, recorded.db.entries)
+
+            recorded.settle()
+            assert.equal(1, recorded.screenshots())
+        end)
+
+        -- Which of the burst the picture is filed against, where the player allowed both
+        -- rules: the account first is the memory even when a plain one opened the window.
+        it("files a burst against the most specific achievement in it", function()
+            local _, recorded = bootWithTriggers({ "accountFirstAchievement", "achievement" })
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 111, true)
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 222, false)
+            recorded.settle()
+
+            assert.equal(1, recorded.screenshots())
+            assert.equal("accountFirstAchievement", recorded.db.entries[1].trigger)
+            assert.equal(222, recorded.db.entries[1].achievement)
+        end)
+
         it("photographs the next account first once the rate limit has passed", function()
             local _, recorded = bootWithTriggers()
             recorded.frame:fire("ACHIEVEMENT_EARNED", 1, false)
+            recorded.settle()
 
             recorded.clock.advance(60)
             recorded.frame:fire("ACHIEVEMENT_EARNED", 2, false)
+            recorded.settle()
 
             assert.equal(2, recorded.screenshots())
             assert.equal(2, recorded.db.entries[2].achievement)
@@ -1936,8 +1985,39 @@ describe("addon integration", function()
 
             recorded.frame:fire("LOADING_SCREEN_ENABLED")
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
 
             assert.equal(0, recorded.screenshots())
+        end)
+
+        -- The half second the burst waits is long enough for the world to go away in, and a
+        -- keystone that ends on time completes the run and then teleports the party out. The
+        -- picture behind that loading screen is a black rectangle, so there is no picture.
+        it("takes no picture when a loading screen starts while the window is open", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.frame:fire("LOADING_SCREEN_ENABLED")
+            recorded.settle()
+
+            assert.equal(0, recorded.screenshots())
+            assert.same({}, recorded.db.entries)
+        end)
+
+        -- Nothing is queued for later, so the moment is gone; but the rate limit was never
+        -- started either, and the next real one must not be refused on its behalf.
+        it("photographs the next moment after a window a loading screen swallowed", function()
+            local _, recorded = bootWithTriggers()
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 1, false)
+            recorded.frame:fire("LOADING_SCREEN_ENABLED")
+            recorded.settle()
+
+            recorded.frame:fire("LOADING_SCREEN_DISABLED")
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 2, false)
+            recorded.settle()
+
+            assert.equal(1, recorded.screenshots())
+            assert.equal(2, recorded.db.entries[1].achievement)
         end)
 
         it("takes one again once the loading screen has lifted", function()
@@ -1946,6 +2026,7 @@ describe("addon integration", function()
 
             recorded.frame:fire("LOADING_SCREEN_DISABLED")
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
 
             assert.equal(1, recorded.screenshots())
         end)
@@ -1958,6 +2039,7 @@ describe("addon integration", function()
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
 
             assert.equal(1, recorded.screenshots())
         end)
@@ -1967,11 +2049,13 @@ describe("addon integration", function()
 
             recorded.frame:fire("CINEMATIC_START")
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
 
             assert.equal(0, recorded.screenshots())
 
             recorded.frame:fire("CINEMATIC_STOP")
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12346, false)
+            recorded.settle()
 
             assert.equal(1, recorded.screenshots())
         end)
@@ -1982,6 +2066,7 @@ describe("addon integration", function()
             local _, recorded = bootWithTriggers()
 
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
             recorded.frame:fire("PLAYER_LOGOUT")
 
             assert.equal(recorded.db.segments[1].id, recorded.db.entries[1].segment)
@@ -2003,6 +2088,7 @@ describe("addon integration", function()
             local _, recorded = bootWithTriggers()
 
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
             recorded.clock.advance(1)
             recorded.frame:fire("SCREENSHOT_SUCCEEDED")
 
@@ -2037,6 +2123,7 @@ describe("addon integration", function()
         it("does not let the rate limit refuse a pressed capture", function()
             local app, recorded = bootWithTriggers()
             recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.settle()
 
             recorded.clock.advance(1)
 
@@ -2053,6 +2140,7 @@ describe("addon integration", function()
                 local _, recorded = bootWithTriggers({ case.trigger })
 
                 recorded.frame:fire(unpack(case.fire))
+                recorded.settle()
 
                 assert.equal(1, recorded.screenshots())
                 assert.equal(case.trigger, recorded.db.entries[1].trigger)
@@ -2064,6 +2152,7 @@ describe("addon integration", function()
                 local _, recorded = bootWithTriggers()
 
                 recorded.frame:fire(unpack(case.fire))
+                recorded.settle()
 
                 assert.equal(0, recorded.screenshots())
             end)
@@ -2076,6 +2165,7 @@ describe("addon integration", function()
             })
 
             recorded.frame:fire("CHALLENGE_MODE_COMPLETED")
+            recorded.settle()
 
             assert.equal(1, recorded.screenshots())
             assert.equal("keystoneOnTime", recorded.db.entries[1].trigger)
@@ -2088,6 +2178,7 @@ describe("addon integration", function()
             })
 
             recorded.frame:fire("CHALLENGE_MODE_COMPLETED")
+            recorded.settle()
 
             assert.equal(0, recorded.screenshots())
         end)
@@ -2114,6 +2205,7 @@ describe("addon integration", function()
             })
 
             recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+            recorded.settle()
 
             assert.equal(1, recorded.screenshots())
             assert.equal("newAppearance", recorded.db.entries[1].trigger)
@@ -2127,6 +2219,7 @@ describe("addon integration", function()
             })
 
             recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 12)
+            recorded.settle()
 
             assert.equal(0, recorded.screenshots())
         end)
@@ -2137,6 +2230,7 @@ describe("addon integration", function()
             })
 
             recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+            recorded.settle()
 
             assert.equal(0, recorded.screenshots())
         end)

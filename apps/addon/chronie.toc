@@ -35,6 +35,7 @@ src/EntryText.lua
 src/EntryPrompt.lua
 src/EntryToast.lua
 src/CaptureTriggers.lua
+src/CaptureBurst.lua
 src/ScreenshotWatch.lua
 src/EquipsetLedger.lua
 src/SegmentTracker.lua

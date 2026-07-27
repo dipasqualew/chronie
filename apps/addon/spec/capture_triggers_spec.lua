@@ -163,6 +163,41 @@ describe("ns.newCaptureTriggers", function()
 
             assert.is_nil(triggers.consider({ kind = "levelUp", id = 70 }).achievement)
         end)
+
+        -- Neither of these reaches an entry. They exist for ns.newCaptureBurst, which has to
+        -- choose between several decisions belonging to one moment, and the rank is how it
+        -- knows the account first among a raid clear's achievements is the one to keep.
+        it("carries the kind the decision came out of", function()
+            local triggers = newTriggers({ triggers = { "mount" } })
+
+            assert.equal("mount", triggers.consider({ kind = "mount", id = 1234 }).kind)
+        end)
+
+        it("ranks the specific name above the general one", function()
+            local specific = newTriggers({ triggers = { "accountFirstAchievement", "achievement" } })
+            local general = newTriggers({ triggers = { "accountFirstAchievement", "achievement" } })
+
+            assert.equal(1, specific.consider(achievement()).rank)
+            assert.equal(2, general.consider(achievement({ accountFirst = false })).rank)
+        end)
+
+        -- The rank belongs to the name, not to the event that matched it. A player who
+        -- allowed only the general rule gets rank 2 for both kinds of achievement, so a
+        -- raid clear is decided by which arrived first rather than by an account first
+        -- being handed a rank that says it is more specific than a rule it did not match.
+        it("ranks two events that matched the same name equally", function()
+            local first = newTriggers({ triggers = { "achievement" } })
+            local plain = newTriggers({ triggers = { "achievement" } })
+
+            assert.equal(2, first.consider(achievement()).rank)
+            assert.equal(2, plain.consider(achievement({ accountFirst = false })).rank)
+        end)
+
+        it("ranks a kind with only one name at the top", function()
+            local triggers = newTriggers({ triggers = { "mount" } })
+
+            assert.equal(1, triggers.consider({ kind = "mount", id = 1234 }).rank)
+        end)
     end)
 
     describe("the rate limit", function()

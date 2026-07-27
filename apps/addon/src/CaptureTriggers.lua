@@ -18,6 +18,10 @@ local _, ns = ...
 ---  minute, and thirty pictures of the same corridor is a mess rather than a memory. The
 ---  limiter counts automatic captures only: a player holding the keybinding down is doing
 ---  something deliberate, and being told no by a rule they did not press is not helpful.
+---  It is a rate limit across moments and nothing else — several events belonging to *one*
+---  moment are collapsed a layer up, by `ns.newCaptureBurst`, before the shutter is reached.
+---  Keeping the two apart is what lets this cooldown be loosened without a boss kill turning
+---  back into four photographs of itself.
 ---* **The world is not on screen.** Events fire during loading screens and cinematics, and
 ---  the picture that comes back is a black rectangle. The obstruction is tracked by name
 ---  because two of them can overlap — a cinematic that ends in a loading screen — and the
@@ -34,6 +38,11 @@ local _, ns = ...
 ---than another item that wears one already owned.
 
 ---What a capture would be, when one is worth taking.
+---
+---Only `trigger` and `achievement` are ever written to an entry. The other two describe the
+---decision rather than the photograph, and exist so `ns.newCaptureBurst` can tell two
+---decisions apart when a single moment fires several: see `displaces` there for what it
+---does with them.
 ---@class CaptureDecision
 ---@field trigger string The allowed rule that fired, which is filed with the entry so a
 ---reader can tell an automatic capture from a pressed one and say why it happened.
@@ -41,6 +50,9 @@ local _, ns = ...
 ---An explicit field per subject kind rather than a kind/id pair: there will only ever be a
 ---handful, and downstream the link is a real foreign key that a polymorphic column could
 ---not be.
+---@field kind string The event kind this came out of, carried through unchanged.
+---@field rank integer Where the matched name sat in that kind's candidate list, 1 being the
+---most specific. Comparable only against another decision of the same kind.
 
 ---@class CaptureTriggers
 ---@field consider fun(event: CaptureEvent): CaptureDecision? What to capture, or nil.
@@ -61,49 +73,50 @@ local _, ns = ...
 ---thirty, short enough that two genuinely separate moments in an evening both get one.
 local DEFAULT_COOLDOWN = 60
 
----Which trigger names each kind of event can satisfy, most specific first.
+---Which trigger names each kind of event can satisfy, most specific first, and what an
+---event has to be for the specific one to be offered to it at all.
 ---
 ---A list rather than a single name so that the specific and the general are both
 ---expressible: an account-first achievement is offered as the account-first rule and then as
 ---the plain one, so allowing either is enough to photograph it, and allowing only the
----account-first rule leaves the other twenty-nine achievements of a raid clear alone.
+---account-first rule leaves the other twenty-nine achievements of a raid clear alone. An
+---event that fails `specific` is offered the general names only, which is what makes
+---"every achievement" and "only the ones nobody on this account had" two different lists.
+---
+---The position of a name in its own list is the rank the decision carries. It is a property
+---of the list rather than of the event, which matters: a plain achievement and an account
+---first are both `achievement` rank 2 for a player who allowed only the general rule, and a
+---moment holding both is decided by arrival order rather than by one of them accidentally
+---looking more specific than the other.
 ---
 ---Nothing here needs an event Chronie was not already listening to. That is deliberate: a
 ---second set of listeners for events the tally already handles is how the two drift apart.
 local RULES = {
-    achievement = function(event)
-        if event.accountFirst then
-            return { "accountFirstAchievement", "achievement" }
-        end
-        return { "achievement" }
-    end,
-    levelUp = function()
-        return { "levelUp" }
-    end,
-    mount = function()
-        return { "mount" }
-    end,
-    pet = function()
-        return { "pet" }
-    end,
-    toy = function()
-        return { "toy" }
-    end,
-    keystone = function(event)
-        if event.onTime then
-            return { "keystoneOnTime", "keystone" }
-        end
-        return { "keystone" }
-    end,
+    achievement = {
+        names = { "accountFirstAchievement", "achievement" },
+        specific = function(event)
+            return event.accountFirst
+        end,
+    },
+    levelUp = { names = { "levelUp" } },
+    mount = { names = { "mount" } },
+    pet = { names = { "pet" } },
+    toy = { names = { "toy" } },
+    keystone = {
+        names = { "keystoneOnTime", "keystone" },
+        specific = function(event)
+            return event.onTime
+        end,
+    },
     -- The same shape as the achievement, and for the same reason: a bag emptied at a vendor
     -- collects a dozen sources and one of them is a look nobody had. "A new appearance" is
     -- worth a picture in a way "another item that wears one I own" is not.
-    transmog = function(event)
-        if event.newAppearance then
-            return { "newAppearance", "transmog" }
-        end
-        return { "transmog" }
-    end,
+    transmog = {
+        names = { "newAppearance", "transmog" },
+        specific = function(event)
+            return event.newAppearance
+        end,
+    },
 }
 
 ---What the decision hangs off, per kind. Only the achievement has one today, because it is
@@ -154,10 +167,18 @@ function ns.newCaptureTriggers(deps)
                 return nil
             end
 
-            local trigger
-            for _, candidate in ipairs(rule(event)) do
-                if allowed[candidate] then
-                    trigger = candidate
+            -- The specific names are offered only to an event that earns them; anything
+            -- else starts at the general one at the end of the list.
+            local from = 1
+            if #rule.names > 1 and not (rule.specific and rule.specific(event)) then
+                from = #rule.names
+            end
+
+            local trigger, rank
+            for index = from, #rule.names do
+                if allowed[rule.names[index]] then
+                    trigger = rule.names[index]
+                    rank = index
                     break
                 end
             end
@@ -173,7 +194,7 @@ function ns.newCaptureTriggers(deps)
                 return nil
             end
 
-            local decision = { trigger = trigger }
+            local decision = { trigger = trigger, kind = event.kind, rank = rank }
             attach(event, decision)
             return decision
         end,
