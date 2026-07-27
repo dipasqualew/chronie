@@ -5752,6 +5752,117 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(valorstones["characters"][0]["character"], "Alt-Ravencrest");
         assert_eq!(valorstones["characters"][0]["total"], 800);
         assert_eq!(valorstones["oldest"], 1_999_913_600_i64);
+        // A currency nobody has said is shared is every character's own, and summing it is
+        // the right answer rather than the bug.
+        assert_eq!(valorstones["accountWide"], false);
+    }
+
+    /// A history collected before the shared flag existed has no column to put one in. The
+    /// migration has to widen the table under the rows already there, and every currency in
+    /// it reads as the character's own until a walk says otherwise — which is what those
+    /// rows were actually recorded as meaning.
+    #[test]
+    fn migrates_a_database_written_before_a_currency_could_be_shared() {
+        let (_temp, wow, database) = holdings_install(
+            r#"["Main-Ravencrest"] = { ["currencies"] = {
+                [2032] = {
+                    ["name"] = "Trader's Tender", ["total"] = 1500,
+                    ["accountWide"] = true, ["at"] = 2000000000,
+                },
+            } },"#,
+        );
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..12] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction
+                .execute_batch(
+                    "INSERT INTO accounts (id, source_key, first_seen_at, last_seen_at)
+                       VALUES (1, 'legacy', 1900000000, 1900000000);
+                     INSERT INTO characters (id, account_id, source_key, name, realm,
+                                             first_seen_at, last_seen_at)
+                       VALUES (1, 1, 'Brin-Vale', 'Brin', 'Vale', 1900000000, 1900000000);
+                     INSERT INTO character_currencies
+                         (character_id, currency_id, name, total, observed_at)
+                       VALUES (1, 2032, 'Trader''s Tender', 2000, 1900000000);",
+                )
+                .unwrap();
+            transaction.pragma_update(None, "user_version", 12_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let tender = &dashboard(&database).unwrap()["holdings"]["currencies"][0];
+        // Brin-Vale's row survived the migration and is still listed — but the character
+        // that has actually read the flag is the one that settles what the number means.
+        assert_eq!(tender["characters"].as_array().unwrap().len(), 2);
+        assert_eq!(tender["accountWide"], true);
+        assert_eq!(tender["total"], 1500);
+    }
+
+    /// A warband currency is one pot that every character reads through the same call, so
+    /// the per-character rows are the same number reported several times rather than several
+    /// holdings to add up. Summing them multiplies the pot by the size of the roster.
+    #[test]
+    fn counts_an_account_wide_currency_once_rather_than_once_per_character() {
+        let (_temp, wow, database) = holdings_install(
+            r#"
+            ["Alt-Ravencrest"] = { ["currencies"] = {
+                [2032] = {
+                    ["name"] = "Trader's Tender", ["total"] = 2000,
+                    ["accountWide"] = true, ["at"] = 1999913600,
+                },
+            } },
+            ["Main-Ravencrest"] = { ["currencies"] = {
+                [2032] = {
+                    ["name"] = "Trader's Tender", ["total"] = 1500,
+                    ["accountWide"] = true, ["at"] = 2000000000,
+                },
+            } },
+        "#,
+        );
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let tender = &dashboard(&database).unwrap()["holdings"]["currencies"][0];
+        // The freshest reading, not the sum and not the eldest: the older row is the same
+        // pot out of date rather than a second holding.
+        assert_eq!(tender["total"], 1500);
+        assert_eq!(tender["accountWide"], true);
+        assert_eq!(tender["oldest"], 2_000_000_000_i64);
+        // Both characters still travel with it, because the list is what says the number was
+        // checked from more than one place.
+        assert_eq!(tender["characters"].as_array().unwrap().len(), 2);
+    }
+
+    /// Whether a currency is shared is a fact about the currency rather than about the
+    /// character that looked, so a snapshot written before the addon ever collected the flag
+    /// is an unasked question rather than a "no".
+    #[test]
+    fn treats_a_currency_as_shared_once_any_character_has_read_the_flag() {
+        let (_temp, wow, database) = holdings_install(
+            r#"
+            ["Alt-Ravencrest"] = { ["currencies"] = {
+                [2032] = { ["name"] = "Trader's Tender", ["total"] = 2000, ["at"] = 1999913600 },
+            } },
+            ["Main-Ravencrest"] = { ["currencies"] = {
+                [2032] = {
+                    ["name"] = "Trader's Tender", ["total"] = 2000,
+                    ["accountWide"] = true, ["at"] = 2000000000,
+                },
+            } },
+        "#,
+        );
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let tender = &dashboard(&database).unwrap()["holdings"]["currencies"][0];
+        assert_eq!(tender["accountWide"], true);
+        assert_eq!(tender["total"], 2000);
     }
 
     #[test]

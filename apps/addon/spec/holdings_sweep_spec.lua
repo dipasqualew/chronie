@@ -79,12 +79,23 @@ describe("ns.readHoldings", function()
         currencyID = 2245,
         name = "Flightstones",
         quantity = 5000,
+        isAccountWide = false,
     }
     local VALORSTONES = {
         isHeader = false,
         currencyID = 3008,
         name = "Valorstones",
         quantity = 0,
+        isAccountWide = false,
+    }
+    -- A warband-wide currency: every character on the account reads the same pot through
+    -- the same call, and the flag is the only thing that says so.
+    local TENDERS = {
+        isHeader = false,
+        currencyID = 2032,
+        name = "Trader's Tender",
+        quantity = 1000,
+        isAccountWide = true,
     }
     local CURRENCY_HEADER = {
         isHeader = true,
@@ -92,6 +103,7 @@ describe("ns.readHoldings", function()
         currencyID = 0,
         name = "Midnight",
         quantity = 0,
+        isAccountWide = false,
     }
 
     local CONSORTIUM = {
@@ -126,9 +138,34 @@ describe("ns.readHoldings", function()
         }))
 
         assert.same({
-            { id = 2245, name = "Flightstones", total = 5000 },
-            { id = 3008, name = "Valorstones", total = 0 },
+            { id = 2245, name = "Flightstones", total = 5000, accountWide = false },
+            { id = 3008, name = "Valorstones", total = 0, accountWide = false },
         }, held.currencies)
+    end)
+
+    -- The whole reason the flag has to travel: the number beside a warband currency is the
+    -- account's pot rather than this character's share of it, and nothing downstream can
+    -- tell the two apart by looking at the number.
+    it("says which currencies are the account's shared pot rather than this character's", function()
+        local held = ns.readHoldings(client({
+            currencies = { TENDERS, FLIGHTSTONES },
+        }))
+
+        assert.same({
+            { id = 2032, name = "Trader's Tender", total = 1000, accountWide = true },
+            { id = 2245, name = "Flightstones", total = 5000, accountWide = false },
+        }, held.currencies)
+    end)
+
+    -- A build old enough to have no warband currencies at all has no field to read, and
+    -- "the client did not say" has to read as not shared rather than as unknown — every
+    -- currency on such a build really is the character's own.
+    it("reads a client that has never heard of the flag as holding nothing shared", function()
+        local held = ns.readHoldings(client({
+            currencies = { { isHeader = false, currencyID = 2245, name = "Flightstones", quantity = 5000 } },
+        }))
+
+        assert.same({ { id = 2245, name = "Flightstones", total = 5000, accountWide = false } }, held.currencies)
     end)
 
     -- Zero is the whole point of walking rather than watching: a character that has spent
@@ -157,7 +194,7 @@ describe("ns.readHoldings", function()
             },
         }))
 
-        assert.same({ { id = 2245, name = "Flightstones", total = 5000 } }, held.currencies)
+        assert.same({ { id = 2245, name = "Flightstones", total = 5000, accountWide = false } }, held.currencies)
     end)
 
     it("reads every faction the pane lists, reduced to the same bar a gain is", function()
