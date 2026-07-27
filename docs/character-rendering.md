@@ -89,18 +89,12 @@ agree exactly.
 
 ## Compositing
 
-**The base skin is the one hop of this that is not resolved.** Which BLP a character's skin
-is comes out of the player's own customization — `ChrCustomizationChoice` →
-`ChrCustomizationElement` → `ChrCustomizationMaterial` → `TextureFileData` — and none of
-those four tables' column positions have been read off an install the way the chains in
-[game-files.md](game-files.md#the-chain-verified) were. Until they have been,
-`character.rs` allocates the atlas and leaves it a flat tone; `Atlas::base` is written and
-tested and is the one function that changes when they are. That is the bar `GeosetGroup[6]`
-was eventually held to as well, and for the same reason: four guessed indices in a row would
-paint the body with whatever the guess landed on and call it a skin.
-
 1. Allocate `2048 × 1024` RGBA.
-2. Blit the base skin BLP over the whole buffer.
+2. Blit the base skin BLP over the whole buffer, then blend the rest of what the character's
+   own customization paints — her underwear — into the section rectangles it names. Which
+   pictures those are is
+   [game-files.md](game-files.md#the-characters-own-skin-verified); `skin.rs` is the reading
+   and `Atlas::base` is the blit.
 3. For the one item being shown, for each `ComponentSection` it supplies (via
    `ItemDisplayInfoMaterialRes`, joined by `foreign_id()`): resolve the material to the one
    file painted for *this* body, decode its BLP, scale to fill the section rectangle exactly,
@@ -110,9 +104,17 @@ paint the body with whatever the guess landed on and call it a skin.
 Step 3's first hop is a trap of its own: a material resource names a file per body, and only
 `ComponentTextureFileData` says which is which. It is written down in
 [game-files.md](game-files.md#componenttexturefiledata), because it is a table rather than a
-rendering decision. `Atlas::wear` in `character.rs` is steps 1 and 3; `worn.rs` is the reading.
+rendering decision. `character::atlas` is all three steps, out of `Atlas::base` and
+`Atlas::wear`; `skin.rs` and `worn.rs` are the reading behind steps 2 and 3.
 
-Two things to get right, both from wow.export:
+Three things to get right, the last two from wow.export:
+
+**The base is a copy and everything else is a blend.** `ChrModelTextureLayer` says which is
+which, and on layout 104 exactly one layer of the body atlas is a copy: the skin, at the bottom
+of the stack with nothing under it to blend against. Every layer above it — the underwear the
+same choice paints, and then the item — is blended into its own rectangles. Turning the base
+into a blend against transparency, or a layer above it into a copy, are the two ways to get
+this backwards; the second is the next paragraph.
 
 **Always alpha-blend item layers.** The layer data nominally says "blit" (a straight
 copy) for some layers. A straight copy erases the body wherever the item texture is
