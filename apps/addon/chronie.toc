@@ -31,6 +31,7 @@ src/EntryText.lua
 src/EntryPrompt.lua
 src/EntryToast.lua
 src/CaptureTriggers.lua
+src/ScreenshotWatch.lua
 src/EquipsetLedger.lua
 src/SegmentTracker.lua
 src/SegmentTable.lua
@@ -41,7 +42,9 @@ src/ReportWindow.lua
 src/CombatLogging.lua
 Main.lua
 
-# Bindings.xml is deliberately absent. The client loads it by that name from the addon's
-# root folder on its own, before it reads this file; naming it here hands the same file to
-# the ordinary UI XML parser as well, which does not know what a <Binding> is and reports
-# it as unrecognised XML at every login.
+# There is no Bindings.xml, and adding one back is a decision rather than a detail. Chronie
+# photographs by listening for SCREENSHOT_SUCCEEDED, which the client fires for the
+# screenshot key every player already has bound, so a key of its own would be a second way
+# to do the one thing — and the file was its own recurring bug: the client loads it by name
+# before it reads this manifest, so naming it here parsed it twice as UI XML (issue #44),
+# and a header declared on more than one binding was reported as loaded twice (issue #69).

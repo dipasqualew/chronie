@@ -1069,71 +1069,34 @@ describe("addon integration", function()
         end)
     end)
 
-    -- Bindings.xml is the only file in the tree the client parses rather than executes,
-    -- so nothing about it can be proved by loading the addon. What these check is where
-    -- the file sits and that every token inside it is one the addon labels — a binding
-    -- whose BINDING_NAME_ global is missing shows up in the Key Bindings panel as a raw
-    -- CHRONIE_SHOUTY_TOKEN, which is a bug only a player would ever notice.
-    describe("the capture keybinding", function()
-        local BINDINGS = "Bindings.xml"
+    -- Chronie binds no keys, and that is an assertion rather than an omission. The
+    -- Bindings.xml this block used to be about declared header="CHRONIE" on both of its two
+    -- bindings, and the client reads a header the first time it sees it and complains every
+    -- time after: "Binding header CHRONIE was attempted to be loaded more than once", in
+    -- red, at every single login (issue #69). Nothing took the file's place, because
+    -- nothing needed to — the addon photographs by listening for SCREENSHOT_SUCCEEDED,
+    -- which the client fires for the screenshot key every player already has bound, so a
+    -- key of Chronie's own would be a second way to do the one thing.
+    describe("the keybindings it does not ship", function()
+        -- loader.read raises for a file that is not there, so the failure is the assertion.
+        it("has no Bindings.xml, which is the one name the client would load by itself", function()
+            local read, contents = pcall(loader.read, "Bindings.xml")
 
-        ---@return table<string, string> binding name -> the header it sits under
-        local function declaredBindings()
-            local bindings = {}
-            for attributes in loader.read(BINDINGS):gmatch("<Binding%s+([^>]-)>") do
-                local name = attributes:match('name%s*=%s*"([^"]+)"')
-                local header = attributes:match('header%s*=%s*"([^"]+)"')
-                assert.is_truthy(name, "a <Binding> in " .. BINDINGS .. " has no name")
-                bindings[name] = header
-            end
-            return bindings
-        end
-
-        -- loader.read resolves against the addon folder and fails loudly if the file is
-        -- not there, which is the whole assertion: the client finds Bindings.xml by that
-        -- name in that folder or the player has no keybinding.
-        it("sits in the addon's root folder, which is where the client looks for it", function()
-            assert.is_string(loader.read(BINDINGS))
+            assert.is_false(read,
+                "Bindings.xml is back in the addon folder: " .. tostring(contents))
         end)
 
-        -- The client loads Bindings.xml by name, on its own, before it reads the .toc at
-        -- all. Naming it in the .toc as well hands the same file to the ordinary UI XML
-        -- parser, which knows nothing of <Binding> and says so three times at every login:
-        -- "Unrecognized XML: Binding", then one line for each attribute. Issue #44.
-        it("is not listed in the .toc, which would parse it a second time as UI XML", function()
-            for _, path in ipairs(loader.tocFiles()) do
-                assert.is_not_equal(BINDINGS, path,
-                    BINDINGS .. " is listed in chronie.toc; the client already loads it by name")
-            end
-        end)
-
-        it("declares a binding that takes a screenshot", function()
-            assert.is_truthy(declaredBindings()["CHRONIE_CAPTURE"])
-        end)
-
-        it("labels every binding it declares, and the header each one sits under", function()
+        -- What the Key Bindings panel builds its rows out of. A BINDING_ global left
+        -- standing would put a Chronie section in that panel with nothing behind it.
+        it("declares no BINDING_ global for the Key Bindings panel to draw", function()
             loader.load()
 
-            for name, header in pairs(declaredBindings()) do
-                assert.is_string(_G["BINDING_NAME_" .. name],
-                    "BINDING_NAME_" .. name .. " is not declared, so the panel shows the raw token")
-                assert.is_string(_G["BINDING_HEADER_" .. header],
-                    "BINDING_HEADER_" .. header .. " is not declared, so the panel shows the raw token")
+            for name in pairs(_G) do
+                if type(name) == "string" then
+                    assert.is_nil(name:match("^BINDING_"),
+                        tostring(name) .. " is declared, so the addon still names a binding")
+                end
             end
-        end)
-
-        it("files the bindings under a Chronie header", function()
-            loader.load()
-
-            assert.equal("Chronie", _G.BINDING_HEADER_CHRONIE)
-        end)
-
-        it("runs nothing when the addon has not wired itself up", function()
-            -- The binding body's own guard, transcribed: a key pressed during login must
-            -- not reach into a half-built addon.
-            local body = loader.read(BINDINGS):match("<Binding[^>]->(.-)</Binding>")
-
-            assert.is_truthy(body:match("if%s+ChronieCapture%s+then"))
         end)
     end)
 
@@ -1152,10 +1115,13 @@ describe("addon integration", function()
             return app, recorded
         end
 
-        it("exposes the capture the keybinding calls", function()
+        it("exposes the capture the addon presses for itself", function()
             local app = bootInWorld()
 
             assert.is_function(app.capture)
+            -- And the thing that tells its own shots from the player's, which is what makes
+            -- the SCREENSHOT_SUCCEEDED handler below safe to subscribe at all.
+            assert.is_function(app.screenshotWatch.claim)
         end)
 
         it("writes an entry and takes the picture", function()
@@ -1284,6 +1250,147 @@ describe("addon integration", function()
 
             assert.same({}, recorded.db.segments)
             assert.equal(1, #recorded.db.entries)
+        end)
+
+        -- The reason Chronie has no capture key of its own. The client fires
+        -- SCREENSHOT_SUCCEEDED for every screenshot it writes, the player's own key
+        -- included, and the event says nothing about who asked for it — so an unclaimed one
+        -- is somebody photographing something themselves, which is exactly the thing worth
+        -- remembering. Fired through the real dispatcher, because "the addon subscribed to
+        -- this event at all" is half of what these prove.
+        describe("that the player took with the client's own key", function()
+            ---The toast the prompt puts up, and the edit box inside it. Both are ordinary
+            ---frames the addon built, so a test drives them the way a mouse and a keyboard
+            ---would rather than reaching into the prompt behind them.
+            ---@param recorded table
+            ---@return table? toast, table? box
+            local function noteToast(recorded)
+                local toast
+                for _, frame in ipairs(recorded.frames) do
+                    if frame.frameName == "ChronieEntryToast" then
+                        toast = frame
+                    end
+                end
+                if not toast then
+                    return nil
+                end
+                for _, frame in ipairs(recorded.frames) do
+                    if frame.parent == toast and frame.frameType == "EditBox" then
+                        return toast, frame
+                    end
+                end
+                return toast
+            end
+
+            -- No trigger on the row is the whole statement: downstream tells a rule that
+            -- fired by itself from a person who decided by whether there is one at all.
+            it("files one entry, with a picture and nothing claiming to have asked for it", function()
+                local _, recorded = bootInWorld()
+
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+                assert.equal(1, #recorded.db.entries)
+                assert.is_true(recorded.db.entries[1].hasImage)
+                assert.is_nil(recorded.db.entries[1].trigger)
+                assert.is_nil(recorded.db.entries[1].achievement)
+            end)
+
+            -- The picture already exists; the client has just finished writing it. Reaching
+            -- for the shutter here would take a second photograph of the moment after the
+            -- one the player meant, and leave a marker pointing at the wrong file.
+            it("takes no picture of the picture", function()
+                local _, recorded = bootInWorld()
+
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+                assert.equal(0, recorded.screenshots())
+            end)
+
+            it("links it to the segment that was open", function()
+                local _, recorded = bootInWorld({ instanceName = "Ulduar", instanceType = "raid" })
+
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.equal(recorded.db.segments[1].id, recorded.db.entries[1].segment)
+            end)
+
+            -- Standing still and photographing something moves no other counter, so the
+            -- tracker would drop the segment and the link above would dangle.
+            it("makes that segment worth filing on its own", function()
+                local _, recorded = bootInWorld()
+
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.equal(1, #recorded.db.segments)
+            end)
+
+            it("offers a note on it, and files what is typed into that offer against it", function()
+                local _, recorded = bootInWorld()
+
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+                local toast, box = noteToast(recorded)
+                assert.is_true(toast:IsShown())
+                -- A click on the toast, then a sentence, then Enter: the only route into
+                -- the box, and the only thing in the addon that takes keyboard focus.
+                toast:run("OnMouseUp")
+                box:SetText("the sun coming up over Nagrand")
+                box:run("OnEnterPressed")
+
+                assert.equal("the sun coming up over Nagrand", recorded.db.entries[1].note)
+            end)
+
+            -- A cinematic or a loading screen is where the automatic triggers refuse to
+            -- fire, and rightly: nobody wants a photograph of a black rectangle they did
+            -- not ask for. Somebody pressing the key during one means it, and a deliberate
+            -- act is never second-guessed.
+            it("is recorded even with a loading screen between the player and the world", function()
+                local _, recorded = bootInWorld()
+
+                recorded.frame:fire("LOADING_SCREEN_ENABLED")
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+                assert.equal(1, #recorded.db.entries)
+            end)
+
+            -- The entry log's own refusal, reached through this door as well: screenshot
+            -- filenames resolve to the second, so two markers in one second could only ever
+            -- resolve to the same picture.
+            it("files one entry for a burst of them inside the same second", function()
+                local _, recorded = bootInWorld()
+
+                for _ = 1, 5 do
+                    recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+                end
+
+                assert.equal(1, #recorded.db.entries)
+            end)
+
+            -- A shot the client abandoned resolves Chronie's claim on it, so the press
+            -- cannot go on standing and swallow the next photograph the player takes.
+            it("owns the next success after a shot of Chronie's own failed", function()
+                local app, recorded = bootInWorld()
+                app.capture()
+
+                recorded.frame:fire("SCREENSHOT_FAILED")
+                recorded.clock.advance(1)
+                recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+                assert.equal(2, #recorded.db.entries)
+                assert.is_nil(recorded.db.entries[2].trigger)
+                assert.equal(1, recorded.screenshots())
+            end)
+
+            it("records nothing at all for a failure of its own", function()
+                local app, recorded = bootInWorld()
+                app.capture()
+
+                recorded.frame:fire("SCREENSHOT_FAILED")
+
+                assert.equal(1, #recorded.db.entries)
+            end)
         end)
     end)
 
@@ -1424,6 +1531,41 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_LOGOUT")
 
             assert.equal(recorded.db.segments[1].id, recorded.db.entries[1].segment)
+        end)
+
+        -- The regression ns.newScreenshotWatch exists to prevent, and the one thing that
+        -- could have gone wrong the moment the addon started listening for the event: the
+        -- client fires SCREENSHOT_SUCCEEDED for Chronie's own shot too, so a handler that
+        -- believed every success was the player's would file a second entry for every
+        -- automatic capture — same second, same segment, one of them claiming a trigger and
+        -- one of them claiming a person decided.
+        --
+        -- The second between the two is what makes this an assertion about the watch. The
+        -- client writes the file asynchronously and the event comes back whenever it comes
+        -- back, so a boundary in between is ordinary; and inside the same second the entry
+        -- log's own image cooldown would refuse the duplicate anyway, which would let this
+        -- pass with no watch at all.
+        it("files one entry for its own shot, not a second when the client reports it", function()
+            local _, recorded = bootWithTriggers()
+
+            recorded.frame:fire("ACHIEVEMENT_EARNED", 12345, false)
+            recorded.clock.advance(1)
+            recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+            assert.equal(1, #recorded.db.entries)
+            assert.equal("accountFirstAchievement", recorded.db.entries[1].trigger)
+        end)
+
+        -- The same, for the capture a person asked for through app.capture: nothing about
+        -- the claim depends on which of the two pressed the shutter.
+        it("files one entry for a capture it was asked for, however the client reports it", function()
+            local app, recorded = bootWithTriggers()
+
+            app.capture()
+            recorded.clock.advance(1)
+            recorded.frame:fire("SCREENSHOT_SUCCEEDED")
+
+            assert.equal(1, #recorded.db.entries)
         end)
 
         -- A pressed capture is somebody deciding, and it says so by carrying no trigger.
