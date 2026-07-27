@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_activities.sql"),
     include_str!("../migrations/0003_lockouts.sql"),
     include_str!("../migrations/0004_equipsets.sql"),
+    include_str!("../migrations/0005_holdings.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1129,13 +1130,14 @@ fn insert_outcomes(
         };
         transaction
             .execute(
-                "INSERT INTO currency_gains (segment_id, currency_id, name, amount)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO currency_gains (segment_id, currency_id, name, amount, total)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     segment_id,
                     currency_id,
                     optional_text(event, "name").unwrap_or("Unknown"),
-                    integer(event, "amount")
+                    integer(event, "amount"),
+                    optional_integer(event, "total")
                 ],
             )
             .map_err(|error| error.to_string())?;
@@ -1147,9 +1149,17 @@ fn insert_outcomes(
         };
         transaction
             .execute(
-                "INSERT INTO reputation_gains (segment_id, faction, amount)
-                 VALUES (?1, ?2, ?3)",
-                params![segment_id, faction, integer(event, "amount")],
+                "INSERT INTO reputation_gains (
+                     segment_id, faction, amount, standing, standing_current, standing_max
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    segment_id,
+                    faction,
+                    integer(event, "amount"),
+                    optional_text(event, "standing"),
+                    optional_integer(event, "current"),
+                    optional_integer(event, "max")
+                ],
             )
             .map_err(|error| error.to_string())?;
     }
@@ -1728,7 +1738,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     }
 
     load_rows!(
-        "SELECT segment_id, currency_id, name, amount
+        "SELECT segment_id, currency_id, name, amount, total
          FROM currency_gains ORDER BY segment_id, name",
         "currencies",
         |row| Ok((
@@ -1736,19 +1746,23 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
             serde_json::json!({
                 "id": row.get::<_, i64>(1)?,
                 "name": row.get::<_, String>(2)?,
-                "amount": row.get::<_, i64>(3)?
+                "amount": row.get::<_, i64>(3)?,
+                "total": row.get::<_, Option<i64>>(4)?
             })
         ))
     );
     load_rows!(
-        "SELECT segment_id, faction, amount
+        "SELECT segment_id, faction, amount, standing, standing_current, standing_max
          FROM reputation_gains ORDER BY segment_id, faction",
         "reputation",
         |row| Ok((
             row.get::<_, i64>(0)?,
             serde_json::json!({
                 "faction": row.get::<_, String>(1)?,
-                "amount": row.get::<_, i64>(2)?
+                "amount": row.get::<_, i64>(2)?,
+                "standing": row.get::<_, Option<String>>(3)?,
+                "current": row.get::<_, Option<i64>>(4)?,
+                "max": row.get::<_, Option<i64>>(5)?
             })
         ))
     );

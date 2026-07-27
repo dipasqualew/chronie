@@ -60,12 +60,33 @@ export interface CurrencyGain {
   name: string;
   amount: number;
   at?: number | null;
+  /**
+   * What the character held once the last change of the segment had landed — the number
+   * that decides whether the gain is enough to buy anything. Absent when the client never
+   * said, which is not the same as holding none.
+   */
+  total?: number | null;
 }
 
+/**
+ * A reputation gain, and where it left the character standing with that faction.
+ *
+ * The standing is a bar rather than a number, because the client's four reputation systems
+ * agree on nothing else: renown counts levels of its own, paragon fills the same bar over
+ * and over past Exalted, a friendship has ranks with their own names, and everything else
+ * is the reaction ladder. The addon picks between them and sends the result as a level name
+ * with a position inside it, so nothing downstream has to know which system answered.
+ */
 export interface ReputationGain {
   faction: string;
   amount: number;
   at?: number | null;
+  /** The level's own name — "Honored", "Renown 12", "Best Friend". */
+  standing?: string | null;
+  /** How far into that level the character is. */
+  current?: number | null;
+  /** What the level takes to finish; absent or zero for a level with nothing after it. */
+  max?: number | null;
 }
 
 /**

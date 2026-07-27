@@ -12,7 +12,7 @@ import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
 import { highlights } from "./sessions";
 import { clock, dayLabel, duration, escapeHtml, plural, signed } from "./format";
 import { eventsOf } from "./types";
-import type { AchievementEvent, EventListKey, EventOf, Segment } from "./types";
+import type { AchievementEvent, EventListKey, EventOf, ReputationGain, Segment } from "./types";
 import { activityChip, classDot, className, highlightList, locationType } from "./ui";
 
 const wowhead = (kind: string, id: number, text: string): string =>
@@ -142,6 +142,57 @@ function equipsets(): Section {
 }
 
 /**
+ * Where a reputation gain left the character, as a bar under the faction it belongs to.
+ *
+ * The pair of numbers is a position inside one level rather than a faction's whole
+ * reputation — the addon has already decided which of the client's reputation systems
+ * answers for this faction and reduced its answer to that shape — so the bar is always read
+ * the same way whether the level is Honored, Renown 12 or a friendship rank.
+ *
+ * A gain the client could not place gets no bar at all: an account-wide line read on a
+ * character that has never met the faction has no standing to draw, and an empty track
+ * would claim they were at the bottom of one.
+ */
+function standingBar(event: ReputationGain): string {
+  const max = Math.max(event.max || 0, 0);
+  const current = Math.min(Math.max(event.current || 0, 0), max);
+  if (!event.standing && max === 0) return "";
+  const numbers = max > 0 ? `${current.toLocaleString()} / ${max.toLocaleString()}` : "";
+  const caption = [event.standing, numbers].filter(Boolean).join(" ");
+  // A bar with no length to it is still drawn, so a maxed-out standing reads as a standing
+  // rather than as a faction with no bar. `max` of 0 is not a legal progress element, so the
+  // unknown-length case is the one drawn as an empty track.
+  return `<p class="rep-standing">
+    <progress class="rep-bar" value="${max > 0 ? current : 0}" max="${max > 0 ? max : 1}"
+      aria-label="${escapeHtml(`${event.standing || "Standing"} with ${event.faction}`)}"></progress>
+    <span class="muted">${escapeHtml(caption)}</span>
+  </p>`;
+}
+
+/**
+ * The reputation gains, each with the standing it left behind.
+ *
+ * A section of its own rather than a one-line formatter, because the bar is a block under
+ * the gain rather than something that fits on the end of it.
+ */
+function reputation(): Section {
+  return {
+    title: "Reputation",
+    render: (segment) => {
+      const gains = eventsOf(segment, "reputation");
+      if (!gains.length) return "";
+      return `<section class="detail-section">
+        <h3>Reputation</h3>
+        <ul>${gains.map((gain) => `<li>
+          🎖️ ${escapeHtml(gain.faction)} <span class="muted">${escapeHtml(signed(gain.amount))}</span> ${at(gain)}
+          ${standingBar(gain)}
+        </li>`).join("")}</ul>
+      </section>`;
+    },
+  };
+}
+
+/**
  * Every list of events a segment can carry, and how each one reads in full. The table
  * columns abbreviate; this is the place that does not, because it is where someone comes
  * when the abbreviation was not enough.
@@ -190,13 +241,13 @@ const sections = (book: AchievementBook): Section[] => [
   section({
     key: "currencies",
     title: "Currency",
-    line: (event) => `🪙 ${escapeHtml(event.name)} <span class="muted">${escapeHtml(signed(event.amount))}</span>`,
+    // What the segment earned, then what the character was left holding. The second is the
+    // number that decides whether the first is enough to buy anything, and it is absent
+    // rather than zero when the client never said what the holding was.
+    line: (event) => `🪙 ${escapeHtml(event.name)} <span class="muted">${escapeHtml(signed(event.amount))}` +
+      `${event.total == null ? "" : ` (${event.total.toLocaleString()})`}</span>`,
   }),
-  section({
-    key: "reputation",
-    title: "Reputation",
-    line: (event) => `🎖️ ${escapeHtml(event.faction)} <span class="muted">${escapeHtml(signed(event.amount))}</span>`,
-  }),
+  reputation(),
 ];
 
 export interface SegmentModalOptions {

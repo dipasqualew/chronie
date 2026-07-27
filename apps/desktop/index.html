@@ -432,6 +432,23 @@
     display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 0;
   }
 
+  /* Where a reputation gain left the character: a bar under the faction, indented past its
+     name so the two read as one entry. A real <progress> rather than a pair of divs, so the
+     numbers under it are the caption of something a screen reader already announces as a
+     progress bar. */
+  .detail-section .rep-standing {
+    display: flex; align-items: center; gap: 8px;
+    margin: 2px 0 0; font-size: 12px; color: var(--text-secondary);
+  }
+  .rep-bar {
+    flex: none; width: 180px; height: 8px;
+    appearance: none; border: none; border-radius: 4px;
+    background: var(--surface-2); color: var(--ok);
+  }
+  .rep-bar::-webkit-progress-bar { background: var(--surface-2); border-radius: 4px; }
+  .rep-bar::-webkit-progress-value { background: var(--ok); border-radius: 4px; }
+  .rep-bar::-moz-progress-bar { background: var(--ok); border-radius: 4px; }
+
   /* A change to an equipment set is a set and the slots it moved, so it is a list holding
      lists. The slot rows line up in three columns — where, what was there, what is now —
      because scanning down "what replaced what" is the whole reason to open one. */
