@@ -8,6 +8,7 @@ pub mod combatlog;
 pub mod db2;
 pub mod glb;
 pub mod icons;
+pub mod logfile;
 pub mod m2;
 pub mod models;
 pub mod transmog;
