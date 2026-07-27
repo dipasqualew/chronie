@@ -51,6 +51,13 @@ const OTHER_HELM = appearance({
 const ARROWS = appearance({
   appearanceId: 4, itemId: 4, name: "A quiver of arrows", displayType: 11, inventoryType: 24,
 });
+/**
+ * An appearance the game encrypts: no item behind it, so no name, no slot and nothing to look
+ * up. The other way there is nowhere on her to put a row, and the only one with no id to link.
+ */
+const WITHHELD = appearance({
+  appearanceId: 0, itemId: 0, name: "", displayType: 0, displayInfoId: 0,
+});
 
 const SETS: TransmogPayload = {
   sets: [
@@ -64,8 +71,20 @@ const SETS: TransmogPayload = {
 
 const CONTENTS: Record<number, TransmogSetItemsPayload> = {
   201: { setId: 201, appearances: [HELM, ROBE, ARROWS], readCount: 3, withheldCount: 0 },
-  203: { setId: 203, appearances: [OTHER_HELM], readCount: 1, withheldCount: 0 },
+  203: { setId: 203, appearances: [OTHER_HELM, WITHHELD], readCount: 1, withheldCount: 1 },
 };
+
+/** The one box above the grid, which decides what every open set lists. */
+function hideBox(): HTMLElement {
+  return screen.getByRole("checkbox", { name: "Hide what she cannot wear" });
+}
+
+/** The row a piece is on, which is the thing the button and the link out both live inside. */
+function rowFor(card: HTMLElement, name: string): HTMLElement {
+  const row = within(card).getByRole("button", { name }).closest("li");
+  if (!row) throw new Error(`${name} is on no row`);
+  return row as HTMLElement;
+}
 
 /**
  * A stage that records what it was handed, which is the only thing worth asserting about the
@@ -267,14 +286,88 @@ describe("TransmogView", () => {
     expect(loadCharacter).toHaveBeenCalledTimes(1);
   });
 
+  // A row the game gives no place on a body is a disabled button and an apology in among the
+  // pieces it cannot be worn beside, so it is left out — and the count is what keeps a list
+  // shorter than the card promised from reading as a bug.
+  it("leaves out the rows there is nowhere on her to put, and says how many", async () => {
+    view();
+    const card = await open("Tideglass Regalia");
+    expect(within(card).queryByText("A quiver of arrows")).toBeNull();
+    expect(within(card).getByText("1 appearance hidden, with nowhere on her to go")).toBeTruthy();
+  });
+
+  // And the box is for the reader who wants to see what a set is really made of, either way
+  // round: what it left out comes back, and goes away again.
+  it("shows the rows again when asked, and hides them once more when unasked", async () => {
+    view();
+    const card = await open("Tideglass Regalia");
+
+    fireEvent.click(hideBox());
+    expect(within(card).getByText("A quiver of arrows")).toBeTruthy();
+    expect(within(card).queryByText(/hidden, with nowhere on her to go/)).toBeNull();
+
+    fireEvent.click(hideBox());
+    expect(within(card).queryByText("A quiver of arrows")).toBeNull();
+  });
+
+  // It is a statement about what the reader is here for rather than about one card, so a set
+  // opened afterwards obeys it too — which a per-card control would have got wrong.
+  it("applies to a set opened after it was answered, not only to one already open", async () => {
+    view();
+    fireEvent.click(hideBox());
+    const card = await open("Tideglass Regalia");
+    expect(within(card).getByRole("button", { name: "Wear Ammo: A quiver of arrows" }))
+      .toBeTruthy();
+  });
+
   // An appearance the body has nowhere to put says so, rather than being a button that does
-  // nothing when clicked.
+  // nothing when clicked — once the reader has asked to see it at all.
   it("will not put on something there is nowhere on the body for", async () => {
     view();
+    fireEvent.click(hideBox());
     const card = await open("Tideglass Regalia");
     const arrows = within(card).getByRole("button", { name: "Wear Ammo: A quiver of arrows" });
     expect(arrows).toHaveProperty("disabled", true);
     expect(within(card).getByText(REASONS.nowhere)).toBeTruthy();
+  });
+
+  // The regression the whole row was rebuilt for. The name is the largest thing on a row and
+  // the one a reader aims at, and it used to be the one part that did not dress the character
+  // — it was the link out, and only the icon beside it put the piece on.
+  it("puts the piece on when the item's own name is clicked", async () => {
+    view();
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByText("Crown of Tides"));
+    await waitFor(() => expect(worn()).toEqual(["Head Crown of Tides"]));
+  });
+
+  // Leaving the app is the rarer errand of the two, so it is a link in the corner of the row
+  // rather than the width of it — and taking it leaves her wearing what she was wearing.
+  it("leaves for Wowhead from the end of the row, without undressing her", async () => {
+    view();
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear Chest: Robe of Tides" }));
+    await waitFor(() => expect(worn()).toEqual(["Chest Robe of Tides"]));
+
+    const row = rowFor(card, "Wear Head: Crown of Tides");
+    const link = within(row).getByRole("link", { name: "Crown of Tides on Wowhead" });
+    expect(link.getAttribute("href")).toBe("https://www.wowhead.com/item=1");
+    expect(row.lastElementChild).toBe(link);
+
+    fireEvent.click(link);
+    await waitFor(() => expect(worn()).toEqual(["Chest Robe of Tides"]));
+  });
+
+  // There is nothing to look up for an appearance the game encrypts: it has no item behind
+  // it, so a link would go to item zero.
+  it("gives an appearance the game withholds nothing to look up", async () => {
+    view();
+    fireEvent.click(hideBox());
+    const card = await open("Emberforge Plate");
+    const withheld = rowFor(card, "Wear Unknown slot: The game keeps this appearance encrypted");
+    expect(within(withheld).queryByRole("link")).toBeNull();
+    // Its neighbour has one, so the absence is about this row rather than about the set.
+    expect(within(rowFor(card, "Wear Head: Emberforge Helm")).getByRole("link")).toBeTruthy();
   });
 
   it("says so when a set will not come", async () => {
