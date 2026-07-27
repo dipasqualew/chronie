@@ -1,6 +1,8 @@
 use crate::activity;
 use crate::captures::{self, Marker, Stored, Wanted};
-use chrono::{DateTime, Local, Utc};
+use crate::combatlog;
+use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
+use chrono::{DateTime, Datelike, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -19,6 +21,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_holdings.sql"),
     include_str!("../migrations/0006_captures.sql"),
     include_str!("../migrations/0007_account_rollups.sql"),
+    include_str!("../migrations/0008_combat_logs.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1755,6 +1758,512 @@ fn link_captures(transaction: &Transaction<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/* ---------- what the client's own combat log says ---------- */
+
+/// How many new bytes of combat log one sync will get through.
+///
+/// A first pass over a season of logs is gigabytes, and doing it in one go is a sync that
+/// looks like it has hung. This is the same work spread over a beat that comes round every
+/// thirty seconds: nothing is skipped, nothing is read twice, and a backlog of a hundred
+/// gigabytes clears in half an hour of the app simply being open.
+const LOG_BYTES_PER_SYNC: u64 = 64 * 1024 * 1024;
+
+/// The year to read a log's stamps with when its lines do not carry one.
+///
+/// The client names its files with the day it opened them — `WoWCombatLog-070926_182310.txt`
+/// — which is the best answer available and is the file's own claim rather than a guess. When
+/// the name does not say, the filesystem's date does, and after that there is only now.
+fn log_year(found: &combatlog::Found) -> i32 {
+    stamped_year(&found.file.name)
+        .or_else(|| {
+            found
+                .file
+                .modified
+                .and_then(|at| DateTime::from_timestamp(at, 0))
+                .map(|moment| moment.with_timezone(&Local).year())
+        })
+        .unwrap_or_else(|| Local::now().year())
+}
+
+/// The `MMDDYY_HHMMSS` in a log's name, as a year.
+fn stamped_year(name: &str) -> Option<i32> {
+    let stamp = name.split(['-', '.', '_']).collect::<Vec<_>>().join("_");
+    let stamp = stamp.split('_').find(|part| {
+        part.len() == 6 && part.bytes().all(|byte| byte.is_ascii_digit())
+    })?;
+    stamp[4..6].parse::<i32>().ok().map(|year| 2000 + year)
+}
+
+/// Where the last read of this log got to, and the state it needs to carry on.
+///
+/// The cursor comes off the log's own row; the map and the sample clock are read back out of
+/// the rows the last read wrote, rather than kept a second time on the cursor. One place for
+/// each fact is one place for it to be wrong.
+fn log_resume(connection: &Connection, name: &str) -> Result<(Option<i64>, Resume), String> {
+    let Some((log_id, cursor)) = connection
+        .query_row(
+            "SELECT id, byte_offset, byte_size, head_hash, head_bytes
+             FROM combat_logs WHERE name = ?1",
+            [name],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    logfile::Cursor {
+                        offset: row.get::<_, i64>(1)? as u64,
+                        size: row.get::<_, i64>(2)? as u64,
+                        head: row.get(3)?,
+                        head_bytes: row.get::<_, i64>(4)? as u64,
+                    },
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok((None, Resume::default()));
+    };
+    let map = connection
+        .query_row(
+            "SELECT ui_map_id, name, x0, x1, y0, y1, changed_at FROM log_maps
+             WHERE log_id = ?1 ORDER BY changed_at DESC, id DESC LIMIT 1",
+            [log_id],
+            |row| {
+                Ok(MapBounds {
+                    ui_map_id: row.get(0)?,
+                    name: row.get(1)?,
+                    x0: row.get(2)?,
+                    x1: row.get(3)?,
+                    y0: row.get(4)?,
+                    y1: row.get(5)?,
+                    at: row.get(6)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let sampled = connection
+        .query_row(
+            "SELECT at_ms, ui_map_id FROM log_positions
+             WHERE log_id = ?1 ORDER BY at_ms DESC, id DESC LIMIT 1",
+            [log_id],
+            |row| {
+                Ok(Sampled {
+                    at: row.get(0)?,
+                    ui_map_id: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok((
+        Some(log_id),
+        Resume {
+            cursor: Some(cursor),
+            map,
+            sampled,
+        },
+    ))
+}
+
+/// Writes down where reading a log got to, and what it is turning out to be.
+///
+/// `advanced` only ever moves towards true. A file can span two sessions and be written
+/// without advanced parameters for one of them, and the answer that matters — "did this log
+/// ever carry positions" — must not be undone by a later pass over its quiet half.
+fn upsert_log(
+    transaction: &Transaction<'_>,
+    name: &str,
+    reading: &Reading,
+    now: i64,
+) -> Result<i64, String> {
+    let facts = &reading.facts;
+    transaction
+        .execute(
+            "INSERT INTO combat_logs (
+                 name, byte_offset, byte_size, head_hash, head_bytes, lines_read, restarts,
+                 advanced, first_event_at, last_event_at, first_seen_at, last_seen_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+             ON CONFLICT(name) DO UPDATE SET
+                 byte_offset = excluded.byte_offset,
+                 byte_size = excluded.byte_size,
+                 head_hash = excluded.head_hash,
+                 head_bytes = excluded.head_bytes,
+                 -- Reset by a restart, because the lines counted before it were counted
+                 -- against a file this row is no longer the cursor for. `?7` is whether this
+                 -- read restarted, not how many times this file ever has, so the count it
+                 -- feeds is added to rather than replaced — a log rotated twice has restarted
+                 -- twice, and the second one resets the tally exactly as the first did.
+                 lines_read = CASE
+                     WHEN ?7 = 1 THEN excluded.lines_read
+                     ELSE combat_logs.lines_read + excluded.lines_read
+                 END,
+                 restarts = combat_logs.restarts + ?7,
+                 advanced = CASE
+                     WHEN combat_logs.advanced = 1 THEN 1
+                     ELSE COALESCE(excluded.advanced, combat_logs.advanced)
+                 END,
+                 first_event_at = COALESCE(combat_logs.first_event_at, excluded.first_event_at),
+                 last_event_at = COALESCE(excluded.last_event_at, combat_logs.last_event_at),
+                 last_seen_at = excluded.last_seen_at",
+            params![
+                name,
+                reading.cursor.offset as i64,
+                reading.cursor.size as i64,
+                reading.cursor.head,
+                reading.cursor.head_bytes as i64,
+                facts.lines as i64,
+                i64::from(reading.restarted.is_some()),
+                // Nothing to say until a line has been read that could have carried them.
+                (facts.lines > 0).then(|| i64::from(facts.advanced_seen)),
+                facts.first_at,
+                facts.last_at,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .query_row("SELECT id FROM combat_logs WHERE name = ?1", [name], |row| {
+            row.get(0)
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn insert_map(
+    transaction: &Transaction<'_>,
+    log_id: i64,
+    bounds: &MapBounds,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT INTO log_maps (log_id, ui_map_id, name, x0, x1, y0, y1, changed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(log_id, changed_at, ui_map_id) DO NOTHING",
+            params![
+                log_id,
+                bounds.ui_map_id,
+                bounds.name,
+                bounds.x0,
+                bounds.x1,
+                bounds.y0,
+                bounds.y1,
+                bounds.at,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// One point of the track.
+///
+/// The normalised pair is filled in rather than overwritten, because a point read before the
+/// `MAP_CHANGE` that would place it can be placed by a later pass — and a point already
+/// placed must not lose that to a pass that happens to have no bounds in hand.
+fn insert_position(
+    transaction: &Transaction<'_>,
+    log_id: i64,
+    point: &Position,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT INTO log_positions (
+                 log_id, at_ms, actor_guid, actor_name, ui_map_id,
+                 world_x, world_y, map_x, map_y, facing
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(log_id, at_ms, actor_guid) DO UPDATE SET
+                 map_x = COALESCE(excluded.map_x, log_positions.map_x),
+                 map_y = COALESCE(excluded.map_y, log_positions.map_y)",
+            params![
+                log_id,
+                point.at,
+                point.actor_guid,
+                point.actor_name,
+                point.ui_map_id,
+                point.world_x,
+                point.world_y,
+                point.map_x,
+                point.map_y,
+                point.facing,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Writes down one fight, from whichever end of it was read.
+///
+/// A fight with only an end is the second half of one the previous pass left open, so it
+/// closes that row rather than starting another. Only when there is no such row is an
+/// end-with-no-beginning written down on its own — which is what a log that was rotated
+/// mid-pull leaves behind, and is still worth having.
+fn store_fight(
+    transaction: &Transaction<'_>,
+    log_id: i64,
+    fight: &Fight,
+    now: i64,
+) -> Result<Option<i64>, String> {
+    let kind = match fight.kind {
+        Fought::Encounter => "encounter",
+        Fought::Keystone => "keystone",
+    };
+    let affixes = Value::Array(fight.affixes.iter().map(|id| Value::from(*id)).collect());
+    if fight.started_at.is_none() {
+        let Some(ended_at) = fight.ended_at else {
+            // Neither end. Nothing about it is a fact.
+            return Ok(None);
+        };
+        let open: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM log_fights
+                 WHERE log_id = ?1 AND kind = ?2 AND ended_at IS NULL
+                   AND (encounter_id IS ?3 OR ?3 IS NULL)
+                 ORDER BY started_at DESC, id DESC LIMIT 1",
+                params![log_id, kind, fight.encounter_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(id) = open {
+            transaction
+                .execute(
+                    "UPDATE log_fights SET
+                         ended_at = ?2, success = ?3, duration_ms = ?4,
+                         name = CASE WHEN ?5 = '' THEN name ELSE ?5 END
+                     WHERE id = ?1",
+                    params![id, ended_at, fight.success, fight.duration_ms, fight.name],
+                )
+                .map_err(|error| error.to_string())?;
+            return Ok(Some(id));
+        }
+        // Nothing open to close, so this is a fight whose beginning was never read. Written
+        // once and recognised by its ending, since that is the only identity it has.
+        let existing: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM log_fights
+                 WHERE log_id = ?1 AND kind = ?2 AND encounter_id IS ?3 AND ended_at = ?4",
+                params![log_id, kind, fight.encounter_id, ended_at],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(id) = existing {
+            return Ok(Some(id));
+        }
+    }
+    transaction
+        .execute(
+            "INSERT INTO log_fights (
+                 log_id, kind, encounter_id, name, difficulty_id, group_size, instance_id,
+                 keystone_level, affixes_json, started_at, ended_at, success, duration_ms,
+                 recorded_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(log_id, kind, encounter_id, started_at) DO UPDATE SET
+                 name = CASE WHEN excluded.name = '' THEN log_fights.name ELSE excluded.name END,
+                 difficulty_id = COALESCE(excluded.difficulty_id, log_fights.difficulty_id),
+                 group_size = COALESCE(excluded.group_size, log_fights.group_size),
+                 instance_id = COALESCE(excluded.instance_id, log_fights.instance_id),
+                 keystone_level = COALESCE(excluded.keystone_level, log_fights.keystone_level),
+                 affixes_json = CASE
+                     WHEN excluded.affixes_json = '[]' THEN log_fights.affixes_json
+                     ELSE excluded.affixes_json
+                 END,
+                 ended_at = COALESCE(excluded.ended_at, log_fights.ended_at),
+                 success = COALESCE(excluded.success, log_fights.success),
+                 duration_ms = COALESCE(excluded.duration_ms, log_fights.duration_ms)",
+            params![
+                log_id,
+                kind,
+                fight.encounter_id,
+                fight.name,
+                fight.difficulty_id,
+                fight.group_size,
+                fight.instance_id,
+                fight.keystone_level,
+                affixes.to_string(),
+                fight.started_at,
+                fight.ended_at,
+                fight.success,
+                fight.duration_ms,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .query_row(
+            // Ordered, because the row just written is the only one this can mean and a fight
+            // with no beginning is not covered by the unique key that would otherwise say so.
+            "SELECT id FROM log_fights
+             WHERE log_id = ?1 AND kind = ?2 AND encounter_id IS ?3 AND started_at IS ?4
+             ORDER BY id DESC LIMIT 1",
+            params![log_id, kind, fight.encounter_id, fight.started_at],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+fn insert_combatants(
+    transaction: &Transaction<'_>,
+    fight_row: i64,
+    fight: &Fight,
+) -> Result<(), String> {
+    for combatant in &fight.combatants {
+        transaction
+            .execute(
+                "INSERT INTO log_combatants (
+                     fight_id, guid, faction, spec_id, talents_json, equipment_json
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(fight_id, guid) DO UPDATE SET
+                     faction = COALESCE(excluded.faction, log_combatants.faction),
+                     spec_id = COALESCE(excluded.spec_id, log_combatants.spec_id),
+                     talents_json = excluded.talents_json,
+                     equipment_json = excluded.equipment_json",
+                params![
+                    fight_row,
+                    combatant.guid,
+                    combatant.faction,
+                    combatant.spec_id,
+                    combatant.talents.to_string(),
+                    combatant.equipment.to_string(),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Attaches what the log said to the visits it was said during.
+///
+/// Run after every sync's segments are in, over everything still unattached, for the same
+/// reason `link_captures` is: a position is read within thirty seconds of being logged and
+/// the segment it belongs to is not written until the player logs out, so the link almost
+/// never can be made at the moment the row is.
+///
+/// A point prefers the segment whose character the log named — every position carries the
+/// name the client wrote — and falls back on the time alone, which is enough whenever only
+/// one character was being played, and that is always.
+fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
+    // Ranked in a CTE rather than ordered inside a correlated subquery, because SQLite will
+    // not resolve a reference to the row being updated from a subquery's ORDER BY — and the
+    // preference is exactly the sort of thing that belongs in an ORDER BY.
+    transaction
+        .execute(
+            "WITH ranked AS (
+                 SELECT
+                     p.id AS point,
+                     s.id AS segment,
+                     ROW_NUMBER() OVER (
+                         PARTITION BY p.id
+                         ORDER BY (
+                             c.source_key = p.actor_name OR c.name = p.actor_name
+                         ) DESC, s.started_at DESC
+                     ) AS rank
+                 FROM log_positions p
+                 JOIN segments s ON p.at_ms / 1000 BETWEEN s.started_at AND s.ended_at
+                 JOIN characters c ON c.id = s.character_id
+                 WHERE p.segment_id IS NULL
+                   -- Nothing outside the span history covers can land in it, and this is what
+                   -- keeps the pass from costing anything at all on an install that has read
+                   -- a season of logs and has no segments yet: with no segments the pair is
+                   -- NULL, the comparison is NULL, and no row is considered.
+                   AND p.at_ms / 1000 BETWEEN (SELECT MIN(started_at) FROM segments)
+                                          AND (SELECT MAX(ended_at) FROM segments)
+             )
+             UPDATE log_positions SET segment_id = (
+                 SELECT segment FROM ranked
+                 WHERE ranked.point = log_positions.id AND ranked.rank = 1
+             )
+             WHERE segment_id IS NULL",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    // A fight has no character on it, so it goes to the visit it overlaps most. A boss pulled
+    // at the very end of one segment and finished at the start of the next belongs to
+    // whichever of them it spent longer inside, which is the only answer that does not need
+    // somebody to pick a tie-break rule out of the air.
+    transaction
+        .execute(
+            "WITH bounded AS (
+                 SELECT
+                     id,
+                     COALESCE(started_at, ended_at) / 1000 AS from_second,
+                     COALESCE(ended_at, started_at) / 1000 AS to_second
+                 FROM log_fights
+                 WHERE segment_id IS NULL AND COALESCE(started_at, ended_at) IS NOT NULL
+             ),
+             ranked AS (
+                 SELECT
+                     f.id AS fight,
+                     s.id AS segment,
+                     ROW_NUMBER() OVER (
+                         PARTITION BY f.id
+                         ORDER BY
+                             MIN(s.ended_at, f.to_second) - MAX(s.started_at, f.from_second)
+                                 DESC,
+                             s.started_at DESC
+                     ) AS rank
+                 FROM bounded f
+                 JOIN segments s
+                     ON s.started_at <= f.to_second AND s.ended_at >= f.from_second
+             )
+             UPDATE log_fights SET segment_id = (
+                 SELECT segment FROM ranked
+                 WHERE ranked.fight = log_fights.id AND ranked.rank = 1
+             )
+             WHERE segment_id IS NULL",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Reads what is new in every combat log this install has, and files what it finds.
+///
+/// Oldest first, on a shared byte budget, so that a backlog is worked through in the order it
+/// was written and no single sync disappears into it.
+///
+/// A file that cannot be read is skipped rather than fatal, and the next sync tries again: a
+/// log can be deleted between the folder being listed and the file being opened, and a night
+/// of segments is worth more than refusing them all over one file that went away. A database
+/// error is a different thing and is passed up.
+fn ingest_logs(connection: &mut Connection, wow_path: &Path, now: i64) -> Result<(), String> {
+    let mut budget = LOG_BYTES_PER_SYNC;
+    let mut anything = false;
+    for found in combatlog::logs(wow_path) {
+        if budget == 0 {
+            break;
+        }
+        let (_, resume) = log_resume(connection, &found.file.name)?;
+        let mut reader = logfile::Reader::new(log_year(&found), logfile::Zone::Local);
+        reader.budget = budget;
+        let Ok(reading) = reader.read(&found.path, &resume) else {
+            continue;
+        };
+        budget = budget.saturating_sub(reading.consumed);
+        anything = true;
+
+        let transaction = connection.transaction().map_err(|error| error.to_string())?;
+        let log_id = upsert_log(&transaction, &found.file.name, &reading, now)?;
+        for bounds in &reading.facts.maps {
+            insert_map(&transaction, log_id, bounds)?;
+        }
+        for point in &reading.facts.positions {
+            insert_position(&transaction, log_id, point)?;
+        }
+        for fight in &reading.facts.fights {
+            if let Some(row) = store_fight(&transaction, log_id, fight, now)? {
+                insert_combatants(&transaction, row, fight)?;
+            }
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
+    if anything {
+        let transaction = connection.transaction().map_err(|error| error.to_string())?;
+        place_log_facts(&transaction)?;
+        transaction.commit().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 /// One account's SavedVariables file, parsed and ready to be written to the database.
 struct Incoming {
     source_key: String,
@@ -1952,6 +2461,11 @@ pub fn collect(
     record_images(&transaction, &ingested, now)?;
     link_captures(&transaction)?;
     transaction.commit().map_err(|error| error.to_string())?;
+
+    // After the segments are in, because attaching a position to the visit it was recorded
+    // during needs that visit to exist — and a sync that read a log first would leave every
+    // point from the session that just ended waiting another thirty seconds for no reason.
+    ingest_logs(&mut connection, wow_path, now)?;
 
     // Last of all, and only for images a committed row now names. A file deleted here is one
     // Chronie has already read, copied, hashed, read back and written down.
@@ -2815,6 +3329,8 @@ fn segment_value(transaction: &Transaction<'_>, segment_id: i64) -> Result<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+    use serde_json::json;
     use std::fs;
 
     const DAY_SECONDS: i64 = 86_400;
@@ -4363,5 +4879,485 @@ ChronieDB = {{ ["segments"] = {{
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /* ---------- what the client's own combat log says ---------- */
+
+    /// One of the checked-in synthetic logs, laid down in a game folder under the name the
+    /// client would have given it. No real log and no install: everything the collector does
+    /// with a combat log is driven by the same files `logfile` is tested against.
+    fn plant_log(wow: &Path, fixture: &str, name: &str) {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/combatlog")
+            .join(fixture);
+        let logs = wow.join("Logs");
+        fs::create_dir_all(&logs).unwrap();
+        fs::copy(source, logs.join(name)).unwrap();
+    }
+
+    /// The instant a line of `raid-night.txt` names, in epoch seconds. The fixture states its
+    /// own offset on every line, so this is the same instant wherever the tests run.
+    fn raid_second(hour: u32, minute: u32, second: u32) -> i64 {
+        chrono::FixedOffset::east_opt(-5 * 3600)
+            .unwrap()
+            .with_ymd_and_hms(2023, 11, 14, hour, minute, second)
+            .unwrap()
+            .timestamp()
+    }
+
+    /// A segment covering part of that night, written the way the addon writes one.
+    fn night_segment(id: &str, character: &str, from: i64, to: i64) -> String {
+        format!(
+            r#"
+      {{ ["id"] = "{id}", ["character"] = "{character}", ["instance"] = "Amirdrassil",
+        ["instanceType"] = "raid", ["difficulty"] = "Mythic",
+        ["endedAt"] = {to}, ["startedAt"] = {from}, ["seconds"] = {} }}
+    "#,
+            to - from
+        )
+    }
+
+    fn rows_of<T: rusqlite::types::FromSql>(database: &Path, query: &str) -> Vec<T> {
+        let connection = open_database(database).unwrap();
+        let mut statement = connection.prepare(query).unwrap();
+        let found: Vec<T> = statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        found
+    }
+
+    #[test]
+    fn reads_a_raid_night_out_of_the_game_s_log_folder() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        ));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "log_positions"), 6);
+        assert_eq!(count_of(&database, "log_maps"), 1);
+        assert_eq!(count_of(&database, "log_fights"), 2);
+        // Three at the first pull and two at the second.
+        assert_eq!(count_of(&database, "log_combatants"), 5);
+        let connection = open_database(&database).unwrap();
+        let (offset, size, advanced, lines): (i64, i64, i64, i64) = connection
+            .query_row(
+                "SELECT byte_offset, byte_size, advanced, lines_read FROM combat_logs",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(offset, size, "the whole file should have been read");
+        assert_eq!(advanced, 1);
+        assert_eq!(lines, 28);
+    }
+
+    /// What the whole thing is for: a position inside an instance, placed on the map and filed
+    /// against the visit it happened during.
+    #[test]
+    fn attaches_the_track_and_the_fights_to_the_visit_they_happened_during() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        ));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let connection = open_database(&database).unwrap();
+        let segment: i64 = connection
+            .query_row("SELECT id FROM segments WHERE source_id = 'night-1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            rows_of::<i64>(&database, "SELECT segment_id FROM log_positions"),
+            vec![segment; 6]
+        );
+        assert_eq!(
+            rows_of::<i64>(&database, "SELECT segment_id FROM log_fights"),
+            vec![segment; 2]
+        );
+        let (x, y, map): (f64, f64, i64) = connection
+            .query_row(
+                "SELECT map_x, map_y, ui_map_id FROM log_positions ORDER BY at_ms LIMIT 1 OFFSET 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((x, y, map), (0.5, 0.25, 2232));
+    }
+
+    /// The fights themselves, with the boundaries the game stated rather than the ones the
+    /// addon inferred, and the gear everybody had on at the pull.
+    #[test]
+    fn keeps_the_boundaries_and_the_gear_the_log_alone_knows() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        ));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let connection = open_database(&database).unwrap();
+        let mut statement = connection
+            .prepare(
+                "SELECT kind, encounter_id, name, started_at, ended_at, success, duration_ms
+                 FROM log_fights ORDER BY started_at",
+            )
+            .unwrap();
+        let fights: Vec<(String, i64, String, i64, i64, i64, i64)> = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            fights,
+            [
+                (
+                    "encounter".to_string(),
+                    2820,
+                    "Gnarlroot".to_string(),
+                    raid_second(20, 16, 0) * 1000,
+                    raid_second(20, 16, 30) * 1000,
+                    0,
+                    1_800_000,
+                ),
+                (
+                    "encounter".to_string(),
+                    2820,
+                    "Gnarlroot".to_string(),
+                    raid_second(20, 20, 0) * 1000,
+                    raid_second(20, 24, 0) * 1000,
+                    1,
+                    240_000,
+                ),
+            ]
+        );
+        let equipment: String = connection
+            .query_row(
+                "SELECT equipment_json FROM log_combatants
+                 WHERE guid = 'Player-3676-0A1B2C3D' ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let worn: Value = serde_json::from_str(&equipment).unwrap();
+        assert_eq!(worn[0]["itemId"], 207198);
+        assert_eq!(worn[0]["itemLevel"], 486);
+        assert_eq!(worn[1]["bonusIds"], json!([8836, 8840]));
+    }
+
+    /// Every position carries the name the client wrote beside it, which is what lets a point
+    /// go to the character who was standing there rather than merely to the right half hour.
+    #[test]
+    fn gives_a_point_to_the_character_the_log_named() {
+        let bystander = night_segment(
+            "bystander",
+            "Ruvenne-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        );
+        let played = night_segment(
+            "played",
+            "Alyndra-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        );
+        let (_temp, wow, database) = synthetic_install(&format!("{bystander}, {played}"));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let placed = rows_of::<String>(
+            &database,
+            "SELECT DISTINCT s.source_id FROM log_positions p JOIN segments s ON s.id = p.segment_id",
+        );
+        assert_eq!(placed, ["played"]);
+    }
+
+    /// The log is read on every sync and the file has not changed. Reading it again must cost
+    /// nothing and must not double anything.
+    #[test]
+    fn does_not_read_a_log_it_has_already_read() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        ));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "log_positions"), 6);
+        assert_eq!(count_of(&database, "log_fights"), 2);
+        assert_eq!(count_of(&database, "log_combatants"), 5);
+        let lines: i64 = open_database(&database)
+            .unwrap()
+            .query_row("SELECT lines_read FROM combat_logs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(lines, 28, "the file was read a second time");
+    }
+
+    /// The ordinary case while somebody is playing: the file grows between two syncs, and the
+    /// line it was halfway through writing at the first one is whole by the second.
+    #[test]
+    fn reads_only_what_was_added_to_a_log_that_grew() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            1_714_600_000,
+            1_714_610_000,
+        ));
+        plant_log(&wow, "partial-tail.txt", "WoWCombatLog-050124_221000.txt");
+        collect(&wow, &database, 1_714_610_100, Options::default()).unwrap();
+        assert_eq!(count_of(&database, "log_fights"), 0, "a half-written line was read");
+
+        plant_log(&wow, "partial-tail-complete.txt", "WoWCombatLog-050124_221000.txt");
+        collect(&wow, &database, 1_714_610_200, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "log_fights"), 1);
+        assert_eq!(count_of(&database, "log_positions"), 1);
+        let (lines, restarts): (i64, i64) = open_database(&database)
+            .unwrap()
+            .query_row("SELECT lines_read, restarts FROM combat_logs", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(lines, 5, "the first two lines were read twice");
+        assert_eq!(restarts, 0);
+    }
+
+    /// Rotation: the name comes back attached to a different file. The cursor has to notice
+    /// rather than resume into the middle of a record it has never seen — and the night the
+    /// old log recorded is still a night that happened, so its rows stay.
+    #[test]
+    fn notices_a_rotated_log_and_keeps_what_the_old_one_said() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            1_718_200_000,
+            1_718_300_000,
+        ));
+        plant_log(&wow, "rotated-before.txt", "WoWCombatLog.txt");
+        collect(&wow, &database, 1_718_300_100, Options::default()).unwrap();
+        assert_eq!(count_of(&database, "log_fights"), 1);
+
+        plant_log(&wow, "rotated-after.txt", "WoWCombatLog.txt");
+        collect(&wow, &database, 1_718_300_200, Options::default()).unwrap();
+
+        let (restarts, lines): (i64, i64) = open_database(&database)
+            .unwrap()
+            .query_row("SELECT restarts, lines_read FROM combat_logs", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(restarts, 1);
+        assert_eq!(lines, 7, "the restart should count the new file's lines only");
+        let names = rows_of::<String>(
+            &database,
+            "SELECT DISTINCT name FROM log_fights ORDER BY name",
+        );
+        assert_eq!(names, ["Fyrakk the Blazing", "Gnarlroot"]);
+    }
+
+    /// A log rotated more than once. The tally of restarts is a count and not a flag, and the
+    /// line count it resets has to be reset by the second rotation exactly as by the first —
+    /// otherwise the number quietly becomes the sum of two files that never coexisted.
+    #[test]
+    fn counts_every_rotation_rather_than_the_first_one() {
+        let (_temp, wow, database) = synthetic_install("");
+        plant_log(&wow, "rotated-before.txt", "WoWCombatLog.txt");
+        collect(&wow, &database, 1_718_300_100, Options::default()).unwrap();
+        plant_log(&wow, "rotated-after.txt", "WoWCombatLog.txt");
+        collect(&wow, &database, 1_718_300_200, Options::default()).unwrap();
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog.txt");
+
+        collect(&wow, &database, 1_718_300_300, Options::default()).unwrap();
+
+        let (restarts, lines): (i64, i64) = open_database(&database)
+            .unwrap()
+            .query_row("SELECT restarts, lines_read FROM combat_logs", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(restarts, 2);
+        assert_eq!(lines, 28, "the tally carried lines from a file that is gone");
+    }
+
+    /// A log with advanced logging off carries no positions and no map bounds, and every other
+    /// thing in it is still worth having. What it must not do is fail.
+    #[test]
+    fn stores_a_log_written_without_advanced_logging_for_what_it_does_carry() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            1_700_600_000,
+            1_700_610_000,
+        ));
+        plant_log(&wow, "advanced-off.txt", "WoWCombatLog-112123_210300.txt");
+
+        collect(&wow, &database, 1_700_610_100, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "log_positions"), 0);
+        assert_eq!(count_of(&database, "log_maps"), 0);
+        assert_eq!(count_of(&database, "log_fights"), 1);
+        let advanced: i64 = open_database(&database)
+            .unwrap()
+            .query_row("SELECT advanced FROM combat_logs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(advanced, 0);
+    }
+
+    /// A night is several files, because the client splits a log per session. All of them get
+    /// read, each with its own cursor.
+    #[test]
+    fn reads_every_log_in_the_folder_and_keeps_a_cursor_for_each() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+        plant_log(&wow, "mythic-plus.txt", "WoWCombatLog-120223_190000.txt");
+        plant_log(&wow, "advanced-off.txt", "WoWCombatLog-112123_210300.txt");
+        // Everything else in the folder is not a combat log and is not to be touched.
+        fs::write(wow.join("Logs/Client.log"), b"not a combat log at all").unwrap();
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "combat_logs"), 3);
+        let kinds = rows_of::<String>(
+            &database,
+            "SELECT kind FROM log_fights ORDER BY kind, started_at",
+        );
+        assert_eq!(kinds, ["encounter", "encounter", "encounter", "encounter", "keystone"]);
+        assert!(open_database(&database)
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM combat_logs WHERE byte_offset < byte_size",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap()
+            == 0);
+    }
+
+    /// A capture, a lockout, an equipment set and now a combat log all arrive through the same
+    /// sync. A database written before this shape existed has to grow into it without being
+    /// rebuilt, and without losing what it already held.
+    #[test]
+    fn migrates_a_database_written_before_combat_logs_were_read() {
+        let (_temp, wow, database) = synthetic_install(&night_segment(
+            "night-1",
+            "Alyndra-Ravencrest",
+            raid_second(20, 10, 0),
+            raid_second(20, 30, 0),
+        ));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+        {
+            fs::create_dir_all(database.parent().unwrap()).unwrap();
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..7] {
+                transaction.execute_batch(migration).unwrap();
+            }
+            transaction.pragma_update(None, "user_version", 7_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "log_positions"), 6);
+        assert_eq!(count_of(&database, "segments"), 1);
+    }
+
+    /// A log read before the visit it belongs to has been filed is the ordinary case, not the
+    /// exception: the client writes SavedVariables at logout and the log while playing. The
+    /// points wait, and the sync that finally sees the segment attaches them.
+    #[test]
+    fn attaches_a_track_to_a_visit_that_is_filed_after_it() {
+        let (_temp, wow, database) = synthetic_install("");
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+        assert_eq!(count_of(&database, "log_positions"), 6);
+        assert_eq!(
+            rows_of::<Option<i64>>(&database, "SELECT segment_id FROM log_positions"),
+            vec![None; 6]
+        );
+
+        touch(
+            &wow,
+            &night_segment(
+                "night-1",
+                "Alyndra-Ravencrest",
+                raid_second(20, 10, 0),
+                raid_second(20, 30, 0),
+            ),
+        );
+        collect(&wow, &database, 2_000_000_200, Options::default()).unwrap();
+
+        assert!(rows_of::<Option<i64>>(&database, "SELECT segment_id FROM log_positions")
+            .iter()
+            .all(Option::is_some));
+    }
+
+    /// A pull that straddles two visits goes to the one it spent longer inside, which is the
+    /// only answer that does not need a tie-break rule picked out of the air.
+    #[test]
+    fn gives_a_fight_to_the_visit_it_spent_longest_inside() {
+        let early = night_segment(
+            "early",
+            "Alyndra-Ravencrest",
+            raid_second(20, 0, 0),
+            raid_second(20, 16, 10),
+        );
+        let late = night_segment(
+            "late",
+            "Alyndra-Ravencrest",
+            raid_second(20, 16, 11),
+            raid_second(20, 30, 0),
+        );
+        let (_temp, wow, database) = synthetic_install(&format!("{early}, {late}"));
+        plant_log(&wow, "raid-night.txt", "WoWCombatLog-111423_201500.txt");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        // The first pull runs 20:16:00 to 20:16:30: ten seconds in `early`, nineteen in `late`.
+        let placed = rows_of::<String>(
+            &database,
+            "SELECT s.source_id FROM log_fights f JOIN segments s ON s.id = f.segment_id
+             ORDER BY f.started_at",
+        );
+        assert_eq!(placed, ["late", "late"]);
+    }
+
+    /// The name the client gives a file is the only thing that says which year its stamps are
+    /// in, for a log old enough not to state one.
+    #[test]
+    fn reads_the_year_out_of_the_name_the_client_gave_the_file() {
+        assert_eq!(stamped_year("WoWCombatLog-070926_182310.txt"), Some(2026));
+        assert_eq!(stamped_year("WoWCombatLog-111423_201500.txt"), Some(2023));
+        assert_eq!(stamped_year("WoWCombatLog.txt"), None);
+        assert_eq!(stamped_year("WoWCombatLog-notadate.txt"), None);
     }
 }

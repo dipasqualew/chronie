@@ -176,32 +176,61 @@ fn read_advanced(wow_path: &Path) -> (Option<bool>, Option<PathBuf>) {
     }
 }
 
+/// A combat log on disk, and where it is.
+///
+/// The path is kept apart from [`LogFile`] rather than added to it, because `LogFile` is what
+/// the window is told about an install and an absolute path on somebody's machine is not
+/// something a window has any use for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub path: PathBuf,
+    pub file: LogFile,
+}
+
+/// Every combat log in the install's `Logs/` folder, oldest first.
+///
+/// Modern clients split logs per session — `WoWCombatLog-070926_182310.txt` — rather than
+/// appending to one file forever, so a night can be several files and the folder is read
+/// rather than a name being assumed. Oldest first, because anything catching up on a backlog
+/// wants to read them in the order they were written.
+pub fn logs(wow_path: &Path) -> Vec<Found> {
+    let Ok(entries) = fs::read_dir(wow_path.join("Logs")) else {
+        return Vec::new();
+    };
+    let mut found: Vec<Found> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.to_ascii_lowercase().starts_with(LOG_PREFIX) {
+                return None;
+            }
+            let data = entry.metadata().ok()?;
+            if !data.is_file() {
+                return None;
+            }
+            Some(Found {
+                file: LogFile {
+                    modified: modified_at(&entry.path()),
+                    name,
+                    bytes: data.len(),
+                },
+                path: entry.path(),
+            })
+        })
+        .collect();
+    // A filesystem that will not date a file sorts oldest, so a dated one always wins. The
+    // name settles the rest, so that two logs written in the same second are always read in
+    // the same order.
+    found.sort_by(|left, right| {
+        (left.file.modified.unwrap_or(i64::MIN), &left.file.name)
+            .cmp(&(right.file.modified.unwrap_or(i64::MIN), &right.file.name))
+    });
+    found
+}
+
 /// The newest thing in `Logs/` that looks like a combat log.
 pub fn newest_log(wow_path: &Path) -> Option<LogFile> {
-    let entries = fs::read_dir(wow_path.join("Logs")).ok()?;
-    let mut newest: Option<(LogFile, i64)> = None;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.to_ascii_lowercase().starts_with(LOG_PREFIX) {
-            continue;
-        }
-        let Ok(data) = entry.metadata() else { continue };
-        if !data.is_file() {
-            continue;
-        }
-        let modified = modified_at(&entry.path());
-        let file = LogFile {
-            name,
-            bytes: data.len(),
-            modified,
-        };
-        // A filesystem that will not date a file sorts oldest, so a dated one always wins.
-        let rank = modified.unwrap_or(i64::MIN);
-        if newest.as_ref().is_none_or(|(_, best)| rank > *best) {
-            newest = Some((file, rank));
-        }
-    }
-    newest.map(|(file, _)| file)
+    logs(wow_path).pop().map(|found| found.file)
 }
 
 /// Whether the newest log is one somebody is writing to right now.
