@@ -306,7 +306,7 @@ all differ so that a swap cannot pass unnoticed.
 ### Why the M2 parser is hand-rolled
 
 `wow-m2` was the plan, on condition of prototyping it against a real `humanfemale_hd.m2`
-first — and that prototype is exactly what `CLAUDE.md` forbids, so it could not be done. What
+first — and at the time that prototype was against the rules, so it could not be done. What
 could be checked pointed the other way anyway: at 0.7.0 it loads from a *path* rather than
 from the bytes `GameFiles` hands over, it depends on `wow-blp ^0.7` against the `0.3.2`
 already in the tree, and its parent crate claims 1.12–5.4.8.
@@ -314,8 +314,9 @@ already in the tree, and its parent crate claims 1.12–5.4.8.
 So `apps/desktop/src-tauri/src/m2.rs` reads the static subset directly — around 370 lines
 for chunks, vertices, textures, materials, texture combos, submeshes and batches. It is
 written against this document and cross-read against wow.export's `M2Loader.js` and
-`Skin.js`. If the day comes that a real file can be put in front of a candidate crate, the
-module is small enough to be a fair comparison rather than a sunk cost.
+`Skin.js`. The rule has since gone, so a real file *can* now be put in front of a candidate
+crate — and the module is small enough that doing so would be a fair comparison rather than
+a sunk cost.
 
 ## Reference implementations
 
