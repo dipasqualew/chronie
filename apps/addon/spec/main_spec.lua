@@ -1394,6 +1394,460 @@ describe("addon integration", function()
         end)
     end)
 
+    -- The same record a photograph makes with the picture left out, written by the same log and
+    -- offered by the same prompt: a memory is a capture without the shutter. These drive it
+    -- through the whole addon, because the thing worth proving is that the second path really
+    -- is the first one minus the shutter rather than a parallel one that has drifted.
+    describe("marking a memory", function()
+        ---Boot, log in and enter the world: an account minted, a segment open and a map named.
+        ---@param options table?
+        ---@return table app, table recorded
+        local function bootInWorld(options)
+            options = options or {}
+            options.playerName = options.playerName or "Thrall"
+            options.realmName = options.realmName or "Ragnaros"
+            local app, recorded = boot(options)
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            return app, recorded
+        end
+
+        ---The toast the prompt puts up, and the edit box inside it. Both are ordinary frames
+        ---the addon built, so a test drives them the way a mouse and a keyboard would.
+        ---@param recorded table
+        ---@return table? toast, table? box
+        local function noteToast(recorded)
+            local toast
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == "ChronieEntryToast" then
+                    toast = frame
+                end
+            end
+            if not toast then
+                return nil
+            end
+            for _, frame in ipairs(recorded.frames) do
+                if frame.parent == toast and frame.frameType == "EditBox" then
+                    return toast, frame
+                end
+            end
+            return toast
+        end
+
+        it("exposes the memory the addon marks for itself", function()
+            local app = bootInWorld()
+
+            assert.is_function(app.remember)
+        end)
+
+        describe("with the sentence already typed", function()
+            it("files one entry carrying the note and no picture", function()
+                local app, recorded = bootInWorld()
+
+                local entry = app.remember("Killed Ragnaros at last")
+
+                assert.equal(1, #recorded.db.entries)
+                assert.equal(entry, recorded.db.entries[1])
+                assert.equal("Killed Ragnaros at last", entry.note)
+                assert.is_nil(entry.hasImage)
+            end)
+
+            it("stamps it with who was playing and which account they are", function()
+                local app, recorded = bootInWorld({ playerName = "Jaina", realmName = "Draenor" })
+
+                local entry = app.remember("the sun coming up over Nagrand")
+
+                assert.equal("Jaina-Draenor", entry.character)
+                assert.equal(recorded.db.account.id, entry.author)
+            end)
+
+            it("records where the character was standing", function()
+                local app, recorded = bootInWorld()
+                recorded.setMap({ uiMapID = 84, x = 0.25, y = 0.75 })
+
+                local entry = app.remember("right here")
+
+                assert.equal(84, entry.uiMapID)
+                assert.equal(0.25, entry.x)
+                assert.equal(0.75, entry.y)
+            end)
+
+            -- Most of instanced content: the client names the map perfectly happily and then
+            -- declines to say where on it you are standing. Never a fabricated 0, 0.
+            it("records the map alone where the client gives no point", function()
+                local app, recorded = bootInWorld({ instanceName = "Ulduar", instanceType = "raid" })
+                recorded.setMap({ uiMapID = 2296 })
+
+                local entry = app.remember("Yogg down")
+
+                assert.equal(2296, entry.uiMapID)
+                assert.is_nil(entry.x)
+                assert.is_nil(entry.y)
+            end)
+
+            it("links it to the segment that was open", function()
+                local app, recorded = bootInWorld({ instanceName = "Ulduar", instanceType = "raid" })
+
+                local entry = app.remember("Yogg down")
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.equal(recorded.db.segments[1].id, entry.segment)
+            end)
+
+            -- An evening spent standing somewhere writing notes moves no other counter, so
+            -- without the tally being told the tracker would drop the segment and take the
+            -- link above down with it.
+            it("makes that segment worth filing on its own", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("something worth remembering")
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.equal(1, #recorded.db.segments)
+            end)
+
+            -- There is no picture here and there was never meant to be one. A shutter fired
+            -- for a memory would leave an image on disk that no marker claims, which reads
+            -- downstream as a photograph somebody else took.
+            it("reaches for no shutter at all", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("no picture, thank you")
+
+                assert.equal(0, recorded.screenshots())
+            end)
+
+            -- The memory is complete the moment it is written. A toast asking for the sentence
+            -- that has just been typed is a box in the way of somebody already doing something
+            -- else, and it has nothing to ask for.
+            it("puts up no toast", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("Killed Ragnaros at last")
+
+                local toast = noteToast(recorded)
+                assert.is_true(toast == nil or not toast:IsShown())
+            end)
+
+            -- Two sentences in one second is two memories: the entry log's cooldown protects
+            -- two screenshot filenames from being confused, and there are no files here.
+            it("takes a second memory inside the same second", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("the first thing")
+                app.remember("the second thing")
+
+                assert.equal(2, #recorded.db.entries)
+                assert.equal("the second thing", recorded.db.entries[2].note)
+            end)
+
+            -- The one user-authored string in the record, and the reason ns.entryText exists:
+            -- what reaches SavedVariables has to be safe for a Lua file, a hand-written Rust
+            -- reader, a SQLite row and a React tree.
+            it("cleans the pipes out of what reaches SavedVariables", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("got |cffa335ee|Hitem:19019::::::::60:::::|h[Thunderfury]|h|r")
+
+                local note = recorded.db.entries[1].note
+                assert.is_truthy(note:find("[Thunderfury]", 1, true))
+                assert.is_nil(note:find("|", 1, true))
+            end)
+
+            it("folds a pasted sentence onto one line", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("  two\nlines\tapart  ")
+
+                assert.equal("two lines apart", recorded.db.entries[1].note)
+            end)
+
+            -- Sanitising is not escaping. The markup is the player's and it is stored
+            -- verbatim; escaping belongs to the one place downstream that builds HTML.
+            it("leaves markup a player typed exactly as they typed it", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("<b>first</b> Yogg kill")
+
+                assert.equal("<b>first</b> Yogg kill", recorded.db.entries[1].note)
+            end)
+
+            -- Nothing survived the cleaning, so this is the same as having typed nothing: the
+            -- box is offered instead of a row full of a colour code being filed.
+            it("offers the box for a sentence that was nothing but escapes", function()
+                local app, recorded = bootInWorld()
+
+                app.remember("|TInterface\\Icons\\foo:16|t")
+
+                local toast = noteToast(recorded)
+                assert.is_true(toast:IsShown())
+                assert.is_nil(recorded.db.entries[1].note)
+            end)
+
+            it("writes nothing before the world has loaded and the account has a name", function()
+                local app, recorded = boot({
+                    playerName = "Thrall",
+                    realmName = "Ragnaros",
+                    playerGUID = false,
+                })
+
+                assert.is_nil(app.remember("too early for this"))
+                assert.same({}, recorded.db.entries)
+            end)
+        end)
+
+        describe("with nothing typed yet", function()
+            it("files the moment now and asks for the sentence", function()
+                local app, recorded = bootInWorld()
+
+                local entry = app.remember()
+
+                assert.equal(1, #recorded.db.entries)
+                assert.equal(entry, recorded.db.entries[1])
+                assert.is_nil(entry.note)
+                assert.is_nil(entry.hasImage)
+                assert.equal(0, recorded.screenshots())
+            end)
+
+            -- The one thing in the addon that opens focused, and only because asking for a
+            -- memory by name is the deliberate act the no-autofocus rule makes room for.
+            it("opens the box focused, without waiting to be clicked", function()
+                local app, recorded = bootInWorld()
+
+                app.remember()
+
+                local toast, box = noteToast(recorded)
+                assert.is_true(toast:IsShown())
+                assert.is_true(box:IsShown())
+                assert.is_true(box:HasFocus())
+            end)
+
+            -- The moment belongs to where the player was standing when they decided to write
+            -- it down, not to wherever they happen to be twenty seconds later.
+            it("stamps the moment when it was asked for rather than when it was finished", function()
+                local app, recorded = bootInWorld()
+                local at = recorded.clock.now()
+
+                local entry = app.remember()
+                recorded.clock.advance(15)
+                recorded.setMap({ uiMapID = 2296 })
+                local toast, box = noteToast(recorded)
+                toast:run("OnMouseUp")
+                box:SetText("about where I was standing")
+                box:run("OnEnterPressed")
+
+                assert.equal(at, entry.at)
+                assert.equal(84, entry.uiMapID)
+            end)
+
+            it("keeps the row and attaches what was typed into the box", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+
+                local _, box = noteToast(recorded)
+                box:SetText("the sun coming up over Nagrand")
+                box:run("OnEnterPressed")
+
+                assert.equal(1, #recorded.db.entries)
+                assert.equal("the sun coming up over Nagrand", recorded.db.entries[1].note)
+            end)
+
+            it("cleans what was typed into the box on the way to the file", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+
+                local _, box = noteToast(recorded)
+                box:SetText("two\nlines |cffff0000apart|r")
+                box:run("OnEnterPressed")
+
+                assert.equal("two lines apartr", recorded.db.entries[1].note)
+            end)
+
+            -- The box opens focused, and an offer somebody is typing into has no deadline at
+            -- all: taking the box away mid-sentence is worse than a toast that outstays its
+            -- welcome. So this one cannot lapse while the box holds focus.
+            it("keeps the offer open while the box still has focus", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+                local toast = noteToast(recorded)
+
+                recorded.clock.advance(600)
+                toast:run("OnUpdate")
+
+                assert.is_true(toast:IsShown())
+                assert.equal(1, #recorded.db.entries)
+            end)
+
+            -- A memory is its text and nothing else, so one nobody wrote anything about is a
+            -- record of nothing, and the right amount of that to keep in the file is none.
+            -- Clicking away from the box starts the clock again, and this is what runs out.
+            it("takes the row back out again when the offer lapses", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+                local toast, box = noteToast(recorded)
+
+                box:run("OnEditFocusLost")
+                recorded.clock.advance(20)
+                toast:run("OnUpdate")
+
+                assert.same({}, recorded.db.entries)
+                assert.is_false(toast:IsShown())
+            end)
+
+            -- The one path the expiry clock cannot reach. An engaged prompt has no deadline at
+            -- all, so a memory whose box still holds focus is a note-less row that nothing will
+            -- ever come back for — and logout is the moment the file is written. Without the
+            -- dismissal on the way out it would be written holding a memory of nothing.
+            it("takes the row back out again when the player logs out mid-sentence", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+                local toast = noteToast(recorded)
+
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.same({}, recorded.db.entries)
+                assert.is_false(toast:IsShown())
+            end)
+
+            -- The other half of that, and the reason the dismissal cannot simply discard
+            -- whatever is pending: a photograph is a record with or without a sentence about it.
+            it("keeps a photographed entry when the player logs out mid-sentence", function()
+                local app, recorded = bootInWorld()
+                app.capture()
+
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.equal(1, #recorded.db.entries)
+                assert.is_true(recorded.db.entries[1].hasImage)
+                assert.is_nil(recorded.db.entries[1].note)
+            end)
+
+            it("takes the row back out again when the box is escaped away empty", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+                local _, box = noteToast(recorded)
+
+                box:run("OnEscapePressed")
+
+                assert.same({}, recorded.db.entries)
+            end)
+
+            it("takes the row back out again when an empty box is submitted", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+                local _, box = noteToast(recorded)
+
+                box:SetText("   ")
+                box:run("OnEnterPressed")
+
+                assert.same({}, recorded.db.entries)
+            end)
+
+            -- Everything the memory kept alive goes with it: a segment filed only because
+            -- somebody started writing a note and thought better of it is a segment nothing
+            -- happened in, but the tally has already been told, so it stays. The row is what
+            -- must not survive.
+            it("leaves no entry behind for a segment it kept alive", function()
+                local app, recorded = bootInWorld()
+                app.remember()
+                local toast, box = noteToast(recorded)
+                box:run("OnEditFocusLost")
+                recorded.clock.advance(20)
+                toast:run("OnUpdate")
+
+                recorded.frame:fire("PLAYER_LOGOUT")
+
+                assert.same({}, recorded.db.entries)
+                assert.equal(1, #recorded.db.segments)
+            end)
+
+            -- A photograph is the opposite of a memory here: the picture is the record and the
+            -- sentence about it was only ever an offer, so an offer nobody took leaves the
+            -- entry exactly where it is.
+            it("leaves a photograph's entry alone when its own offer lapses", function()
+                local app, recorded = bootInWorld()
+                app.capture()
+                local toast = noteToast(recorded)
+
+                recorded.clock.advance(20)
+                toast:run("OnUpdate")
+
+                assert.equal(1, #recorded.db.entries)
+                assert.is_true(recorded.db.entries[1].hasImage)
+            end)
+
+            -- Somebody is mid-sentence about a photograph and asks for a memory. There is no
+            -- box to put it in and no text to keep it alive, so it goes back out again rather
+            -- than sitting in the file forever as a memory of nothing.
+            it("writes nothing while somebody is mid-sentence on an earlier entry", function()
+                local app, recorded = bootInWorld()
+                app.capture()
+                local toast, box = noteToast(recorded)
+                toast:run("OnMouseUp")
+
+                assert.is_nil(app.remember())
+
+                assert.equal(1, #recorded.db.entries)
+                assert.is_true(recorded.db.entries[1].hasImage)
+                -- And the sentence being written still lands on the picture it is about.
+                box:SetText("the shot I was writing about")
+                box:run("OnEnterPressed")
+                assert.equal("the shot I was writing about", recorded.db.entries[1].note)
+            end)
+        end)
+
+        describe("the /chronie note command", function()
+            it("marks a memory out of the rest of the line", function()
+                local app, recorded = bootInWorld()
+
+                recorded.slashRegistrations[1].handler("note Killed Ragnaros at last")
+
+                assert.equal(1, #recorded.db.entries)
+                assert.equal("Killed Ragnaros at last", recorded.db.entries[1].note)
+                assert.is_nil(recorded.db.entries[1].hasImage)
+                assert.equal(0, recorded.screenshots())
+                -- The memory itself is the acknowledgement; there is nothing to say back.
+                assert.same({}, recorded.lines)
+                assert.is_nil(app.entryPrompt.pending())
+            end)
+
+            it("offers the box when the line stops at the subcommand", function()
+                local _, recorded = bootInWorld()
+
+                recorded.slashRegistrations[1].handler("note")
+
+                local toast, box = noteToast(recorded)
+                assert.is_true(toast:IsShown())
+                assert.is_true(box:HasFocus())
+                assert.same({}, recorded.lines)
+            end)
+
+            it("is named in the usage line", function()
+                local _, recorded = bootInWorld()
+
+                recorded.slashRegistrations[1].handler("nonsense")
+
+                assert.is_truthy(recorded.lines[1]:find("note [text]", 1, true))
+            end)
+
+            -- The only thing worth a word is having written nothing at all, which before the
+            -- world has loaded is what happens: there is no account to author the entry.
+            it("says nothing was written down when the entry could not be filed", function()
+                local _, recorded = boot({
+                    playerName = "Thrall",
+                    realmName = "Ragnaros",
+                    playerGUID = false,
+                })
+
+                recorded.slashRegistrations[1].handler("note")
+
+                assert.equal(1, #recorded.lines)
+                assert.is_truthy(recorded.lines[1]:find("nothing was written down", 1, true))
+                assert.same({}, recorded.db.entries)
+            end)
+        end)
+    end)
+
     describe("capturing without being asked", function()
         ---Boot into the world with a given allowlist, the way an installed copy the
         ---desktop app configured arrives.
@@ -2855,14 +3309,14 @@ describe("addon integration", function()
             assert.is_nil(visible["Deadmines"])
         end)
 
-        it("names segments, currency, report, log and events in the usage text", function()
+        it("names every subcommand there is in the usage text", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
             recorded.slashRegistrations[1].handler("nonsense")
 
             assert.equal(
                 "|cff33ff99chronie|r: usage: /chronie locks | results | segments | currency "
-                    .. "| report | log | events",
+                    .. "| report | log | events | note [text]",
                 recorded.lines[1]
             )
         end)

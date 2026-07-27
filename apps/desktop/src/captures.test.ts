@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  captureFacts, captureReason, captureSummary, captureTip, capturedMoments, createCaptureAlbum,
-  deleteWarning, fileSize, missingReason, noteChanged, thumbnailIds,
+  captureFacts, captureKind, captureLabel, capturePlaceholder, captureReason, captureSummary,
+  captureTip, capturedMoments, createCaptureAlbum, deleteWarning, fileSize, missingReason,
+  noteChanged, thumbnailIds,
 } from "./captures";
 import { clock } from "./format";
 import type { Capture, CaptureThumbnailsPayload, Segment } from "./types";
@@ -96,6 +97,59 @@ describe("thumbnailIds", () => {
     })]);
 
     expect(thumbnailIds(moments)).toEqual([1]);
+  });
+});
+
+// A memory is a capture that never asked for a picture, and calling it a screenshot in the label
+// a screen reader reads out is simply wrong: the reader would be told to open a photograph that
+// does not exist and was never meant to.
+describe("captureKind", () => {
+  it.each([
+    ["stored" as const, "screenshot"],
+    // A screenshot whose file could not be found is still a screenshot — that is exactly what
+    // it is, and the tile says so separately.
+    ["missing" as const, "screenshot"],
+    ["none" as const, "note"],
+  ])("calls a %s capture a %s", (imageState, kind) => {
+    expect(captureKind(capture({ imageState }))).toBe(kind);
+  });
+});
+
+describe("captureLabel", () => {
+  it("names the kind, the place and the moment, and nothing about position in a grid", () => {
+    const [moment] = capturedMoments([segment({ captures: [capture()] })]);
+
+    expect(captureLabel(moment))
+      .toBe(`Open the screenshot from Glass Caverns at ${clock(EVENING + 1400)}`);
+  });
+
+  it("offers a note to be opened rather than a picture that was never taken", () => {
+    const [moment] = capturedMoments([
+      segment({ captures: [capture({ imageState: "none" })] }),
+    ]);
+
+    expect(captureLabel(moment))
+      .toBe(`Open the note from Glass Caverns at ${clock(EVENING + 1400)}`);
+  });
+});
+
+// Three states and three glyphs, for the same reason missingReason is three sentences: a note is
+// not a failure and must not wear the sign that says something went wrong.
+describe("capturePlaceholder", () => {
+  it.each([
+    ["none" as const, "📝"],
+    ["missing" as const, "🚫"],
+    // A picture Chronie holds whose thumbnail has not arrived yet: the frame, not a warning.
+    ["stored" as const, "🖼️"],
+  ])("stands in for a %s capture with %s", (imageState, glyph) => {
+    expect(capturePlaceholder(capture({ imageState }))).toBe(glyph);
+  });
+
+  it("gives each state a glyph of its own", () => {
+    const glyphs = (["stored", "missing", "none"] as const)
+      .map((imageState) => capturePlaceholder(capture({ imageState })));
+
+    expect(new Set(glyphs).size).toBe(3);
   });
 });
 
@@ -193,6 +247,46 @@ describe("captureSummary", () => {
     const moments = capturedMoments([segment({ captures: [capture()] })]);
 
     expect(captureSummary(moments)).toBe("1 screenshot");
+  });
+
+  it("says nothing was photographed when there is nothing at all", () => {
+    expect(captureSummary([])).toBe("No screenshots");
+  });
+
+  // An evening spent writing notes and taking no photographs must not fold up under the words
+  // "No screenshots" while holding a dozen of them — nor grow a "0 screenshots" beside them,
+  // which describes an absence nobody was looking for.
+  it("counts notes on their own, without mentioning screenshots at all", () => {
+    const moments = capturedMoments([segment({
+      captures: [
+        capture({ id: 1, sourceId: "a", imageState: "none" }),
+        capture({ id: 2, sourceId: "b", imageState: "none" }),
+      ],
+    })]);
+
+    expect(captureSummary(moments)).toBe("2 notes");
+    expect(captureSummary(moments)).not.toContain("screenshot");
+  });
+
+  it("says one note in the singular", () => {
+    const moments = capturedMoments([segment({
+      captures: [capture({ imageState: "none" })],
+    })]);
+
+    expect(captureSummary(moments)).toBe("1 note");
+  });
+
+  it("counts all three kinds when an evening held all three", () => {
+    const moments = capturedMoments([segment({
+      captures: [
+        capture({ id: 1, sourceId: "a", at: EVENING + 10 }),
+        capture({ id: 2, sourceId: "b", at: EVENING + 20 }),
+        capture({ id: 3, sourceId: "c", at: EVENING + 30, imageState: "missing" }),
+        capture({ id: 4, sourceId: "d", at: EVENING + 40, imageState: "none" }),
+      ],
+    })]);
+
+    expect(captureSummary(moments)).toBe("2 screenshots · 1 without a file · 1 note");
   });
 });
 

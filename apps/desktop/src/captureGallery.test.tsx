@@ -46,9 +46,12 @@ const said = (error: unknown): string => `Chronie said: ${String(error)}`;
  * talks to a backend and nothing monkey patches one.
  */
 function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
-  const album = createCaptureAlbum((ids) =>
+  // Recorded rather than merely answered: "a note is never asked for a thumbnail" is a
+  // statement about what crossed the bridge, and only the request itself can say it.
+  const thumbnails = vi.fn((ids: number[]) =>
     Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, THUMBNAIL])) }));
-  return render(
+  const album = createCaptureAlbum(thumbnails);
+  const view = render(
     <CaptureGallery
       segments={[segment(captures)]}
       album={album}
@@ -63,9 +66,20 @@ function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
       }}
     />,
   );
+  return Object.assign(view, { thumbnails });
 }
 
-const tiles = (): HTMLElement[] => screen.getAllByRole("button", { name: /Open the screenshot/ });
+/**
+ * Every tile in the grid, whichever kind it is.
+ *
+ * Both kinds have to be matched here rather than only screenshots, because a memory announces
+ * itself as a note — that is the whole point of `captureKind` — and a helper that only found
+ * screenshots would silently renumber the grid the moment one of them was a note.
+ */
+const tiles = (): HTMLElement[] =>
+  screen.getAllByRole("button", { name: /^Open the (screenshot|note) from/ });
+const thumbState = (tile: HTMLElement): string | null | undefined =>
+  tile.querySelector(".capture-thumb")?.getAttribute("data-state");
 const viewer = (): HTMLElement => {
   const found = document.getElementById("capture-viewer");
   if (!found) throw new Error("The gallery has nowhere to show a picture.");
@@ -125,6 +139,61 @@ describe("CaptureGallery", () => {
     expect(tiles()[1].textContent).toContain("could not find the file");
     // And neither asks the backend for a picture that does not exist.
     expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(0);
+  });
+
+  // A memory is an entry that asked for no picture on purpose. Everything the tile does has to
+  // say so — the state the stylesheet hangs off, the sentence a screen reader is given, and the
+  // request that is never made — because the one thing it must not look like is a screenshot
+  // that went astray.
+  describe("a memory, which never had a picture", () => {
+    const memory = (overrides: Partial<Capture> = {}): Capture =>
+      capture({ imageState: "none", byteSize: null, ...overrides });
+
+    it("carries its own state rather than a screenshot's", () => {
+      gallery([memory()]);
+
+      expect(thumbState(tiles()[0])).toBe("none");
+      expect(tiles()[0].querySelector("img")).toBeNull();
+      // The glyph is the notebook, not the sign that says something went wrong.
+      expect(tiles()[0].textContent).toContain("📝");
+    });
+
+    it("offers a note to be opened rather than a screenshot", () => {
+      gallery([memory()]);
+
+      expect(screen.getByRole("button", { name: /^Open the note from Glass Caverns/ }))
+        .toBe(tiles()[0]);
+      expect(screen.queryByRole("button", { name: /^Open the screenshot/ })).toBeNull();
+    });
+
+    it("shows what somebody wrote instead of the reason there is no picture", () => {
+      gallery([memory({ note: "Killed Ragnaros at last" })]);
+
+      expect(tiles()[0].querySelector(".capture-note")?.textContent)
+        .toBe("Killed Ragnaros at last");
+      expect(tiles()[0].textContent).not.toContain("A note, with no picture taken.");
+    });
+
+    // Nothing was ever stored for it, so there is nothing to fetch and nothing to fail.
+    it("is never asked for a thumbnail", async () => {
+      const { thumbnails } = gallery([memory(), memory({ id: 12, sourceId: "TEST|1|12" })]);
+
+      await waitFor(() => expect(tiles()).toHaveLength(2));
+      expect(thumbnails).not.toHaveBeenCalled();
+    });
+
+    // The grid an evening actually produces: a picture beside a memory, each drawn as itself.
+    it("sits beside a screenshot without either being drawn as the other", async () => {
+      const { thumbnails } = gallery([
+        capture({ id: 11, sourceId: "a", at: EVENING + 10 }),
+        memory({ id: 12, sourceId: "b", at: EVENING + 20, note: "and then this" }),
+      ]);
+
+      await waitFor(() => expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(1));
+      expect(thumbnails).toHaveBeenCalledWith([11]);
+      expect(thumbState(tiles()[0])).toBe("stored");
+      expect(thumbState(tiles()[1])).toBe("none");
+    });
   });
 
   // The other way a picture can be absent, and the one the row cannot predict: it says the

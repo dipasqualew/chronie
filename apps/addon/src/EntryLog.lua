@@ -52,6 +52,8 @@ local _, ns = ...
 ---was refused — see the cooldown below.
 ---@field annotate fun(entry: EntryRecord, text: string): EntryRecord Attaches a note to an
 ---entry already written.
+---@field discard fun(entry: EntryRecord): boolean Unwrites an entry that turned out to hold
+---nothing. True when the row was there to remove.
 
 ---@class EntryLogDeps
 ---@field db table SavedVariables table; mutated in place so the client persists it.
@@ -185,6 +187,34 @@ function ns.newEntryLog(deps)
         annotate = function(entry, text)
             entry.note = text
             return entry
+        end,
+
+        ---Takes back an entry this log wrote.
+        ---
+        ---There is exactly one thing this is for. A memory — an entry with no picture — is
+        ---its text and nothing else, so one written by somebody who then said nothing is a
+        ---record of nothing, and the right amount of it to keep is none. A photograph is the
+        ---opposite: worth keeping whether or not anybody found the words, which is why this
+        ---is a deliberate call by whoever knows which of the two it was, rather than a rule
+        ---the log applies to every noteless entry it holds.
+        ---
+        ---Searched from the end, because the entry being taken back was written moments ago
+        ---and is almost always the last row in the table.
+        ---
+        ---`db.entryCounter` is deliberately not wound back. It exists to make ids unique
+        ---rather than to count what survives, and an id that has once been handed out must
+        ---never be handed out again — a shared memory pack somebody else is holding may
+        ---already name it.
+        ---@param entry EntryRecord
+        ---@return boolean
+        discard = function(entry)
+            for index = #db.entries, 1, -1 do
+                if db.entries[index] == entry then
+                    table.remove(db.entries, index)
+                    return true
+                end
+            end
+            return false
         end,
     }
 end

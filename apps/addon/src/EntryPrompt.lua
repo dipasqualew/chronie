@@ -46,7 +46,10 @@ local _, ns = ...
 ---@field now fun(): integer
 ---@field attach fun(entry: EntryRecord, text: string) Writes the note onto the entry.
 ---@field onShow fun(entry: EntryRecord)? Called when an offer opens.
----@field onHide fun()? Called when one closes, however it closed.
+---@field onHide fun(entry: EntryRecord, annotated: boolean)? Called when one closes, however
+---it closed, with what it was offering and whether a note actually landed on it. Both halves
+---matter to a caller that has to decide the entry's fate: a memory that nobody wrote anything
+---about is a row worth taking back out again, and this is the only moment that says so.
 ---@field windowSeconds integer? How long an offer stands. Default 20.
 
 ---Long enough to read the toast, notice it and decide; short enough that it is gone before
@@ -71,16 +74,18 @@ function ns.newEntryPrompt(deps)
         return expiresAt ~= nil and now() >= expiresAt
     end
 
-    local function close()
+    ---@param annotated boolean? Whether a note landed on the entry on the way out.
+    local function close(annotated)
         if not pending then
             return
         end
+        local entry = pending
         -- State goes first, so that anything the hide reaches — a frame's OnHide handler
         -- calling dismiss right back, which is exactly what Escape does — finds nothing
         -- pending and stops there rather than going round again.
         pending, expiresAt, engaged = nil, nil, false
         if deps.onHide then
-            deps.onHide()
+            deps.onHide(entry, annotated and true or false)
         end
     end
 
@@ -155,11 +160,15 @@ function ns.newEntryPrompt(deps)
             if note then
                 deps.attach(entry, note)
             end
-            close()
+            close(note ~= nil)
             return note and entry or nil
         end,
 
-        dismiss = close,
+        -- Wrapped rather than handed over directly: this is reached from a frame's OnHide,
+        -- which calls it with arguments of its own, and none of them mean "a note landed".
+        dismiss = function()
+            close(false)
+        end,
 
         ---@return boolean
         tick = function()

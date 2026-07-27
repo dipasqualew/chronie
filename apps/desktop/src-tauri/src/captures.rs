@@ -1019,6 +1019,136 @@ mod tests {
         assert_eq!(markers[0].note.as_deref(), Some("first Yogg kill"));
     }
 
+    /// A memory read the whole way in, out of the Lua the client actually writes.
+    ///
+    /// Every other test here starts from a `json!` literal, which is the shape after the reader
+    /// has already done its work. A note is the one string in that file a person typed, and the
+    /// three things a person types that the file has to carry — a quote, a line break and
+    /// something that is not ASCII — are all things the client escapes or encodes on the way
+    /// out. So this one starts from the text: the reader, then `markers`, then the note rules on
+    /// top of both, with nothing standing in for any of them.
+    ///
+    /// Written the way the client writes it, tabs and trailing `-- [1]` comment included, with
+    /// `"` escaped as `\"`, a line break as `\n`, and the non-ASCII as the raw UTF-8 bytes an
+    /// enUS install's own files carry. A note can never leave the addon holding a line break —
+    /// `ns.entryText` flattens it first — but this reader is also what reads a file written by
+    /// an addon build older than that rule, so the escape has to be handled rather than assumed
+    /// away.
+    #[test]
+    fn reads_a_memory_out_of_the_lua_the_client_writes() {
+        let text = "ChronieDB = {\n\
+             \t[\"entries\"] = {\n\
+             \t\t{\n\
+             \t\t\t[\"id\"] = \"account|1700000000|4\",\n\
+             \t\t\t[\"schema\"] = 1,\n\
+             \t\t\t[\"at\"] = 1700000000,\n\
+             \t\t\t[\"stamp\"] = \"111423_120000\",\n\
+             \t\t\t[\"character\"] = \"Sateline-ArgentDawn\",\n\
+             \t\t\t[\"author\"] = \"account\",\n\
+             \t\t\t[\"segment\"] = \"Sateline-ArgentDawn|1699999000|Molten Core\",\n\
+             \t\t\t[\"uiMapID\"] = 232,\n\
+             \t\t\t[\"note\"] = \"Ragnaros a dit \\\"非\\\" — et puis\\nune ligne de plus\",\n\
+             \t\t}, -- [1]\n\
+             \t},\n\
+             }\n";
+
+        let saved = crate::collector::read_saved_variable(text, "ChronieDB")
+            .expect("the client's own Lua parses")
+            .expect("ChronieDB is the variable it wrote");
+        let markers = markers(&saved);
+
+        assert_eq!(markers.len(), 1);
+        let marker = &markers[0];
+        // Byte for byte what somebody typed: the quotes are quotes again rather than the
+        // backslashes the file carried them as, and the 非 and the em dash are themselves.
+        assert_eq!(
+            marker.note.as_deref(),
+            Some("Ragnaros a dit \"非\" — et puis une ligne de plus"),
+        );
+        // And still valid UTF-8, which is the whole point of caring: one bad byte here spoils
+        // the file for every reader of it rather than merely spoiling this note.
+        assert!(std::str::from_utf8(marker.note.as_deref().unwrap().as_bytes()).is_ok());
+        assert_eq!(marker.source_id, "account|1700000000|4");
+        assert_eq!(marker.captured_at, 1_700_000_000);
+        assert_eq!(marker.stamp.as_deref(), Some("111423_120000"));
+        assert_eq!(marker.character.as_deref(), Some("Sateline-ArgentDawn"));
+        assert_eq!(marker.author.as_deref(), Some("account"));
+        assert_eq!(
+            marker.segment.as_deref(),
+            Some("Sateline-ArgentDawn|1699999000|Molten Core"),
+        );
+        // A memory asked for no picture, which is the whole difference between it and a
+        // photograph whose file has gone astray.
+        assert!(!marker.wants_image);
+        // The map was named and the point was not — most of instanced content — so the point
+        // stays absent rather than arriving as a fabricated 0, 0.
+        assert_eq!(marker.ui_map_id, Some(232));
+        assert_eq!(marker.x, None);
+        assert_eq!(marker.y, None);
+    }
+
+    /// The same note again with every non-ASCII byte written as a decimal escape.
+    ///
+    /// Which of the two forms the client uses is not something an enUS install can be held up
+    /// against — its own files carry no byte over 127 at all — so both are read here and both
+    /// have to arrive at the same string. `\233\157\158` is 非 and `\195\169` is é.
+    #[test]
+    fn reads_a_memory_whose_non_ascii_arrived_as_decimal_escapes() {
+        let text = "ChronieDB = {\n\
+             \t[\"entries\"] = {\n\
+             \t\t{\n\
+             \t\t\t[\"id\"] = \"account|1700000000|5\",\n\
+             \t\t\t[\"at\"] = 1700000000,\n\
+             \t\t\t[\"note\"] = \"Ragnaros a dit \\\"\\233\\157\\158\\\" une fois d\\195\\169j\\195\\160\",\n\
+             \t\t}, -- [1]\n\
+             \t},\n\
+             }\n";
+
+        let saved = crate::collector::read_saved_variable(text, "ChronieDB")
+            .unwrap()
+            .unwrap();
+        let markers = markers(&saved);
+
+        assert_eq!(
+            markers[0].note.as_deref(),
+            Some("Ragnaros a dit \"非\" une fois déjà"),
+        );
+        assert!(!markers[0].wants_image);
+    }
+
+    /// A memory taken where the client would not name a map at all — a loading screen, or the
+    /// handful of places it simply declines. The three position fields are absent from the Lua
+    /// table and have to stay absent here.
+    #[test]
+    fn reads_a_memory_the_client_could_not_place() {
+        let text = "ChronieDB = {\n\
+             \t[\"entries\"] = {\n\
+             \t\t{\n\
+             \t\t\t[\"id\"] = \"account|1700000001|6\",\n\
+             \t\t\t[\"schema\"] = 1,\n\
+             \t\t\t[\"at\"] = 1700000001,\n\
+             \t\t\t[\"stamp\"] = \"111423_120001\",\n\
+             \t\t\t[\"character\"] = \"Sateline-ArgentDawn\",\n\
+             \t\t\t[\"author\"] = \"account\",\n\
+             \t\t\t[\"note\"] = \"nowhere in particular\",\n\
+             \t\t}, -- [1]\n\
+             \t},\n\
+             }\n";
+
+        let saved = crate::collector::read_saved_variable(text, "ChronieDB")
+            .unwrap()
+            .unwrap();
+        let markers = markers(&saved);
+
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].note.as_deref(), Some("nowhere in particular"));
+        assert_eq!(markers[0].ui_map_id, None);
+        assert_eq!(markers[0].x, None);
+        assert_eq!(markers[0].y, None);
+        assert_eq!(markers[0].segment, None);
+        assert!(!markers[0].wants_image);
+    }
+
     #[test]
     fn reads_no_note_off_an_entry_that_carries_none() {
         let markers = markers(&json!({

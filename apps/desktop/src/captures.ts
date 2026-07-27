@@ -55,6 +55,35 @@ export function missingReason(capture: Capture): string | null {
 export const captureTitle = (moment: CapturedMoment): string => clock(moment.capture.at);
 
 /**
+ * What a capture is, in the one word everything visible has to call it.
+ *
+ * A memory is a capture that never asked for a picture, and calling it a screenshot in the
+ * label a screen reader reads out is simply wrong — the reader would be told to open a
+ * photograph that does not exist and was never meant to. `missing` stays a screenshot, because
+ * that is exactly what it is: one whose file could not be found.
+ */
+export const captureKind = (capture: Capture): "note" | "screenshot" =>
+  capture.imageState === "none" ? "note" : "screenshot";
+
+/** What a tile announces itself as: which kind it is, and the two facts that place it. */
+export const captureLabel = ({ capture, segment }: CapturedMoment): string =>
+  `Open the ${captureKind(capture)} from ${segment.instance} at ${clock(capture.at)}`;
+
+/**
+ * The glyph standing in for a picture that is not on screen.
+ *
+ * Three states and three glyphs, for the same reason [`missingReason`] is three sentences: a
+ * note is not a failure and must not wear the sign that says something went wrong. `stored` is
+ * a picture Chronie holds whose thumbnail has not arrived yet, so it gets the frame rather than
+ * either warning.
+ */
+export function capturePlaceholder(capture: Capture): string {
+  if (capture.imageState === "none") return "📝";
+  if (capture.imageState === "missing") return "🚫";
+  return "🖼️";
+}
+
+/**
  * Why the capture exists, when it was not somebody pressing the key.
  *
  * The presence of a trigger is the whole difference between the two, so it is worth saying —
@@ -123,19 +152,27 @@ export function captureTip(moment: CapturedMoment): string {
 }
 
 /**
- * How a fold reads before anybody has opened it: how many pictures, and how many of them are
- * only markers.
+ * How a fold reads before anybody has opened it: how many pictures, how many of them are only
+ * markers, and how many of the entries under it were never pictures at all.
  *
- * The second half is not padding. A player who took ten screenshots and finds nine of them is
- * owed an explanation on the way in rather than after opening the grid and counting.
+ * Neither of the trailing halves is padding. A player who took ten screenshots and finds nine
+ * of them is owed an explanation on the way in rather than after opening the grid and counting;
+ * and an evening spent writing notes and taking no photographs must not fold up under the words
+ * "No screenshots" while holding a dozen of them.
  */
 export function captureSummary(moments: CapturedMoment[]): string {
-  const shown = moments.filter(({ capture }) => capture.imageState === "stored").length;
-  const lost = moments.filter(({ capture }) => capture.imageState === "missing").length;
-  const counted = plural(shown, "screenshot");
   if (!moments.length) return "No screenshots";
-  if (!lost) return counted;
-  return `${counted} · ${lost} without a file`;
+  const notes = moments.filter(({ capture }) => capture.imageState === "none").length;
+  const lost = moments.filter(({ capture }) => capture.imageState === "missing").length;
+  const shown = moments.length - notes - lost;
+
+  const parts: string[] = [];
+  // Counted as screenshots, and named as such, only where any were asked for: "0 screenshots"
+  // beside a count of notes describes an absence nobody was looking for.
+  if (shown || lost) parts.push(plural(shown, "screenshot"));
+  if (lost) parts.push(`${lost} without a file`);
+  if (notes) parts.push(plural(notes, "note"));
+  return parts.join(" · ");
 }
 
 /**

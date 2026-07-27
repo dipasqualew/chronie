@@ -135,6 +135,141 @@ describe("ns.newEntryLog", function()
         end)
     end)
 
+    -- An entry with the picture left out. The same row, written by the same log, and the
+    -- absence of `hasImage` is the whole difference: downstream reads it as a moment somebody
+    -- marked rather than a photograph whose file has gone astray.
+    describe("recording a memory", function()
+        it("carries no hasImage at all rather than a false one", function()
+            local log, db = newLog()
+
+            local entry = log.record()
+
+            assert.is_nil(entry.hasImage)
+            assert.is_nil(db.entries[1].hasImage)
+        end)
+
+        it("writes every other field the same way a photograph's is written", function()
+            local log, db = newLog()
+
+            log.record()
+
+            assert.same({
+                id = AUTHOR .. "|" .. NOW .. "|1",
+                schema = 1,
+                at = NOW,
+                stamp = STAMP,
+                character = "Thrall-Ragnaros",
+                author = AUTHOR,
+                segment = "Thrall-Ragnaros|" .. (NOW - 1800) .. "|Ulduar",
+                uiMapID = 84,
+                x = 0.25,
+                y = 0.75,
+            }, db.entries[1])
+        end)
+
+        -- The cooldown exists because two screenshot filenames a second apart are the closest
+        -- pair that can still be told from one another. A memory has no file to be confused
+        -- with, so somebody writing two sentences in one second gets two memories.
+        it("takes two memories in the same second", function()
+            local log, db = newLog()
+
+            local first = log.record()
+            local second = log.record()
+
+            assert.is_table(first)
+            assert.is_table(second)
+            assert.equal(2, #db.entries)
+            assert.not_equal(first.id, second.id)
+        end)
+
+        -- And a memory does not start the cooldown either: the next press of the screenshot
+        -- key is judged against the last photograph, not against the last sentence.
+        it("does not hold back the photograph that follows it", function()
+            local log, db = newLog()
+
+            log.record()
+
+            assert.is_table(log.record({ hasImage = true }))
+            assert.equal(2, #db.entries)
+        end)
+
+        it("is refused while the account cannot be named, like any other entry", function()
+            local log, db = newLog({ author = false })
+
+            assert.is_nil(log.record())
+            assert.same({}, db.entries)
+        end)
+    end)
+
+    -- What a memory nobody wrote anything about is worth keeping: none of it. A photograph is
+    -- the opposite, which is why this is a deliberate call by whoever knows which of the two
+    -- they are holding rather than a rule the log applies to every noteless entry.
+    describe("discarding an entry", function()
+        it("takes the row back out of db.entries", function()
+            local log, db = newLog()
+            local entry = log.record()
+
+            assert.is_true(log.discard(entry))
+            assert.same({}, db.entries)
+        end)
+
+        it("takes out the row it was handed rather than the last one written", function()
+            local log, db, clock = newLog()
+            local first = log.record()
+            clock.advance(1)
+            local second = log.record()
+            clock.advance(1)
+            local third = log.record()
+
+            assert.is_true(log.discard(second))
+
+            assert.same({ first, third }, db.entries)
+        end)
+
+        it("answers false for an entry it never wrote, and leaves the file alone", function()
+            local log, db = newLog()
+            local mine = log.record()
+            local theirs = { id = "somebody else's entry", at = NOW }
+
+            assert.is_false(log.discard(theirs))
+            assert.same({ mine }, db.entries)
+        end)
+
+        it("answers false the second time the same entry is taken back", function()
+            local log = newLog()
+            local entry = log.record()
+            log.discard(entry)
+
+            assert.is_false(log.discard(entry))
+        end)
+
+        -- The counter numbers what has been handed out rather than what survives. An id that
+        -- has once been given away must never be given away again: a shared memory pack
+        -- somebody else is holding may already name it.
+        it("does not wind the counter back, so no id is ever handed out twice", function()
+            local log, db, clock = newLog()
+            local discarded = log.record()
+            log.discard(discarded)
+
+            clock.advance(1)
+            local entry = log.record()
+
+            assert.equal(2, db.entryCounter)
+            assert.not_equal(discarded.id, entry.id)
+            assert.equal(AUTHOR .. "|" .. (NOW + 1) .. "|2", entry.id)
+        end)
+
+        -- The same second as the discarded one, which is where a counter derived from
+        -- #db.entries would have handed the number straight back out again.
+        it("does not reuse the id even inside the second it was written in", function()
+            local log = newLog()
+            local discarded = log.record()
+            log.discard(discarded)
+
+            assert.not_equal(discarded.id, log.record().id)
+        end)
+    end)
+
     describe("the segment link", function()
         -- The link has to be exactly the id the log files that segment under, or the
         -- desktop app joins an entry to nothing.
