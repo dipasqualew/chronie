@@ -20,15 +20,27 @@
 //!   and z-fighting look like from the outside, so [`bare`] picks one variant per group.
 //! - **The skin comes from the caller.** The body's texture is M2 type 1, the composited
 //!   2048 × 1024 atlas this module builds, rather than a file the model names.
+//!
+//! And then the point of all of it: **one appearance, worn.** What an item does to a body is
+//! two things and no more — it paints textures into rectangles of that atlas, and it switches
+//! geoset variants on in place of the bare defaults. [`crate::worn`] reads both out of the
+//! game's tables; [`Atlas::wear`] and [`dressed`] are where they land on the character.
+//!
+//! One item at a time, which is what keeps this small. The two subsystems that make an
+//! assembled outfit hard — the priority table that arbitrates which of two items owns the
+//! sleeves, and the per-slot draw order that puts bracers over them — exist to settle
+//! arguments between items, and one item cannot argue with itself.
 
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
 use image::{ImageEncoder, Rgba, RgbaImage};
+use serde_json::Value;
 
 use crate::casc::GameFiles;
 use crate::glb;
 use crate::icons::{data_url, pixels_of, png_of};
 use crate::m2::{Mesh, Model, Paint};
+use crate::worn::{ComponentTexture, Geoset, Worn};
 
 /// `humanfemale_hd.m2`, from the community listfile.
 ///
@@ -52,6 +64,37 @@ const ATLAS_HEIGHT: u32 = 1024;
 /// rather than painted with this, which is the difference between hair that is grey and hair
 /// with somebody's kneecap on it.
 const BODY_TEXTURE: u32 = 1;
+
+/// One rectangle of the atlas: where a part of the body is painted.
+struct Rect {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+/// Where each `ComponentSection` lands, for `CharComponentTextureLayoutID` 104.
+///
+/// Read off `CharComponentTextureSections` on build 12.0.5.67 and tabulated in
+/// `docs/character-rendering.md`, where the same numbers came back independently from
+/// wago.tools. Note the asymmetry: the body occupies only the left 1024 × 1024 of the atlas,
+/// and the right half is the face and the scalp.
+///
+/// **Section 8, the accessory, has no rectangle in this layout.** `ItemDisplayInfoMaterialRes`
+/// carries section-8 rows anyway, and on this model they have nowhere to go — which is a row
+/// to drop rather than a file to reject. Sections 9 and 10 are the scalp, and share theirs.
+const SECTIONS: [(u32, Rect); 10] = [
+    (0, Rect { x: 0, y: 0, width: 512, height: 256 }),        // arms upper
+    (1, Rect { x: 0, y: 256, width: 512, height: 256 }),      // arms lower
+    (2, Rect { x: 0, y: 512, width: 512, height: 128 }),      // hands
+    (3, Rect { x: 512, y: 0, width: 512, height: 256 }),      // torso upper
+    (4, Rect { x: 512, y: 256, width: 512, height: 128 }),    // torso lower
+    (5, Rect { x: 512, y: 384, width: 512, height: 256 }),    // legs upper
+    (6, Rect { x: 512, y: 640, width: 512, height: 256 }),    // legs lower
+    (7, Rect { x: 512, y: 896, width: 512, height: 128 }),    // feet
+    (9, Rect { x: 1024, y: 0, width: 1024, height: 1024 }),   // scalp upper
+    (10, Rect { x: 1024, y: 0, width: 1024, height: 1024 }),  // scalp lower
+];
 
 /// What an atlas holds where nothing has been composited into it.
 ///
@@ -122,6 +165,45 @@ impl Atlas {
         Ok(())
     }
 
+    /// Paints one appearance's textures into the rectangles the layout gives them.
+    ///
+    /// This is the whole of showing armour. Each row of `ItemDisplayInfoMaterialRes` is a
+    /// picture and a part of the body; each lands in its rectangle, scaled to fill it, over
+    /// whatever the atlas already held.
+    ///
+    /// Three things decide whether it looks right, and all three fail as a picture rather than
+    /// as an error — `docs/character-rendering.md` has them:
+    ///
+    /// - **Always alpha-blend.** The game's layer data nominally asks for a straight copy on
+    ///   some layers, and a copy erases the body wherever the item texture is transparent. Do
+    ///   that and every sleeveless chestpiece punches a hole in the arm.
+    /// - **Scale with a linear filter.** Armour textures are authored small — 128 × 64 upward
+    ///   — and land in rectangles a few hundred pixels wide. Nearest-neighbour shows the
+    ///   reader the texels against a 2048-wide base.
+    /// - **Drop what the layout has no room for**, which is section 8 and nothing else.
+    ///
+    /// A texture this install cannot produce leaves its part of the body bare rather than
+    /// failing the whole character: a chestpiece whose lower torso is missing is still most of
+    /// what the reader asked to see, and the alternative is an error where a body should be.
+    pub fn wear(&mut self, files: &dyn GameFiles, textures: &[ComponentTexture]) {
+        for texture in textures {
+            let Some(rect) = rect_of(texture.section) else {
+                continue;
+            };
+            let Ok(decoded) = files
+                .read(texture.file)
+                .and_then(|blp| pixels_of(&blp, ATLAS_WIDTH))
+            else {
+                continue;
+            };
+            let scaled =
+                image::imageops::resize(&decoded, rect.width, rect.height, FilterType::Triangle);
+            // `overlay` composites source-over, which is the blend the paragraph above is
+            // about; `replace` is the copy that would take the holes with it.
+            image::imageops::overlay(&mut self.pixels, &scaled, i64::from(rect.x), i64::from(rect.y));
+        }
+    }
+
     /// The atlas as PNG bytes, which is the one picture format a `.glb` carries and a browser
     /// reads.
     pub fn png(&self) -> Result<Vec<u8>, String> {
@@ -138,30 +220,64 @@ impl Atlas {
     }
 }
 
+/// The rectangle a section is painted into, or nothing where the layout has none for it.
+fn rect_of(section: u32) -> Option<&'static Rect> {
+    SECTIONS
+        .iter()
+        .find(|(which, _)| *which == section)
+        .map(|(_, rect)| rect)
+}
+
 /// The bare character, as a `.glb` in a data URL for the window to load.
 ///
 /// Unlike an appearance's model there is no `null` answer here. Every armour slot in the game
 /// is drawn on this one mesh, so an install that cannot produce it has nothing to fall back to
 /// and the failure is worth reporting rather than showing an empty pane over.
-pub fn model_of(files: &dyn GameFiles, base_skin: Option<u32>) -> Result<serde_json::Value, String> {
-    let glb = glb_of(files, base_skin)?;
+pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
+    let glb = glb_of(files, None)?;
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
-/// The same, as the `.glb` bytes themselves — which is what `dump_model` writes to a file.
+/// The same character with one appearance on it, or `null` when there is nothing to put there.
 ///
-/// `base_skin` is the FileDataID of the character's own skin texture, when the caller has one.
-/// See [`Atlas::base`] for why nothing does yet.
-pub fn glb_of(files: &dyn GameFiles, base_skin: Option<u32>) -> Result<Vec<u8>, String> {
+/// `null` is an ordinary answer, and it is the same one an appearance with no model of its own
+/// gives: the game encrypts the displays of content it has not shipped, and a slot whose only
+/// texture was painted for another body resolves to nothing. Either way the window keeps
+/// showing the icon it already has, rather than a bare body that pretends to be dressed.
+pub fn worn_model_of(
+    files: &dyn GameFiles,
+    display_info_id: u32,
+    display_type: u32,
+) -> Result<Value, String> {
+    let worn = crate::worn::of(files, display_info_id, display_type)?;
+    if worn.is_empty() {
+        return Ok(serde_json::json!({ "displayInfoId": display_info_id, "model": Value::Null }));
+    }
+    let glb = glb_of(files, Some(&worn))?;
+    Ok(serde_json::json!({
+        "displayInfoId": display_info_id,
+        "model": data_url("model/gltf-binary", &glb),
+    }))
+}
+
+/// The `.glb` bytes themselves — which is what `dump_model` writes to a file.
+///
+/// `worn` is the one appearance being shown, when there is one. Nothing else about the body
+/// changes with it: the same mesh, the same UVs, the same atlas, one layer deeper.
+pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
     let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
     let skin = model
         .skin_file_data_id()
         .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
-    let mesh = undressed(&model.with_skin(&files.read(skin)?)?);
+    let mesh = dressed(
+        &model.with_skin(&files.read(skin)?)?,
+        worn.map_or(&[], |worn| worn.geosets.as_slice()),
+    );
 
+    // No base skin: see `Atlas::base` for what is missing and why.
     let mut atlas = Atlas::unpainted();
-    if let Some(fdid) = base_skin {
-        atlas.base(&files.read(fdid)?)?;
+    if let Some(worn) = worn {
+        atlas.wear(files, &worn.textures);
     }
     let painted = atlas.png()?;
 
@@ -174,15 +290,34 @@ pub fn glb_of(files: &dyn GameFiles, base_skin: Option<u32>) -> Result<Vec<u8>, 
     })
 }
 
-/// The mesh with only the parts a body wearing nothing draws.
+/// The mesh with only the parts a body wearing this — or nothing — draws.
+///
+/// Per `docs/character-rendering.md`: hide everything, show the skin and the defaults, then
+/// for each group the appearance drives, hide that group's whole hundred and show the one
+/// value it names. [`bare`] is the first two lines of that; this is the third.
+///
+/// **A group is only taken over when the body actually holds the geoset it asks for.** That is
+/// a deliberate floor rather than an optimisation: the column those values come out of has not
+/// been verified against an install, as [`crate::worn`] says, and every way of getting it
+/// wrong shows up as geometry rather than as an error. Hiding a group and then showing nothing
+/// in it is the worst of those — a leg that is simply absent — and this turns it into the body
+/// as it was, which reads as an appearance that changed nothing.
 ///
 /// The vertices are left whole rather than compacted down to the ones the surviving parts
 /// use. They are shared by every part, a body has tens of thousands of them, and the indices
 /// would all have to be renumbered to save loading the ones the hidden geosets pointed at.
-fn undressed(mesh: &Mesh) -> Mesh {
+fn dressed(mesh: &Mesh, geosets: &[Geoset]) -> Mesh {
+    let taken: Vec<&Geoset> = geosets
+        .iter()
+        .filter(|worn| mesh.parts.iter().any(|part| part.geoset == worn.geoset))
+        .collect();
+    let shown = |geoset: u16| match taken.iter().find(|worn| worn.group == geoset / 100) {
+        Some(worn) => geoset == worn.geoset,
+        None => bare(geoset),
+    };
     Mesh {
         vertices: mesh.vertices.clone(),
-        parts: mesh.parts.iter().filter(|part| bare(part.geoset)).cloned().collect(),
+        parts: mesh.parts.iter().filter(|part| shown(part.geoset)).cloned().collect(),
     }
 }
 
@@ -198,20 +333,61 @@ fn decode_file(files: &dyn GameFiles, fdid: u32) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
-    use serde_json::Value;
 
     /// The character's own skin, which nothing in the app supplies yet.
     const BASE_SKIN: u32 = 160_001;
 
-    /// The four colours every fixture texture is painted in, one per quadrant, as the
-    /// generator writes them.
+    /// The four colours every fixture icon is painted in, one per quadrant, as the generator
+    /// writes them.
     const QUADRANTS: [[u8; 3]; 4] = [[66, 130, 198], [198, 65, 66], [255, 0, 132], [0, 195, 255]];
 
+    /// The fixture displays whose appearances are worn rather than shown on their own, and the
+    /// slots `ItemAppearance` gives them.
+    const CHESTPIECE: (u32, u32) = (900_003, 2);
+    const BOOTS: (u32, u32) = (900_004, 5);
+    const ROBE: (u32, u32) = (900_012, 2);
+
     fn mesh() -> Mesh {
+        worn_mesh(&[])
+    }
+
+    /// The body as it is drawn with a given set of geosets switched on.
+    fn worn_mesh(geosets: &[Geoset]) -> Mesh {
         let files = fixture_files();
         let model = Model::parse(&files.read(HUMAN_FEMALE).unwrap()).unwrap();
         let skin = model.skin_file_data_id().unwrap();
-        undressed(&model.with_skin(&files.read(skin).unwrap()).unwrap())
+        dressed(&model.with_skin(&files.read(skin).unwrap()).unwrap(), geosets)
+    }
+
+    /// The geosets the fixture's own tables say an appearance switches on.
+    fn geosets_of((display_info_id, display_type): (u32, u32)) -> Vec<Geoset> {
+        crate::worn::of(&fixture_files(), display_info_id, display_type)
+            .unwrap()
+            .geosets
+    }
+
+    /// The geosets a body ends up drawing, which is what the whole selection comes down to.
+    fn drawn(mesh: &Mesh) -> Vec<u16> {
+        mesh.parts.iter().map(|part| part.geoset).collect()
+    }
+
+    /// The atlas an appearance paints, as pixels, ready to be sampled a rectangle at a time.
+    fn atlas_of((display_info_id, display_type): (u32, u32)) -> RgbaImage {
+        let files = fixture_files();
+        let worn = crate::worn::of(&files, display_info_id, display_type).unwrap();
+        let mut atlas = Atlas::unpainted();
+        atlas.wear(&files, &worn.textures);
+        image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
+    }
+
+    /// The colour in the middle of one of the atlas's section rectangles.
+    ///
+    /// The middle rather than a corner: a rectangle is filled by scaling a texture into it, and
+    /// what a test wants to know is which texture landed there rather than how its edges were
+    /// resolved against the neighbouring one.
+    fn middle_of(atlas: &RgbaImage, section: u32) -> [u8; 4] {
+        let rect = rect_of(section).expect("the layout has a rectangle for that section");
+        atlas.get_pixel(rect.x + rect.width / 2, rect.y + rect.height / 4).0
     }
 
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
@@ -241,8 +417,8 @@ mod tests {
     #[test]
     fn draws_each_part_of_the_body_once() {
         let body = mesh();
-        let geosets: Vec<u16> = body.parts.iter().map(|part| part.geoset).collect();
-        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 101, 2101]);
+        let geosets = drawn(&body);
+        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 101, 1001, 1301, 501, 2101]);
 
         // One group, one part. Group 0 is the skin, which is the id with no group of its own.
         let mut groups: Vec<u16> = geosets.iter().map(|geoset| geoset / 100).collect();
@@ -320,18 +496,174 @@ mod tests {
     // The whole module, as the window asks for it: a body with geometry and a picture in it.
     #[test]
     fn hands_the_window_a_body_to_turn_around() {
-        let answer = model_of(&fixture_files(), None).unwrap();
+        let answer = model_of(&fixture_files()).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
         let scene = scene(&STANDARD.decode(encoded).unwrap());
 
         assert_eq!(scene["asset"]["version"], "2.0");
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 7);
+        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 10);
         // One picture: the atlas. The hair asks for a type this composites nothing for, and a
         // part with no picture keeps its geometry.
         assert_eq!(scene["images"].as_array().unwrap().len(), 1);
         assert_eq!(scene["images"][0]["mimeType"], "image/png");
+    }
+
+    /* ---------- wearing one appearance ---------- */
+
+    // The geoset half of showing armour, on the three the acceptance names. Each swaps its own
+    // groups' defaults for the variant the item drives and leaves every other group alone —
+    // and the robe is the one worth reading twice, because it fills the same slot as the
+    // chestpiece and takes a different part of the body over.
+    #[test]
+    fn swaps_the_bare_default_of_each_group_an_appearance_drives() {
+        // Sleeves in place of bare arms, a chest in place of the bare torso.
+        assert_eq!(
+            drawn(&worn_mesh(&geosets_of(CHESTPIECE))),
+            vec![0, 802, 1101, 2001, 2701, 101, 1002, 1301, 501, 2101]
+        );
+        // The boot itself and the booted feet: two groups from one item, and the feet group is
+        // the one whose zero means booted rather than bare.
+        assert_eq!(
+            drawn(&worn_mesh(&geosets_of(BOOTS))),
+            vec![0, 801, 1101, 2002, 2701, 101, 1001, 1301, 502, 2101]
+        );
+        // The robe leaves the chest bare and hangs a skirt over the legs instead.
+        assert_eq!(
+            drawn(&worn_mesh(&geosets_of(ROBE))),
+            vec![0, 802, 1101, 2001, 2701, 101, 1001, 1302, 501, 2101]
+        );
+    }
+
+    // Every one of those draws the same number of parts as a bare body: one per group, still.
+    // Which is what says the group was taken over rather than added to — a variant drawn
+    // beside its own default is two pairs of legs in the same trousers.
+    #[test]
+    fn draws_no_more_parts_dressed_than_bare() {
+        let bare = mesh().parts.len();
+        for appearance in [CHESTPIECE, BOOTS, ROBE] {
+            let body = worn_mesh(&geosets_of(appearance));
+            assert_eq!(body.parts.len(), bare, "{appearance:?}");
+            let mut groups: Vec<u16> = drawn(&body).iter().map(|geoset| geoset / 100).collect();
+            groups.sort_unstable();
+            let mut distinct = groups.clone();
+            distinct.dedup();
+            assert_eq!(groups, distinct, "{appearance:?} draws a group twice");
+        }
+    }
+
+    // The floor under the geoset column, which has not been read off an install: an item that
+    // asks for a variant this body does not hold leaves the group as it was. A leg that is
+    // simply absent is the worst way to be wrong about a geoset, and this is what rules it out.
+    #[test]
+    fn leaves_a_group_alone_when_the_body_holds_nothing_it_asks_for() {
+        let absent = [Geoset { group: 11, geoset: 1177 }, Geoset { group: 4, geoset: 402 }];
+        assert_eq!(drawn(&worn_mesh(&absent)), drawn(&mesh()));
+    }
+
+    // The compositing half: each texture into the rectangle the layout gives its section, and
+    // nothing outside it. A section blitted into its neighbour's rectangle is armour on the
+    // wrong limb, which is a picture rather than an error.
+    #[test]
+    fn paints_each_texture_into_the_rectangle_its_section_names() {
+        let atlas = atlas_of(CHESTPIECE);
+        assert_eq!(middle_of(&atlas, 0), [90, 200, 60, 255]); // upper arms
+        assert_eq!(middle_of(&atlas, 1), [120, 40, 200, 255]); // lower arms
+        assert_eq!(middle_of(&atlas, 3), [40, 160, 220, 255]); // upper torso
+        assert_eq!(middle_of(&atlas, 4), [30, 210, 170, 255]); // lower torso
+        // The parts of the body it does not paint keep the tone underneath. The legs are the
+        // ones worth naming: they sit directly under the torso in the atlas, so a rectangle
+        // one row too tall shows up here rather than anywhere else.
+        assert_eq!(middle_of(&atlas, 5), UNPAINTED);
+        assert_eq!(middle_of(&atlas, 7), UNPAINTED);
+
+        // And a different appearance paints a different set of them.
+        let robe = atlas_of(ROBE);
+        assert_eq!(middle_of(&robe, 3), [240, 130, 20, 255]);
+        assert_eq!(middle_of(&robe, 5), [70, 20, 190, 255]);
+        assert_eq!(middle_of(&robe, 6), [200, 240, 40, 255]);
+        assert_eq!(middle_of(&robe, 0), UNPAINTED);
+    }
+
+    // The trap: an item layer is alpha-blended even where the game's own layer data says to
+    // copy it. A copy erases the body wherever the texture is transparent, which is a hole in
+    // the arm for every sleeveless chestpiece — and looks like a rendering bug rather than a
+    // compositing one.
+    #[test]
+    fn blends_an_item_layer_rather_than_copying_it_over_the_body() {
+        let atlas = atlas_of(CHESTPIECE);
+        let arms = rect_of(0).unwrap();
+        // The upper-arm texture is painted for its top half and empty for its bottom one, so
+        // the sleeve is there and the arm below it is still the body.
+        assert_eq!(atlas.get_pixel(arms.x + arms.width / 2, arms.y + arms.height / 4).0, [90, 200, 60, 255]);
+        let below = atlas.get_pixel(arms.x + arms.width / 2, arms.y + arms.height - 8);
+        assert_eq!(below.0, UNPAINTED, "a transparent sleeve punched a hole in the arm");
+    }
+
+    // The other trap: armour textures are authored a few dozen pixels tall and land in
+    // rectangles a few hundred deep, so the scale has to interpolate. Nearest-neighbour leaves
+    // the seam between two bands a hard edge; a linear filter leaves a run of blends, and this
+    // is what tells the two apart at the one row where they differ.
+    #[test]
+    fn scales_a_texture_up_with_a_linear_filter() {
+        let atlas = atlas_of(CHESTPIECE);
+        let torso = rect_of(3).unwrap();
+        let seam = atlas.get_pixel(torso.x + torso.width / 2, torso.y + torso.height / 2).0;
+        let (top, bottom) = ([40, 160, 220, 255], [220, 60, 140, 255]);
+        assert_ne!(seam, top);
+        assert_ne!(seam, bottom);
+        for channel in 0..3 {
+            let (low, high) = (top[channel].min(bottom[channel]), top[channel].max(bottom[channel]));
+            assert!((low..=high).contains(&seam[channel]), "{seam:?} is not between the two bands");
+        }
+    }
+
+    // Section 8 is in the game's tables and has no rectangle in this layout at all, so the row
+    // is dropped rather than treated as an error — and nothing else the appearance paints is
+    // lost with it. The boots carry one.
+    #[test]
+    fn drops_a_section_the_layout_has_nowhere_to_put() {
+        let boots = crate::worn::of(&fixture_files(), BOOTS.0, BOOTS.1).unwrap();
+        assert!(boots.textures.iter().any(|texture| texture.section == 8));
+        let atlas = atlas_of(BOOTS);
+        assert_eq!(middle_of(&atlas, 7), [20, 100, 240, 255]);
+        assert_eq!(middle_of(&atlas, 6), [150, 30, 90, 255]);
+        assert!(rect_of(8).is_none());
+    }
+
+    // A texture this install does not hold leaves its part of the body bare. A chestpiece with
+    // one section missing is most of what the reader asked to see, and an error where a body
+    // should be is none of it.
+    #[test]
+    fn leaves_a_part_bare_when_its_texture_cannot_be_read() {
+        // The shirt's only texture is a file the fixture directory deliberately omits.
+        let atlas = atlas_of((900_008, 10));
+        assert_eq!(middle_of(&atlas, 3), UNPAINTED);
+    }
+
+    // The whole module as the window asks for it: a body with an appearance on it, still one
+    // picture and still the same mesh.
+    #[test]
+    fn hands_the_window_a_body_with_one_appearance_on_it() {
+        let answer = worn_model_of(&fixture_files(), ROBE.0, ROBE.1).unwrap();
+        assert_eq!(answer["displayInfoId"], ROBE.0);
+        let url = answer["model"].as_str().expect("the answer holds a model");
+        let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let scene = scene(&STANDARD.decode(encoded).unwrap());
+        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 10);
+        assert_eq!(scene["images"].as_array().unwrap().len(), 1);
+    }
+
+    // An appearance this install can say nothing about answers with nothing, the same way one
+    // with no model of its own does — and the window keeps showing the icon it has.
+    #[test]
+    fn answers_with_nothing_for_an_appearance_it_cannot_read() {
+        for display in [900_900, 404_040] {
+            let answer = worn_model_of(&fixture_files(), display, 2).unwrap();
+            assert_eq!(answer["model"], Value::Null, "display {display}");
+        }
     }
 
     // The browser tests load `character.glb` into three.js, which is the only place anything
@@ -340,21 +672,28 @@ mod tests {
     //
     //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
     //         character apps/desktop/fixtures/transmog/character.glb
+    //     cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog \
+    //         worn/900012/2 apps/desktop/fixtures/transmog/robe.glb
     #[test]
-    fn writes_the_glb_the_browser_tests_load() {
-        let committed = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("fixtures")
-                .join("transmog")
-                .join("character.glb"),
-        )
-        .expect("the fixture glb is committed");
-        assert_eq!(
-            glb_of(&fixture_files(), None).unwrap(),
-            committed,
-            "character.glb is stale; regenerate it with the dump_model example"
-        );
+    fn writes_the_glbs_the_browser_tests_load() {
+        let robe = crate::worn::of(&fixture_files(), ROBE.0, ROBE.1).unwrap();
+        for (name, written) in [
+            ("character.glb", glb_of(&fixture_files(), None).unwrap()),
+            ("robe.glb", glb_of(&fixture_files(), Some(&robe)).unwrap()),
+        ] {
+            let committed = std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("fixtures")
+                    .join("transmog")
+                    .join(name),
+            )
+            .unwrap_or_else(|_| panic!("{name} is committed"));
+            assert_eq!(
+                written, committed,
+                "{name} is stale; regenerate it with the dump_model example"
+            );
+        }
     }
 
     // An install this app cannot read the body out of is worth saying so about rather than

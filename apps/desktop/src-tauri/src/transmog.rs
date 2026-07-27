@@ -102,6 +102,14 @@ pub mod display_column {
     /// material. This is the texture an item's own model uses, and not the one armour is
     /// drawn on the body with — that comes out of `ItemDisplayInfoMaterialRes`.
     pub const MATERIAL_RESOURCES_ID: usize = 11;
+    /// Which variant of each geoset group the display switches on: an array of six, read one
+    /// element at a time like the two above.
+    ///
+    /// **Unlike 10 and 11, this position was not read off an install.** It is where the
+    /// community's definitions put it, and `docs/game-files.md` says what that is worth. A
+    /// build that moved it would hand `worn` six numbers that are not geoset values, which is
+    /// why nothing downstream hides a part of the body it cannot then show something for.
+    pub const GEOSET_GROUP: usize = 12;
 }
 
 /// How many model slots `ModelResourcesID` holds, and how wide one of them is. The file

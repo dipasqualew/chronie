@@ -1033,7 +1033,7 @@ mod tests {
             .collect();
         // Row nine is the one that keeps a model only in its second slot, and reading the
         // column as one number is exactly how that gets missed.
-        assert_eq!(first, vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0, 41006, 41007]);
+        assert_eq!(first, vec![41001, 41002, 0, 0, 0, 0, 41004, 0, 0, 41006, 41007, 0]);
     }
 
     // The elements past the first are the reason this exists: a shoulder set keeps a model
@@ -1064,6 +1064,7 @@ mod tests {
                 vec![0, 41005],
                 vec![41006, 0],
                 vec![41007, 0],
+                vec![0, 0],
             ]
         );
 
@@ -1078,17 +1079,21 @@ mod tests {
         assert_eq!(
             geosets,
             vec![
-                vec![27, 21, 0, 0, 0, 0],
-                vec![26, 0, 0, 0, 0, 0],
-                vec![8, 10, 13, 22, 28, 0],
-                vec![5, 20, 0, 0, 0, 0],
-                vec![4, 23, 0, 0, 0, 0],
-                vec![11, 9, 13, 0, 0, 0],
+                // The helm's second element is the -1 the game writes where a display drives
+                // no geoset, and this column is read unsigned — so it arrives whole rather
+                // than as a small number somebody could mistake for a variant.
+                vec![2, u32::MAX, 0, 0, 0, 0],
+                vec![1, 0, 0, 0, 0, 0],
+                vec![1, 1, 0, 0, 0, 0],
+                vec![1, 0, 0, 0, 0, 0],
+                vec![1, 0, 0, 0, 0, 0],
+                vec![3, 0, 0, 0, 0, 0],
                 vec![0, 0, 0, 0, 0, 0],
                 vec![0, 0, 0, 0, 0, 0],
-                vec![26, 0, 0, 0, 0, 0],
-                vec![27, 0, 0, 0, 0, 0],
-                vec![27, 0, 0, 0, 0, 0],
+                vec![1, 0, 0, 0, 0, 0],
+                vec![2, 0, 0, 0, 0, 0],
+                vec![2, 0, 0, 0, 0, 0],
+                vec![1, 0, 1, 0, 0, 0],
             ]
         );
     }
@@ -1120,6 +1125,7 @@ mod tests {
                 vec![2, 3],
                 vec![1, 0],
                 vec![1, 0],
+                vec![0, 0],
             ]
         );
     }
@@ -1131,7 +1137,7 @@ mod tests {
             .rows()
             .map(|row| row.element(display::FLAGS, 0, 32))
             .collect();
-        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(flags, vec![1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         // Asking past the end says so rather than running into the next column.
         for row in table.rows() {
             assert_eq!(row.element(display::FLAGS, 1, 32), 0);
@@ -1160,11 +1166,16 @@ mod tests {
             vec![
                 (900003, 3, 52001),
                 (900003, 0, 52002),
-                (900003, 4, 52003),
-                (900002, 5, 52004),
-                (900002, 6, 52005),
-                (900001, 7, 52006),
-                (900003, 2, 52007),
+                (900003, 1, 52003),
+                (900003, 4, 52004),
+                (900012, 3, 52005),
+                (900012, 5, 52006),
+                (900012, 6, 52007),
+                (900004, 7, 52008),
+                (900004, 6, 52009),
+                (900004, 8, 52010),
+                (900005, 2, 52011),
+                (900008, 3, 52012),
             ]
         );
 
@@ -1176,7 +1187,7 @@ mod tests {
             .map(|row| row.number(material::COMPONENT_SECTION))
             .collect();
         sections.sort_unstable();
-        assert_eq!(sections, vec![0, 2, 3, 4]);
+        assert_eq!(sections, vec![0, 1, 3, 4]);
     }
 
     // A table that keeps no such block is not broken, it simply has no foreign key.
@@ -1192,8 +1203,8 @@ mod tests {
     #[test]
     fn leaves_out_the_relationships_of_a_section_it_cannot_decrypt() {
         let table = table(ITEM_DISPLAY_INFO_MATERIAL_RES);
-        assert_eq!(table.declared_rows(), 8);
-        assert_eq!(table.rows().count(), 7);
+        assert_eq!(table.declared_rows(), 13);
+        assert_eq!(table.rows().count(), 12);
         assert!(table.rows().all(|row| row.foreign_id() != 900900));
     }
 

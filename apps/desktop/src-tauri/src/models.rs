@@ -25,12 +25,16 @@ use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT
 /// `ModelFileData` — every `.m2` the client owns, keyed by the resource that names it.
 const MODEL_FILE_DATA: u32 = 1337833;
 /// `TextureFileData` — the same for `.blp`s.
-const TEXTURE_FILE_DATA: u32 = 982459;
+///
+/// Shared with `worn`, which asks it a wider question: an item's model wants the one file its
+/// material names, and a body texture wants every file it names so that another table can say
+/// which of them was painted for the character being drawn.
+pub const TEXTURE_FILE_DATA: u32 = 982459;
 
 /// The one column of `ModelFileData` that is not the row id: which model resource the file is.
 const MODEL_RESOURCES_ID: usize = 4;
 /// The same for `TextureFileData`.
-const MATERIAL_RESOURCES_ID: usize = 2;
+pub const MATERIAL_RESOURCES_ID: usize = 2;
 
 /// The largest texture worth re-encoding for a model.
 ///
