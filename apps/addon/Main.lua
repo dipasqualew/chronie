@@ -300,8 +300,16 @@ function ns.main(env)
         onShow = function(entry)
             entryToast.show(entry)
         end,
-        onHide = function()
+        onHide = function(entry, annotated)
             entryToast.hide()
+            -- A memory is its text, and nothing else: an entry with no picture and nothing
+            -- said is a record of nothing, so what survives somebody opening the box and
+            -- thinking better of it is nothing rather than an empty tile in the gallery. A
+            -- photograph is the opposite — the picture is the record, and the sentence about
+            -- it was only ever an offer — so this asks which of the two it was.
+            if not annotated and not entry.hasImage then
+                entryLog.discard(entry)
+            end
         end,
     })
 
@@ -358,6 +366,61 @@ function ns.main(env)
         -- taking. The offer is passive and expires on its own, so a player who is busy
         -- does nothing and loses nothing.
         entryPrompt.offer(entry)
+        return entry
+    end
+
+    ---Marks a moment with nothing but what somebody had to say about it.
+    ---
+    ---The same record a photograph makes with the picture left out, written by the same log
+    ---and offered by the same prompt: a memory is `capture` without the shutter. That is the
+    ---whole design and it is worth being explicit about, because the alternative — a second
+    ---capture path, a second prompt and a second store for text-without-an-image — is two of
+    ---everything to keep in step, which is the drift `ns.segmentSchema` exists to prevent for
+    ---event lists.
+    ---
+    ---Two ways in, and they differ only in where the sentence comes from. Given text, the
+    ---memory is complete the moment it is written and no toast appears; given nothing, the
+    ---entry is filed against this instant and the prompt offers the box, which is what makes
+    ---`/chronie note` usable while the thing worth remembering is still happening.
+    ---
+    ---The moment, the map and the segment are stamped when this is called rather than when
+    ---the sentence is finished, and that is the point of filing first: the entry belongs to
+    ---where the player was standing when they decided to write it, not to wherever they
+    ---happen to be twenty seconds later.
+    ---@param text string? What the player already typed, when they typed it up front.
+    ---@return EntryRecord? entry nil when nothing was written down.
+    local function remember(text)
+        local note = ns.entryText(text)
+
+        local entry = entryLog.record()
+        if not entry then
+            return nil
+        end
+        -- The same reason a capture does this: an evening spent standing somewhere writing
+        -- notes leaves every other counter at rest, and the tracker drops a segment that saw
+        -- nothing — taking the segment the memory links to down with it.
+        tally.entry()
+
+        if note then
+            entryLog.annotate(entry, note)
+            return entry
+        end
+
+        -- Refused because somebody is mid-sentence on an earlier entry. There is no box to
+        -- put this one in and no text to keep it alive, so it goes back out again rather than
+        -- sitting in the file forever as a memory of nothing.
+        if not entryPrompt.offer(entry) then
+            entryLog.discard(entry)
+            return nil
+        end
+        -- Opened focused, which nothing else in the addon does. The rule the toast is built
+        -- around is that it never takes keyboard focus *on its own*, because a box that
+        -- focuses itself behind a screenshot swallows every keybind the player has mid-pull.
+        -- Asking for a memory by name is the deliberate act that rule makes room for: there
+        -- is no picture here, the box is the entire reason the command was typed, and the
+        -- player's hands were already in a chat box a moment ago. Making them go and find the
+        -- toast to click it would be a worse feature, not a safer one.
+        entryToast.engage()
         return entry
     end
 
@@ -486,7 +549,8 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /chronie locks | results | segments | currency | report | log | events")
+            logger.info("usage: /chronie locks | results | segments | currency | report | log "
+                .. "| events | note [text]")
         end,
     })
     ---Names every event this client build refused, so a wrong or since-renamed event name
@@ -547,6 +611,20 @@ function ns.main(env)
     end)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
+    end)
+    -- The one way into a memory, and a slash command rather than a key on purpose. Chronie
+    -- binds none (see the note at the foot of chronie.toc), and the chat box is somewhere a
+    -- player can already type a sentence without a frame of Chronie's having to steal focus
+    -- to let them — which is the failure the whole prompt was specified around.
+    --
+    -- `/chronie note` on its own is the same offer a screenshot gets: the moment is filed now
+    -- and the toast waits to be clicked. `/chronie note <text>` is the impatient form, done
+    -- in one line. Neither says anything back on success, because the toast or the memory
+    -- itself is the acknowledgement; the only thing worth a word is having written nothing.
+    router.add("note", function(argument)
+        if not remember(argument) then
+            logger.info("nothing was written down — try /chronie note <what happened>.")
+        end
     end)
     -- Asks the client rather than repeating what login decided, so this stays true after
     -- somebody has changed either switch by hand since.
@@ -892,6 +970,7 @@ function ns.main(env)
         entryLog = entryLog,
         combatLogging = combatLogging,
         capture = capture,
+        remember = remember,
         captureTriggers = captureTriggers,
         screenshotWatch = screenshotWatch,
         entryPrompt = entryPrompt,

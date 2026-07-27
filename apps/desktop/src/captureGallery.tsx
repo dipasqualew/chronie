@@ -15,11 +15,10 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
-  captureFacts, captureSummary, captureTip, captureTitle, capturedMoments, deleteWarning,
-  missingReason, noteChanged, thumbnailIds,
+  captureFacts, captureLabel, capturePlaceholder, captureSummary, captureTip, captureTitle,
+  capturedMoments, deleteWarning, missingReason, noteChanged, thumbnailIds,
 } from "./captures";
 import type { CaptureAlbum, CapturedMoment } from "./captures";
-import { clock } from "./format";
 import type { CaptureImagePayload, DashboardPayload, Segment } from "./types";
 
 /** Everything the gallery needs a backend for. Injected, so it is drivable without one. */
@@ -124,13 +123,17 @@ function CaptureTile({ moment, thumbnail, onOpen }: TileProps): ReactNode {
   return (
     <button
       type="button" className="capture-tile" onClick={onOpen}
-      aria-label={`Open the screenshot from ${segment.instance} at ${clock(capture.at)}`}
+      aria-label={captureLabel(moment)}
       data-tip={captureTip(moment)}
     >
-      <span className="capture-thumb" data-state={missing ? "missing" : "stored"}>
+      {/* The row's own three states rather than a has-picture boolean: a note took no picture
+          on purpose and must not be drawn as a screenshot that went astray. */}
+      <span className="capture-thumb" data-state={capture.imageState}>
         {thumbnail
           ? <img src={thumbnail} alt="" />
-          : <span className="capture-placeholder" aria-hidden="true">{missing ? "🚫" : "🖼️"}</span>}
+          : <span className="capture-placeholder" aria-hidden="true">
+            {capturePlaceholder(capture)}
+          </span>}
       </span>
       <span className="capture-caption">
         <span className="capture-when">{captureTitle(moment)}</span>
