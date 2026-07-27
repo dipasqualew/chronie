@@ -915,7 +915,13 @@ const mockDesktop: E2EMock = {
         achievements: [],
         levelUps: [],
         mounts: [],
-        pets: [{ id: 12, name: "Mossling", at: NIGHT_BEFORE + 800 }],
+        // The same critter twice, which is the shape only a battle pet can take: the
+        // collection grew by one and the second catch is another of something already
+        // held. A card that counted two would be reporting a collection that did not move.
+        pets: [
+          { id: 12, name: "Mossling", at: NIGHT_BEFORE + 800, speciesFirst: true },
+          { id: 12, name: "Mossling", at: NIGHT_BEFORE + 820, speciesFirst: false },
+        ],
         quests: [],
         toys: [{ id: 13, name: "Pocket Orrery", at: NIGHT_BEFORE + 850 }],
         housingItems: [{ id: 14, name: "Carved Reading Chair", at: NIGHT_BEFORE + 860, warbandFirst: true }],
@@ -1267,6 +1273,18 @@ const timeline = (page: Page): Locator => page.locator("#timeline");
 const sessions = (page: Page): Locator => page.locator("#timeline .session");
 
 /**
+ * Who played that evening, as the row of class circles.
+ *
+ * Scoped to the cast rather than to every named image on the card: the running totals are
+ * named marks too, and a card that earned gold and reputation would otherwise report a cast
+ * of five for an evening two characters played.
+ */
+const cast = (session: Locator): Locator => session.locator(".session-cast").getByRole("img");
+
+/** The evening's activities, which are the first thing a card says. */
+const activities = (session: Locator): Locator => session.locator(".act-roll").getByRole("button");
+
+/**
  * The colour each of a set of elements is ringed in, as the browser resolved it.
  *
  * Computed rather than read off the markup on purpose: a class colour reaches the screen
@@ -1446,16 +1464,16 @@ test("stitches segments into play sessions and leads with what happened", async 
   });
 
   await test.step("the cast is named where a screen reader can reach it", async () => {
-    const cast = sessions(page).first().getByRole("img");
-    await expect(cast).toHaveCount(2);
-    await expect(cast.first()).toHaveAttribute("aria-label", /Aster-Vale, Mage · level 12/);
+    const played = cast(sessions(page).first());
+    await expect(played).toHaveCount(2);
+    await expect(played.first()).toHaveAttribute("aria-label", /Aster-Vale, Mage · level 12/);
   });
 
   // The circle is the only thing on a session card that says who played at a glance, and it
   // says it in the colour the game uses. A ring drawn in the fallback grey is the failure
   // this catches: everyone the same colour is the same as nobody named.
   await test.step("each character is drawn in their own class colour", async () => {
-    await expect(borderColours(sessions(page).first().getByRole("img")))
+    await expect(borderColours(cast(sessions(page).first())))
       .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
   });
 
@@ -1468,10 +1486,10 @@ test("stitches segments into play sessions and leads with what happened", async 
   // thirteen, and this covers the only thing they cannot, which is that the page arrives
   // with the colours still attached to it.
   await test.step("and filled with it, not merely ringed in it", async () => {
-    const cast = sessions(page).first().getByRole("img");
+    const played = cast(sessions(page).first());
 
-    await expect(fillColours(cast)).resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
-    await expect(inkColours(cast)).resolves.toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
+    await expect(fillColours(played)).resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+    await expect(inkColours(played)).resolves.toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
   });
 
   // Filling the circles cost them the ring that used to be their outer edge: they now wear
@@ -1479,7 +1497,7 @@ test("stitches segments into play sessions and leads with what happened", async 
   // to without them then swallowed every initial but the last — "MAGE, DRUID, PRIEST, ROGUE"
   // came out as "M. DI PI RO". So the stacking is held to what it is for: a cast that reads.
   await test.step("and stacked close enough to read as one cast, not so close as to bury it", async () => {
-    const covered = await overlapFractions(sessions(page).first().getByRole("img"));
+    const covered = await overlapFractions(cast(sessions(page).first()));
 
     expect(covered.length).toBeGreaterThan(0);
     for (const fraction of covered) {
@@ -1496,12 +1514,30 @@ test("stitches segments into play sessions and leads with what happened", async 
     await expect(first).toContainText("52m elapsed");
   });
 
-  await test.step("the achievements lead and the running totals follow", async () => {
+  // What somebody did leads the card; what it earned them follows as summaries; and the
+  // running numbers, which are context rather than news, are marks with the figures inside
+  // them. A currency written out in full on the card is the state this replaced.
+  await test.step("what was done leads, and what it earned follows", async () => {
     const first = sessions(page).first();
+    const done = activities(first);
+
+    await expect(done).toHaveCount(1);
+    await expect(done.first()).toContainText("Mythic+ run");
+    await expect(done.first()).toContainText("+14 · Glass Caverns · timed");
+
     await expect(first).toContainText("2 achievements");
     await expect(first).toContainText("Clockwork Glider");
-    await expect(first).toContainText("Glass Token");
-    await expect(first).toContainText("3g 29s");
+    await expect(first).not.toContainText("Glass Token");
+  });
+
+  // Every figure the strip used to write out, in the one hover per kind that replaced it.
+  await test.step("the running numbers are marks with the figures in the hover", async () => {
+    const totals = sessions(page).first().locator(".tally");
+
+    await expect(totals).toHaveCount(3);
+    await expect(totals.first()).toHaveAttribute("aria-label", "Gold: 3g 29s");
+    await expect(sessions(page).first().locator(".tally-currency"))
+      .toHaveAttribute("aria-label", "Currency: Warband Chit +100, Glass Token +4, Rustward Scrip +2");
   });
 
   // Two achievements and two characters' levelling that evening, so the card says how much
@@ -1511,6 +1547,15 @@ test("stitches segments into play sessions and leads with what happened", async 
     await expect(first).toContainText("2 levels");
     await expect(first).not.toContainText("Into the Light");
     await expect(first).not.toContainText("Level 12");
+  });
+
+  // The night before caught the same critter twice. A pet is the one collectible a player
+  // can hold several of, so only the catch that grew the collection is worth a line — "2
+  // pets" would be reporting a collection that moved by one.
+  await test.step("a pet caught twice counts once", async () => {
+    const before = sessions(page).nth(1);
+    await expect(before).toContainText("Mossling");
+    await expect(before).not.toContainText("2 pets");
   });
 });
 
@@ -1581,6 +1626,15 @@ test("summarises each segment the same way, once the session is opened", async (
 });
 
 test("digs from a session down into a single segment and back out again", async ({ page, detail }) => {
+  // The shortest way down there, and the one the card is arranged around: the evening's
+  // activities are the first thing on it, and each is the way into the segment it happened
+  // in — where the fight-by-fight, the pictures and the correction all live.
+  await test.step("an activity on the card goes straight to the run it was", async () => {
+    await activities(sessions(page).first()).first().click();
+    await expect(detail.title()).toHaveText("Glass Caverns");
+    await detail.close();
+  });
+
   await sessions(page).first().getByRole("button", { name: "2 segments" }).click();
 
   await detail.openFromTimeline("Aster-Vale", "Glass Caverns");
@@ -1847,8 +1901,14 @@ test("shows an evening's screenshots, and lets one be annotated or deleted", asy
 test("shows what happened to an equipment set, down to the slot", async ({ page, detail }) => {
   // Two slots moved: one item was replaced by a better one, and one was cleared outright.
   // The total falls because clearing a slot really does cost the set everything it held.
+  //
+  // Saving a set is housekeeping, so on the card it is its icon and nothing more — but the
+  // sentence it gave up is still the name a screen reader reads and still the hover, which
+  // is the whole bargain that made drawing it quietly acceptable.
   const chip = sessions(page).first().getByRole("button", { name: /Raid updated/ });
-  await expect(chip).toContainText("2 slots, −604 ilvl");
+  await expect(chip).toHaveText("🎽");
+  await expect(chip).toHaveAttribute("data-tip", /2 slots, −604 ilvl/);
+  await expect(chip).toHaveAttribute("aria-label", /2 slots, −604 ilvl/);
 
   await chip.click();
   await expect(detail.title()).toHaveText("Glass Caverns");
@@ -2676,4 +2736,5 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
       .toContainText("Replaced this history with Study desktop's: 1204 segments");
   });
 });
+
 

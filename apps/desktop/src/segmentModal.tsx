@@ -212,13 +212,18 @@ function Reputation(
  * belongs to the character rather than to this hour of its life. A segment from March shown
  * beside an unqualified balance would read as though the balance were March's, so the balance
  * says "now" and carries the age of the reading behind it.
+ *
+ * What the loot was worth used to sit on the first line and no longer does. It is a vendor
+ * price for things mostly sold or disenchanted rather than kept, it does not add up to the
+ * movement beside it, and a third number that agrees with neither of the other two is worse
+ * than no number at all. The ledger on the details view still carries it.
  */
 function Gold(
   { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
 ): ReactNode {
   const account = holdings?.gold;
   const held = account?.characters.find((holder) => holder.character === segment.character);
-  if (!segment.goldDiff && !segment.lootValue && !held) return null;
+  if (!segment.goldDiff && !held) return null;
   const who = segment.character.split("-")[0] || segment.character;
   return (
     <Section title="Gold">
@@ -226,7 +231,7 @@ function Gold(
         <li>
           💰 <span className={isLoss(segment.goldDiff) ? "loss" : "gold"}>
             {signedGold(segment.goldDiff)}
-          </span> <span className="muted">over the segment · {gold(segment.lootValue)} looted</span>
+          </span> <span className="muted">over the segment</span>
         </li>
         {held ? (
           <li>

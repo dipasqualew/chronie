@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { SESSION_GAP_SECONDS, buildSessions, charactersIn, highlights } from "./sessions";
+import {
+  SESSION_GAP_SECONDS, activitiesIn, buildSessions, charactersIn, highlights,
+} from "./sessions";
 import type { Session } from "./sessions";
-import type { Segment } from "./types";
+import type { Activity, Segment } from "./types";
 
 const HOUR = 3600;
 const BASE = 1_785_000_000;
@@ -135,6 +137,64 @@ describe("charactersIn", () => {
     expect(cast.map((entry) => entry.name)).toEqual(["Aster-Vale", "Brin-Hearth"]);
     expect(cast[0]).toMatchObject({ seconds: 1500, segmentCount: 2, level: 12, classFile: "MAGE" });
     expect(cast[0].places).toEqual(["Glass Caverns", "Copperwood"]);
+  });
+});
+
+describe("activitiesIn", () => {
+  const key = (level: number, dungeon: string): Activity => ({
+    id: level,
+    kind: "mythic_plus",
+    source: "inferred",
+    confidence: 1,
+    metadata: { keystoneLevel: level, dungeon },
+  });
+
+  it("lists what was done in the order it was done, whatever order the segments arrived in", () => {
+    const done = activitiesIn([
+      segment({ startedAt: BASE + 700, activities: [key(14, "Glass Caverns")] }),
+      segment({ startedAt: BASE, activities: [key(9, "Copperwood Depths")] }),
+    ]);
+
+    expect(done.map((entry) => entry.activity.metadata.keystoneLevel)).toEqual([9, 14]);
+  });
+
+  // Four keys in an evening is four keys. This is the one thing on a session card that is
+  // never folded into a count, because the count would throw away every level and dungeon
+  // that made the four of them different runs.
+  it("keeps every one of several runs of the same kind", () => {
+    const done = activitiesIn([
+      segment({ activities: [key(14, "Glass Caverns"), key(15, "Copperwood Depths")] }),
+    ]);
+
+    expect(done).toHaveLength(2);
+  });
+
+  it("carries the segment, the character and the class each one belongs to", () => {
+    const only = segment({
+      character: "Brin-Hearth", classFile: "DRUID", instance: "Copperwood Depths",
+      activities: [key(9, "Copperwood Depths")],
+    });
+
+    expect(activitiesIn([only])[0]).toMatchObject({
+      segmentId: only.segmentId,
+      character: "Brin-Hearth",
+      classFile: "DRUID",
+      instance: "Copperwood Depths",
+      at: only.startedAt,
+    });
+  });
+
+  it("has nothing to list for an evening nobody labelled", () => {
+    expect(activitiesIn([segment()])).toEqual([]);
+  });
+
+  it("hangs the evening's activities off the session itself", () => {
+    const [session] = buildSessions([
+      segment({ startedAt: BASE, activities: [key(14, "Glass Caverns")] }),
+      segment({ startedAt: BASE + 700, activities: [key(9, "Copperwood Depths")] }),
+    ]);
+
+    expect(session.activities).toHaveLength(2);
   });
 });
 
@@ -366,6 +426,64 @@ describe("highlights", () => {
     });
   });
 
+  // A battle pet is the one collectible a player can hold several of, so a catch is only
+  // news when the collection actually grew by it.
+  describe("pets", () => {
+    it("counts a pet caught for the first time as a collection growing", () => {
+      const [session] = buildSessions([
+        segment({ pets: [{ id: 456, name: "Darkmoon Rabbit", speciesFirst: true }] }),
+      ]);
+
+      expect(session.highlights.find((entry) => entry.kind === "pet")).toMatchObject({
+        label: "Darkmoon Rabbit",
+      });
+    });
+
+    it("says nothing about another of a species already owned", () => {
+      const [session] = buildSessions([
+        segment({ pets: [{ id: 456, name: "Darkmoon Rabbit", speciesFirst: false }] }),
+      ]);
+
+      expect(kinds(session)).not.toContain("pet");
+    });
+
+    it("counts only the new ones out of an evening of catching", () => {
+      const [session] = buildSessions([
+        segment({
+          pets: [
+            { id: 456, name: "Darkmoon Rabbit", speciesFirst: true },
+            { id: 456, name: "Darkmoon Rabbit", speciesFirst: false },
+            { id: 789, name: "Mossling", speciesFirst: true },
+          ],
+        }),
+      ]);
+
+      expect(session.highlights.find((entry) => entry.kind === "pet")).toMatchObject({
+        label: "2 pets",
+      });
+    });
+
+    // A catch from before the addon started asking is not a duplicate, it is unknown — and
+    // dropping it would hide a pet that may well have been the first of its species.
+    it("keeps a catch nothing could say either way about", () => {
+      const [session] = buildSessions([
+        segment({ pets: [{ id: 456, name: "Darkmoon Rabbit" }] }),
+      ]);
+
+      expect(session.highlights.find((entry) => entry.kind === "pet")).toMatchObject({
+        label: "Darkmoon Rabbit",
+      });
+    });
+  });
+
+  // A vendor price for things mostly sold or disenchanted, agreeing with neither the wallet
+  // beside it nor anything a player decided. The wallet is the number that means something.
+  it("says nothing about what the loot was worth", () => {
+    const [session] = buildSessions([segment({ lootValue: 120_000, goldDiff: 400 })]);
+
+    expect(kinds(session)).toEqual(["gold"]);
+  });
+
   it("offers the segment a milestone came from so it can be opened", () => {
     const only = segment({ mounts: [{ id: 11, name: "Clockwork Glider" }] });
     const [session] = buildSessions([only]);
@@ -398,7 +516,7 @@ describe("highlights", () => {
 
   it("gives every highlight an icon and a family to draw it in", () => {
     const [session] = buildSessions([
-      segment({ lootValue: 500, achievements: [{ id: 1, name: "Something" }] }),
+      segment({ goldDiff: 500, achievements: [{ id: 1, name: "Something" }] }),
     ]);
 
     expect(session.highlights.every((entry) => entry.icon && entry.family)).toBe(true);
