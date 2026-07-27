@@ -434,6 +434,11 @@
     border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px;
     background: var(--surface-2); display: flex; flex-direction: column; gap: 8px;
   }
+  /* An opened set holds its own contents and stops being a tile on the grid: it runs the
+     full width so its rows are readable, and the sets after it close up around it. */
+  .mog-card[data-open="true"] {
+    grid-column: 1 / -1; border-color: var(--series-1); background: var(--surface-1);
+  }
   .mog-card h4 {
     margin: 0; font-size: 13.5px; font-weight: 600; line-height: 1.35;
     /* Set names run long and the cards have to stay on a grid, so let them wrap twice. */
@@ -453,6 +458,69 @@
     margin-top: auto; font-size: 12px; color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
   }
+  .mog-contents { border-top: 1px solid var(--border); padding-top: 8px; }
+  .mog-contents-head {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+  }
+  .mog-wear-all {
+    margin-left: auto; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
+    padding: 3px 9px; cursor: pointer;
+  }
+  .mog-wear-all:hover { border-color: var(--series-1); }
+
+  /* The two halves that do not move: the sets are scrolled through and the character is not.
+     Sticky rather than fixed so the panel scrolls with the page's own header and then stays,
+     which is what "on screen at all times" means once the window is short. */
+  .mog-layout {
+    display: grid; gap: 12px; align-items: start;
+    grid-template-columns: minmax(0, 1fr) 330px;
+  }
+  .mog-browser { min-width: 0; }
+  .outfit {
+    position: sticky; top: 12px;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1);
+    display: flex; flex-direction: column; gap: 10px; padding: 12px;
+    max-height: calc(100vh - 24px); overflow: auto;
+  }
+  /* A window narrow enough that two columns would squeeze both puts the character above the
+     sets rather than beside them, and she stays at the top of the scroll. */
+  @media (max-width: 900px) {
+    .mog-layout { grid-template-columns: minmax(0, 1fr); }
+    .outfit { position: static; max-height: none; }
+  }
+  /* The stage keeps its height whatever the pane is showing, so a body arriving does not make
+     the list under it jump. */
+  .outfit-preview { display: grid; justify-items: center; gap: 6px; }
+  .outfit-stage { width: 100%; height: 300px; }
+  .outfit-stage canvas { display: block; width: 100%; height: 100%; }
+  .outfit-preview[data-state="empty"] .outfit-stage,
+  .outfit-preview[data-state="loading"] .outfit-stage { visibility: hidden; }
+  .outfit-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .outfit-head h3 {
+    margin: 0; font-size: 12px; font-weight: 650; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--text-secondary);
+  }
+  .outfit-clear {
+    margin-left: auto; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
+    padding: 3px 8px; cursor: pointer;
+  }
+  .outfit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+  .outfit-slot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 6px; border-radius: 8px; background: var(--surface-2);
+  }
+  .outfit-where { flex: none; min-width: 74px; text-align: center; }
+  .outfit-what { display: grid; min-width: 0; line-height: 1.3; }
+  .outfit-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .outfit-what .muted { font-size: 11.5px; }
+  .outfit-off {
+    margin-left: auto; flex: none; border: 0; background: none; padding: 2px 4px;
+    color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .outfit-off:hover { color: var(--series-1); text-decoration: underline; }
+  .outfit-empty { margin: 0; font-size: 12px; }
 
   /* ---------- setup ---------- */
 
@@ -616,14 +684,13 @@
      every row; the two columns already read as before and after. */
   .equipset-now::before { content: "→ "; color: var(--text-secondary); }
 
-  #transmog-detail { width: min(560px, 94vw); max-height: 86vh; }
-  #transmog-detail[open] { display: flex; flex-direction: column; }
   .mog-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
   .mog-item {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 7px 8px; border-radius: 8px;
   }
   .mog-item:hover { background: var(--surface-2); }
+  .mog-item[data-worn="true"] { background: var(--surface-2); }
   .mog-item .badge { flex: none; min-width: 74px; text-align: center; }
   .mog-item a { color: var(--series-1); }
   /* The frame is drawn before the picture is decoded, and stays empty for the appearances
@@ -637,8 +704,8 @@
     /* Icons are stored at 64 pixels and shown at half that, which bilinear scaling suits. */
     object-fit: cover;
   }
-  /* The picture and the slot are one button: it is what takes that piece off the character
-     above, or puts it back. Pressed means worn, which is how every row of a set opens. */
+  /* The picture and the slot are one button: it is what puts that piece on the character
+     beside it, or takes it off again. Pressed means worn. */
   .mog-pick {
     display: flex; align-items: center; gap: 8px; flex: none;
     padding: 2px; margin: 0; border: 0; border-radius: 8px; background: none; cursor: pointer;
@@ -648,14 +715,6 @@
      the set's own count includes it — and only the toggle is out of reach. */
   .mog-pick:disabled { cursor: default; opacity: 0.55; }
 
-  /* The pane the set is worn in. It keeps its height whatever it is showing, so toggling a
-     row does not make the rows below jump about. */
-  .mog-preview {
-    flex: none; display: grid; justify-items: center; gap: 6px;
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
-  }
-  .mog-stage { width: 100%; height: 240px; }
-  .mog-stage canvas { display: block; width: 100%; height: 100%; }
   .mog-note { text-align: center; margin: 0; }
 
   /* ---------- screenshots ---------- */

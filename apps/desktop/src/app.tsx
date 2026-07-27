@@ -29,10 +29,9 @@ import { buildSessions } from "./sessions";
 import { Setup } from "./setup";
 import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
-import { TransmogDetail } from "./transmogDetail";
 import { TransmogView } from "./transmogView";
 import type {
-  DashboardPayload, Segment, Settings, TransmogPayload, TransmogSet,
+  DashboardPayload, Segment, Settings, TransmogPayload,
 } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "transmog", "setup"] as const;
@@ -63,7 +62,6 @@ export function App({ payload, settings }: AppProps): ReactNode {
   const [editing, setEditing] = useState<number | null>(null);
   const [transmog, setTransmog] = useState<TransmogPayload | null>(null);
   const [transmogStatus, setTransmogStatus] = useState("");
-  const [openSet, setOpenSet] = useState<TransmogSet | null>(null);
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
@@ -238,7 +236,14 @@ export function App({ payload, settings }: AppProps): ReactNode {
       </section>
 
       <section id="transmog-view" hidden={view !== "transmog"}>
-        <TransmogView payload={transmog} status={transmogStatus} onOpenSet={setOpenSet} />
+        <TransmogView
+          payload={transmog}
+          status={transmogStatus}
+          loadSet={desktop.transmogSetItems}
+          loadIcons={desktop.gameIcons}
+          loadCharacter={desktop.characterModel}
+          loadWorn={desktop.wornSet}
+        />
       </section>
 
       <section id="setup-view" hidden={view !== "setup"}>
@@ -295,15 +300,6 @@ export function App({ payload, settings }: AppProps): ReactNode {
         })}
         onClose={() => setShowing(null)}
         onEditActivities={setEditing}
-      />
-
-      <TransmogDetail
-        set={openSet}
-        onClose={() => setOpenSet(null)}
-        load={desktop.transmogSetItems}
-        loadIcons={desktop.gameIcons}
-        loadCharacter={desktop.characterModel}
-        loadWorn={desktop.wornSet}
       />
 
       <ActivityEditor

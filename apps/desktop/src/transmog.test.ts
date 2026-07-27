@@ -91,6 +91,18 @@ describe("filterSets", () => {
     set({ id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe", classMask: 0x0190, expansionId: 3 }),
     set({ id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe", classMask: 0x0e08, expansionId: 3 }),
   ];
+  /** The same sets with the metadata a search now reads filled in. */
+  const WITH_METADATA = [
+    set({ id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire", expansionId: 5 }),
+    set({
+      id: 203, name: "Emberforge Plate", group: "Emberforge Armory",
+      classMask: 0x0023, expansionId: 3, patchIntroduced: 40001,
+    }),
+    set({
+      id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe",
+      classMask: 0x0190, expansionId: 4,
+    }),
+  ];
   const none = { search: "", expansion: "", klass: "" };
   const ids = (sets: TransmogSet[]): number[] => sets.map((found) => found.id);
 
@@ -119,6 +131,26 @@ describe("filterSets", () => {
   it("applies search, expansion and class together", () => {
     expect(ids(filterSets(SETS, { search: "tideglass", expansion: "3", klass: "9" }))).toEqual([202]);
     expect(filterSets(SETS, { search: "tideglass", expansion: "4", klass: "" })).toEqual([]);
+  });
+
+  // Everything the card itself already shows is searchable, because a reader looking at
+  // "Plate · Cataclysm · Patch 4.0.1" and wanting more like it types one of those words.
+  it.each<[string, string, number[]]>([
+    ["the armour a class mask names", "plate", [203]],
+    ["a class inside a mask", "priest", [201]],
+    ["the expansion", "cataclysm", [203]],
+    ["the patch", "4.0.1", [203]],
+    ["the set's own id", "205", [205]],
+  ])("searches %s", (_what, search, expected) => {
+    expect(ids(filterSets(WITH_METADATA, { ...none, search }))).toEqual(expected);
+  });
+
+  // Word by word rather than as a phrase, so a reader can narrow by two facts at once without
+  // learning what order the metadata happens to be written in.
+  it("takes every word of a search, in any order", () => {
+    expect(ids(filterSets(WITH_METADATA, { ...none, search: "plate cataclysm" }))).toEqual([203]);
+    expect(ids(filterSets(WITH_METADATA, { ...none, search: "cataclysm plate" }))).toEqual([203]);
+    expect(filterSets(WITH_METADATA, { ...none, search: "plate pandaria" })).toEqual([]);
   });
 });
 

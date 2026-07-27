@@ -4,7 +4,7 @@
  * This is the one view that reads the game's own files rather than the addon's history, so it
  * shows what exists rather than what a character has collected. The backend hands over a flat
  * list; everything here is how it gets grouped, filtered and named. The drawing over it is
- * `transmogView.tsx`.
+ * `transmogView.tsx`, and what a reader puts on out of one is `outfit.ts`.
  */
 
 import type { TransmogSet } from "./types";
@@ -71,20 +71,49 @@ export function patchName(packed: number): string {
   return `${major}.${minor}.${patch}`;
 }
 
-/** The sets a filter leaves, in the order the backend already sorted them. */
+/**
+ * Everything about a set a search matches against, as one lowercased string.
+ *
+ * The name and the collection are what a reader types first, and then everything the card
+ * itself already shows them: who it is for, where it came from, and which patch — because a
+ * reader looking at "Plate · Cataclysm · Patch 4.0.1" and wanting more like it types one of
+ * those words, and a search that only reads names sends them hunting for the dropdown that
+ * holds it instead. The id is in there too, which is the one thing a reader has when the game
+ * withholds the name.
+ */
+function searchable(set: TransmogSet): string {
+  return [
+    set.name,
+    set.group,
+    classLabel(set.classMask),
+    ...classNames(set.classMask),
+    expansionName(set.expansionId),
+    patchName(set.patchIntroduced),
+    String(set.id),
+  ].join(" ").toLowerCase();
+}
+
+/**
+ * The sets a filter leaves, in the order the backend already sorted them.
+ *
+ * The search is every word rather than the whole phrase, so "plate cata" finds what neither
+ * word finds on its own — which is how a reader narrows a wardrobe of several thousand sets
+ * without learning what order the metadata happens to be written in.
+ */
 export function filterSets(
   sets: TransmogSet[],
   filters: { search: string; expansion: string; klass: string },
 ): TransmogSet[] {
-  const search = filters.search.trim().toLowerCase();
+  const words = filters.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const expansion = filters.expansion === "" ? null : Number(filters.expansion);
   const klass = filters.klass === "" ? null : Number(filters.klass);
   return sets.filter((set) => {
     if (expansion !== null && set.expansionId !== expansion) return false;
     // A set with no class of its own is for everyone, so it survives a class filter.
     if (klass !== null && set.classMask !== 0 && (set.classMask & (1 << klass)) === 0) return false;
-    if (!search) return true;
-    return set.name.toLowerCase().includes(search) || set.group.toLowerCase().includes(search);
+    if (!words.length) return true;
+    const against = searchable(set);
+    return words.every((word) => against.includes(word));
   });
 }
 

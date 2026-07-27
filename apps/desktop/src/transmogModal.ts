@@ -4,7 +4,8 @@
  * The grid can only count a set's appearances, because that is all `TransmogSetItem` holds.
  * Following one of them to an actual item takes three more of the game's tables, which the
  * backend walks on demand. Everything decidable from what it answers with is decided here;
- * the dialog over it is `transmogDetail.tsx`.
+ * the card that opens on it is in `transmogView.tsx`, and where a row can be worn is
+ * `outfit.ts`.
  *
  * A row is named by the item the appearance belongs to, which comes out of a fifth table the
  * backend reads for it. The game withholds the items of content it has not shipped, like
@@ -80,15 +81,26 @@ export function slotName(displayType: number, inventoryType = 0): string {
 }
 
 /**
- * Whether the character can be shown holding this, which is not the same as it being a weapon.
+ * Which hand holds this, or nothing where the game names none — which is not the same
+ * question as whether it is a weapon.
  *
  * The hand comes out of the same table as the name and is the backend's `worn::held_in` read
  * from the other end: it puts a one-hander on the right hand's attachment, an off-hand on the
  * left's and a shield on the forearm's. Where the game says nothing there is nowhere to put
- * the model, and the window shows it on its own instead.
+ * the model at all.
+ *
+ * The hand is also the *place*, which is what a wardrobe needs and one set did not: a
+ * one-hander and a two-hander are the same hand and cannot both be held, and a shield and an
+ * off-hand are the other one. See `outfit.ts`, which keys the two hands by this.
  */
+export function heldIn(displayType: number, inventoryType: number): "right" | "left" | null {
+  if (!WEAPONRY.has(displayType)) return null;
+  return WORN_IN[inventoryType]?.hand ?? null;
+}
+
+/** Whether the character can be shown holding this. */
 export function isHeld(displayType: number, inventoryType: number): boolean {
-  return WEAPONRY.has(displayType) && (WORN_IN[inventoryType]?.hand ?? null) !== null;
+  return heldIn(displayType, inventoryType) !== null;
 }
 
 /** One appearance as a row reads it, with everything the markup needs already decided. */
