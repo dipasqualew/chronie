@@ -58,6 +58,21 @@ class SegmentDetail {
     return this.dialog.locator(".earned-icon img");
   }
 
+  /** One row per transmog source the segment recorded. */
+  transmogs(): Locator {
+    return this.dialog.locator(".items li");
+  }
+
+  /**
+   * The pictures that have arrived in the item rows, wherever in the modal they are.
+   *
+   * Not an accessibility locator, for the same reason the achievements' are not: the row
+   * names the item beside the picture, so the picture carries no alternative text.
+   */
+  itemIcons(): Locator {
+    return this.dialog.locator(".item-icon img");
+  }
+
   /**
    * The line one gain is written on, found by the thing it is a gain of.
    *
@@ -244,7 +259,8 @@ class TransmogView {
 
   /** The tab loads the game's tables the first time it is opened, and not before. */
   async open(): Promise<void> {
-    await this.page.getByRole("button", { name: "Transmog" }).click();
+    // Exactly, because a session that collected one is a chip that says "transmog" too.
+    await this.page.getByRole("button", { name: "Transmog", exact: true }).click();
     await expect(this.view.getByRole("heading", { name: "Transmog", level: 1 })).toBeVisible();
   }
 
@@ -666,7 +682,10 @@ const mockDesktop: E2EMock = {
         currencyTotal: 2,
         reputationTotal: 50,
         housingXP: 0,
-        transmogs: [],
+        // A second source in the same evening, so the transmog summary counts two and unfolds
+        // into them — and one this install can say nothing about, which is what the name the
+        // addon caught at the time is the fallback for.
+        transmogs: [{ id: 4200, name: "Storm Cloak", at: EVENING + 2200, newAppearance: false }],
         // The other half of the story: gains the client said nothing else about. An
         // item-based currency counted before its first change has no holding to report, and
         // a faction read off a chat line on a character that has never met it has no
@@ -998,6 +1017,28 @@ const mockDesktop: E2EMock = {
       points: 25,
       iconFileDataId: 250001,
       faction: -1,
+    },
+  },
+  // What the game says about the items those segments name — the transmog source collected,
+  // and the two pieces the equipment set swapped. 4200 is deliberately absent: the cloak the
+  // set gave up is an item this install cannot describe, and the row still has to draw with
+  // the name the addon caught.
+  itemDetails: {
+    // The transmog source, which the addon recorded as a number and nothing else: this is the
+    // whole of what the reader ends up seeing about it.
+    101: {
+      id: 101, name: "Wanderer's Mantle", classId: 4, subclassId: 2, inventoryType: 3,
+      quality: 3, requiredLevel: 25, allowableClass: 0xffff, iconFileDataId: 130002,
+    },
+    // The plate helm the set took on, and the one it replaced. The helm is the only item in
+    // the fixture some classes may not wear.
+    4101: {
+      id: 4101, name: "Deepwater Crown", classId: 4, subclassId: 4, inventoryType: 1,
+      quality: 4, requiredLevel: 80, allowableClass: 0b10_0011, iconFileDataId: 130001,
+    },
+    4100: {
+      id: 4100, name: "Tideglass Crown", classId: 4, subclassId: 4, inventoryType: 1,
+      quality: 3, requiredLevel: 80, allowableClass: 0b10_0011, iconFileDataId: 130001,
     },
   },
   // The screenshots Chronie holds, keyed by the row id a tile asks for them by. 13 is absent
@@ -1389,6 +1430,21 @@ test("unfolds a summary into the things it counted, and folds it back up", async
     await expect(levels).toHaveAttribute("aria-expanded", "false");
     await expect(first).not.toContainText("Level 12");
   });
+
+  // The summary the addon could put no name to at all. What it counted is a number, and what
+  // the reader gets when they open it is the piece of gear — read out of the installed game
+  // here on the timeline, the same way it is inside a segment.
+  await test.step("a transmog summary unfolds into the pieces themselves", async () => {
+    await first.getByRole("button", { name: /new appearance/ }).click();
+
+    await expect(first).toContainText("Wanderer's Mantle");
+    await expect(first).not.toContainText("Item 101");
+    // Named by what the row shows rather than by the number underneath it, so the button
+    // reads to a screen reader the way it reads on screen.
+    await expect(first.getByRole("button", {
+      name: /Open the segment Wanderer's Mantle was recorded in/,
+    })).toBeVisible();
+  });
 });
 
 // A segment reads the same way its session does, and clicking it is how its summary comes
@@ -1443,6 +1499,23 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(unknown).toContainText("Quiet Ascent");
     await expect(unknown).toContainText("account first");
     await expect(unknown).not.toContainText("points");
+  });
+
+  // The transmog the addon recorded is a number and nothing else — the client had not loaded
+  // the item when it fired — so everything a reader recognises the piece by is read out of the
+  // installed game after the segment is on screen: what it is called, what colour that name is
+  // written in, what kind of armour it is and where it is worn.
+  await test.step("a transmog source fills in as the piece of gear it is", async () => {
+    const collected = detail.transmogs();
+    await expect(collected).toHaveCount(1);
+    await expect(collected).toContainText("Wanderer's Mantle");
+    await expect(collected).toContainText("Leather");
+    await expect(collected).toContainText("Shoulders");
+    await expect(collected).toContainText("new appearance");
+    // Rare, which is the colour every player reads without being told, and which is an
+    // attribute rather than a style because the packaged window's policy drops inline styles.
+    await expect(detail.linkTo("Wanderer's Mantle")).toHaveAttribute("data-quality", "3");
+    await expect(detail.itemIcons().first()).toBeVisible();
   });
 
   // "+4" and "+25" say what the run paid out and nothing about what that came to. The
@@ -1523,9 +1596,12 @@ test("digs from a session down into a single segment and back out again", async 
   await test.step("a quest and an achievement go out to the reader's own browser", async () => {
     await detail.linkTo("Quest 81").click();
     await detail.linkTo("Into the Light").click();
+    await detail.linkTo("Wanderer's Mantle").click();
     await expect.poll(() => openedUrls(page)).toEqual([
       "https://www.wowhead.com/quest=81",
       "https://www.wowhead.com/achievement=9",
+      // By the id the segment recorded, whatever the game ended up calling the item.
+      "https://www.wowhead.com/item=101",
     ]);
     await expect(detail.title()).toHaveText("Glass Caverns");
     expect(page.url()).toContain("127.0.0.1:4399");
@@ -1674,13 +1750,25 @@ test("shows what happened to an equipment set, down to the slot", async ({ page,
   const slots = change.locator(".equipset-slots li");
   await expect(slots).toHaveCount(2);
   await expect(slots.first()).toContainText("Head");
-  await expect(slots.first()).toContainText("Tideglass Crown (623)");
-  await expect(slots.first()).toContainText("Deepwater Crown (639)");
+  await expect(slots.first()).toContainText("Tideglass Crown");
+  await expect(slots.first()).toContainText("623");
+  await expect(slots.first()).toContainText("Deepwater Crown");
+  await expect(slots.first()).toContainText("639");
+
+  // Both pieces of the slot are drawn as the items they are — the picture and the colour of
+  // the name — rather than as text, which is the same component the transmog rows use.
+  await test.step("and both sides are drawn as the items they are", async () => {
+    await expect(detail.itemIcons()).toHaveCount(3);
+    await expect(detail.linkTo("Deepwater Crown")).toHaveAttribute("data-quality", "4");
+  });
 
   // A slot the edit cleared says what left it and shows nothing arriving, rather than
   // drawing as a row with a blank on both sides.
   await expect(slots.nth(1)).toContainText("Back");
-  await expect(slots.nth(1)).toContainText("Storm Cloak (620)");
+  // The cloak is an item this install cannot describe, which is what an item from a build
+  // newer than the one on disk looks like: the name the addon caught, and no picture.
+  await expect(slots.nth(1)).toContainText("Storm Cloak");
+  await expect(slots.nth(1)).toContainText("620");
 
   await detail.close();
 });

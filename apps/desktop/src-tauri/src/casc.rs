@@ -94,6 +94,12 @@ pub fn achievement_fixture_files() -> DirFiles {
     fixtures("achievements")
 }
 
+/// The fixtures for the item tables, written by `scripts/make-item-fixtures.ts`.
+#[cfg(test)]
+pub fn item_fixture_files() -> DirFiles {
+    fixtures("items")
+}
+
 /* ---------- the real thing ---------- */
 
 /// The 30-byte record CASC writes in front of every BLTE payload inside a `data.NNN`.

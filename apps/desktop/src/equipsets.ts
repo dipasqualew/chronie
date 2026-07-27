@@ -86,36 +86,40 @@ export function equipsetDetail(change: EquipsetChangeEvent): string {
   return `${plural(slots, "slot")}, ${moved > 0 ? "+" : "−"}${Math.abs(moved)} ilvl`;
 }
 
-/** One slot of a change, as a row reads it: what was there, and what is there now. */
+/**
+ * One slot of a change, as a row reads it: what was there, and what is there now.
+ *
+ * The items themselves are ids rather than words. Naming an item — its own name, the picture
+ * beside it, the colour of its quality — is `GameItem`'s business and is the same everywhere
+ * in the app; what belongs to a slot of an equipment set, and to nothing else, is what the
+ * piece was worth.
+ */
 export interface EquipsetSlotLine {
   slot: string;
-  /** What the slot held before, already worded. Empty when it held nothing. */
-  before: string;
-  /** What it holds now. Empty when the change emptied it. */
-  after: string;
-  /** The item currently in the slot, for a link out to it. */
+  /** The item currently in the slot, or null where the change emptied it. */
   itemId: number | null;
   previousItemId: number | null;
+  /** What the piece in the slot is worth, upgrades and all. Empty where nothing said. */
+  level: string;
+  previousLevel: string;
 }
 
 /**
  * How one slot's change reads.
  *
- * An item is named where the client could be asked and numbered where it could not, which
- * is the ordinary shape of this data: saving a set saves what is equipped, so the item that
- * went in was on the character and could be asked its name and its real level. A change only
- * noticed at a later login has the id alone, and the row still says what it knows.
+ * A level arrives where the client could be asked and is absent where it could not, which is
+ * the ordinary shape of this data: saving a set saves what is equipped, so the item that went
+ * in was on the character and could be asked its real level. A change only noticed at a later
+ * login has the id alone, and the row still says what it knows.
  */
 export function equipsetSlotLine(item: EquipsetSlotChange): EquipsetSlotLine {
-  const named = (id?: number | null, name?: string | null, level?: number | null): string => {
-    if (id == null) return "";
-    return `${name || `Item ${id}`}${level == null ? "" : ` (${level})`}`;
-  };
+  const worth = (id?: number | null, level?: number | null): string =>
+    (id == null || level == null ? "" : String(level));
   return {
     slot: slotName(item.slot),
-    before: named(item.previousItemId, item.previousItemName, item.previousItemLevel),
-    after: named(item.itemId, item.itemName, item.itemLevel),
     itemId: item.itemId ?? null,
     previousItemId: item.previousItemId ?? null,
+    level: worth(item.itemId, item.itemLevel),
+    previousLevel: worth(item.previousItemId, item.previousItemLevel),
   };
 }

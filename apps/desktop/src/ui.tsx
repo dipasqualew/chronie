@@ -11,11 +11,14 @@
  * one way on the timeline and another on a character's page would be the same bug twice.
  */
 
+import { useEffect, useReducer } from "react";
 import type { ReactNode } from "react";
 
 import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities";
 import type { PartialActivity } from "./activities";
 import { clock, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
+import { GameItem } from "./item";
+import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
 import type { Highlight, SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
@@ -157,21 +160,49 @@ const panelId = (scope: string, kind: string): string => `hl-${scope}-${kind}`;
  * way back to the segment it was recorded in.
  */
 export function HighlightPanel(
-  { entry, scope, onOpenSegment }:
-  { entry: Highlight; scope: string; onOpenSegment?: (segmentId: number) => void },
+  { entry, scope, items, onOpenSegment }: {
+    entry: Highlight;
+    scope: string;
+    /** What the game says about an item, for the entries that are about one. */
+    items?: ItemBook;
+    onOpenSegment?: (segmentId: number) => void;
+  },
 ): ReactNode {
+  // The book is a cache outside React, so an answer landing changes nothing React would
+  // notice. The rows redraw themselves; this is here for the one thing they cannot — the name
+  // in each button's own label, which has to say what the row ended up showing.
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
+  const named = entry.items.map((item) => item.itemId).filter((id): id is number => !!id);
+  // The whole panel in one request rather than one per row: the rows would each ask for
+  // themselves anyway, and asking here means the answer is already in hand when they draw.
+  const wanted = named.join(",");
+  useEffect(() => items?.learn(
+    wanted ? wanted.split(",").map(Number) : [], redraw,
+  ), [items, wanted]);
+
   return (
     <ul className="hl-panel" id={panelId(scope, entry.kind)}>
       {entry.items.map((item, index) => {
         const meta = [item.detail, item.character, item.at == null ? "" : clock(item.at)].filter(Boolean);
+        // An entry about an item is drawn as one — the picture, the game's own name, the
+        // colour of its quality — and everything else as the label the summary built. The
+        // button around it is what it always was: a way back to the segment, and it is named
+        // by whatever the row ended up showing rather than by the label underneath it.
+        const shown = (item.itemId && items?.detail(item.itemId)?.name) || item.label;
         return (
           <li key={`${item.segmentId}-${item.label}-${index}`}>
             <button
               type="button" className="hl-item"
-              aria-label={`Open the segment ${item.label} was recorded in`}
+              aria-label={`Open the segment ${shown} was recorded in`}
               onClick={() => onOpenSegment?.(item.segmentId)}
             >
-              <span className="hl-item-name">{item.label}</span>
+              <span className="hl-item-name">
+                {items && item.itemId
+                  ? <GameItem
+                    id={item.itemId} name={item.label} book={items} facts={false} link={false}
+                  />
+                  : item.label}
+              </span>
               <span className="hl-item-meta">{meta.join(" · ")}</span>
             </button>
           </li>
@@ -197,6 +228,12 @@ export function TallyItem({ entry }: { entry: Highlight }): ReactNode {
 
 export interface HighlightListProps {
   entries: Highlight[];
+  /**
+   * What the game says about the items the entries name, for the summaries that unfold into
+   * items. Absent where nothing can unfold — a segment row is one button and holds no others
+   * — and the panel then draws the name the addon caught, which is what it always drew.
+   */
+  items?: ItemBook;
   /**
    * Namespaces the ids of any panels drawn, so two sessions on screen do not collide.
    * Required whenever `interactive`, and ignored otherwise.
@@ -241,7 +278,7 @@ export function shownHighlights(
  */
 export function HighlightList(
   {
-    entries, scope = "", milestones: withChips = true, tallies: withTallies = true,
+    entries, items, scope = "", milestones: withChips = true, tallies: withTallies = true,
     expanded = null, interactive = true, onUnfold, onOpenSegment,
   }: HighlightListProps,
 ): ReactNode {
@@ -262,7 +299,9 @@ export function HighlightList(
       </div>
       : null}
     {unfolded
-      ? <HighlightPanel entry={unfolded} scope={scope} onOpenSegment={onOpenSegment} />
+      ? <HighlightPanel
+        entry={unfolded} scope={scope} items={items} onOpenSegment={onOpenSegment}
+      />
       : null}
     {tallies.length
       ? <div className="tally-row">

@@ -153,32 +153,35 @@ describe("equipsetDetail", () => {
 });
 
 describe("equipsetSlotLine", () => {
-  it("names both sides and what each was worth", () => {
+  // The names are not here and are not meant to be: what the item is called is looked up out
+  // of the game's own tables, the same way everywhere in the app. What a slot of an equipment
+  // set says that nothing else does is which two items, and what each was worth.
+  it("says which item is on each side of the change and what each was worth", () => {
     expect(equipsetSlotLine(slot({
       slot: 1,
       itemId: 101, itemLevel: 639, itemName: "Deepwater Crown",
       previousItemId: 100, previousItemLevel: 623, previousItemName: "Tideglass Crown",
     }))).toEqual({
       slot: "Head",
-      before: "Tideglass Crown (623)",
-      after: "Deepwater Crown (639)",
       itemId: 101,
       previousItemId: 100,
+      level: "639",
+      previousLevel: "623",
     });
   });
 
   // The ordinary shape of a change noticed at a later login: the id reached the ledger and
   // nothing else could be asked, because the item was no longer on the character.
-  it("numbers an item it has no name for, and leaves out a level it has none for", () => {
+  it("leaves out a level it has none for", () => {
     const line = equipsetSlotLine(slot({ itemId: 101 }));
 
-    expect(line.after).toBe("Item 101");
+    expect(line).toMatchObject({ itemId: 101, level: "" });
   });
 
   it("leaves the side that holds nothing empty, on either side", () => {
-    expect(equipsetSlotLine(slot({ previousItemId: 100, previousItemName: "Tideglass Crown" })).after)
-      .toBe("");
-    expect(equipsetSlotLine(slot({ itemId: 101, itemName: "Deepwater Crown" })).before)
-      .toBe("");
+    expect(equipsetSlotLine(slot({ previousItemId: 100, previousItemLevel: 623 })))
+      .toMatchObject({ itemId: null, level: "", previousItemId: 100, previousLevel: "623" });
+    expect(equipsetSlotLine(slot({ itemId: 101, itemLevel: 639 })))
+      .toMatchObject({ itemId: 101, level: "639", previousItemId: null, previousLevel: "" });
   });
 });

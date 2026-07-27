@@ -8,6 +8,7 @@ pub mod combatlog;
 pub mod db2;
 pub mod glb;
 pub mod icons;
+pub mod items;
 pub mod logfile;
 pub mod m2;
 pub mod models;
@@ -21,6 +22,7 @@ use achievements::AchievementBook;
 use chrono::Utc;
 use collector::{dashboard as load_dashboard, SyncResult};
 use icons::IconCache;
+use items::ItemBook;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -114,6 +116,10 @@ struct AppState {
     icons: Arc<IconCache>,
     /// The achievements looked up so far, shared for the same reason.
     achievements: Arc<AchievementBook>,
+    /// The items looked up so far, likewise. A separate book from the achievements because
+    /// they are separate tables, and the same bargain: a history names the same item once
+    /// per segment it turned up in, and the read behind it opens `ItemSparse`.
+    items: Arc<ItemBook>,
     /// The newest combat log as the last poll saw it. Kept because one look at a file cannot
     /// tell "being written to" from "left there in March"; two looks thirty seconds apart can.
     combat_log_seen: Mutex<Option<combatlog::LogFile>>,
@@ -231,6 +237,24 @@ async fn achievement_details(ids: Vec<u32>, state: State<'_, AppState>) -> Resul
     if !missing.is_empty() {
         let found =
             read_game_files(&state, move |files| achievements::read(files, &missing)).await?;
+        book.store(found);
+    }
+    Ok(book.answer(&ids))
+}
+
+/// What the game says about the items a window is showing.
+///
+/// The same arrangement as the achievements above, and for the same reason: a segment carries
+/// item ids — the transmog sources a character learned, the pieces an equipment set changed to
+/// hold — and everything a player recognises an item by is in the game's own tables. What it
+/// answers with is numbers rather than words; which subclass of armour is "Leather" is the
+/// window's business.
+#[tauri::command]
+async fn item_details(ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value, String> {
+    let book = Arc::clone(&state.items);
+    let missing = book.missing(&ids);
+    if !missing.is_empty() {
+        let found = read_game_files(&state, move |files| items::read(files, &missing)).await?;
         book.store(found);
     }
     Ok(book.answer(&ids))
@@ -970,6 +994,7 @@ pub fn run() {
                 data_dir,
                 icons: Arc::default(),
                 achievements: Arc::default(),
+                items: Arc::default(),
                 combat_log_seen: Mutex::default(),
                 updater_configured,
             };
@@ -1001,6 +1026,7 @@ pub fn run() {
             character_model,
             worn_set,
             achievement_details,
+            item_details,
             game_icons,
             settings,
             choose_wow_path,

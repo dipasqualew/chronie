@@ -22,6 +22,7 @@ import { Details } from "./details";
 import { duration, plural } from "./format";
 import { createAchievementBook } from "./achievements";
 import { desktop, message } from "./bridge";
+import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
 import { SegmentModal } from "./segmentModal";
 import type { SegmentModalState } from "./segmentModal";
@@ -75,6 +76,15 @@ export function App({ payload, settings }: AppProps): ReactNode {
   // achievements over and over, and each is looked up the first time and never again.
   const achievements = useMemo(() => createAchievementBook({
     load: (ids) => desktop.achievementDetails(ids),
+    loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
+  }), []);
+
+  // And the same for items, which every view that names one asks for itself: a row puts its
+  // own id in the book and the book sends one request for whatever asked in that turn, so a
+  // segment of twenty pieces is one lookup and the second segment naming the same piece is
+  // none. One book for the window, because a wardrobe is the same wardrobe on every screen.
+  const items = useMemo(() => createItemBook({
+    load: (ids) => desktop.itemDetails(ids),
     loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
   }), []);
 
@@ -212,7 +222,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
         </header>
         <div id="timeline">
           <Timeline
-            sessions={sessions} onOpenSegment={openSegment}
+            sessions={sessions} onOpenSegment={openSegment} items={items}
             album={album} captures={captureActions}
           />
         </div>
@@ -223,7 +233,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
           <h1>Characters</h1>
           <div className="sub" id="characters-meta">{rosterMeta}</div>
         </header>
-        <Characters profiles={profiles} onOpenSegment={openSegment} />
+        <Characters profiles={profiles} onOpenSegment={openSegment} items={items} />
       </section>
 
       <section id="details-view" hidden={view !== "details"}>
@@ -290,6 +300,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
       <SegmentModal
         showing={walking}
         achievements={achievements}
+        items={items}
         holdings={payload.holdings}
         album={album}
         captures={captureActions}
