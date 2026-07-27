@@ -1125,9 +1125,13 @@ if CreateFrame then
                 end
                 return amount
             end,
+            -- Both calls, because GetInstanceInfo alone names the continent out in the open
+            -- world. ns.readLocation decides which answer a segment is filed under.
             instanceInfo = function()
-                local name, kind, difficultyId, difficulty = GetInstanceInfo()
-                return { name = name, kind = kind, difficultyId = difficultyId, difficulty = difficulty }
+                return ns.readLocation({
+                    getInstanceInfo = GetInstanceInfo,
+                    getRealZoneText = GetRealZoneText,
+                })
             end,
             -- UnitXPMax reads 0 at the level cap, where "percent of a level" has no meaning
             -- any more. Reporting nil there keeps the tally from dividing by it and from

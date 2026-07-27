@@ -645,6 +645,34 @@ function fake.newMap(options)
     return cMap, { asked = asked }
 end
 
+---A stand-in for the two client calls that name where the player is standing, which
+---disagree with each other out in the open world and have to.
+---
+---`GetInstanceInfo` names the CONTINENT out there — "Northrend" for every zone on it —
+---while `GetRealZoneText` names the zone the player is actually in. Inside an instance the
+---two can differ the other way: the instance is "Utgarde Keep" and the zone around its door
+---is "Howling Fjord". Leaving `zoneText` out, or setting it to `""`, models a loading
+---screen, where the client has no zone to name yet.
+---@param options table? `{ instanceName, kind, difficultyId, difficulty, zoneText }`
+---@return table client `{ getInstanceInfo, getRealZoneText }`
+function fake.newZone(options)
+    options = options or {}
+
+    local client = {}
+
+    -- The real GetInstanceInfo returns several more values after these four; nothing in the
+    -- addon reads them, so the fake stops where the contract does.
+    function client.getInstanceInfo()
+        return options.instanceName, options.kind, options.difficultyId, options.difficulty
+    end
+
+    function client.getRealZoneText()
+        return options.zoneText
+    end
+
+    return client
+end
+
 ---A deterministic stand-in for the global `date`, so expiry strings never depend on
 ---the machine's timezone or locale.
 ---@return fun(format: string, timestamp: integer): string

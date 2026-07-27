@@ -35,6 +35,7 @@ read_globals = {
     "C_Bank",
     "Enum",
     "GetInstanceInfo",
+    "GetRealZoneText",
     "GetItemInfo",
     "C_Item",
     "GetCursorInfo",
