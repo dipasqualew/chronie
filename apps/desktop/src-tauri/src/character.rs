@@ -606,7 +606,7 @@ mod tests {
     fn draws_each_part_of_the_body_once() {
         let body = mesh();
         let geosets = drawn(&body);
-        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 1, 1001, 1301, 501, 2101]);
+        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 1, 1001, 1301, 501, 3201, 3601, 2101]);
 
         // One group, one part — for every group but the hair's, which is group 0 and which
         // the skin shares because the skin is the one geoset with no group of its own.
@@ -616,6 +616,25 @@ mod tests {
         let mut distinct = groups.clone();
         distinct.dedup();
         assert_eq!(groups, distinct, "a group drawn twice is a limb drawn twice");
+    }
+
+    // The head, which is the one part of a body no appearance ever asks for and no rule about
+    // armour ever reaches. Group 32 has no "nothing here" value: `3201` is a scrap at the top
+    // of the neck and the head itself is whichever value the character's own face shape names,
+    // so a body assembled out of its groups' first values wears a hairstyle over a stump. The
+    // ears are the same sentence with the group empty instead — there is no `701` at all — and
+    // the necklace is it inverted: a group whose chosen value is *nothing*, hung with jewellery
+    // by the same rule that loses the head.
+    #[test]
+    fn draws_the_head_and_ears_her_own_customization_names() {
+        let geosets = drawn(&mesh());
+        assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
+        assert!(!geosets.contains(&3201), "and not the scrap beside it: {geosets:?}");
+        assert!(geosets.contains(&702), "she has no ears: {geosets:?}");
+        assert!(!geosets.contains(&3601), "she is wearing jewellery nobody chose: {geosets:?}");
+        // And the hairstyle she was given rather than the first the file happens to hold.
+        assert!(geosets.contains(&2), "{geosets:?}");
+        assert!(!geosets.contains(&1), "{geosets:?}");
     }
 
     // The `level` trap, on the one model where it is not academic. The fixture's skull sits
@@ -757,7 +776,7 @@ mod tests {
         let scene = scene(&STANDARD.decode(encoded).unwrap());
 
         assert_eq!(scene["asset"]["version"], "2.0");
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 10);
+        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 12);
         // One picture: the atlas. The hair asks for a type this composites nothing for, and a
         // part with no picture keeps its geometry.
         assert_eq!(scene["images"].as_array().unwrap().len(), 1);
@@ -775,18 +794,18 @@ mod tests {
         // Sleeves in place of bare arms, a chest in place of the bare torso.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(CHESTPIECE))),
-            vec![0, 802, 1101, 2001, 2701, 1, 1002, 1301, 501, 2101]
+            vec![0, 802, 1101, 2001, 2701, 1, 1002, 1301, 501, 3201, 3601, 2101]
         );
         // The boot itself and the booted feet: two groups from one item, and the feet group is
         // the one whose zero means booted rather than bare.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(BOOTS))),
-            vec![0, 801, 1101, 2002, 2701, 1, 1001, 1301, 502, 2101]
+            vec![0, 801, 1101, 2002, 2701, 1, 1001, 1301, 502, 3201, 3601, 2101]
         );
         // The robe leaves the chest bare and hangs a skirt over the legs instead.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(ROBE))),
-            vec![0, 802, 1101, 2001, 2701, 1, 1001, 1302, 501, 2101]
+            vec![0, 802, 1101, 2001, 2701, 1, 1001, 1302, 501, 3201, 3601, 2101]
         );
     }
 
@@ -906,7 +925,7 @@ mod tests {
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
         let scene = scene(&STANDARD.decode(encoded).unwrap());
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 10);
+        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 12);
         assert_eq!(scene["images"].as_array().unwrap().len(), 1);
     }
 
@@ -990,7 +1009,7 @@ mod tests {
         assert!(!helmed.contains(&2));
         // And nothing else: the helm's own group swaps as any item's does, and every other
         // group is where a bare body left it.
-        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 2101]);
+        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 3201, 3601, 2101]);
     }
 
     // Taking it off puts the hair back, which is the same sentence read the other way: the
@@ -1073,6 +1092,8 @@ mod tests {
                 1002, // the chestpiece
                 1301, // the robe group, which is the one two pieces asked for
                 501,  // no boot
+                3201, // the head
+                3601, // the necklace
                 2101, // the skull
             ]
         );

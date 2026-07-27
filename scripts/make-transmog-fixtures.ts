@@ -46,6 +46,7 @@ const FILE_DATA_ID = {
   chrCustomizationOption: 3384247,
   chrCustomizationElement: 3512765,
   chrCustomizationMaterial: 3459652,
+  chrCustomizationGeoset: 3456171,
   chrModelTextureLayer: 3548976,
 } as const;
 
@@ -788,12 +789,16 @@ const textureFileData: TableSpec = {
         [0, 0, 53002], // painted over it
         [0, 0, 53003], // and so is this
         [0, 0, 53004], // the other swatch's skin, which this app must not reach
+        [0, 0, 53005], // her face, blended over the right half of the same atlas
+        [0, 0, 53006], // the face that goes with the other swatch, which resolves too
+        [0, 0, 53007], // her hair, which is a whole atlas rather than a rectangle of one
+        [0, 0, 53008], // and her eyes, which are another
       ],
       idList: [
         150004, 150002, 150102, 150007, 150005, 150003, 150006,
         151001, 151002, 151003, 151004, 151005, 151006, 151007, 151008, 151009, 151010, 151011,
         151012, 151013,
-        160001, 160002, 160003, 160004,
+        160001, 160002, 160003, 160004, 160005, 160006, 160007, 160008,
       ],
     },
     {
@@ -1010,10 +1015,10 @@ const chrModelTextureLayer: TableSpec = {
   recordSize: 4,
   columns: [
     { storage: Storage.indexed, offsetBits: 0, sizeBits: 3, palette: [1, 6, 19, 20] }, // TextureType
-    { storage: Storage.indexed, offsetBits: 3, sizeBits: 5, palette: [0, 1, 2, 10, 11, 14] }, // Layer
+    { storage: Storage.indexed, offsetBits: 3, sizeBits: 5, palette: [0, 1, 2, 3, 10, 11, 12, 14] }, // Layer
     { storage: Storage.bitpackedSigned, offsetBits: 8, sizeBits: 2 }, // Flags
     { storage: Storage.indexed, offsetBits: 10, sizeBits: 4, palette: [1, 15] }, // BlendMode
-    { storage: Storage.indexed, offsetBits: 14, sizeBits: 4, palette: [-1, 512, 32, 8] }, // SectionMask
+    { storage: Storage.indexed, offsetBits: 14, sizeBits: 4, palette: [-1, 512, 1024, 32, 8] }, // SectionMask
     { storage: Storage.indexed, offsetBits: 18, sizeBits: 2, palette: [-1] }, // SectionMask2
     // Field_9_0_1_34365_006[3], which nothing has ever needed and which sits between the
     // blend modes and the targets — so a reader that skipped it reads a target as a mask.
@@ -1024,7 +1029,7 @@ const chrModelTextureLayer: TableSpec = {
       offsetBits: 22,
       sizeBits: 6,
       arrayCount: 2,
-      palette: [1, 0, 10, 0, 4, 0, 13, 0, 14, 0, 27, 0, 40, 0],
+      palette: [1, 0, 10, 0, 4, 0, 5, 0, 13, 0, 14, 0, 25, 0, 27, 0, 40, 0],
     },
   ],
   sections: [
@@ -1035,16 +1040,21 @@ const chrModelTextureLayer: TableSpec = {
         [1, 0, 0, 1, -1, -1, [0, 0, 0], [1, 0]], // the base skin: the body atlas, copied
         [6, 1, 0, 1, -1, -1, [0, 0, 0], [10, 0]], // hair: copied too, and a different atlas
         [1, 2, 0, 15, 512, -1, [0, 0, 0], [4, 0]], // a layer this choice paints nothing for
+        // The face, blended into section 10 — which shares its rectangle with section 9 and
+        // is the right half of the atlas, where the body's own UVs never reach and the head's
+        // do. A body whose face layer went missing is the creepy one.
+        [1, 3, 0, 15, 1024, -1, [0, 0, 0], [5, 0]],
         // The two halves of the underwear, blended into one rectangle each: section 5, the
         // upper legs, and section 3, the upper torso. Their masks are what says so.
         [1, 10, 0, 15, 32, -1, [0, 0, 0], [13, 0]],
         [1, 11, 0, 15, 8, -1, [0, 0, 0], [14, 0]],
-        [20, 14, 0, 1, -1, -1, [0, 0, 0], [27, 0]], // jewelry: a third atlas, copied as well
+        [19, 12, 0, 1, -1, -1, [0, 0, 0], [25, 0]], // the eyes: a third atlas, copied as well
+        [20, 14, 0, 1, -1, -1, [0, 0, 0], [27, 0]], // jewelry: a fourth, and one with no file
         // Another layout's base layer, which is the one row here that would resolve and be
         // wrong: same shape, same blend mode, a target this app must never paint.
         [1, 0, 0, 1, -1, -1, [0, 0, 0], [40, 0]],
       ],
-      idList: [29, 30, 31, 39, 64, 339, 900029],
+      idList: [29, 30, 31, 34, 39, 64, 338, 339, 900029],
       relationships: [
         [104, 0],
         [104, 1],
@@ -1052,7 +1062,9 @@ const chrModelTextureLayer: TableSpec = {
         [104, 3],
         [104, 4],
         [104, 5],
-        [2, 6],
+        [104, 6],
+        [104, 7],
+        [2, 8],
       ],
     },
   ],
@@ -1096,7 +1108,11 @@ const chrCustomizationElement: TableSpec = {
     {
       key: 0n,
       // Choice, Related, Geoset, SkinnedModel, Material, and then nine columns of nothing.
+      // In id order, which is the order the game keeps them in and not the order they read in.
       rows: [
+        // The hairstyle: a geoset in group 0, which is the group the skin shares.
+        [132, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [133, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // the swatch beside it, another style
         // The choice this app draws, and everything picking it does.
         [85, 0, 0, 0, 823, 0, 0, 0, 0, 0, 0, 0, 0], // the skin itself
         [85, 0, 0, 0, 824, 0, 0, 0, 0, 0, 0, 0, 0], // a layer painted over it
@@ -1108,8 +1124,35 @@ const chrCustomizationElement: TableSpec = {
         // A second swatch of the same option, whose skin is a different picture. Reading the
         // choice column wrong lands here, and it resolves.
         [86, 0, 0, 0, 827, 0, 0, 0, 0, 0, 0, 0, 0],
+
+        // The face, and the whole of why the related column is here: a face is painted per
+        // *skin*, so choosing one face names a material for every swatch of another option
+        // and only the one whose related choice is also chosen applies. Take them all and the
+        // last one wins, which is a face of the wrong colour on a body of the right one.
+        [102, 85, 0, 0, 870, 0, 0, 0, 0, 0, 0, 0, 0],
+        [102, 86, 0, 0, 871, 0, 0, 0, 0, 0, 0, 0, 0],
+        // The hair's colour, which is a picture on an atlas of its own rather than on the
+        // body's — and is what stands between a hairstyle and a white cap.
+        [156, 0, 0, 0, 14968, 0, 0, 0, 0, 0, 0, 0, 0],
+        // Another body's face shape, which is the trap the ChrModel filter exists for: drop
+        // it and group 32 has two owners, and which head this app draws is a row order.
+        [9001, 0, 11351, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        // The eyes' colour, on a third atlas.
+        [4150, 0, 0, 0, 14914, 0, 0, 0, 0, 0, 0, 0, 0],
+        // The necklace, whose first swatch is *no necklace*: a geoset value the body holds
+        // nothing for, which is how the game says a group is off.
+        [4908, 0, 2068, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        // The head itself, and the swatch beside it, which the body also holds.
+        [5059, 0, 11350, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [5060, 0, 11351, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        // The ears, in a group whose values start at 2 — there is no 701 on a real body.
+        [56653, 0, 13292, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       ],
-      idList: [2917, 2918, 2919, 2920, 2921, 2922],
+      idList: [
+        45, 46,
+        2917, 2918, 2919, 2920, 2921, 2922,
+        2964, 2965, 3277, 9002, 18774, 22918, 33059, 33060, 40000,
+      ],
     },
     {
       // Encrypted, so a choice belonging to a body the game has not shipped says nothing.
@@ -1135,7 +1178,8 @@ const chrCustomizationMaterial: TableSpec = {
   flags: 4,
   recordSize: 4,
   columns: [
-    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [1, 13, 14, 20] }, // TextureTargetID
+    // TextureTargetID
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [1, 5, 10, 13, 14, 20, 25] },
     { storage: Storage.bitpackedSigned, offsetBits: 6, sizeBits: 22 }, // MaterialResourcesID
   ],
   sections: [
@@ -1147,8 +1191,12 @@ const chrCustomizationMaterial: TableSpec = {
         [14, 53003], // 825, and so is this
         [20, 53009], // 826, a target whose texture this install does not hold
         [1, 53004], // 827, the *other* swatch's skin — same target, another choice
+        [5, 53005], // 870, the face that goes with the skin this app draws
+        [5, 53006], // 871, the face that goes with the swatch beside it
+        [25, 53008], // 14914, the eyes, on an atlas of their own
+        [10, 53007], // 14968, the hair, on another
       ],
-      idList: [823, 824, 825, 826, 827],
+      idList: [823, 824, 825, 826, 827, 870, 871, 14914, 14968],
     },
     {
       key: 0x4f9c2e18d73b06a5n,
@@ -1159,14 +1207,50 @@ const chrCustomizationMaterial: TableSpec = {
 };
 
 /**
+ * `ChrCustomizationGeoset` — a customization's geoset, as a group and a value rather than an id.
+ *
+ * `GeosetType × 100 + GeosetID` is the number the model uses, which is the same arithmetic an
+ * item's geoset groups get and the same arithmetic a reader can get backwards. Two of the rows
+ * here are the ones worth being right about: the head, whose group has no value 1 to fall back
+ * on, and a necklace whose value is **0** — the game's way of saying a group is switched off,
+ * and a value the body deliberately holds nothing for.
+ */
+const chrCustomizationGeoset: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrCustomizationGeoset,
+  layoutHash: 0x2fd41ca7,
+  tableHash: 0x5c0b93ea,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 4,
+  columns: [
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [0, 7, 21, 32, 36] }, // GeosetType
+    { storage: Storage.indexed, offsetBits: 6, sizeBits: 3, palette: [0, 1, 2, 3] }, // GeosetID
+    { storage: Storage.indexed, offsetBits: 9, sizeBits: 2, palette: [-1] }, // Modifier
+  ],
+  sections: [
+    {
+      key: 0n,
+      rows: [
+        [0, 2, -1], // 45, the hairstyle a bare body wears: group 0, and *not* value 1
+        [0, 1, -1], // 46, the style beside it
+        [36, 0, -1], // 2068, no necklace at all
+        [21, 1, -1], // 2410, the skull the skin choice drives, which is on either way
+        [7, 2, -1], // 13292, the ears — a group whose values start at 2
+        [32, 2, -1], // 11350, the head itself
+        [32, 3, -1], // 11351, the head beside it, which this app must not reach
+      ],
+      idList: [45, 46, 2068, 2410, 11350, 11351, 13292],
+    },
+  ],
+};
+
+/**
  * `ChrCustomizationChoice` and `ChrCustomizationOption` — the swatch and the thing it is a
  * swatch of.
  *
- * Nothing in the app reads either: the choice is hard-coded, and one Human Female is the whole
- * of what this draws. `examples/dump_customization` reads them so that a run against an
- * install can say *whose* skin it just resolved, which is the difference between a chain that
- * works and a chain that works on the wrong body. They are here so that the same run against
- * the fixtures says it too.
+ * These are what say *which* swatch of each option a body opens on, which is the first swatch
+ * by `OrderIndex` — and which options belong to this body at all, out of `ChrModelID`. A
+ * reader that skipped the model would give a Human Female another race's head.
  *
  * Both keep their ids **inside** the row, unlike the three tables above — which is why the
  * option is column 2 here and the material was column 4 there.
@@ -1195,9 +1279,25 @@ const chrCustomizationChoice: TableSpec = {
     {
       key: 0n,
       // Name, ID, Option, Req, VisReq, OrderIndex, UiOrderIndex, Flags, Patch, Sound, Swatch.
+      //
+      // Two swatches of most options, and the second is never the answer: the swatches are
+      // listed second-first here and there, so a reader that took the row order rather than
+      // the order index gets a different face and a different hairstyle.
       rows: [
         ["", 85, 14, 318, 0, 0, 40, 0, 90001, 0, [0, 0]],
         ["", 86, 14, 318, 0, 1, 41, 0, 90001, 0, [0, 0]],
+        ["", 103, 15, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
+        ["", 102, 15, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 133, 16, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
+        ["", 132, 16, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 156, 17, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 4150, 464, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 4908, 510, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 5060, 526, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
+        ["", 5059, 526, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 56653, 8790, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        // The other body's, whose option belongs to a ChrModel this app never draws.
+        ["", 9001, 9000, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
       ],
     },
   ],
@@ -1228,7 +1328,20 @@ const chrCustomizationOption: TableSpec = {
   sections: [
     {
       key: 0n,
-      rows: [["Skin Color", 14, 14, 80, 2, 2, 2, 0, 0, 1, 0, 1, 90001]],
+      // Name, ID, SecondaryID, Flags, ChrModelID, OrderIndex, and then seven of nothing.
+      rows: [
+        ["Face", 15, 15, 80, 2, 1, 2, 0, 0, 1, 0, 1, 90001],
+        ["Skin Color", 14, 14, 80, 2, 2, 2, 0, 0, 1, 0, 1, 90001],
+        ["Hair Style", 16, 16, 80, 2, 3, 2, 0, 0, 1, 0, 1, 90001],
+        ["Hair Color", 17, 17, 80, 2, 4, 2, 0, 0, 1, 0, 1, 90001],
+        ["Eye Color", 464, 464, 80, 2, 5, 2, 0, 0, 1, 0, 1, 90001],
+        ["Necklace", 510, 510, 80, 2, 7, 2, 0, 0, 1, 0, 1, 90001],
+        ["Face Shape", 526, 526, 80, 2, 9, 2, 0, 0, 1, 0, 1, 90001],
+        ["Ears", 8790, 8790, 80, 2, 13, 2, 0, 0, 1, 0, 1, 90001],
+        // Another body's face shape. Every column of it reads, and the only thing wrong with
+        // it is whose it is.
+        ["Face Shape", 9000, 9000, 80, 5, 9, 2, 0, 0, 1, 0, 1, 90001],
+      ],
     },
   ],
 };
@@ -1888,14 +2001,20 @@ const models: ModelSpec[] = [
  *   the reason type 1 has to be told from "not a file": painting hair with the body atlas
  *   would be as wrong as painting it with nothing, and much harder to notice.
  *
- * Nothing here is copied from the game. It is seventeen cubes with the game's own numbering on
- * them.
+ * - **The groups a customization owns rather than an item.** The head, the ears and the
+ *   necklace are not gear and no appearance drives them; what says which variant of each a
+ *   body draws is the character's own customization, and none of the three obeys the value-1
+ *   rule the armour groups do. They are the reason a body can be assembled correctly out of
+ *   items and still have nothing above the neck.
+ *
+ * Nothing here is copied from the game. It is twenty-four cubes with the game's own numbering
+ * on them.
  */
 const characterModel: ModelSpec = {
   fileDataId: 1000764,
   skinFileDataId: 1000765,
   skeletonFileDataId: 1000766,
-  cubes: 19,
+  cubes: 24,
   // Written backwards into the combo list, so combo 2 reaches the skin, combo 1 the hair and
   // combo 0 the cape.
   textures: [
@@ -1946,6 +2065,21 @@ const characterModel: ModelSpec = {
     // is no `1501` beside it, exactly as there is none on the retail body: a bare back is a
     // group with no default in it rather than a default that draws nothing.
     { cube: 18, from: 0, count: 36, material: 1, level: 0, geoset: 1502, combo: 0 },
+    // Group 32, the head. This is the group the value-1 rule cannot reach: `3201` is a scrap
+    // at the top of the neck and the head is `3202`, so a body that draws its groups' first
+    // values draws a hairstyle floating over a stump. Which value is the head is the
+    // character's own face shape and nothing else, which is why it takes a whole table to
+    // find. `3203` is the one beside it, and it is here so that reaching the wrong swatch —
+    // or another body's option — is a different head rather than nothing at all.
+    { cube: 19, from: 0, count: 36, material: 0, level: 0, geoset: 3201, combo: 2 },
+    { cube: 20, from: 0, count: 36, material: 0, level: 0, geoset: 3202, combo: 2 },
+    { cube: 21, from: 0, count: 36, material: 0, level: 0, geoset: 3203, combo: 2 },
+    // Group 7, the ears, whose values start at 2 exactly as the retail body's do: there is no
+    // `701`, so nothing is drawn here at all until a customization asks for something.
+    { cube: 22, from: 0, count: 36, material: 0, level: 0, geoset: 702, combo: 2 },
+    // Group 36, the necklace — a group whose default swatch is *no necklace*, and which the
+    // value-1 rule therefore hangs jewellery on that the character never chose.
+    { cube: 23, from: 0, count: 36, material: 0, level: 0, geoset: 3601, combo: 2 },
   ],
 };
 
@@ -2013,6 +2147,10 @@ function skinTextures(): IconSpec[] {
     [160002, [190, 40, 40, 255]], // target 13: her underwear, over the upper legs
     [160003, [40, 190, 40, 255]], // target 14: the other half of it, over the upper torso
     [160004, [40, 40, 190, 255]], // the *other* swatch's skin, on the same target as the first
+    [160005, [230, 170, 60, 255]], // target 5: her face, over the right half of the atlas
+    [160006, [60, 170, 230, 255]], // the face that goes with the other swatch of the skin
+    [160007, [150, 60, 200, 255]], // target 10: her hair, which is an atlas of its own
+    [160008, [60, 200, 150, 255]], // target 25: and her eyes, which are another
   ];
 
   return painted.map(([fileDataId, colour]) => ({
@@ -2098,6 +2236,7 @@ emit("transmog", {
     chrCustomizationMaterial,
     chrCustomizationChoice,
     chrCustomizationOption,
+    chrCustomizationGeoset,
   ],
   icons,
   raw: [

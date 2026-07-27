@@ -320,7 +320,7 @@ mod tests {
         let files = fixture_files();
         let layers = layers_of(&files).unwrap();
         let numbered: Vec<u32> = layers.iter().map(|layer| layer.target).collect();
-        assert_eq!(numbered, vec![1, 4, 13, 14], "bottom layer first");
+        assert_eq!(numbered, vec![1, 4, 5, 13, 14], "bottom layer first");
     }
 
     // The layer table describes every layout the client has, and another body's rows are the
