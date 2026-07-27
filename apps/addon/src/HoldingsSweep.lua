@@ -3,7 +3,7 @@ local _, ns = ...
 ---Everything one character is holding right now, in the shape `HoldingsStore.record`
 ---already takes off a finished segment.
 ---@class HeldSweep
----@field currencies table[] `{ id, name, total }` per currency the pane lists.
+---@field currencies table[] `{ id, name, total, accountWide }` per currency the pane lists.
 ---@field reputation table[] `{ faction, standing, current, max, rank, system }` per faction.
 
 ---Reads a currency the pane is showing, or nothing when the row is not one.
@@ -13,8 +13,18 @@ local _, ns = ...
 ---`currencyID` of 0. Both are checked rather than either: the flag is what the client
 ---means by it, and the id is what the store is keyed on, so a row without one is unusable
 ---even if the client never called it a header.
+---
+---`isAccountWide` is what says the quantity beside it is the **warband's** pot rather than
+---this character's share of it — the client hands every character on the account the same
+---number through this same call, so nothing downstream can tell the two apart by looking at
+---the number. It is the client's own distinction rather than one invented here: build
+---12.0.5.67823 carries the field on the row and exposes
+---`C_CurrencyInfo.IsAccountWideCurrency(currencyID)` beside it, and keeps
+---`isAccountTransferable` / `IsAccountTransferableCurrency` as a separate pair for the
+---crest-like currencies that stay per-character but can be moved between them at a cost.
+---Those are genuinely each character's own and are summed like anything else.
 ---@param row table?
----@return table? `{ id, name, total }`
+---@return table? `{ id, name, total, accountWide }`
 local function currencyHolding(row)
     if type(row) ~= "table" or row.isHeader then
         return nil
@@ -26,7 +36,13 @@ local function currencyHolding(row)
     -- The balance as it stands, zero included. That is the whole difference between walking
     -- and watching: a character that has spent everything it had must be able to say so, or
     -- the account total goes on counting what it was last seen with.
-    return { id = id, name = row.name, total = row.quantity }
+    --
+    -- The flag is reported as a real boolean rather than only when it is set, because a walk
+    -- reads it off the same row it reads the quantity off and so is a complete answer: a
+    -- currency that stops being shared stops being shared here at the next zoning-in. A
+    -- client build old enough to have no field at all reads as false, which is the truth on
+    -- a build with no warband currencies to be wrong about.
+    return { id = id, name = row.name, total = row.quantity, accountWide = row.isAccountWide == true }
 end
 
 ---Walks the character's currency pane and reports what each row says it is holding.

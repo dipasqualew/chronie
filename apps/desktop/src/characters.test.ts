@@ -165,6 +165,19 @@ describe("buildCharacters against what the account holds", () => {
         total: 400,
         characters: [{ character: "Brin-Hearth", total: 400, at: BASE }],
       },
+      // One pot the whole warband reads: the total is the pot, not the sum of the rows, and
+      // every character's row is the same number seen from a different place.
+      {
+        id: 10,
+        name: "Warband Chit",
+        total: 6_000,
+        accountWide: true,
+        oldest: BASE + 100,
+        characters: [
+          { character: "Aster-Vale", total: 6_000, at: BASE + 100 },
+          { character: "Brin-Hearth", total: 6_000, at: BASE },
+        ],
+      },
     ],
     // What the roster is sitting on: both wallets and the one pot they share, which is added
     // to the account's worth once rather than once per character.
@@ -207,9 +220,20 @@ describe("buildCharacters against what the account holds", () => {
 
   it("gives a character only what they are holding themselves, biggest first", () => {
     expect(profileFor("Aster-Vale").currencies).toEqual([
-      { id: 8, name: "Rustward Scrip", total: 20_000, accountTotal: 20_000, at: BASE + 100 },
-      { id: 7, name: "Glass Token", total: 12_450, accountTotal: 30_000, at: BASE + 100 },
+      { id: 8, name: "Rustward Scrip", total: 20_000, accountTotal: 20_000, at: BASE + 100, accountWide: false },
+      { id: 7, name: "Glass Token", total: 12_450, accountTotal: 30_000, at: BASE + 100, accountWide: false },
+      { id: 10, name: "Warband Chit", total: 6_000, accountTotal: 6_000, at: BASE + 100, accountWide: true },
     ]);
+  });
+
+  // Without the flag the line reads as this character's own 6,000 next to an account total
+  // that happens to match — which is exactly what a share of a pot does not look like.
+  it("says which of them are the warband's one pot rather than the character's own", () => {
+    const chit = profileFor("Brin-Hearth").currencies.find((held) => held.id === 10);
+
+    expect(chit?.accountWide).toBe(true);
+    expect(chit?.total).toBe(6_000);
+    expect(chit?.accountTotal).toBe(6_000);
   });
 
   it("carries the account's total beside the character's own", () => {

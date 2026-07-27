@@ -58,6 +58,52 @@ describe("ns.newHoldingsStore", function()
             assert.equal(1200, db.holdings["Alt-Ravencrest"].currencies[3008].total)
         end)
 
+        it("writes down that a currency is the account's pot rather than the character's", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 1000, accountWide = true } },
+            }))
+
+            assert.same({ name = "Trader's Tender", total = 1000, accountWide = true, at = NOW },
+                db.holdings["Alt-Ravencrest"].currencies[2032])
+        end)
+
+        -- Only the pane walk reads the flag; a gain arrives off an event that never carries
+        -- one. Clearing it on every gain would unshare a currency between two zonings-in.
+        it("keeps the shared flag through a gain that says nothing about it", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 1000, accountWide = true } },
+            }))
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", amount = 50, total = 1050 } },
+            }))
+
+            local held = db.holdings["Alt-Ravencrest"].currencies[2032]
+            assert.equal(1050, held.total)
+            assert.is_true(held.accountWide)
+        end)
+
+        -- A walk reads the flag off the same row it reads the quantity off, so it is a
+        -- complete answer rather than a silence: a currency Blizzard un-shares stops being
+        -- shared here at the next zoning-in rather than staying flagged forever.
+        it("lets a later walk take the shared flag back off again", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 1000, accountWide = true } },
+            }))
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 1000, accountWide = false } },
+            }))
+
+            -- Absent rather than false, because the snapshot is the account's SavedVariables
+            -- and a key per currency per character saying "no" costs a file to say nothing.
+            assert.is_nil(db.holdings["Alt-Ravencrest"].currencies[2032].accountWide)
+        end)
+
         it("keeps a faction the client would not place out of the snapshot", function()
             local store, db = newStore()
 
@@ -271,6 +317,68 @@ describe("ns.newHoldingsStore", function()
             -- The eldest reading, because it is the weakest claim in the sum.
             assert.equal(NOW, rollup.oldest)
             assert.is_table(db.holdings["Main-Ravencrest"])
+        end)
+
+        -- The bug this describes: the client reports a warband currency's shared balance to
+        -- every character that asks, so every character reports the same pot and summing
+        -- them multiplies it by the size of the roster.
+        it("counts the account's shared pot once rather than once per character", function()
+            local store, _, clock = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 2000, accountWide = true } },
+            }))
+            clock.advance(DAY)
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 2000, accountWide = true } },
+            }))
+
+            local rollup = store.currency(2032)
+
+            assert.equal(2000, rollup.total)
+            assert.is_true(rollup.accountWide)
+            -- Every character that read the pot is still listed, because the list is what
+            -- says the number was checked from more than one place.
+            assert.equal(2, #rollup.characters)
+        end)
+
+        -- Two characters read the same pot at different times, so the older reading is not a
+        -- second holding to add on: it is the same holding, out of date. The freshest is the
+        -- one to believe, and it is also the whole claim, so it is what dates the total.
+        it("believes the freshest reading of the shared pot rather than the eldest", function()
+            local store, _, clock = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 2000, accountWide = true } },
+            }))
+            clock.advance(DAY)
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 1500, accountWide = true } },
+            }))
+
+            local rollup = store.currency(2032)
+
+            assert.equal(1500, rollup.total)
+            assert.equal(NOW + DAY, rollup.oldest)
+        end)
+
+        -- Whether a currency is shared is a fact about the currency, not about the character
+        -- that looked. A snapshot written before the flag was ever collected simply has not
+        -- been asked yet, so one character that has been is enough to settle it for all.
+        it("treats a currency as shared once any character has read the flag", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 2000 } },
+            }))
+            store.record("Alt-Ravencrest", summary({
+                currencies = { { id = 2032, name = "Trader's Tender", total = 2000, accountWide = true } },
+            }))
+
+            local rollup = store.currency(2032)
+
+            assert.is_true(rollup.accountWide)
+            assert.equal(2000, rollup.total)
         end)
 
         it("says nothing at all about a currency nobody has reported", function()

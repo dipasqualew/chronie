@@ -247,9 +247,22 @@ function Gold(
  *
  * The eldest reading in the sum is the one named, because it is the weakest claim in it — a
  * total built partly from numbers a month old should not read as though it were all current.
+ *
+ * A warband currency is not a sum and must not be worded as one. "6,000 across 4 characters"
+ * says four people hold some between them; the truth is that there is one pot of 6,000 and
+ * all four are looking at it, which is the difference between having earned it four times and
+ * having earned it once. There is no eldest reading to name either — the one the total came
+ * from is the freshest, and it is the whole claim rather than a term in it.
  */
 function AccountTotal({ held }: { held: AccountCurrency | undefined }): ReactNode {
-  if (!held || held.characters.length < 2) return null;
+  if (!held) return null;
+  if (held.accountWide) {
+    const read = held.oldest ? `, read ${ago(held.oldest)}` : "";
+    return <> <span className="account-total">
+      · {held.total.toLocaleString()} shared across the warband{read}
+    </span></>;
+  }
+  if (held.characters.length < 2) return null;
   const eldest = held.oldest ? `, eldest read ${ago(held.oldest)}` : "";
   return <> <span className="account-total">
     · {held.total.toLocaleString()} across {plural(held.characters.length, "character")}{eldest}

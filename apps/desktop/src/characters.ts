@@ -31,6 +31,13 @@ export interface CharacterCurrency {
   name: string;
   total: number;
   accountTotal: number;
+  /**
+   * True when the two numbers above are the same warband pot rather than a share and a sum.
+   *
+   * Without it the line reads as this character's own balance next to an account total that
+   * happens to match it, which is exactly what a share of a shared pot does not look like.
+   */
+  accountWide: boolean;
   at?: number | null;
 }
 
@@ -181,6 +188,7 @@ function currenciesOf(name: string, holdings?: AccountHoldings): CharacterCurren
         name: currency.name || `Currency ${currency.id}`,
         total: held.total,
         accountTotal: currency.total,
+        accountWide: currency.accountWide === true,
         at: held.at,
       }];
     })

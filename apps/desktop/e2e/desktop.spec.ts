@@ -598,6 +598,19 @@ const mockDesktop: E2EMock = {
           { character: "Aster-Vale", total: 12450, at: EVENING },
           { character: "Brin-Hearth", total: 17550, at: EVENING - 3 * 86400 },
         ],
+      }, {
+        // The warband's one pot: the game hands every character the same balance, so both
+        // rows are that balance seen from somewhere else rather than two holdings, the total
+        // is the freshest of them rather than their sum, and the wording has to say so.
+        id: 10,
+        name: "Warband Chit",
+        total: 6000,
+        accountWide: true,
+        oldest: EVENING,
+        characters: [
+          { character: "Aster-Vale", total: 6000, at: EVENING },
+          { character: "Brin-Hearth", total: 6000, at: EVENING - 3 * 86400 },
+        ],
       }],
       factions: [
         {
@@ -748,7 +761,10 @@ const mockDesktop: E2EMock = {
         // level the faction now sits at with the distance into it. Those are the numbers a
         // gain on its own cannot give — whether there is enough to buy anything, and how far
         // "+25" actually moved the standing.
-        currencies: [{ id: 7, name: "Glass Token", amount: 4, total: 12450 }],
+        currencies: [
+          { id: 7, name: "Glass Token", amount: 4, total: 12450 },
+          { id: 10, name: "Warband Chit", amount: 100, total: 6000 },
+        ],
         reputation: [{
           faction: "Cavern Cartographers", amount: 25,
           standing: "Honored", current: 4200, max: 12000,
@@ -1445,6 +1461,11 @@ test("digs from a session down into a single segment and back out again", async 
   await test.step("a gain says what the whole account has, not only this character", async () => {
     await expect(detail.gainFor("Glass Token")).toContainText("30,000 across 2 characters");
 
+    // The warband's pot must not be worded as a sum. "6,000 across 2 characters" says two
+    // people hold some between them; there is one pot of 6,000 and both are looking at it.
+    await expect(detail.gainFor("Warband Chit")).toContainText("6,000 shared across the warband");
+    await expect(detail.gainFor("Warband Chit")).not.toContainText("across 2 characters");
+
     await expect(detail.gainFor("Cavern Cartographers"))
       .toContainText("Brin-Hearth is further along: Revered");
   });
@@ -1805,6 +1826,11 @@ test("gives every character a page of their own", async ({ page, roster }) => {
     await expect(roster.lineFor("Glass Token")).toContainText("17,550");
     await expect(roster.lineFor("Glass Token")).toContainText("30,000 across the account");
     await expect(roster.lineFor("Deepwater Wardens")).toContainText("furthest on the account");
+
+    // The 6,000 on this line is the account's pot read from here rather than this
+    // character's share of it, and unlabelled it would read as a coincidence that the alt
+    // beside them holds exactly as much.
+    await expect(roster.lineFor("Warband Chit")).toContainText("shared across the warband");
 
     await roster.pick("Aster-Vale");
     await expect(roster.lineFor("Glass Token")).toContainText("12,450");

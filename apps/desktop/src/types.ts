@@ -303,7 +303,17 @@ export interface CurrencyHolder {
 export interface AccountCurrency {
   id: number;
   name?: string | null;
+  /** The wallets added up — or, when `accountWide`, the freshest reading of the one pot. */
   total: number;
+  /**
+   * True when this is the warband's one shared pot rather than a holding per character.
+   *
+   * The game answers every character that asks with the same account-wide balance, so the
+   * rows below are one number reported several times and adding them up would multiply the
+   * pot by the size of the roster. It also changes what the rows *mean* on screen: a
+   * character's line is the account's balance seen from there, not that character's share.
+   */
+  accountWide?: boolean;
   oldest?: number | null;
   characters: CurrencyHolder[];
 }
