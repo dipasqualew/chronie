@@ -111,8 +111,7 @@ fn parse_stamp(date: &str, time: &str) -> Option<Stamp> {
     }
 
     // The offset is glued to the end of the seconds — `20:15:30.123-5` — so it is cut off
-    // before the time is read rather than after, and only after the millisecond point, which
-    // is what keeps the `-` of an offset from being confused with anything else.
+    // before the time is read rather than after.
     let (clock, offset) = split_offset(time);
     let mut parts = clock.split(':');
     let hour = parts.next()?.parse().ok()?;
@@ -158,38 +157,56 @@ fn parse_fraction(text: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// How many digits of fraction the client writes. It writes milliseconds, and it writes all
+/// three of them, which is the only thing that tells a fraction from the offset stuck to it.
+const FRACTION_DIGITS: usize = 3;
+
 /// Cuts a trailing UTC offset off a time, if it has one.
 ///
-/// `-5`, `-05` and `-0500` are all the same offset written three ways, and which one a client
-/// writes is not something to depend on: two digits or fewer are hours, more are hours and
-/// minutes.
+/// There is nothing between the fraction and the offset, and a real 12.0.7 client writes a
+/// positive offset with **no sign at all** — `16:24:38.4081` is 38.408 seconds an hour east of
+/// UTC, not a fraction with a fourth digit. So the two are told apart by width rather than by
+/// looking for a `+` or a `-`: three digits are the milliseconds and everything after them is
+/// the offset, whether or not it announces itself.
+///
+/// A time that stops after its three digits stated no offset, which is the old shape and is
+/// what [`Clock`] answers for.
 fn split_offset(time: &str) -> (&str, Option<i32>) {
     let Some(point) = time.find('.') else {
         return (time, None);
     };
-    let Some(sign) = time[point..].find(['+', '-']).map(|index| index + point) else {
-        return (time, None);
+    let width = time[point + 1..]
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count()
+        .min(FRACTION_DIGITS);
+    let (clock, tail) = time.split_at(point + 1 + width);
+    (clock, parse_offset(tail))
+}
+
+/// Seconds east of UTC, from an offset written any of the ways a client writes one.
+///
+/// `-5`, `-05` and `-0500` are the same offset three ways, and `1` is the fourth: two digits
+/// or fewer are hours, more are hours and minutes, and a missing sign means east.
+fn parse_offset(text: &str) -> Option<i32> {
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
     };
-    let digits = &time[sign + 1..];
     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return (time, None);
+        return None;
     }
     let (hours, minutes) = if digits.len() <= 2 {
-        (digits.parse::<i32>().unwrap_or(0), 0)
+        (digits.parse::<i32>().ok()?, 0)
     } else {
         let split = digits.len() - 2;
         (
-            digits[..split].parse::<i32>().unwrap_or(0),
-            digits[split..].parse::<i32>().unwrap_or(0),
+            digits[..split].parse::<i32>().ok()?,
+            digits[split..].parse::<i32>().ok()?,
         )
     };
     let magnitude = hours * 3600 + minutes * 60;
-    let seconds = if time.as_bytes()[sign] == b'-' {
-        -magnitude
-    } else {
-        magnitude
-    };
-    (&time[..sign], Some(seconds))
+    Some(if negative { -magnitude } else { magnitude })
 }
 
 /// Which zone a stamp that states none was written in.
@@ -397,6 +414,13 @@ impl MapBounds {
     /// The game's world axes are not the map's: world X runs north, world Y runs west, and a
     /// map's own origin is its north-west corner. So the horizontal fraction comes out of the
     /// world's Y and the vertical out of its X, both counting down from the larger edge.
+    ///
+    /// Checked against a real log rather than believed. Terokkar Forest states
+    /// `-1000, -4600, 7083.33, 1683.33`, which is 3600 yards on the X axis and 5400 on the Y —
+    /// and Terokkar's map is the wider-than-tall one, so the width has to be the Y span. The
+    /// points recorded in the Bone Wastes come out at roughly `0.47, 0.67`, which is where
+    /// Auchindoun is; swapping the two axes would put them out in the east of the zone
+    /// instead, and that is the failure this arrangement was most at risk of.
     ///
     /// Deliberately not clamped. A point outside 0..1 means these bounds are not the bounds
     /// this position was recorded under, and rounding that into a corner of the map would
@@ -1044,9 +1068,47 @@ fn advanced_at(event: &str) -> Option<usize> {
     }
 }
 
-/// How many fields an advanced block is, and where the position sits inside it.
-const ADVANCED_FIELDS: usize = 17;
-const POSITION_X: usize = 12;
+/// The fewest fields an advanced block has ever been. A 10.2 client wrote seventeen; a 12.0.7
+/// one writes nineteen, having gained two somewhere between the armour and the power. This is
+/// not what the position is found by — see [`position_at`] — it is only what makes a line long
+/// enough to be worth looking at, and so it is the smaller of the two.
+const ADVANCED_MINIMUM: usize = 17;
+
+/// Where `positionX, positionY, uiMapID, facing` sit inside an advanced block.
+///
+/// Counting to them is the thing that quietly stops being true. The block's first fields are
+/// the same as they have always been, but the ones between the armour and the position have
+/// been added to at least once — a 10.2 client put the position twelve fields into the block
+/// and a 12.0.7 one puts it fourteen — and a parser holding a number reads the map id as a
+/// coordinate the day that changes, which looks like a player standing in a corner rather than
+/// like a bug.
+///
+/// So this looks for the shape instead, which has not moved: two coordinates written with a
+/// decimal point, then a map id, then a facing. Nothing earlier in the block is written with a
+/// decimal point — health, power, attack power and armour are all whole numbers — so the first
+/// place that shape appears is the position.
+fn position_at(parts: &[&str], start: usize) -> Option<usize> {
+    // From two past the start: the block opens with a GUID and its owner's, and neither can be
+    // mistaken for a coordinate, but skipping them costs nothing and says why they are there.
+    (start + 2..parts.len().saturating_sub(3)).find(|index| {
+        decimal(parts[*index])
+            && decimal(parts[index + 1])
+            && stated_or_nil(parts[index + 2])
+            && decimal(parts[index + 3])
+    })
+}
+
+/// A number the client wrote with a decimal point, which is how it writes every coordinate and
+/// no other field of an advanced block.
+fn decimal(field: &str) -> bool {
+    field.contains('.') && number(field).is_some()
+}
+
+/// A whole number, or the `nil` a client writes where it had none — which is what a map id is
+/// on a line recorded somewhere the client could not name.
+fn stated_or_nil(field: &str) -> bool {
+    integer(field).is_some() || field.trim() == "nil"
+}
 
 /// Whether this line was written with advanced logging on.
 ///
@@ -1056,7 +1118,7 @@ const POSITION_X: usize = 12;
 /// with one.
 fn carries_advanced(event: &str, parts: &[&str]) -> bool {
     advanced_at(event).is_some_and(|start| {
-        parts.len() >= start + ADVANCED_FIELDS && is_guid(parts[start].trim())
+        parts.len() >= start + ADVANCED_MINIMUM && is_guid(parts[start].trim())
     })
 }
 
@@ -1085,14 +1147,15 @@ fn read_position(event: &str, parts: &[&str], at: i64) -> Option<Found> {
     if unit_flags & AFFILIATION_MASK != AFFILIATION_MINE || !subject.starts_with("Player-") {
         return None;
     }
+    let position = position_at(parts, start)?;
     Some(Found {
         at,
         guid: subject.to_string(),
         name: name.to_string(),
-        world_x: number(parts[start + POSITION_X])?,
-        world_y: number(parts[start + POSITION_X + 1])?,
-        ui_map_id: integer(parts[start + POSITION_X + 2]),
-        facing: number(parts[start + POSITION_X + 3]),
+        world_x: number(parts[position])?,
+        world_y: number(parts[position + 1])?,
+        ui_map_id: integer(parts[position + 2]),
+        facing: number(parts[position + 3]),
     })
 }
 
