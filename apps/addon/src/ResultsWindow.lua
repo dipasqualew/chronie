@@ -22,13 +22,8 @@ local _, ns = ...
 ---@field openTransmogCollection fun(sourceID: integer)?
 ---@field itemName fun(itemID: integer): string?
 ---@field now fun(): integer? Current time, for saying how old an account-wide figure is.
----@field accountCurrency fun(currencyID: integer): CurrencyRollup? What the whole account
----holds of a currency. Absent, or nil for a currency nobody has reported, leaves the gain
----as this character's own number.
 ---@field accountStanding fun(faction: string): StandingRollup? Where the account as a whole
 ---stands with a faction, so a grind already finished elsewhere says so.
----@field accountGold fun(): GoldRollup? What every character and the warband bank hold
----between them. Absent, or nil before anything has been read, leaves the wallet on its own.
 ---@field character fun(): string? "Name-Realm" of whoever is playing, so the account rollup
 ---can leave out the character whose own numbers are already on the line above.
 ---@field title string|fun(summary: SegmentSummary): string?
@@ -37,33 +32,56 @@ local _, ns = ...
 ---@field frameStrata string?
 ---@field toplevel boolean?
 
-local WIDTH = 260
+local WIDTH = 268
 local PADDING = 12
 local LINE = 15
 local COLUMN_GAP = 8
 local VALUE_WIDTH = 92
 local SUMMARY_VALUE_WIDTH = 140
+-- The title sits on a strip of its own, closed by a hairline: the panel's whole shape is
+-- flat colour and one-pixel edges, so the header is separated by a rule rather than a
+-- carved border.
+local HEADER_HEIGHT = 24
+local RULE_HEIGHT = 1
+-- A rule in the body takes a line to itself, breathing on both sides.
+local RULE_LINE = 11
 -- A reputation bar sits under the faction it belongs to, indented past its name so the
 -- two read as one entry, and takes a whole line of its own so the standing fits on it.
 local BAR_HEIGHT = 11
 local BAR_INDENT = 10
 
 local TITLE_COLOR = { 1, 0.82, 0 }
-local LABEL_COLOR = { 0.7, 0.7, 0.7 }
+local HEADING_COLOR = { 0.93, 0.91, 0.85 }
+local LABEL_COLOR = { 0.68, 0.68, 0.7 }
 local VALUE_COLOR = { 1, 1, 1 }
 local GOLD_COLOR = { 1, 0.82, 0 }
 local REP_COLOR = { 0.4, 0.8, 0.4 }
-local MUTED_COLOR = { 0.5, 0.5, 0.5 }
+-- Purple is the account's colour and green the character's, everywhere: an achievement
+-- nobody on the account had earned before and an appearance new to the whole wardrobe are
+-- both purple, and a character's own first and a variant of something already collected
+-- are both green.
 local ACCOUNT_COLOR = { 0.7, 0.45, 1 }
 local CHARACTER_COLOR = { 0.35, 0.85, 0.45 }
-local VARIANT_COLOR = { 0.7, 0.45, 1 }
 
+local PANEL_COLOR = { 0.05, 0.05, 0.06, 0.94 }
+local BORDER_COLOR = { 0, 0, 0, 1 }
+local HEADER_COLOR = { 0.11, 0.11, 0.13, 1 }
+local RULE_COLOR = { 1, 0.82, 0, 0.22 }
 local BAR_BACK_COLOR = { 0.14, 0.14, 0.14, 0.9 }
 local BAR_FILL_COLOR = { 0.24, 0.55, 0.29, 0.95 }
 
 local ACCOUNT_HEX = "|cffb373ff"
 local CHARACTER_HEX = "|cff59d973"
 local COLOR_END = "|r"
+
+-- FRIZQT__.TTF carries 253 codepoints — ASCII, Latin-1 and a short tail of punctuation —
+-- and none of the arrows, triangles or check marks a panel like this wants. Read out of the
+-- font's own cmap: `fonts/frizqt__.ttf`, file 615960, build 12.0.5.67823. So every icon here
+-- is a texture escape instead, against paths confirmed present in that same build. The `·`
+-- and `Δ` used below are in the font; anything beyond them has to become one of these.
+local EXPAND_ICON = "|TInterface\\Buttons\\UI-PlusButton-Up:12:12:0:-1|t "
+local COLLAPSE_ICON = "|TInterface\\Buttons\\UI-MinusButton-Up:12:12:0:-1|t "
+local REVIEWED_ICON = "|TInterface\\RaidFrame\\ReadyCheck-Ready:12:12:0:-1|t "
 
 ---Groups a count's digits in threes, because a reputation bar reads in five figures and
 ---an unbroken run of them is unreadable at this font size.
@@ -84,6 +102,8 @@ function ns.newResultsWindow(deps)
     local rows = {}
     ---@type { back: table, fill: table, text: table }[]
     local bars = {}
+    ---@type table[] Hairlines drawn between blocks of the body.
+    local rules = {}
     local frame, title
     local latest
     local expanded = {
@@ -111,14 +131,19 @@ function ns.newResultsWindow(deps)
         if deps.toplevel then
             frame:SetToplevel(true)
         end
+        -- Flat colour and a one-pixel edge, rather than the client's carved dialog border:
+        -- the panel is read at a glance while something else is happening on screen, and a
+        -- dark rectangle with a hairline round it takes far less attention to see past than
+        -- a tiled parchment does. WHITE8X8 is the client's own white pixel, tinted by the
+        -- backdrop colours below, so the whole frame costs two textures.
         frame:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
         })
+        frame:SetBackdropColor(PANEL_COLOR[1], PANEL_COLOR[2], PANEL_COLOR[3], PANEL_COLOR[4])
+        frame:SetBackdropBorderColor(BORDER_COLOR[1], BORDER_COLOR[2], BORDER_COLOR[3], BORDER_COLOR[4])
         frame:SetMovable(true)
         frame:EnableMouse(true)
         frame:SetClampedToScreen(true)
@@ -133,14 +158,34 @@ function ns.newResultsWindow(deps)
         local point, x, y = deps.loadPoint()
         frame:SetPoint(point or "CENTER", deps.uiParent, point or "CENTER", x or 0, y or 0)
 
-        title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        title:SetPoint("TOPLEFT", PADDING, -PADDING)
+        -- The header is a lighter strip closed by a gold hairline. Both sit on BORDER, the
+        -- layer nothing else in the panel uses, which is what keeps the frame's own chrome
+        -- out of the pooled bar textures underneath it.
+        local strip = frame:CreateTexture(nil, "BORDER")
+        strip:SetColorTexture(HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], HEADER_COLOR[4])
+        strip:SetPoint("TOPLEFT", 1, -1)
+        strip:SetWidth(WIDTH - 2)
+        strip:SetHeight(HEADER_HEIGHT)
+
+        local underline = frame:CreateTexture(nil, "BORDER")
+        underline:SetColorTexture(RULE_COLOR[1], RULE_COLOR[2], RULE_COLOR[3], RULE_COLOR[4])
+        underline:SetPoint("TOPLEFT", 1, -1 - HEADER_HEIGHT)
+        underline:SetWidth(WIDTH - 2)
+        underline:SetHeight(RULE_HEIGHT)
+
+        title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("LEFT", frame, "TOPLEFT", PADDING, -1 - HEADER_HEIGHT / 2)
+        title:SetWordWrap(false)
+        -- Clipped rather than wrapped, and clear of the close button when there is one: a
+        -- long "Character — Instance" title must not run out under it.
+        title:SetWidth(WIDTH - PADDING * 2 - (deps.closable and HEADER_HEIGHT or 0))
         title:SetText(type(deps.title) == "string" and deps.title or "Current Segment")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
 
         if deps.closable then
             local close = createFrame("Button", nil, frame, "UIPanelCloseButton")
-            close:SetPoint("TOPRIGHT", 2, 2)
+            close:SetSize(HEADER_HEIGHT, HEADER_HEIGHT)
+            close:SetPoint("TOPRIGHT", -2, -2)
             close:SetScript("OnClick", function()
                 frame:Hide()
             end)
@@ -193,21 +238,37 @@ function ns.newResultsWindow(deps)
         return bar.back, bar.fill, bar.text
     end
 
+    ---A hairline across the body, used where a run of dashes used to be. It sits on BORDER
+    ---with the header's chrome, so the bars keep BACKGROUND and ARTWORK to themselves.
+    ---@param index integer
+    ---@return table
+    local function ruleAt(index)
+        local rule = rules[index]
+        if not rule then
+            rule = frame:CreateTexture(nil, "BORDER")
+            rule:SetColorTexture(RULE_COLOR[1], RULE_COLOR[2], RULE_COLOR[3], RULE_COLOR[4])
+            rules[index] = rule
+        end
+        return rule
+    end
+
     ---@param summary SegmentSummary
     local function render(summary)
         if type(deps.title) == "function" then
             title:SetText(deps.title(summary) or "Segment Details")
         end
-        local y = -PADDING - LINE - 4
+        local y = -HEADER_HEIGHT - RULE_HEIGHT - PADDING
         local used = 0
         local usedBars = 0
+        local usedRules = 0
 
         ---@param text string
         ---@param valueText string
         ---@param color number[]
         ---@param action fun(button: string)? Called when the line is clicked.
         ---@param requestedValueWidth number? Width reserved for unusually long summary values.
-        local function line(text, valueText, color, action, requestedValueWidth)
+        ---@param labelColor number[]? Brighter for a category heading than for what is under it.
+        local function line(text, valueText, color, action, requestedValueWidth, labelColor)
             used = used + 1
             local label, value = rowAt(used)
             local valueWidth = valueText ~= "" and (requestedValueWidth or VALUE_WIDTH) or 0
@@ -216,7 +277,8 @@ function ns.newResultsWindow(deps)
             value:SetWidth(valueWidth)
             label:SetPoint("TOPLEFT", PADDING, y)
             label:SetText(text)
-            label:SetTextColor(LABEL_COLOR[1], LABEL_COLOR[2], LABEL_COLOR[3])
+            labelColor = labelColor or LABEL_COLOR
+            label:SetTextColor(labelColor[1], labelColor[2], labelColor[3])
             label:Show()
             value:SetPoint("TOPRIGHT", -PADDING, y)
             value:SetText(valueText)
@@ -259,13 +321,33 @@ function ns.newResultsWindow(deps)
             y = y - LINE
         end
 
-        ---Keeps the disclosure marker after the heading so changing + to - never
-        ---shifts the heading itself.
-        ---@param heading string
-        ---@param isExpanded boolean
-        ---@return string
-        local function disclosure(heading, isExpanded)
-            return heading .. (isExpanded and " -" or " +")
+        ---A hairline where a run of dashes used to be, taking a line of its own.
+        local function rule()
+            usedRules = usedRules + 1
+            local drawn = ruleAt(usedRules)
+            drawn:SetPoint("TOPLEFT", PADDING, y - (RULE_LINE - RULE_HEIGHT) / 2)
+            drawn:SetWidth(WIDTH - PADDING * 2)
+            drawn:SetHeight(RULE_HEIGHT)
+            drawn:Show()
+            y = y - RULE_LINE
+        end
+
+        ---A category heading: the disclosure icon, then the name, then whatever the block
+        ---under it sums to. Clicking anywhere along it opens or closes the block.
+        ---
+        ---The icon leads rather than trails. Both states are the same declared size, so
+        ---swapping one for the other cannot shift the heading beside it, and a column of
+        ---them down the left edge is what makes the headings read as headings.
+        ---@param text string
+        ---@param key string Which flag in `expanded` this heading owns.
+        ---@param valueText string
+        ---@param requestedValueWidth number?
+        local function heading(text, key, valueText, requestedValueWidth)
+            line((expanded[key] and COLLAPSE_ICON or EXPAND_ICON) .. text, valueText, VALUE_COLOR,
+                function()
+                    expanded[key] = not expanded[key]
+                    render(latest)
+                end, requestedValueWidth, HEADING_COLOR)
         end
 
         ---How stale an account-wide figure is, as it reads on the end of a line. Empty for
@@ -280,26 +362,6 @@ function ns.newResultsWindow(deps)
             end
             local age = ns.formatAge(clock() - at)
             return age == "now" and "" or (", " .. age)
-        end
-
-        ---What the rest of the account holds of a currency this segment earned.
-        ---
-        ---Only drawn when another character holds some too. On an account of one — or a
-        ---currency only this character has ever picked up — the account total is the same
-        ---number as the holding on the line above, and repeating it says nothing.
-        ---@param gain CurrencyGain
-        local function accountCurrencyLine(gain)
-            if not deps.accountCurrency or not gain.id then
-                return
-            end
-            local rollup = deps.accountCurrency(gain.id)
-            if not rollup or #rollup.characters < 2 then
-                return
-            end
-            -- The oldest reading is what the total's honesty rests on: it is a sum of
-            -- numbers of different ages, and the eldest of them is the weakest claim in it.
-            line("    account", group(rollup.total) .. " on " .. #rollup.characters
-                .. staleness(rollup.oldest), MUTED_COLOR, nil, SUMMARY_VALUE_WIDTH)
         end
 
         ---Where the account as a whole stands with a faction this segment gained.
@@ -328,39 +390,13 @@ function ns.newResultsWindow(deps)
                 who .. staleness(best.at), ACCOUNT_COLOR, nil, SUMMARY_VALUE_WIDTH)
         end
 
-        ---What the account is worth in gold, under the wallet this segment moved.
-        ---
-        ---Drawn only when it is worth *more* than the wallet directly above, which covers two
-        ---cases at once. A lone character with an empty warband bank is worth exactly what is
-        ---in its pocket, and saying so twice takes a line to say nothing. And a character part
-        ---way through its first ever segment is not in the rollup yet — its snapshot is
-        ---written when the segment closes — so the account would otherwise read as poorer than
-        ---the pocket it is standing next to, which is true of the rollup and nonsense on
-        ---screen. The wallets and the pot are named separately because they answer different
-        ---questions: one is what the roster is sitting on, the other is what any of them can
-        ---reach from a bank.
-        local function accountGoldLines()
-            if not deps.accountGold then
-                return
-            end
-            local rollup = deps.accountGold()
-            if not rollup or rollup.total <= (summary.wallet or 0) then
-                return
-            end
-            line("    account", deps.formatMoney(rollup.total) .. staleness(rollup.oldest),
-                MUTED_COLOR, nil, SUMMARY_VALUE_WIDTH)
-            if rollup.warband and rollup.warband > 0 then
-                line("    warband bank", deps.formatMoney(rollup.warband),
-                    MUTED_COLOR, nil, SUMMARY_VALUE_WIDTH)
-            end
-        end
-
+        -- Only what this hour of play produced. The balances it landed on — the wallet, what
+        -- the account is worth between it and the warband bank, what any one currency has
+        -- accumulated to — are still recorded and still shown, in the desktop app, which is
+        -- where a question about a total belongs. Here they would be the two largest numbers
+        -- on a panel that exists to say what just happened.
         line("Loot value", deps.formatMoney(summary.lootValue), GOLD_COLOR)
         line("Gold Δ", deps.formatMoney(summary.goldDiff), GOLD_COLOR)
-        if summary.wallet then
-            line("Wallet", deps.formatMoney(summary.wallet), GOLD_COLOR)
-            accountGoldLines()
-        end
 
         local achievements = summary.achievements or {}
         local currencies = summary.currencies or {}
@@ -376,7 +412,7 @@ function ns.newResultsWindow(deps)
         local housingXP = summary.housingXP or 0
         if #achievements + #currencies + #levelUps + #mounts + #pets + #quests
             + #reputation + #toys + #transmogs + #housingItems + #housingLevelUps + housingXP > 0 then
-            line("------------------------", "", MUTED_COLOR)
+            rule()
         end
 
         -- Completed categories are deliberately rendered in heading order. Empty
@@ -392,10 +428,7 @@ function ns.newResultsWindow(deps)
             end
             local achievementValue = ACCOUNT_HEX .. accountAchievements .. " account" .. COLOR_END
                 .. " / " .. CHARACTER_HEX .. characterAchievements .. " character" .. COLOR_END
-            line(disclosure("Achievements", expanded.achievements), achievementValue, VALUE_COLOR, function()
-                expanded.achievements = not expanded.achievements
-                render(latest)
-            end, SUMMARY_VALUE_WIDTH)
+            heading("Achievements", "achievements", achievementValue, SUMMARY_VALUE_WIDTH)
             if expanded.achievements then
                 for _, event in ipairs(achievements) do
                     local current = event
@@ -418,31 +451,20 @@ function ns.newResultsWindow(deps)
         end
 
         if #currencies > 0 then
-            line(disclosure("Currency", expanded.currencies),
-                ((summary.currencyTotal or 0) >= 0 and "+" or "") .. (summary.currencyTotal or 0),
-                VALUE_COLOR,
-                function()
-                    expanded.currencies = not expanded.currencies
-                    render(latest)
-                end)
+            heading("Currency", "currencies",
+                ((summary.currencyTotal or 0) >= 0 and "+" or "") .. (summary.currencyTotal or 0))
             if expanded.currencies then
                 for _, gain in ipairs(currencies) do
-                    -- What the segment earned, then what the character is left holding —
-                    -- the second is the number that decides whether the first is enough
-                    -- to buy anything, and the client's own counters are read the same way.
-                    local change = (gain.amount >= 0 and "+" or "") .. group(gain.amount)
-                    local held = gain.total and (change .. " (" .. group(gain.total) .. ")") or change
-                    line("  " .. gain.name, held, REP_COLOR)
-                    accountCurrencyLine(gain)
+                    -- What the segment earned, and only that. What the character is left
+                    -- holding afterwards, and what the rest of the account holds beside it,
+                    -- are the desktop app's questions.
+                    line("  " .. gain.name, (gain.amount >= 0 and "+" or "") .. group(gain.amount), REP_COLOR)
                 end
             end
         end
 
         if #levelUps > 0 then
-            line(disclosure("Level ups", expanded.levelUps), tostring(#levelUps), VALUE_COLOR, function()
-                expanded.levelUps = not expanded.levelUps
-                render(latest)
-            end)
+            heading("Level ups", "levelUps", tostring(#levelUps))
             if expanded.levelUps then
                 for _, event in ipairs(levelUps) do
                     line("  Level " .. event.level, "reached", REP_COLOR)
@@ -450,14 +472,11 @@ function ns.newResultsWindow(deps)
             end
         end
 
-        local function collection(heading, key, events)
+        local function collection(name, key, events)
             if #events == 0 then
                 return
             end
-            line(disclosure(heading, expanded[key]), tostring(#events), VALUE_COLOR, function()
-                expanded[key] = not expanded[key]
-                render(latest)
-            end)
+            heading(name, key, tostring(#events))
             if expanded[key] then
                 for _, event in ipairs(events) do
                     line("  " .. event.name, "collected", REP_COLOR)
@@ -478,10 +497,7 @@ function ns.newResultsWindow(deps)
             end
             local questValue = ACCOUNT_HEX .. accountQuests .. " warband" .. COLOR_END
                 .. " / " .. CHARACTER_HEX .. characterQuests .. " character" .. COLOR_END
-            line(disclosure("Quests", expanded.quests), questValue, VALUE_COLOR, function()
-                expanded.quests = not expanded.quests
-                render(latest)
-            end, SUMMARY_VALUE_WIDTH)
+            heading("Quests", "quests", questValue, SUMMARY_VALUE_WIDTH)
             if expanded.quests then
                 for _, event in ipairs(quests) do
                     local scope = "completed"
@@ -499,11 +515,7 @@ function ns.newResultsWindow(deps)
         end
 
         if #reputation > 0 then
-            line(disclosure("Reputation", expanded.reputation), "+" .. (summary.reputationTotal or 0),
-                VALUE_COLOR, function()
-                    expanded.reputation = not expanded.reputation
-                    render(latest)
-                end)
+            heading("Reputation", "reputation", "+" .. (summary.reputationTotal or 0))
             if expanded.reputation then
                 for _, gain in ipairs(reputation) do
                     line("  " .. gain.faction, "+" .. group(gain.amount), REP_COLOR)
@@ -537,14 +549,11 @@ function ns.newResultsWindow(deps)
             end
             local housingValue = ACCOUNT_HEX .. warband .. " warband" .. COLOR_END
                 .. " / " .. CHARACTER_HEX .. additional .. " extra" .. COLOR_END
-            line(disclosure("Housing items", expanded.housingItems), housingValue, VALUE_COLOR, function()
-                expanded.housingItems = not expanded.housingItems
-                render(latest)
-            end, SUMMARY_VALUE_WIDTH)
+            heading("Housing items", "housingItems", housingValue, SUMMARY_VALUE_WIDTH)
             if expanded.housingItems then
                 for _, event in ipairs(housingItems) do
                     local scope = event.warbandFirst and "warband first" or "additional"
-                    local color = event.warbandFirst and ACCOUNT_COLOR or VARIANT_COLOR
+                    local color = event.warbandFirst and ACCOUNT_COLOR or CHARACTER_COLOR
                     line("  " .. event.name, scope, color)
                 end
             end
@@ -555,11 +564,7 @@ function ns.newResultsWindow(deps)
         end
 
         if #housingLevelUps > 0 then
-            line(disclosure("Housing levels", expanded.housingLevelUps), tostring(#housingLevelUps),
-                VALUE_COLOR, function()
-                    expanded.housingLevelUps = not expanded.housingLevelUps
-                    render(latest)
-                end)
+            heading("Housing levels", "housingLevelUps", tostring(#housingLevelUps))
             if expanded.housingLevelUps then
                 for _, event in ipairs(housingLevelUps) do
                     line("  Level " .. event.level, "reached", REP_COLOR)
@@ -575,25 +580,25 @@ function ns.newResultsWindow(deps)
                 end
             end
             local variants = #transmogs - appearances
-            local transmogValue = tostring(appearances) .. " new"
+            -- An appearance the wardrobe has never held is the account's, and coloured like
+            -- one; a variant of something already collected is the character's own find.
+            local transmogValue = ACCOUNT_HEX .. appearances .. " new" .. COLOR_END
             if variants > 0 then
-                transmogValue = transmogValue .. " · " .. variants .. " variant"
+                transmogValue = transmogValue .. " · " .. CHARACTER_HEX .. variants .. " variant"
                 if variants ~= 1 then
                     transmogValue = transmogValue .. "s"
                 end
+                transmogValue = transmogValue .. COLOR_END
             end
-            line(disclosure("Transmog", expanded.transmogs), transmogValue, VALUE_COLOR, function()
-                expanded.transmogs = not expanded.transmogs
-                render(latest)
-            end)
+            heading("Transmog", "transmogs", transmogValue, SUMMARY_VALUE_WIDTH)
             if expanded.transmogs then
                 for index, event in ipairs(transmogs) do
                     local current = event
                     local itemName = deps.itemName and deps.itemName(current.id)
                     local kind = current.newAppearance and "new" or "variant"
-                    local kindColor = current.newAppearance and REP_COLOR or VARIANT_COLOR
+                    local kindColor = current.newAppearance and ACCOUNT_COLOR or CHARACTER_COLOR
                     local reviewKey = tostring(current.sourceID or current.id) .. ":" .. tostring(index)
-                    local prefix = reviewedTransmogs[reviewKey] and "✓ " or ""
+                    local prefix = reviewedTransmogs[reviewKey] and REVIEWED_ICON or ""
                     line("  " .. prefix .. (itemName or ("Item " .. current.id)), kind, kindColor, function(button)
                         reviewedTransmogs[reviewKey] = true
                         if button == "RightButton" and current.sourceID and deps.openTransmogCollection then
@@ -616,6 +621,10 @@ function ns.newResultsWindow(deps)
             bars[index].back:Hide()
             bars[index].fill:Hide()
             bars[index].text:Hide()
+        end
+
+        for index = usedRules + 1, #rules do
+            rules[index]:Hide()
         end
 
         frame:SetHeight(-y + PADDING)

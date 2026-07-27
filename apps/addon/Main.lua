@@ -200,9 +200,7 @@ function ns.main(env)
         itemName = env.itemName,
         now = env.now,
         character = currentCharacter,
-        accountCurrency = holdings.currency,
         accountStanding = holdings.standing,
-        accountGold = holdings.gold,
     })
 
     local segmentLog = ns.newSegmentLog({

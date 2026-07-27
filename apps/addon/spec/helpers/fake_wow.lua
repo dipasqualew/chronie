@@ -331,6 +331,8 @@ function fake.newFrame(options)
         "SetFrameStrata",
         "SetToplevel",
         "SetBackdrop",
+        "SetBackdropColor",
+        "SetBackdropBorderColor",
         "SetMovable",
         "EnableMouse",
         "RegisterForDrag",
