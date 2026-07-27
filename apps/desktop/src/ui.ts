@@ -26,6 +26,40 @@ export const CLASS_COLORS: Record<string, string> = {
 export const classColor = (classFile?: string | null): string =>
   CLASS_COLORS[classFile ?? ""] || "var(--text-muted)";
 
+/** Near-black and white, the two inks the initials inside a filled circle can be written in. */
+const INK_DARK = "#0b0b0b";
+const INK_LIGHT = "#ffffff";
+
+/** WCAG relative luminance, which is what "how light is this colour" means when measured. */
+function luminance(hex: string): number {
+  const channel = (offset: number): number => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+const contrast = (one: number, other: number): number =>
+  (Math.max(one, other) + 0.05) / (Math.min(one, other) + 0.05);
+
+/**
+ * The ink to write a character's initials in once the circle is filled with their class
+ * colour. No single choice reads on all thirteen: priest is white and rogue is nearly
+ * yellow-white, while death knight red and shaman blue are darker than the body text. So
+ * the fill is measured and whichever ink contrasts with it more wins.
+ */
+export function classInk(classFile?: string | null): string {
+  const fill = CLASS_COLORS[classFile ?? ""];
+  // A class the palette does not know is filled with the theme's muted grey, whose value
+  // lives in the stylesheet and cannot be measured from here. It is mid-toned in both
+  // themes, and the dark ink is the one that reads on it either way.
+  if (!fill) return INK_DARK;
+  const light = luminance(fill);
+  return contrast(light, luminance(INK_DARK)) >= contrast(light, luminance(INK_LIGHT))
+    ? INK_DARK
+    : INK_LIGHT;
+}
+
 /** "DEATHKNIGHT" is how the game files it and not how anyone says it. */
 export function className(classFile?: string | null): string {
   if (!classFile) return "Unknown class";
@@ -42,7 +76,9 @@ export const classDot = (classFile?: string | null): string =>
   `<span class="dot" style="background:${classColor(classFile)}"></span>`;
 
 /**
- * A character as a circle in their class colour, carrying everything the hover card needs.
+ * A character as a circle filled with their class colour, carrying everything the hover
+ * card needs. The fill and the ink that reads on it travel together as two custom
+ * properties, because the stylesheet cannot work the second one out from the first.
  *
  * Focusable and named, so the detail is reachable without a mouse: the circle is the only
  * place a session says which characters were involved, and that must not be hover-only.
@@ -60,7 +96,7 @@ export function characterCircle(character: SessionCharacter): string {
     (places ? `<span class="tip-places">${escapeHtml(places)}</span>` : "");
   const label = `${character.name}, ${parts.join(", ")}`;
   return `<span class="circle" role="img" tabindex="0"
-    style="--class-color:${classColor(character.classFile)}"
+    style="--class-color:${classColor(character.classFile)};--class-ink:${classInk(character.classFile)}"
     aria-label="${escapeHtml(label)}" data-tip="${escapeHtml(tip)}"
   >${escapeHtml(initials(character.name))}</span>`;
 }
