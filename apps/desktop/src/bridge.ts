@@ -11,6 +11,7 @@ import type {
   AppUpdateResult,
   Capture,
   CaptureImagePayload,
+  CaptureQuality,
   CaptureThumbnailsPayload,
   CharacterModelPayload,
   CombatLogStatus,
@@ -129,6 +130,26 @@ export const desktop = {
       return Promise.resolve(structuredClone(mock.logRetention));
     }
     return invoke<LogRetention>("set_log_retention", { days });
+  },
+  // Which things photograph themselves. The list reaches the game inside the addon, so the
+  // backend reinstalls it on the way through — and answers with the whole of the settings, so
+  // the panel repaints from what was stored. The mock records the same list the real one saves.
+  setCaptureTriggers: (triggers: string[]): Promise<Settings> => {
+    if (mock) {
+      mock.settings.captureTriggers = triggers;
+      return Promise.resolve(structuredClone(mock.settings));
+    }
+    return invoke<Settings>("set_capture_triggers", { triggers });
+  },
+  // What is kept of a picture, and whether the game keeps its own copy. The two travel together
+  // because they are one decision about disk, and neither reaches the addon at all.
+  setCaptureStorage: (quality: CaptureQuality, keepOriginals: boolean): Promise<Settings> => {
+    if (mock) {
+      mock.settings.captureQuality = quality;
+      mock.settings.keepOriginalScreenshots = keepOriginals;
+      return Promise.resolve(structuredClone(mock.settings));
+    }
+    return invoke<Settings>("set_capture_storage", { quality, keepOriginals });
   },
   // Every activity command answers with the whole dashboard, so the window repaints from
   // what was actually stored rather than from what the page hoped the write did. Under the

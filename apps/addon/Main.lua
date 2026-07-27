@@ -894,6 +894,13 @@ function ns.main(env)
                 newAppearance = info.newAppearance,
                 at = env.now(),
             })
+            -- From inside the tally's own handler, the way the achievement is, so the thing
+            -- that counts and the thing that photographs cannot drift apart.
+            autoCapture({
+                kind = "transmog",
+                id = info.itemID,
+                newAppearance = info.newAppearance,
+            })
         end
     end)
     onTallyEvent("EQUIPMENT_SETS_CHANGED", syncEquipsets)

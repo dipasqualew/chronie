@@ -540,9 +540,58 @@
   .outfit-off:hover { color: var(--series-1); text-decoration: underline; }
   .outfit-empty { margin: 0; font-size: 12px; }
 
-  /* ---------- setup ---------- */
+  /* ---------- settings ---------- */
+
+  /* A rail and a pane. The rail is narrow enough that the pane still gets a readable
+     measure, and sticky so a long category does not scroll its own navigation away. */
+  .settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
+  .settings-rail { display: grid; gap: 2px; position: sticky; top: 8px; }
+  .settings-rail button {
+    text-align: left; background: transparent; border-color: transparent;
+    color: var(--text-secondary); padding: 8px 11px;
+  }
+  .settings-rail button:hover { background: var(--surface-2); }
+  .settings-rail button[aria-current="true"] {
+    background: var(--surface-1); border-color: var(--border);
+    color: var(--text-primary); font-weight: 600;
+  }
+  /* Two panels share the combat-log category, and this is the gap between them. */
+  .settings-sections { display: grid; gap: 18px; }
+  @media (max-width: 820px) {
+    .settings-layout { grid-template-columns: 1fr; }
+    .settings-rail {
+      position: static; grid-auto-flow: column; grid-auto-columns: max-content;
+      overflow-x: auto; padding-bottom: 4px;
+    }
+  }
 
   .setup { padding: 18px; }
+  .setup h2 { font-size: 16px; margin: 0 0 4px; }
+  .setup h2 + .sub { margin: 0 0 4px; }
+  /* The line between "this is one panel" and "this is one decision inside it". */
+  .setup-subhead {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-secondary); margin: 22px 0 4px;
+    padding-top: 14px; border-top: 1px solid var(--border);
+  }
+
+  /* ---------- screenshots ---------- */
+
+  .capture-group { margin-top: 14px; }
+  .capture-group h4 { margin: 0 0 2px; font-size: 13px; color: var(--text-secondary); }
+  /* A box, then the moment it is about, then what that costs. The box is pulled to the top
+     line rather than centred, because the label beside it is two or three lines tall. */
+  .setup label.capture-choice {
+    display: flex; align-items: flex-start; gap: 9px; margin: 0; padding: 6px 0;
+    font-size: 14px; color: var(--text-primary); cursor: pointer;
+  }
+  .setup label.capture-choice input { width: 15px; height: 15px; margin-top: 3px; flex: none; cursor: pointer; }
+  .setup label.capture-choice .sub { display: block; }
+  /* A rule a broader one already covers is still on, and still yours to untick — it is just
+     not doing anything on its own, and the line saying so is not a warning. */
+  .capture-covered { font-style: italic; }
+  .capture-quality { border: 0; padding: 0; margin: 12px 0 0; }
+  .capture-quality legend { padding: 0; font-size: 13px; color: var(--text-secondary); }
   .setup-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
   .setup label { color: var(--text-secondary); font-size: 12px; }
   .path-row { display: flex; gap: 8px; margin-top: 5px; }

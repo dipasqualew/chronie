@@ -95,6 +95,7 @@ describe("ns.newCaptureTriggers", function()
             { kind = "pet", id = 42, trigger = "pet" },
             { kind = "toy", id = 999, trigger = "toy" },
             { kind = "keystone", id = 375, trigger = "keystone" },
+            { kind = "transmog", id = 30001, trigger = "transmog" },
         }) do
             it("captures a " .. case.kind .. " when that rule is allowed", function()
                 local triggers = newTriggers({ triggers = { case.trigger } })
@@ -110,6 +111,31 @@ describe("ns.newCaptureTriggers", function()
                 assert.is_nil(triggers.consider({ kind = case.kind, id = case.id }))
             end)
         end
+
+        -- The same specific-then-general shape the achievement has, and worth its own case:
+        -- emptying a bag at a vendor collects a dozen sources at once and one of them being
+        -- a look nobody owned is the only part of that worth a photograph.
+        it("tells an appearance new to the collection from another item wearing an old one", function()
+            local triggers = newTriggers({ triggers = { "newAppearance" } })
+
+            assert.equal("newAppearance", triggers.consider({
+                kind = "transmog", id = 30001, newAppearance = true,
+            }).trigger)
+            assert.is_nil(triggers.consider({
+                kind = "transmog", id = 30002, newAppearance = false,
+            }))
+        end)
+
+        it("captures every transmog source for somebody who asked for that", function()
+            local triggers = newTriggers({ triggers = { "transmog" } })
+
+            assert.equal("transmog", triggers.consider({
+                kind = "transmog", id = 30002, newAppearance = false,
+            }).trigger)
+            assert.equal("transmog", triggers.consider({
+                kind = "transmog", id = 30001, newAppearance = true,
+            }).trigger)
+        end)
 
         it("tells a keystone that beat the timer from one that did not", function()
             local triggers = newTriggers({ triggers = { "keystoneOnTime" } })

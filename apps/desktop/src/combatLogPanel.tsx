@@ -1,5 +1,5 @@
 /**
- * The combat logging section of Setup: a switch, and an honest answer about what the game is
+ * The combat logging section of Settings: a switch, and an honest answer about what the game is
  * really doing.
  *
  * The switch is off until somebody deliberately turns it on, and the copy beside it says what

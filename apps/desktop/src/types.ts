@@ -570,6 +570,17 @@ export interface CaptureImagePayload {
   byteSize?: number;
 }
 
+/**
+ * How much of a screenshot Chronie keeps once it has taken custody of it. Mirrors
+ * `captures::Quality`.
+ *
+ * Four named levels rather than a number, because a quality slider is a figure nobody can
+ * predict the effect of. `original` is the file the game wrote, byte for byte; the other three
+ * re-encode, and only the last two change the size. Every install that has not said otherwise
+ * is on `balanced` — the store is forever and the client writes megabytes a shot.
+ */
+export type CaptureQuality = "original" | "high" | "balanced" | "small";
+
 export interface Settings {
   wowPath?: string | null;
   lastSync?: string | null;
@@ -578,6 +589,19 @@ export interface Settings {
   /** After how many days a log Chronie has read to its end is deleted. Absent or null means
    * nothing is ever deleted, which is what every install starts as. */
   retainLogDays?: number | null;
+  /**
+   * Which rules photograph a moment without being asked — see `captureSettings.ts` for what
+   * each name means, and `ns.newCaptureTriggers` in the addon for what acts on them.
+   *
+   * Absent means an install this build has not written settings for yet, which the backend
+   * answers with its own conservative default rather than with nothing. An explicit empty list
+   * is a different thing and means what it says: photograph nothing unless a key is pressed.
+   */
+  captureTriggers?: string[];
+  /** How much of each screenshot the store keeps. Absent reads as `balanced`. */
+  captureQuality?: CaptureQuality;
+  /** Whether the game keeps its own copy of a screenshot Chronie now holds. */
+  keepOriginalScreenshots?: boolean;
 }
 
 /* ---------- combat logging ---------- */
@@ -636,7 +660,7 @@ export interface LogDeletion {
 }
 
 /**
- * What the retention section of Setup is drawn from. Mirrors `retention::Report`.
+ * What the retention section of Settings is drawn from. Mirrors `retention::Report`.
  *
  * `doomed` is computed whether or not `enabled`, because the question worth answering before
  * somebody turns the sweeper on is which files that would cost them. That preview is the dry

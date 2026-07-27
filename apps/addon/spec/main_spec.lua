@@ -2092,6 +2092,67 @@ describe("addon integration", function()
             assert.equal(0, recorded.screenshots())
         end)
 
+        ---The same boot, with a wardrobe: a source event has nothing to photograph unless
+        ---the client can say what item it was and whether the look was new.
+        ---@param triggers string[]
+        ---@param sources table<integer, table>
+        local function bootWithWardrobe(triggers, sources)
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = { captureTriggers = triggers },
+                transmogSources = sources,
+            })
+            recorded.frame:fire("PLAYER_LOGIN")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            return app, recorded
+        end
+
+        it("photographs an appearance new to the collection", function()
+            local _, recorded = bootWithWardrobe({ "newAppearance" }, {
+                [11] = { item = 19019, visualID = 800, newAppearance = true },
+            })
+
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            assert.equal(1, recorded.screenshots())
+            assert.equal("newAppearance", recorded.db.entries[1].trigger)
+        end)
+
+        -- Emptying a bag at a vendor collects a dozen sources for looks already owned, and
+        -- a photograph of each of those is the noise the specific rule exists to avoid.
+        it("leaves another item wearing an appearance already owned alone", function()
+            local _, recorded = bootWithWardrobe({ "newAppearance" }, {
+                [12] = { item = 19020, visualID = 800, newAppearance = false },
+            })
+
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 12)
+
+            assert.equal(0, recorded.screenshots())
+        end)
+
+        it("leaves a transmog source alone by default", function()
+            local _, recorded = bootWithWardrobe({ "accountFirstAchievement" }, {
+                [11] = { item = 19019, visualID = 800, newAppearance = true },
+            })
+
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            assert.equal(0, recorded.screenshots())
+        end)
+
+        -- The same rule the achievement follows: the picture rides inside the handler that
+        -- already folds the source into the tally, rather than in a second subscription.
+        it("counts the transmog it photographed as well", function()
+            local app, recorded = bootWithWardrobe({ "newAppearance" }, {
+                [11] = { item = 19019, visualID = 800, newAppearance = true },
+            })
+
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            assert.equal(1, #app.tally.summary().transmogs)
+        end)
+
         -- Not a second subscription to ACHIEVEMENT_EARNED: the capture rides inside the
         -- handler that already folds the achievement into the tally, so the two can never
         -- disagree about what happened.

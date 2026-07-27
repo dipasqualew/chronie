@@ -2,7 +2,7 @@
  * The window: five views over one loaded dashboard, and the plumbing behind them.
  *
  * Timeline is what happened, Characters is who it happened to, Details is every row of it,
- * Transmog is what the installed game holds, Setup is the plumbing. The first three read the
+ * Transmog is what the installed game holds, Settings is the plumbing. The first three read the
  * same segments, and every write goes through the backend and comes back as a whole dashboard
  * — so what is on screen is always what was stored, never what the page hoped a write did.
  *
@@ -26,7 +26,7 @@ import { installExternalLinks } from "./links";
 import { SegmentModal } from "./segmentModal";
 import type { SegmentModalState } from "./segmentModal";
 import { buildSessions } from "./sessions";
-import { Setup } from "./setup";
+import { Settings as SettingsView } from "./settings";
 import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
@@ -34,7 +34,7 @@ import type {
   DashboardPayload, Segment, Settings, TransmogPayload,
 } from "./types";
 
-const VIEWS = ["timeline", "characters", "details", "transmog", "setup"] as const;
+const VIEWS = ["timeline", "characters", "details", "transmog", "settings"] as const;
 type View = typeof VIEWS[number];
 
 const TAB_LABELS: Record<View, string> = {
@@ -42,7 +42,7 @@ const TAB_LABELS: Record<View, string> = {
   characters: "Characters",
   details: "Details",
   transmog: "Transmog",
-  setup: "Setup",
+  settings: "Settings",
 };
 
 /** How often the window looks for segments it has not seen. */
@@ -57,7 +57,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
   const [segments, setSegments] = useState<Segment[]>(payload.segments || []);
   // Nothing can be collected until the game folder is known, so a first run opens on the one
   // screen that can do anything about it rather than on an empty timeline.
-  const [view, setView] = useState<View>(settings.wowPath ? "timeline" : "setup");
+  const [view, setView] = useState<View>(settings.wowPath ? "timeline" : "settings");
   const [showing, setShowing] = useState<SegmentModalState | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [transmog, setTransmog] = useState<TransmogPayload | null>(null);
@@ -246,10 +246,10 @@ export function App({ payload, settings }: AppProps): ReactNode {
         />
       </section>
 
-      <section id="setup-view" hidden={view !== "setup"}>
-        <Setup
+      <section id="settings-view" hidden={view !== "settings"}>
+        <SettingsView
           settings={settings}
-          visible={view === "setup"}
+          visible={view === "settings"}
           actions={{
             choosePath: desktop.chooseWowPath,
             savePath: desktop.saveWowPath,
@@ -257,6 +257,11 @@ export function App({ payload, settings }: AppProps): ReactNode {
             installAddon: desktop.installAddon,
             checkForAppUpdate: desktop.checkForAppUpdate,
             onSynced: reloadWindow(800),
+            onError: message,
+          }}
+          captures={{
+            setTriggers: desktop.setCaptureTriggers,
+            setStorage: desktop.setCaptureStorage,
             onError: message,
           }}
           combatLog={{
