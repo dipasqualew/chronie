@@ -6,6 +6,7 @@
  * through the table's current order rather than through a play session.
  */
 
+import { equipsetDetail, equipsetTitle } from "./equipsets";
 import { clock, duration, escapeHtml, gold, signed, signedGold } from "./format";
 import type { OpenSegment } from "./timeline";
 import { eventsOf } from "./types";
@@ -13,6 +14,7 @@ import type {
   AchievementEvent,
   CollectibleEvent,
   CurrencyGain,
+  EquipsetChangeEvent,
   EventListKey,
   EventOf,
   HousingItemEvent,
@@ -53,6 +55,8 @@ const transmogText = (events?: TransmogEvent[]): string => (events || []).map((e
     ? "new" : event.newAppearance === false ? "variant" : "unknown"})`).join(", ");
 const questText = (events?: QuestEvent[]): string =>
   (events || []).map((event) => event.name || `Quest ${event.id}`).join(", ");
+const equipsetText = (events?: EquipsetChangeEvent[]): string =>
+  (events || []).map((event) => `${equipsetTitle(event)} (${equipsetDetail(event)})`).join(", ");
 
 /** Cells are compared against others from their own column, so both sides always match. */
 type SortValue = string | number;
@@ -158,6 +162,7 @@ const ALL_COLUMNS: Column[] = [
   }),
   eventColumn({ key: "toys", title: "Toys", text: collectionText, optional: true }),
   eventColumn({ key: "transmogs", title: "Transmog", text: transmogText, optional: true }),
+  eventColumn({ key: "equipsetChanges", title: "Equipment sets", text: equipsetText, optional: true }),
   eventColumn({ key: "housingItems", title: "Housing items", text: housingText, optional: true }),
   {
     key: "housingXP", title: "Housing XP", num: true, sort: (s) => s.housingXP || 0,

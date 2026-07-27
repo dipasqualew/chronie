@@ -21,6 +21,7 @@ src/SegmentTally.lua
 src/ResultsWindow.lua
 src/MinimapButton.lua
 src/SegmentLog.lua
+src/EquipsetLedger.lua
 src/SegmentTracker.lua
 src/SegmentTable.lua
 src/CurrencyItems.lua

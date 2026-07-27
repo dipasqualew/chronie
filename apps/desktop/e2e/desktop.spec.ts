@@ -361,6 +361,24 @@ const mockDesktop: E2EMock = {
         currencyTotal: 4,
         reputationTotal: 25,
         housingXP: 0,
+        equipsetChanges: [
+          {
+            setId: 3,
+            name: "Raid",
+            kind: "updated",
+            at: EVENING + 1700,
+            items: [
+              {
+                slot: 1,
+                itemId: 4101, itemLevel: 639, itemName: "Deepwater Crown",
+                previousItemId: 4100, previousItemLevel: 623, previousItemName: "Tideglass Crown",
+              },
+              // A slot the edit cleared, which has to draw as an emptied slot rather than as
+              // a row with nothing in it.
+              { slot: 15, previousItemId: 4200, previousItemLevel: 620, previousItemName: "Storm Cloak" },
+            ],
+          },
+        ],
         transmogs: [{ id: 101, at: EVENING + 1400, newAppearance: true }],
         currencies: [{ id: 7, name: "Glass Token", amount: 4 }],
         reputation: [{ faction: "Cavern Cartographers", amount: 25 }],
@@ -776,6 +794,35 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(detail.title()).toHaveText("Glass Caverns");
     expect(page.url()).toContain("127.0.0.1:4399");
   });
+
+  await detail.close();
+});
+
+// What happened to an equipment set is a chip like any other milestone, and the thing it
+// unfolds into is the part a table could never hold: which slot, and what replaced what.
+test("shows what happened to an equipment set, down to the slot", async ({ page, detail }) => {
+  // Two slots moved: one item was replaced by a better one, and one was cleared outright.
+  // The total falls because clearing a slot really does cost the set everything it held.
+  const chip = sessions(page).first().getByRole("button", { name: /Raid updated/ });
+  await expect(chip).toContainText("2 slots, −604 ilvl");
+
+  await chip.click();
+  await expect(detail.title()).toHaveText("Glass Caverns");
+
+  const change = detail.dialog.locator(".equipset");
+  await expect(change).toHaveCount(1);
+  await expect(change).toContainText("Raid updated");
+
+  const slots = change.locator(".equipset-slots li");
+  await expect(slots).toHaveCount(2);
+  await expect(slots.first()).toContainText("Head");
+  await expect(slots.first()).toContainText("Tideglass Crown (623)");
+  await expect(slots.first()).toContainText("Deepwater Crown (639)");
+
+  // A slot the edit cleared says what left it and shows nothing arriving, rather than
+  // drawing as a row with a blank on both sides.
+  await expect(slots.nth(1)).toContainText("Back");
+  await expect(slots.nth(1)).toContainText("Storm Cloak (620)");
 
   await detail.close();
 });

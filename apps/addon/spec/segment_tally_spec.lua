@@ -1330,6 +1330,14 @@ describe("ns.newSegmentTally", function()
             assert.is_true(tally.hasEvents())
         end)
 
+        it("is true once an equipment set changes", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.equipsetChange({ setId = 3, name = "Raid", kind = "created", at = 100, items = {} })
+
+            assert.is_true(tally.hasEvents())
+        end)
+
         -- A currency that is earned then wholly spent nets to zero, but the segment did
         -- see the currency move, so it is still worth keeping.
         it("stays true for a currency that nets back to zero", function()
@@ -1339,6 +1347,63 @@ describe("ns.newSegmentTally", function()
             tally.currency(1166, -30, "Timewarped Badge")
 
             assert.is_true(tally.hasEvents())
+        end)
+    end)
+
+    describe("equipset changes", function()
+        it("files what the ledger worked out, slots and all", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.equipsetChange({
+                setId = 3, name = "Raid", kind = "updated", at = 400,
+                items = { { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" } },
+            })
+
+            assert.same({
+                {
+                    setId = 3, name = "Raid", kind = "updated", at = 400,
+                    items = {
+                        { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" },
+                    },
+                },
+            }, tally.summary().equipsetChanges)
+        end)
+
+        -- A created or deleted set with no slots is still a set coming or going, and worth a
+        -- row. An edit with nothing in it is not an edit at all.
+        it("keeps a created set that holds nothing", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.equipsetChange({ setId = 3, name = "Empty", kind = "created", at = 400, items = {} })
+
+            assert.equal(1, #tally.summary().equipsetChanges)
+        end)
+
+        it("drops an edit that changed no slot", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.equipsetChange({ setId = 3, name = "Raid", kind = "updated", at = 400, items = {} })
+
+            assert.same({}, tally.summary().equipsetChanges)
+        end)
+
+        it("ignores a change that arrives with no segment open", function()
+            local tally = newTally()
+            tally.equipsetChange({ setId = 3, name = "Raid", kind = "created", at = 400, items = {} })
+
+            assert.is_false(tally.hasEvents())
+        end)
+
+        -- The ledger hands over its own tables; the summary must not be able to reach back
+        -- into them, or a later sync editing a slot would rewrite a filed change.
+        it("does not share its slot tables with the caller", function()
+            local tally = newTally()
+            tally.begin(0)
+            local items = { { slot = 1, itemId = 100 } }
+            tally.equipsetChange({ setId = 3, name = "Raid", kind = "updated", at = 400, items = items })
+            items[1].itemId = 999
+
+            assert.equal(100, tally.summary().equipsetChanges[1].items[1].itemId)
         end)
     end)
 
@@ -1397,6 +1462,10 @@ describe("ns.newSegmentTally", function()
             tally.achievement(1, "First", 500)
             tally.levelUp(42, 525)
             tally.quest(7848, 550)
+            tally.equipsetChange({
+                setId = 3, name = "Raid", kind = "updated", at = 575,
+                items = { { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" } },
+            })
 
             assert.same({
                 active = true,
@@ -1419,6 +1488,14 @@ describe("ns.newSegmentTally", function()
                 housingXP = 0,
                 housingLevelUps = {},
                 encounters = {},
+                equipsetChanges = {
+                    {
+                        setId = 3, name = "Raid", kind = "updated", at = 575,
+                        items = {
+                            { slot = 1, itemId = 100, itemLevel = 639, itemName = "Tideglass Crown" },
+                        },
+                    },
+                },
             }, tally.summary())
         end)
     end)

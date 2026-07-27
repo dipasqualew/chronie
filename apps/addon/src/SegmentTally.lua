@@ -33,6 +33,7 @@ local _, ns = ...
 ---@field housingXP fun(amount: integer) Fold a housing experience gain into the segment total.
 ---@field housingLevelUp fun(level: integer, at: integer) Append a housing level gained.
 ---@field encounter fun(event: EncounterEvent) Append a boss encounter that ended, kill or wipe.
+---@field equipsetChange fun(change: EquipsetChange) Append a change to one equipment set.
 ---@field keystoneStart fun(info: table, at: integer) Open a Mythic+ run: `{ level, mapId, affixes }`.
 ---@field keystoneComplete fun(info: table, at: integer) Close it: `{ durationMs, onTime, upgrades, level }`.
 ---@field keystoneReset fun() Abandon the open run; the level and map stay, completion does not.
@@ -299,6 +300,7 @@ function ns.newSegmentTally(deps)
         segment.housingXP = 0
         segment.housingLevelUps = {}
         segment.encounters = {}
+        segment.equipsetChanges = {}
         segment.keystone = nil
         segment.experienceGained = 0
         segment.experiencePercent = 0
@@ -600,6 +602,38 @@ function ns.newSegmentTally(deps)
             }
         end,
 
+        ---Something that happened to one of the character's equipment sets.
+        ---
+        ---The ledger has already worked out what changed; this only files it against the
+        ---segment it happened during. A change carrying no slots at all is still recorded
+        ---when the set itself came or went — an empty set is a set — but never for an edit,
+        ---because "these items changed" with nothing in the list is not an edit.
+        ---@param change EquipsetChange
+        equipsetChange = function(change)
+            if not segment.active or not change or not change.setId or not change.kind then
+                return
+            end
+            local items = {}
+            for index, item in ipairs(change.items or {}) do
+                items[index] = {
+                    slot = item.slot,
+                    itemId = item.itemId,
+                    itemLevel = item.itemLevel,
+                    itemName = item.itemName,
+                }
+            end
+            if #items == 0 and change.kind == "updated" then
+                return
+            end
+            segment.equipsetChanges[#segment.equipsetChanges + 1] = {
+                setId = change.setId,
+                name = change.name,
+                kind = change.kind,
+                at = change.at,
+                items = items,
+            }
+        end,
+
         ---Opens a Mythic+ run on this segment. A level of nil is not a keystone start the
         ---tally can say anything useful about, so it is dropped rather than recorded as a
         ---run of unknown level.
@@ -805,6 +839,7 @@ function ns.newSegmentTally(deps)
                 or segment.housingXP ~= 0
                 or #segment.housingLevelUps > 0
                 or #segment.encounters > 0
+                or #segment.equipsetChanges > 0
                 or segment.keystone ~= nil
                 or segment.experienceGained ~= 0
         end,
@@ -866,6 +901,7 @@ function ns.newSegmentTally(deps)
                 housingXP = segment.housingXP,
                 housingLevelUps = ns.copyEventList(specs.housingLevelUps, segment.housingLevelUps),
                 encounters = ns.copyEventList(specs.encounters, segment.encounters),
+                equipsetChanges = ns.copyEventList(specs.equipsetChanges, segment.equipsetChanges),
                 keystone = ns.copyDetail(details.keystone, segment.keystone),
                 experience = ns.copyDetail(details.experience, experience),
             }

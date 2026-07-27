@@ -10,6 +10,11 @@ local _, ns = ...
 ---left absent in the copy — never invented — so an optional flag like `accountFirst` only
 ---appears when the source actually carried it. Listing the keys explicitly (rather than a
 ---blind shallow copy) also stops internal bookkeeping fields from leaking into a record.
+---
+---A named key holding a spec of its own — `items = { ... }` — is a list of tables nested
+---inside the event, copied by the same rules one level down. Only equipment set changes
+---need it today, and they genuinely do: what changed about a set is a list of slots, and
+---flattening it into the parent would lose which slot went with which item.
 ns.segmentEventSpecs = {
     transmogs       = { "id", "at", "sourceID", "appearanceID", "newAppearance" },
     currencies      = { "id", "name", "amount" },
@@ -23,6 +28,10 @@ ns.segmentEventSpecs = {
     housingItems    = { "id", "name", "at", "warbandFirst" },
     housingLevelUps = { "level", "at" },
     encounters      = { "id", "name", "at", "difficultyId", "groupSize", "success" },
+    equipsetChanges = {
+        "setId", "name", "kind", "at",
+        items = { "slot", "itemId", "itemLevel", "itemName" },
+    },
 }
 
 ---The single-valued tables a segment carries: at most one per segment, so they are copied
@@ -67,7 +76,11 @@ end
 ---Deep-copies a list of event tables, keeping only the named keys and only where the
 ---source actually set them. The copy shares no table with the source, so a later mutation
 ---of the live tally can never reach back into a summary or a filed record.
----@param keys string[] The keys to carry across, from ns.segmentEventSpecs.
+---
+---A spec's named keys — the `items = { ... }` form — describe a list of tables nested in
+---each event, and recur through this same function. A nested list the source never set
+---stays absent rather than arriving as an empty list, on the same rule as every other key.
+---@param keys table The keys to carry across, from ns.segmentEventSpecs.
 ---@param events table[]? The source list; nil is treated as empty.
 ---@return table[]
 function ns.copyEventList(keys, events)
@@ -77,6 +90,11 @@ function ns.copyEventList(keys, events)
         for _, key in ipairs(keys) do
             if event[key] ~= nil then
                 out[key] = event[key]
+            end
+        end
+        for key, nested in pairs(keys) do
+            if type(key) == "string" and event[key] ~= nil then
+                out[key] = ns.copyEventList(nested, event[key])
             end
         end
         copy[index] = out

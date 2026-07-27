@@ -14,6 +14,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_initial.sql"),
     include_str!("../migrations/0002_activities.sql"),
     include_str!("../migrations/0003_lockouts.sql"),
+    include_str!("../migrations/0004_equipsets.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -403,6 +404,7 @@ fn normalized(mut segment: Value) -> Option<Value> {
         "housingItems",
         "housingLevelUps",
         "encounters",
+        "equipsetChanges",
     ] {
         if !object.get(key).is_some_and(Value::is_array) {
             object.insert(key.into(), Value::Array(Vec::new()));
@@ -839,6 +841,8 @@ fn clear_outcomes(transaction: &Transaction<'_>, segment_id: i64) -> Result<(), 
         "housing_level_ups",
         "encounters",
         "keystone_runs",
+        // equipset_slots hang off the change row and go with it.
+        "equipset_changes",
     ] {
         transaction
             .execute(
@@ -910,6 +914,7 @@ fn events<'a>(segment: &'a Value, key: &str) -> &'a [Value] {
 
 fn insert_outcomes(
     transaction: &Transaction<'_>,
+    character_id: i64,
     segment_id: i64,
     segment: &Value,
 ) -> Result<(), String> {
@@ -1189,6 +1194,79 @@ fn insert_outcomes(
                 .map_err(|error| error.to_string())?;
         }
     }
+
+    insert_equipset_changes(transaction, character_id, segment_id, segment)?;
+    Ok(())
+}
+
+/// Files what happened to the character's equipment sets, and what each changed slot holds.
+///
+/// The slot rows are the ledger: each says what its slot holds *after* the change, and the
+/// row before it for the same character, set and slot is what it replaced. Nothing here
+/// writes a "before", because the row behind already is one.
+///
+/// A change naming no slots is still written when the set itself came or went — an empty set
+/// is a set — which is why the slot loop is allowed to write nothing.
+fn insert_equipset_changes(
+    transaction: &Transaction<'_>,
+    character_id: i64,
+    segment_id: i64,
+    segment: &Value,
+) -> Result<(), String> {
+    for (position, event) in events(segment, "equipsetChanges").iter().enumerate() {
+        let Some(set_id) = optional_integer(event, "setId") else {
+            continue;
+        };
+        // An unknown kind is not something the ledger can file, and the column's CHECK would
+        // refuse it anyway; dropping it here keeps a bad row from failing the whole sync.
+        let kind = match optional_text(event, "kind") {
+            Some(kind @ ("created" | "deleted" | "updated")) => kind,
+            _ => continue,
+        };
+        let changed_at = optional_integer(event, "at");
+        transaction
+            .execute(
+                "INSERT INTO equipset_changes (
+                     segment_id, position, character_id, set_id, name, kind, changed_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    segment_id,
+                    position as i64,
+                    character_id,
+                    set_id,
+                    optional_text(event, "name").unwrap_or(""),
+                    kind,
+                    changed_at
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        let change_id = transaction.last_insert_rowid();
+
+        for item in events(event, "items") {
+            let Some(slot) = optional_integer(item, "slot") else {
+                continue;
+            };
+            transaction
+                .execute(
+                    "INSERT INTO equipset_slots (
+                         change_id, character_id, set_id, slot,
+                         item_id, item_level, item_name, changed_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(change_id, slot) DO NOTHING",
+                    params![
+                        change_id,
+                        character_id,
+                        set_id,
+                        slot,
+                        optional_integer(item, "itemId"),
+                        optional_integer(item, "itemLevel"),
+                        optional_text(item, "itemName"),
+                        changed_at
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -1276,7 +1354,7 @@ fn upsert_segment(
         )
         .map_err(|error| error.to_string())?;
     let segment_id = existing.unwrap_or_else(|| transaction.last_insert_rowid());
-    insert_outcomes(transaction, segment_id, segment)?;
+    insert_outcomes(transaction, character_id, segment_id, segment)?;
     refresh_activities(transaction, segment_id, segment, now)?;
     Ok(existing.is_none())
 }
@@ -1446,6 +1524,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
                     })),
                     "activities": [],
                     "encounters": [],
+                    "equipsetChanges": [],
                     "transmogs": [],
                     "currencies": [],
                     "reputation": [],
@@ -1685,6 +1764,84 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
             ))
         }
     );
+
+    // Equipment set changes are the one event list whose rows carry a list of their own, so
+    // they are assembled here rather than through `load_rows!`.
+    //
+    // What each slot replaced comes from the row behind it in the ledger — the previous row
+    // for the same character, set and slot — which is what `LAG` is doing. That is the whole
+    // reason the table stores only the state after a change: the before is already written
+    // down, once, as somebody else's after.
+    let mut statement = connection
+        .prepare(
+            "WITH history AS (
+                 SELECT id, change_id, slot, item_id, item_level, item_name,
+                        LAG(item_id)    OVER slot_history AS previous_item_id,
+                        LAG(item_level) OVER slot_history AS previous_item_level,
+                        LAG(item_name)  OVER slot_history AS previous_item_name
+                 FROM equipset_slots
+                 WINDOW slot_history AS (
+                     PARTITION BY character_id, set_id, slot
+                     ORDER BY changed_at, id
+                 )
+             )
+             SELECT changes.segment_id, changes.id, changes.set_id, changes.name,
+                    changes.kind, changes.changed_at,
+                    history.slot, history.item_id, history.item_level, history.item_name,
+                    history.previous_item_id, history.previous_item_level,
+                    history.previous_item_name
+             FROM equipset_changes AS changes
+             LEFT JOIN history ON history.change_id = changes.id
+             ORDER BY changes.segment_id, changes.position, history.slot",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                serde_json::json!({
+                    "setId": row.get::<_, i64>(2)?,
+                    "name": row.get::<_, String>(3)?,
+                    "kind": row.get::<_, String>(4)?,
+                    "at": row.get::<_, Option<i64>>(5)?,
+                }),
+                row.get::<_, Option<i64>>(6)?.map(|slot| serde_json::json!({
+                    "slot": slot,
+                    "itemId": row.get::<_, Option<i64>>(7).unwrap_or(None),
+                    "itemLevel": row.get::<_, Option<i64>>(8).unwrap_or(None),
+                    "itemName": row.get::<_, Option<String>>(9).unwrap_or(None),
+                    "previousItemId": row.get::<_, Option<i64>>(10).unwrap_or(None),
+                    "previousItemLevel": row.get::<_, Option<i64>>(11).unwrap_or(None),
+                    "previousItemName": row.get::<_, Option<String>>(12).unwrap_or(None),
+                })),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    // The join hands back one row per slot, so a change with three slots arrives three
+    // times. Changes come out grouped and in order, so the last one built is the one a
+    // slot belongs to and no lookup table is needed.
+    let mut open: Option<(i64, i64, Value)> = None;
+    for row in rows {
+        let (segment_id, change_id, change, slot) = row.map_err(|error| error.to_string())?;
+        if open.as_ref().is_none_or(|(_, open_id, _)| *open_id != change_id) {
+            if let Some((previous_segment, _, built)) = open.take() {
+                push_event(&mut segments, &indices, previous_segment, "equipsetChanges", built);
+            }
+            let mut change = change;
+            change["items"] = Value::Array(Vec::new());
+            open = Some((segment_id, change_id, change));
+        }
+        if let (Some((_, _, built)), Some(slot)) = (open.as_mut(), slot) {
+            if let Some(items) = built["items"].as_array_mut() {
+                items.push(slot);
+            }
+        }
+    }
+    if let Some((segment_id, _, built)) = open {
+        push_event(&mut segments, &indices, segment_id, "equipsetChanges", built);
+    }
+    drop(statement);
 
     // A keystone run is one per segment rather than a list, so it is attached directly
     // instead of pushed onto an event array.
@@ -2126,6 +2283,207 @@ ChronieDB = {{ ["segments"] = {{
           { ["id"] = 746, ["name"] = "Ignis", ["success"] = false }
         } }
     "#;
+
+    /// Two segments, each carrying one change to the same equipment set, written the way
+    /// the addon writes them. The pair is the point: what the second change replaced can
+    /// only come from the first, because nothing ever stores a "before".
+    const EQUIPSET_SEGMENTS: &str = r#"
+      { ["id"] = "set-1", ["character"] = "Aster-Vale", ["instance"] = "Valdrakken",
+        ["instanceType"] = "none", ["endedAt"] = 2000000000, ["startedAt"] = 1999990000,
+        ["equipsetChanges"] = {
+          { ["setId"] = 3, ["name"] = "Raid", ["kind"] = "created", ["at"] = 1999990500,
+            ["items"] = {
+              { ["slot"] = 1, ["itemId"] = 100, ["itemLevel"] = 623,
+                ["itemName"] = "Tideglass Crown" },
+              { ["slot"] = 5, ["itemId"] = 200, ["itemLevel"] = 619,
+                ["itemName"] = "Tideglass Robe" }
+            } }
+        } },
+      { ["id"] = "set-2", ["character"] = "Aster-Vale", ["instance"] = "Valdrakken",
+        ["instanceType"] = "none", ["endedAt"] = 2000100000, ["startedAt"] = 2000090000,
+        ["equipsetChanges"] = {
+          { ["setId"] = 3, ["name"] = "Raid", ["kind"] = "updated", ["at"] = 2000090500,
+            ["items"] = {
+              { ["slot"] = 1, ["itemId"] = 101, ["itemLevel"] = 639,
+                ["itemName"] = "Deepwater Crown" }
+            } }
+        } }
+    "#;
+
+    #[test]
+    fn stores_what_happened_to_an_equipment_set_and_what_each_slot_holds() {
+        let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
+
+        collect(&wow, &database, 2_000_100_000).unwrap();
+
+        let payload = dashboard(&database).unwrap();
+        // Newest first, so the edit leads and the creation follows.
+        let edit = &payload["segments"][0]["equipsetChanges"][0];
+        assert_eq!(edit["setId"], 3);
+        assert_eq!(edit["name"], "Raid");
+        assert_eq!(edit["kind"], "updated");
+        assert_eq!(edit["at"], 2_000_090_500_i64);
+        assert_eq!(edit["items"].as_array().unwrap().len(), 1);
+        assert_eq!(edit["items"][0]["slot"], 1);
+        assert_eq!(edit["items"][0]["itemId"], 101);
+        assert_eq!(edit["items"][0]["itemLevel"], 639);
+        assert_eq!(edit["items"][0]["itemName"], "Deepwater Crown");
+
+        let created = &payload["segments"][1]["equipsetChanges"][0];
+        assert_eq!(created["kind"], "created");
+        assert_eq!(created["items"].as_array().unwrap().len(), 2);
+    }
+
+    /// The whole reason the ledger stores only the state after a change: the row behind is
+    /// the before, so an edit knows what it replaced without anyone writing it down twice.
+    #[test]
+    fn reads_what_a_slot_replaced_out_of_the_row_behind_it() {
+        let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
+
+        collect(&wow, &database, 2_000_100_000).unwrap();
+
+        let payload = dashboard(&database).unwrap();
+        let edit = &payload["segments"][0]["equipsetChanges"][0]["items"][0];
+        assert_eq!(edit["previousItemId"], 100);
+        assert_eq!(edit["previousItemLevel"], 623);
+        assert_eq!(edit["previousItemName"], "Tideglass Crown");
+
+        // The creation is the first thing that ever happened to the slot, so there is no row
+        // behind it and nothing to have replaced.
+        let created = &payload["segments"][1]["equipsetChanges"][0]["items"][0];
+        assert_eq!(created["previousItemId"], Value::Null);
+        assert_eq!(created["previousItemLevel"], Value::Null);
+    }
+
+    /// A slot the change emptied is a fact worth keeping, not a row to skip: "the head slot
+    /// was cleared" says as much about a set as any item ever put in it.
+    #[test]
+    fn keeps_a_slot_a_change_emptied() {
+        let cleared = r#"
+          { ["id"] = "set-1", ["character"] = "Aster-Vale", ["instance"] = "Valdrakken",
+            ["instanceType"] = "none", ["endedAt"] = 2000000000,
+            ["equipsetChanges"] = {
+              { ["setId"] = 3, ["name"] = "Raid", ["kind"] = "deleted", ["at"] = 1999990500,
+                ["items"] = { { ["slot"] = 1 } } }
+            } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(cleared);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let item = &dashboard(&database).unwrap()["segments"][0]["equipsetChanges"][0]["items"][0];
+        assert_eq!(item["slot"], 1);
+        assert_eq!(item["itemId"], Value::Null);
+    }
+
+    /// A set that was created and holds nothing is still a set that was created. The change
+    /// row has to survive having no slots to hang off it.
+    #[test]
+    fn keeps_a_change_that_names_no_slot_at_all() {
+        let empty = r#"
+          { ["id"] = "set-1", ["character"] = "Aster-Vale", ["instance"] = "Valdrakken",
+            ["instanceType"] = "none", ["endedAt"] = 2000000000,
+            ["equipsetChanges"] = {
+              { ["setId"] = 3, ["name"] = "Empty", ["kind"] = "created", ["at"] = 1999990500,
+                ["items"] = {} }
+            } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(empty);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let change = &dashboard(&database).unwrap()["segments"][0]["equipsetChanges"][0];
+        assert_eq!(change["kind"], "created");
+        assert_eq!(change["items"], serde_json::json!([]));
+    }
+
+    /// Two characters can each own a set numbered 3, and they are not the same set. Keying
+    /// the ledger's history by the character alone is what keeps one from reading as the
+    /// other's before.
+    #[test]
+    fn keeps_two_characters_sets_apart_even_when_they_share_an_id() {
+        let shared = r#"
+          { ["id"] = "aster-1", ["character"] = "Aster-Vale", ["instance"] = "Valdrakken",
+            ["instanceType"] = "none", ["endedAt"] = 2000000000,
+            ["equipsetChanges"] = {
+              { ["setId"] = 3, ["name"] = "Aster Raid", ["kind"] = "created", ["at"] = 1999990000,
+                ["items"] = { { ["slot"] = 1, ["itemId"] = 100, ["itemLevel"] = 600 } } }
+            } },
+          { ["id"] = "brann-1", ["character"] = "Brann-Vale", ["instance"] = "Valdrakken",
+            ["instanceType"] = "none", ["endedAt"] = 2000100000,
+            ["equipsetChanges"] = {
+              { ["setId"] = 3, ["name"] = "Brann Raid", ["kind"] = "created", ["at"] = 2000090000,
+                ["items"] = { { ["slot"] = 1, ["itemId"] = 500, ["itemLevel"] = 500 } } }
+            } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(shared);
+
+        collect(&wow, &database, 2_000_100_000).unwrap();
+
+        let payload = dashboard(&database).unwrap();
+        // Brann's creation is newest. It must not have inherited Aster's item as its before.
+        let brann = &payload["segments"][0]["equipsetChanges"][0]["items"][0];
+        assert_eq!(brann["itemId"], 500);
+        assert_eq!(brann["previousItemId"], Value::Null);
+    }
+
+    /// Re-reading the same file rewrites a segment's rows, and the ledger must not grow a
+    /// second copy of a change that already happened.
+    #[test]
+    fn does_not_double_a_change_when_the_same_segment_is_synced_again() {
+        let (_temp, wow, database) = synthetic_install(EQUIPSET_SEGMENTS);
+        collect(&wow, &database, 2_000_100_000).unwrap();
+
+        touch(&wow, EQUIPSET_SEGMENTS);
+        collect(&wow, &database, 2_000_100_001).unwrap();
+
+        let connection = open_database(&database).unwrap();
+        let changes: i64 = connection
+            .query_row("SELECT COUNT(*) FROM equipset_changes", [], |row| row.get(0))
+            .unwrap();
+        let slots: i64 = connection
+            .query_row("SELECT COUNT(*) FROM equipset_slots", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!((changes, slots), (2, 3));
+
+        let edit = &dashboard(&database).unwrap()["segments"][0]["equipsetChanges"][0];
+        assert_eq!(edit["items"][0]["previousItemId"], 100);
+    }
+
+    /// A kind the CHECK would refuse must not take the whole sync down with it. Everything
+    /// else in the file is still worth storing.
+    #[test]
+    fn skips_a_change_whose_kind_is_not_one_of_the_three() {
+        let nonsense = r#"
+          { ["id"] = "set-1", ["character"] = "Aster-Vale", ["instance"] = "Valdrakken",
+            ["instanceType"] = "none", ["endedAt"] = 2000000000, ["lootValue"] = 40,
+            ["equipsetChanges"] = {
+              { ["setId"] = 3, ["name"] = "Raid", ["kind"] = "rearranged", ["at"] = 1999990500,
+                ["items"] = { { ["slot"] = 1, ["itemId"] = 100 } } }
+            } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(nonsense);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        assert_eq!(segment["equipsetChanges"], serde_json::json!([]));
+        assert_eq!(segment["lootValue"], 40);
+    }
+
+    /// A history recorded before equipment sets were tracked has no such rows, and every
+    /// reader of the payload is written to expect the key regardless.
+    #[test]
+    fn gives_a_segment_that_saw_no_set_change_an_empty_list() {
+        let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
+
+        collect(&wow, &database, 2_000_000_000).unwrap();
+
+        assert_eq!(
+            dashboard(&database).unwrap()["segments"][0]["equipsetChanges"],
+            serde_json::json!([])
+        );
+    }
 
     #[test]
     fn stores_a_keystone_run_and_guesses_the_activity_from_it() {
