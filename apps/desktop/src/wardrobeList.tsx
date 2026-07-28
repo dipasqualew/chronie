@@ -22,6 +22,11 @@
  * row of models is geometry read out of the game's files. `gallery.ts` decides what a page is
  * and where a camera looks; `galleryStage.ts` draws them, all on one graphics context.
  *
+ * And beside the name on every row, the fourth thing: **what the artwork was measured to be** —
+ * two swatches and a word, out of the store this repository ships rather than out of anybody's
+ * install. `qualities.ts` is what that is and where it comes from; what it buys here is a search
+ * box that answers "brown", which is a word the game writes nowhere.
+ *
  * Turned on, the list stops being a list. A row becomes a tile with the picture across the whole
  * of it and the name, the marks and the rest underneath — because the picture is what the reader
  * turned this on to look at, and a hundred pixels of it beside a column of text is not looking.
