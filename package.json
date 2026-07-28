@@ -13,12 +13,14 @@
     "trace": "bun run scripts/trace-render.ts",
     "test": "bun run --cwd apps/desktop test",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
+    "test:scripts": "node node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc -p apps/desktop && tsc -p scripts",
     "ci:wait": "bun run scripts/wait-for-ci.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
     "@types/node": "^22.15.3",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }
