@@ -9,8 +9,16 @@
  * from one and a robe from another — and a dialog that had to be closed to reach the second
  * set made that the hard way round.
  *
- * `transmog.ts` decides how sets group and filter, `outfit.ts` decides what goes where, and
- * `outfitPanel.tsx` draws the body. This is the browsing over them.
+ * The left half browses **two ways**, and the switch between them is the one control above
+ * both. Sets are what somebody at Blizzard put together; items are the game's whole wardrobe
+ * cut by the kind of thing — every head, every staff — which is the only way to reach the
+ * several thousand looks no set names. What survives the switch is the outfit, because it
+ * lives here rather than in either browser: a helm out of a set is still on her while a
+ * two-hander is picked out of the list.
+ *
+ * `transmog.ts` decides how sets group and filter, `wardrobe.ts` what a kind is and what a
+ * filter over one leaves, `outfit.ts` what goes where, and `outfitPanel.tsx` draws the body.
+ * This is the browsing over them.
  *
  * Two things about the left half are worth saying plainly, because both were the other way
  * round once. **A row's whole width puts the piece on**, and Wowhead is an icon at the end of
@@ -29,7 +37,7 @@ import type { ReactNode } from "react";
 import { plural } from "./format";
 import { wearable as canBeWorn } from "./modelPreview";
 import {
-  NOTHING_ON, isWorn, onlyWearable, takeOff, toggle as toggleWorn, wearSet, wearable,
+  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, wearSet, wearable,
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
@@ -41,12 +49,15 @@ import {
 } from "./transmogModal";
 import type { AppearanceRow, AppearanceSource } from "./transmogModal";
 import type { ModelStage } from "./modelViewer";
+import { LinkOut } from "./ui";
+import { WardrobeList } from "./wardrobeList";
 import type {
   CharacterModelPayload,
   IconsPayload,
   TransmogPayload,
   TransmogSet,
   TransmogSetItemsPayload,
+  WardrobePayload,
   WornPiece,
   WornSetPayload,
 } from "./types";
@@ -58,6 +69,8 @@ export interface TransmogViewProps {
   status: string;
   /** Asks the backend what a set is made of, when a reader opens one. */
   loadSet: (setId: number) => Promise<TransmogSetItemsPayload>;
+  /** Asks it for every look filling a kind of place, when a reader browses by item. */
+  loadAppearances: (displayTypes: number[]) => Promise<WardrobePayload>;
   /** Asks the backend for the pictures those rows need, decoded out of the game's textures. */
   loadIcons: (iconFileDataIds: number[]) => Promise<IconsPayload>;
   /** Passed through to the panel: the bare body, and the body wearing the whole outfit. */
@@ -67,9 +80,15 @@ export interface TransmogViewProps {
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
 }
 
+/** Which half of the browser the reader is in: the game's sets, or the game's whole wardrobe. */
+type Browsing = "sets" | "items";
+
 export function TransmogView(
-  { payload, status, loadSet, loadIcons, loadCharacter, loadWorn, createStage }: TransmogViewProps,
+  {
+    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, createStage,
+  }: TransmogViewProps,
 ): ReactNode {
+  const [browsing, setBrowsing] = useState<Browsing>("sets");
   const [search, setSearch] = useState("");
   const [expansion, setExpansion] = useState("");
   const [klass, setKlass] = useState("");
@@ -93,7 +112,31 @@ export function TransmogView(
   // throughout, so a set opened after its neighbour draws complete straight away.
   const icons = useRef(new Map<number, string>()).current;
   const asked = useRef(new Set<number>()).current;
+  // Which pictures have already been sent for. Both halves of the browser ask through the same
+  // door — a wardrobe list of a hundred rows and a set of twelve want the same textures often
+  // enough — and this is what stops the second asker asking again while the first is in flight.
+  const askedIcons = useRef(new Set<number>()).current;
   const [, redraw] = useReducer((count: number) => count + 1, 0);
+
+  /**
+   * Sends for the pictures some rows are waiting on, and redraws when they arrive.
+   *
+   * A picture that will not come stays an empty frame and nothing is said about it: an icon is
+   * the one thing on a row that can be missing without the row losing its point, and the row
+   * already names its slot and its item.
+   */
+  const wantIcons = useCallback((wanted: number[]): void => {
+    const missing = [...new Set(wanted)]
+      .filter((id) => id > 0 && !icons.has(id) && !askedIcons.has(id));
+    if (!missing.length) return;
+    for (const id of missing) askedIcons.add(id);
+    void loadIcons(missing)
+      .then((pictures) => {
+        for (const [id, url] of Object.entries(pictures.icons || {})) icons.set(Number(id), url);
+        redraw();
+      })
+      .catch(() => undefined);
+  }, [loadIcons, icons, askedIcons]);
 
   /**
    * Reads what a set is made of, and then the pictures its rows are waiting on.
@@ -109,21 +152,15 @@ export function TransmogView(
       .then((answer) => {
         known.set(setId, answer);
         redraw();
-        const wanted = iconIds(answer).filter((id) => !icons.has(id));
-        if (!wanted.length) return;
-        return loadIcons(wanted).then((pictures) => {
-          for (const [id, url] of Object.entries(pictures.icons || {})) icons.set(Number(id), url);
-          redraw();
-        });
+        wantIcons(iconIds(answer));
       })
-      // An icon is the one thing on a row that can be missing without the row losing its point,
-      // so a picture that will not come stays an empty frame. A set that will not come is worth
-      // saying, because the reader clicked to see what was in it.
+      // A set that will not come is worth saying, because the reader clicked to see what was
+      // in it.
       .catch((error: unknown) => {
         if (!known.has(setId)) known.set(setId, message(error));
         redraw();
       });
-  }, [loadSet, loadIcons, known, icons, asked]);
+  }, [loadSet, wantIcons, known, asked]);
 
   const openSet = useCallback((set: TransmogSet): void => {
     setOpen((was) => {
@@ -163,7 +200,21 @@ export function TransmogView(
       </div>
     </header>
     <div className="mog-layout">
-      <section className="panel mog-browser">
+      <div className="mog-half">
+        {/* The one control above both browsers, because it is a statement about what a reader
+            is looking for rather than about either list. Two buttons rather than a select:
+            there are two of them and both are worth being one click away. */}
+        <div className="mog-modes" role="group" aria-label="Browse the game by">
+          <button
+            type="button" aria-pressed={browsing === "sets"}
+            onClick={() => setBrowsing("sets")}
+          >Sets</button>
+          <button
+            type="button" aria-pressed={browsing === "items"}
+            onClick={() => setBrowsing("items")}
+          >Items</button>
+        </div>
+      <section className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}>
         <div className="table-head">
           <div className="controls">
             <input
@@ -209,7 +260,7 @@ export function TransmogView(
                     key={set.id} set={set} open={open.has(set.id)} onToggle={() => openSet(set)}
                     contents={known.get(set.id)} icons={icons} outfit={outfit}
                     hideUnwearable={hideUnwearable}
-                    onWear={(row) => setOutfit((was) => toggleWorn(was, row, set))}
+                    onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
                     onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
                   />
                 ))}
@@ -222,6 +273,15 @@ export function TransmogView(
           <p>Try a different search, class or expansion.</p>
         </div>
       </section>
+      {/* Kept in the tree rather than swapped in, so that what a reader has read, searched
+          and scrolled is still there when they come back to it. Nothing is read for it until
+          it is first shown — see `hidden`, which the list takes as the word to start. */}
+      <WardrobeList
+        hidden={browsing !== "items"} load={loadAppearances} wantIcons={wantIcons} icons={icons}
+        outfit={outfit} hideUnwearable={hideUnwearable} onHideUnwearable={setHideUnwearable}
+        onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
+      />
+      </div>
       <OutfitPanel
         outfit={outfit} icons={icons} createStage={createStage}
         loadCharacter={loadCharacter} loadWorn={loadWorn}
@@ -453,27 +513,6 @@ function Sources({ row }: { row: AppearanceRow }): ReactNode {
         </li>
       ))}
     </ul>
-  );
-}
-
-/**
- * The mark on the link out: a box with an arrow leaving it, drawn rather than written.
- *
- * Drawn because there is nothing to write it with. The window ships no icon font and loads
- * nothing from the network, and the arrows in the fonts it does have are a lottery across
- * machines — so the one glyph this view needs is eleven points of SVG in the markup.
- */
-function LinkOut(): ReactNode {
-  return (
-    <svg
-      viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"
-      fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9.5 2.5H13.5V6.5" />
-      <path d="M13.5 2.5L7.5 8.5" />
-      <path d="M12 9.5V13C12 13.3 11.8 13.5 11.5 13.5H3C2.7 13.5 2.5 13.3 2.5 13V4.5C2.5 4.2 2.7 4 3 4H6.5" />
-    </svg>
   );
 }
 

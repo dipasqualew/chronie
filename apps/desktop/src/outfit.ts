@@ -107,9 +107,16 @@ export interface Worn {
   /** Where on the body it is, which is what only one thing at a time can occupy. */
   place: string;
   row: AppearanceRow;
-  /** Which set it was taken out of, so the list says where each piece came from. */
-  setId: number;
-  setName: string;
+  /**
+   * Where the reader took it from, as the line the panel prints under the item's name.
+   *
+   * A set's name, and **empty for a look picked out of the game at large** — which is the
+   * whole of what the two halves of the view differ by once a piece is on. A wardrobe list
+   * browses appearances rather than anybody's idea of an outfit, so there is no second name
+   * to give, and inventing one ("the wardrobe", the slot it fills) would be a line saying
+   * either nothing or what the badge beside it already says.
+   */
+  from: string;
 }
 
 /**
@@ -131,10 +138,10 @@ export const NOTHING_ON: Outfit = {};
  * An appearance with nowhere to go leaves the outfit alone. The row is what says so to the
  * reader — see [`wearable`] — and this is the floor under it.
  */
-export function wear(outfit: Outfit, row: AppearanceRow, set: TransmogSet): Outfit {
+export function wear(outfit: Outfit, row: AppearanceRow, from = ""): Outfit {
   const place = placeOf(row);
   if (!place) return outfit;
-  return { ...outfit, [place]: { place, row, setId: set.id, setName: set.name } };
+  return { ...outfit, [place]: { place, row, from } };
 }
 
 /**
@@ -146,7 +153,12 @@ export function wear(outfit: Outfit, row: AppearanceRow, set: TransmogSet): Outf
  * than an arbitrary one.
  */
 export function wearSet(outfit: Outfit, rows: AppearanceRow[], set: TransmogSet): Outfit {
-  return rows.reduce((worn, row) => wear(worn, row, set), outfit);
+  return rows.reduce((worn, row) => wear(worn, row, setLabel(set)), outfit);
+}
+
+/** What the panel calls the set a piece came out of, which the game leaves unnamed for some. */
+export function setLabel(set: TransmogSet): string {
+  return set.name || `Set ${set.id}`;
 }
 
 /** Takes off whatever is in one place. A place nothing is in is left as it was. */
@@ -158,10 +170,10 @@ export function takeOff(outfit: Outfit, place: string): Outfit {
 }
 
 /** Puts an appearance on, or takes it off again when it is already the one being worn. */
-export function toggle(outfit: Outfit, row: AppearanceRow, set: TransmogSet): Outfit {
+export function toggle(outfit: Outfit, row: AppearanceRow, from = ""): Outfit {
   const place = placeOf(row);
   if (!place) return outfit;
-  return isWorn(outfit, row) ? takeOff(outfit, place) : wear(outfit, row, set);
+  return isWorn(outfit, row) ? takeOff(outfit, place) : wear(outfit, row, from);
 }
 
 /**

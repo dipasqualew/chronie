@@ -261,6 +261,23 @@ async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<V
     read_game_files(&state, move |files| transmog::set_items(files, set_id)).await
 }
 
+/// Every appearance the game holds for one kind of place, whether or not a set names it.
+///
+/// The display types come from the window rather than from the backend, because the kinds a
+/// reader picks between do not divide the way the table does: an armour slot is one display
+/// type and everything held in a hand is five. Asked for a kind at a time — the whole
+/// wardrobe is fourteen megabytes and nobody browses fifty-five thousand rows at once.
+#[tauri::command]
+async fn transmog_appearances(
+    display_types: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| {
+        wardrobe::appearances(files, &display_types)
+    })
+    .await
+}
+
 /// What the game says about the achievements a window is showing.
 ///
 /// The dashboard already carries the ids, because the addon recorded them at the moment they
@@ -1116,6 +1133,7 @@ pub fn run() {
             query_schema,
             transmog_sets,
             transmog_set_items,
+            transmog_appearances,
             character_model,
             worn_set,
             achievement_details,

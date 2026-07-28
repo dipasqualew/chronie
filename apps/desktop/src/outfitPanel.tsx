@@ -191,7 +191,10 @@ export function OutfitPanel(
               {/* The panel is narrow and item names are not, so the name is clipped and the
                   whole of it is on the row for anyone who wants it. */}
               <span className="outfit-item" title={piece.row.label}>{piece.row.label}</span>
-              <span className="muted">{piece.setName || `Set ${piece.setId}`}</span>
+              {/* Absent rather than empty for a look picked out of the game at large: there
+                  is no set behind one, and a blank line under every second piece would be a
+                  gap a reader has to work out the meaning of. */}
+              {piece.from ? <span className="muted">{piece.from}</span> : null}
             </span>
             <button
               type="button" className="outfit-off"

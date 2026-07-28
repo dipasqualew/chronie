@@ -574,3 +574,26 @@ export function SegmentButton(
     </button>
   );
 }
+
+/**
+ * The mark on a link that leaves the window: a box with an arrow leaving it, drawn rather
+ * than written.
+ *
+ * Drawn because there is nothing to write it with. The window ships no icon font and loads
+ * nothing from the network, and the arrows in the fonts it does have are a lottery across
+ * machines — so the one glyph the wardrobe needs is eleven points of SVG in the markup. Both
+ * halves of the transmog browser draw it, which is why it is here.
+ */
+export function LinkOut(): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"
+      fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.5 2.5H13.5V6.5" />
+      <path d="M13.5 2.5L7.5 8.5" />
+      <path d="M12 9.5V13C12 13.3 11.8 13.5 11.5 13.5H3C2.7 13.5 2.5 13.3 2.5 13V4.5C2.5 4.2 2.7 4 3 4H6.5" />
+    </svg>
+  );
+}

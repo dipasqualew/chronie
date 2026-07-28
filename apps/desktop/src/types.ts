@@ -508,6 +508,51 @@ export interface TransmogSetItemsPayload {
 }
 
 /**
+ * One look out of the game's whole wardrobe, as `wardrobe::WardrobeAppearance` reads it.
+ *
+ * The other way round from a set: this is an appearance the game holds for a place on the
+ * body, whether or not any set names it, already followed to the item that gives it most
+ * cheaply. A row is a *look* rather than an item, so `itemCount` is how many items the game
+ * sells it through and the name is one of theirs.
+ *
+ * Everything the item says can be missing — the game encrypts what it has not shipped — and a
+ * zero means the tables said nothing rather than that they said zero.
+ */
+export interface WardrobeAppearance {
+  appearanceId: number;
+  /** The item the row is named after, out of however many give the look. */
+  itemId: number;
+  name: string;
+  /** Which slot it fills: 0 head, 1 shoulder, 2–10 the rest of the armour, 11 up weapons. */
+  displayType: number;
+  /** Where the item is worn, which for a weapon is what says which hand holds it. */
+  inventoryType: number;
+  /** What kind of thing the item is: 4 armour, 2 a weapon, or something worn by nobody. */
+  classId: number;
+  /** Which kind of that kind — the axe, the staff, the dagger. `wardrobe.ts` names them. */
+  subclassId: number;
+  allowableClass: number;
+  requiredLevel: number;
+  quality: number;
+  displayInfoId: number;
+  iconFileDataId: number;
+  hasModel: boolean;
+  /** How many items of the game give this look, the one it is named after included. */
+  itemCount: number;
+  /** True when a class-locked item and an unrestricted one both give it. */
+  liftsRestriction: boolean;
+}
+
+export interface WardrobePayload {
+  /** The kinds of place asked for, as the game's own display types. */
+  displayTypes: number[];
+  appearances: WardrobeAppearance[];
+  readCount: number;
+  /** Looks this install can reach no item of, and so can say nothing whatever about. */
+  withheldCount: number;
+}
+
+/**
  * The pictures for a list of things, decoded out of the game's own textures.
  *
  * Keyed by the FileDataID whatever named them named them by — an appearance, an achievement
@@ -885,6 +930,10 @@ export interface E2EMock {
   transmog: TransmogPayload;
   /** What each set is made of, keyed by set id, as opening one asks for. */
   transmogItems: Record<number, TransmogSetItemsPayload>;
+  /** Every look filling one kind of place, keyed by the display types asked for, ascending
+   * and joined by commas. A key absent from here is a kind the install holds nothing for,
+   * which the real backend answers with an empty list rather than an error. */
+  wardrobe: Record<string, WardrobePayload>;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
   /** The body wearing an outfit, keyed by that outfit's display ids in ascending order and
