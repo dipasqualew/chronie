@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  UNNAMED, appearanceIds, charactersWithSets, filterInGameSets, rowOf, rowsOf, setLabel,
-  setSummary, setsFor, wardrobeSummary,
+  UNNAMED, appearanceIds, charactersWithSets, filterInGameSets, iconFrom, requestSummary, rowOf,
+  rowsOf, setLabel, setSummary, setsFor, slotsFrom, transmogSlotOf, wardrobeSummary,
 } from "./inGameSets";
+import { NOTHING_ON, wear } from "./outfit";
+import type { Outfit, Worn } from "./outfit";
 import { ANY_CLASS } from "./transmogModal";
-import type { InGameSet, InGameSetSlot, InGameSetsPayload, TransmogAppearance } from "./types";
+import type { AppearanceRow } from "./transmogModal";
+import type {
+  InGameSet, InGameSetSlot, InGameSetsPayload, SetRequest, TransmogAppearance,
+} from "./types";
 
 /** One appearance as the game's own tables answer for it, with only what a test spells out. */
 const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearance => ({
@@ -322,5 +327,251 @@ describe("wardrobeSummary", () => {
     ["several", [set(), set({ id: 5 })], "2 sets saved in game"],
   ])("says its own sentence for %s", (_what, sets, said) => {
     expect(wardrobeSummary(sets)).toBe(said);
+  });
+});
+
+/* ---------- and the one thing this app sends the other way ---------- */
+
+/** One appearance as the row every browser in this view draws, which is what a send reads. */
+const row = (fields: Partial<TransmogAppearance> = {}): AppearanceRow => rowOf(appearance(fields));
+
+/** The outfit those rows come to, assembled the way a reader assembles one. */
+const dressedIn = (...rows: AppearanceRow[]): Outfit =>
+  rows.reduce((worn, one) => wear(worn, one), NOTHING_ON);
+
+/**
+ * The same, with the rows put where a test says rather than where `wear` would put them.
+ *
+ * For the two cases a reader cannot reach and the code guards anyway: `wear` refuses exactly
+ * what `slotsFrom` refuses, so an outfit assembled the ordinary way can never hold a row the
+ * send has nowhere to put. Forcing one in is what makes the guard under it assertable.
+ */
+const forced = (pieces: Record<string, AppearanceRow>): Outfit =>
+  Object.fromEntries(Object.entries(pieces).map(
+    ([place, one]): [string, Worn] => [place, { place, row: one, from: "" }],
+  ));
+
+describe("transmogSlotOf", () => {
+  // The whole reason this is a written-out table rather than the display type passed through.
+  // Both numberings cover the same eleven places and they disagree about eight of them, so
+  // every disagreement is named here: getting one wrong puts a cloak where the shirt goes, and
+  // is discovered by a player looking at their own character wearing it.
+  it.each<[string, number, number]>([
+    ["a shirt", 2, 4],
+    ["a back", 9, 2],
+    ["a tabard", 10, 5],
+    ["a waist", 4, 8],
+    ["legs", 5, 9],
+    ["feet", 6, 10],
+    ["a wrist", 7, 6],
+    ["hands", 8, 7],
+  ])("sends %s from display type %i to transmog slot %i", (_what, displayType, slot) => {
+    expect(transmogSlotOf(row({ displayType }))).toBe(slot);
+  });
+
+  // And the three the two numberings happen to agree about, asserted rather than assumed —
+  // they are what makes the table look like an identity to anybody reading only the top of it.
+  it.each<[string, number]>([
+    ["a head", 0],
+    ["a shoulder", 1],
+    ["a chest", 3],
+  ])("leaves %s where both numberings already agree it goes", (_what, displayType) => {
+    expect(transmogSlotOf(row({ displayType }))).toBe(displayType);
+  });
+
+  // The two the display type cannot answer at all: everything from 11 up is a weapon or a
+  // shield, and which hand holds it is the item's own `InventoryType` — see `heldIn`.
+  it.each<[string, number, number, number]>([
+    ["a one-hander", 11, 13, 11],
+    ["a two-hander", 11, 17, 11],
+    ["an off-hand", 11, 22, 12],
+    ["a shield", 13, 14, 12],
+  ])("puts %s in the hand the game says holds it", (_what, displayType, inventoryType, slot) => {
+    expect(transmogSlotOf(row({ displayType, inventoryType }))).toBe(slot);
+  });
+
+  // Arrows: filed under a weapon slot and held by nobody. `placeOf` has nowhere to put one
+  // either, so a row that cannot go on the character in this app is one that is not sent to
+  // the game — the two refusals have to agree or an outfit could be sent that was never worn.
+  it("has nowhere to put a thing the game files under a weapon slot and nobody holds", () => {
+    const arrows = row({ displayType: 11, inventoryType: 24 });
+
+    expect(transmogSlotOf(arrows)).toBeNull();
+  });
+
+  /**
+   * BUG, recorded rather than fixed: a withheld row is sent to the head.
+   *
+   * `transmogSlotOf` promises nothing "for exactly the things `outfit.ts` has nowhere to put
+   * either — an appearance the game withholds, a thing filed under a weapon slot that nobody
+   * holds". Keeping the first half takes asking about `withheld` *before* reading the display
+   * type: the backend hands a withheld row over as zeroes, and zero is a perfectly good display
+   * type, so a withheld row read off the table comes back a head — and what would then be sent
+   * is a request naming slot 0 and no appearance at all.
+   *
+   * Unreachable through the window today — `wear` refuses a withheld row, so one cannot be in
+   * an outfit — but the guard is what makes the promise true rather than lucky, and the next
+   * caller of this function will not be `wear`.
+   */
+  it("has nowhere to put an appearance the game withholds", () => {
+    expect(transmogSlotOf(rowOf(WITHHELD))).toBeNull();
+  });
+});
+
+describe("slotsFrom", () => {
+  // Ascending by the *game's* numbering, which is not the order the rail beside the character
+  // reads: that one runs head downwards, so it lists the shirt above the chest, and the game
+  // numbers the chest 3 and the shirt 4. A send that passed the rail's order through would
+  // hand the client a list going 0, 4, 3.
+  it("comes back in the game's own slot order rather than the body's", () => {
+    const outfit = dressedIn(
+      row({ displayType: 2, appearanceId: 80_002 }),
+      row({ displayType: 3, appearanceId: 80_003 }),
+      row({ displayType: 0, appearanceId: 80_001 }),
+    );
+
+    expect(slotsFrom(outfit)).toEqual([
+      { slot: 0, appearanceId: 80_001 },
+      { slot: 3, appearanceId: 80_003 },
+      { slot: 4, appearanceId: 80_002 },
+    ]);
+  });
+
+  // A place holds one thing here and one thing in the game, so there is nothing to reconcile:
+  // the second helm took the first one's place on her, and the request names that place once.
+  it("names a place once, with what she is actually wearing in it", () => {
+    const first = row({ displayType: 0, appearanceId: 80_001 });
+    const second = row({ displayType: 0, appearanceId: 80_042 });
+
+    expect(slotsFrom(dressedIn(first, second))).toEqual([{ slot: 0, appearanceId: 80_042 }]);
+  });
+
+  it("has nothing to send for a character with nothing on", () => {
+    expect(slotsFrom(NOTHING_ON)).toEqual([]);
+  });
+
+  // Both halves of "a row that cannot be worn is a row that is not sent". The arrows never
+  // reach an outfit at all, because `wear` refuses them for the same reason; and the floor
+  // under that is `slotsFrom` dropping one that was put there anyway.
+  it("drops what it has nowhere to put, however it got into the outfit", () => {
+    const arrows = row({ displayType: 11, inventoryType: 24, appearanceId: 80_024 });
+    const helm = row({ displayType: 0, appearanceId: 80_001 });
+
+    expect(slotsFrom(dressedIn(helm, arrows))).toEqual([{ slot: 0, appearanceId: 80_001 }]);
+    expect(slotsFrom(forced({ "armour-0": helm, "hand-right": arrows })))
+      .toEqual([{ slot: 0, appearanceId: 80_001 }]);
+  });
+});
+
+describe("iconFrom", () => {
+  // Not optional, whatever the type says: the client documents `NewCustomSet`'s `icon` as a
+  // `fileID` that may not be nil, so the first piece holding a picture is the set's picture.
+  it("takes the picture of the first piece that has one", () => {
+    const outfit = dressedIn(
+      row({ displayType: 0, iconFileDataId: 130_001 }),
+      row({ displayType: 3, iconFileDataId: 130_003 }),
+    );
+
+    expect(iconFrom(outfit)).toBe(130_001);
+  });
+
+  // The game names no texture for some looks, and a zero handed to `NewCustomSet` is not a
+  // picture — so a bare first slot is passed over rather than being the answer.
+  it("passes over a piece the game gives no picture for", () => {
+    const outfit = dressedIn(
+      row({ displayType: 0, iconFileDataId: 0 }),
+      row({ displayType: 3, iconFileDataId: 130_003 }),
+    );
+
+    expect(iconFrom(outfit)).toBe(130_003);
+  });
+
+  // Nothing is the honest answer only when there is no picture anywhere in the outfit, and it
+  // is the caller's to deal with rather than a nil for the game to refuse.
+  it.each<[string, Outfit]>([
+    ["an outfit with nothing on it", NOTHING_ON],
+    ["one whose every piece the game names no texture for", dressedIn(
+      row({ displayType: 0, iconFileDataId: 0 }),
+      row({ displayType: 3, iconFileDataId: 0 }),
+    )],
+  ])("has no picture to give for %s", (_what, outfit) => {
+    expect(iconFrom(outfit)).toBeNull();
+  });
+
+  /**
+   * BUG, recorded rather than fixed: the picture is picked in the rail's order, not the game's.
+   *
+   * `iconFrom` claims to pick the way Blizzard's own `WardrobeCustomSetManager:NewCustomSet`
+   * does — "it walks the slots in order and takes the icon of the first one holding an
+   * appearance" — so that a set sent from here wears the picture it would have worn if it had
+   * been saved in game.
+   *
+   * The trap is that `wornPieces` answers in `PLACES`: head downwards, the order a reader's eye
+   * goes, and deliberately not the game's numbering. The two agree for every outfit whose
+   * earliest filled place is the head, which is nearly all of them, and disagree wherever the
+   * body order and the slot order cross. A shirt and a chest is the plainest crossing: the game
+   * numbers the chest 3 and the shirt 4, so it takes the chest's picture, while the rail lists
+   * the shirt first.
+   *
+   * So the walk has to be the game's order and not the rail's, which is what `placed` is for.
+   */
+  it("takes the picture the game would have taken, not the one the rail lists first", () => {
+    const outfit = dressedIn(
+      row({ displayType: 2, iconFileDataId: 130_002 }),
+      row({ displayType: 3, iconFileDataId: 130_003 }),
+    );
+
+    expect(iconFrom(outfit)).toBe(130_003);
+  });
+});
+
+describe("requestSummary", () => {
+  const request = (fields: Partial<SetRequest> = {}): SetRequest => ({
+    id: 1,
+    name: "Tideglass court",
+    createdAt: 2_100_000_000,
+    slots: [at(0, 80_001)],
+    ...fields,
+  });
+
+  // The four the addon can answer with, each its own sentence: a reader who sent an outfit
+  // wants to know whether it is in the game, and "sent" says nothing about that either way.
+  it.each<[string, string]>([
+    ["created", "Saved in game as Tideglass court."],
+    ["updated", "Saved over the in-game set called Tideglass court."],
+    ["refused", "Not saved: the game would not accept the name Tideglass court."],
+  ])("says what %s came to", (outcome, said) => {
+    expect(requestSummary(request({ outcome }))).toBe(said);
+  });
+
+  // The one refusal a reader can do something about, so it says what: the account is out of
+  // slots, and the request is still waiting rather than lost.
+  it("says how to make room when the account's sets are full", () => {
+    expect(requestSummary(request({ outcome: "full" }))).toBe(
+      "Not saved: the account's transmog sets are full. "
+      + "Delete one in game and Tideglass court goes in next login.",
+    );
+  });
+
+  // An outcome this app has never heard of is an addon newer than the window reading it —
+  // `failed` is one the backend already writes and this has no sentence for. Saying something
+  // plain is better than a blank where the answer goes.
+  it.each<[string, string]>([
+    ["the failure the addon already writes", "failed"],
+    ["one from an addon newer than this window", "somethingNewer"],
+  ])("has a plain sentence for %s", (_what, outcome) => {
+    expect(requestSummary(request({ outcome }))).toBe("Could not save Tideglass court in game.");
+  });
+
+  // The state that matters most, because it is the ordinary one and the one nothing else
+  // explains: nothing this app does reaches a running game, so the outfit is saved at the next
+  // login and a line saying only "sent" would have people opening the game to look for it.
+  it.each<[string, string | null | undefined]>([
+    ["a request the addon has not answered yet", null],
+    ["one stored before an outcome could be written at all", undefined],
+  ])("explains that %s lands at next login", (_what, outcome) => {
+    expect(requestSummary(request({ outcome }))).toBe(
+      "Waiting for Tideglass court to be saved — it goes in next time you log that account in.",
+    );
   });
 });

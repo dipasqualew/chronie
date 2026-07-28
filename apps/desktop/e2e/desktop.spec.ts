@@ -801,6 +801,24 @@ class Outfit {
     await this.keep().click();
   }
 
+  /**
+   * The other button beside that box, which asks the *game* to keep the outfit.
+   *
+   * Beside the save rather than instead of it: they are two different keepings, and the one a
+   * reader wants may be either or both. This one is the only thing the app writes into a WoW
+   * account, and it is two steps — the request is recorded here and the addon carries it out
+   * the next time that account is logged in.
+   */
+  sendToGame(): Locator {
+    return this.panel.getByRole("button", { name: "Send to the game" });
+  }
+
+  /** Sends what she has on to the game under a name, the way a reader does. */
+  async sendAs(name: string): Promise<void> {
+    await this.name().fill(name);
+    await this.sendToGame().click();
+  }
+
   /** The pane the body is drawn on, which says how much geometry it ended up holding. */
   stage(): Locator {
     return this.panel.locator(".outfit-stage");
@@ -4096,6 +4114,28 @@ test("browses the game's transmog sets and dresses the character in them", async
       "Tideglass Mantle · Shoulder · Tideglass",
     ]);
     await expect(outfit.summary()).toHaveText("2 of 13 slots filled");
+  });
+
+  // And the direction nothing else in this suite goes: out of the app and into the account.
+  // Every other step above reads the game; this one writes to it, and it is the only thing
+  // Chronie ever asks a WoW account to change.
+  //
+  // The sentence is the point of the step rather than a detail of it. Nothing in a desktop app
+  // can reach a running client, so the outfit is not in the game when the button comes back —
+  // it is a row waiting for the addon to find at the next login, and a line that said only
+  // "sent" would have a reader opening the game to look for something that is not there.
+  await test.step("what she has on is sent to the game, to be saved at the next login", async () => {
+    await outfit.sendAs("  Tideglass  court ");
+
+    // Named by what came back rather than by what was typed: the backend tidies the name, and
+    // a window drawing its own idea of it would promise a set under a name nobody will see.
+    await expect(outfit.panel).toContainText(
+      "Waiting for Tideglass court to be saved — it goes in next time you log that account in.",
+    );
+    // The box is emptied, because the request is made and typing over it would make a second
+    // one. What she has on is untouched — sending is a note taken, not a door closed.
+    await expect(outfit.name()).toHaveValue("");
+    await expect(outfit.slots()).toHaveCount(2);
   });
 });
 

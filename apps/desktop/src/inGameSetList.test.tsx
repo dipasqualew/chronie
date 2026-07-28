@@ -34,6 +34,19 @@ const MANTLE = appearance({
   modifiedAppearanceId: 71_002, itemId: 30_002, name: "Tideglass Mantle", appearanceId: 80_002,
   displayType: 1, inventoryType: 3, displayInfoId: 900_002, iconFileDataId: 130_002,
 });
+/**
+ * The same one-handed sword, which a rogue wears in both hands at once.
+ *
+ * The whole reason the slot travels with the row. `ItemSparse` files this as inventory type 13,
+ * a one-hander, and that is every word the game's files have to say about which hand holds it —
+ * so `placeOf` puts both copies in the main hand and one of them disappears. Only the set knows,
+ * because the set named the slots.
+ */
+const SWORD = appearance({
+  modifiedAppearanceId: 71_004, itemId: 30_004, name: "Tideglass Edge", appearanceId: 80_004,
+  displayType: 11, inventoryType: 13, displayInfoId: 900_004, iconFileDataId: 130_004,
+});
+
 const HELM = appearance({
   modifiedAppearanceId: 71_003, itemId: 30_003, name: "Emberforge Helm", appearanceId: 80_003,
   displayInfoId: 900_003, iconFileDataId: 0,
@@ -69,6 +82,21 @@ const SETS: InGameSetsPayload = {
 /** What the game's files turn out to hold, keyed by the ids the window asks with. */
 const CONTENTS: Record<string, InGameSetAppearancesPayload> = {
   "71001,71002": { appearances: [CROWN, MANTLE], readCount: 2, withheldCount: 0 },
+  "71004,71004": { appearances: [SWORD, SWORD], readCount: 2, withheldCount: 0 },
+};
+
+/** A character wearing one sword in each hand, which is what only the set can say. */
+const DUAL_WIELD: InGameSetsPayload = {
+  characters: [{
+    character: "Aster-Ravencrest",
+    sets: [{
+      id: 6,
+      name: "Both hands",
+      icon: 130_004,
+      observedAt: null,
+      slots: [{ slot: 11, appearanceId: 71_004 }, { slot: 12, appearanceId: 71_004 }],
+    }],
+  }],
 };
 
 /**
@@ -237,24 +265,47 @@ describe("the sets the player saved in the game", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Wear Head: Tideglass Crown" }));
 
     expect(onWear).toHaveBeenCalledTimes(1);
-    expect(onWear.mock.calls[0]?.[0]).toMatchObject({
+    // The place goes up beside the row, because the set is the only thing that knows it: a
+    // one-hander says nothing about which hand holds it, and this list has the slot.
+    expect(onWear.mock.calls[0]?.[0]).toBe("armour-0");
+    expect(onWear.mock.calls[0]?.[1]).toMatchObject({
       slot: "Head", label: "Tideglass Crown", displayInfoId: 900_001,
     });
   });
 
   // A set is a set of clothes, and looking at all of it at once is the ordinary thing to want.
-  // The set goes up with the rows because it is what the outfit is labelled by — a piece put
-  // on this way says which set it came out of, and only the set knows its name.
-  it("hands the set and its rows up when the whole of it goes on", async () => {
+  // The set goes up with the pieces because it is what the outfit is labelled by — a piece put
+  // on this way says which set it came out of, and only the set knows its name. The places go
+  // up too, and for the reason above: the set named the slots and nothing else can.
+  it("hands the set and its pieces up when the whole of it goes on", async () => {
     const { onWearAll } = view();
     const card = await open("Tideglass");
 
     fireEvent.click(within(card).getByRole("button", { name: "Wear all of Tideglass" }));
 
     expect(onWearAll).toHaveBeenCalledTimes(1);
-    const [set, rows] = onWearAll.mock.calls[0] as [InGameSet, { label: string }[]];
+    const [set, pieces] = onWearAll.mock.calls[0] as
+      [InGameSet, { place: string; row: { label: string } }[]];
     expect(set.id).toBe(4);
-    expect(rows.map((row) => row.label)).toEqual(["Tideglass Crown", "Tideglass Mantle"]);
+    expect(pieces.map(({ place, row }) => [place, row.label])).toEqual([
+      ["armour-0", "Tideglass Crown"],
+      ["armour-1", "Tideglass Mantle"],
+    ]);
+  });
+
+  // Dual wield is ordinary, and it is the case that decided the shape of both callbacks above.
+  // The same sword in both hands is one appearance filling two slots, and the game's files say
+  // only that it is a one-hander — so a list that worked the place out from the row would put
+  // both copies in the main hand and hand up one piece where the player has two.
+  it("keeps a sword in each hand, which only the set can say", async () => {
+    const { onWearAll } = view({ payload: DUAL_WIELD });
+    const card = await open("Both hands");
+
+    fireEvent.click(within(card).getByRole("button", { name: "Wear all of Both hands" }));
+
+    const [, pieces] = onWearAll.mock.calls[0] as
+      [InGameSet, { place: string; row: { label: string } }[]];
+    expect(pieces.map(({ place }) => place)).toEqual(["hand-right", "hand-left"]);
   });
 
   // What she has on is the view's, not this list's, so the only claim worth making here is

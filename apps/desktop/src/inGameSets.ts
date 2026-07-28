@@ -168,12 +168,35 @@ const OFF_HAND = 12;
  * on the character in this app is a row that is not sent to the game either.
  */
 export function transmogSlotOf(row: AppearanceRow): number | null {
+  // Before the table, not after it. A row the game withholds arrives as zeroes — the backend
+  // has nothing to fill it in with — and zero is a perfectly good display type, so a withheld
+  // row read off the table comes back as a *head*. The promise above is that this refuses
+  // exactly what `outfit.ts` refuses, and `placeOf` asks `canBeWorn` first for the same reason.
+  if (row.withheld) return null;
   const armour = TRANSMOG_SLOT_OF_DISPLAY[row.displayType];
   if (armour !== undefined) return armour;
   const hand = heldIn(row.displayType, row.inventoryType);
   if (hand === "right") return MAIN_HAND;
   if (hand === "left") return OFF_HAND;
   return null;
+}
+
+/**
+ * Where on the character a slot the game named goes, in this app's own words.
+ *
+ * The way back from `TransmogSlot` to a place, which only a set read out of the game ever needs:
+ * it is the one thing that knows which hand a one-hander is in, and `placeOf` — which works it
+ * out from the inventory type — cannot, because an off-hand sword and a main-hand sword are the
+ * same item. See `wearAllAt`.
+ *
+ * Derived from the same table as [`transmogSlotOf`] rather than written out again, so the two
+ * directions cannot drift apart.
+ */
+export function placeOfSlot(slot: number): string | null {
+  if (slot === MAIN_HAND) return "hand-right";
+  if (slot === OFF_HAND) return "hand-left";
+  const displayType = TRANSMOG_SLOT_OF_DISPLAY.indexOf(slot as never);
+  return displayType < 0 ? null : `armour-${displayType}`;
 }
 
 /**
@@ -187,13 +210,32 @@ export function transmogSlotOf(row: AppearanceRow): number | null {
  * thing in the game, so there is nothing to reconcile and the last writer would win anyway.
  */
 export function slotsFrom(outfit: Outfit): InGameSetSlot[] {
-  const found = new Map<number, InGameSetSlot>();
+  return placed(outfit).map(({ slot, row }) => ({ slot, appearanceId: row.appearanceId }));
+}
+
+/**
+ * What she has on, paired with the slot the game would file each piece under, in the game's
+ * order.
+ *
+ * The game's order and not the rail's, which is the whole reason this is one function rather
+ * than repeated at each of its two callers. `wornPieces` answers in `outfit.ts`'s `PLACES` —
+ * head downwards, the order a reader's eye goes — and the game numbers the same eleven places
+ * differently enough that a shirt and a chestpiece swap over between the two. Anything that
+ * claims to do what the game does has to walk them the game's way.
+ *
+ * At most one per slot: a place holds one thing in `outfit.ts` and one thing in the game, so
+ * there is nothing to reconcile.
+ */
+function placed(outfit: Outfit): { slot: number; row: AppearanceRow }[] {
+  const found = new Map<number, AppearanceRow>();
   for (const { row } of wornPieces(outfit)) {
     const slot = transmogSlotOf(row);
     if (slot === null) continue;
-    found.set(slot, { slot, appearanceId: row.appearanceId });
+    found.set(slot, row);
   }
-  return [...found.values()].sort((left, right) => left.slot - right.slot);
+  return [...found.entries()]
+    .map(([slot, row]) => ({ slot, row }))
+    .sort((left, right) => left.slot - right.slot);
 }
 
 /**
@@ -202,6 +244,9 @@ export function slotsFrom(outfit: Outfit): InGameSetSlot[] {
  * Blizzard's own `WardrobeCustomSetManager:NewCustomSet` picks it exactly this way — it walks
  * the slots in order and takes the icon of the first one holding an appearance — so a set sent
  * from here ends up wearing the same picture it would have worn if it had been saved in game.
+ * *The game's* order, which is why this walks [`placed`] rather than the rail: a reader wearing
+ * a shirt and a chestpiece would otherwise be given the shirt's picture where the game would
+ * have taken the chest's.
  *
  * Not optional, whatever it looks like: the client's `NewCustomSet` documents `icon` as a
  * `fileID` that may not be nil, so there is no "let the game decide" to fall back on. Nothing
@@ -209,10 +254,7 @@ export function slotsFrom(outfit: Outfit): InGameSetSlot[] {
  * to decide what to do about that rather than send a nil the game will refuse.
  */
 export function iconFrom(outfit: Outfit): number | null {
-  for (const { row } of wornPieces(outfit)) {
-    if (transmogSlotOf(row) !== null && row.iconFileDataId > 0) return row.iconFileDataId;
-  }
-  return null;
+  return placed(outfit).find(({ row }) => row.iconFileDataId > 0)?.row.iconFileDataId ?? null;
 }
 
 /**

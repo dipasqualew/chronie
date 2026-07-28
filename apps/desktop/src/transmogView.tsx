@@ -48,8 +48,8 @@ import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { wearable as canBeWorn } from "./modelPreview";
 import {
-  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, wearAll, wearSet,
-  wearable,
+  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, toggleAt, wearAll,
+  wearAllAt, wearSet, wearable,
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
@@ -470,8 +470,12 @@ export function TransmogView(
         hidden={browsing !== "ingame"} payload={inGame.payload}
         loadAppearances={inGame.loadAppearances} icons={icons} wantIcons={wantIcons}
         outfit={outfit}
-        onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
-        onWearAll={(set, rows) => setOutfit((was) => wearAll(was, rows, inGameSetLabel(set)))}
+        // The place travels with the row rather than being worked out from it: an in-game set
+        // is the only kind that names the slot, and so the only one that can say which hand a
+        // one-hander is in. See `wearAllAt`.
+        onWear={(place, row) => setOutfit((was) => toggleAt(was, place, row))}
+        onWearAll={(set, pieces) =>
+          setOutfit((was) => wearAllAt(was, pieces, inGameSetLabel(set)))}
       />
       </div>
       <OutfitPanel

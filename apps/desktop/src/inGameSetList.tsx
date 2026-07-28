@@ -26,9 +26,8 @@ import type { ReactNode } from "react";
 
 import { plural } from "./format";
 import {
-  appearanceIds, charactersWithSets, filterInGameSets, rowsOf, setLabel, setSummary,
+  appearanceIds, charactersWithSets, filterInGameSets, placeOfSlot, rowsOf, setLabel, setSummary,
 } from "./inGameSets";
-import { isWorn } from "./outfit";
 import type { Outfit } from "./outfit";
 import type { AppearanceRow } from "./transmogModal";
 import { LinkOut } from "./ui";
@@ -45,8 +44,15 @@ export interface InGameSetListProps {
   /** Asks for the pictures the drawn rows are waiting on, which the view above caches. */
   wantIcons: (iconFileDataIds: number[]) => void;
   outfit: Outfit;
-  onWear: (row: AppearanceRow) => void;
-  onWearAll: (set: InGameSet, rows: AppearanceRow[]) => void;
+  /**
+   * Puts one piece on, in the place the *set* says it goes.
+   *
+   * The place travels rather than being worked out from the row, because this is the only kind
+   * of set that knows it: a one-hander says nothing about which hand holds it, and an in-game
+   * set names the slot. See `wearAllAt`.
+   */
+  onWear: (place: string, row: AppearanceRow) => void;
+  onWearAll: (set: InGameSet, pieces: { place: string; row: AppearanceRow }[]) => void;
 }
 
 /** What an opened set turned out to be, or the sentence saying why it could not be opened. */
@@ -168,13 +174,18 @@ function Card(
     open: boolean;
     icons: Map<number, string>;
     outfit: Outfit;
-    onWear: (row: AppearanceRow) => void;
-    onWearAll: (set: InGameSet, rows: AppearanceRow[]) => void;
+    onWear: (place: string, row: AppearanceRow) => void;
+    onWearAll: (set: InGameSet, pieces: { place: string; row: AppearanceRow }[]) => void;
     onToggle: () => void;
   },
 ): ReactNode {
   const name = setLabel(set);
-  const rows = typeof opened === "object" ? rowsOf(opened.appearances) : [];
+  // The rows come back in the order the appearances were asked for, which is slot order — see
+  // `appearanceIds` — so the set's own slots line up with them one for one, and that is what
+  // says which hand each weapon is in.
+  const pieces = (typeof opened === "object" ? rowsOf(opened.appearances) : [])
+    .map((row, at) => ({ slot: set.slots[at]?.slot, row }))
+    .map(({ slot, row }) => ({ place: slot === undefined ? null : placeOfSlot(slot), slot, row }));
 
   return (
     <article className="mog-card" data-open={open || undefined}>
@@ -194,21 +205,27 @@ function Card(
           {typeof opened === "string"
             ? <p className="mark-failure" role="alert">{opened}</p>
             : null}
-          {rows.length
+          {pieces.length
             ? <div className="mog-contents-head">
               <button
-                type="button" className="mog-wear-all" onClick={() => onWearAll(set, rows)}
+                type="button" className="mog-wear-all"
+                onClick={() => onWearAll(set, wearablePieces(pieces))}
               >{`Wear all of ${name}`}</button>
             </div>
             : null}
           <ul className="mog-items">
-            {rows.map((row, at) => (
+            {pieces.map(({ place, slot, row }, at) => (
               <Piece
                 // The slot rather than the appearance, because one appearance can fill two
                 // slots — the same sword in both hands — and keying on the look would collapse
                 // the pair into one row and lose the hand that came second.
-                key={set.slots[at]?.slot ?? at} row={row} worn={isWorn(outfit, row)}
-                icon={icons.get(row.iconFileDataId)} onWear={() => onWear(row)}
+                // By the look rather than by the row object, because the rows are rebuilt on every
+                // draw — and by the *set's* place rather than the row's, so an off-hand sword
+                // reads as worn in the hand the set put it in.
+                key={slot ?? at} row={row}
+                worn={!!place && outfit[place]?.row.appearanceId === row.appearanceId}
+                icon={icons.get(row.iconFileDataId)}
+                onWear={place ? () => onWear(place, row) : undefined}
               />
             ))}
           </ul>
@@ -218,13 +235,21 @@ function Card(
   );
 }
 
+/** The pieces of a set the character has somewhere to put, which is what "wear all" wears. */
+function wearablePieces(
+  pieces: { place: string | null; row: AppearanceRow }[],
+): { place: string; row: AppearanceRow }[] {
+  return pieces.flatMap(({ place, row }) => (place ? [{ place, row }] : []));
+}
+
 /** One piece of an in-game set, as something to put on the character. */
 function Piece(
   { row, worn, icon, onWear }: {
     row: AppearanceRow;
     worn: boolean;
     icon?: string;
-    onWear: () => void;
+    /** Absent for a piece the character has nowhere to put, which is what disables the row. */
+    onWear?: () => void;
   },
 ): ReactNode {
   return (
@@ -232,7 +257,7 @@ function Piece(
       <button
         type="button" className="mog-pick" aria-pressed={worn}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
-        disabled={row.withheld}
+        disabled={!onWear}
       >
         <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
         <span className="badge">{row.slot}</span>
