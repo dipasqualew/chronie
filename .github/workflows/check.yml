@@ -60,6 +60,30 @@ jobs:
       - run: ./scripts/check-rust.sh
         shell: bash
 
+      # Installing Chronie is PowerShell now: `install.ps1` unpacks the release and writes
+      # the shortcut and the uninstall entry itself, rather than handing an NSIS installer a
+      # job Windows Defender will not let it do. `./scripts/check.sh` cannot check any of it —
+      # it runs on the machines that have no PowerShell — so this runner, which is here
+      # because it is the one Chronie ships on, is also the only one that can.
+      #
+      # A parse is not a test. It is the floor: `install.ps1` arrives through `irm | iex`, so
+      # a syntax error is not a red build somewhere, it is somebody's half-installed machine.
+      - name: Parse the PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($script in Get-ChildItem scripts -Filter *.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $script.FullName, [ref]$null, [ref]$errors) | Out-Null
+            foreach ($error in $errors) {
+              $failed = $true
+              $line = $error.Extent.StartLineNumber
+              Write-Host "::error file=scripts/$($script.Name),line=$line::$($error.Message)"
+            }
+          }
+          if ($failed) { exit 1 }
+
   # These two stay on Linux, and not out of habit. The addon's Lua never runs on the host
   # operating system at all — it runs inside the game client's own 5.1 interpreter, which is
   # the same interpreter whatever the machine underneath is — and Playwright drives Chromium

@@ -12,6 +12,10 @@ on:
       - "package.json"
       - "bun.lock"
       - ".github/workflows/dev-release.yml"
+      # Packed into the release archive, because `install.ps1` is piped in from the internet
+      # and has nowhere else to get an uninstaller from. A change to it has to be published
+      # like any other part of the build.
+      - "scripts/uninstall.ps1"
 
 permissions:
   contents: write
@@ -90,13 +94,42 @@ jobs:
         working-directory: apps/desktop
         run: bun run tauri build
 
+      # What a person downloads, and the only asset that is any use to them. The NSIS
+      # installer beside it is still built — the updater has no other shape to ship in — but
+      # it is not published, because Windows Defender refuses to let anyone run it: it
+      # signatures the NSIS stub that every self-extracting installer is built from, not
+      # anything in Chronie, and an unsigned one is blocked on download and again on launch
+      # (issue #135). A zip has no stub. `scripts/install.ps1` unpacks this one itself.
+      #
+      # The build is a single executable — the frontend, the icons and the addon are all
+      # compiled into it — so the archive is that plus the uninstaller, which has to travel
+      # with it because `install.ps1` is piped in from the internet with no checkout beside
+      # it to copy from.
+      - name: Pack the portable archive
+        id: portable
+        shell: pwsh
+        run: |
+          $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          foreach ($key in "resources", "externalBin") {
+            if ($config.bundle.PSObject.Properties.Name -contains $key) {
+              throw "bundle.$key means the app is more than one file now; teach this step to pack the rest."
+            }
+          }
+
+          $version = "0.1.$env:GITHUB_RUN_NUMBER"
+          $executable = "apps/desktop/src-tauri/target/release/$($config.productName).exe"
+          if (-not (Test-Path $executable)) { throw "The build did not produce $executable." }
+
+          $archiveName = "$($config.productName)_${version}_x64-portable.zip"
+          $archive = Join-Path $env:RUNNER_TEMP $archiveName
+          Compress-Archive -Path $executable, "scripts/uninstall.ps1" -DestinationPath $archive -Force
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+
       - name: Replace rolling dev release
         shell: pwsh
         run: |
           $version = "0.1.$env:GITHUB_RUN_NUMBER"
           $bundle = "apps/desktop/src-tauri/target/release/bundle/nsis"
-          $installer = Get-ChildItem $bundle -Filter "*-setup.exe" | Select-Object -First 1
-          if (-not $installer) { throw "Tauri did not produce an NSIS installer." }
 
           git tag --force dev $env:GITHUB_SHA
           git push --force origin refs/tags/dev
@@ -110,7 +143,11 @@ jobs:
             gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
           }
 
-          $assets = @($installer.FullName)
+          $assets = @("${{ steps.portable.outputs.archive }}")
+          # Nobody has configured a signing key, so this branch has never run. When somebody
+          # does, read issue #135 first: what the updater downloads and runs is the NSIS
+          # installer, wrapped in a zip, and that is the artifact Windows Defender refuses.
+          # Automatic updates need a code-signing certificate before they need this.
           if ("${{ steps.release-config.outputs.signed }}" -eq "true") {
             $updater = Get-ChildItem $bundle -Filter "*.nsis.zip" | Select-Object -First 1
             if (-not $updater) { throw "Tauri did not produce an NSIS updater bundle." }

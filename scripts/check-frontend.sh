@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 echo "==> typecheck"
 bun run typecheck
 
+echo "==> repository scripts"
+bun run test:scripts
+
 echo "==> desktop frontend"
 bun run --cwd apps/desktop test
 bun run --cwd apps/desktop test:e2e

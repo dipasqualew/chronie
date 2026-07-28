@@ -4,9 +4,15 @@
  *
  * `scripts/install.ps1` installs the newest *published* dev release; this is the other
  * half — the way to run the code you are looking at as a real installed application
- * rather than under `bun run dev`. On macOS that means dropping the bundled `.app` into
- * `/Applications`; on Windows it means running the NSIS installer the build produced,
- * which is per-user and asks for no administrator rights.
+ * rather than under `bun run dev`. Either way it is a copy: the bundled `.app` into
+ * `/Applications` on macOS, the executable into `%LOCALAPPDATA%\Chronie` on Windows.
+ *
+ * Windows used to go through the NSIS installer the build produced. It cannot any more —
+ * Windows Defender signatures the NSIS stub and refuses to run one that is unsigned, which
+ * is issue #135 and is as true of a locally built installer as of a published one. Copying
+ * the executable in is what `install.ps1` now does to the published build, minus the
+ * shortcut and the uninstall entry, which are already there if it has ever been run and are
+ * not what this command is for.
  *
  *   bun run install-locally
  *
@@ -16,8 +22,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const TAURI_DIR = join(ROOT, "apps/desktop/src-tauri");
@@ -51,9 +57,12 @@ const UNSIGNED = JSON.stringify({
 /**
  * `bundle.targets` in the config is Windows-only, so the format is named here instead:
  * asking for `app` on a Mac produces the `.app` the config would never have asked for.
+ * Naming none of them asks for no bundle at all, which is what Windows wants — the payload
+ * there is the single executable cargo has already written.
  */
-function build(bundles: string): void {
-    const args = ["run", "--cwd", "apps/desktop", "tauri", "build", "--bundles", bundles];
+function build(bundles?: string): void {
+    const format = bundles ? ["--bundles", bundles] : ["--no-bundle"];
+    const args = ["run", "--cwd", "apps/desktop", "tauri", "build", ...format];
     execFileSync("bun", [...args, "--config", UNSIGNED], { cwd: ROOT, stdio: "inherit" });
 }
 
@@ -73,24 +82,30 @@ function installOnMac(): string {
 }
 
 function installOnWindows(): string {
-    build("nsis");
-    const bundle = join(TARGET_DIR, "release/bundle/nsis");
-    const setup = existsSync(bundle)
-        ? readdirSync(bundle).find((name) => name.endsWith("-setup.exe"))
-        : undefined;
-    if (!setup) {
-        throw new Error(`The build did not produce an installer in ${bundle}.`);
+    // Nothing needs bundling: the payload is the one executable, and skipping NSIS skips
+    // both the minute it takes and the installer nothing is allowed to run.
+    build();
+    const built = join(TARGET_DIR, `release/${config.productName}.exe`);
+    if (!existsSync(built)) {
+        throw new Error(`The build did not produce ${built}.`);
     }
-    // The installer is `currentUser`, so it needs no elevation and replaces any existing
-    // install in place; waiting on it keeps this command's exit meaningful.
-    execFileSync(join(bundle, setup), [], { stdio: "inherit" });
-    return join(bundle, setup);
+    // The running copy holds this file open, and Windows will not write over one that is
+    // open. `taskkill` is fine with there being nothing to kill, hence the swallowed error.
+    try {
+        execFileSync("taskkill", ["/IM", `${config.productName}.exe`, "/F"], { stdio: "ignore" });
+    } catch {
+        // Not running. Nothing to close.
+    }
+    const installed = join(process.env.LOCALAPPDATA ?? "", config.productName, `${config.productName}.exe`);
+    mkdirSync(dirname(installed), { recursive: true });
+    cpSync(built, installed);
+    return installed;
 }
 
 if (process.platform === "darwin") {
     console.log(`Installed ${installOnMac()}`);
 } else if (process.platform === "win32") {
-    console.log(`Ran ${installOnWindows()}; open Chronie from the Start menu.`);
+    console.log(`Installed ${installOnWindows()}; open Chronie from the Start menu.`);
 } else {
     console.error(`No local install for ${process.platform}: Chronie bundles for macOS and Windows only.`);
     process.exit(1);
