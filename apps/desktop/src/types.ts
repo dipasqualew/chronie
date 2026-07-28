@@ -984,6 +984,19 @@ export interface AppUpdateResult {
   version: string;
 }
 
+/**
+ * Which build of Chronie this is. Mirrors `Release` in `lib.rs`.
+ *
+ * The channel is the rolling GitHub release the build was published under and the commit is the
+ * one it was cut from — the whole forty characters, because the link needs them even though
+ * nobody reads them. A commit is empty when the build came from a tree with no git behind it,
+ * which is a build that cannot say where it came from rather than one that came from nowhere.
+ */
+export interface Release {
+  channel: string;
+  commit: string;
+}
+
 /* ---------- moving the history between machines ---------- */
 
 /** A Chronie found waiting on this network. Mirrors `wifi::Peer`. */
@@ -1078,6 +1091,9 @@ export interface E2EMock {
    * image, which is what the real backend answers nothing for. */
   captureImages: Record<number, E2ECaptureImage>;
   settings: Settings;
+  /** Which build the window is showing itself as, so the suite can follow the two links in the
+   * app bar to a commit and a release it knows the addresses of. */
+  release: Release;
   /** What the install is doing about combat logs. State rather than a fixture: ticking the
    * box in the panel under test advances it, the way the real backend's own answer changes. */
   combatLog: CombatLogStatus;

@@ -33,8 +33,10 @@ import { Settings as SettingsView } from "./settings";
 import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
+import { VersionTag } from "./versionTag";
 import type {
-  CustomSetsPayload, DashboardPayload, Segment, Settings, TransmogMarksPayload, TransmogPayload,
+  CustomSetsPayload, DashboardPayload, Release, Segment, Settings, TransmogMarksPayload,
+  TransmogPayload,
 } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
@@ -55,9 +57,11 @@ const DASHBOARD_POLL_MS = 30_000;
 export interface AppProps {
   payload: DashboardPayload;
   settings: Settings;
+  /** Which build is running, or nothing when the backend would not say. */
+  release: Release | null;
 }
 
-export function App({ payload, settings }: AppProps): ReactNode {
+export function App({ payload, settings, release }: AppProps): ReactNode {
   const [segments, setSegments] = useState<Segment[]>(payload.segments || []);
   // Nothing can be collected until the game folder is known, so a first run opens on the one
   // screen that can do anything about it rather than on an empty timeline.
@@ -231,6 +235,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
     <div className="wrap">
       <nav className="appbar" aria-label="Application">
         <span className="brand">Chronie</span>
+        <VersionTag release={release} />
         {VIEWS.map((name) => (
           <button
             key={name} id={`${name}-tab`} type="button"

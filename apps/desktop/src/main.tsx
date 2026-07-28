@@ -21,6 +21,13 @@ import { desktop } from "./bridge";
 const root = document.getElementById("root");
 if (!root) throw new Error("The window is missing #root.");
 
-const [payload, settings] = await Promise.all([desktop.dashboard(), desktop.settings()]);
+const [payload, settings, release] = await Promise.all([
+  desktop.dashboard(),
+  desktop.settings(),
+  // Which build this is, asked for alongside them and forgiven for failing. It is a line in the
+  // corner of the app bar, and a window that would not open because it could not name itself
+  // would be the worst trade in the app.
+  desktop.release().catch(() => null),
+]);
 
-createRoot(root).render(<App payload={payload} settings={settings} />);
+createRoot(root).render(<App payload={payload} settings={settings} release={release} />);

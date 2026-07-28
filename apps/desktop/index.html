@@ -141,8 +141,21 @@
 
   /* ---------- app bar ---------- */
 
-  .appbar { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; }
-  .appbar .brand { font-weight: 700; margin-right: auto; letter-spacing: -0.01em; }
+  /* Wrapping, because the bar now carries the build as well as a tab for every view, and the
+     two together clear the narrowest window the app allows by about thirty pixels. That is
+     close enough that a longer channel name or a larger system font would not, and a tab
+     pushed off the right-hand edge is a view with no way into it. */
+  .appbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 6px; margin-bottom: 22px; }
+  .appbar .brand { font-weight: 700; letter-spacing: -0.01em; }
+  /* The build, beside the name it belongs to, and it is the version that holds the tabs off to
+     the right — so a build with no commit to show does not drag the whole bar back with it. */
+  .appbar .version {
+    margin-right: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .appbar .version a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+  .appbar .version a:hover { color: var(--text-primary); }
   .appbar button { border-radius: 999px; padding: 6px 14px; }
 
   header.view-head { margin-bottom: 18px; }

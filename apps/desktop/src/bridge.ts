@@ -27,6 +27,7 @@ import type {
   MarkSubjectKind,
   QueryAnswer,
   QuerySchema,
+  Release,
   Segment,
   Settings,
   SyncResult,
@@ -211,6 +212,10 @@ export const desktop = {
   },
   settings: (): Promise<Settings> =>
     mock ? Promise.resolve(structuredClone(mock.settings)) : invoke<Settings>("settings"),
+  // Which build is running, which is baked into the binary at compile time and cannot change
+  // under a window that is already open — so it is asked for once, on the way to the first paint.
+  release: (): Promise<Release> =>
+    mock ? Promise.resolve(structuredClone(mock.release)) : invoke<Release>("release"),
   chooseWowPath: (): Promise<string | null> =>
     mock ? Promise.resolve(mock.chosenPath) : invoke<string | null>("choose_wow_path"),
   saveWowPath: (wowPath: string): Promise<Settings> => {
