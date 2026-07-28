@@ -50,6 +50,11 @@ fake.KNOWN_EVENTS = {
     "SCREENSHOT_FAILED",
     "SCREENSHOT_SUCCEEDED",
     "TRANSMOG_COLLECTION_SOURCE_ADDED",
+    -- Read out of the same 12.0.5.67823 client, beside TRANSMOG_DISPLAYED_OUTFIT_CHANGED and
+    -- TRANSMOG_OUTFITS_CHANGED. This is the one for the sets the player saves themselves; the
+    -- other two belong to the new Midnight outfit slots, which Chronie does not touch. See
+    -- docs/transmog-sets.md.
+    "TRANSMOG_CUSTOM_SETS_CHANGED",
     "UPDATE_INSTANCE_INFO",
     "ZONE_CHANGED_NEW_AREA",
 }
@@ -827,6 +832,10 @@ function fake.newEnv(options)
     -- change them between two syncs and watch the ledger notice.
     local equipmentSets = options.equipmentSets or {}
     local equippedItems = options.equippedItems or {}
+    -- The player's own transmog sets, already in the shape the client's three calls are
+    -- reduced to in Main.lua. Mutable for the same reason the equipment sets are: a test
+    -- changes it between two syncs and watches the snapshot notice.
+    local transmogCustomSets = options.transmogCustomSets or {}
     local currencyNames = options.currencies or {}
     -- Where the character stands with each faction, by localised name, already reduced to
     -- the shape ns.factionStanding returns: `{ standing, current, max }`. A faction with no
@@ -982,6 +991,9 @@ function fake.newEnv(options)
         end,
         equippedItems = function()
             return equippedItems
+        end,
+        transmogCustomSets = function()
+            return transmogCustomSets
         end,
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]

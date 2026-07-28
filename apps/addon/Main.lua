@@ -36,6 +36,7 @@ local addonName, ns = ...
 ---@field transmogSourceInfo fun(sourceID: integer): table?
 ---@field equipmentSets fun(): table<integer, EquipsetState> Every equipment set the character has.
 ---@field equippedItems fun(): table<integer, EquippedItem> What the character is wearing, by slot.
+---@field transmogCustomSets fun(): CustomSetState[] Every transmog set the player saved in game.
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
@@ -267,6 +268,44 @@ function ns.main(env)
         for _, change in ipairs(equipsetLedger.sync(env.now())) do
             tally.equipsetChange(change)
         end
+    end
+
+    ---Where one character's last-seen transmog sets are kept.
+    ---
+    ---Keyed by character for the same reason the equipment sets above are, and with one extra
+    ---reason of its own: the sets themselves are the account's, but *whether Chronie has ever
+    ---looked* is a fact about a character, and an unkeyed snapshot would let the last alt to
+    ---log out speak for every one of them. Keyed, a character that has never been played since
+    ---Chronie was installed simply says nothing, which is the truth.
+    local function customSetStore()
+        env.db.customSets = env.db.customSets or {}
+        local character = currentCharacter()
+        env.db.customSets[character] = env.db.customSets[character] or {}
+        return env.db.customSets[character]
+    end
+
+    local customSetSnapshot = ns.newCustomSetSnapshot({
+        readSets = env.transmogCustomSets,
+        -- The same proxy the equipment sets use, and for the same reason: the character is not
+        -- known until login and this is built before it.
+        store = setmetatable({}, {
+            __index = function(_, key)
+                return customSetStore()[key]
+            end,
+            __newindex = function(_, key, value)
+                customSetStore()[key] = value
+            end,
+        }),
+        now = env.now,
+    })
+
+    ---Files what the player's own transmog sets look like now.
+    ---
+    ---Unlike the equipment sets beside it this reports nothing and is watched by nobody: the
+    ---snapshot is for the app to read out of SavedVariables at logout, not for the panel to
+    ---show. Nothing in game needs telling — the player is looking at their own wardrobe.
+    local function syncCustomSets()
+        customSetSnapshot.sync(env.now())
     end
 
     local segmentTracker = ns.newSegmentTracker({
@@ -795,11 +834,21 @@ function ns.main(env)
         -- costs a walk of two short lists and keeps the snapshot current through the session
         -- rather than only at its ends.
         sweepHoldings()
+        -- Beside the sweep and for its reason: the wardrobe the server sends at login has
+        -- often not arrived by PLAYER_LOGIN, and reading it here means the far side of every
+        -- load screen rather than one moment that may be too early. The event above keeps it
+        -- current in between, so this is only ever catching up on what happened out of sight.
+        syncCustomSets()
         renderResults()
         resultsWindow.show()
     end
     dispatcher.on("PLAYER_ENTERING_WORLD", syncSegment)
     dispatcher.on("ZONE_CHANGED_NEW_AREA", syncSegment)
+
+    -- The event covers every change the player makes while Chronie is watching. The read
+    -- inside syncSegment covers the ones it was not: a set saved on another character, or
+    -- before the addon was ever installed.
+    dispatcher.on("TRANSMOG_CUSTOM_SETS_CHANGED", syncCustomSets)
 
     -- What is between the player and the world. Events fire happily during a load screen
     -- and a cinematic, and the picture that comes back from either is worth nothing, so an
@@ -1309,6 +1358,47 @@ if CreateFrame then
                     end
                 end
                 return worn
+            end,
+            ---Every transmog set the player saved in game, and the appearances in each.
+            ---
+            ---Three calls per set, because the client hands back ids and nothing else:
+            ---`GetCustomSets` names them, `GetCustomSetInfo` says what one is called and what
+            ---picture it wears, and `GetCustomSetItemTransmogInfoList` says what is in it.
+            ---Both of the latter are documented as possibly returning nothing, so both are
+            ---allowed to; a set that will not describe itself is still recorded under its id,
+            ---because the id is what the app matches on and a set the player can see in their
+            ---own wardrobe should not vanish from the list for being shy.
+            ---
+            ---The appearance list is walked with `ipairs` — Blizzard's own WardrobeCustomSets
+            ---does the same — and so is indexed from one, while every other part of the client
+            ---numbers these slots from zero as `TransmogSlot`. The index less one is therefore
+            ---what gets written down, so that "11" means the main hand here exactly as it does
+            ---everywhere else.
+            ---
+            ---Guarded on the namespace because custom sets arrived with Midnight. On an older
+            ---client this reports no sets rather than raising, which leaves the app showing a
+            ---player nothing instead of showing them an error about a feature their game has
+            ---not got.
+            transmogCustomSets = function()
+                local collection = C_TransmogCollection
+                if not (collection and collection.GetCustomSets) then
+                    return {}
+                end
+                local sets = {}
+                for _, setID in ipairs(collection.GetCustomSets() or {}) do
+                    local name, icon = collection.GetCustomSetInfo(setID)
+                    local slots = {}
+                    for index, info in ipairs(collection.GetCustomSetItemTransmogInfoList(setID) or {}) do
+                        slots[#slots + 1] = {
+                            slot = index - 1,
+                            appearance = info.appearanceID,
+                            secondary = info.secondaryAppearanceID,
+                            illusion = info.illusionID,
+                        }
+                    end
+                    sets[#sets + 1] = { id = setID, name = name, icon = icon, slots = slots }
+                end
+                return sets
             end,
             activeQuestIDs = function()
                 local ids = {}

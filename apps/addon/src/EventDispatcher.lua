@@ -27,6 +27,11 @@ function ns.newEventDispatcher(deps)
     return {
         ---Subscribes to a client event.
         ---
+        ---**One handler per event, and the second one wins.** Subscribing twice to the same
+        ---name silently unsubscribes whatever was there before, which reads as the earlier
+        ---feature quietly ceasing to work rather than as an error anywhere. Two things that
+        ---both want the same event are two calls in one handler body, not two calls here.
+        ---
         ---Since patch 8.0.1 RegisterEvent *raises* on an event this client build does not
         ---define, and every subscription here runs in a straight line from the composition
         ---root. Letting that error escape would abort the rest of ns.main, so a single

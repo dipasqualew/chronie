@@ -38,6 +38,7 @@ src/CaptureTriggers.lua
 src/CaptureBurst.lua
 src/ScreenshotWatch.lua
 src/EquipsetLedger.lua
+src/CustomSetSnapshot.lua
 src/SegmentTracker.lua
 src/SegmentTable.lua
 src/CurrencyItems.lua
