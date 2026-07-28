@@ -21,28 +21,14 @@ use std::{
     time::Duration,
 };
 
-const MIGRATIONS: &[&str] = &[
-    include_str!("../migrations/0001_initial.sql"),
-    include_str!("../migrations/0002_activities.sql"),
-    include_str!("../migrations/0003_lockouts.sql"),
-    include_str!("../migrations/0004_equipsets.sql"),
-    include_str!("../migrations/0005_holdings.sql"),
-    include_str!("../migrations/0006_captures.sql"),
-    include_str!("../migrations/0007_account_rollups.sql"),
-    include_str!("../migrations/0008_combat_logs.sql"),
-    include_str!("../migrations/0009_capture_subjects.sql"),
-    include_str!("../migrations/0010_capture_notes.sql"),
-    include_str!("../migrations/0011_gold.sql"),
-    include_str!("../migrations/0012_log_retention.sql"),
-    include_str!("../migrations/0013_account_wide_currencies.sql"),
-    include_str!("../migrations/0014_position_track.sql"),
-    include_str!("../migrations/0015_pet_species_first.sql"),
-    include_str!("../migrations/0016_transmog_marks.sql"),
-    include_str!("../migrations/0017_custom_sets.sql"),
-    include_str!("../migrations/0018_in_game_sets.sql"),
-    include_str!("../migrations/0019_set_requests.sql"),
-    include_str!("../migrations/0020_character_looks.sql"),
-];
+#[derive(Debug, Clone, Copy)]
+struct Migration {
+    name: &'static str,
+    sql: &'static str,
+}
+
+include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
+
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
 #[derive(Debug, Clone, Serialize)]
@@ -494,15 +480,73 @@ fn migrate(connection: &mut Connection) -> Result<(), String> {
             "Database schema version {version} is newer than this app supports."
         ));
     }
-    for (index, migration) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+
+    // Before timestamped names, `user_version = N` meant the first N migrations in the
+    // numbered list had run. Seed those names once, inside the same database, so an existing
+    // install crosses to per-file history without executing any schema change twice.
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS chronie_migrations (
+                 name TEXT PRIMARY KEY NOT NULL
+             );",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut applied = {
+        let mut statement = transaction
+            .prepare("SELECT name FROM chronie_migrations")
+            .map_err(|error| error.to_string())?;
+        let names = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        names
+    };
+    if applied.is_empty() && version > 0 {
+        for migration in MIGRATIONS.iter().take(version as usize) {
+            transaction
+                .execute(
+                    "INSERT INTO chronie_migrations (name) VALUES (?1)",
+                    [migration.name],
+                )
+                .map_err(|error| error.to_string())?;
+            applied.insert(migration.name.to_string());
+        }
+    }
+    let known = MIGRATIONS
+        .iter()
+        .map(|migration| migration.name)
+        .collect::<HashSet<_>>();
+    if let Some(name) = applied.iter().find(|name| !known.contains(name.as_str())) {
+        return Err(format!(
+            "Database migration {name} is newer than this app supports."
+        ));
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+
+    let mut applied_count = applied.len() as i64;
+    for migration in MIGRATIONS
+        .iter()
+        .filter(|migration| !applied.contains(migration.name))
+    {
         let transaction = connection
             .transaction()
             .map_err(|error| error.to_string())?;
         transaction
-            .execute_batch(migration)
+            .execute_batch(migration.sql)
             .map_err(|error| error.to_string())?;
         transaction
-            .pragma_update(None, "user_version", (index + 1) as i64)
+            .execute(
+                "INSERT INTO chronie_migrations (name) VALUES (?1)",
+                [migration.name],
+            )
+            .map_err(|error| error.to_string())?;
+        applied_count += 1;
+        transaction
+            .pragma_update(None, "user_version", applied_count)
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())?;
     }
@@ -558,6 +602,34 @@ pub fn snapshot(database_path: &Path, destination: &Path) -> Result<(), String> 
         .map_err(|error| format!("Could not copy the database: {error}"))
 }
 
+fn unknown_migration(connection: &Connection) -> Result<Option<String>, rusqlite::Error> {
+    let has_history: bool = connection.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM sqlite_schema
+             WHERE type = 'table' AND name = 'chronie_migrations'
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_history {
+        return Ok(None);
+    }
+
+    let known = MIGRATIONS
+        .iter()
+        .map(|migration| migration.name)
+        .collect::<HashSet<_>>();
+    let mut statement = connection.prepare("SELECT name FROM chronie_migrations ORDER BY name")?;
+    let names = statement.query_map([], |row| row.get::<_, String>(0))?;
+    for name in names {
+        let name = name?;
+        if !known.contains(name.as_str()) {
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
+}
+
 /// Reads a database file without touching it, and refuses anything that is not one of ours.
 ///
 /// Deliberately not [`open_database`]: this is the gate a database arriving from another
@@ -579,6 +651,13 @@ pub fn summarize(database_path: &Path) -> Result<Summary, String> {
     if version > SCHEMA_VERSION {
         return Err(format!(
             "That database was written by a newer Chronie (schema {version}, this build reads {SCHEMA_VERSION}). Update this Chronie first."
+        ));
+    }
+    if let Some(name) = unknown_migration(&connection)
+        .map_err(|_| "That file is not a Chronie database.".to_string())?
+    {
+        return Err(format!(
+            "That database was written by a newer Chronie (migration {name} is unknown to this build). Update this Chronie first."
         ));
     }
     let counts = connection
@@ -5434,7 +5513,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..4] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction
                 .execute_batch(
@@ -5685,7 +5764,7 @@ ChronieDB = {{ ["segments"] = {{
             fs::create_dir_all(database.parent().unwrap()).unwrap();
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
-            transaction.execute_batch(MIGRATIONS[0]).unwrap();
+            transaction.execute_batch(MIGRATIONS[0].sql).unwrap();
             transaction.pragma_update(None, "user_version", 1_i64).unwrap();
             transaction.commit().unwrap();
         }
@@ -6517,7 +6596,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..5] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction.pragma_update(None, "user_version", 5_i64).unwrap();
             transaction.commit().unwrap();
@@ -6540,7 +6619,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..8] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction.pragma_update(None, "user_version", 8_i64).unwrap();
             transaction.commit().unwrap();
@@ -6866,7 +6945,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..12] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction
                 .execute_batch(
@@ -7168,7 +7247,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..10] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction
                 .execute_batch(
@@ -7209,6 +7288,64 @@ ChronieDB = {{ ["segments"] = {{
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+        let recorded: i64 = connection
+            .query_row("SELECT COUNT(*) FROM chronie_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(recorded, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn turns_a_numbered_schema_version_into_timestamped_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("chronie.sqlite3");
+        {
+            let mut connection = Connection::open(&database).unwrap();
+            let transaction = connection.transaction().unwrap();
+            for migration in &MIGRATIONS[..10] {
+                transaction.execute_batch(migration.sql).unwrap();
+            }
+            transaction.pragma_update(None, "user_version", 10_i64).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        initialize(&database).unwrap();
+
+        let connection = Connection::open(&database).unwrap();
+        let mut statement = connection
+            .prepare("SELECT name FROM chronie_migrations ORDER BY name")
+            .unwrap();
+        let recorded = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let expected = MIGRATIONS
+            .iter()
+            .map(|migration| migration.name.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(recorded, expected);
+    }
+
+    #[test]
+    fn refuses_an_unknown_timestamped_migration() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("chronie.sqlite3");
+        initialize(&database).unwrap();
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "INSERT INTO chronie_migrations (name) VALUES ('20990101T0000_future.sql')",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let error = initialize(&database).unwrap_err();
+        assert!(error.contains("20990101T0000_future.sql"), "{error}");
+        let error = summarize(&database).unwrap_err();
+        assert!(error.contains("20990101T0000_future.sql"), "{error}");
     }
 
     /* ---------- what the client's own combat log says ---------- */
@@ -7620,7 +7757,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..7] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction.pragma_update(None, "user_version", 7_i64).unwrap();
             transaction.commit().unwrap();
@@ -8466,7 +8603,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..15] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction.pragma_update(None, "user_version", 15_i64).unwrap();
             transaction.commit().unwrap();
@@ -8672,7 +8809,7 @@ ChronieDB = {{ ["segments"] = {{
             let mut connection = Connection::open(&database).unwrap();
             let transaction = connection.transaction().unwrap();
             for migration in &MIGRATIONS[..16] {
-                transaction.execute_batch(migration).unwrap();
+                transaction.execute_batch(migration.sql).unwrap();
             }
             transaction
                 .execute(

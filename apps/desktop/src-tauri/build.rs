@@ -2,8 +2,70 @@ use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
     embed_addon();
+    embed_migrations();
     embed_commit();
     tauri_build::build()
+}
+
+/// Writes the timestamped migration files into a Rust slice in lexicographic order.
+///
+/// The folder is the list: a feature adds one uniquely named file and does not append to a
+/// shared Rust array. Sorting here gives SQLite the same total order on every filesystem,
+/// including the two historical migrations that share a minute.
+fn embed_migrations() {
+    let directory = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("migrations");
+    println!("cargo:rerun-if-changed={}", directory.display());
+
+    let mut files = fs::read_dir(&directory)
+        .expect("the desktop should have a migrations folder")
+        .map(|entry| entry.expect("a migration directory entry should be readable").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .collect::<Vec<_>>();
+    files.sort();
+    assert!(!files.is_empty(), "the desktop should have migrations");
+
+    let entries = files
+        .iter()
+        .map(|path| {
+            println!("cargo:rerun-if-changed={}", path.display());
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("a migration filename should be UTF-8");
+            assert_migration_name(name);
+            format!(
+                "    Migration {{ name: {name:?}, sql: include_str!({:?}) }},\n",
+                path.to_string_lossy()
+            )
+        })
+        .collect::<String>();
+
+    let generated = format!("static MIGRATIONS: &[Migration] = &[\n{entries}];\n");
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("migrations.rs");
+    fs::write(out, generated).expect("the generated migration list should be writable");
+}
+
+fn assert_migration_name(name: &str) {
+    let (timestamp, description) = name
+        .split_once('_')
+        .unwrap_or_else(|| panic!("{name} has no timestamp separator"));
+    assert!(
+        timestamp.len() == 13
+            && timestamp.as_bytes()[8] == b'T'
+            && timestamp
+                .bytes()
+                .enumerate()
+                .all(|(index, byte)| index == 8 || byte.is_ascii_digit()),
+        "{name} does not use YYYYMMDDThhmm"
+    );
+    assert!(
+        description.len() > ".sql".len()
+            && description.ends_with(".sql")
+            && description[..description.len() - ".sql".len()]
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'),
+        "{name} does not have a lowercase snake-case description"
+    );
 }
 
 /// Writes the commit this build came out of into `CHRONIE_COMMIT`, for the window to show.
