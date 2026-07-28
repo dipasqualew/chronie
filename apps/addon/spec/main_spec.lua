@@ -2941,25 +2941,17 @@ describe("addon integration", function()
             end
         end
 
-        ---The header's own font strings: the two arrows, named by the glyphs they are drawn
-        ---with, and the title between them. They are the only ones the panel builds without
-        ---a justification, which is what tells them from every row in the body.
+        ---The header's title, which is the whole of the header: it is the one font string the
+        ---panel builds in a heading font rather than the small one every row of the body and
+        ---of the list is drawn in.
         ---@param frame table
-        ---@return table `{ back, forward, title }`
+        ---@return table?
         local function headerOf(frame)
-            local header = {}
             for _, fontString in ipairs(frame.fontStrings) do
-                if fontString.justify == nil then
-                    if fontString.text == "«" then
-                        header.back = fontString
-                    elseif fontString.text == "»" then
-                        header.forward = fontString
-                    else
-                        header.title = fontString
-                    end
+                if fontString.template ~= "GameFontHighlightSmall" then
+                    return fontString
                 end
             end
-            return header
         end
 
         ---What the header says, without the disclosure icon in front of it.
@@ -2971,7 +2963,7 @@ describe("addon integration", function()
         ---@param frame table
         ---@return string?
         local function titleOf(frame)
-            local title = headerOf(frame).title
+            local title = headerOf(frame)
             return title and (title.text:gsub("^|T.-|t ", ""))
         end
 
@@ -3022,6 +3014,16 @@ describe("addon integration", function()
             error("no row saying " .. label .. " on the list to pick")
         end
 
+        ---Opens the list off the header and picks the row saying `label`, which is the whole
+        ---of how a player points the panel at anything but the segment they are in.
+        ---@param recorded table
+        ---@param panel table the results panel's frame
+        ---@param label string
+        local function pick(recorded, panel, label)
+            headerOf(panel):run("OnMouseUp", "LeftButton")
+            pickRow(pickerFrame(recorded, panel), label)
+        end
+
         ---What the panel is showing against one of the body's labels. The value font string
         ---is created straight after its label, which is what pairs the two.
         ---@param frame table
@@ -3036,11 +3038,11 @@ describe("addon integration", function()
             end
         end
 
-        -- The panel could only ever say one thing: what is happening right now. The arrows
-        -- are what reach the other two questions a damage meter answers with the same frame
-        -- — what the evening adds up to, and what the dungeon before this one did — and only
-        -- the whole addon wired together can say whether they reach the right segments.
-        it("walks from the open segment to the session total and on to a filed one", function()
+        -- The panel could only ever say one thing: what is happening right now. The list is
+        -- what reaches the other question a damage meter answers with the same frame — what
+        -- the dungeon before this one did — and only the whole addon wired together can say
+        -- whether a row on it lands on the right segment.
+        it("stands on a segment already filed when it is picked off the list", function()
             local _, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
@@ -3057,31 +3059,24 @@ describe("addon integration", function()
             recorded.clock.advance(720)
 
             local frame = panelFrame(recorded)
-            local header = headerOf(frame)
             assert.equal("Westfall", titleOf(frame))
             assert.equal("0c", panelValueFor(frame, "Gold Δ"))
 
-            header.back:run("OnMouseUp", "LeftButton")
-
-            assert.equal("Session · 2 segments", titleOf(frame))
-            -- Deadmines' five silver plus the open segment's nothing: the body follows the
-            -- header rather than staying on whatever was drawn before the arrow was clicked.
-            assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
-
-            header.forward:run("OnMouseUp", "LeftButton")
-            header.forward:run("OnMouseUp", "LeftButton")
+            pick(recorded, frame, "Deadmines")
 
             assert.equal("Deadmines · 12m ago", titleOf(frame))
+            -- The five silver picked up in there: the body follows the choice rather than
+            -- staying on whatever was drawn before the list was opened over it.
             assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
         end)
 
-        -- The arrows walk the strip one step at a time, which is fine for the segment next
-        -- door and useless four dungeons into an evening. The picker is the damage meter's own
-        -- answer: a list of everything on offer, named and dated well enough to recognise,
-        -- with the session total set apart from the segments. Only the whole addon wired
-        -- together can say whether the panel was handed the real strip to draw a list from and
-        -- a chooser that reaches back to it — a panel given neither is silently a panel whose
-        -- title does nothing when it is clicked.
+        -- The picker is the damage meter's own answer to a panel that can be pointed at
+        -- several things: a list of everything on offer, named and dated well enough to
+        -- recognise, with the session total set apart on top and the evening under it running
+        -- forwards to the segment being played. Only the whole addon wired together can say
+        -- whether the panel was handed the real list to draw from and a chooser that reaches
+        -- back to it — a panel given neither is silently a panel whose title does nothing when
+        -- it is clicked.
         it("opens the list from the title and stands on the session total picked out of it", function()
             local _, recorded = boot({
                 playerName = "Thrall",
@@ -3100,13 +3095,13 @@ describe("addon integration", function()
             recorded.clock.advance(720)
 
             local frame = panelFrame(recorded)
-            headerOf(frame).title:run("OnMouseUp", "LeftButton")
+            headerOf(frame):run("OnMouseUp", "LeftButton")
 
             local list = pickerFrame(recorded, frame)
             assert.same({
                 { label = "Session", detail = "2 segments" },
-                { label = "Westfall", detail = "12m · playing" },
                 { label = "Deadmines", detail = "<1m · 12m ago" },
+                { label = "Westfall", detail = "12m · playing" },
             }, pickerRows(list))
 
             pickRow(list, "Session")
@@ -3138,7 +3133,7 @@ describe("addon integration", function()
             recorded.clock.advance(120)
 
             local frame = panelFrame(recorded)
-            headerOf(frame).forward:run("OnMouseUp", "LeftButton")
+            pick(recorded, frame, "Deadmines")
             assert.equal("Deadmines · 2m ago", titleOf(frame))
 
             recorded.setInstance({ name = "Elwynn Forest", kind = "none", difficultyId = 0,
@@ -3146,9 +3141,9 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             assert.equal("Elwynn Forest", titleOf(frame))
-            -- And the dungeon is still one arrow away: the panel moved because something new
+            -- And the dungeon is still on the list: the panel moved because something new
             -- opened, not because the view it was parked on fell out of the evening.
-            headerOf(frame).forward:run("OnMouseUp", "LeftButton")
+            pick(recorded, frame, "Deadmines")
             assert.equal("Deadmines · 2m ago", titleOf(frame))
         end)
 
@@ -3169,7 +3164,7 @@ describe("addon integration", function()
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
             local frame = panelFrame(recorded)
-            headerOf(frame).back:run("OnMouseUp", "LeftButton")
+            pick(recorded, frame, "Session")
             assert.equal("Session · 2 segments", titleOf(frame))
 
             recorded.clock.advance(120)
