@@ -100,6 +100,18 @@ pub mod item_column {
     /// agrees with all eleven of them on 99.8% of the 77,356 pieces of armour in the game.
     /// Nothing else in the table comes within 13%.
     pub const INVENTORY_TYPE: usize = 66;
+    /// A bit per class, or [`crate::items::ANY_CLASS`] for anybody — which is what nearly
+    /// every item carries.
+    ///
+    /// Read off the same install as the three below it, by `examples/dump_item_facts`. This
+    /// is the column that says an appearance a class set locks away is also sold to everyone
+    /// by something else, which happens to 30.8% of the appearances in the game that more
+    /// than one item reaches.
+    pub const ALLOWABLE_CLASS: usize = 52;
+    /// The level a character has to have reached to equip it. Zero for most things.
+    pub const REQUIRED_LEVEL: usize = 65;
+    /// The colour the game writes the name in: 0 poor, 2 uncommon, 4 epic, 5 legendary.
+    pub const QUALITY: usize = 67;
 }
 
 /// Columns of `ItemDisplayInfo`.
@@ -240,6 +252,18 @@ pub struct TransmogSetAppearance {
     /// that says which hand, because the four display types above do not. Zero when the game
     /// holds no row for the item, which is the same silence that leaves it unnamed.
     pub inventory_type: u32,
+    /// Who may wear the item, as a bit per class, or [`crate::items::ANY_CLASS`] for anybody.
+    ///
+    /// This and the two below it are not facts about the appearance — they are facts about
+    /// the *item*, and they are here because several items reach one appearance and this is
+    /// what tells them apart. A set sells one look through a class-locked piece, an
+    /// unrestricted one and a cheaper one, and without these three the rows are the same
+    /// sentence written out five times. Zero where the game withholds the item.
+    pub allowable_class: u32,
+    /// The level a character has to have reached to equip it. Zero is the ordinary answer.
+    pub required_level: u32,
+    /// The colour the game writes the name in: 0 poor, 2 uncommon, 4 epic, 5 legendary.
+    pub quality: u32,
     pub display_info_id: u32,
     /// The icon the game shows for it, as a FileDataID, or zero when it names none.
     pub icon_file_data_id: u32,
@@ -327,6 +351,9 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
                 appearance_id,
                 display_type,
                 inventory_type: 0,
+                allowable_class: 0,
+                required_level: 0,
+                quality: 0,
                 display_info_id,
                 icon_file_data_id,
                 has_model: has_model.get(&display_info_id).copied().unwrap_or(false),
@@ -349,22 +376,39 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
     Ok(payload(set_id, found))
 }
 
-/// Fills in what the game calls each of a set's items and where it is worn, out of `ItemSparse`.
+/// What one row of `ItemSparse` says about an item, out of the five columns this app reads.
+#[derive(Debug, Clone, Default)]
+struct ItemFacts {
+    name: String,
+    inventory_type: u32,
+    allowable_class: u32,
+    required_level: u32,
+    quality: u32,
+}
+
+/// Fills in what the game says about each of a set's items, out of `ItemSparse`.
 ///
 /// That table is every item in the game — 63 MB of it on a shipping build, an order of
 /// magnitude more than the rest of the chain put together — so nothing is kept from it beyond
 /// the dozen rows a set actually needs. The rows are walked once and only the ones an
 /// appearance here belongs to are read; the file itself is dropped on the way out.
 ///
-/// Two things come out of the same walk, and the second is why a weapon can be shown at all.
-/// The **name** is what the row is labelled with. The **inventory type** is where the item is
-/// worn, and for a weapon it is the only statement in the game's files of which hand it goes
-/// in — `ItemAppearance.DisplayType` files a sword, a shield and a wand under four numbers that
-/// say none of it. See `worn::held_in`.
+/// Five columns come out of the one walk, and each is here because something cannot be drawn
+/// without it. The **name** is what the row is labelled with. The **inventory type** is where
+/// the item is worn, and for a weapon it is the only statement in the game's files of which
+/// hand it goes in — `ItemAppearance.DisplayType` files a sword, a shield and a wand under
+/// four numbers that say none of it. See `worn::held_in`.
 ///
-/// An item the table says nothing about keeps an empty name and a zero rather than costing its
+/// The last three — **who may wear it, what it takes, and what it is worth** — are what tells
+/// two rows of a set apart once the rows are grouped by appearance. A set names one look
+/// several times over, once per item that gives it, and 92.6% of the time the items disagree
+/// about nothing except their names. These are the columns that carry the disagreements worth
+/// showing, and the one worth showing most is the first: a look a class set locks away is
+/// often sold to everybody by something else in the same set.
+///
+/// An item the table says nothing about keeps an empty name and zeroes rather than costing its
 /// row. The game encrypts the items of content it has not shipped, exactly as it does
-/// everywhere else along this chain, and neither is worth dropping a row for.
+/// everywhere else along this chain, and none of that is worth dropping a row for.
 fn describe_items(
     files: &dyn GameFiles,
     appearances: &mut [TransmogSetAppearance],
@@ -379,26 +423,32 @@ fn describe_items(
     }
 
     let items = Db2::parse_with_text_columns(files.read(ITEM_SPARSE)?, &item_column::TEXT)?;
-    let described: HashMap<u32, (String, u32)> = items
+    let described: HashMap<u32, ItemFacts> = items
         .rows()
         .filter(|row| wanted.contains(&row.id()))
         .map(|row| {
             (
                 row.id(),
-                (
-                    row.text(item_column::NAME),
-                    row.number(item_column::INVENTORY_TYPE),
-                ),
+                ItemFacts {
+                    name: row.text(item_column::NAME),
+                    inventory_type: row.number(item_column::INVENTORY_TYPE),
+                    allowable_class: row.number(item_column::ALLOWABLE_CLASS),
+                    required_level: row.number(item_column::REQUIRED_LEVEL),
+                    quality: row.number(item_column::QUALITY),
+                },
             )
         })
         .collect();
     for appearance in appearances {
-        let (name, inventory_type) = described
+        let facts = described
             .get(&appearance.item_id)
             .cloned()
             .unwrap_or_default();
-        appearance.name = name;
-        appearance.inventory_type = inventory_type;
+        appearance.name = facts.name;
+        appearance.inventory_type = facts.inventory_type;
+        appearance.allowable_class = facts.allowable_class;
+        appearance.required_level = facts.required_level;
+        appearance.quality = facts.quality;
     }
     Ok(())
 }
@@ -515,6 +565,11 @@ mod tests {
                 // The weapon rack: a one-hander, a two-hander, a shield, and one held in
                 // the other hand.
                 (&json!(204), &json!(4)),
+                // Five rows and two looks, which is what the count on a card means and why
+                // it is no longer the number of rows the detail view draws.
+                (&json!(207), &json!(5)),
+                (&json!(208), &json!(2)),
+                (&json!(209), &json!(2)),
                 (&json!(201), &json!(4)),
                 (&json!(202), &json!(2)),
             ]
@@ -528,6 +583,9 @@ mod tests {
             vec![
                 json!("Duskwoven Attire"),
                 json!("Duskwoven Attire"),
+                json!("Emberforge Armory"),
+                json!("Emberforge Armory"),
+                json!("Emberforge Armory"),
                 json!("Emberforge Armory"),
                 json!("Emberforge Armory"),
                 json!("Tideglass Wardrobe"),
@@ -554,6 +612,9 @@ mod tests {
                 (&json!(5), &json!(20), &json!(206)),
                 (&json!(4), &json!(5), &json!(203)),
                 (&json!(4), &json!(10), &json!(204)),
+                (&json!(4), &json!(15), &json!(207)),
+                (&json!(4), &json!(20), &json!(208)),
+                (&json!(4), &json!(25), &json!(209)),
                 (&json!(3), &json!(5), &json!(201)),
                 (&json!(3), &json!(10), &json!(202)),
             ]
@@ -565,8 +626,8 @@ mod tests {
     #[test]
     fn reports_the_sets_the_game_keeps_encrypted() {
         let payload = payload();
-        assert_eq!(payload["readCount"], 6);
-        assert_eq!(payload["declaredCount"], 8);
+        assert_eq!(payload["readCount"], 9);
+        assert_eq!(payload["declaredCount"], 11);
         assert_eq!(payload["withheldCount"], 2);
         assert!(!column(&payload, "id").contains(&json!(900)));
         assert!(!column(&payload, "name").contains(&json!("Unreleased Alpha")));
@@ -597,6 +658,7 @@ mod tests {
                     "modifiedAppearanceId": 71006, "itemId": 30006, "name": "Emberforge Helm",
                     "appearanceId": 80006,
                     "displayType": 0, "inventoryType": 1,
+                    "allowableClass": 0xffff, "requiredLevel": 0, "quality": 4,
                     "displayInfoId": 900001, "iconFileDataId": 130001,
                     "hasModel": true,
                 },
@@ -604,6 +666,7 @@ mod tests {
                     "modifiedAppearanceId": 71007, "itemId": 30007, "name": "Emberforge Pauldrons",
                     "appearanceId": 80007,
                     "displayType": 1, "inventoryType": 3,
+                    "allowableClass": 0xffff, "requiredLevel": 0, "quality": 4,
                     "displayInfoId": 900009, "iconFileDataId": 130002,
                     "hasModel": true,
                 },
@@ -611,6 +674,7 @@ mod tests {
                     "modifiedAppearanceId": 71008, "itemId": 30008,
                     "name": "Emberforge Breastplate", "appearanceId": 80008,
                     "displayType": 3, "inventoryType": 5,
+                    "allowableClass": 0xffff, "requiredLevel": 0, "quality": 5,
                     "displayInfoId": 900003, "iconFileDataId": 130003,
                     "hasModel": false,
                 },
@@ -618,11 +682,56 @@ mod tests {
                     "modifiedAppearanceId": 71009, "itemId": 30009, "name": "Emberforge Greaves",
                     "appearanceId": 80009,
                     "displayType": 5, "inventoryType": 7,
+                    "allowableClass": 0xffff, "requiredLevel": 0, "quality": 4,
                     "displayInfoId": 900006, "iconFileDataId": 130006,
                     "hasModel": false,
                 },
             ])
         );
+    }
+
+    // The three columns the largest table in the game is now read for beyond the name: who may
+    // wear an item, what it takes to wear it, and what it is worth. Set 207 sells one look
+    // three ways and this is the whole of what separates the three rows — without it the
+    // detail view would be collapsing them on the strength of nothing.
+    #[test]
+    fn says_who_may_wear_each_item_of_a_set_and_what_it_costs() {
+        let opened = opened(207);
+        let facts: Vec<(&Value, &Value, &Value, &Value)> = opened["appearances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|appearance| {
+                (
+                    &appearance["name"],
+                    &appearance["allowableClass"],
+                    &appearance["requiredLevel"],
+                    &appearance["quality"],
+                )
+            })
+            .collect();
+        assert_eq!(
+            facts,
+            vec![
+                // The head, three times over: the set's own piece is Warrior-only, and two
+                // other items give the same look to anybody — the second of them cheaper.
+                (&json!("Stormforged Helm"), &json!(0b1), &json!(60), &json!(4)),
+                (&json!("Stormforged Greathelm"), &json!(0xffff), &json!(60), &json!(4)),
+                (&json!("Helm of the Tempest"), &json!(0xffff), &json!(45), &json!(3)),
+                (&json!("Stormforged Breastplate"), &json!(0b1), &json!(60), &json!(4)),
+                (&json!("Breastplate of the Tempest"), &json!(0xffff), &json!(60), &json!(4)),
+            ]
+        );
+
+        // Five rows and two appearances between them, which is the count the detail view
+        // groups down to.
+        let looks: HashSet<u32> = opened["appearances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|appearance| appearance["appearanceId"].as_u64().unwrap() as u32)
+            .collect();
+        assert_eq!(looks.len(), 2);
     }
 
     // The game stores a set's fourteenth appearance as a copy of its first, and a reader that
@@ -668,12 +777,15 @@ mod tests {
                     "modifiedAppearanceId": 71011, "itemId": 30011, "name": "",
                     "appearanceId": 80011,
                     "displayType": 3, "inventoryType": 0,
+                    "allowableClass": 0, "requiredLevel": 0, "quality": 0,
                     "displayInfoId": 900900, "iconFileDataId": 130008,
                     "hasModel": false,
                 },
                 {
                     "modifiedAppearanceId": 71012, "itemId": 0, "name": "", "appearanceId": 0,
-                    "displayType": 0, "inventoryType": 0, "displayInfoId": 0,
+                    "displayType": 0, "inventoryType": 0,
+                    "allowableClass": 0, "requiredLevel": 0, "quality": 0,
+                    "displayInfoId": 0,
                     "iconFileDataId": 0,
                     "hasModel": false,
                 },
@@ -702,6 +814,7 @@ mod tests {
                 "modifiedAppearanceId": 71013, "itemId": 30013, "name": "",
                 "appearanceId": 80013,
                 "displayType": 2, "inventoryType": 4,
+                "allowableClass": 0xffff, "requiredLevel": 0, "quality": 1,
                 "displayInfoId": 900008, "iconFileDataId": 0,
                 "hasModel": false,
             }])

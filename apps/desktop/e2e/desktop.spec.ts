@@ -741,6 +741,18 @@ const FULL_SIZE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAAB
 // viewer, and the tooltip that is handed HTML rather than a value in a React tree.
 const NOTED = "<b>first</b> Yogg kill";
 
+/**
+ * What every item of the transmog fixtures says about itself beyond its name.
+ *
+ * The window groups a set's rows by appearance and reads these three to say what separates two
+ * items that give the same look, so a row has to carry them whether or not the flow below
+ * looks at them. Every item here is one anybody may wear.
+ */
+const ANY_CLASS_ITEM = { allowableClass: 0xffff, requiredLevel: 0, quality: 4 } as const;
+
+/** And what the backend answers for an appearance whose item the game keeps encrypted. */
+const WITHHELD_ITEM = { allowableClass: 0, requiredLevel: 0, quality: 0 } as const;
+
 // Typed as the real backend's answers, so a fixture that has drifted from what a command
 // actually returns fails the type check rather than the assertion three steps later.
 //
@@ -1047,22 +1059,26 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
           displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         // The set names the same appearance twice, which is why the card counts four.
         {
           modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
           displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
           modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle", appearanceId: 80002,
           displayType: 1, inventoryType: 3,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
         },
         {
           modifiedAppearanceId: 71003, itemId: 30003, name: "Tideglass Robe", appearanceId: 80003,
           displayType: 3, inventoryType: 5,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
         },
       ],
@@ -1076,11 +1092,13 @@ const mockDesktop: E2EMock = {
           modifiedAppearanceId: 71004, itemId: 30004, name: "Tideglass Sandals",
           appearanceId: 80004,
           displayType: 6, inventoryType: 8,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
         },
         {
           modifiedAppearanceId: 71005, itemId: 30005, name: "Tideglass Gloves", appearanceId: 80005,
           displayType: 8, inventoryType: 10,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
         },
       ],
@@ -1094,24 +1112,28 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71006, itemId: 30006, name: "Emberforge Helm", appearanceId: 80006,
           displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
           modifiedAppearanceId: 71007, itemId: 30007, name: "Emberforge Pauldrons",
           appearanceId: 80007,
           displayType: 1, inventoryType: 3,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900009, iconFileDataId: 130002, hasModel: true,
         },
         {
           modifiedAppearanceId: 71008, itemId: 30008, name: "Emberforge Breastplate",
           appearanceId: 80008,
           displayType: 3, inventoryType: 5,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
         },
         {
           modifiedAppearanceId: 71009, itemId: 30009, name: "Emberforge Greaves",
           appearanceId: 80009,
           displayType: 5, inventoryType: 7,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
         },
         // A weapon, which the game files under a display type that says only "a weapon" —
@@ -1120,6 +1142,7 @@ const mockDesktop: E2EMock = {
           modifiedAppearanceId: 71010, itemId: 30010, name: "Emberforge Blade",
           appearanceId: 80010,
           displayType: 11, inventoryType: 13,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
         // And one whose item the game withholds, so nothing says a hand — or a name. That
@@ -1129,6 +1152,7 @@ const mockDesktop: E2EMock = {
           modifiedAppearanceId: 71017, itemId: 30017, name: "",
           appearanceId: 80017,
           displayType: 12, inventoryType: 0,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
       ],
@@ -1143,11 +1167,13 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71011, itemId: 30011, name: "", appearanceId: 80011,
           displayType: 3, inventoryType: 5,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
         },
         {
           modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0,
           displayType: 0, inventoryType: 1,
+          ...WITHHELD_ITEM,
           displayInfoId: 0, iconFileDataId: 0, hasModel: false,
         },
       ],
