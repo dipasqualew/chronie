@@ -28,6 +28,7 @@ import type {
   SyncResult,
   TransmogPayload,
   TransmogSetItemsPayload,
+  WardrobePayload,
   WifiPeer,
   WifiReceipt,
   WifiReceiveStatus,
@@ -55,6 +56,14 @@ export const desktop = {
   transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> => mock
     ? Promise.resolve(structuredClone(mock.transmogItems[setId] ?? emptySet(setId)))
     : invoke<TransmogSetItemsPayload>("transmog_set_items", { setId }),
+  // Every look filling one kind of place, which is the other way of browsing the game: asked
+  // for a kind at a time, because the whole wardrobe is fifty-five thousand rows and fourteen
+  // megabytes. Kept by the caller once it arrives — what the game holds cannot change under a
+  // running window — so a reader going back and forth between two kinds pays for each once.
+  transmogAppearances: (displayTypes: number[]): Promise<WardrobePayload> => mock
+    ? Promise.resolve(structuredClone(mock.wardrobe[wardrobeKey(displayTypes)]
+      ?? emptyWardrobe(displayTypes)))
+    : invoke<WardrobePayload>("transmog_appearances", { displayTypes }),
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.
   achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock
@@ -320,6 +329,14 @@ function mockReceive(advance: (status: WifiReceiveStatus) => void): WifiReceiveS
 /** A set the e2e mock says nothing about, which the real backend would answer for. */
 const emptySet = (setId: number): TransmogSetItemsPayload =>
   ({ setId, appearances: [], readCount: 0, withheldCount: 0 });
+
+/** How the e2e mock's wardrobe is keyed: the display types, ascending, joined by commas. */
+const wardrobeKey = (displayTypes: number[]): string =>
+  [...displayTypes].sort((left, right) => left - right).join(",");
+
+/** A kind the mock holds nothing for, which the real backend answers with an empty list. */
+const emptyWardrobe = (displayTypes: number[]): WardrobePayload =>
+  ({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 });
 
 /**
  * The icons the e2e mock holds among those asked for.

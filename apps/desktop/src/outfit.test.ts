@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NOTHING_ON, isWorn, onlyWearable, outfitSummary, piecesOf, placeName, placeOf, takeOff, toggle,
-  wear, wearSet, wearable, wornPieces,
+  NOTHING_ON, isWorn, onlyWearable, outfitSummary, piecesOf, placeName, placeOf, setLabel,
+  takeOff, toggle, wear, wearSet, wearable, wornPieces,
 } from "./outfit";
 import type { AppearanceRow } from "./transmogModal";
 import type { TransmogSet } from "./types";
@@ -117,9 +117,9 @@ describe("placeName", () => {
 
 describe("wear", () => {
   it("puts an appearance on, and says which set it came out of", () => {
-    const outfit = wear(NOTHING_ON, HELM, someSet());
+    const outfit = wear(NOTHING_ON, HELM, "Tideglass Regalia");
     expect(wornPieces(outfit)).toEqual([
-      { place: "armour-0", row: HELM, setId: 7, setName: "Tideglass Regalia" },
+      { place: "armour-0", row: HELM, from: "Tideglass Regalia" },
     ]);
   });
 
@@ -127,18 +127,18 @@ describe("wear", () => {
   // and they all end up on the same body.
   it("keeps pieces taken out of different sets at once", () => {
     const outfit = wear(
-      wear(NOTHING_ON, HELM, someSet({ id: 1, name: "One" })),
+      wear(NOTHING_ON, HELM, "One"),
       ROBE,
-      someSet({ id: 2, name: "Two" }),
+      "Two",
     );
-    expect(wornPieces(outfit).map((piece) => piece.setName)).toEqual(["One", "Two"]);
+    expect(wornPieces(outfit).map((piece) => piece.from)).toEqual(["One", "Two"]);
   });
 
   // A second helm cannot go on over the first. A reader clicking down a set trying hats
   // expects each one to be *the* hat.
   it("replaces whatever was already in that place", () => {
     const other = row({ displayType: 0, displayInfoId: 900_099, label: "Another helm" });
-    const outfit = wear(wear(NOTHING_ON, HELM, someSet()), other, someSet());
+    const outfit = wear(wear(NOTHING_ON, HELM, "Tideglass Regalia"), other, "Tideglass Regalia");
     expect(wornPieces(outfit)).toHaveLength(1);
     expect(wornPieces(outfit)[0]?.row.label).toBe("Another helm");
   });
@@ -147,7 +147,7 @@ describe("wear", () => {
   // different item from a one-hander and the same right hand, so it takes it.
   it("treats the hand as the place, so a two-hander takes the one-hander's hand", () => {
     const twoHander = row({ displayType: 11, inventoryType: 17, displayInfoId: 900_014 });
-    const outfit = wear(wear(NOTHING_ON, SWORD, someSet()), twoHander, someSet());
+    const outfit = wear(wear(NOTHING_ON, SWORD, "Tideglass Regalia"), twoHander, "Tideglass Regalia");
     expect(wornPieces(outfit)).toHaveLength(1);
     expect(wornPieces(outfit)[0]?.row.displayInfoId).toBe(900_014);
   });
@@ -155,19 +155,26 @@ describe("wear", () => {
   // A shield is the other hand, so the two coexist rather than replacing each other.
   it("leaves the other hand alone", () => {
     const shield = row({ displayType: 13, inventoryType: 14, displayInfoId: 900_015 });
-    const outfit = wear(wear(NOTHING_ON, SWORD, someSet()), shield, someSet());
+    const outfit = wear(wear(NOTHING_ON, SWORD, "Tideglass Regalia"), shield, "Tideglass Regalia");
     expect(wornPieces(outfit)).toHaveLength(2);
   });
 
   it("leaves the outfit alone for an appearance with nowhere to go", () => {
     const nowhere = row({ withheld: true });
-    expect(wear(NOTHING_ON, nowhere, someSet())).toBe(NOTHING_ON);
+    expect(wear(NOTHING_ON, nowhere, "Tideglass Regalia")).toBe(NOTHING_ON);
+  });
+
+  // The other half of the browser has no set behind it: a look picked out of every head in
+  // the game came from the game, and the panel prints nothing rather than inventing a line.
+  it("wears a look that came out of no set at all", () => {
+    const outfit = wear(NOTHING_ON, HELM);
+    expect(wornPieces(outfit).map((piece) => piece.from)).toEqual([""]);
   });
 
   // State that is replaced rather than mutated, because the panel redraws on the identity.
   it("answers with a new outfit and leaves the old one as it was", () => {
-    const before = wear(NOTHING_ON, HELM, someSet());
-    const after = wear(before, ROBE, someSet());
+    const before = wear(NOTHING_ON, HELM, "Tideglass Regalia");
+    const after = wear(before, ROBE, "Tideglass Regalia");
     expect(wornPieces(before)).toHaveLength(1);
     expect(after).not.toBe(before);
   });
@@ -175,12 +182,12 @@ describe("wear", () => {
 
 describe("takeOff", () => {
   it("takes one piece off and leaves the rest on", () => {
-    const outfit = wear(wear(NOTHING_ON, HELM, someSet()), ROBE, someSet());
+    const outfit = wear(wear(NOTHING_ON, HELM, "Tideglass Regalia"), ROBE, "Tideglass Regalia");
     expect(wornPieces(takeOff(outfit, "armour-0")).map((piece) => piece.place)).toEqual(["armour-3"]);
   });
 
   it("leaves an outfit that has nothing in that place exactly as it was", () => {
-    const outfit = wear(NOTHING_ON, HELM, someSet());
+    const outfit = wear(NOTHING_ON, HELM, "Tideglass Regalia");
     expect(takeOff(outfit, "hand-left")).toBe(outfit);
   });
 });
@@ -190,9 +197,9 @@ describe("wornPieces", () => {
   // backend paints them in either.
   it("reads down the body whatever order the pieces went on in", () => {
     const boots = row({ displayType: 6, displayInfoId: 900_004 });
-    let outfit = wear(NOTHING_ON, SWORD, someSet());
-    outfit = wear(outfit, boots, someSet());
-    outfit = wear(outfit, HELM, someSet());
+    let outfit = wear(NOTHING_ON, SWORD, "Tideglass Regalia");
+    outfit = wear(outfit, boots, "Tideglass Regalia");
+    outfit = wear(outfit, HELM, "Tideglass Regalia");
     expect(wornPieces(outfit).map((piece) => piece.place))
       .toEqual(["armour-0", "armour-6", "hand-right"]);
   });
@@ -202,18 +209,18 @@ describe("isWorn", () => {
   // By the display rather than by the row, because a collection's tier variants share most of
   // their pieces: the robe put on from one set is still the robe when found in its neighbour.
   it("marks the same appearance found in another set as the one that is on", () => {
-    const outfit = wear(NOTHING_ON, ROBE, someSet({ id: 1 }));
+    const outfit = wear(NOTHING_ON, ROBE, "Set 1");
     const elsewhere = row({ ...ROBE, appearanceId: 55, itemId: 999 });
     expect(isWorn(outfit, elsewhere)).toBe(true);
   });
 
   it("does not mark a different appearance in the same place", () => {
-    const outfit = wear(NOTHING_ON, ROBE, someSet());
+    const outfit = wear(NOTHING_ON, ROBE, "Tideglass Regalia");
     expect(isWorn(outfit, row({ displayType: 3, displayInfoId: 900_003 }))).toBe(false);
   });
 
   it("does not mark an appearance that could never go on", () => {
-    expect(isWorn(wear(NOTHING_ON, ROBE, someSet()), row({ withheld: true }))).toBe(false);
+    expect(isWorn(wear(NOTHING_ON, ROBE, "Tideglass Regalia"), row({ withheld: true }))).toBe(false);
   });
 });
 
@@ -221,16 +228,23 @@ describe("toggle", () => {
   // Clicking a row a second time is how a reader takes one piece off without going to the
   // list beside the character.
   it("puts an appearance on, and takes the same one off again", () => {
-    const on = toggle(NOTHING_ON, HELM, someSet());
+    const on = toggle(NOTHING_ON, HELM, "Tideglass Regalia");
     expect(wornPieces(on)).toHaveLength(1);
-    expect(wornPieces(toggle(on, HELM, someSet()))).toHaveLength(0);
+    expect(wornPieces(toggle(on, HELM, "Tideglass Regalia"))).toHaveLength(0);
   });
 
   // A different helm is not the one being worn, so clicking it swaps rather than undressing.
   it("swaps when the thing clicked is not the one already in that place", () => {
     const other = row({ displayType: 0, displayInfoId: 900_099, label: "Another helm" });
-    const on = toggle(NOTHING_ON, HELM, someSet());
-    expect(wornPieces(toggle(on, other, someSet()))[0]?.row.label).toBe("Another helm");
+    const on = toggle(NOTHING_ON, HELM, "Tideglass Regalia");
+    expect(wornPieces(toggle(on, other, "Tideglass Regalia"))[0]?.row.label).toBe("Another helm");
+  });
+});
+
+describe("setLabel", () => {
+  it("names a set, and numbers the ones the game leaves unnamed", () => {
+    expect(setLabel(someSet())).toBe("Tideglass Regalia");
+    expect(setLabel(someSet({ id: 12, name: "" }))).toBe("Set 12");
   });
 });
 
@@ -252,7 +266,7 @@ describe("wearSet", () => {
   // arbitrary one, and what is already on elsewhere is left alone.
   it("keeps the last of two pieces for one place, and everything else on", () => {
     const other = row({ displayType: 0, displayInfoId: 900_099, label: "Another helm" });
-    const outfit = wearSet(wear(NOTHING_ON, SWORD, someSet()), [HELM, other], someSet());
+    const outfit = wearSet(wear(NOTHING_ON, SWORD, "Tideglass Regalia"), [HELM, other], someSet());
     expect(wornPieces(outfit).map((piece) => piece.row.label))
       .toEqual(["Another helm", "A sword"]);
   });
@@ -260,7 +274,7 @@ describe("wearSet", () => {
 
 describe("piecesOf", () => {
   it("sends the three numbers the backend dresses her from", () => {
-    const outfit = wear(wear(NOTHING_ON, SWORD, someSet()), HELM, someSet());
+    const outfit = wear(wear(NOTHING_ON, SWORD, "Tideglass Regalia"), HELM, "Tideglass Regalia");
     expect(piecesOf(outfit)).toEqual([
       { displayInfoId: 900_001, displayType: 0, inventoryType: 0 },
       { displayInfoId: 900_007, displayType: 11, inventoryType: 13 },
@@ -274,6 +288,6 @@ describe("outfitSummary", () => {
   });
 
   it("counts what is on against what could be", () => {
-    expect(outfitSummary(wear(NOTHING_ON, HELM, someSet()))).toBe("1 of 13 slots filled");
+    expect(outfitSummary(wear(NOTHING_ON, HELM, "Tideglass Regalia"))).toBe("1 of 13 slots filled");
   });
 });

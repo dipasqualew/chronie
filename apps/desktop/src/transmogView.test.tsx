@@ -5,7 +5,8 @@ import { REASONS } from "./modelPreview";
 import { TransmogView } from "./transmogView";
 import type { ModelStage } from "./modelViewer";
 import type {
-  TransmogAppearance, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WornPiece,
+  TransmogAppearance, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance,
+  WardrobePayload, WornPiece,
 } from "./types";
 
 afterEach(cleanup);
@@ -72,6 +73,84 @@ const SETS: TransmogPayload = {
   withheldCount: 0,
 };
 
+/** One look out of the game's whole wardrobe, with only what a test cares about spelled out. */
+const look = (
+  fields: Partial<WardrobeAppearance> & Pick<WardrobeAppearance, "appearanceId" | "name">,
+): WardrobeAppearance => ({
+  itemId: 7000 + fields.appearanceId,
+  displayType: 0,
+  inventoryType: 1,
+  classId: 4,
+  subclassId: 1,
+  allowableClass: 0xffff,
+  requiredLevel: 0,
+  quality: 4,
+  displayInfoId: 900_001,
+  iconFileDataId: 0,
+  hasModel: true,
+  itemCount: 1,
+  liftsRestriction: false,
+  ...fields,
+});
+
+/**
+ * What the game holds for two kinds of place, as the other half of the browser reads them.
+ *
+ * The heads are the point of browsing this way: the Coif belongs to no set, so nothing in the
+ * grid beside it could reach that look at all. The things held in a hand are one answer
+ * covering five display types, which is what the kinds cut up — a staff and a two-handed
+ * sword are both filed under 11, and only the item's own subclass separates them.
+ */
+const WARDROBE: Record<string, WardrobePayload> = {
+  "0": {
+    displayTypes: [0],
+    readCount: 2,
+    withheldCount: 1,
+    appearances: [
+      look({ appearanceId: 40, name: "Coif of the Drowned Star", displayInfoId: 900_040 }),
+      // The same look set 203 holds, which is what says both halves dress one character.
+      look({ appearanceId: 3, name: "Emberforge Helm", displayInfoId: 900_099, itemCount: 3, liftsRestriction: true }),
+    ],
+  },
+  // A kind the size a real one is: 5,111 heads on a shipping install, and a list that drew
+  // all of them would be forty screens of buttons nobody asked for.
+  "3": {
+    displayTypes: [3],
+    readCount: 120,
+    withheldCount: 0,
+    appearances: Array.from({ length: 120 }, (_, index) => look({
+      appearanceId: 500 + index,
+      // Numbered so the order is legible: the backend sorts by name and this is what that
+      // looks like when a kind holds more than a page of them.
+      name: `Robe ${String(index).padStart(3, "0")}`,
+      displayType: 3,
+      inventoryType: 5,
+      displayInfoId: 901_000 + index,
+    })),
+  },
+  "11,12,13,14,15": {
+    displayTypes: [11, 12, 13, 14, 15],
+    readCount: 3,
+    withheldCount: 0,
+    appearances: [
+      look({
+        appearanceId: 41, name: "Emberforge Blade", displayType: 11, inventoryType: 13,
+        classId: 2, subclassId: 7, displayInfoId: 900_007,
+      }),
+      look({
+        appearanceId: 42, name: "Staff of the Quiet Tide", displayType: 11, inventoryType: 17,
+        classId: 2, subclassId: 10, displayInfoId: 900_014,
+      }),
+      // Filed as armour rather than as a weapon, so a picker reading the display type alone
+      // would have put it among the swords.
+      look({
+        appearanceId: 43, name: "Emberforge Aegis", displayType: 13, inventoryType: 14,
+        classId: 4, subclassId: 6, displayInfoId: 900_015,
+      }),
+    ],
+  },
+};
+
 const CONTENTS: Record<number, TransmogSetItemsPayload> = {
   201: { setId: 201, appearances: [HELM, ROBE, ARROWS], readCount: 3, withheldCount: 0 },
   203: { setId: 203, appearances: [OTHER_HELM, WITHHELD], readCount: 1, withheldCount: 1 },
@@ -121,18 +200,24 @@ function view(options: { payload?: TransmogPayload | null } = {}) {
   const loadCharacter = vi.fn(() => Promise.resolve({ model: model("a bare body") }));
   const loadSet = vi.fn((setId: number) =>
     Promise.resolve(CONTENTS[setId] ?? { setId, appearances: [], readCount: 0, withheldCount: 0 }));
+  // The wardrobe half of the browser, which is not read at all until a reader asks for it —
+  // recorded rather than answered, because that is the statement worth making about it.
+  const loadAppearances = vi.fn((displayTypes: number[]) =>
+    Promise.resolve(WARDROBE[displayTypes.join(",")]
+      ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 }));
   const rendered = render(
     <TransmogView
       payload={options.payload === undefined ? SETS : options.payload}
       status="Reading the game's transmog tables…"
       loadSet={loadSet}
+      loadAppearances={loadAppearances}
       loadIcons={() => Promise.resolve({ icons: {} })}
       loadCharacter={loadCharacter}
       loadWorn={loadWorn}
       createStage={() => stage}
     />,
   );
-  return { rendered, loadWorn, loadCharacter, loadSet, shown };
+  return { rendered, loadWorn, loadCharacter, loadSet, loadAppearances, shown };
 }
 
 /** Opens a set in place, and waits for what it holds to arrive. */
@@ -142,6 +227,19 @@ async function open(name: string): Promise<HTMLElement> {
   if (!card) throw new Error(`${name} has no card`);
   await waitFor(() => expect(within(card).getAllByRole("listitem").length).toBeGreaterThan(0));
   return card as HTMLElement;
+}
+
+/**
+ * Switches the browser to the game's whole wardrobe, which is what a reader does when the
+ * sets are not where the look they want lives.
+ */
+async function browseItems(
+  already?: ReturnType<typeof view>,
+): Promise<ReturnType<typeof view>> {
+  const shown = already ?? view();
+  fireEvent.click(screen.getByRole("button", { name: "Items" }));
+  await waitFor(() => expect(screen.getByLabelText("Kind of appearance")).toBeTruthy());
+  return shown;
 }
 
 /** What the outfit list says is on, by slot and item. */
@@ -380,6 +478,8 @@ describe("TransmogView", () => {
         payload={SETS}
         status=""
         loadSet={() => Promise.reject(new Error("The game keeps that one encrypted."))}
+        loadAppearances={(displayTypes) =>
+          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
@@ -398,6 +498,8 @@ describe("TransmogView", () => {
         payload={SETS}
         status=""
         loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
+        loadAppearances={(displayTypes) =>
+          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
@@ -415,5 +517,105 @@ describe("TransmogView", () => {
     fireEvent.change(screen.getByLabelText("Filter transmog sets"), { target: { value: "plate" } });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull());
     expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
+  });
+
+  /* ---------- browsing by item rather than by set ---------- */
+
+  // The wardrobe costs the game's storage the same second the sets do, and a reader who never
+  // leaves the sets should never pay it.
+  it("reads nothing of the wardrobe until the reader asks to see it", async () => {
+    const shown = view();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy());
+    expect(shown.loadAppearances).not.toHaveBeenCalled();
+
+    await browseItems(shown);
+    expect(shown.loadAppearances).toHaveBeenCalledWith([0]);
+  });
+
+  // The point of the whole half: a look no set names is unreachable from the grid, and here
+  // it is the first row.
+  it("lists every look the game has for a place, set or no set", async () => {
+    await browseItems();
+    expect(await screen.findByText("Coif of the Drowned Star")).toBeTruthy();
+    expect(screen.getByText("Emberforge Helm")).toBeTruthy();
+  });
+
+  // The other point: what the two halves share is the character, so a reader can take a helm
+  // out of a set and go looking for a staff without losing it.
+  it("keeps the outfit across the switch, and marks what is already on", async () => {
+    const shown = view();
+    const card = await open("Emberforge Plate");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear Head: Emberforge Helm" }));
+    await waitFor(() => expect(worn()).toEqual(["Head Emberforge Helm"]));
+
+    await browseItems(shown);
+    await screen.findByText("Coif of the Drowned Star");
+    // Still on her, and the list says so: the look is the same display however it was reached.
+    expect(worn()).toEqual(["Head Emberforge Helm"]);
+    expect(screen.getByRole("button", { name: "Wear Head: Emberforge Helm" })
+      .getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("puts a look picked out of the wardrobe on the character", async () => {
+    const { loadWorn } = await browseItems();
+    fireEvent.click(await screen.findByRole("button", { name: "Wear Head: Coif of the Drowned Star" }));
+
+    await waitFor(() => expect(worn()).toEqual(["Head Coif of the Drowned Star"]));
+    expect(loadWorn).toHaveBeenLastCalledWith([
+      { displayInfoId: 900_040, displayType: 0, inventoryType: 1 },
+    ]);
+    // And says nothing about a set, because there is no set behind it — the line under the
+    // name is where a set's name goes and inventing one would be a line saying nothing.
+    expect(document.querySelector("#outfit-list .outfit-what .muted")).toBeNull();
+  });
+
+  // The reason the browser reads the item's own subclass at all: the game files a staff and a
+  // two-handed sword under one display type, so a picker built on display types could offer
+  // neither of them.
+  it("picks one kind of weapon out of everything held in a hand", async () => {
+    const { loadAppearances } = await browseItems();
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "weapon-10" } });
+
+    expect(await screen.findByText("Staff of the Quiet Tide")).toBeTruthy();
+    expect(screen.queryByText("Emberforge Blade")).toBeNull();
+    expect(loadAppearances).toHaveBeenLastCalledWith([11, 12, 13, 14, 15]);
+
+    // And the seventeen kinds of weapon are that one answer: going from staves to swords is a
+    // filter over what is already here rather than another second of the game's storage.
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "weapon-7" } });
+    expect(await screen.findByText("Emberforge Blade")).toBeTruthy();
+    expect(loadAppearances).toHaveBeenCalledTimes(2);
+  });
+
+  // A shield is armour in the game's own filing and sits beside the swords in the same
+  // answer, so the kind that finds it is reading the item rather than the slot.
+  it("keeps a shield apart from the weapons it arrives with", async () => {
+    await browseItems();
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "shield" } });
+    expect(await screen.findByText("Emberforge Aegis")).toBeTruthy();
+    expect(screen.queryByText("Emberforge Blade")).toBeNull();
+  });
+
+  // A kind of place is thousands of looks, and the button under them is the honest version
+  // of an endless scroll: it says how many more there are before it draws any of them.
+  it("draws a kind a page at a time and says how much of it is left", async () => {
+    await browseItems();
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-3" } });
+
+    await screen.findByText("Robe 000");
+    expect(screen.getByText("100 of 120 appearances")).toBeTruthy();
+    expect(screen.queryByText("Robe 100")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 20 more of 20 appearances" }));
+    expect(await screen.findByText("Robe 119")).toBeTruthy();
+    expect(screen.getByText("120 appearances")).toBeTruthy();
+  });
+
+  it("narrows a kind by name", async () => {
+    await browseItems();
+    await screen.findByText("Coif of the Drowned Star");
+    fireEvent.change(screen.getByLabelText("Filter appearances"), { target: { value: "coif" } });
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
   });
 });

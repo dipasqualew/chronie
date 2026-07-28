@@ -264,6 +264,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
           payload={transmog}
           status={transmogStatus}
           loadSet={desktop.transmogSetItems}
+          loadAppearances={desktop.transmogAppearances}
           loadIcons={desktop.gameIcons}
           loadCharacter={desktop.characterModel}
           loadWorn={desktop.wornSet}

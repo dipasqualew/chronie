@@ -258,10 +258,20 @@ class Roster {
 class TransmogView {
   readonly page: Page;
   readonly view: Locator;
+  /**
+   * The half of the view the sets are browsed in.
+   *
+   * Scoped rather than reaching into the whole view, because the wardrobe list beside it is
+   * the same panel with the same controls in it — a class filter, a box about what she can
+   * wear — and "the class filter" is only a question with an answer once it is asked of one
+   * of them.
+   */
+  readonly browser: Locator;
 
   constructor(page: Page) {
     this.page = page;
     this.view = page.locator("#transmog-view");
+    this.browser = this.view.locator("#transmog-browser");
   }
 
   /** The tab loads the game's tables the first time it is opened, and not before. */
@@ -271,18 +281,23 @@ class TransmogView {
     await expect(this.view.getByRole("heading", { name: "Transmog", level: 1 })).toBeVisible();
   }
 
+  /** The switch above both browsers: the game's sets, or the game's whole wardrobe. */
+  async browseBy(what: "Sets" | "Items"): Promise<void> {
+    await this.view.getByRole("button", { name: what, exact: true }).click();
+  }
+
   /** The collection headings, which are the browser's own — the panel beside it has one too. */
   collections(): Locator {
-    return this.view.locator(".mog-browser").getByRole("heading", { level: 3 });
+    return this.browser.getByRole("heading", { level: 3 });
   }
 
   sets(): Locator {
-    return this.view.getByRole("heading", { level: 4 });
+    return this.browser.getByRole("heading", { level: 4 });
   }
 
   /** The card a set is shown on, found by the set's own heading. */
   card(name: string): Locator {
-    return this.view
+    return this.browser
       .getByRole("article")
       .filter({ has: this.page.getByRole("heading", { name, exact: true }) });
   }
@@ -355,7 +370,7 @@ class TransmogView {
 
   /** The one box above the grid: whether the rows with nowhere to go are left out. */
   hideUnwearable(): Locator {
-    return this.view.getByRole("checkbox", { name: "Hide what she cannot wear" });
+    return this.browser.getByRole("checkbox", { name: "Hide what she cannot wear" });
   }
 
   /**
@@ -391,15 +406,15 @@ class TransmogView {
   }
 
   search(): Locator {
-    return this.view.getByLabel("Filter transmog sets");
+    return this.browser.getByLabel("Filter transmog sets");
   }
 
   expansion(): Locator {
-    return this.view.getByLabel("Expansion");
+    return this.browser.getByLabel("Expansion");
   }
 
   klass(): Locator {
-    return this.view.getByLabel("Class");
+    return this.browser.getByLabel("Class");
   }
 
   /** How far down the grid the reader has got, which the character has to survive. */
@@ -409,6 +424,55 @@ class TransmogView {
 
   scrollToEnd(): Promise<void> {
     return this.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  }
+}
+
+/**
+ * The other half of the browser: every look the game holds for one kind of place.
+ *
+ * A flat list rather than a grid of cards, because there is nothing to group five thousand
+ * heads by — so a row is found by what its button would do, which is put the thing on her.
+ */
+class Wardrobe {
+  readonly page: Page;
+  readonly list: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.list = page.locator("#wardrobe");
+  }
+
+  /** What is drawn right now, which is a page of it rather than the whole kind. */
+  rows(): Locator {
+    return this.list.locator(".mog-items > .mog-item");
+  }
+
+  /** The names on those rows, which is what a reader is scanning for. */
+  names(): Locator {
+    return this.list.locator(".mog-name");
+  }
+
+  /** Which kind of place is being browsed: an armour slot, or a kind of thing held. */
+  kind(): Locator {
+    return this.list.getByLabel("Kind of appearance");
+  }
+
+  search(): Locator {
+    return this.list.getByLabel("Filter appearances");
+  }
+
+  klass(): Locator {
+    return this.list.getByLabel("Class");
+  }
+
+  /** The button on one row, which puts that look on the character or takes it off again. */
+  wear(slot: string, label: string): Locator {
+    return this.list.getByRole("button", { name: `Wear ${slot}: ${label}` });
+  }
+
+  /** How far down the kind the reader has got, and what the game would not say. */
+  count(): Locator {
+    return this.list.locator("#wardrobe-count");
   }
 }
 
@@ -436,6 +500,16 @@ class Outfit {
   /** How much is on, as the line above the list reads it. */
   summary(): Locator {
     return this.panel.locator("#outfit-summary");
+  }
+
+  /**
+   * The line under each item's name saying which set it came out of.
+   *
+   * Only on the pieces that came out of one: a look picked out of the game's whole wardrobe
+   * has no set behind it, and the line is absent rather than empty.
+   */
+  provenance(): Locator {
+    return this.panel.locator(".outfit-what .muted");
   }
 
   takeOff(label: string): Promise<void> {
@@ -709,6 +783,7 @@ const test = base.extend<{
   ledger: DetailsTable;
   roster: Roster;
   transmog: TransmogView;
+  wardrobe: Wardrobe;
   outfit: Outfit;
   combat: CombatLoggingPanel;
   retention: LogRetentionPanel;
@@ -730,6 +805,9 @@ const test = base.extend<{
   },
   transmog: async ({ page }, use) => {
     await use(new TransmogView(page));
+  },
+  wardrobe: async ({ page }, use) => {
+    await use(new Wardrobe(page));
   },
   outfit: async ({ page }, use) => {
     await use(new Outfit(page));
@@ -1238,6 +1316,92 @@ const mockDesktop: E2EMock = {
       ],
     },
   },
+  // The other half of the browser: every look the game holds for one kind of place, keyed by
+  // the display types the window asks for. Two answers, because that is all the window ever
+  // asks for — one armour slot, and everything held in a hand at once.
+  //
+  // The looks are the backend fixtures' own, with one addition that is the whole point of
+  // browsing this way: the Coif of the Drowned Star belongs to no set at all, so nothing in
+  // the sets beside this could ever reach it.
+  wardrobe: {
+    "0": {
+      displayTypes: [0],
+      readCount: 3,
+      // One head this install can reach no item of, which is a look it can say nothing
+      // whatever about rather than one it can half-describe.
+      withheldCount: 1,
+      appearances: [
+        // A head out of the game and out of no set. It is first because the list is sorted
+        // by name, which is how a wardrobe of five thousand is scrolled at all.
+        {
+          appearanceId: 80040, itemId: 30040, name: "Coif of the Drowned Star",
+          displayType: 0, inventoryType: 1, classId: 4, subclassId: 1,
+          allowableClass: 0xffff, requiredLevel: 30, quality: 3,
+          displayInfoId: 900040, iconFileDataId: 130002, hasModel: true,
+          itemCount: 1, liftsRestriction: false,
+        },
+        // The helm set 203 also holds, which is what says the two halves of the view are
+        // dressing one character: worn from either, it is the same look on the same head.
+        {
+          appearanceId: 80006, itemId: 30006, name: "Emberforge Helm",
+          displayType: 0, inventoryType: 1, classId: 4, subclassId: 4,
+          allowableClass: 0xffff, requiredLevel: 0, quality: 4,
+          displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+          // Three items sell it and one of them is locked to a class the other two are not,
+          // which is the one fact about a look no amount of scrolling would show.
+          itemCount: 3, liftsRestriction: true,
+        },
+        {
+          appearanceId: 80001, itemId: 30001, name: "Tideglass Crown",
+          displayType: 0, inventoryType: 1, classId: 4, subclassId: 1,
+          allowableClass: 0x0190, requiredLevel: 0, quality: 4,
+          displayInfoId: 900002, iconFileDataId: 130001, hasModel: true,
+          itemCount: 1, liftsRestriction: false,
+        },
+      ],
+    },
+    // Everything held in a hand, in one answer — which is what lets the picker offer staves
+    // and daggers as neighbours without going back to the game for each.
+    "11,12,13,14,15": {
+      displayTypes: [11, 12, 13, 14, 15],
+      readCount: 4,
+      withheldCount: 0,
+      appearances: [
+        {
+          appearanceId: 80010, itemId: 30010, name: "Emberforge Blade",
+          displayType: 11, inventoryType: 13, classId: 2, subclassId: 7,
+          allowableClass: 0xffff, requiredLevel: 0, quality: 5,
+          displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
+          itemCount: 1, liftsRestriction: false,
+        },
+        // A shield, which the game files as armour rather than as a weapon — so a picker
+        // reading the display type alone would have put it among the swords.
+        {
+          appearanceId: 80015, itemId: 30015, name: "Emberforge Aegis",
+          displayType: 13, inventoryType: 14, classId: 4, subclassId: 6,
+          allowableClass: 0xffff, requiredLevel: 0, quality: 5,
+          displayInfoId: 900015, iconFileDataId: 130005, hasModel: true,
+          itemCount: 1, liftsRestriction: false,
+        },
+        // And two the display type cannot tell apart at all: a staff and a two-handed sword
+        // are both filed under 11, and only the item's own subclass separates them.
+        {
+          appearanceId: 80014, itemId: 30014, name: "Emberforge Greatsword",
+          displayType: 11, inventoryType: 17, classId: 2, subclassId: 8,
+          allowableClass: 0xffff, requiredLevel: 0, quality: 5,
+          displayInfoId: 900014, iconFileDataId: 130005, hasModel: true,
+          itemCount: 1, liftsRestriction: false,
+        },
+        {
+          appearanceId: 80041, itemId: 30041, name: "Staff of the Quiet Tide",
+          displayType: 11, inventoryType: 17, classId: 2, subclassId: 10,
+          allowableClass: 0xffff, requiredLevel: 45, quality: 4,
+          displayInfoId: 900014, iconFileDataId: 130005, hasModel: true,
+          itemCount: 2, liftsRestriction: false,
+        },
+      ],
+    },
+  },
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
   // set 205 names it and the install holds no such file, which is the case a row has to
@@ -1332,6 +1496,10 @@ const mockDesktop: E2EMock = {
     // pauldrons off again.
     "900001,900002,900012": fixtureModel("worn-helm.glb"),
     "900001,900009,900012": fixtureModel("worn-helm.glb"),
+    // And the two the other half of the browser assembles: a head that belongs to no set at
+    // all, and that head with a staff — which is a look no card in the grid could reach.
+    "900040": fixtureModel("worn-helm.glb"),
+    "900014,900040": fixtureModel("worn-helm.glb"),
     // One outfit is missing on purpose and answers `null`: set 205's one wearable row names a
     // display the game keeps encrypted, so this install has nothing to put on her for it.
   },
@@ -2388,6 +2556,7 @@ test("opens a character's segments into the same detail every other view opens",
 test("browses the game's transmog sets and dresses the character in them", async ({
   page,
   transmog,
+  wardrobe,
   outfit,
 }) => {
   await transmog.open();
@@ -2499,7 +2668,7 @@ test("browses the game's transmog sets and dresses the character in them", async
 
   await test.step("a filter that matches nothing says so", async () => {
     await transmog.search().fill("nothing like it");
-    await expect(transmog.view.getByText("Nothing matches")).toBeVisible();
+    await expect(transmog.browser.getByText("Nothing matches")).toBeVisible();
     await expect(transmog.sets()).toHaveCount(0);
   });
 
@@ -2805,6 +2974,88 @@ test("browses the game's transmog sets and dresses the character in them", async
       .toHaveCount(0);
     await expect(transmog.card("Emberforge Plate"))
       .toContainText("1 appearance hidden, with nowhere on her to go");
+  });
+
+  /* ---------- the other half: every look the game has, set or no set ---------- */
+
+  // What the switch is for. A set is somebody at Blizzard's idea of an outfit, and the Coif
+  // belongs to none — so no card in the grid behind this could ever have reached it.
+  await test.step("browsing by item reaches a look no set holds", async () => {
+    await transmog.wear("Emberforge Plate", "Head", "Emberforge Helm").click();
+    await expect(outfit.slots()).toHaveCount(1);
+
+    await transmog.browseBy("Items");
+    await expect(wardrobe.names()).toHaveText([
+      "Coif of the Drowned Star", "Emberforge Helm", "Tideglass Crown",
+    ]);
+    await expect(wardrobe.count()).toHaveText("3 appearances · 1 look the game keeps encrypted");
+  });
+
+  // And what the switch does not do: she keeps what she has on. The helm went on out of a
+  // set and the list says so too — one look, however it was reached.
+  await test.step("what she has on survives the switch, and the list knows it", async () => {
+    await expect(outfit.slots()).toHaveText([/Head.*Emberforge Helm.*Emberforge Plate/s]);
+    await expect(wardrobe.wear("Head", "Emberforge Helm")).toHaveAttribute("aria-pressed", "true");
+    await expect(wardrobe.wear("Head", "Coif of the Drowned Star"))
+      .toHaveAttribute("aria-pressed", "false");
+  });
+
+  await test.step("a look out of the wardrobe goes on her, and names no set", async () => {
+    await wardrobe.wear("Head", "Coif of the Drowned Star").click();
+    await expect(outfit.slots()).toHaveText([/Head.*Coif of the Drowned Star/s]);
+    // Nothing came out of a set, so nothing claims one: the line where a set's name goes is
+    // absent rather than blank.
+    await expect(outfit.provenance()).toHaveCount(0);
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2208");
+  });
+
+  // The reason the browser reads what kind of thing an item is at all: the game files a
+  // staff, a two-handed sword and a one-handed axe under one display type, so a picker built
+  // on the game's own numbering could offer none of them.
+  await test.step("one kind of weapon is picked out of everything held in a hand", async () => {
+    await wardrobe.kind().selectOption({ label: "Staff" });
+    await expect(wardrobe.names()).toHaveText(["Staff of the Quiet Tide"]);
+
+    await wardrobe.kind().selectOption({ label: "One-handed sword" });
+    await expect(wardrobe.names()).toHaveText(["Emberforge Blade"]);
+
+    // A shield arrives in the same answer as those two and is not a weapon at all in the
+    // game's filing — it is armour — so the kind that finds it is reading the item.
+    await wardrobe.kind().selectOption({ label: "Shield" });
+    await expect(wardrobe.names()).toHaveText(["Emberforge Aegis"]);
+  });
+
+  await test.step("a look out of one kind and a look out of another go on at once", async () => {
+    await wardrobe.kind().selectOption({ label: "Staff" });
+    await wardrobe.wear("Two-hand", "Staff of the Quiet Tide").click();
+    await expect(outfit.slots()).toHaveText([
+      /Head.*Coif of the Drowned Star/s,
+      /Main hand.*Staff of the Quiet Tide/s,
+    ]);
+  });
+
+  await test.step("a kind narrows by name and by class like the sets do", async () => {
+    await wardrobe.kind().selectOption({ label: "Head" });
+    await wardrobe.search().fill("coif");
+    await expect(wardrobe.names()).toHaveText(["Coif of the Drowned Star"]);
+
+    await wardrobe.search().fill("");
+    // The Tideglass Crown is the one head of the three that any class may not wear.
+    await wardrobe.klass().selectOption({ label: "Warrior" });
+    await expect(wardrobe.names()).toHaveText(["Coif of the Drowned Star", "Emberforge Helm"]);
+    await wardrobe.klass().selectOption("");
+  });
+
+  // And back again, with both halves as they were left: the sets keep their filters, the
+  // wardrobe keeps its kind, and she keeps what was assembled out of the two of them.
+  await test.step("switching back hands the sets over unchanged", async () => {
+    await transmog.browseBy("Sets");
+    await expect(transmog.rows("Emberforge Plate")).toHaveCount(5);
+    await expect(outfit.slots()).toHaveCount(2);
+
+    await transmog.browseBy("Items");
+    await expect(wardrobe.kind()).toHaveValue("armour-0");
+    await expect(wardrobe.names()).toHaveCount(3);
   });
 });
 

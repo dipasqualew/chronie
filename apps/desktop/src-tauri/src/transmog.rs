@@ -28,8 +28,10 @@ use crate::db2::Db2;
 const TRANSMOG_SET: u32 = 1376213;
 const TRANSMOG_SET_ITEM: u32 = 1376212;
 const TRANSMOG_SET_GROUP: u32 = 1576116;
-const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
-const ITEM_APPEARANCE: u32 = 982462;
+/// Shared with `wardrobe`, which walks the same two hops from the other end: this module
+/// asks what a named set is made of, that one asks what fills a place on the body.
+pub const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
+pub const ITEM_APPEARANCE: u32 = 982462;
 /// Shared with `models`, which reaches the same table by a different question: this module
 /// asks whether a display has geometry, that one asks what it is.
 pub const ITEM_DISPLAY_INFO: u32 = 1266429;
@@ -63,13 +65,13 @@ mod set_item_column {
 }
 
 /// Columns of `ItemModifiedAppearance`, which is what ties an appearance to an item.
-mod modified_appearance_column {
+pub mod modified_appearance_column {
     pub const ITEM_ID: usize = 1;
     pub const APPEARANCE_ID: usize = 3;
 }
 
 /// Columns of `ItemAppearance`.
-mod appearance_column {
+pub mod appearance_column {
     /// Which slot the appearance fills; the game's own numbering, tabulated in the docs.
     pub const DISPLAY_TYPE: usize = 0;
     pub const DISPLAY_INFO_ID: usize = 1;
