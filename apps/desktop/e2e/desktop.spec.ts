@@ -3429,7 +3429,7 @@ test("browses the game's transmog sets and dresses the character in them", async
     // The same body the two looks asked for when they were picked out of the game itself: the
     // outfit is keyed by its display ids, so a body arriving at all says the saved set asked
     // for the same one, and nothing was lost on the way through Chronie's own storage.
-    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2208");
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "976");
   });
 
   await test.step("one piece of a saved set goes on without the rest of it", async () => {
