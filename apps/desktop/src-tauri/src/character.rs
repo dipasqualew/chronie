@@ -19,8 +19,9 @@
 //!   chestpiece switches on, bare feet *and* boots. Drawing them all is what doubled geometry
 //!   and z-fighting look like from the outside, so one variant per group is picked — by
 //!   [`crate::customization`] where the character has an opinion, and by [`bare`] where she has
-//!   none. Her head is one of the former, and it is the part of a body that no rule about
-//!   armour can reach: group 32 has no "nothing here" value to fall back on.
+//!   none. Her head is the part of a body that no rule about armour can reach: group 32's value
+//!   1 is the stub a helm leaves rather than a bare default, so it comes from her own face shape
+//!   where the game asks her one and from [`WORN_ANYWAY`] on the forty-four bodies it does not.
 //! - **The skin comes from the caller.** The body's texture is M2 type 1, the composited
 //!   2048 × 1024 atlas this module builds, rather than a file the model names. So do her hair
 //!   and her eyes, which are types 6 and 19 and atlases of their own — a part handed nothing
@@ -110,8 +111,9 @@ const UNPAINTED: [u8; 4] = [0xc8, 0xa2, 0x8c, 0xff];
 /// **It is the floor and not the answer.** Value 1 is a convention the armour groups keep and
 /// the groups a *customization* owns do not: group 32's value 1 is a scrap at the top of the
 /// neck rather than a head, group 7 has no value 1 at all, and group 36's is a necklace where
-/// the character chose none. Every one of those is settled by [`crate::customization`] before
-/// this is consulted, and what is left for this are the groups nobody has an opinion about.
+/// the character chose none. Where the game asks the reader about one of those, the answer is
+/// settled by [`crate::customization`] before this is consulted. Where it asks nothing —
+/// which is most bodies for most of those groups — [`WORN_ANYWAY`] is what stands in.
 ///
 /// When an item is composited onto the body — the step after that one — it hides its groups'
 /// whole hundred and shows the one value it drives instead. That replaces whatever was there;
@@ -119,6 +121,32 @@ const UNPAINTED: [u8; 4] = [0xc8, 0xa2, 0x8c, 0xff];
 pub fn bare(geoset: u16) -> bool {
     geoset == 0 || geoset % 100 == 1
 }
+
+/// The groups whose value 1 is not "nothing here" but *nothing left*, and what a body wears in
+/// them when the game asks nobody about it.
+///
+/// A helm can take the head and the ears away — `HelmetGeosetData` names group 32 on 385 of its
+/// rows and group 7 on 2,467 — and value 1 of each is what it leaves behind rather than what a
+/// bare body has. Read off build 12.0.5.67823 on 2026-07-29, over all fifty-one bodies: group
+/// 32's value 1 runs from 58 to 208 triangles and its value 2 from 654 to 2,726 — the closed
+/// neck, and the head. Group 7's value 1 is absent altogether on nineteen of the twenty-six
+/// bodies nothing asks about their ears, and twenty to twenty-nine triangles on five more.
+///
+/// So [`bare`] is exactly backwards for these two, and it was invisible for as long as the only
+/// body drawn was a Human's: a Human is asked *Face Shape* and *Ears*, and an answer takes the
+/// group over before this is reached. Forty-four of the fifty-one bodies are asked neither, and
+/// every one of them was drawn with the stub at the top of the neck — which is issue #185.
+///
+/// **Value 2 is what the bodies that do answer say.** Of the seven that name a head, six name
+/// `3202`; of the twenty-five that name a pair of ears, twenty-three name `702`. The exceptions
+/// are the Dracthyr's head and the Night Elf's ears, and both are *asked*, so neither ever falls
+/// through to this. The floor below still holds regardless: a value this body has nothing for
+/// leaves the group where [`bare`] had it, so a body whose only head is its first value keeps it.
+const WORN_ANYWAY: [(u16, u16); 2] = [(EARS, 2), (HEAD, 2)];
+
+/// The ears, and the head. Both are groups the game asks about on some bodies and not others.
+const EARS: u16 = 7;
+const HEAD: u16 = 32;
 
 /// The composited body texture: one buffer the whole character is painted out of.
 ///
@@ -547,6 +575,12 @@ impl<'a> Mannequin<'a> {
 /// customization the appearance's floor and group 36 keeps its bare default; give the
 /// appearance the customization's certainty and a wrong column costs a limb.
 ///
+/// **And the first line is not one rule either**, which is [`WORN_ANYWAY`]: the head and the
+/// ears are groups the game asks only some bodies about, and value 1 of each is the stub a helm
+/// leaves rather than what a bare body wears. A body nobody is asked about takes value 2 of them
+/// instead — with the same floor an appearance gets, since emptying a group is the one way of
+/// being wrong here that costs a part.
+///
 /// **A group is only taken over when the body actually holds the geoset it asks for.** That is
 /// a deliberate floor rather than an optimisation: the column those values come out of has not
 /// been verified against an install, as [`crate::worn`] says, and every way of getting it
@@ -591,12 +625,26 @@ fn dressed(mesh: &Mesh, worn: Option<&Worn>, herself: Option<&Customization>) ->
             .find(|worn| worn.group == group)
             .or_else(|| hers.iter().find(|hers| hers.group == group))
     };
+    // And what a group nobody was asked about wears: `bare`, except for the two groups whose
+    // value 1 is the stub a helm leaves rather than a body's own default. `WORN_ANYWAY` says
+    // what those wear instead, and only where this body holds it — the same floor an item's
+    // geosets get, because emptying a group is the one way of being wrong that costs a part.
+    let unasked = |group: u16| {
+        WORN_ANYWAY
+            .iter()
+            .find(|(named, _)| *named == group)
+            .map(|(_, value)| group * 100 + value)
+            .filter(|geoset| mesh.parts.iter().any(|part| part.geoset == *geoset))
+    };
     // Geoset 0 is the skin, and the one id that belongs to no group — least of all group 0's
     // hairstyles, which is the hundred it shares.
     let shown = |geoset: u16| match owner(geoset / 100) {
         _ if geoset == 0 => true,
         Some(owner) => geoset == owner.geoset,
-        None => bare(geoset),
+        None => match unasked(geoset / 100) {
+            Some(worn_anyway) => geoset == worn_anyway,
+            None => bare(geoset),
+        },
     };
     let covered = |geoset: u16| geoset != 0 && hidden.contains(&(geoset / 100));
     Mesh {
@@ -894,6 +942,60 @@ mod tests {
         assert!(!geosets.contains(&2), "and not the one the game opens on: {geosets:?}");
         assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
         assert!(geosets.contains(&702), "she has no ears: {geosets:?}");
+    }
+
+    // And the forty-four bodies the game asks neither of those questions about, which is what
+    // issue #185 was: a Human is asked her face shape and her ears and the answer takes both
+    // groups over, and a Draenei, an Orc or a Tauren is asked neither — so both fell through to
+    // `bare`, and `bare` is the armour convention. Group 32's value 1 is the stub a helm leaves
+    // where the head was, so a body with no question about its head was drawn with the stub.
+    #[test]
+    fn draws_the_head_of_a_body_the_game_asks_nothing_about() {
+        // A body with a head and the stub beside it, ears with no bare value, and one armour
+        // group so that the convention this does *not* change is in the same picture.
+        let body = body_of(&[0, 3201, 3202, 702, 703, 801, 802]);
+        // Everything she is asked about, which on such a body is her hairstyle and no more.
+        let herself = Customization {
+            geosets: vec![Geoset { group: 0, geoset: 2 }],
+            ..Default::default()
+        };
+
+        let geosets = drawn(&dressed(&body, None, Some(&herself)));
+
+        assert!(geosets.contains(&3202), "he has no head: {geosets:?}");
+        assert!(!geosets.contains(&3201), "only the stub a helm leaves: {geosets:?}");
+        assert!(geosets.contains(&702), "he has no ears: {geosets:?}");
+        assert!(!geosets.contains(&703), "and only the one pair: {geosets:?}");
+        // The armour groups keep the convention that is theirs: bare arms rather than sleeves.
+        assert!(geosets.contains(&801) && !geosets.contains(&802), "{geosets:?}");
+    }
+
+    // And the floor under it, which is the one this repository keeps everywhere else: a value
+    // this body has nothing for leaves the group as it was rather than emptying it. A body with
+    // a head in the group's first value and nothing in its second is the Dracthyr's shape, and
+    // the Dracthyr is drawn with the head it holds.
+    #[test]
+    fn keeps_the_only_head_a_body_holds_whichever_value_it_is() {
+        let body = body_of(&[0, 3201]);
+        let geosets = drawn(&dressed(&body, None, None));
+        assert!(geosets.contains(&3201), "he has no head at all: {geosets:?}");
+    }
+
+    /// A body holding exactly the geosets named, one part each, and nothing else about it.
+    fn body_of(geosets: &[u16]) -> Mesh {
+        Mesh {
+            vertices: Vec::new(),
+            parts: geosets
+                .iter()
+                .map(|geoset| crate::m2::Part {
+                    indices: Vec::new(),
+                    geoset: *geoset,
+                    paint: crate::m2::Paint::Supplied(1),
+                    blend: crate::m2::Blend::Opaque,
+                    two_sided: false,
+                })
+                .collect(),
+        }
     }
 
     // The last thing on that head, and the one geoset selection has nothing to say about: her

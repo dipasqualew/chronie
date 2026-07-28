@@ -399,6 +399,33 @@ right, the face was painted into the right half of it the whole time, and there 
 read it. `customization.rs` is where those five come from, and
 [game-files.md](game-files.md#the-character-herself-verified) is the chain.
 
+**And the same head again, once the body stopped being a Human's**, which was issue #185. The
+table above is what the game *asks a Human*, and forty-four of the fifty-one bodies it is asked
+about neither its face shape nor its ears — no `ChrCustomizationOption` of theirs drives group
+32 or group 7 at all. So both groups fell back through the line above to value 1, and value 1 of
+those two is not a bare default: it is what a **helm** leaves behind. `HelmetGeosetData` hides
+group 32 on 385 of its rows and group 7 on 2,467, and read off build 12.0.5.67823 on 2026-07-29
+over all fifty-one bodies:
+
+| Group | Value 1 | Value 2 |
+|---|---|---|
+| 32 head | 58 – 208 triangles, on every one of the fifty-one | 654 – 2,726 triangles, on every one of the fifty-one |
+| 7 ears | absent on 19 of the 26 bodies nobody is asked about, 20 – 29 triangles on 5 more, and the Vulpera's two pairs are the same size | 142 – 500 triangles |
+
+The closed neck, and the head. `character::WORN_ANYWAY` is the two of them, and what a body with
+no question about either wears is **value 2** — which is what every body that *is* asked says:
+six of the seven that name a head name `3202`, and twenty-one of the twenty-three that name a
+pair of ears name `702`. The exceptions are the Dracthyr's head and the Night Elf's ears, and
+each of those is asked, so neither ever reaches the fallback. The floor under an item's geosets
+applies here too: a body whose group holds no value 2 keeps whatever `bare` gave it, rather than
+losing the part.
+
+Eleven of the fifty-one were put through `scripts/render-model.ts` against 12.0.5.67823 on
+2026-07-29 — Draenei Male, Tauren Male, Orc Male, Worgen Male, Vulpera Male, Mechagnome Male,
+Undead Male, Earthen Male, Haranir Male, Dracthyr and Human Female — and each came out with its
+own head on it: tusks, horns, snout, muzzle and ears where they belong. The Human and the
+Dracthyr are unchanged, because both are asked.
+
 **A customization geoset takes its group over whether or not the body holds it; an item's does
 not.** The rule for an item is this repository's rather than the game's: *a group is only taken
 over when the body actually holds the geoset the value resolves to*, otherwise the default
