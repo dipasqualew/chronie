@@ -478,11 +478,20 @@ export const characterModel: E2EMock["characterModel"] = fixtureModel("character
 // holds because the picker is a `<select>` and the only thing about it worth driving from
 // outside is that changing it replaces the form underneath, which one other body proves and
 // fifty do not.
+//
+// The two characters are the two halves of what the addon can read: Aster has been to a barber
+// and so arrives with answers, and Brin has not and arrives as a body and nothing else — which is
+// the ordinary case and the one worth having in front of the window. They are the other body
+// between them, so picking one is a change the form underneath has to survive.
 export const characterLook: E2EMock["characterLook"] = {
   bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
   body: 2,
   questions: CHARACTER_QUESTIONS[2]!,
   picked: [],
+  characters: [
+    { character: "Aster-Vale", body: 2, picked: [{ question: 16, swatch: 133 }] },
+    { character: "Brin-Ravencrest", body: 1, picked: [] },
+  ],
 };
 
 export const characterQuestions: E2EMock["characterQuestions"] = CHARACTER_QUESTIONS;

@@ -469,6 +469,9 @@ function fakeHerself() {
         // The other body is asked its own questions, which is what changing body means.
         : [{ id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] }],
       picked: [...picked],
+      // The reader's own roster, which the panel's other tests are about — these are about
+      // what changing her does to the pictures above, and a roster does not change that.
+      characters: [],
     })),
     save: vi.fn((chosen: number, answers: CharacterPick[]) => {
       body = chosen;
@@ -483,7 +486,7 @@ type FakeHerself = ReturnType<typeof fakeHerself>;
 
 /** And nobody the reader can be, for the tests that are about something else entirely. */
 const NOT_ASKED = {
-  load: () => Promise.resolve({ bodies: [], body: 0, questions: [], picked: [] }),
+  load: () => Promise.resolve({ bodies: [], body: 0, questions: [], picked: [], characters: [] }),
   save: (body: number, picked: CharacterPick[]) => Promise.resolve({ body, picked }),
   onError: String,
 };

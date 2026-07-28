@@ -238,6 +238,37 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(outfit.about("Hair Style")).toHaveValue("133");
   });
 
+  // And the one control on this panel that is not the reader inventing somebody: the people they
+  // actually play, read out of the game by the addon. Picking one is a body and every answer
+  // about it in a single change — "show me this hat on my warrior" rather than the dozen selects
+  // above it, arranged until they approximate her.
+  await test.step("one of the reader's own characters can be worn instead", async () => {
+    await expect(outfit.swatches("Who you play"))
+      .toHaveText(["Someone else", "Aster-Vale", "Brin-Ravencrest"]);
+    // And she already is one of them, without anybody having said so: the answer given two
+    // steps up is the one Aster carries, and the control reads the form rather than remembering
+    // a click. That is what lets it go back to nobody when a swatch is changed by hand.
+    await expect(outfit.about("Who you play")).toHaveValue("Aster-Vale");
+    await outfit.about("Hair Style").selectOption("132");
+    await expect(outfit.about("Who you play")).toHaveValue("");
+
+    // Picking her back is the whole feature in one line: the answer arrives without the reader
+    // having had to know which swatch it was.
+    await outfit.about("Who you play").selectOption("Aster-Vale");
+    await expect(outfit.about("Hair Style")).toHaveValue("133");
+    await expect(outfit.canvas()).toBeVisible();
+
+    // And somebody of the other body, which moves the body picker under it and replaces the
+    // form under that — the same reload picking that body by hand causes, because it is one.
+    await outfit.about("Who you play").selectOption("Brin-Ravencrest");
+    await expect(outfit.about("Body")).toHaveValue("1");
+    await expect(outfit.about("Beard")).toHaveValue("70");
+
+    // Back to her, so the steps after this one find the body they were written against.
+    await outfit.about("Who you play").selectOption("Aster-Vale");
+    await expect(outfit.about("Hair Style")).toHaveValue("133");
+  });
+
   await test.step("the search reaches the collection as well as the set", async () => {
     await sets.search().fill("tideglass");
     await expect(sets.sets()).toHaveText(["Tideglass Regalia", "Tideglass Hide"]);

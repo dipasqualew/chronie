@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { answerOf, lookKey, swatchLabel, withAnswer } from "./herself";
-import type { CharacterLookPayload, CharacterQuestion } from "./types";
+import { answerOf, lookKey, shownAs, swatchLabel, withAnswer, withCharacter } from "./herself";
+import type { CharacterLookPayload, CharacterQuestion, PlayedCharacter } from "./types";
 
 /** A question whose swatches are named, which is what the game does for hairstyles. */
 const HAIR: CharacterQuestion = {
@@ -23,6 +23,7 @@ const ASKED: CharacterLookPayload = {
   body: 2,
   questions: [HAIR, SKIN],
   picked: [],
+  characters: [],
 };
 
 describe("which swatch is on her", () => {
@@ -131,5 +132,101 @@ describe("her as a cache key", () => {
     const picked = [{ question: 16, swatch: 133 }, { question: 14, swatch: 86 }];
     lookKey(2, picked);
     expect(picked[0]).toEqual({ question: 16, swatch: 133 });
+  });
+});
+
+describe("becoming somebody the reader plays", () => {
+  /** Somebody who has been to a barber, so the addon could read what she is made of. */
+  const ASTER: PlayedCharacter = {
+    character: "Aster-Vale",
+    body: 2,
+    picked: [{ question: 16, swatch: 133 }, { question: 14, swatch: 87 }],
+  };
+
+  /** And somebody who has not, which is most of a roster: the right body, and nothing else the
+   * game would say. */
+  const BRIN: PlayedCharacter = { character: "Brin-Ravencrest", body: 1, picked: [] };
+
+  it("puts on every answer the character carries", () => {
+    expect(withCharacter(ASKED, ASTER)).toEqual([
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 87 },
+    ]);
+  });
+
+  // What picking somebody off the list means. A reader who had been arranging this body by hand
+  // and then asked for their warrior is asking to look like their warrior.
+  it("overrules an answer the reader had already given about that body", () => {
+    const answered: CharacterLookPayload = { ...ASKED, picked: [{ question: 16, swatch: 132 }] };
+
+    expect(withCharacter(answered, ASTER)).toEqual([
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 87 },
+    ]);
+  });
+
+  // And the rule the whole settings file rests on: one file holds every body's answers, and
+  // becoming somebody on one body must not forget what was arranged on another.
+  it("keeps the answers about every other body untouched", () => {
+    const both: CharacterLookPayload = {
+      ...ASKED,
+      picked: [{ question: 11, swatch: 48 }, { question: 16, swatch: 132 }],
+    };
+
+    expect(withCharacter(both, ASTER)).toEqual([
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 87 },
+      { question: 11, swatch: 48 },
+    ]);
+  });
+
+  // The ordinary case, and the one that looks like it does nothing: the client only says what a
+  // character is made of at a barber's, so most of a roster is a body and no answers. What
+  // changes for them is the body, which the caller sends alongside this.
+  it("leaves the answers alone for a character the game would say nothing about", () => {
+    const answered: CharacterLookPayload = { ...ASKED, picked: [{ question: 11, swatch: 48 }] };
+
+    expect(withCharacter(answered, BRIN)).toEqual([{ question: 11, swatch: 48 }]);
+  });
+});
+
+describe("which of them the form is showing", () => {
+  const ASTER: PlayedCharacter = {
+    character: "Aster-Vale", body: 2, picked: [{ question: 16, swatch: 133 }],
+  };
+  const BRIN: PlayedCharacter = { character: "Brin-Ravencrest", body: 1, picked: [] };
+  const ROSTER = [ASTER, BRIN];
+
+  it("names the character whose body and answers are the ones in force", () => {
+    expect(shownAs(2, [{ question: 16, swatch: 133 }], ROSTER)).toBe("Aster-Vale");
+  });
+
+  // The settings file also holds answers about every other body the reader has ever touched.
+  // Held against a character, nobody would ever match after the first look at a second body.
+  it("ignores the answers about bodies the character has nothing to do with", () => {
+    const picked = [{ question: 16, swatch: 133 }, { question: 11, swatch: 48 }];
+
+    expect(shownAs(2, picked, ROSTER)).toBe("Aster-Vale");
+  });
+
+  // Which is what changing one swatch by hand does: she stops being that person, and the
+  // control saying so is the whole reason it reads the form rather than remembering a click.
+  it("names nobody once an answer of theirs has been changed", () => {
+    expect(shownAs(2, [{ question: 16, swatch: 132 }], ROSTER)).toBe("");
+  });
+
+  it("names nobody on a body none of them is", () => {
+    expect(shownAs(9, [{ question: 16, swatch: 133 }], ROSTER)).toBe("");
+  });
+
+  // Somebody the game has said nothing about is their body and the swatches it opens on, so an
+  // untouched form on that body is them — which is true, and is what a reader sees after
+  // picking them.
+  it("names a character the game would say nothing about by their body alone", () => {
+    expect(shownAs(1, [], ROSTER)).toBe("Brin-Ravencrest");
+  });
+
+  it("names nobody at all when the reader plays nobody this install can draw", () => {
+    expect(shownAs(2, [], [])).toBe("");
   });
 });

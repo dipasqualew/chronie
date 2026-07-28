@@ -230,14 +230,20 @@ pub struct Picked {
     pub swatch: u32,
 }
 
-/// How many answers one body is allowed to carry.
+/// How many answers the settings file is allowed to carry.
 ///
-/// A Human Female has thirteen questions and [`clean`] allows one answer to each, so this is the
-/// floor under a payload that says otherwise rather than the real number. Deliberately not
-/// thirteen: what a body may be asked is the installed game's business and not this app's, and a
-/// backend that refused a fourteenth would be the wrong end of the app to learn from a patch
-/// that added one.
-pub const ANSWER_LIMIT: usize = 64;
+/// The whole file and not one body's: the questions are the game's own ids and no two bodies share
+/// one, so what is stored is every body the reader has ever answered anything about — that is what
+/// makes switching bodies and back find the answers still there. A Human Female has thirteen
+/// questions, the game offers fifty-one bodies, and the largest of them are asked rather more, so
+/// a reader who tries on their whole roster is carrying hundreds of answers and is not doing
+/// anything unusual.
+///
+/// So this is a floor under a payload that is not a person's answers at all rather than a count of
+/// anything. Deliberately far above what the game could ask: what a body may be asked is the
+/// installed game's business and not this app's, and a backend that refused the answer after the
+/// last one it had heard of would be the wrong end of the app to learn from a patch.
+pub const ANSWER_LIMIT: usize = 2048;
 
 /// Everything the character's own customization decides, before anything is worn on her.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1055,12 +1061,18 @@ mod tests {
         assert_eq!(clean(Vec::new()), Ok(Vec::new()), "nobody has answered anything yet");
     }
 
+    // The limit is a floor under a payload that is not a person's answers rather than a count of
+    // what a body is asked, so both ends of it are worth stating: a roster's worth of bodies, each
+    // answered for, is an ordinary settings file and has to survive being saved.
     #[test]
-    fn refuses_more_answers_than_a_body_has_questions() {
-        let many: Vec<Picked> = (0..=ANSWER_LIMIT as u32)
-            .map(|at| Picked { question: at + 1, swatch: at + 1 })
-            .collect();
-        assert!(clean(many).is_err());
+    fn refuses_more_answers_than_a_settings_file_could_hold() {
+        let answers = |how_many: u32| -> Vec<Picked> {
+            (0..how_many).map(|at| Picked { question: at + 1, swatch: at + 1 }).collect()
+        };
+        assert!(clean(answers(ANSWER_LIMIT as u32 + 1)).is_err());
+        // Fifty-one bodies of a dozen questions each, which is what trying on a whole roster in
+        // the transmog view comes to — see `look.rs`.
+        assert!(clean(answers(51 * 13)).is_ok());
     }
 
     /* ---------- the other body ---------- */

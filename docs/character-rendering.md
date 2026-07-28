@@ -140,6 +140,33 @@ unchecked answer resolves to somebody else's hairstyle. Both are dropped and the
 back to the swatch the game opens on. A stored *body* this install does not offer falls back the
 same way, to the Human Female.
 
+**And the reader's own characters, which is the same numbers arriving from the game instead of
+from a form.** `ChrCustomizationOption.ID` and `ChrCustomizationChoice.ID` are exactly the two
+arguments the client's `C_BarberShop.SetCustomizationChoice(optionID, choiceID)` takes, so an
+answer the addon reads off a character is a `customization::Picked` with no translation — which
+is what lets "show me this on my warrior" be one click rather than a dozen selects arranged until
+they approximate her. `look.rs` is this end of it and `apps/addon/src/CharacterLook.lua` is the
+other.
+
+There is one hard limit on it, and it is the game's rather than the addon's. Read off the
+12.0.5.67823 client's own `C_BarberShop` function table, **`GetAvailableCustomizations` is the
+only call in the game that will enumerate a character's own customization at all**, and it
+answers nothing anywhere except while the barber's screen is up — `C_CharacterCreation`'s
+equivalent lives on the character-select screen, where no addon runs. So the addon takes it
+whenever the game offers it and keeps the last answer the rest of the time, and a character
+nobody has had a haircut on since Chronie was installed reaches the app as a race and nothing
+more. That is still worth having: the race decides the body, and the body is most of what a
+reader means by "my warrior". `UnitRace` and `UnitSex` are readable wherever the character is
+standing, and it is `ChrRaceXChrModel` that turns them into a `ChrModel` — `body::of_race`, which
+walks the table rather than reading `body::offered`'s own race field, because that field names
+the *first* playable race to claim a shared body and so calls every Mag'har an Orc.
+
+Two numberings meet at that seam and they disagree. `UnitSex` answers 1 for a unit with no sex,
+2 male and 3 female; `ChrModel.Sex` and every other DB2 column with an opinion write 0 male and
+1 female. The addon writes down what the client said, because an addon that opens no DB2 has no
+business claiming to know what one says, and `look.rs` translates it beside the table it is
+translating into.
+
 **A swatch's geoset can decline in two opposite ways, and one of them is a row to drop.**
 `ChrCustomizationGeoset` states a group and a value, and `0` means the group is switched off —
 which has to be kept, or a character wears the necklace she declined. `-1` is the other thing,

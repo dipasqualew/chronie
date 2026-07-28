@@ -908,6 +908,29 @@ export interface CharacterLookPayload {
   /** Every body's answers, not only this one's — the question ids are the game's own and no
    * two bodies share one, so switching bodies and back finds the answers still there. */
   picked: CharacterPick[];
+  /** The reader's own characters, as the addon read them out of the game: a `look::Known` each.
+   * Empty on an install the addon has never run on, and on a machine with no game to resolve a
+   * race against. */
+  characters: PlayedCharacter[];
+}
+
+/**
+ * Somebody the reader actually plays, offered as a shortcut into the form: a `look::Known`.
+ *
+ * The other direction from everything else on the panel, which is the reader inventing a person
+ * out of fifty-one bodies and a select per question. This is a person who already exists.
+ *
+ * `picked` is empty far more often than not, and that is not a character with no hair. The client
+ * will only enumerate what a character is made of while the barber's screen is up — see
+ * `look.rs` — so a character nobody has had a haircut on since Chronie was installed arrives as
+ * the right body and the swatches the game itself opens on.
+ */
+export interface PlayedCharacter {
+  /** `Name-Realm`, which is what the whole app files a character under. */
+  character: string;
+  /** The `ChrModel` their race and sex come to, resolved against the installed game. */
+  body: number;
+  picked: CharacterPick[];
 }
 
 /**

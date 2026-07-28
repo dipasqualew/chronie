@@ -285,6 +285,39 @@ pub fn known(files: &dyn GameFiles, id: u32) -> Result<u32, String> {
     }
 }
 
+/// The body somebody of this race and this sex is, or nothing where this install offers none.
+///
+/// The one question the app asks in the other direction, and the reason it exists is the
+/// reader's own roster: the addon can say which race a character is and the client will not say
+/// which `ChrModel` that comes to, because a character has no `ChrModel` — a *body* does, and
+/// the game keeps the two apart. See `look.rs`.
+///
+/// **Not resolvable through [`offered`]'s `race` field**, which is why this walks the table
+/// again. That field is the first playable race to name a shared body, so a Pandaren of the
+/// Alliance and a Pandaren of the Horde both come out as the neutral Pandaren there — a fine
+/// answer to "what is this body called" and the wrong one to "which body is this person".
+///
+/// `sex` is the tables' own numbering, 0 male and 1 female. A race whose one body the game gives
+/// no sex — the Dracthyr's, and it is the only one — matches neither, so it is taken as the
+/// answer to either: the alternative is a Dracthyr the app declines to draw at all.
+pub fn of_race(files: &dyn GameFiles, race: u32, sex: u32) -> Result<Option<u32>, String> {
+    let offers = offered(files)?;
+    let table = Db2::parse(files.read(CHR_RACE_X_CHR_MODEL)?)?;
+    let mine: Vec<&Offer> = table
+        .rows()
+        .filter(|row| row.number(race_model_column::RACE) == race)
+        .filter_map(|row| {
+            let model = row.number(race_model_column::MODEL);
+            offers.iter().find(|offer| offer.id == model)
+        })
+        .collect();
+    Ok(mine
+        .iter()
+        .find(|offer| offer.sex == sex)
+        .or_else(|| mine.iter().find(|offer| offer.sex != MALE && offer.sex != FEMALE))
+        .map(|offer| offer.id))
+}
+
 /// One body, with everything the install says about it.
 ///
 /// A body this install does not offer falls back to [`DEFAULT`] rather than failing, because the
@@ -640,4 +673,56 @@ mod tests {
     /// What [`known`] says about a body that is not on offer, kept here so that the tests
     /// asserting it cannot drift from the message a reader is shown.
     const NOT_ON_OFFER: &str = "There is no body of that kind to draw her on.";
+
+    /* ---------- and the same question asked from a character's end ---------- */
+
+    /// The races the fixtures ship, which is one of each way a race can name a body.
+    const HUMAN: u32 = 1;
+    const ORC: u32 = 2;
+    /// A second race whose body is the Orc's, which is what the Mag'har and the Pandaren are.
+    const MAGHAR: u32 = 3;
+    const DRACTHYR: u32 = 4;
+    /// A playable race whose body has no mesh, and one nobody can be.
+    const VULPERA: u32 = 5;
+    const NAGA_RACE: u32 = 13;
+
+    fn body_of(race: u32, sex: u32) -> Option<u32> {
+        of_race(&fixture_files(), race, sex).unwrap()
+    }
+
+    // The ordinary case, and the whole of what the roster shortcut rests on: a character says a
+    // race and a sex, and the app has to draw somebody.
+    #[test]
+    fn finds_the_body_somebody_of_a_race_is() {
+        assert_eq!(body_of(HUMAN, MALE), Some(HUMAN_MALE));
+        assert_eq!(body_of(HUMAN, FEMALE), Some(HUMAN_FEMALE));
+    }
+
+    // The case a lookup through the offer's own race gets wrong. A body two races share is
+    // offered once under the first of them, so the Mag'har's body is filed under the Orc there
+    // — and a Mag'har would come out as somebody the app has no body for at all.
+    #[test]
+    fn finds_the_body_of_a_race_that_shares_one_with_another() {
+        assert_eq!(body_of(MAGHAR, MALE), Some(ORC_MALE));
+        assert_eq!(body_of(ORC, MALE), Some(ORC_MALE));
+    }
+
+    // The Dracthyr, whose one body the game gives no sex. Neither answer matches, and refusing
+    // both would be the app declining to draw a race a reader can be.
+    #[test]
+    fn draws_a_race_with_one_body_on_it_whichever_sex_the_character_is() {
+        assert_eq!(body_of(DRACTHYR, MALE), Some(SEXLESS));
+        assert_eq!(body_of(DRACTHYR, FEMALE), Some(SEXLESS));
+    }
+
+    // And the three ways there is nobody to draw: a race with no body of that sex, a race whose
+    // body this install cannot produce a mesh for, and a race nobody can be. Each is a character
+    // the shortcut leaves off its list rather than one it offers and then fails on.
+    #[test]
+    fn answers_with_nobody_where_this_install_offers_no_such_body() {
+        assert_eq!(body_of(ORC, FEMALE), None);
+        assert_eq!(body_of(VULPERA, MALE), None);
+        assert_eq!(body_of(NAGA_RACE, FEMALE), None);
+        assert_eq!(body_of(404, MALE), None);
+    }
 }
