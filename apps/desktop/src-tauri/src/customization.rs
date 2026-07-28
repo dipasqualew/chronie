@@ -207,6 +207,7 @@ pub struct Customization {
 /// drawn from its groups' bare defaults on the flat tone
 /// [`crate::character::Atlas::unpainted`] holds — which is what every body looked like before
 /// this chain was read, so the worst case is the old picture rather than a broken one.
+#[tracing::instrument(name = "customization.of", skip_all)]
 pub fn of(files: &dyn GameFiles) -> Result<Option<Customization>, String> {
     let chosen = chosen_by(files)?;
     if chosen.is_empty() {

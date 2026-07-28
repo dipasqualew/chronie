@@ -181,6 +181,7 @@ impl Db2 {
     /// same bargain the rest of this module makes about which column means what.
     ///
     /// Naming them for a table of fixed-size records changes nothing.
+    #[tracing::instrument(name = "db2.parse", skip_all, fields(bytes = data.len()))]
     pub fn parse_with_text_columns(data: Vec<u8>, text_columns: &[usize]) -> Result<Self, String> {
         if data.len() < 204 || &data[0..4] != b"WDC5" {
             return Err("Not a WDC5 table; this build of the game is not supported.".into());

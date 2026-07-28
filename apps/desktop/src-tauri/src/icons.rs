@@ -36,6 +36,7 @@ const LARGEST_ICON: u32 = 512;
 /// serve from: the frontend is loaded from the bundle and every byte it shows comes across
 /// the command bridge. An icon is a couple of kilobytes and an item's model a few hundred,
 /// which is small enough for that.
+#[tracing::instrument(name = "data_url", skip_all, fields(bytes = bytes.len()))]
 pub fn data_url(kind: &str, bytes: &[u8]) -> String {
     format!("data:{kind};base64,{}", STANDARD.encode(bytes))
 }
@@ -46,6 +47,7 @@ pub fn data_url(kind: &str, bytes: &[u8]) -> String {
 /// sanity check rather than a rule of the format: an icon is 64 pixels and a texture painted
 /// on a model a few hundred, so anything far beyond that is a lookup that landed somewhere
 /// unintended, and re-encoding it would cost more than everything around it put together.
+#[tracing::instrument(name = "blp.png_of", skip_all, fields(bytes = blp.len()))]
 pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
     let decoded = pixels_of(blp, largest)?;
     let mut png = Vec::new();
@@ -60,6 +62,7 @@ pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
 /// Everything BLP-specific is here rather than in [`png_of`], because the model work needs the
 /// pixels themselves — a texture blitted into the character's body atlas is never encoded on
 /// its own — and the palette trap below has to be dodged exactly once.
+#[tracing::instrument(name = "blp.pixels_of", skip_all, fields(bytes = blp.len()))]
 pub fn pixels_of(blp: &[u8], largest: u32) -> Result<RgbaImage, String> {
     let parsed = parse_blp(blp).map_err(|error| format!("not a texture this build can read: {error}"))?;
     let decoded = blp_to_image(&parsed, 0).map_err(|error| format!("would not decode: {error}"))?;

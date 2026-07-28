@@ -155,11 +155,95 @@ describe("HighlightList", () => {
   });
 
   it("leaves the running totals off where they were not asked for", () => {
-    const rich = segment({ goldDiff: 4200, lootValue: 900, mounts: [{ id: 11, name: "Clockwork Glider" }] });
+    const rich = segment({ goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }] });
 
     expect(draw([rich]).container.querySelector(".tally-row")).toBeTruthy();
     cleanup();
     expect(draw([rich], { tallies: false }).container.querySelector(".tally-row")).toBeNull();
+  });
+
+  /**
+   * The running numbers are context, not news, and they used to be written out in full: a
+   * night that touched five factions ended in five lines of name and number under a card
+   * whose job is to say what happened. Each kind is now one mark, and the numbers are in
+   * the hover — which is also the only shape in which several of them read as one fact.
+   */
+  describe("the running totals", () => {
+    const earned = (): Segment => segment({
+      goldDiff: 4200,
+      currencies: [
+        { id: 7, name: "Glass Token", amount: 4 },
+        { id: 10, name: "Warband Chit", amount: 100 },
+      ],
+      reputation: [{ faction: "Cavern Cartographers", amount: 25 }],
+    });
+
+    it("draws one mark per kind, however many things it counted", () => {
+      const view = draw([earned()]);
+
+      // Gold, currency, reputation — not gold and two currencies and a faction.
+      expect(view.container.querySelectorAll(".tally")).toHaveLength(3);
+    });
+
+    it("puts every number of a kind into the one hover", () => {
+      draw([earned()]);
+
+      const currency = screen.getByRole("img", { name: /Currency/ });
+      expect(currency.dataset.tip).toContain("Glass Token +4");
+      expect(currency.dataset.tip).toContain("Warband Chit +100");
+    });
+
+    // The card's only statement of what the evening earned, so it cannot be hover-only:
+    // a name and a tab stop are what make it reachable without a mouse.
+    it("names each mark and leaves it reachable from the keyboard", () => {
+      draw([earned()]);
+
+      const wallet = screen.getByRole("img", { name: "Gold: 42s 0c" });
+      expect(wallet.tabIndex).toBe(0);
+    });
+
+    // A vendor price for things mostly sold or disenchanted, agreeing with neither the
+    // wallet beside it nor anything a player decided.
+    it("has no mark for what the loot was worth", () => {
+      const view = draw([segment({ lootValue: 900_000, goldDiff: 4200 })]);
+
+      expect(view.container.querySelectorAll(".tally")).toHaveLength(1);
+      expect(view.container.textContent).not.toContain("Looted");
+    });
+  });
+
+  /**
+   * Saving a set of gear is housekeeping: worth a mark on the card, not worth the width of
+   * "Raid · 2 slots, +16 item levels" beside a mount and an account first.
+   */
+  describe("an equipment set change", () => {
+    const changed = (): Segment => segment({
+      equipsetChanges: [{
+        setId: 3, name: "Raid", kind: "updated",
+        items: [{ slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 }],
+      }],
+    });
+
+    it("is drawn as its icon, with the words moved into the hover", () => {
+      const view = draw([changed()]);
+
+      const chip = view.container.querySelector(".hl-equipset");
+      expect(chip?.textContent).toBe("🎽");
+      expect(chip?.getAttribute("data-tip")).toContain("Raid");
+    });
+
+    // A chip with no words on it still has to say what it is to anybody not looking at it.
+    it("still says what it is to a screen reader", () => {
+      draw([changed()]);
+
+      expect(screen.getByRole("button", { name: /Raid/ })).toBeTruthy();
+    });
+
+    it("keeps its label where it is not the one drawn quietly", () => {
+      const view = draw([segment({ mounts: [{ id: 11, name: "Clockwork Glider" }] })]);
+
+      expect(view.container.querySelector(".hl-mount")?.textContent).toContain("Clockwork Glider");
+    });
   });
 
   it("keeps only the totals for the detail modal, which lists the rest in full below", () => {

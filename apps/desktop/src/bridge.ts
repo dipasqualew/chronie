@@ -21,6 +21,8 @@ import type {
   ItemDetail,
   ItemDetailsPayload,
   LogRetention,
+  QueryAnswer,
+  QuerySchema,
   Segment,
   Settings,
   SyncResult,
@@ -85,6 +87,15 @@ export const desktop = {
   wornSet: (pieces: WornPiece[]): Promise<WornSetPayload> => mock
     ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null })
     : invoke<WornSetPayload>("worn_set", { pieces }),
+  // One question, typed by the reader, asked of their own history. The backend refuses
+  // anything that is not a read and stops anything that will not finish, so what can come
+  // back from here is rows or a sentence about why there are none.
+  runQuery: (sql: string, limit: number): Promise<QueryAnswer> =>
+    mock ? mockQuery(sql) : invoke<QueryAnswer>("run_query", { sql, limit }),
+  // What the history holds, so a query can be written without reading the migrations. Asked
+  // for when the view is first opened and kept: tables do not appear while somebody is typing.
+  querySchema: (): Promise<QuerySchema> =>
+    mock ? Promise.resolve(structuredClone(mock.query.schema)) : invoke<QuerySchema>("query_schema"),
   // Links leave the app entirely: the backend asks the operating system to open them, which
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {
@@ -267,6 +278,23 @@ export const desktop = {
     }))
     : invoke<WifiReceiveStatus>("wifi_answer_offer", { accepted }),
 };
+
+/**
+ * The e2e mock's answer to one query.
+ *
+ * Matched on the query's text with its whitespace collapsed, so a fixture may lay a statement
+ * out over several lines and the page may send it back exactly as typed. A query the fixture
+ * says nothing about is refused rather than answered with an empty table, which is the one
+ * thing a stubbed database must never do: an empty result and an unrecognised query look
+ * identical on screen, and only one of them means the test is testing anything.
+ */
+function mockQuery(sql: string): Promise<QueryAnswer> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const held = mock.query.answers[sql.trim().replace(/\s+/g, " ")];
+  if (!held) return Promise.reject(new Error("no such table: main.that_one"));
+  if ("error" in held) return Promise.reject(new Error(held.error));
+  return Promise.resolve(structuredClone(held));
+}
 
 /**
  * Which state the mock's install is in once the setting has moved, mirroring the rule in

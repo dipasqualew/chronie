@@ -48,6 +48,19 @@ to do — the setting as the game's own config records it, and whether a file in
 panel says so and names the box to tick yourself. In game, `/chronie log` asks the
 same question of the client directly.
 
+## Ask the history something
+
+The **Query** tab is the collected history as what it actually is — a SQLite database
+— with a SQL editor over it and a chart under that. Point one dropdown at a column to
+run along the bottom and another at a column to run up the side, and the answer is a
+bar, a line or a scatter. The tables and their columns are listed beside the editor,
+and the row of questions above it — hours per character, gold per hour by place,
+keystone times by level — are there to be run and then edited.
+
+Nothing typed there can change anything. Only `SELECT`, `WITH`, `VALUES` and
+`EXPLAIN` are run at all, one statement at a time, and a query still going after ten
+seconds is stopped.
+
 ## Move a history to another machine
 
 Setup's **Sync over WiFi** hands one Chronie's whole database to another one on the

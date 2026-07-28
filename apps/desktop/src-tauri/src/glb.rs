@@ -69,6 +69,7 @@ impl<'a> Piece<'a> {
 }
 
 /// A `.glb` for a scene, with every texture every piece of it uses embedded in it.
+#[tracing::instrument(name = "glb.write", skip_all, fields(pieces = pieces.len()))]
 pub fn write(pieces: &[Piece<'_>]) -> Result<Vec<u8>, String> {
     if pieces.iter().any(|piece| piece.mesh.vertices.is_empty() || piece.mesh.parts.is_empty()) {
         return Err("the model holds no geometry".into());

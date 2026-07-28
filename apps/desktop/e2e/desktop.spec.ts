@@ -5,7 +5,14 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { RECIPES } from "../src/query";
 import type { E2EMock } from "../src/types";
+
+/**
+ * A query as the mock's table of answers is keyed — whitespace collapsed, so a statement laid
+ * out over six lines in the recipe is the same key as the one the page sends back.
+ */
+const collapsed = (sql: string): string => sql.trim().replace(/\s+/g, " ");
 
 /**
  * The window addressed the way a user addresses it: by the names and roles on screen.
@@ -602,6 +609,72 @@ class CaptureSettingsPanel {
   }
 }
 
+/**
+ * The Query view: an editor, an answer, and a picture of it.
+ *
+ * Everything here is addressed the way it is announced — the editor by its label, the chart
+ * by the sentence a screen reader is given for it, the refusal by being an alert. The one
+ * exception is the rows, which are a table and are read as one.
+ */
+class QueryWorkbench {
+  readonly page: Page;
+  readonly view: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.view = page.locator("#query-view");
+  }
+
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Query", exact: true }).click();
+    await expect(this.view).toBeVisible();
+  }
+
+  editor(): Locator {
+    return this.view.getByRole("textbox", { name: "SQL" });
+  }
+
+  async runIt(): Promise<void> {
+    await this.view.getByRole("button", { name: "Run" }).click();
+  }
+
+  /** The chart, which says what it is drawing in the name it is announced by. */
+  chart(): Locator {
+    return this.view.getByRole("img");
+  }
+
+  /** One of the three dropdowns over the chart: `Horizontal axis`, `Vertical axis`, `Chart shape`. */
+  choice(name: string): Locator {
+    return this.view.getByRole("combobox", { name });
+  }
+
+  /** What the run amounted to — rows, columns, milliseconds. */
+  summary(): Locator {
+    return this.view.getByRole("status");
+  }
+
+  /** Why a query was refused, in the words the database used. */
+  failure(): Locator {
+    return this.view.getByRole("alert");
+  }
+
+  rows(): Locator {
+    return this.view.locator(".query-rows tbody tr");
+  }
+
+  /** One question worth asking, offered above the editor. */
+  recipe(name: string): Locator {
+    return this.view.getByRole("button", { name });
+  }
+
+  /** A table in the list down the left, opened so what is inside it can be reached. */
+  async openTable(name: string): Promise<Locator> {
+    const listed = this.view.locator(`#query-table-${name}`);
+    await listed.locator("summary").click();
+    return listed;
+  }
+}
+
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
@@ -613,6 +686,7 @@ const test = base.extend<{
   retention: LogRetentionPanel;
   captureSettings: CaptureSettingsPanel;
   shots: Screenshots;
+  workbench: QueryWorkbench;
 }>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
@@ -643,6 +717,9 @@ const test = base.extend<{
   },
   shots: async ({ page }, use) => {
     await use(new Screenshots(page));
+  },
+  workbench: async ({ page }, use) => {
+    await use(new QueryWorkbench(page));
   },
 });
 
@@ -915,7 +992,13 @@ const mockDesktop: E2EMock = {
         achievements: [],
         levelUps: [],
         mounts: [],
-        pets: [{ id: 12, name: "Mossling", at: NIGHT_BEFORE + 800 }],
+        // The same critter twice, which is the shape only a battle pet can take: the
+        // collection grew by one and the second catch is another of something already
+        // held. A card that counted two would be reporting a collection that did not move.
+        pets: [
+          { id: 12, name: "Mossling", at: NIGHT_BEFORE + 800, speciesFirst: true },
+          { id: 12, name: "Mossling", at: NIGHT_BEFORE + 820, speciesFirst: false },
+        ],
         quests: [],
         toys: [{ id: 13, name: "Pocket Orrery", at: NIGHT_BEFORE + 850 }],
         housingItems: [{ id: 14, name: "Carved Reading Chair", at: NIGHT_BEFORE + 860, warbandFirst: true }],
@@ -1214,6 +1297,64 @@ const mockDesktop: E2EMock = {
     unfinished: { count: 0, bytes: 0, files: [] },
     removed: [],
   },
+  // The database as the Query view may see it, and the answers to the four questions this
+  // suite asks of it. The queries are keyed by the recipes themselves rather than by copies
+  // of their text: what the view sends is the recipe, so a recipe somebody rewords stays
+  // answered and a view that stopped sending it does not.
+  query: {
+    schema: {
+      tables: [
+        {
+          name: "characters",
+          view: false,
+          rowCount: 3,
+          columns: [
+            { name: "id", kind: "INTEGER", primaryKey: true },
+            { name: "name", kind: "TEXT", primaryKey: false },
+            { name: "class_file", kind: "TEXT", primaryKey: false },
+          ],
+        },
+        {
+          name: "segments",
+          view: false,
+          rowCount: 1204,
+          columns: [
+            { name: "id", kind: "INTEGER", primaryKey: true },
+            { name: "character_id", kind: "INTEGER", primaryKey: false },
+            { name: "instance_name", kind: "TEXT", primaryKey: false },
+            { name: "duration_seconds", kind: "INTEGER", primaryKey: false },
+          ],
+        },
+      ],
+    },
+    answers: {
+      [collapsed(RECIPES[0]?.sql ?? "")]: {
+        columns: ["character", "hours"],
+        rows: [["Aster-Vale", 41.5], ["Brin-Hearth", 12], ["Corvin-Vale", 3.2]],
+        truncated: false,
+        elapsedMs: 3,
+      },
+      [collapsed(RECIPES[1]?.sql ?? "")]: {
+        columns: ["day", "hours"],
+        rows: [
+          ["2026-07-23", 2.5], ["2026-07-24", 4], ["2026-07-25", 0.75], ["2026-07-26", 3.25],
+        ],
+        truncated: false,
+        elapsedMs: 5,
+      },
+      // What clicking a table in the list asks for. The null is the point of the row: an
+      // empty cell and a cell holding nothing look identical, and only one of them is true.
+      'SELECT * FROM "characters" LIMIT 50': {
+        columns: ["id", "name", "class_file"],
+        rows: [[1, "Aster-Vale", "MAGE"], [2, "Brin-Hearth", "PALADIN"], [3, "Corvin-Vale", null]],
+        truncated: false,
+        elapsedMs: 1,
+      },
+      // A mistyped column, refused in SQLite's own words — the one answer this feature has
+      // to get right, because it is the one every reader will meet.
+      "SELECT charater FROM segments": { error: "no such column: charater" },
+    },
+  },
   chosenPath: "D:\\Games\\Example MMO",
   syncResult: { segmentCount: 3, added: 1, updated: 1 },
   installResult: { version: "0.8.0-dev" },
@@ -1265,6 +1406,18 @@ function fixtureModel(name: string): string {
 
 const timeline = (page: Page): Locator => page.locator("#timeline");
 const sessions = (page: Page): Locator => page.locator("#timeline .session");
+
+/**
+ * Who played that evening, as the row of class circles.
+ *
+ * Scoped to the cast rather than to every named image on the card: the running totals are
+ * named marks too, and a card that earned gold and reputation would otherwise report a cast
+ * of five for an evening two characters played.
+ */
+const cast = (session: Locator): Locator => session.locator(".session-cast").getByRole("img");
+
+/** The evening's activities, which are the first thing a card says. */
+const activities = (session: Locator): Locator => session.locator(".act-roll").getByRole("button");
 
 /**
  * The colour each of a set of elements is ringed in, as the browser resolved it.
@@ -1446,16 +1599,16 @@ test("stitches segments into play sessions and leads with what happened", async 
   });
 
   await test.step("the cast is named where a screen reader can reach it", async () => {
-    const cast = sessions(page).first().getByRole("img");
-    await expect(cast).toHaveCount(2);
-    await expect(cast.first()).toHaveAttribute("aria-label", /Aster-Vale, Mage · level 12/);
+    const played = cast(sessions(page).first());
+    await expect(played).toHaveCount(2);
+    await expect(played.first()).toHaveAttribute("aria-label", /Aster-Vale, Mage · level 12/);
   });
 
   // The circle is the only thing on a session card that says who played at a glance, and it
   // says it in the colour the game uses. A ring drawn in the fallback grey is the failure
   // this catches: everyone the same colour is the same as nobody named.
   await test.step("each character is drawn in their own class colour", async () => {
-    await expect(borderColours(sessions(page).first().getByRole("img")))
+    await expect(borderColours(cast(sessions(page).first())))
       .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
   });
 
@@ -1468,10 +1621,10 @@ test("stitches segments into play sessions and leads with what happened", async 
   // thirteen, and this covers the only thing they cannot, which is that the page arrives
   // with the colours still attached to it.
   await test.step("and filled with it, not merely ringed in it", async () => {
-    const cast = sessions(page).first().getByRole("img");
+    const played = cast(sessions(page).first());
 
-    await expect(fillColours(cast)).resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
-    await expect(inkColours(cast)).resolves.toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
+    await expect(fillColours(played)).resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+    await expect(inkColours(played)).resolves.toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
   });
 
   // Filling the circles cost them the ring that used to be their outer edge: they now wear
@@ -1479,7 +1632,7 @@ test("stitches segments into play sessions and leads with what happened", async 
   // to without them then swallowed every initial but the last — "MAGE, DRUID, PRIEST, ROGUE"
   // came out as "M. DI PI RO". So the stacking is held to what it is for: a cast that reads.
   await test.step("and stacked close enough to read as one cast, not so close as to bury it", async () => {
-    const covered = await overlapFractions(sessions(page).first().getByRole("img"));
+    const covered = await overlapFractions(cast(sessions(page).first()));
 
     expect(covered.length).toBeGreaterThan(0);
     for (const fraction of covered) {
@@ -1496,12 +1649,30 @@ test("stitches segments into play sessions and leads with what happened", async 
     await expect(first).toContainText("52m elapsed");
   });
 
-  await test.step("the achievements lead and the running totals follow", async () => {
+  // What somebody did leads the card; what it earned them follows as summaries; and the
+  // running numbers, which are context rather than news, are marks with the figures inside
+  // them. A currency written out in full on the card is the state this replaced.
+  await test.step("what was done leads, and what it earned follows", async () => {
     const first = sessions(page).first();
+    const done = activities(first);
+
+    await expect(done).toHaveCount(1);
+    await expect(done.first()).toContainText("Mythic+ run");
+    await expect(done.first()).toContainText("+14 · Glass Caverns · timed");
+
     await expect(first).toContainText("2 achievements");
     await expect(first).toContainText("Clockwork Glider");
-    await expect(first).toContainText("Glass Token");
-    await expect(first).toContainText("3g 29s");
+    await expect(first).not.toContainText("Glass Token");
+  });
+
+  // Every figure the strip used to write out, in the one hover per kind that replaced it.
+  await test.step("the running numbers are marks with the figures in the hover", async () => {
+    const totals = sessions(page).first().locator(".tally");
+
+    await expect(totals).toHaveCount(3);
+    await expect(totals.first()).toHaveAttribute("aria-label", "Gold: 3g 29s");
+    await expect(sessions(page).first().locator(".tally-currency"))
+      .toHaveAttribute("aria-label", "Currency: Warband Chit +100, Glass Token +4, Rustward Scrip +2");
   });
 
   // Two achievements and two characters' levelling that evening, so the card says how much
@@ -1511,6 +1682,15 @@ test("stitches segments into play sessions and leads with what happened", async 
     await expect(first).toContainText("2 levels");
     await expect(first).not.toContainText("Into the Light");
     await expect(first).not.toContainText("Level 12");
+  });
+
+  // The night before caught the same critter twice. A pet is the one collectible a player
+  // can hold several of, so only the catch that grew the collection is worth a line — "2
+  // pets" would be reporting a collection that moved by one.
+  await test.step("a pet caught twice counts once", async () => {
+    const before = sessions(page).nth(1);
+    await expect(before).toContainText("Mossling");
+    await expect(before).not.toContainText("2 pets");
   });
 });
 
@@ -1581,6 +1761,15 @@ test("summarises each segment the same way, once the session is opened", async (
 });
 
 test("digs from a session down into a single segment and back out again", async ({ page, detail }) => {
+  // The shortest way down there, and the one the card is arranged around: the evening's
+  // activities are the first thing on it, and each is the way into the segment it happened
+  // in — where the fight-by-fight, the pictures and the correction all live.
+  await test.step("an activity on the card goes straight to the run it was", async () => {
+    await activities(sessions(page).first()).first().click();
+    await expect(detail.title()).toHaveText("Glass Caverns");
+    await detail.close();
+  });
+
   await sessions(page).first().getByRole("button", { name: "2 segments" }).click();
 
   await detail.openFromTimeline("Aster-Vale", "Glass Caverns");
@@ -1847,8 +2036,14 @@ test("shows an evening's screenshots, and lets one be annotated or deleted", asy
 test("shows what happened to an equipment set, down to the slot", async ({ page, detail }) => {
   // Two slots moved: one item was replaced by a better one, and one was cleared outright.
   // The total falls because clearing a slot really does cost the set everything it held.
+  //
+  // Saving a set is housekeeping, so on the card it is its icon and nothing more — but the
+  // sentence it gave up is still the name a screen reader reads and still the hover, which
+  // is the whole bargain that made drawing it quietly acceptable.
   const chip = sessions(page).first().getByRole("button", { name: /Raid updated/ });
-  await expect(chip).toContainText("2 slots, −604 ilvl");
+  await expect(chip).toHaveText("🎽");
+  await expect(chip).toHaveAttribute("data-tip", /2 slots, −604 ilvl/);
+  await expect(chip).toHaveAttribute("aria-label", /2 slots, −604 ilvl/);
 
   await chip.click();
   await expect(detail.title()).toHaveText("Glass Caverns");
@@ -2682,3 +2877,71 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
   });
 });
 
+
+/**
+ * The whole of the Query view, from opening it to being told a column does not exist.
+ *
+ * The steps are in the order somebody actually meets them, and the first one is the one the
+ * feature stands or falls on: the view opens already answered, with a picture of a real
+ * question, rather than as an empty box waiting for somebody to know SQL before it will show
+ * them anything.
+ */
+test("asks the history a question and draws the answer", async ({ workbench }) => {
+  await workbench.open();
+
+  await test.step("opens on a question already asked, and a chart of it", async () => {
+    await expect(workbench.summary()).toHaveText("3 rows · 2 columns · 3 ms");
+    // The chart says what it is drawing in the name it is announced by, which is the only
+    // thing a reader who cannot see it would be given.
+    await expect(workbench.chart())
+      .toHaveAccessibleName("hours by character, as a bar chart of 3 values");
+    await expect(workbench.rows()).toHaveCount(3);
+    await expect(workbench.rows().first()).toContainText("Aster-Vale");
+    await expect(workbench.rows().first()).toContainText("41.5");
+  });
+
+  await test.step("redraws the same answer as another shape", async () => {
+    await workbench.choice("Chart shape").selectOption("line");
+    await expect(workbench.chart())
+      .toHaveAccessibleName("hours by character, as a line chart of 3 values");
+  });
+
+  await test.step("takes another question from the ones offered", async () => {
+    await workbench.recipe("Hours per day").click();
+
+    await expect(workbench.editor()).toHaveValue(/GROUP BY s.ended_day/);
+    await expect(workbench.summary()).toHaveText("4 rows · 2 columns · 5 ms");
+    // The recipe says what to plot and how, so a question about days over time arrives as a
+    // line rather than as whatever the column order happened to suggest.
+    await expect(workbench.chart())
+      .toHaveAccessibleName("hours by day, as a line chart of 4 values");
+    await expect(workbench.rows()).toHaveCount(4);
+  });
+
+  await test.step("opens a table from the list and asks for all of it", async () => {
+    const characters = await workbench.openTable("characters");
+    await expect(characters).toContainText("class_file");
+
+    await characters.getByRole("button", { name: "SELECT * FROM characters" }).click();
+
+    await expect(workbench.editor()).toHaveValue('SELECT * FROM "characters" LIMIT 50');
+    await expect(workbench.rows()).toHaveCount(3);
+    // Nothing said what to plot, so the convention did: the first column that names things
+    // along the bottom, the first that counts them up the side.
+    await expect(workbench.chart())
+      .toHaveAccessibleName("id by name, as a bar chart of 3 values");
+    // The character with no class recorded. An empty cell and a cell holding nothing look
+    // identical on screen, and only one of them is what the database said.
+    await expect(workbench.rows().last()).toContainText("—");
+  });
+
+  await test.step("says why a query was refused, and keeps the rows that worked", async () => {
+    await workbench.editor().fill("SELECT charater FROM segments");
+    await workbench.runIt();
+
+    await expect(workbench.failure()).toHaveText("no such column: charater");
+    // The last answer is still on screen: a mistyped column is one keystroke from a working
+    // query, and taking the rows away to say so would be a punishment for a typo.
+    await expect(workbench.rows()).toHaveCount(3);
+  });
+});

@@ -90,6 +90,7 @@ local _, ns = ...
 ---@field name string Localised collection entry name.
 ---@field at integer When it was collected.
 ---@field guid string? Instance GUID, present for battle pets.
+---@field speciesFirst boolean? Pets only: true when the species was not already collected.
 
 ---@class HousingItemEvent
 ---@field id integer Housing catalog entry / item ID.
@@ -566,11 +567,19 @@ function ns.newSegmentTally(deps)
             end
         end,
 
+        ---A battle pet caught or learned.
+        ---
+        ---`speciesFirst` is the difference between the collection growing and the same
+        ---critter caught for the fourth time, and only the caller can tell them apart —
+        ---the client's owned count has to be read at the moment of the catch. It is left
+        ---absent rather than guessed when nobody said, because "not first" and "nobody
+        ---asked" are two different things to a reader deciding whether to show the pet.
         ---@param id integer
         ---@param name string?
         ---@param at integer
         ---@param guid string?
-        pet = function(id, name, at, guid)
+        ---@param speciesFirst boolean?
+        pet = function(id, name, at, guid, speciesFirst)
             if segment.active and id then
                 local event = {
                     id = id,
@@ -579,6 +588,9 @@ function ns.newSegmentTally(deps)
                 }
                 if guid then
                     event.guid = guid
+                end
+                if speciesFirst ~= nil then
+                    event.speciesFirst = speciesFirst and true or false
                 end
                 segment.pets[#segment.pets + 1] = event
             end

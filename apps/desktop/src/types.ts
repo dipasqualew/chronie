@@ -30,6 +30,20 @@ export interface CollectibleEvent {
   guid?: string | null;
 }
 
+/**
+ * A battle pet caught, and whether the collection actually grew.
+ *
+ * The one collectible the game lets a player own several of: a mount is collected or not, but
+ * the same rabbit can be caught twenty times. Only the client can tell the two apart and only
+ * at the moment of the catch, so the addon reads its owned count there and sends the answer.
+ *
+ * Absent, not false, on a catch recorded before the addon asked. "Another of one owned" and
+ * "nobody said" are different things to a view deciding whether the pet is worth a line.
+ */
+export interface PetEvent extends CollectibleEvent {
+  speciesFirst?: boolean | null;
+}
+
 export interface TransmogEvent {
   id: number;
   name?: string | null;
@@ -265,7 +279,7 @@ export interface Segment {
   achievements?: AchievementEvent[];
   levelUps?: LevelUpEvent[];
   mounts?: CollectibleEvent[];
-  pets?: CollectibleEvent[];
+  pets?: PetEvent[];
   quests?: QuestEvent[];
   toys?: CollectibleEvent[];
   housingItems?: HousingItemEvent[];
@@ -640,6 +654,48 @@ export interface Settings {
   keepOriginalScreenshots?: boolean;
 }
 
+/* ---------- asking the history a question directly ---------- */
+
+/**
+ * One cell of an answer. Mirrors what `query::cell` writes: SQLite's five storage classes
+ * reduced to the three JSON has words for, with a blob described rather than carried.
+ *
+ * Numbers stay numbers all the way across, which is the whole reason the chart beside the
+ * table can plot a column without parsing figures back out of text.
+ */
+export type QueryCell = string | number | null;
+
+/** What one query answered. Mirrors `query::Answer`. */
+export interface QueryAnswer {
+  columns: string[];
+  rows: QueryCell[][];
+  /** True when the query had more rows than the limit allowed — see `query::MAX_ROWS`. */
+  truncated: boolean;
+  elapsedMs: number;
+}
+
+/** One column of a table, as the table declared it. Mirrors `query::Column`. */
+export interface QueryColumn {
+  name: string;
+  /** The declared type — `INTEGER`, `TEXT`, and empty for the columns that have none. */
+  kind: string;
+  primaryKey: boolean;
+}
+
+/** One table or view a query may name. Mirrors `query::Table`. */
+export interface QueryTable {
+  name: string;
+  view: boolean;
+  /** `null` for a view, where counting the rows would mean running the view. */
+  rowCount?: number | null;
+  columns: QueryColumn[];
+}
+
+/** Everything a query could name. Mirrors `query::Schema`. */
+export interface QuerySchema {
+  tables: QueryTable[];
+}
+
 /* ---------- combat logging ---------- */
 
 /** The newest file in the game's `Logs/` folder. Mirrors `combatlog::LogFile`. */
@@ -818,6 +874,9 @@ export interface E2EMock {
   /** What a sweep of the game's Logs folder would do. State rather than a fixture, for the
    * same reason: turning retention on in the panel has to move what the panel then says. */
   logRetention: LogRetention;
+  /** The database as the Query view is allowed to see it: what a query may name, and what
+   * each query it is given answers with. */
+  query: E2EQuery;
   chosenPath: string;
   syncResult: SyncResult;
   installResult: InstallResult;
@@ -825,6 +884,21 @@ export interface E2EMock {
   /** Where a link handed to the operating system is recorded instead, in the order asked. */
   openedUrls: string[];
   wifi: E2EWifi;
+}
+
+/**
+ * SQLite, stubbed.
+ *
+ * There is no database behind the browser suite, so a query is answered from a table of
+ * prepared answers rather than run. Keyed by the query's own text with its whitespace
+ * collapsed, so a fixture can lay a statement out over several lines and a test can type it
+ * however it likes. An entry carrying `error` is a query the real backend would refuse, which
+ * is how the one path that matters most — a mistake, said plainly, with the editor intact —
+ * is reachable at all.
+ */
+export interface E2EQuery {
+  schema: QuerySchema;
+  answers: Record<string, QueryAnswer | { error: string }>;
 }
 
 /** One capture's pictures as the mock holds them: the tile, and the thing behind it. */

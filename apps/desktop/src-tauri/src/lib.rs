@@ -14,6 +14,7 @@ pub mod logfile;
 pub mod m2;
 pub mod models;
 pub mod placement;
+pub mod query;
 pub mod retention;
 pub mod transmog;
 pub mod wifi;
@@ -215,6 +216,33 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
 #[tauri::command]
 fn dashboard(state: State<'_, AppState>) -> Result<Value, String> {
     load_dashboard(&state.database_path())
+}
+
+/// One query, typed by the reader, run against their own history.
+///
+/// `async`, and therefore off the main thread, for a reason the other database commands do not
+/// have: every one of those runs a statement this repository wrote and can vouch for, and this
+/// one runs whatever somebody typed. `query::TIME_BUDGET` bounds how long that can take, but
+/// ten seconds of a frozen window would still be ten seconds of a frozen window.
+#[tauri::command]
+async fn run_query(
+    sql: String,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<query::Answer, String> {
+    let path = state.database_path();
+    tauri::async_runtime::spawn_blocking(move || query::run(&path, &sql, limit))
+        .await
+        .map_err(|error| format!("That query did not finish: {error}"))?
+}
+
+/// What is in the history, so that a query can be written without reading the migrations.
+#[tauri::command]
+async fn query_schema(state: State<'_, AppState>) -> Result<query::Schema, String> {
+    let path = state.database_path();
+    tauri::async_runtime::spawn_blocking(move || query::schema(&path))
+        .await
+        .map_err(|error| format!("Reading the schema did not finish: {error}"))?
 }
 
 /// The transmog sets the installed game knows about.
@@ -1083,6 +1111,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dashboard,
+            run_query,
+            query_schema,
             transmog_sets,
             transmog_set_items,
             character_model,

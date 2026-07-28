@@ -31,6 +31,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0012_log_retention.sql"),
     include_str!("../migrations/0013_account_wide_currencies.sql"),
     include_str!("../migrations/0014_position_track.sql"),
+    include_str!("../migrations/0015_pet_species_first.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -1241,15 +1242,17 @@ fn insert_outcomes(
         transaction
             .execute(
                 "INSERT INTO pets (
-                     segment_id, position, species_id, name, collected_at, pet_guid
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     segment_id, position, species_id, name, collected_at, pet_guid,
+                     species_first
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     segment_id,
                     position as i64,
                     species_id,
                     optional_text(event, "name"),
                     optional_integer(event, "at"),
-                    optional_text(event, "guid")
+                    optional_text(event, "guid"),
+                    optional_boolean(event, "speciesFirst")
                 ],
             )
             .map_err(|error| error.to_string())?;
@@ -3112,7 +3115,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
         ))
     );
     load_rows!(
-        "SELECT segment_id, species_id, name, collected_at, pet_guid
+        "SELECT segment_id, species_id, name, collected_at, pet_guid, species_first
          FROM pets ORDER BY segment_id, position",
         "pets",
         |row| Ok((
@@ -3121,7 +3124,8 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
                 "id": row.get::<_, i64>(1)?,
                 "name": row.get::<_, Option<String>>(2)?,
                 "at": row.get::<_, Option<i64>>(3)?,
-                "guid": row.get::<_, Option<String>>(4)?
+                "guid": row.get::<_, Option<String>>(4)?,
+                "speciesFirst": row.get::<_, Option<i64>>(5)?.map(|value| value != 0)
             })
         ))
     );
@@ -4311,6 +4315,35 @@ ChronieDB = {{ ["segments"] = {{
         let created = &payload["segments"][1]["equipsetChanges"][0];
         assert_eq!(created["kind"], "created");
         assert_eq!(created["items"].as_array().unwrap().len(), 2);
+    }
+
+    /// A battle pet is the one collectible a player can own several of, and the addon is
+    /// the only thing in a position to tell the two cases apart — the client's owned count
+    /// is only true at the moment of the catch. So the flag travels verbatim, all three
+    /// ways: caught for the first time, caught again, and caught by a build that never said.
+    #[test]
+    fn keeps_whether_a_caught_pet_was_the_first_of_its_species() {
+        let pets = r#"
+          { ["id"] = "pets-1", ["character"] = "Aster-Vale", ["instance"] = "Nagrand",
+            ["instanceType"] = "none", ["endedAt"] = 2000000000, ["startedAt"] = 1999990000,
+            ["pets"] = {
+              { ["id"] = 456, ["name"] = "Darkmoon Rabbit", ["at"] = 1999990500,
+                ["guid"] = "BattlePet-0-1", ["speciesFirst"] = true },
+              { ["id"] = 456, ["name"] = "Darkmoon Rabbit", ["at"] = 1999990600,
+                ["guid"] = "BattlePet-0-2", ["speciesFirst"] = false },
+              { ["id"] = 789, ["name"] = "Mossling", ["at"] = 1999990700 }
+            } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(pets);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let caught = &dashboard(&database).unwrap()["segments"][0]["pets"];
+        assert_eq!(caught[0]["speciesFirst"], true);
+        assert_eq!(caught[1]["speciesFirst"], false);
+        // Not false: a catch recorded before the addon asked is one nobody can say either
+        // way about, and reading it as a duplicate would hide a pet that may well be new.
+        assert_eq!(caught[2]["speciesFirst"], Value::Null);
     }
 
     /// The whole reason the ledger stores only the state after a change: the row behind is

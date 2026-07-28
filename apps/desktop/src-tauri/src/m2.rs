@@ -254,6 +254,7 @@ pub struct Model {
 
 impl Model {
     /// Reads the chunks of an item's `.m2`.
+    #[tracing::instrument(name = "m2.parse", skip_all, fields(bytes = bytes.len()))]
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         let mut md21: Option<&[u8]> = None;
         let mut skins: Vec<u32> = Vec::new();
@@ -331,6 +332,7 @@ impl Model {
     }
 
     /// The model joined to one of its skin profiles: the triangles, in drawing order.
+    #[tracing::instrument(name = "m2.with_skin", skip_all, fields(bytes = skin.len()))]
     pub fn with_skin(&self, skin: &[u8]) -> Result<Mesh, String> {
         if skin.get(0..4) != Some(SKIN) {
             return Err("not a skin profile: it does not start with SKIN".into());
@@ -435,6 +437,7 @@ impl Model {
 ///
 /// A skeleton with no `SKA1` is not an error, and neither is one with no `SKB1`: every
 /// character body has both, and this is what says so for the file that turns out not to.
+#[tracing::instrument(name = "m2.attachments", skip_all, fields(bytes = skeleton.len()))]
 pub fn attachments(skeleton: &[u8]) -> Result<Vec<Attachment>, String> {
     let Some(ska1) = chunk_named(skeleton, SKA1) else {
         return Ok(Vec::new());
