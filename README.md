@@ -156,6 +156,14 @@ git push -u origin some-change
 gh pr create --fill
 ```
 
+If `main` moves before the pull request lands, fetch it and run
+`git rebase origin/main`; never merge `origin/main` into the feature branch.
+Because pull requests are squash-merged, a branch stacked on a now-merged pull
+request must instead be re-cut from the new `origin/main`, replaying only its
+own commits (for example, with
+`git rebase --onto origin/main <old-parent-tip>`). This preserves a clean
+history without conflicts against duplicate copies of the same work.
+
 Then wait for its CI rather than guessing at it:
 
 ```sh

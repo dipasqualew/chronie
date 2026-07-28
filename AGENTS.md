@@ -94,6 +94,15 @@ git push -u origin some-change
 gh pr create --fill
 ```
 
+When `main` advances while a branch is open, update the branch with
+`git fetch origin main` followed by `git rebase origin/main`. Never merge
+`origin/main` into a feature branch: the project squash-merges pull requests, so
+merging the squashed copy back into a branch that contains the original commits
+creates false conflicts. If the branch was stacked on another branch whose pull
+request has since been squash-merged, re-cut it from the new `origin/main` and
+replay only the commits unique to the branch (for example,
+`git rebase --onto origin/main <old-parent-tip>`).
+
 The pull request is not paperwork, it is the mechanism. It is what runs the CI
 you are about to wait on, it is where the diff, the checks and the reasoning sit
 together, and it is what a human reads if they want to read anything. Work that
