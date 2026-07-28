@@ -1,0 +1,330 @@
+//! The transmog sets the player saved in the game, as the addon reports them.
+//!
+//! `customsets.rs` beside this is the reader's own wardrobe, assembled in this app. This is the
+//! other one — what they already had in game — and the two are deliberately not the same thing,
+//! because only one of them is Chronie's to change without asking. `0018_in_game_sets.sql` is
+//! where these are stored, `collector.rs` is the SQL, and `inGameSets.ts` is the window.
+//!
+//! **The name of this module is a translation, and it is worth saying which way round.** The
+//! game calls these *custom sets* — `C_TransmogCollection.NewCustomSet` and the rest, which is
+//! the vocabulary the addon uses because the addon is talking to the game. This app has called
+//! its own saved sets *custom sets* since before the game had any, and one word cannot mean both
+//! on the same screen. So the addon writes `customSets` and everything from here inward reads
+//! *in-game sets*. Nothing is lost in the crossing: the id, the name and the appearances are the
+//! game's throughout.
+//!
+//! This module is the shapes and the reading and nothing else. It opens no game files, which is
+//! why a set can be listed on a machine that has not got the game installed — see the migration
+//! for what that costs, which is that it cannot be *opened* there.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// The client's `TransmogSlot` enumeration, which runs 0 to 12 inclusive.
+///
+/// A bound rather than a vocabulary: nothing here needs to know that 11 is the main hand, only
+/// that a slot outside this range is not a slot the game has and so is not something the addon
+/// can have honestly read. See `0018_in_game_sets.sql` for the names.
+const SLOTS: i64 = 13;
+
+/// One appearance in a set, and where on the character it sits.
+///
+/// `secondary` and `illusion` are absent far more often than they are present — a slot has a
+/// second appearance or an enchant illusion only if it is the kind of slot that can — and the
+/// addon drops the `0` the client reports for "none", so absent here means nobody claimed
+/// anything rather than "claimed to be zero".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Slot {
+    pub slot: i64,
+    /// An `ItemModifiedAppearance` id — the same number a piece of a set saved in this app
+    /// carries, which is what lets the two be drawn by one piece of code.
+    pub appearance_id: i64,
+    pub secondary_appearance_id: Option<i64>,
+    pub illusion_id: Option<i64>,
+}
+
+/// One set the player saved in game.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InGameSet {
+    /// The client's own id, which survives a rename and is what an edit names the set by.
+    pub id: i64,
+    pub name: String,
+    /// The FileDataID of the picture the game shows it under, where it names one.
+    pub icon: Option<i64>,
+    /// When the addon last saw this character's wardrobe *differ*, rather than when it last
+    /// looked — the addon only moves it when two looks disagree.
+    pub observed_at: Option<i64>,
+    /// What is in it, ascending by slot. Empty is ordinary: a set the player has named and not
+    /// yet filled is a set, and the game will list it for them.
+    pub slots: Vec<Slot>,
+}
+
+/// One character's sets, and every character the database has any for.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InGameSetsPayload {
+    /// Keyed by the character the addon read them on, `Name-Realm`.
+    ///
+    /// Keyed by character even though the sets themselves belong to the account, because
+    /// *whether Chronie has ever looked* is a fact about a character. A character nobody has
+    /// played since Chronie was installed has no entry, which is the truth; folding them all
+    /// into one list would let the last alt to log out speak for the whole roster.
+    pub characters: Vec<CharacterSets>,
+}
+
+/// What one character was last seen to have.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterSets {
+    pub character: String,
+    pub sets: Vec<InGameSet>,
+}
+
+/// One number out of a Lua value the addon wrote, when it really is one.
+///
+/// Lua has one number type and the parser hands integers back as integers, but a table written
+/// by a client that decided to store `4.0` would arrive as a float, so both are accepted and
+/// anything else is not a number at all.
+fn number(value: Option<&Value>) -> Option<i64> {
+    match value? {
+        Value::Number(found) => found.as_i64().or_else(|| Some(found.as_f64()? as i64)),
+        _ => None,
+    }
+}
+
+/// One slot of one set, or nothing when the addon's row does not describe one.
+///
+/// A slot outside the client's own range is refused rather than stored. Everything downstream
+/// treats the number as a place on the body, and a 47 would be drawn nowhere and reported as a
+/// slot the reader does not have.
+fn slot(value: &Value) -> Option<Slot> {
+    let slot = number(value.get("slot"))?;
+    if !(0..SLOTS).contains(&slot) {
+        return None;
+    }
+    let appearance_id = number(value.get("appearance"))?;
+    Some(Slot {
+        slot,
+        appearance_id,
+        secondary_appearance_id: number(value.get("secondary")),
+        illusion_id: number(value.get("illusion")),
+    })
+}
+
+/// One set out of the addon's list, or nothing when the entry is not one.
+///
+/// The id is the only field that can fail the set: a set with no id cannot be matched against
+/// what is already stored, cannot be named in an edit, and is not something the player can be
+/// shown and then asked about. A missing *name* is survivable and left empty — the game's own
+/// `GetCustomSetInfo` is documented as sometimes answering nothing — and the window says so.
+fn set(value: &Value, observed_at: Option<i64>) -> Option<InGameSet> {
+    let id = number(value.get("id"))?;
+    let mut slots: Vec<Slot> = value
+        .get("slots")
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().filter_map(slot).collect())
+        .unwrap_or_default();
+    // The addon already sorts these, and sorting again is not distrust of it: this is a file a
+    // player can edit, and a set whose slots arrived shuffled would be stored shuffled and
+    // drawn in an order the same wardrobe did not have yesterday.
+    slots.sort_by_key(|held| held.slot);
+    slots.dedup_by_key(|held| held.slot);
+    Some(InGameSet {
+        id,
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        icon: number(value.get("icon")),
+        observed_at,
+        slots,
+    })
+}
+
+/// Every character's sets out of the `customSets` table the addon writes.
+///
+/// Shaped `{ ["Name-Realm"] = { at = …, sets = { … } } }`. A character whose entry is missing or
+/// malformed contributes nothing rather than an empty list, which is the same distinction the
+/// payload's own doc draws: never looked and looked-and-found-none are different, and only one
+/// of them should overwrite what the database already knows about that character.
+pub fn read(value: &Value) -> Vec<CharacterSets> {
+    let Some(characters) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut found: Vec<CharacterSets> = characters
+        .iter()
+        .filter_map(|(character, entry)| {
+            let observed_at = number(entry.get("at"));
+            let rows = entry.get("sets").and_then(Value::as_array)?;
+            let mut sets: Vec<InGameSet> =
+                rows.iter().filter_map(|row| set(row, observed_at)).collect();
+            sets.sort_by_key(|found| found.id);
+            sets.dedup_by_key(|found| found.id);
+            Some(CharacterSets {
+                character: character.clone(),
+                sets,
+            })
+        })
+        .collect();
+    // By name, so two syncs of an unchanged file write the same rows in the same order and a
+    // diff of the database says nothing happened.
+    found.sort_by(|left, right| left.character.cmp(&right.character));
+    found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn reads_a_character_with_one_set() {
+        let found = read(&json!({
+            "Aster-Vale": {
+                "at": 1_700_000_000,
+                "sets": [{
+                    "id": 4,
+                    "name": "Winter",
+                    "icon": 133_600,
+                    "slots": [{ "slot": 0, "appearance": 55 }],
+                }],
+            }
+        }));
+
+        assert_eq!(
+            found,
+            vec![CharacterSets {
+                character: "Aster-Vale".into(),
+                sets: vec![InGameSet {
+                    id: 4,
+                    name: "Winter".into(),
+                    icon: Some(133_600),
+                    observed_at: Some(1_700_000_000),
+                    slots: vec![Slot {
+                        slot: 0,
+                        appearance_id: 55,
+                        secondary_appearance_id: None,
+                        illusion_id: None,
+                    }],
+                }],
+            }]
+        );
+    }
+
+    /// A set the player named and has not filled is a set. The game lists it for them, and a
+    /// wardrobe that quietly dropped it would disagree with the one they can see.
+    #[test]
+    fn keeps_a_set_with_nothing_in_it() {
+        let found = read(&json!({
+            "Aster-Vale": { "sets": [{ "id": 1, "name": "Later", "slots": [] }] }
+        }));
+
+        assert_eq!(found[0].sets[0].slots, Vec::new());
+        assert_eq!(found[0].sets[0].observed_at, None);
+    }
+
+    /// The id is the only thing a set cannot be read without: it is what an edit names, and
+    /// what the next sync matches against.
+    #[test]
+    fn refuses_a_set_with_no_id() {
+        let found = read(&json!({
+            "Aster-Vale": { "sets": [{ "name": "Nameless" }, { "id": 2, "name": "Real" }] }
+        }));
+
+        assert_eq!(found[0].sets.len(), 1);
+        assert_eq!(found[0].sets[0].id, 2);
+    }
+
+    /// `GetCustomSetInfo` is documented as sometimes answering nothing, so an unnamed set is a
+    /// thing the game itself produces rather than a corrupt file.
+    #[test]
+    fn survives_a_set_that_will_not_name_itself() {
+        let found = read(&json!({ "Aster-Vale": { "sets": [{ "id": 7 }] } }));
+
+        assert_eq!(found[0].sets[0].name, "");
+        assert_eq!(found[0].sets[0].icon, None);
+    }
+
+    /// Everything downstream treats the number as a place on the body, so a slot the game has
+    /// not got would be drawn nowhere and reported as somewhere the reader does not have.
+    #[test]
+    fn refuses_a_slot_the_game_does_not_have() {
+        let found = read(&json!({
+            "Aster-Vale": { "sets": [{ "id": 1, "slots": [
+                { "slot": -1, "appearance": 5 },
+                { "slot": 13, "appearance": 6 },
+                { "slot": 12, "appearance": 7 },
+            ] }] }
+        }));
+
+        assert_eq!(found[0].sets[0].slots.len(), 1);
+        assert_eq!(found[0].sets[0].slots[0].slot, 12);
+    }
+
+    #[test]
+    fn orders_characters_sets_and_slots() {
+        let found = read(&json!({
+            "Zia-Vale": { "sets": [] },
+            "Aster-Vale": { "sets": [
+                { "id": 9, "slots": [{ "slot": 5, "appearance": 1 }, { "slot": 2, "appearance": 2 }] },
+                { "id": 3, "slots": [] },
+            ] },
+        }));
+
+        assert_eq!(found[0].character, "Aster-Vale");
+        assert_eq!(found[1].character, "Zia-Vale");
+        assert_eq!(
+            found[0].sets.iter().map(|set| set.id).collect::<Vec<_>>(),
+            vec![3, 9]
+        );
+        assert_eq!(
+            found[0].sets[1]
+                .slots
+                .iter()
+                .map(|held| held.slot)
+                .collect::<Vec<_>>(),
+            vec![2, 5]
+        );
+    }
+
+    /// Never looked and looked-and-found-none are different, and only the second should
+    /// overwrite what the database already knows about that character.
+    #[test]
+    fn skips_a_character_that_has_not_reported_a_list_at_all() {
+        let found = read(&json!({
+            "Aster-Vale": { "at": 1 },
+            "Zia-Vale": { "sets": [] },
+        }));
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].character, "Zia-Vale");
+    }
+
+    #[test]
+    fn reads_the_two_things_a_slot_usually_has_not_got() {
+        let found = read(&json!({
+            "Aster-Vale": { "sets": [{ "id": 1, "slots": [
+                { "slot": 11, "appearance": 5, "secondary": 6, "illusion": 7 },
+            ] }] }
+        }));
+
+        assert_eq!(
+            found[0].sets[0].slots[0],
+            Slot {
+                slot: 11,
+                appearance_id: 5,
+                secondary_appearance_id: Some(6),
+                illusion_id: Some(7),
+            }
+        );
+    }
+
+    #[test]
+    fn survives_a_table_that_is_not_a_table_of_characters() {
+        assert!(read(&Value::Null).is_empty());
+        assert!(read(&json!([1, 2, 3])).is_empty());
+    }
+}

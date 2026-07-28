@@ -96,7 +96,10 @@ local function setState(state)
         return nil
     end
     local slots = {}
-    for _, raw in ipairs(state.slots or {}) do
+    -- `ipairs` on a string raises rather than walking nothing, so the type is asked before the
+    -- walk and not only inside it. Every other line here distrusts what the client handed over;
+    -- these two would have been the exceptions, and an exception in a guard is a hole in it.
+    for _, raw in ipairs(type(state.slots) == "table" and state.slots or {}) do
         slots[#slots + 1] = slotState(raw)
     end
     -- Ascending by slot, because `pairs` over the client's list would hand these back in
@@ -118,7 +121,7 @@ end
 ---@return CustomSetState[]
 local function snapshot(sets)
     local out = {}
-    for _, raw in ipairs(sets or {}) do
+    for _, raw in ipairs(type(sets) == "table" and sets or {}) do
         out[#out + 1] = setState(raw)
     end
     table.sort(out, function(left, right)
