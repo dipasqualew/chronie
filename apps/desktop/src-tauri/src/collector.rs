@@ -3,6 +3,7 @@ use crate::captures::{self, Marker, Stored, Wanted};
 use crate::combatlog;
 use crate::customsets;
 use crate::icons;
+use crate::ingamesets;
 use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
 use crate::marks;
 use crate::placement;
@@ -36,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0015_pet_species_first.sql"),
     include_str!("../migrations/0016_transmog_marks.sql"),
     include_str!("../migrations/0017_custom_sets.sql"),
+    include_str!("../migrations/0018_in_game_sets.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2602,6 +2604,7 @@ struct Incoming {
     lockouts: LockoutFeed,
     holdings: Value,
     warband: Value,
+    in_game_sets: Vec<ingamesets::CharacterSets>,
     markers: Vec<Marker>,
 }
 
@@ -2731,6 +2734,155 @@ fn sync_warband(
     Ok(())
 }
 
+/// What each character was last seen to have saved in game, replacing whatever it last said.
+///
+/// Wholesale per character, the way [`sync_holdings`] is and for the same reason: this is a
+/// snapshot of one wardrobe, and half of an old one beside half of a new one is a wardrobe
+/// nobody ever had. That is also the whole of the cleaning up the file needs — a set deleted in
+/// game stops being written by the addon, and stops existing here on the next sync, without
+/// anything having to notice it went.
+///
+/// Only characters the file actually reported are touched. A roster of ten alts is one file, and
+/// the character that logged out last is the only one whose wardrobe was read; wiping the other
+/// nine because they said nothing this time would empty the app every time somebody played.
+fn sync_in_game_sets(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    characters: &[ingamesets::CharacterSets],
+    now: i64,
+) -> Result<(), String> {
+    for reported in characters {
+        let character_id =
+            upsert_character_key(transaction, account_id, &reported.character, None, None, now)?;
+        // The slots go with the sets by way of the cascade the migration declares, so deleting
+        // the sets is the whole of the clearing out.
+        transaction
+            .execute(
+                "DELETE FROM character_transmog_sets WHERE character_id = ?1",
+                [character_id],
+            )
+            .map_err(|error| error.to_string())?;
+        for set in &reported.sets {
+            transaction
+                .execute(
+                    "INSERT INTO character_transmog_sets
+                         (character_id, set_id, name, icon, observed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![character_id, set.id, set.name, set.icon, set.observed_at],
+                )
+                .map_err(|error| error.to_string())?;
+            for slot in &set.slots {
+                transaction
+                    .execute(
+                        "INSERT INTO character_transmog_set_slots
+                             (character_id, set_id, slot, appearance_id,
+                              secondary_appearance_id, illusion_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            character_id,
+                            set.id,
+                            slot.slot,
+                            slot.appearance_id,
+                            slot.secondary_appearance_id,
+                            slot.illusion_id
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every character's in-game sets, for the window to browse.
+///
+/// All of them at once rather than a character at a time, for the reason the reader's own sets
+/// come back all at once: this is what one person saved with their own hands across one roster,
+/// so it is tens of rows rather than the game's several thousand sets.
+pub fn in_game_sets(database_path: &Path) -> Result<ingamesets::InGameSetsPayload, String> {
+    let connection = open_database(database_path)?;
+    let mut statement = connection
+        .prepare(
+            // `source_key` rather than `name`, which is what every other reader in this file
+            // selects and what the payload's own doc promises: `name` is the half before the
+            // hyphen, so two Asters on two realms would fold into one wardrobe and the window
+            // — which looks a character up by `Name-Realm` — would find neither.
+            "SELECT c.source_key, s.set_id, s.name, s.icon, s.observed_at
+             FROM character_transmog_sets s
+             JOIN characters c ON c.id = s.character_id
+             ORDER BY c.source_key, s.name COLLATE NOCASE, s.set_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+
+    let mut characters: Vec<ingamesets::CharacterSets> = Vec::new();
+    for row in rows {
+        let (character, id, name, icon, observed_at) = row.map_err(|error| error.to_string())?;
+        let set = ingamesets::InGameSet {
+            id,
+            name,
+            icon,
+            observed_at,
+            slots: Vec::new(),
+        };
+        // The query is ordered by character, so a run of rows belongs to whichever one is
+        // already being built and a new name is always a new entry.
+        match characters.last_mut() {
+            Some(last) if last.character == character => last.sets.push(set),
+            _ => characters.push(ingamesets::CharacterSets {
+                character,
+                sets: vec![set],
+            }),
+        }
+    }
+
+    let mut slots = connection
+        .prepare(
+            "SELECT c.source_key, s.set_id, s.slot, s.appearance_id,
+                    s.secondary_appearance_id, s.illusion_id
+             FROM character_transmog_set_slots s
+             JOIN characters c ON c.id = s.character_id
+             ORDER BY c.source_key, s.set_id, s.slot",
+        )
+        .map_err(|error| error.to_string())?;
+    let held = slots
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                ingamesets::Slot {
+                    slot: row.get(2)?,
+                    appearance_id: row.get(3)?,
+                    secondary_appearance_id: row.get(4)?,
+                    illusion_id: row.get(5)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in held {
+        let (character, set_id, slot) = row.map_err(|error| error.to_string())?;
+        if let Some(found) = characters
+            .iter_mut()
+            .find(|entry| entry.character == character)
+            .and_then(|entry| entry.sets.iter_mut().find(|set| set.id == set_id))
+        {
+            found.slots.push(slot);
+        }
+    }
+
+    Ok(ingamesets::InGameSetsPayload { characters })
+}
+
 pub fn collect(
     wow_path: &Path,
     database_path: &Path,
@@ -2786,6 +2938,14 @@ pub fn collect(
             // `holdings` by character, and a warband entry in there would arrive here as a
             // character named "warband".
             warband: saved.get("warband").cloned().unwrap_or(Value::Null),
+            // `customSets` is the addon's word, because the addon is talking to the game and
+            // that is what the game calls them. In here they are in-game sets, so that the
+            // reader's own saved sets can keep the name they have had since before the game
+            // had any. See `ingamesets.rs`.
+            in_game_sets: saved
+                .get("customSets")
+                .map(ingamesets::read)
+                .unwrap_or_default(),
             markers: captures::markers(&saved),
         });
     }
@@ -2836,6 +2996,7 @@ pub fn collect(
         sync_lockouts(&transaction, account_id, &account.lockouts, now)?;
         sync_holdings(&transaction, account_id, &account.holdings, now)?;
         sync_warband(&transaction, account_id, &account.warband)?;
+        sync_in_game_sets(&transaction, account_id, &account.in_game_sets, now)?;
         for marker in &account.markers {
             if deleted.contains(&marker.source_id) {
                 continue;
@@ -8228,5 +8389,243 @@ ChronieDB = {{ ["segments"] = {{
                 .as_deref(),
             Some("horde")
         );
+    }
+
+    /* ---------- the sets somebody saved in the game itself ---------- */
+
+    /// An install whose SavedVariables carry the wardrobe the addon read out of the game and
+    /// nothing else. No segments on purpose, the way `holdings_install` has none: what a
+    /// character saved at a transmogrifier is a fact about the character, and it has to reach
+    /// the database whether or not that character has ever filed a segment.
+    fn in_game_sets_install(sets_lua: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        let saved = wow.join("WTF/Account/TEST/SavedVariables");
+        fs::create_dir_all(&saved).unwrap();
+        fs::write(
+            saved.join("chronie.lua"),
+            format!(r#"ChronieDB = {{ ["customSets"] = {{ {sets_lua} }} }}"#),
+        )
+        .unwrap();
+        let database = temp.path().join("data/chronie.sqlite3");
+        (temp, wow, database)
+    }
+
+    /// The store as the next logout would leave it. The trailing note is what makes the file
+    /// look different to a collector that skips a source whose size and timestamp are
+    /// unchanged — the same trick `rewrite_holdings` plays.
+    fn rewrite_in_game_sets(wow: &Path, sets_lua: &str) {
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            format!(r#"ChronieDB = {{ ["customSets"] = {{ {sets_lua} }} }} -- touched"#),
+        )
+        .unwrap();
+    }
+
+    /// One character's sets out of the payload, by the key it comes back under.
+    ///
+    /// `Name-Realm` — the account key, which is what every reader in this file answers with and
+    /// what the window looks a character up by. The bare name would fold two Asters on two
+    /// realms into one wardrobe, so the whole key is asked for here and nowhere is it split.
+    fn sets_of<'a>(
+        payload: &'a ingamesets::InGameSetsPayload,
+        character: &str,
+    ) -> &'a [ingamesets::InGameSet] {
+        payload
+            .characters
+            .iter()
+            .find(|entry| entry.character == character)
+            .map(|entry| entry.sets.as_slice())
+            .unwrap_or_else(|| panic!("no sets for {character}"))
+    }
+
+    /// Two characters of one account, which is what one SavedVariables file holds. Aster has a
+    /// filled set and an empty one; Brin has a weapon, which is the only kind of slot that
+    /// carries both of the things a slot usually has not got.
+    const TWO_WARDROBES: &str = r#"
+        ["Aster-Vale"] = {
+            ["at"] = 2000000000,
+            ["sets"] = {
+                { ["id"] = 4, ["name"] = "Winter", ["icon"] = 133600, ["slots"] = {
+                    { ["slot"] = 0, ["appearance"] = 55 },
+                    { ["slot"] = 9, ["appearance"] = 66 },
+                } },
+                { ["id"] = 7, ["name"] = "Later", ["slots"] = { } },
+            },
+        },
+        ["Brin-Ravencrest"] = {
+            ["at"] = 1999000000,
+            ["sets"] = {
+                { ["id"] = 1, ["name"] = "Sunfire", ["icon"] = 133601, ["slots"] = {
+                    { ["slot"] = 11, ["appearance"] = 88, ["secondary"] = 99,
+                      ["illusion"] = 5000 },
+                } },
+            },
+        },
+    "#;
+
+    #[test]
+    fn a_roster_nobody_has_saved_a_set_on_holds_none() {
+        let (_temp, wow, database) = in_game_sets_install("");
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        assert!(in_game_sets(&database).unwrap().characters.is_empty());
+    }
+
+    /// The whole of the round trip: the addon's table becomes rows, and the rows come back as
+    /// sets with their slots on the set they belong to rather than pooled across the character.
+    #[test]
+    fn files_a_characters_sets_and_what_is_in_them() {
+        let (_temp, wow, database) = in_game_sets_install(TWO_WARDROBES);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let payload = in_game_sets(&database).unwrap();
+        let aster = sets_of(&payload, "Aster-Vale");
+        // By name, which is the order the window lists them in, so the empty one leads.
+        assert_eq!(
+            aster.iter().map(|set| set.id).collect::<Vec<_>>(),
+            vec![7, 4]
+        );
+
+        let winter = &aster[1];
+        assert_eq!(winter.name, "Winter");
+        assert_eq!(winter.icon, Some(133_600));
+        assert_eq!(
+            winter.slots,
+            vec![
+                ingamesets::Slot {
+                    slot: 0,
+                    appearance_id: 55,
+                    secondary_appearance_id: None,
+                    illusion_id: None,
+                },
+                ingamesets::Slot {
+                    slot: 9,
+                    appearance_id: 66,
+                    secondary_appearance_id: None,
+                    illusion_id: None,
+                },
+            ]
+        );
+
+        // Brin's one slot stayed on Brin's one set: the join is by character and set, and a
+        // reader that matched on the set id alone would hang this weapon on Aster too, since
+        // both rosters number their sets from one.
+        let brin = sets_of(&payload, "Brin-Ravencrest");
+        assert_eq!(brin.len(), 1);
+        assert_eq!(
+            brin[0].slots,
+            vec![ingamesets::Slot {
+                slot: 11,
+                appearance_id: 88,
+                secondary_appearance_id: Some(99),
+                illusion_id: Some(5000),
+            }]
+        );
+    }
+
+    /// A set the player named and has not filled is a set — the game lists it for them, and a
+    /// wardrobe that quietly dropped it here would disagree with the one they can see.
+    #[test]
+    fn keeps_a_set_with_nothing_in_it() {
+        let (_temp, wow, database) = in_game_sets_install(TWO_WARDROBES);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let payload = in_game_sets(&database).unwrap();
+        let later = &sets_of(&payload, "Aster-Vale")[0];
+        assert_eq!(later.id, 7);
+        assert_eq!(later.name, "Later");
+        assert_eq!(later.icon, None);
+        assert!(later.slots.is_empty());
+    }
+
+    /// When the addon last saw the wardrobe *differ*, not when the collector ran. The two are
+    /// hours apart for anybody who saved a set and then played for an evening, and the reading
+    /// is only worth showing if it is the addon's.
+    #[test]
+    fn carries_through_when_the_wardrobe_was_last_seen_to_differ() {
+        let (_temp, wow, database) = in_game_sets_install(TWO_WARDROBES);
+
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        let payload = in_game_sets(&database).unwrap();
+        for set in sets_of(&payload, "Aster-Vale") {
+            assert_eq!(set.observed_at, Some(2_000_000_000));
+        }
+        assert_eq!(sets_of(&payload, "Brin-Ravencrest")[0].observed_at, Some(1_999_000_000));
+    }
+
+    /// The file is a snapshot of one wardrobe, so a sync is a replacement and not a merge. A
+    /// set deleted at the transmogrifier simply stops being written, and this is what makes it
+    /// stop existing here — with its slots, by the cascade the migration declares.
+    #[test]
+    fn a_later_sync_replaces_a_characters_sets_wholesale() {
+        let (_temp, wow, database) = in_game_sets_install(TWO_WARDROBES);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        // Winter was deleted in game, Later was renamed and filled, and both are reported in
+        // the one list because that list is the whole wardrobe.
+        rewrite_in_game_sets(
+            &wow,
+            r#"
+            ["Aster-Vale"] = {
+                ["at"] = 2000000500,
+                ["sets"] = {
+                    { ["id"] = 7, ["name"] = "Spring", ["icon"] = 133602, ["slots"] = {
+                        { ["slot"] = 3, ["appearance"] = 44 },
+                    } },
+                },
+            },
+            "#,
+        );
+        collect(&wow, &database, 2_000_000_600, Options::default()).unwrap();
+
+        let payload = in_game_sets(&database).unwrap();
+        let aster = sets_of(&payload, "Aster-Vale");
+        assert_eq!(aster.len(), 1);
+        assert_eq!(aster[0].id, 7);
+        assert_eq!(aster[0].name, "Spring");
+        assert_eq!(aster[0].observed_at, Some(2_000_000_500));
+        assert_eq!(aster[0].slots.len(), 1);
+        assert_eq!(aster[0].slots[0].appearance_id, 44);
+
+        // The deleted set's two slots went with it rather than being left behind to be hung on
+        // whatever set claims id 4 next — Brin's one slot is all that is left beside Spring's.
+        assert_eq!(count_of(&database, "character_transmog_sets"), 2);
+        assert_eq!(count_of(&database, "character_transmog_set_slots"), 2);
+    }
+
+    /// A roster of ten alts is one file, and the character that logged out last is the only one
+    /// whose wardrobe was read. Wiping the other nine because they said nothing this time would
+    /// empty the app every time somebody played.
+    #[test]
+    fn leaves_a_character_the_file_did_not_mention_this_time_standing() {
+        let (_temp, wow, database) = in_game_sets_install(TWO_WARDROBES);
+        collect(&wow, &database, 2_000_000_100, Options::default()).unwrap();
+
+        rewrite_in_game_sets(
+            &wow,
+            r#"
+            ["Brin-Ravencrest"] = {
+                ["at"] = 2000000500,
+                ["sets"] = { { ["id"] = 1, ["name"] = "Sunfire", ["slots"] = { } } },
+            },
+            "#,
+        );
+        collect(&wow, &database, 2_000_000_600, Options::default()).unwrap();
+
+        let payload = in_game_sets(&database).unwrap();
+        // Aster's wardrobe is exactly as it was, stamp included: nothing about her was read.
+        let aster = sets_of(&payload, "Aster-Vale");
+        assert_eq!(aster.iter().map(|set| set.id).collect::<Vec<_>>(), vec![7, 4]);
+        assert_eq!(aster[1].slots.len(), 2);
+        assert_eq!(aster[1].observed_at, Some(2_000_000_000));
+        // And Brin's was replaced, weapon and all, by the one list that did arrive.
+        let brin = sets_of(&payload, "Brin-Ravencrest");
+        assert_eq!(brin.len(), 1);
+        assert!(brin[0].slots.is_empty());
     }
 }

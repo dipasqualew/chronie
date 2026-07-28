@@ -14,6 +14,7 @@ pub mod db2;
 pub mod gallery;
 pub mod glb;
 pub mod icons;
+pub mod ingamesets;
 pub mod items;
 pub mod logfile;
 pub mod m2;
@@ -445,6 +446,46 @@ fn delete_custom_set(
     state: State<'_, AppState>,
 ) -> Result<customsets::CustomSetsPayload, String> {
     collector::delete_custom_set(&state.database_path(), id)
+}
+
+/// The sets the player saved in the game itself, per character the addon has read one on.
+///
+/// The third kind of set on that screen, and the only one this app neither invented nor found
+/// in the game's files: Blizzard's sets are a DB2 table, the reader's own are rows this app
+/// wrote, and these were saved at a transmogrifier long before Chronie existed. Read out of the
+/// database rather than the install, so a machine without the game still lists them — see
+/// `0018_in_game_sets.sql` for why listing is as far as that goes.
+#[tauri::command]
+fn in_game_sets(state: State<'_, AppState>) -> Result<ingamesets::InGameSetsPayload, String> {
+    collector::in_game_sets(&state.database_path())
+}
+
+/// What a list of appearances actually is, for a set that names them and nothing else.
+///
+/// An in-game set is stored as `ItemModifiedAppearance` ids because that is all the game tells
+/// the addon, so opening one is this: the same four table walks a Blizzard set costs, over the
+/// ids the set names rather than the ids `TransmogSetItem` names. The answer is shaped exactly
+/// like `transmog_set_items`, which is what lets the window draw one with the code it already
+/// has for the other.
+///
+/// Asked when a reader opens a set rather than when the list is drawn, for the reason every
+/// other read of the game's tables here is deferred: a roster's worth of wardrobes is a lot of
+/// walking for rows nobody has looked at.
+#[tauri::command]
+async fn in_game_set_appearances(
+    appearance_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| {
+        let found = transmog::appearances_of(files, &appearance_ids)?;
+        let named = found.iter().filter(|row| row.item_id != 0).count();
+        Ok(serde_json::json!({
+            "readCount": named,
+            "withheldCount": found.len() - named,
+            "appearances": found,
+        }))
+    })
+    .await
 }
 
 /// What the game says about the achievements a window is showing.
@@ -1407,6 +1448,8 @@ pub fn run() {
             set_transmog_tag,
             delete_transmog_tag,
             custom_sets,
+            in_game_sets,
+            in_game_set_appearances,
             save_custom_set,
             delete_custom_set,
             character_model,
