@@ -20,9 +20,11 @@
  */
 
 import { plural } from "./format";
-import { markWords, survivesMarks } from "./marks";
+import { markFacets, markWords, survivesMarks } from "./marks";
 import type { MarkFilter } from "./marks";
-import { qualityWords } from "./qualities";
+import { qualityFacets, qualityWords } from "./qualities";
+import { asksAnything, matchesTerms, matchesWords, parseQuery } from "./terms";
+import type { Facet } from "./terms";
 import { ANY_CLASS, slotName } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import type { Quality, TransmogMark, WardrobeAppearance } from "./types";
@@ -219,6 +221,29 @@ function searchable(
   ].join(" ").toLowerCase();
 }
 
+/**
+ * And everything it says *under a name*, which is what a `key:value` term is matched against.
+ *
+ * The three the game supplies, and then the reader's own tags and whatever the artwork was
+ * measured to be — so `slot:head`, `kind:dagger`, `faction:horde` and `colour:brown` are all one
+ * kind of question over one list. A facet with nothing in it is left out rather than offered: a
+ * look whose kind the picker has no word for would otherwise answer `kind:` with nothing, and
+ * `kind:` is a reader asking which of these the picker *does* have a word for.
+ */
+function facetsOf(
+  appearance: WardrobeAppearance,
+  mark: TransmogMark | undefined,
+  quality: Quality | undefined,
+): Facet[] {
+  return [
+    { key: "name", value: appearance.name },
+    { key: "slot", value: slotName(appearance.displayType, appearance.inventoryType) },
+    { key: "kind", value: kindName(appearance) },
+    ...markFacets(mark),
+    ...qualityFacets(quality),
+  ].filter((facet) => facet.value !== "");
+}
+
 /** What kind of thing a look is, as the picker would have called it, or nothing it knows. */
 export function kindName(appearance: WardrobeAppearance): string {
   const kind = KINDS.find((one) => one.classId !== undefined && isKind(appearance, one));
@@ -229,10 +254,15 @@ export function kindName(appearance: WardrobeAppearance): string {
  * The looks a filter leaves, in the order the backend sorted them — which is by name.
  *
  * The search is every word rather than the whole phrase, the way the set browser's is, so
- * "dagger storm" finds what neither word finds alone. The class filter reads the item's own
- * mask: an item nobody is locked out of survives every class, and so does one the game
- * withholds the mask of — a row whose facts this install cannot read is not evidence that a
- * class may not wear it.
+ * "dagger storm" finds what neither word finds alone — and a `key:value` term beside the words
+ * asks about one thing the row says rather than about all of them: see `terms.ts`. The class
+ * filter reads the item's own mask: an item nobody is locked out of survives every class, and so
+ * does one the game withholds the mask of — a row whose facts this install cannot read is not
+ * evidence that a class may not wear it.
+ *
+ * The query is read once and the words and the facets of a row only where something asked for
+ * them. A kind is several thousand looks and this runs on every keystroke, so a row that a
+ * cheaper test has already thrown out never has a string built for it.
  */
 export function filterAppearances(
   appearances: WardrobeAppearance[],
@@ -244,11 +274,12 @@ export function filterAppearances(
      * the appearance rather than by the item, because that is what a row here is. */
     marks?: { filter: MarkFilter; of: (appearanceId: number) => TransmogMark | undefined };
     /** What the committed store measured of them, keyed the same way — see `qualities.ts`.
-     * Nothing filters by it; it is here because the search box reads the words on a row. */
+     * The search box reads both the words on a row and `colour:` and `size:` asked of it. */
     qualities?: (appearanceId: number) => Quality | undefined;
   },
 ): WardrobeAppearance[] {
-  const words = filters.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const query = parseQuery(filters.search);
+  const asked = asksAnything(query);
   const klass = filters.klass === "" ? null : Number(filters.klass);
   return appearances.filter((appearance) => {
     if (!isKind(appearance, filters.kind)) return false;
@@ -258,9 +289,12 @@ export function filterAppearances(
       && (appearance.allowableClass & (1 << klass)) === 0) return false;
     const mark = filters.marks?.of(appearance.appearanceId);
     if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
-    if (!words.length) return true;
-    const against = searchable(appearance, mark, filters.qualities?.(appearance.appearanceId));
-    return words.every((word) => against.includes(word));
+    if (!asked) return true;
+    const quality = filters.qualities?.(appearance.appearanceId);
+    if (query.terms.length && !matchesTerms(query.terms, facetsOf(appearance, mark, quality))) {
+      return false;
+    }
+    return matchesWords(query.words, searchable(appearance, mark, quality));
   });
 }
 

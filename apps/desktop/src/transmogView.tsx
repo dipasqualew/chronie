@@ -53,6 +53,7 @@ import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
 import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "./qualities";
 import { Qualities } from "./qualitiesChips";
+import { withTerm } from "./terms";
 import {
   CLASSES, alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
 } from "./transmog";
@@ -300,6 +301,10 @@ export function TransmogView(
   const sets = payload
     ? filterSets(payload.sets, {
       search, expansion, klass, marks: { filter: marked, of: (id) => index.of("set", id) },
+      // So that "brown" and `colour:brown` mean here what they already meant in the wardrobe
+      // beside this: the card draws the same measured chip, and a chip the box cannot be asked
+      // about is a chip that raises a question and will not answer it.
+      qualities: (id) => setQualities.of(id),
     })
     : [];
   // Only offer the expansions this install actually has sets for.
@@ -351,8 +356,12 @@ export function TransmogView(
       <section className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}>
         <div className="table-head">
           <div className="controls">
+            {/* A term in the placeholder beside the words, because `class:mage` is not a thing
+                anybody guesses a search box takes — see `terms.ts`, and the chips on every card
+                below, which write one into here when they are clicked. */}
             <input
-              id="transmog-search" type="search" placeholder="Filter by name, class, expansion…"
+              id="transmog-search" type="search"
+              placeholder="Filter by name, class, or colour:brown…"
               aria-label="Filter transmog sets" value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -402,6 +411,7 @@ export function TransmogView(
                     contents={known.get(set.id)} icons={icons} outfit={outfit}
                     hideUnwearable={hideUnwearable} marks={marks} markOf={markOf}
                     quality={setQualities.of(set.id)}
+                    onFilter={(term) => setSearch((was) => withTerm(was, term))}
                     onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
                     onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
                   />
@@ -466,7 +476,7 @@ export function TransmogView(
 function Card(
   {
     set, open, onToggle, contents, icons, outfit, hideUnwearable, marks, markOf, quality,
-    onWear, onWearAll,
+    onFilter, onWear, onWearAll,
   }: {
     set: TransmogSet;
     open: boolean;
@@ -481,6 +491,13 @@ function Card(
     markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
     /** What the committed store measured the whole set to be, or nothing where it holds none. */
     quality: Quality | undefined;
+    /**
+     * What a chip on the card asks of the grid when it is clicked — see `terms.ts`.
+     *
+     * The card's own chips only. The rows inside an opened set carry chips of their own and are
+     * given none of this: they are looks, and the box above the grid filters sets.
+     */
+    onFilter: (term: string) => void;
     onWear: (row: AppearanceRow) => void;
     onWearAll: (rows: AppearanceRow[]) => void;
   },
@@ -513,7 +530,7 @@ function Card(
             game states the class, the expansion and the patch, and this was measured off the
             artwork of the looks the set holds. There is no size — a set is a body's worth of
             clothes whatever is in it. */}
-        <Qualities quality={quality} />
+        <Qualities quality={quality} onFilter={onFilter} />
       </div>
       {/* Under the game's own facts and on their own line, because they are a different kind
           of statement: everything above is true of this build for everybody, and this is what
@@ -521,6 +538,7 @@ function Card(
           have to read what is in it. */}
       <MarkControls
         kind="set" id={set.id} mark={markOf("set", set.id)} name={name} actions={marks}
+        onFilter={onFilter}
       />
       {/* Who else wears exactly these clothes. 436 of the game's sets are another set's
           wardrobe under a different name — one per faction, one per class, or the same armour

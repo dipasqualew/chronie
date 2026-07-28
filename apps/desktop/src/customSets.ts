@@ -21,10 +21,12 @@
  */
 
 import { ago } from "./format";
-import { markWords, survivesMarks } from "./marks";
+import { markFacets, markWords, survivesMarks } from "./marks";
 import type { MarkFilter } from "./marks";
 import { placeOrder, wornPieces } from "./outfit";
 import type { Outfit } from "./outfit";
+import { asksAnything, matchesTerms, matchesWords, parseQuery } from "./terms";
+import type { Facet } from "./terms";
 import { ANY_CLASS, slotName } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import type { CustomSet, CustomSetPiece, TransmogMark } from "./types";
@@ -120,10 +122,27 @@ function searchable(set: CustomSet, mark: TransmogMark | undefined): string {
 }
 
 /**
+ * And what one says under a name, which is what a `key:value` term reads — see `terms.ts`.
+ *
+ * `piece` rather than `name` for what is in it, because both are names and a reader asking
+ * `piece:mantle` is asking about the contents rather than about what they called the set. The
+ * measured qualities are not here and cannot be: what was saved is a list of looks out of several
+ * slots, and the store measures a look at a time.
+ */
+function facetsOf(set: CustomSet, mark: TransmogMark | undefined): Facet[] {
+  return [
+    { key: "name", value: set.name },
+    ...set.pieces.map((piece) => ({ key: "piece", value: piece.name })),
+    ...markFacets(mark),
+  ].filter((facet) => facet.value !== "");
+}
+
+/**
  * The saved sets a filter leaves, in the order the backend sorted them — which is by name.
  *
  * Every word rather than the whole phrase, the way both browsers beside it search, so "horde
- * mantle" finds what neither word finds alone.
+ * mantle" finds what neither word finds alone — and a `key:value` term beside the words asks
+ * about one thing a set says rather than about all of them.
  */
 export function filterCustomSets(
   sets: CustomSet[],
@@ -133,13 +152,14 @@ export function filterCustomSets(
     marks?: { filter: MarkFilter; of: (setId: number) => TransmogMark | undefined };
   },
 ): CustomSet[] {
-  const words = filters.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const query = parseQuery(filters.search);
+  const asked = asksAnything(query);
   return sets.filter((set) => {
     const mark = filters.marks?.of(set.id);
     if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
-    if (!words.length) return true;
-    const against = searchable(set, mark);
-    return words.every((word) => against.includes(word));
+    if (!asked) return true;
+    if (query.terms.length && !matchesTerms(query.terms, facetsOf(set, mark))) return false;
+    return matchesWords(query.words, searchable(set, mark));
   });
 }
 

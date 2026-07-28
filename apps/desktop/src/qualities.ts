@@ -23,6 +23,7 @@
  *   are words on a row — see [`qualityWords`], which is [`markWords`]'s opposite number.
  */
 
+import type { Facet } from "./terms";
 import type { Quality, QualitiesFile, SetQualitiesFile } from "./types";
 
 /**
@@ -187,6 +188,29 @@ export function qualityWords(quality: Quality | undefined): string {
     quality.accent ? colourName(quality.accent) : "",
     quality.size ?? "",
   ].join(" ").trim().toLowerCase();
+}
+
+/** The two keys a measurement is asked for under, in the box and on a clicked chip alike. */
+export const COLOUR = "colour";
+export const SIZE = "size";
+
+/**
+ * And what it adds to the terms a search reads: `colour:brown`, `size:large`.
+ *
+ * [`qualityWords`]'s other half, and what the issue behind all of this actually asked for — the
+ * words were always there to be typed, but "brown" typed as a word finds the Brownhide Vest too,
+ * and there was no way to say that the brown was the thing being asked about.
+ *
+ * Both colours come back under the one key rather than as `primary` and `accent`. A reader looking
+ * at two swatches is looking at a thing that is brown and gold; which of the two the measurement
+ * called the fuller is a detail of `qualities.rs` and not a question anybody types.
+ */
+export function qualityFacets(quality: Quality | undefined): Facet[] {
+  if (!quality) return [];
+  const facets: Facet[] = [{ key: COLOUR, value: colourName(quality.primary) }];
+  if (quality.accent) facets.push({ key: COLOUR, value: colourName(quality.accent) });
+  if (quality.size) facets.push({ key: SIZE, value: quality.size });
+  return facets;
 }
 
 /** How a quality reads on a chip, which is the two colours named and the size word. */

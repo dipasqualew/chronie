@@ -30,6 +30,7 @@ import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { isWorn } from "./outfit";
 import type { Outfit } from "./outfit";
+import { withTerm } from "./terms";
 import type { AppearanceRow } from "./transmogModal";
 import { LinkOut } from "./ui";
 import type { CustomSet, CustomSetsPayload, TransmogMark } from "./types";
@@ -75,8 +76,11 @@ export function CustomSetList(
     <section className="panel mog-browser" id="custom-sets" hidden={hidden}>
       <div className="table-head">
         <div className="controls">
+          {/* A term beside the words, the way both browsers before this one advertise theirs —
+              here it is `piece:` and whatever the reader tagged, a saved set having no colour of
+              its own to be measured. See `terms.ts`. */}
           <input
-            id="custom-search" type="search" placeholder="Filter by name or what is in it…"
+            id="custom-search" type="search" placeholder="Filter by name, or piece:mantle…"
             aria-label="Filter your sets" value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -97,6 +101,7 @@ export function CustomSetList(
             <Card
               key={set.id} set={set} icons={icons} wantIcons={wantIcons} outfit={outfit}
               marks={marks} mark={index.of("custom", set.id)} index={index}
+              onFilter={(term) => setSearch((was) => withTerm(was, term))}
               onWear={onWear} onWearAll={() => onWearAll(set)}
               onDelete={() => {
                 setFailure("");
@@ -131,7 +136,7 @@ export function CustomSetList(
  */
 function Card(
   {
-    set, icons, wantIcons, outfit, marks, mark, index, onWear, onWearAll, onDelete,
+    set, icons, wantIcons, outfit, marks, mark, index, onFilter, onWear, onWearAll, onDelete,
   }: {
     set: CustomSet;
     icons: Map<number, string>;
@@ -140,6 +145,9 @@ function Card(
     marks: MarkActions;
     mark: TransmogMark | undefined;
     index: MarkIndex;
+    /** What a tag on the set asks of this list when it is clicked — see `terms.ts`. The pieces
+     * inside are looks and the box filters sets, so their own tags are given none of it. */
+    onFilter: (term: string) => void;
     onWear: (row: AppearanceRow) => void;
     onWearAll: () => void;
     onDelete: () => void;
@@ -166,7 +174,9 @@ function Card(
           no class, came out of no expansion and arrived in no patch, and the one thing that
           could go there — that it is the reader's own — is what the browser it is in says. */}
       <h4>{set.name}</h4>
-      <MarkControls kind="custom" id={set.id} mark={mark} name={set.name} actions={marks} />
+      <MarkControls
+        kind="custom" id={set.id} mark={mark} name={set.name} actions={marks} onFilter={onFilter}
+      />
       <div className="mog-foot">
         <span>{savedSummary(set)}</span>
       </div>

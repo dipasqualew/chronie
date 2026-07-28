@@ -7,9 +7,12 @@
  * `transmogView.tsx`, and what a reader puts on out of one is `outfit.ts`.
  */
 
-import { markWords, survivesMarks } from "./marks";
+import { markFacets, markWords, survivesMarks } from "./marks";
 import type { MarkFilter } from "./marks";
-import type { Alternate, SameLookReason, TransmogMark, TransmogSet } from "./types";
+import { qualityFacets, qualityWords } from "./qualities";
+import { asksAnything, matchesTerms, matchesWords, parseQuery } from "./terms";
+import type { Facet } from "./terms";
+import type { Alternate, Quality, SameLookReason, TransmogMark, TransmogSet } from "./types";
 
 /**
  * The classes, in the order the game's class mask numbers them.
@@ -83,7 +86,9 @@ export function patchName(packed: number): string {
  * holds it instead. The id is in there too, which is the one thing a reader has when the game
  * withholds the name.
  */
-function searchable(set: TransmogSet, mark: TransmogMark | undefined): string {
+function searchable(
+  set: TransmogSet, mark: TransmogMark | undefined, quality: Quality | undefined,
+): string {
   const game = [set, ...(set.alternates ?? [])].flatMap((one) => [
     one.name,
     one.group,
@@ -94,8 +99,36 @@ function searchable(set: TransmogSet, mark: TransmogMark | undefined): string {
     String(one.id),
   ]).join(" ").toLowerCase();
   // And whatever the reader themselves filed it under, so "horde" or "wishlist" finds the sets
-  // they said it about without their having to go near the picker beside the box.
-  return `${game} ${markWords(mark)}`;
+  // they said it about without their having to go near the picker beside the box. And what the
+  // artwork was measured to be, which the wardrobe beside this has always searched and this had
+  // no way to: the card draws the same chip, so "brown" is a word a reader can see here too.
+  return `${game} ${markWords(mark)} ${qualityWords(quality)}`;
+}
+
+/**
+ * And everything a set says under a name, which is what a `key:value` term reads — `terms.ts`.
+ *
+ * The whole cluster again, for the reason every filter here reads it: a set standing in for two
+ * others is standing in for their classes and their expansions, and `class:mage` that missed the
+ * folded-away Mage version would hide the look from exactly the reader asking for it.
+ *
+ * `collection` rather than `group`, because "Tideglass Wardrobe" is what the heading over the card
+ * says and a reader types the word they are looking at. Facets with nothing in them are dropped —
+ * a set out of no collection answers `collection:` with nothing rather than with itself.
+ */
+function facetsOf(
+  set: TransmogSet, mark: TransmogMark | undefined, quality: Quality | undefined,
+): Facet[] {
+  const game = [set, ...(set.alternates ?? [])].flatMap((one): Facet[] => [
+    { key: "name", value: one.name },
+    { key: "collection", value: one.group },
+    { key: "class", value: classLabel(one.classMask) },
+    ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
+    { key: "expansion", value: expansionName(one.expansionId) },
+    { key: "patch", value: patchName(one.patchIntroduced) },
+  ]);
+  return [...game, ...markFacets(mark), ...qualityFacets(quality)]
+    .filter((facet) => facet.value !== "");
 }
 
 /**
@@ -170,9 +203,13 @@ export function filterSets(
     /** What the reader has said about these sets, and what they have narrowed it to. Absent
      * where no mark is in play, which is what every caller that predates them passes. */
     marks?: { filter: MarkFilter; of: (setId: number) => TransmogMark | undefined };
+    /** What the committed store measured a whole set to be — see `qualities.ts`. Absent where
+     * the file has not arrived, which is what the first draw of the view passes. */
+    qualities?: (setId: number) => Quality | undefined;
   },
 ): TransmogSet[] {
-  const words = filters.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const query = parseQuery(filters.search);
+  const asked = asksAnything(query);
   const expansion = filters.expansion === "" ? null : Number(filters.expansion);
   const klass = filters.klass === "" ? null : Number(filters.klass);
   return sets.filter((set) => {
@@ -184,9 +221,12 @@ export function filterSets(
       && !wearers.some((mask) => mask === 0 || (mask & (1 << klass)) !== 0)) return false;
     const mark = filters.marks?.of(set.id);
     if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
-    if (!words.length) return true;
-    const against = searchable(set, mark);
-    return words.every((word) => against.includes(word));
+    if (!asked) return true;
+    const quality = filters.qualities?.(set.id);
+    if (query.terms.length && !matchesTerms(query.terms, facetsOf(set, mark, quality))) {
+      return false;
+    }
+    return matchesWords(query.words, searchable(set, mark, quality));
   });
 }
 

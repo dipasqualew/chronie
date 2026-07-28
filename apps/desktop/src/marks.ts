@@ -21,6 +21,7 @@
  * show them half of what they marked.
  */
 
+import type { Facet } from "./terms";
 import type { MarkSubjectKind, TransmogMark, TransmogMarksPayload, TransmogTag } from "./types";
 
 /** A subject nobody has said anything about, which is nearly all of them. */
@@ -194,4 +195,16 @@ export function markWords(mark: TransmogMark | undefined): string {
   // The word rather than a symbol, because a star is not typeable and "favourite" is what
   // somebody looking for their starred pieces would actually reach for.
   return [...(mark.favourite ? ["favourite"] : []), ...tags].join(" ").toLowerCase();
+}
+
+/**
+ * And what they add to the terms it reads — one per tag, key and value as they were typed.
+ *
+ * [`markWords`]'s other half, and the reason a tag was a key and a value in the first place: a
+ * label becomes a facet with no value, which is exactly what `wishlist:` asks for and what
+ * `wishlist:soon` does not answer. Nothing about the star is here — "starred" is a checkbox above
+ * the list rather than a word under a key, and the box beside it already reads [`markWords`].
+ */
+export function markFacets(mark: TransmogMark | undefined): Facet[] {
+  return (mark?.tags ?? []).map((tag) => ({ key: tag.key, value: tag.value ?? "" }));
 }
