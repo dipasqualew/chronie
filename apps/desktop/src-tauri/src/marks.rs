@@ -22,6 +22,14 @@ use serde::{Deserialize, Serialize};
 pub const SET: &str = "set";
 /// A look, numbered by `ItemAppearance.id` — the game's own unit of collection.
 pub const APPEARANCE: &str = "appearance";
+/// A set the reader saved off the character themselves, numbered by this database.
+///
+/// The one subject of the three that Chronie issues the id for, and the reason marking one had
+/// to be the same feature rather than a second one beside it: a set of somebody's own is a set,
+/// and "star it, tag it, filter the browser by what you said" is what they already know how to
+/// do to the ones Blizzard shipped. See `customsets::KIND`, which is this string from the other
+/// end, and `0017_custom_sets.sql`, which widened the two tables to hold it.
+pub const CUSTOM: &str = "custom";
 
 /// How long a key may be. Long enough for "expansion" or "who wears it", short enough that a
 /// chip stays a chip; a reader wanting a sentence about a look wants the value, not the key.
@@ -47,9 +55,11 @@ pub struct Tag {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mark {
-    /// [`SET`] or [`APPEARANCE`].
+    /// [`SET`], [`APPEARANCE`] or [`CUSTOM`].
     pub kind: String,
-    /// The game's own id for the thing, which is why nothing here has a foreign key.
+    /// The id of the thing: the game's for the first two, and this database's own for a set the
+    /// reader saved. Which is why nothing here has a foreign key — two of the three subjects
+    /// live in the game's files rather than in any table.
     pub id: i64,
     pub favourite: bool,
     pub tags: Vec<Tag>,
@@ -66,7 +76,7 @@ pub struct MarksPayload {
     pub marks: Vec<Mark>,
 }
 
-/// Which of the two kinds of subject this is, refusing anything that is neither.
+/// Which of the three kinds of subject this is, refusing anything that is none of them.
 ///
 /// The check is here as well as in the table's own `CHECK` because the window sends this
 /// across the bridge as a string, and "the database rejected it" is not a sentence anybody
@@ -75,13 +85,14 @@ pub fn subject_kind(raw: &str) -> Result<&'static str, String> {
     match raw {
         SET => Ok(SET),
         APPEARANCE => Ok(APPEARANCE),
+        CUSTOM => Ok(CUSTOM),
         other => Err(format!(
-            "A mark belongs to a set or an appearance, not to a '{other}'."
+            "A mark belongs to a set, an appearance or a set of your own, not to a '{other}'."
         )),
     }
 }
 
-/// A subject id the game could have issued, which is any positive number.
+/// A subject id anything could have issued, which is any positive number.
 ///
 /// Zero is what every hop of the transmog chain reads as when the game encrypts it — an
 /// appearance belonging to content Blizzard has not shipped arrives as an id of nothing at
@@ -153,9 +164,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognises_the_two_kinds_of_subject_and_nothing_else() {
+    fn recognises_the_three_kinds_of_subject_and_nothing_else() {
         assert_eq!(subject_kind("set"), Ok(SET));
         assert_eq!(subject_kind("appearance"), Ok(APPEARANCE));
+        assert_eq!(subject_kind("custom"), Ok(CUSTOM));
         assert!(subject_kind("item").is_err());
         assert!(subject_kind("").is_err());
         // Case is not a spelling of the same word here: this crosses the bridge as one of two
