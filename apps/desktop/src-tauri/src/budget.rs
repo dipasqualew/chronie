@@ -672,11 +672,19 @@ mod tests {
     // The rows are worth looking at beside the click's 274: twenty rows of a wardrobe walk fewer
     // tables' worth of rows than one eight-piece outfit does, because a walk costs the whole
     // table and a page pays for one walk of each.
+    //
+    // **This page is a worst case the window cannot actually ask for**, and the row ceiling is
+    // what that costs. A gallery draws armour on a body and a weapon as its own mesh, and those
+    // are two subsystems reading an overlapping set of tables — so a page holding both walks
+    // `ItemDisplayInfo` and the two model tables once for each half. Every kind the window
+    // offers is one armour slot or the held ones and never a mix (see `wardrobe.ts`), so a real
+    // page takes one branch or the other; the two tests below are what those cost. Mixing them
+    // here is deliberate all the same, because it is the arrangement that measures both.
     #[test]
     fn draws_a_page_within_what_it_costs_today() {
         let work = page_cost(&page());
         assert!(work.reads <= 50, "a page reads {} files", work.reads);
-        assert!(work.rows <= 170, "a page walks {} rows", work.rows);
+        assert!(work.rows <= 205, "a page walks {} rows", work.rows);
         // Not zero, and for the reason `decodes_nothing_again_for_the_same_click` gives: the
         // fixture tables name a texture the fixture directory holds no file for, and a read that
         // found nothing is deliberately not remembered. The page names each display twice, so
@@ -686,6 +694,56 @@ mod tests {
             work.repeated <= PAGE / WARDROBE.len(),
             "a page inflated {} files twice",
             work.repeated,
+        );
+    }
+
+    /// A page of one kind, which is the only kind of page the window ever asks for.
+    ///
+    /// Every kind in the picker is either one armour slot or the seventeen things held in a
+    /// hand, so a reader is looking at heads, or at staves, and never at both. `of` splits on
+    /// exactly that, and these two are what each side costs on its own.
+    fn page_of(pieces: &[(u32, u32, u32)]) -> Work {
+        let rows: Vec<worn::Piece> = (0..PAGE)
+            .map(|row| {
+                let (display_info_id, display_type, inventory_type) = pieces[row % pieces.len()];
+                worn::Piece {
+                    display_info_id,
+                    display_type,
+                    inventory_type,
+                }
+            })
+            .collect();
+        page_cost(&rows)
+    }
+
+    // A page of weapons never builds the body, which is the single largest thing a gallery
+    // touches: her mesh, her skin resized onto a 2048x1024 atlas, her face composited over that,
+    // and a 16MB skeleton. Seventeen of the thirty kinds a reader can pick are held in a hand,
+    // so this is the common page rather than the exotic one.
+    #[test]
+    fn builds_no_body_and_paints_no_atlas_for_a_page_of_weapons() {
+        let work = page_of(&[(900_007, 11, 13)]);
+        assert_eq!(work.atlases, 0, "a page of weapons built a body");
+        assert_eq!(work.encodes, 0, "a page of weapons painted an atlas");
+    }
+
+    // And is cheaper than the mixed page above by more than the rows it left out, because what
+    // it left out is a whole subsystem rather than a share of one.
+    #[test]
+    fn draws_a_page_of_weapons_for_less_than_a_page_that_needs_a_body() {
+        let carried = page_of(&[(900_007, 11, 13)]);
+        let worn = page_of(&[(900_003, 3, 0)]);
+        assert!(
+            carried.rows < worn.rows,
+            "a page of weapons walked {} rows against {} for a page of chestpieces",
+            carried.rows,
+            worn.rows,
+        );
+        assert!(
+            carried.read_bytes < worn.read_bytes,
+            "a page of weapons read {} bytes against {}",
+            carried.read_bytes,
+            worn.read_bytes,
         );
     }
 

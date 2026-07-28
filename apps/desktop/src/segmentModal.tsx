@@ -15,6 +15,7 @@ import { CaptureGallery } from "./captureGallery";
 import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
 import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
+import type { AppearanceModalState } from "./appearanceModal";
 import { GameItem } from "./item";
 import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
@@ -43,6 +44,17 @@ const Wowhead = (
 
 const At = ({ event }: { event: { at?: number | null } }): ReactNode =>
   (event.at ? <span className="muted">{clock(event.at)}</span> : null);
+
+/**
+ * What to call an item on a control that has to say something before anything has been read.
+ *
+ * The book first, because it is the game's own name and is what the row itself is drawing by
+ * the time anybody clicks; then the name the addon caught at the time, which is what the app
+ * had before it read the game's tables at all; and the number, which is always true.
+ */
+function itemName(event: { id: number; name?: string | null }, items: ItemBook): string {
+  return items.detail(event.id)?.name || event.name || `Item ${event.id}`;
+}
 
 /** A section of the modal, or nothing when the segment has no events of that kind. */
 function Section(
@@ -319,7 +331,13 @@ function Currencies(
  * abbreviation was not enough.
  */
 function Lists(
-  { segment, book, items }: { segment: Segment; book: AchievementBook; items: ItemBook },
+  { segment, book, items, onShowAppearance }: {
+    segment: Segment;
+    book: AchievementBook;
+    items: ItemBook;
+    /** Absent where nothing can draw one, which is what leaves the transmog rows as they were. */
+    onShowAppearance?: (showing: AppearanceModalState) => void;
+  },
 ): ReactNode {
   const encounters = eventsOf(segment, "encounters");
   const achievements = eventsOf(segment, "achievements");
@@ -390,6 +408,20 @@ function Lists(
                   ? <span className="appearance-variant">variant of one owned</span>
                   : <span className="muted">unknown</span>}
               <At event={event} />
+              {/* The way through to a picture of it, and the only thing on this row that costs
+                  anything: three of the game's tables stand between an item id and a model, and
+                  none of them is opened until this is pressed. A button rather than the row
+                  itself, because the row is already a link out to Wowhead. */}
+              {onShowAppearance
+                ? <button
+                  type="button" className="ghost appearance-show"
+                  title={`Show ${itemName(event, items)} drawn`}
+                  aria-label={`Show ${itemName(event, items)} drawn`}
+                  onClick={() => onShowAppearance({
+                    itemId: event.id, name: itemName(event, items),
+                  })}
+                >Show</button>
+                : null}
             </GameItem>
           </li>
         ))}
@@ -484,12 +516,19 @@ export interface SegmentModalProps {
   /** The thumbnails the window has already been handed, shared with every other grid. */
   album: CaptureAlbum;
   captures: CaptureActions;
+  /**
+   * Opens a picture of one transmog source the segment names.
+   *
+   * Absent where nothing can draw one — a window with no game install behind it — which leaves
+   * the transmog rows exactly as they were: a name, an icon and whether the look was new.
+   */
+  onShowAppearance?: (showing: AppearanceModalState) => void;
 }
 
 export function SegmentModal(
   {
     showing, onStep, onClose, onEditActivities, achievements: book, items, holdings, album,
-    captures,
+    captures, onShowAppearance,
   }: SegmentModalProps,
 ): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -603,7 +642,10 @@ export function SegmentModal(
               <CaptureGallery segments={[segment]} album={album} actions={captures} />
             </Section>
             : null}
-          <Lists segment={segment} book={book} items={items} />
+          <Lists
+            segment={segment} book={book} items={items}
+            onShowAppearance={onShowAppearance}
+          />
           <Gold segment={segment} holdings={holdings} />
           <Currencies segment={segment} holdings={holdings} />
           <Reputation segment={segment} holdings={holdings} />

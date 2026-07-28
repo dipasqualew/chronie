@@ -18,10 +18,13 @@ import type {
   CustomSetPiece,
   CustomSetsPayload,
   DashboardPayload,
+  GalleryKind,
   GalleryPayload,
   IconsPayload,
   InstallResult,
   ItemDetail,
+  ItemAppearance,
+  ItemAppearancesPayload,
   ItemDetailsPayload,
   LogRetention,
   MarkSubjectKind,
@@ -158,6 +161,14 @@ export const desktop = {
   itemDetails: (ids: number[]): Promise<ItemDetailsPayload> => mock
     ? Promise.resolve({ items: mockItems(ids) })
     : invoke<ItemDetailsPayload>("item_details", { ids }),
+  // The look an item carries, which a segment has no other way to reach: it holds item ids, and
+  // drawing an appearance takes the display it resolves to. Asked when a reader clicks a row
+  // rather than when the segment is drawn — the three tables behind it are hundreds of thousands
+  // of rows, and a modal listing thirty sources would walk them to fill in pictures nobody
+  // asked to see.
+  itemAppearances: (itemIds: number[]): Promise<ItemAppearancesPayload> => mock
+    ? Promise.resolve({ appearances: mockItemAppearances(itemIds) })
+    : invoke<ItemAppearancesPayload>("item_appearances", { itemIds }),
   // The pictures a list of rows needs, asked for once the rows are drawn. The backend keeps
   // every texture it has decoded, so this is answered from memory for everything a
   // neighbouring set or an earlier segment already showed.
@@ -187,6 +198,7 @@ export const desktop = {
     ? Promise.resolve({
       models: pieces.map((piece) => ({
         displayInfoId: piece.displayInfoId,
+        kind: mockGalleryKind(piece.displayType),
         model: mock.wornSets[wornSetKey([piece])] ?? null,
       })),
     })
@@ -498,6 +510,33 @@ function mockItems(wanted: number[]): Record<string, ItemDetail> {
   for (const id of wanted) {
     const detail = mock.itemDetails[id];
     if (detail) found[String(id)] = detail;
+  }
+  return found;
+}
+
+/**
+ * What the real backend would have said a gallery row is a picture of.
+ *
+ * The eleven armour slots are head through tabard and everything the game numbers above them is
+ * carried in a hand, so a display type above ten comes back as the item's own mesh. This is the
+ * one place in the window that decides it rather than reading it — because here there is no
+ * backend to have read it from, and a stub that always claimed `worn` would let the browser
+ * suite pass while the real thing framed every weapon as a character. It mirrors `worn::held`,
+ * which is where the boundary is actually stated.
+ */
+const ARMOUR_SLOTS = 11;
+
+function mockGalleryKind(displayType: number): GalleryKind {
+  return displayType >= ARMOUR_SLOTS ? "held" : "worn";
+}
+
+/** The looks the e2e mock can resolve among the items asked about, keyed the same way. */
+function mockItemAppearances(wanted: number[]): Record<string, ItemAppearance> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, ItemAppearance> = {};
+  for (const id of wanted) {
+    const look = mock.itemAppearances[id];
+    if (look) found[String(id)] = look;
   }
   return found;
 }

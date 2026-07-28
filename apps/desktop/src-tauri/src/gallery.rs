@@ -1,15 +1,20 @@
-//! A page of the wardrobe, every appearance on it shown worn.
+//! A page of the wardrobe: armour shown worn, and what is carried shown as itself.
 //!
-//! The game's own wardrobe does not draw an item; it draws a character wearing the item, and that
+//! The game's own wardrobe does not draw a chestpiece; it draws a character wearing one, and that
 //! is not a presentational choice. **Most of the game's armour has no geometry at all.** A
 //! chestpiece is a set of textures painted into a body's atlas and a handful of geoset switches,
 //! as `docs/character-rendering.md` sets out — there is no chestpiece mesh to put on a turntable,
-//! and the only thing that can be shown is a body with the chestpiece on it. A helm and a sword do
-//! have meshes, and [`crate::models`] still writes one out on its own for `dump_model`, but a
-//! wardrobe that showed geometry where there was some and an icon where there was not would be
-//! showing a body for a tenth of its rows.
+//! and the only thing that can be shown is a body with the chestpiece on it.
 //!
-//! So: one body, and every row of the page wearing one thing.
+//! **A weapon is the other case, and it is not a rare one.** A sword, a shield, a bow and an
+//! off-hand each have a mesh of their own, and the body under one of them contributes nothing:
+//! she is a hundred pixels of woman holding the thing the reader actually asked to look at.
+//! Seventeen of the wardrobe's thirty kinds are held in a hand, so this is a third of the browser
+//! rather than a corner of it. Those rows are drawn by [`crate::models`], which is the same code
+//! `dump_model` writes an `.m2` out with, and they are drawn *without a body at all* — see
+//! [`held`], which is where the page stops paying for one.
+//!
+//! So: one body between every row that needs one, and every row that does not, alone.
 //!
 //! # What makes twenty of them affordable
 //!
@@ -41,13 +46,24 @@ use serde_json::Value;
 use crate::casc::GameFiles;
 use crate::character::Mannequin;
 use crate::icons::data_url;
-use crate::worn::{self, Piece};
+use crate::worn::{self, held, Piece};
 
-/// Every appearance of a page, each worn on the same body, in the order they were asked for.
+/// What kind of picture a row came back as, so the window knows what it is framing.
+///
+/// The two differ in more than provenance. A body is a two-metre character with the appearance
+/// somewhere on her, and the window points a camera at the part of her the slot is on; a held
+/// model is the object and nothing else, and the whole of it is the picture. Sending the word
+/// rather than letting the window re-derive it from the display type keeps one answer to
+/// "was this drawn on a body" instead of two that can disagree.
+const WORN: &str = "worn";
+const HELD: &str = "held";
+
+/// Every appearance of a page, drawn the way that appearance can be drawn, in the order asked.
 ///
 /// `null` for a row is the ordinary answer and means what it means everywhere else in this app:
-/// the game encrypts the displays of content it has not shipped, and an appearance whose only
-/// texture was painted for another body resolves to nothing. The window keeps that row's icon.
+/// the game encrypts the displays of content it has not shipped, an appearance whose only texture
+/// was painted for another body resolves to nothing, and an install can be missing the `.m2` a
+/// weapon names. The window keeps that row's icon.
 ///
 /// The order is the caller's, and every row asked for gets an answer, including the ones that
 /// resolve to nothing — a page one row short is a row the window would have to hunt for.
@@ -57,36 +73,102 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
         return Ok(serde_json::json!({ "models": [] }));
     }
 
-    // One outfit per piece: nothing on this page is ever worn beside anything else on it, so
-    // there is nothing for the priority table or the draw order to settle. What the pieces share
-    // is the tables, and that is the whole reason this is one call rather than a loop.
-    let alone: Vec<&[Piece]> = pieces.iter().map(std::slice::from_ref).collect();
-    let worn = worn::each(files, &alone)?;
+    // The page split by what each row can be a picture of, keeping where each sat. Both halves
+    // are then answered in one go, which is the whole shape of this module: the cost of either
+    // kind is the tables behind it, and a table costs the same walk however many rows come out.
+    let dressed: Vec<usize> = (0..pieces.len())
+        .filter(|row| !held(pieces[*row].display_type))
+        .collect();
+    let carried: Vec<usize> = (0..pieces.len())
+        .filter(|row| held(pieces[*row].display_type))
+        .collect();
 
-    let mannequin = Mannequin::standing(files)?;
+    let mut drawn: Vec<Option<String>> = vec![None; pieces.len()];
+
+    // A page with nothing on it that goes on a body never reaches this branch, and that is the
+    // point of the split: the character and the six tables behind her are the whole cost of a
+    // gallery, and a reader browsing the seventeen kinds of weapon should not pay for a body
+    // none of their rows would have shown.
+    if !dressed.is_empty() {
+        // One outfit per piece: nothing on this page is ever worn beside anything else on it, so
+        // there is nothing for the priority table or the draw order to settle. What the pieces
+        // share is the tables, and that is the whole reason this is one call rather than a loop.
+        let alone: Vec<&[Piece]> = dressed
+            .iter()
+            .map(|row| std::slice::from_ref(&pieces[*row]))
+            .collect();
+        let worn = worn::each(files, &alone)?;
+
+        let mannequin = Mannequin::standing(files)?;
+        for (row, worn) in dressed.iter().zip(worn.iter()) {
+            if worn.is_empty() {
+                continue;
+            }
+            drawn[*row] = Some(data_url("model/gltf-binary", &mannequin.wearing(Some(worn))?));
+        }
+    }
+
+    // And the same for the geometry, out of one walk of each of the three tables an item's own
+    // model comes out of. Nothing is an ordinary answer here too, and a *different* ordinary
+    // answer than an empty `Worn`: this install may simply not hold the file the display names.
+    if !carried.is_empty() {
+        let displays: Vec<u32> = carried
+            .iter()
+            .map(|row| pieces[*row].display_info_id)
+            .collect();
+        for (row, alone) in carried.iter().zip(crate::models::each(files, &displays)?) {
+            drawn[*row] = alone.map(|bytes| data_url("model/gltf-binary", &bytes));
+        }
+    }
+
     let models: Vec<Value> = pieces
         .iter()
-        .zip(worn.iter())
-        .map(|(piece, worn)| {
-            let model = if worn.is_empty() {
-                Value::Null
-            } else {
-                Value::String(data_url("model/gltf-binary", &mannequin.wearing(Some(worn))?))
-            };
-            Ok(serde_json::json!({
+        .zip(drawn)
+        .map(|(piece, model)| {
+            serde_json::json!({
                 "displayInfoId": piece.display_info_id,
-                "model": model,
-            }))
+                "kind": if held(piece.display_type) { HELD } else { WORN },
+                "model": model.map_or(Value::Null, Value::String),
+            })
         })
-        .collect::<Result<_, String>>()?;
+        .collect();
 
     Ok(serde_json::json!({ "models": models }))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
+
+    /// Fixture files that remember which of the game's own files were opened.
+    ///
+    /// The same recorder `wardrobe`'s tests use, and here for the one thing counting cannot say:
+    /// whether the *character* was among them. A page that skipped the body reads fewer files
+    /// than one that did not, but so does a page whose weapons this install cannot see — and
+    /// those are opposite outcomes.
+    struct Noted {
+        files: DirFiles,
+        asked: RefCell<Vec<u32>>,
+    }
+
+    impl Noted {
+        fn new() -> Self {
+            Self {
+                files: fixture_files(),
+                asked: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl GameFiles for Noted {
+        fn read(&self, fdid: u32) -> Result<std::sync::Arc<Vec<u8>>, String> {
+            self.asked.borrow_mut().push(fdid);
+            self.files.read(fdid)
+        }
+    }
 
     /// A helm, a pair of shoulders, a chestpiece and a weapon: the two rows that hang geometry
     /// off the body and the two that only paint it, which is both halves of what a page holds.
@@ -109,7 +191,7 @@ mod tests {
         }
     }
 
-    /// The rows of a page, as `(display id, whether it came back with a body)`.
+    /// The rows of a page, as `(display id, whether it came back with a model)`.
     fn page(pieces: &[Piece]) -> Vec<(u64, bool)> {
         rows(&of(&fixture_files(), pieces).unwrap())
     }
@@ -130,13 +212,83 @@ mod tests {
             .collect()
     }
 
-    // The point of the module: four rows in, four bodies out.
+    /// What each row of a page says it is, which is what the window frames by.
+    fn kinds(pieces: &[Piece]) -> Vec<&'static str> {
+        of(&fixture_files(), pieces).unwrap()["models"]
+            .as_array()
+            .expect("a page answers with an array")
+            .iter()
+            .map(|row| match row["kind"].as_str().expect("a row says what it is") {
+                "worn" => WORN,
+                "held" => HELD,
+                other => panic!("a row came back as {other}"),
+            })
+            .collect()
+    }
+
+    // The point of the module: four rows in, four pictures out.
     #[test]
-    fn shows_every_appearance_of_a_page_worn() {
+    fn shows_every_appearance_of_a_page() {
         assert_eq!(
             page(&[HELM, SHOULDERS, CHESTPIECE, WEAPON]),
             vec![(900_001, true), (900_002, true), (900_003, true), (900_007, true)],
         );
+    }
+
+    // And what each of those pictures is. The three armour rows are a character wearing the
+    // thing, because there is no chestpiece to draw; the weapon is the weapon.
+    #[test]
+    fn draws_armour_on_a_body_and_a_weapon_as_itself() {
+        assert_eq!(
+            kinds(&[HELM, SHOULDERS, CHESTPIECE, WEAPON]),
+            vec![WORN, WORN, WORN, HELD],
+        );
+    }
+
+    // A helm has a mesh of its own and is still drawn worn, which is the distinction the module
+    // turns on: what decides is where the appearance goes, not whether it has geometry. A helm
+    // off a head is a bowl, and the game's own wardrobe shows it on one.
+    #[test]
+    fn draws_a_helm_on_a_body_though_it_has_a_model_of_its_own() {
+        assert_eq!(kinds(&[HELM]), vec![WORN]);
+    }
+
+    // The weapon row is the item's own model and nothing else — which is the same `.glb` the
+    // model path writes for `dump_model`, down to the bytes. Anything else here would mean the
+    // gallery had grown a second implementation of what an item's geometry is.
+    #[test]
+    fn draws_a_weapon_as_the_model_the_display_names() {
+        let files = fixture_files();
+        let alone = crate::models::glb_of(&files, WEAPON.display_info_id)
+            .unwrap()
+            .expect("the fixture weapon has a model");
+        assert_eq!(
+            of(&files, &[WEAPON]).unwrap()["models"][0]["model"],
+            Value::String(data_url("model/gltf-binary", &alone)),
+        );
+    }
+
+    // And the saving that pays for it: a page with nothing on it that goes on a body never reads
+    // the body. She is the single most expensive thing a gallery touches — the mesh, the skin
+    // resized onto a 2048x1024 atlas, the face composited over it and a 16MB skeleton — and a
+    // reader browsing the seventeen kinds of weapon would otherwise pay for her on every page.
+    #[test]
+    fn reads_no_body_for_a_page_of_nothing_but_weapons() {
+        let files = Noted::new();
+        of(&files, &[WEAPON, WEAPON]).expect("a page of weapons draws");
+        assert!(
+            !files.asked.borrow().contains(&crate::character::HUMAN_FEMALE),
+            "a page of weapons read the character anyway",
+        );
+    }
+
+    // The other side of it, so that the test above is measuring the branch rather than a fixture
+    // that happens never to name her: one chestpiece on the page and the body is read.
+    #[test]
+    fn reads_the_body_for_a_page_holding_one_piece_of_armour() {
+        let files = Noted::new();
+        of(&files, &[WEAPON, CHESTPIECE]).expect("a mixed page draws");
+        assert!(files.asked.borrow().contains(&crate::character::HUMAN_FEMALE));
     }
 
     // The order is the caller's and not the draw order the pieces would have gone on a body in.
