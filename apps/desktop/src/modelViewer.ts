@@ -91,6 +91,15 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   // light below from clipping.
   renderer.toneMapping = unlit ? NoToneMapping : ACESFilmicToneMapping;
   renderer.outputColorSpace = SRGBColorSpace;
+  // Named, so that a stylesheet can say how large the element is — because nothing here can.
+  // `resize` below calls `setSize` with `updateStyle` off and has to: the packaged window is
+  // served a policy with a nonce in `style-src`, which makes every engine ignore
+  // `'unsafe-inline'`, so an inline `style=""` is thrown out before it is ever read. What that
+  // leaves is a drawing buffer sized in *device* pixels and an element with no size of its own,
+  // which on a screen with two device pixels to the CSS pixel lays the canvas out at twice its
+  // pane. A class rather than a rule per pane, because two panes draw on one of these and the
+  // second one forgot — see the note on `.model-canvas` in `index.html`.
+  renderer.domElement.className = "model-canvas";
   container.replaceChildren(renderer.domElement);
 
   const scene = new Scene();
