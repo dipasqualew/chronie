@@ -107,7 +107,10 @@ export function MarkControls(
       ><Star filled={favourite} /></button>
       {tags.map((tag) => (
         <span className="chip mark-tag" key={tag.key.toLowerCase()}>
-          {tagLabel(tag)}
+          {/* In its own element rather than as a bare text node, so that what the tag says
+              can be read on its own — the × beside it is part of the chip and not part of
+              the sentence. */}
+          <span className="mark-tag-text">{tagLabel(tag)}</span>
           <button
             type="button" className="mark-drop"
             aria-label={`Remove the tag ${tagLabel(tag)} from ${name}`}
