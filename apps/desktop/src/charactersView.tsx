@@ -79,7 +79,10 @@ export function Characters(
           </ul>
           : <p className="empty">No characters yet. Play for a bit and Chronie will fill this in.</p>}
       </nav>
-      <section className="panel roster-detail" id="character-detail" aria-live="polite">
+      <section
+        className="panel roster-detail" id="character-detail" aria-live="polite"
+        aria-label="The character"
+      >
         {showing
           ? <Profile
             entry={showing} unfolded={unfolded} items={items}
@@ -130,9 +133,15 @@ function RosterEntry(
   );
 }
 
-/** One row of the fact grid: dropped entirely rather than drawn as a dash when unknown. */
+/**
+ * One row of the fact grid: dropped entirely rather than drawn as a dash when unknown.
+ *
+ * The pair is a named group, which is the one thing `<dt>`/`<dd>` cannot do for itself: a
+ * definition takes no name of its own, so nothing outside the grid can ask for "the played
+ * figure" without counting from one end of it.
+ */
 const Stat = ({ label, children }: { label: string; children: ReactNode }): ReactNode =>
-  <div><dt>{label}</dt><dd>{children}</dd></div>;
+  <div role="group" aria-label={label}><dt>{label}</dt><dd>{children}</dd></div>;
 
 interface ProfileProps {
   entry: CharacterProfile;

@@ -69,7 +69,7 @@ export function CaptureGallery({ segments, album, actions }: CaptureGalleryProps
 
   return (
     <div className="captures">
-      <ul className="capture-grid">
+      <ul className="capture-grid" aria-label="Screenshots">
         {moments.map((moment) => (
           <li key={moment.capture.sourceId}>
             <CaptureTile
@@ -243,7 +243,9 @@ function CaptureViewer(
       <div className="detail-head">
         <div>
           <h2 className="detail-title" id="capture-viewer-title">{moment.segment.instance}</h2>
-          <span className="detail-position">{index + 1} of {count}</span>
+          <span className="detail-position" role="status" aria-label="Which screenshot">
+            {index + 1} of {count}
+          </span>
         </div>
         <div className="detail-nav">
           <button

@@ -73,7 +73,10 @@ export function CustomSetList(
   const tags = tagChoices(index, "custom", saved.map((set) => set.id));
 
   return (
-    <section className="panel mog-browser" id="custom-sets" hidden={hidden}>
+    <section
+      className="panel mog-browser" id="custom-sets" hidden={hidden}
+      aria-label="The sets you saved here"
+    >
       <div className="table-head">
         <div className="controls">
           {/* A term beside the words, the way both browsers before this one advertise theirs —
@@ -201,7 +204,7 @@ function Card(
               onClick={() => setConfirming(true)}
             >Delete</button>}
         </div>
-        <ul className="mog-items">
+        <ul className="mog-items" aria-label={`Pieces of ${set.name}`}>
           {pieces.map(({ place, row }) => (
             <Piece
               key={place} row={row} worn={isWorn(outfit, row)}
@@ -239,7 +242,9 @@ function Piece(
         type="button" className="mog-pick" aria-pressed={worn}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
       >
-        <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
+        <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
+          {icon ? <img src={icon} alt="" /> : null}
+        </span>
         <span className="badge">{row.slot}</span>
         <span className="mog-name">{row.label}</span>
       </button>

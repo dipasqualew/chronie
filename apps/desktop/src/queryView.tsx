@@ -142,7 +142,9 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
                 {/* The summary does what a summary does — nothing but open. Everything that
                     writes into the editor is a button inside it, so a click never has to be
                     guessed at. */}
-                <summary>
+                {/* Titled, because a summary carries no role and nothing else here would say
+                    which table this one opens. */}
+                <summary title={`What is in ${table.name}`}>
                   {table.name}
                   <span className="muted">
                     {table.view ? "view" : (table.rowCount ?? 0).toLocaleString()}
@@ -300,7 +302,7 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
                       ))}
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody aria-label="What came back">
                     {answer.rows.map((row, at) => (
                       <tr key={at}>
                         {answer.columns.map((name, column) => (

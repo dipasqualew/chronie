@@ -142,7 +142,12 @@ export function AppearanceModal(
         <h2 className="detail-title" id="appearance-detail-title">{showing?.name ?? ""}</h2>
         <button type="button" className="ghost" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      <div className="appearance-stage" data-state={said.state} ref={pane} />
+      {/* A figure rather than a bare box: what is in it is a picture of the thing the modal is
+          named after, and saying so is what makes it addressable by anything but its class. */}
+      <div
+        className="appearance-stage" data-state={said.state} ref={pane}
+        role="figure" aria-label="Where the appearance is drawn"
+      />
       {said.state === "shown"
         // Only once there is something to turn. A hint over an empty pane is an instruction to
         // do a thing that will not work.
@@ -160,7 +165,8 @@ export function AppearanceModal(
  * already opened the wardrobe pays nothing here because the module is already in memory.
  */
 const lazyStage = (container: HTMLElement): Promise<ModelStage> =>
-  import("./modelViewer").then((viewer) => viewer.createModelStage(container));
+  import("./modelViewer")
+    .then((viewer) => viewer.createModelStage(container, { label: "The appearance, drawn" }));
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

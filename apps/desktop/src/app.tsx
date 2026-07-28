@@ -265,10 +265,18 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         ))}
       </nav>
 
-      <main id="timeline-view" hidden={view !== "timeline"}>
+      {/* Each view is a landmark named after the tab that opens it, which is what makes it
+          reachable — by a screen reader jumping between regions, and by the browser suite,
+          which addresses every view the same way. The hidden ones are out of the tree
+          entirely, so the name only ever belongs to the view on screen. */}
+      <main id="timeline-view" aria-label={TAB_LABELS.timeline} hidden={view !== "timeline"}>
         <header className="view-head">
           <h1>Timeline</h1>
-          <div className="sub" id="timeline-meta">{meta}</div>
+          {/* A live region, because it is recomputed as segments arrive and it is the one line
+              that says how much of a history is on screen. */}
+          <div className="sub" id="timeline-meta" role="status" aria-label="What the timeline holds">
+            {meta}
+          </div>
         </header>
         <div id="timeline">
           <Timeline
@@ -278,17 +286,19 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         </div>
       </main>
 
-      <section id="characters-view" hidden={view !== "characters"}>
+      <section id="characters-view" aria-label={TAB_LABELS.characters} hidden={view !== "characters"}>
         <header className="view-head">
           <h1>Characters</h1>
-          <div className="sub" id="characters-meta">{rosterMeta}</div>
+          <div className="sub" id="characters-meta" role="status" aria-label="What the roster holds">
+            {rosterMeta}
+          </div>
         </header>
         <Characters
           profiles={profiles} onOpenSegment={openSegment} items={items} inGameSets={inGameSets}
         />
       </section>
 
-      <section id="details-view" hidden={view !== "details"}>
+      <section id="details-view" aria-label={TAB_LABELS.details} hidden={view !== "details"}>
         <header className="view-head">
           <h1>Details</h1>
           <div className="sub">Every segment on its own row. Click a column to sort, a row to
@@ -297,7 +307,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         <Details segments={segments} onOpenSegment={openSegment} items={items} />
       </section>
 
-      <section id="query-view" hidden={view !== "query"}>
+      <section id="query-view" aria-label={TAB_LABELS.query} hidden={view !== "query"}>
         <QueryView
           visible={view === "query"}
           actions={{
@@ -308,7 +318,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         />
       </section>
 
-      <section id="transmog-view" hidden={view !== "transmog"}>
+      <section id="transmog-view" aria-label={TAB_LABELS.transmog} hidden={view !== "transmog"}>
         <TransmogView
           payload={transmog}
           status={transmogStatus}
@@ -350,7 +360,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         />
       </section>
 
-      <section id="settings-view" hidden={view !== "settings"}>
+      <section id="settings-view" aria-label={TAB_LABELS.settings} hidden={view !== "settings"}>
         <SettingsView
           settings={settings}
           visible={view === "settings"}

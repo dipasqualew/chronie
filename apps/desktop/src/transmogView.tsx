@@ -478,7 +478,13 @@ export function TransmogView(
             onClick={() => setBrowsing("ingame")}
           >Personal in-game sets</button>
         </div>
-      <section className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}>
+      {/* Named, because all four browsers are the same panel with the same controls in it — a
+          class filter, a search box, a box about what she can wear — and "the class filter" is
+          only a question with an answer once it is asked of one of them. */}
+      <section
+        className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}
+        aria-label="The game's sets"
+      >
         <div className="table-head">
           <div className="controls">
             {/* A term in the placeholder beside the words, because `class:mage` is not a thing
@@ -766,7 +772,7 @@ function Card(
               </button>
               : null}
           </div>
-          <ul className="mog-items">
+          <ul className="mog-items" aria-label={`Appearances in ${name}`}>
             {shown.map((row, index) => (
               <Line
                 key={`${row.appearanceId}-${index}`} row={row} worn={isWorn(outfit, row)}
@@ -818,14 +824,18 @@ function Line(
 
   // An empty frame either way. A row whose appearance names no icon keeps it so the list stays
   // a column of pictures rather than one that indents wherever the game said nothing. The
-  // picture is decorative: the row already says which slot it is and which item it came from.
+  // frame says what it is a frame for and the picture inside it says nothing at all: the whole
+  // row is one button and already carries the slot and the item in its own name, so a picture
+  // announcing itself as well would have a screen reader read every row twice.
   return (
     <li className="mog-item" data-worn={worn}>
       <button
         type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
       >
-        <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
+        <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
+          {icon ? <img src={icon} alt="" /> : null}
+        </span>
         <span className="badge">{row.slot}</span>
         <span className="mog-name">{row.label}</span>
       </button>

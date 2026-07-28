@@ -247,12 +247,18 @@ export function OutfitPanel(
   const worn = wornPieces(outfit);
 
   return (
-    <aside className="outfit" id="outfit">
+    <aside className="outfit" id="outfit" aria-label="The character">
       {/* The stage keeps its height whatever the pane is showing, so a body arriving does not
           make the line under it jump. */}
-      <div className="outfit-preview" data-state={pane.state}>
+      <div className="outfit-preview" data-state={pane.state} role="group" aria-label="The stage">
         <div className="outfit-body">
-          <div className="outfit-stage" ref={stagePane} />
+          {/* A figure, because what it holds is a picture of somebody. The canvas inside names
+              itself — see `createModelStage` — and this names the place it is drawn in, which
+              is what survives a pane that has no picture in it at all. */}
+          <div
+            className="outfit-stage" ref={stagePane}
+            role="figure" aria-label="Where she is drawn"
+          />
           {/* What she has on, **down her side rather than under her**. A row apiece in the
               panel's own column was the version this replaced, and it took the character's
               height away exactly as she was being dressed: every piece put on made the picture
@@ -262,7 +268,7 @@ export function OutfitPanel(
               Pictures only, because a picture is what a reader recognises a hat by. The name,
               the place and the set it came from are all on the tip — [`wornTip`] — which is
               what a wardrobe of icons has always kept them on. */}
-          <ul className="outfit-worn" id="outfit-list">
+          <ul className="outfit-worn" id="outfit-list" aria-label="What she has on">
             {worn.map((piece) => (
               <li className="outfit-slot" key={piece.place}>
                 {/* The tile is the button: taking it off again is the only thing left to do to
@@ -298,7 +304,10 @@ export function OutfitPanel(
             )
             : null}
         </div>
-        <p className="mog-note muted" role="status" id="outfit-note">{pane.note}</p>
+        <p
+          className="mog-note muted" role="status" id="outfit-note"
+          aria-label="What the stage is showing"
+        >{pane.note}</p>
       </div>
       {/* Under the picture and above the clothes, which is the order the two questions come in:
           this is the body, and everything below it is what goes on the body. Shut, because a
@@ -306,7 +315,9 @@ export function OutfitPanel(
       <Herself {...herself} />
       <div className="outfit-head">
         <h3>Worn</h3>
-        <span className="muted" id="outfit-summary">{outfitSummary(outfit)}</span>
+        <span className="muted" id="outfit-summary" role="status" aria-label="How much is on">
+          {outfitSummary(outfit)}
+        </span>
         {worn.length
           ? <button type="button" className="outfit-clear" onClick={onClearAll}>Take it all off</button>
           : null}
@@ -419,7 +430,8 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
  * the wardrobe ever downloads it.
  */
 const lazyStage = (container: HTMLElement): Promise<ModelStage> =>
-  import("./modelViewer").then((viewer) => viewer.createModelStage(container));
+  import("./modelViewer")
+    .then((viewer) => viewer.createModelStage(container, { label: "The character, drawn" }));
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -122,10 +122,14 @@ export function MarkControls(
               can be read on its own — the × beside it is part of the chip and not part of
               the sentence. And a button wherever the list beneath can be narrowed by it, which
               is how a reader gets from "I filed six of these under horde" to seeing the six. */}
+          {/* "the tag" in the name, because a card carries measured chips that also narrow the
+              grid — see `qualitiesChips` — and "filter by brown" out of a grid of cards does
+              not say which of the two kinds of thing it is. */}
           {onFilter
             ? <button
               type="button" className="mark-tag-text mark-tag-ask"
-              aria-label={`Filter by ${tagLabel(tag)}`} title={`Filter by ${tagLabel(tag)}`}
+              aria-label={`Filter by the tag ${tagLabel(tag)}`}
+              title={`Filter by the tag ${tagLabel(tag)}`}
               onClick={() => onFilter(termText(tag.key, tag.value))}
             >{tagLabel(tag)}</button>
             : <span className="mark-tag-text">{tagLabel(tag)}</span>}

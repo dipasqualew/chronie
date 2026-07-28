@@ -349,7 +349,7 @@ export function Details({ segments, onOpenSegment, items }: DetailsProps): React
               ))}
             </tr>
           </thead>
-          <tbody id="rows">
+          <tbody id="rows" aria-label="Segments">
             {rows.map((segment) => (
               <tr
                 key={segment.segmentId}

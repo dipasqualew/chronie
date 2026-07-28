@@ -2039,6 +2039,15 @@ describe("narrowing a list by clicking what is written on it", () => {
   const chip = (label: string, asks: string): HTMLElement =>
     within(rowOf(label)).getByRole("button", { name: `Filter by ${asks}` });
 
+  /**
+   * The same, for a chip the reader wrote rather than one the artwork was measured for.
+   *
+   * The two are named apart on purpose: "filter by brown" out of a row carrying both would not
+   * say which of them it came from — see `marksEditor`.
+   */
+  const tagChip = (label: string, asks: string): HTMLElement =>
+    within(rowOf(label)).getByRole("button", { name: `Filter by the tag ${asks}` });
+
   /** Waits for the slot's measurements, without which a row has nothing measured to click. */
   const measured = (): Promise<HTMLElement> =>
     screen.findByRole("button", { name: "Filter by size: large" });
@@ -2108,7 +2117,7 @@ describe("narrowing a list by clicking what is written on it", () => {
     }));
     await screen.findByText("Emberforge Helm");
 
-    fireEvent.click(chip("Coif of the Drowned Star", "faction: horde"));
+    fireEvent.click(tagChip("Coif of the Drowned Star", "faction: horde"));
 
     expect(box().value).toBe("faction:horde");
     await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
@@ -2130,9 +2139,9 @@ describe("narrowing a list by clicking what is written on it", () => {
     }));
     await screen.findByText("Emberforge Helm");
 
-    fireEvent.click(chip("Coif of the Drowned Star", "faction: horde"));
+    fireEvent.click(tagChip("Coif of the Drowned Star", "faction: horde"));
     await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
-    fireEvent.click(chip("Coif of the Drowned Star", "wishlist"));
+    fireEvent.click(tagChip("Coif of the Drowned Star", "wishlist"));
 
     expect(box().value).toBe("faction:horde wishlist:");
     expect(screen.queryByText("Emberforge Helm")).toBeNull();
@@ -2164,10 +2173,10 @@ describe("narrowing a list by clicking what is written on it", () => {
     const row = rowFor(card, "Wear Head: Crown of Tides");
 
     expect(within(row).getByText("wishlist")).toBeTruthy();
-    expect(within(row).queryByRole("button", { name: "Filter by wishlist" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Filter by the tag wishlist" })).toBeNull();
     // The set's own chip on the card above it is a button, so what the row is missing is about
     // the row rather than about the feature.
-    expect(within(card).getByRole("button", { name: "Filter by faction: horde" })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Filter by the tag faction: horde" })).toBeTruthy();
   });
 });
 
