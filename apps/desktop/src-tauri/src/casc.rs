@@ -150,6 +150,19 @@ impl Weight {
     }
 }
 
+/// What a hash table of `capacity` entries actually allocated.
+///
+/// A table's cost is its buckets, not the entries in them, and `HashMap::capacity` reports
+/// the latter — how many more can go in before it grows. Standard hash maps are hashbrown
+/// underneath, which rounds a wanted capacity up to a power-of-two bucket count with an
+/// eighth left spare, and lays out one slot plus one control byte per bucket. Rebuilding that
+/// arithmetic here rather than reporting `capacity` directly, because the difference on the
+/// index is 43MB against 50MB and the point of the number is to be right about megabytes.
+fn table_bytes<T>(capacity: usize) -> usize {
+    let buckets = (capacity.saturating_mul(8) / 7).next_power_of_two();
+    buckets * (std::mem::size_of::<T>() + 1)
+}
+
 impl CascFiles {
     /// Opens the storage under a World of Warcraft install.
     ///
@@ -222,10 +235,7 @@ impl CascFiles {
     /// What this handle is holding, part by part.
     pub fn weight(&self) -> Weight {
         Weight {
-            // A hash table's cost is its buckets, not its entries: hashbrown lays out one
-            // slot of the key-value pair plus one control byte for every bucket it allocated.
-            locations: self.locations.capacity()
-                * (std::mem::size_of::<([u8; 9], Location)>() + 1),
+            locations: table_bytes::<([u8; 9], Location)>(self.locations.capacity()),
             encoding: self.encoding.weight(),
             root: self.root.weight(),
         }
@@ -541,7 +551,7 @@ impl<T> Cached<T> {
 /// click asks for the game's files twice — so opening per command, which is what this
 /// replaces, was most of what a reader waited for.
 ///
-/// What it costs to keep is [`CascFiles::weight`]: 208MB on build 12.0.5.67823, which the
+/// What it costs to keep is [`CascFiles::weight`]: 215MB on build 12.0.5.67823, which the
 /// `weigh_casc` example prints. That is the whole reason the index, the encoding file and the
 /// root are stored the way they are; held in the shapes they were first written in, this was
 /// 1.4GB and holding one would not have been an option.
