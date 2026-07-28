@@ -9,14 +9,28 @@ edition = "2021"
 name = "chronie_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# A debug build of this crate is fine; a debug build of `image`, `flate2`, `wow-blp` and
-# `sha2` is not. The tests decode BLPs, resize textures and re-encode PNGs, and at
-# `opt-level = 0` those inner loops run an order of magnitude slower than the code being
-# tested — the suite spent most of its wall clock inside dependencies rather than in
-# Chronie. Optimising only the dependencies costs nothing on a warm build, because they are
-# what the cache already holds and what nobody here edits.
-[profile.dev.package."*"]
-opt-level = 2
+# A debug build of this crate is fine; a debug build of a codec is not. The tests decode
+# BLPs, resize textures, re-encode PNGs and JPEGs and hash what comes out, and at
+# `opt-level = 0` those inner loops run several times slower than the code actually under
+# test — `captures` and `character` were 18 of a 23 second run and almost none of it was
+# Chronie's own code.
+#
+# Named crates rather than `"*"`. There are 635 packages in the lockfile and eleven of them
+# do this work; optimising the whole tree to reach those eleven turns every cache miss into
+# a much longer cold build of tauri, webkit bindings and reqwest, which no test ever runs in
+# a loop. Keep this list to crates that appear in a profile of the suite.
+[profile.dev.package]
+adler2 = { opt-level = 2 }
+crc32fast = { opt-level = 2 }
+flate2 = { opt-level = 2 }
+image = { opt-level = 2 }
+miniz_oxide = { opt-level = 2 }
+png = { opt-level = 2 }
+sha2 = { opt-level = 2 }
+tact-parser = { opt-level = 2 }
+wow-blp = { opt-level = 2 }
+zune-core = { opt-level = 2 }
+zune-jpeg = { opt-level = 2 }
 
 # Full debug info for every dependency is a slower link and a much larger `target/` for the
 # CI cache to carry around. Line tables keep the file and line in a panic backtrace, which
