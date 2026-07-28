@@ -36,6 +36,45 @@ the join      ──▶  a set, its items, their assets        transmog.rs
 the payload. It already returns M2 and BLP bytes correctly; nothing about the 3D work
 needs to touch it.
 
+### What an open handle holds, and what it costs
+
+Opening the storage is a quarter of a second and a couple of hundred megabytes, so the
+app opens one and keeps it — `casc::OpenStorage`, reopened when the install path changes
+or when the launcher moves onto another build. That only works because of how the three
+tables underneath are stored, and each of them was something else first. Read off
+**build 12.0.5.67823**, EU, macOS, by `cargo run --release --example weigh_casc`:
+
+| | what it is | held | was |
+|---|---|---|---|
+| `.idx` index | 1,526,119 entries, 9-byte key prefix → archive/offset/size | 50 MB | 143 MB |
+| encoding | 195,148,023 bytes decoded; content-key half is 26,321 pages × 4KB | 104 MB | 468 MB |
+| root | 1,884,024 file ids, 3,191,148 variants, 149,614 path hashes | 61 MB | 794 MB |
+
+Three traps, all paid for once:
+
+**Root is not worth a general-purpose parser.** `tact_parser`'s `WowRoot` is a
+`BTreeMap<u32, BTreeMap<LocaleContentFlags, Md5>>` — an inner map allocated per file id,
+and there are 1.88 million of them — and it collects the Jenkins path hashes as well.
+Chronie addresses everything by FileDataID and never asks for a path, so `Root` parses
+the blocks itself, keeps one flat `(file id, content key)` per variant, and steps over
+the hashes. That is 61MB against 794MB, and it was the single largest thing an open
+handle carried. The dependency existed for this and nothing else.
+
+**Half the encoding file answers a question nobody asks.** Its layout is header, ESpec
+block, content-key page table, content-key pages, then a second page table and pages
+keyed by *encoding* key. Only the content-key half is ever searched; on this build the
+ESpec block and the encoding-key tables are 86MB of the 186. `Encoding::parse` keeps the
+span from the content-key page table to the end of its pages and drops the rest.
+
+**BLTE payloads must be allocated at their decoded size.** The chunk table declares it up
+front. Growing the output by doubling means the largest payload in the install — the
+encoding file — is resident twice over while it is being moved, which on its own was
+worth more than a hundred megabytes.
+
+The count that matters when any of this is touched: the `.glb` for `set/5570` is
+**14,490,442 bytes**, built from around fifty files pulled through both root and
+encoding. A change that resolves the same bytes produces the same number.
+
 ## WDC5 quirks that actually bite
 
 The format packs hard, and four of its habits have caused real trouble:
