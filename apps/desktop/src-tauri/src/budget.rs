@@ -56,6 +56,11 @@
 //! put a ceiling on: neither is a file read or a table walk, so a change that did them twenty
 //! times over would have passed every test above.
 //!
+//! The set grid is drawn the same way and asserted for the same two properties, one page further
+//! out: every card there is a whole outfit rather than one appearance, and the tables walked once
+//! for it include the five behind saying what a set is made of. See
+//! `builds_one_body_for_a_whole_page_of_sets`.
+//!
 //! And there is **one clock**, in `draws_a_page_faster_than_the_same_rows_one_at_a_time`, which
 //! is not a contradiction of the paragraph at the top. It times two things on the same runner
 //! seconds apart and asserts a *ratio* between them, and a ratio is what a shared runner can
@@ -802,6 +807,76 @@ mod tests {
             batched.as_secs_f64() <= apart.as_secs_f64() * SHARE_OF_THE_LOOP,
             "a page took {batched:?} against {apart:?} for the same rows one at a time",
         );
+    }
+
+    /* ---------- a page of the set grid, which is twenty outfits ---------- */
+
+    /// The sets the fixtures hold something wearable in, which is what a page of the grid is.
+    ///
+    /// Eight rather than twenty, because eight is what the fixtures have — and the properties
+    /// below are about sharing rather than about a total, so the number only has to be more
+    /// than one. Set 205 is in it deliberately: its one readable row names a display the game
+    /// encrypts, which is the row that has to cost the page nothing.
+    const SET_PAGE: [u32; 8] = [201, 202, 203, 204, 205, 206, 207, 208];
+
+    /// What one page of the set grid cost, through the stack the app has.
+    fn set_page_cost(set_ids: &[u32]) -> Work {
+        let files = fixture_files();
+        let counted = Counted::over(&files);
+        let remembered = Remembered::over(&counted);
+        counted.restart();
+        let answer = crate::gallery::sets(&remembered, set_ids, &character::Who::default())
+            .expect("the fixture page of sets draws");
+        assert_eq!(
+            answer["models"].as_array().map(Vec::len),
+            Some(set_ids.len()),
+            "a page answers for every set of itself"
+        );
+        counted.work()
+    }
+
+    /// The same sets asked for one card at a time, which is the loop the batch replaces.
+    fn sets_one_at_a_time(set_ids: &[u32]) -> Work {
+        let files = fixture_files();
+        let counted = Counted::over(&files);
+        let remembered = Remembered::over(&counted);
+        counted.restart();
+        for set_id in set_ids {
+            crate::gallery::sets(&remembered, std::slice::from_ref(set_id), &character::Who::default())
+                .expect("a card draws");
+        }
+        counted.work()
+    }
+
+    // The same claim a page of the wardrobe makes, and the one that pays for the whole
+    // arrangement: the body is read, resized and composited once for the page rather than once
+    // per card — even though every card here is a *whole outfit* rather than one appearance.
+    #[test]
+    fn builds_one_body_for_a_whole_page_of_sets() {
+        assert_eq!(set_page_cost(&SET_PAGE).atlases, 1);
+    }
+
+    // And every table is walked once for the page. This is the half a page of sets has that a
+    // page of the wardrobe does not: the five tables `set_items` walks to say what one set is
+    // made of are walked once here for the whole grid, on top of the six behind dressing her.
+    #[test]
+    fn walks_the_tables_once_for_a_whole_page_of_sets() {
+        let batched = set_page_cost(&SET_PAGE);
+        let apart = sets_one_at_a_time(&SET_PAGE);
+        assert!(
+            batched.rows * 4 < apart.rows,
+            "a page of sets walked {} rows against {} for the same sets one at a time",
+            batched.rows,
+            apart.rows,
+        );
+    }
+
+    // The ratchet, as elsewhere: the work as it stands, asserted from above.
+    #[test]
+    fn draws_a_page_of_sets_within_what_it_costs_today() {
+        let work = set_page_cost(&SET_PAGE);
+        assert!(work.reads <= 58, "a page of sets reads {} files", work.reads);
+        assert!(work.rows <= 323, "a page of sets walks {} rows", work.rows);
     }
 
     /* ---------- the counting itself ---------- */

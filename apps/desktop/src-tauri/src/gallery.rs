@@ -33,6 +33,15 @@
 //!   shipping install and [`crate::db2::Db2::rows`] materialises all of them before it yields the
 //!   first, so this is the difference between walking it once and walking it twenty times.
 //!
+//! # And a page of the set grid, which is the same errand one word wider
+//!
+//! [`sets`] draws the other half of the transmog browser: a card per set, and the picture on it is
+//! the whole set worn. It is the same arrangement and not a second one — [`crate::worn::each`] has
+//! always taken a list of *outfits* and [`of`] hands it lists of one, so a page of a dozen sets is
+//! still one body, one walk of each table and one `.glb` per row. What it adds in front is
+//! [`crate::transmog::set_pieces`], because a card in the grid is a name and a count until
+//! somebody opens it and the window has no clothes to send.
+//!
 //! What is deliberately *not* here is a cache. The page is what the window asked for, and holding
 //! the bodies it produced would be tens of megabytes per page of a wardrobe several thousand rows
 //! long. [`crate::casc::Remembered`] already keeps the files underneath all of this, which is the
@@ -139,6 +148,68 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece], who: &Who) -> Result<Value, S
             })
         })
         .collect();
+
+    Ok(serde_json::json!({ "models": models }))
+}
+
+/// A page of the set grid, each set worn whole on a body of its own.
+///
+/// The other half of the same errand [`of`] runs, and the difference is one word: a row here is
+/// an *outfit* rather than an appearance. That word costs nothing extra — [`crate::worn::each`]
+/// was always a list of outfits and [`of`] passes it lists of one — so a page of sets is the same
+/// one body, the same one walk of each table, and the same one `.glb` per row.
+///
+/// **What a set is wearing is read here rather than sent from the window.** The window holds the
+/// grid, not the clothes: a card is a name and a count until somebody opens it, and asking it to
+/// open a dozen sets to draw a page would be a dozen trips through the five tables
+/// [`crate::transmog::set_items`] walks. So this takes the ids off the cards and asks
+/// [`crate::transmog::set_pieces`], which answers for the whole page out of one walk of each of
+/// the four tables the chain is read through.
+///
+/// `null` for a row means the same as it does everywhere else along here: this install can say
+/// nothing to put on her for that set. A set the game encrypts outright reads as no pieces at
+/// all, and one whose every display is withheld reads as an empty outfit; both leave the card
+/// showing what it showed before anybody asked for a picture.
+#[tracing::instrument(name = "gallery.sets", skip_all, fields(sets = set_ids.len()))]
+pub fn sets(files: &dyn GameFiles, set_ids: &[u32], who: &Who) -> Result<Value, String> {
+    if set_ids.is_empty() {
+        return Ok(serde_json::json!({ "models": [] }));
+    }
+
+    let wearing = crate::transmog::set_pieces(files, set_ids)?;
+    let outfits: Vec<&[Piece]> = set_ids
+        .iter()
+        .map(|set_id| wearing.get(set_id).map_or(&[][..], Vec::as_slice))
+        .collect();
+
+    // A page whose every set is empty is a page with nothing on it, and reading the character to
+    // answer it would be several hundred milliseconds spent on nothing — the same saving [`of`]
+    // makes for a page of nothing but weapons.
+    if outfits.iter().all(|pieces| pieces.is_empty()) {
+        return Ok(serde_json::json!({
+            "models": set_ids
+                .iter()
+                .map(|set_id| serde_json::json!({ "setId": set_id, "model": Value::Null }))
+                .collect::<Vec<Value>>(),
+        }));
+    }
+
+    let body = body::of(files, who.body)?;
+    let worn = worn::each(files, &body, &outfits)?;
+    let mannequin = Mannequin::standing(files, &body, &who.picked)?;
+
+    let models: Vec<Value> = set_ids
+        .iter()
+        .zip(worn.iter())
+        .map(|(set_id, worn)| {
+            let model = if worn.is_empty() {
+                Value::Null
+            } else {
+                Value::String(data_url("model/gltf-binary", &mannequin.wearing(Some(worn))?))
+            };
+            Ok(serde_json::json!({ "setId": set_id, "model": model }))
+        })
+        .collect::<Result<Vec<Value>, String>>()?;
 
     Ok(serde_json::json!({ "models": models }))
 }
@@ -365,5 +436,84 @@ mod tests {
     fn says_so_when_the_body_cannot_be_read() {
         let temp = tempfile::tempdir().unwrap();
         assert!(of(&DirFiles::new(temp.path()), &[HELM], &Who::default()).is_err());
+    }
+
+    /* ---------- a page of sets, each worn whole ---------- */
+
+    /// The rows of a page of sets, as `(set id, whether it came back with a picture)`.
+    fn set_page(set_ids: &[u32]) -> Vec<(u64, bool)> {
+        sets(&fixture_files(), set_ids, &Who::default()).unwrap()["models"]
+            .as_array()
+            .expect("a page answers with an array")
+            .iter()
+            .map(|row| {
+                (
+                    row["setId"].as_u64().expect("a row names its set"),
+                    row["model"].as_str().is_some_and(|url| {
+                        url.starts_with("data:model/gltf-binary;base64,")
+                    }),
+                )
+            })
+            .collect()
+    }
+
+    // The point of the module's other half: set ids in, one picture per set out, in the order
+    // asked. The window lays a grid out from its own list and has to line the answers back up.
+    #[test]
+    fn shows_every_set_of_a_page() {
+        assert_eq!(set_page(&[203, 201]), vec![(203, true), (201, true)]);
+        assert_eq!(set_page(&[201, 203]), vec![(201, true), (203, true)]);
+    }
+
+    // And what one of those pictures is: the whole set on one body, rather than a body per
+    // piece. Down to the bytes, because dressing a character is deterministic given what is on
+    // her — so this is the same claim as "the card shows what wearing the set would show".
+    #[test]
+    fn dresses_one_body_in_the_whole_set() {
+        let files = fixture_files();
+        let wearing = crate::transmog::set_pieces(&files, &[203]).unwrap();
+        let whole = crate::character::worn_set_of(&files, &wearing[&203], &Who::default()).unwrap();
+        assert_eq!(
+            sets(&files, &[203], &Who::default()).unwrap()["models"][0]["model"],
+            whole["model"],
+        );
+    }
+
+    // A set this install can put nothing on her for keeps its place and comes back empty. Set
+    // 205's one readable row names a display the game encrypts, so there is nothing to paint.
+    #[test]
+    fn keeps_the_place_of_a_set_it_can_draw_nothing_for() {
+        assert_eq!(set_page(&[201, 205, 203]), vec![(201, true), (205, false), (203, true)]);
+    }
+
+    // And a page where that is true of every set never reads the character at all — she is the
+    // most expensive thing a gallery touches, and there would be nothing to hang off her.
+    #[test]
+    fn reads_no_body_for_a_page_of_sets_with_nothing_to_wear() {
+        let files = Noted::new();
+        assert_eq!(
+            sets(&files, &[900], &Who::default()).unwrap()["models"],
+            serde_json::json!([{ "setId": 900, "model": Value::Null }]),
+        );
+        assert!(!files.asked.borrow().contains(&her_mesh()));
+    }
+
+    // A page of no sets is an empty page rather than a body, the same way a page of no
+    // appearances is: the window asks for one whenever a filter empties the grid.
+    #[test]
+    fn asks_the_game_nothing_for_a_page_of_no_sets() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            sets(&DirFiles::new(temp.path()), &[], &Who::default()).unwrap()["models"],
+            serde_json::json!([]),
+        );
+    }
+
+    // The failure worth reporting rather than drawing an empty grid over, which is the one
+    // every row of the page shares.
+    #[test]
+    fn says_so_when_a_page_of_sets_cannot_be_read() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(sets(&DirFiles::new(temp.path()), &[203], &Who::default()).is_err());
     }
 }
