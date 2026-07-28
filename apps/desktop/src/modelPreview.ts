@@ -23,14 +23,19 @@ export type Wearable =
  * the game encrypts, and `nowhere` a thing the game files under a weapon slot and gives no
  * place on a body — arrows, and an item whose own row is withheld so nothing says a hand.
  *
+ * The second half of each of the pane's own two is the only place the app says which buttons
+ * do what. Nothing on a canvas advertises that the right one moves the model, and a reader who
+ * never finds out is left with the zoom that goes past the edges of the pane and no way back
+ * across them.
+ *
  * What is gone with the single-appearance pane is the pair that explained an install rather
  * than a game — a slot whose model file is missing, a slot whose every texture was painted for
  * another body. Neither is attributable once twelve pieces come back as one body, and what a
  * reader sees instead is the gap in the outfit where that piece would have been.
  */
 export const REASONS = {
-  set: "Worn on the character. Drag to turn it.",
-  bare: "Nothing is worn. Drag to turn it.",
+  set: "Worn on the character. Drag to turn it, right-drag to move it.",
+  bare: "Nothing is worn. Drag to turn it, right-drag to move it.",
   unshowable: "This install holds nothing to put on the character for these.",
   withheld: "The game keeps this appearance encrypted.",
   nowhere: "The game gives this appearance no place on a character.",
