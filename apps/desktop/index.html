@@ -743,6 +743,30 @@
   }
   .outfit-off:hover { color: var(--series-1); text-decoration: underline; }
   .outfit-empty { margin: 0; font-size: 12px; }
+  /* The name box that turns what she has on into a set of the reader's own. One row, because
+     it is one field and one button; the sentence it answers with wraps under both. */
+  .outfit-save { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .outfit-save .outfit-name {
+    flex: 1 1 120px; min-width: 0; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
+    padding: 4px 8px;
+  }
+  .outfit-keep {
+    flex: none; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
+    padding: 4px 10px; cursor: pointer;
+  }
+  .outfit-keep:hover { border-color: var(--series-1); }
+  .outfit-save .muted, .outfit-save .mark-failure { flex: 1 0 100%; font-size: 11.5px; }
+  /* The one control in this view that destroys something, and the only one behind a second
+     click — so it is drawn as an aside rather than as a button competing with "wear all of". */
+  .mog-confirm { display: flex; gap: 6px; align-items: baseline; }
+  .mog-delete {
+    border: 0; background: none; padding: 2px 4px;
+    color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .mog-delete:hover { color: var(--bad); text-decoration: underline; }
+  .mog-confirm .mog-delete { color: var(--bad); }
 
   /* ---------- settings ---------- */
 

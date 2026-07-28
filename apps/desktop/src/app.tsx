@@ -34,7 +34,7 @@ import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
 import type {
-  DashboardPayload, Segment, Settings, TransmogMarksPayload, TransmogPayload,
+  CustomSetsPayload, DashboardPayload, Segment, Settings, TransmogMarksPayload, TransmogPayload,
 } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
@@ -69,6 +69,9 @@ export function App({ payload, settings }: AppProps): ReactNode {
   // What the reader has said about the game's wardrobe, which is the only thing on that screen
   // that comes out of Chronie's own database rather than out of the installed game.
   const [marks, setMarks] = useState<TransmogMarksPayload | null>(null);
+  // And the sets they put together out of it themselves, which come from the same place and
+  // are read in the same breath.
+  const [customSets, setCustomSets] = useState<CustomSetsPayload | null>(null);
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
@@ -146,6 +149,14 @@ export function App({ payload, settings }: AppProps): ReactNode {
     if (view !== "transmog" || marks) return;
     void desktop.transmogMarks().then(setMarks).catch(() => undefined);
   }, [view, marks]);
+
+  // The sets the reader saved, on the same terms: Chronie's own database, read when the view is
+  // first opened, and silent about a failure because the browser it feeds is one of three and
+  // the two beside it are the game's.
+  useEffect(() => {
+    if (view !== "transmog" || customSets) return;
+    void desktop.customSets().then(setCustomSets).catch(() => undefined);
+  }, [view, customSets]);
 
   // Somebody may be playing while this window is open, and the collector picks up what the
   // game wrote within half a minute. Anything new means every view is out of date at once.
@@ -288,6 +299,14 @@ export function App({ payload, settings }: AppProps): ReactNode {
             // Every write answers with every mark, so the browsers repaint from what was
             // stored — the same rule the activity and capture edits follow.
             onApply: setMarks,
+            onError: message,
+          }}
+          custom={{
+            payload: customSets,
+            save: desktop.saveCustomSet,
+            remove: desktop.deleteCustomSet,
+            // Every write answers with every saved set, for the reason above it.
+            onApply: setCustomSets,
             onError: message,
           }}
         />

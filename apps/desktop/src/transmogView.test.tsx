@@ -8,8 +8,9 @@ import { TransmogView } from "./transmogView";
 import type { TransmogViewProps } from "./transmogView";
 import type { ModelStage } from "./modelViewer";
 import type {
-  MarkSubjectKind, TransmogAppearance, TransmogMark, TransmogMarksPayload, TransmogPayload,
-  TransmogSet, TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload, WornPiece,
+  CustomSet, CustomSetPiece, CustomSetsPayload, MarkSubjectKind, TransmogAppearance, TransmogMark,
+  TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance,
+  WardrobePayload, WornPiece,
 } from "./types";
 
 afterEach(cleanup);
@@ -248,16 +249,67 @@ function fakeMarks(starting: TransmogMark[] = []) {
 
 type FakeMarks = ReturnType<typeof fakeMarks>;
 
+/** When a set was saved, as far as anything here is concerned. */
+const SAVED_AT = 2_100_000_000;
+
+/**
+ * The two tables behind a set of the reader's own, faked.
+ *
+ * A store for the reason the marks are one: saving answers with *every* saved set and the window
+ * holds what came back, so a double answering a fixture would let a view that never repainted
+ * pass. The rules it keeps are the ones `customsets.rs` keeps and a test can tell apart from a
+ * broken form — a name is required and tidied, an empty outfit is not a set, and a name already
+ * used saves over the set that has it rather than making a second one.
+ */
+function fakeCustomSets(starting: CustomSet[] = []) {
+  let sets = structuredClone(starting);
+  const answer = (): CustomSetsPayload => ({ sets: structuredClone(sets) });
+  return {
+    starting: answer(),
+    stored: (): CustomSet[] => structuredClone(sets),
+    save: vi.fn((name: string, pieces: CustomSetPiece[]) => {
+      const cleaned = name.trim().replace(/\s+/g, " ");
+      if (!cleaned) {
+        return Promise.reject(new Error("Give the set a name and it will be saved under it."));
+      }
+      if (!pieces.length) {
+        return Promise.reject(
+          new Error("Put something on her first, and then it can be saved as a set."),
+        );
+      }
+      const at = sets.findIndex((set) => set.name.toLowerCase() === cleaned.toLowerCase());
+      if (at >= 0) sets[at] = { ...sets[at]!, name: cleaned, updatedAt: SAVED_AT, pieces };
+      else {
+        const id = sets.reduce((highest, set) => Math.max(highest, set.id), 0) + 1;
+        sets.push({ id, name: cleaned, createdAt: SAVED_AT, updatedAt: SAVED_AT, pieces });
+      }
+      sets.sort((left, right) => left.name.localeCompare(right.name));
+      return Promise.resolve(answer());
+    }),
+    remove: vi.fn((id: number) => {
+      sets = sets.filter((set) => set.id !== id);
+      return Promise.resolve(answer());
+    }),
+  };
+}
+
+type FakeCustomSets = ReturnType<typeof fakeCustomSets>;
+
 /**
  * The view with somewhere for a write's answer to land, which is what `app.tsx` is.
  *
- * The component takes the marks as a prop and never edits them itself, so a test driving a
- * star needs the piece above it that holds the payload. This is that piece and nothing else.
+ * The component takes both of the things that are the reader's own — the marks and the saved
+ * sets — as props and never edits either itself, so a test driving a star or a save needs the
+ * piece above it that holds the payloads. This is that piece and nothing else.
  */
 function Marked(
-  { store, ...props }: Omit<TransmogViewProps, "marks"> & { store: FakeMarks },
+  { store, saved, ...props }:
+    Omit<TransmogViewProps, "marks" | "custom"> & { store: FakeMarks; saved: FakeCustomSets },
 ): ReactNode {
   const [payload, setPayload] = useState<TransmogMarksPayload>(store.starting);
+  const [sets, setSets] = useState<CustomSetsPayload>(saved.starting);
+  const said = (error: unknown): string =>
+    (error instanceof Error ? error.message : String(error));
   return (
     <TransmogView
       {...props}
@@ -267,7 +319,14 @@ function Marked(
         setTag: store.setTag,
         deleteTag: store.deleteTag,
         onApply: setPayload,
-        onError: (error) => (error instanceof Error ? error.message : String(error)),
+        onError: said,
+      }}
+      custom={{
+        payload: sets,
+        save: saved.save,
+        remove: saved.remove,
+        onApply: setSets,
+        onError: said,
       }}
     />
   );
@@ -283,11 +342,24 @@ const UNMARKED = {
   onError: String,
 };
 
+/** And no sets of anybody's own, for the same tests. */
+const NO_SETS = {
+  payload: { sets: [] },
+  save: () => Promise.resolve({ sets: [] }),
+  remove: () => Promise.resolve({ sets: [] }),
+  onApply: () => {},
+  onError: String,
+};
+
 /**
  * The view over doubles a test answers, which is the only way to drive it: nothing here talks
  * to a backend and nothing monkey patches one.
  */
-function view(options: { payload?: TransmogPayload | null; marks?: FakeMarks } = {}) {
+function view(
+  options: {
+    payload?: TransmogPayload | null; marks?: FakeMarks; saved?: FakeCustomSets;
+  } = {},
+) {
   const { stage, shown, resets } = fakeStage();
   // Recorded rather than merely answered: "the same outfit is not read out of the game twice"
   // is a statement about what crossed the bridge, and only the request itself can say it.
@@ -302,6 +374,7 @@ function view(options: { payload?: TransmogPayload | null; marks?: FakeMarks } =
     Promise.resolve(WARDROBE[displayTypes.join(",")]
       ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 }));
   const marks = options.marks ?? fakeMarks();
+  const saved = options.saved ?? fakeCustomSets();
   const rendered = render(
     <Marked
       payload={options.payload === undefined ? SETS : options.payload}
@@ -312,10 +385,13 @@ function view(options: { payload?: TransmogPayload | null; marks?: FakeMarks } =
       loadCharacter={loadCharacter}
       loadWorn={loadWorn}
       store={marks}
+      saved={saved}
       createStage={() => stage}
     />,
   );
-  return { rendered, loadWorn, loadCharacter, loadSet, loadAppearances, marks, shown, resets };
+  return {
+    rendered, loadWorn, loadCharacter, loadSet, loadAppearances, marks, saved, shown, resets,
+  };
 }
 
 /** Opens a set in place, and waits for what it holds to arrive. */
@@ -594,6 +670,7 @@ describe("TransmogView", () => {
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         marks={UNMARKED}
+        custom={NO_SETS}
         createStage={() => stage}
       />,
     );
@@ -615,6 +692,7 @@ describe("TransmogView", () => {
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         marks={UNMARKED}
+        custom={NO_SETS}
         createStage={() => { throw new Error("This machine cannot draw 3D."); }}
       />,
     );
@@ -942,4 +1020,273 @@ describe("what the reader says about the wardrobe", () => {
     // Its neighbour has one, so the absence is about this row and not about the set.
     expect(star(rowFor(card, "Wear Head: Emberforge Helm"), "Emberforge Helm")).toBeTruthy();
   });
+});
+
+/**
+ * The third browser: the sets the reader made, which is the other thing on this screen that the
+ * game knows nothing about.
+ *
+ * These drive the store the same way the marks do and for the same reason — a save that lit up
+ * the browser and never crossed the bridge is the bug worth catching — and they go the whole
+ * way round every time: dress her, save it, find it under "Yours", put it back on. Which is the
+ * only claim that matters here, because every step of that round trip is a translation and a
+ * translation that is right in one direction and wrong in the other loses the outfit silently.
+ */
+describe("the sets the reader puts together themselves", () => {
+  /** The name box under the character, and the button that acts on what is typed in it. */
+  const name = (): HTMLElement => screen.getByLabelText("Name for this set");
+  const keep = (): HTMLElement =>
+    screen.getByRole("button", { name: /^(Save as a set|Replace )/ });
+
+  /** Dresses her out of one of the game's sets, which is where an outfit comes from. */
+  const dress = async (): Promise<void> => {
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear all of Tideglass Regalia" }));
+    await waitFor(() => expect(worn()).toHaveLength(2));
+  };
+
+  /** Types a name and saves what she has on under it. */
+  const saveAs = (called: string): void => {
+    fireEvent.change(name(), { target: { value: called } });
+    fireEvent.click(keep());
+  };
+
+  /** Switches to the third browser, where the saved sets are. */
+  const browseYours = (): void => {
+    fireEvent.click(screen.getByRole("button", { name: "Yours" }));
+  };
+
+  /** The card a saved set is drawn on, found by the heading the reader named it with. */
+  const savedCard = (called: string): HTMLElement => {
+    const heading = screen.getByRole("heading", { name: called, level: 4 });
+    return heading.closest("article") as HTMLElement;
+  };
+
+  it("offers nothing to save while she is wearing nothing", async () => {
+    view();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy());
+    // A form that could only ever be refused is worse than no form.
+    expect(screen.queryByLabelText("Name for this set")).toBeNull();
+  });
+
+  it("saves what she has on, and finds it again under a name of the reader's own", async () => {
+    const { saved } = view();
+    await dress();
+
+    saveAs("  Horde  look ");
+
+    // Stored, tidied, and holding the two pieces that had somewhere on her to go — the arrows
+    // of that set were never on her, so they are not in it.
+    await waitFor(() => expect(saved.stored()).toHaveLength(1));
+    const set = saved.stored()[0]!;
+    expect(set.name).toBe("Horde look");
+    expect(set.pieces.map((piece) => [piece.place, piece.name])).toEqual([
+      ["armour-0", "Crown of Tides"],
+      ["armour-3", "Robe of Tides"],
+    ]);
+    // Every number the character is drawn from survives, which is what makes it wearable again.
+    expect(set.pieces[0]).toMatchObject({ appearanceId: 1, itemId: 1, displayInfoId: 900_001 });
+
+    browseYours();
+    const card = savedCard("Horde look");
+    expect(within(card).getByText("Crown of Tides")).toBeTruthy();
+    expect(within(card).getByText("2 pieces · saved just now")).toBeTruthy();
+  });
+
+  // The whole round trip, and the only claim worth making about a saved set: it goes back on.
+  it("dresses the character in a saved set, out of what was stored and nothing else", async () => {
+    const { loadWorn, saved } = view();
+    await dress();
+    saveAs("Horde look");
+    await waitFor(() => expect(saved.stored()).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Take it all off" }));
+    await waitFor(() => expect(worn()).toEqual([]));
+
+    browseYours();
+    fireEvent.click(within(savedCard("Horde look"))
+      .getByRole("button", { name: "Wear all of Horde look" }));
+
+    await waitFor(() => expect(worn()).toEqual(["Head Crown of Tides", "Chest Robe of Tides"]));
+    // The same body the game's own set asked for, which is what says nothing was lost on the
+    // way through the database.
+    expect(loadWorn).toHaveBeenLastCalledWith([
+      { displayInfoId: 900_001, displayType: 0, inventoryType: 0 },
+      { displayInfoId: 900_012, displayType: 3, inventoryType: 0 },
+    ]);
+  });
+
+  it("puts one piece of a saved set on without the rest of it", async () => {
+    const { saved } = view();
+    await dress();
+    saveAs("Horde look");
+    await waitFor(() => expect(saved.stored()).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Take it all off" }));
+    await waitFor(() => expect(worn()).toEqual([]));
+
+    browseYours();
+    fireEvent.click(within(savedCard("Horde look"))
+      .getByRole("button", { name: "Wear Head: Crown of Tides" }));
+
+    await waitFor(() => expect(worn()).toEqual(["Head Crown of Tides"]));
+  });
+
+  // Names are unique without regard to case, so typing one that is taken saves over that set.
+  // The button has to say so before the click, which is the whole difference between somebody
+  // who meant it and somebody who forgot they had used the name.
+  it("offers to replace a set whose name is typed again, and replaces exactly it", async () => {
+    const { saved } = view();
+    await dress();
+    saveAs("Horde look");
+    await waitFor(() => expect(saved.stored()).toHaveLength(1));
+    const first = saved.stored()[0]!.id;
+
+    // A different outfit and a different spelling of the same name.
+    fireEvent.click(screen.getByRole("button", { name: "Take off Crown of Tides" }));
+    await waitFor(() => expect(worn()).toHaveLength(1));
+    fireEvent.change(name(), { target: { value: "horde LOOK" } });
+    expect(screen.getByRole("button", { name: "Replace Horde look" })).toBeTruthy();
+    fireEvent.click(keep());
+
+    await waitFor(() => expect(saved.stored()[0]?.pieces).toHaveLength(1));
+    expect(saved.stored()).toHaveLength(1);
+    // The same set, which is what keeps whatever was said about it attached to it.
+    expect(saved.stored()[0]?.id).toBe(first);
+  });
+
+  it("says why a save was refused rather than pretending it landed", async () => {
+    const { saved } = view();
+    await dress();
+    saved.save.mockImplementationOnce(() =>
+      Promise.reject(new Error("A set's name has to fit in 64 characters.")));
+
+    saveAs("a".repeat(80));
+
+    expect(await screen.findByRole("alert"))
+      .toHaveProperty("textContent", "A set's name has to fit in 64 characters.");
+    expect(saved.stored()).toEqual([]);
+  });
+
+  it("does not send a set with no name at all", async () => {
+    const { saved } = view();
+    await dress();
+
+    saveAs("   ");
+
+    await waitFor(() => expect(saved.save).not.toHaveBeenCalled());
+  });
+
+  // Saving is a note taken, not a door closed: the reader is still dressing her.
+  it("leaves the outfit on her after it has been saved", async () => {
+    const { saved } = view();
+    await dress();
+
+    saveAs("Horde look");
+
+    await waitFor(() => expect(saved.stored()).toHaveLength(1));
+    expect(worn()).toEqual(["Head Crown of Tides", "Chest Robe of Tides"]);
+  });
+
+  /** A set already saved, for the tests that are about what happens to one afterwards. */
+  const already = (): FakeCustomSets => fakeCustomSets([{
+    id: 7,
+    name: "Horde look",
+    createdAt: SAVED_AT,
+    updatedAt: SAVED_AT,
+    pieces: [{
+      place: "armour-0",
+      appearanceId: 1,
+      itemId: 1,
+      name: "Crown of Tides",
+      displayType: 0,
+      inventoryType: 0,
+      displayInfoId: 900_001,
+      iconFileDataId: 0,
+      hasModel: true,
+    }],
+  }]);
+
+  // The issue's other half: a set of the reader's own takes any mark a Blizzard set takes, by
+  // being a third kind of subject rather than a second feature.
+  it("stars and tags a saved set the way the game's own sets are starred and tagged", async () => {
+    const { marks } = view({ saved: already() });
+    browseYours();
+    const card = savedCard("Horde look");
+
+    fireEvent.click(within(card).getByRole("button", { name: "Favourite Horde look" }));
+
+    await waitFor(() => expect(marks.stored())
+      .toEqual([{ kind: "custom", id: 7, favourite: true, tags: [] }]));
+
+    tagIt(card, "Horde look", "faction", "horde");
+    await waitFor(() => expect(marks.stored()[0]?.tags)
+      .toEqual([{ key: "faction", value: "horde" }]));
+    expect(within(card).getByText("faction: horde")).toBeTruthy();
+  });
+
+  it("narrows the saved sets to the starred ones", async () => {
+    const saved = already();
+    const store = fakeMarks([{ kind: "custom", id: 7, favourite: true, tags: [] }]);
+    view({ saved: fakeCustomSets([...saved.stored(), {
+      id: 8, name: "Alliance look", createdAt: SAVED_AT, updatedAt: SAVED_AT,
+      pieces: saved.stored()[0]!.pieces,
+    }]), marks: store });
+    browseYours();
+
+    fireEvent.click(within(document.querySelector("#custom-sets") as HTMLElement)
+      .getByRole("checkbox", { name: "Favourites only" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Alliance look", level: 4 })).toBeNull());
+    expect(screen.getByRole("heading", { name: "Horde look", level: 4 })).toBeTruthy();
+  });
+
+  // The thing the two browsers beside this one cannot offer: somebody who remembers putting a
+  // piece in one of their sets and not which one.
+  it("finds a saved set by what is in it", async () => {
+    view({ saved: already() });
+    browseYours();
+
+    fireEvent.change(screen.getByLabelText("Filter your sets"), { target: { value: "crown" } });
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Horde look", level: 4 })).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText("Filter your sets"), { target: { value: "aegis" } });
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Horde look", level: 4 })).toBeNull());
+  });
+
+  // The one control in this view that destroys something the reader made.
+  it("throws a saved set away, and only after a second click", async () => {
+    const { saved } = view({ saved: already() });
+    browseYours();
+    const card = savedCard("Horde look");
+
+    fireEvent.click(within(card).getByRole("button", { name: "Delete Horde look" }));
+    // Nothing yet: the first click only asks.
+    expect(saved.remove).not.toHaveBeenCalled();
+
+    fireEvent.click(within(card).getByRole("button", { name: "Delete Horde look" }));
+
+    await waitFor(() => expect(saved.stored()).toEqual([]));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Horde look", level: 4 })).toBeNull());
+  });
+
+  it("says how to make one when there are none", async () => {
+    view();
+    browseYours();
+    expect(await screen.findByText("No sets of your own yet")).toBeTruthy();
+  });
+
+  /** Fills in and submits the little form behind "+ tag" — the same one every mark uses. */
+  function tagIt(host: HTMLElement, called: string, key: string, value = ""): void {
+    fireEvent.click(within(host).getByRole("button", { name: `Tag ${called}` }));
+    fireEvent.change(within(host).getByLabelText(`Tag name for ${called}`), {
+      target: { value: key },
+    });
+    fireEvent.change(within(host).getByLabelText(`Tag value for ${called} (optional)`), {
+      target: { value },
+    });
+    fireEvent.click(within(host).getByRole("button", { name: "Add" }));
+  }
 });

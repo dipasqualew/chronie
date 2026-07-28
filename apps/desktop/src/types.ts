@@ -552,17 +552,62 @@ export interface WardrobePayload {
   withheldCount: number;
 }
 
+/* ---------- the sets somebody puts together themselves ---------- */
+
+/**
+ * One piece of a saved outfit, as `customsets::Piece` stores it.
+ *
+ * The same numbers the row it was picked out of carried, written down rather than looked up
+ * again — see `0017_custom_sets.sql` for why. `displayInfoId` is what the character is drawn
+ * from and `appearanceId` is the game's own unit of collection, which is what lets a piece
+ * inside a saved set carry the same star it carries everywhere else in the view.
+ */
+export interface CustomSetPiece {
+  /** Where on the body it goes, in `outfit.ts`'s own words: `armour-3`, `hand-right`. */
+  place: string;
+  appearanceId: number;
+  itemId: number;
+  /** What the row was called when it was saved, which is the item the look was named after. */
+  name: string;
+  displayType: number;
+  inventoryType: number;
+  displayInfoId: number;
+  iconFileDataId: number;
+  hasModel: boolean;
+}
+
+/**
+ * One set the reader saved off the character, whole.
+ *
+ * Unlike a `TransmogSet`, which is a card that costs four table walks to open: a saved set is
+ * already the list of looks, so there is nothing to defer and no second command to ask with.
+ */
+export interface CustomSet {
+  /** This database's own numbering, which is what a mark against the set is keyed by. */
+  id: number;
+  name: string;
+  /** When it was first saved, and when it was last saved over. Seconds. */
+  createdAt: number;
+  updatedAt: number;
+  /** In no meaningful order — `customSets.ts` puts them in the order the body reads. */
+  pieces: CustomSetPiece[];
+}
+
+export interface CustomSetsPayload {
+  sets: CustomSet[];
+}
+
 /* ---------- what somebody says about the game's wardrobe ---------- */
 
 /**
- * Which of the two things a mark can be against, as `marks.rs` spells them.
+ * Which of the three things a mark can be against, as `marks.rs` spells them.
  *
- * A set is numbered by the game's own `TransmogSet.id` and a look by `ItemAppearance.id`, and
- * the two countings overlap — so the kind is half of the identity and never optional. An
- * appearance rather than an item, because everywhere else in this view a row is a look and not
- * the item that sells it.
+ * A set is numbered by the game's own `TransmogSet.id`, a look by `ItemAppearance.id` and a set
+ * of the reader's own by Chronie's, and the countings overlap — so the kind is half of the
+ * identity and never optional. An appearance rather than an item, because everywhere else in
+ * this view a row is a look and not the item that sells it.
  */
-export type MarkSubjectKind = "set" | "appearance";
+export type MarkSubjectKind = "set" | "appearance" | "custom";
 
 /**
  * One thing somebody said about a set or a look.
@@ -982,6 +1027,10 @@ export interface E2EMock {
    * starring a set in the page under test writes here and the next read shows it, which is the
    * same "write, then repaint from storage" the real backend gives. */
   transmogMarks: TransmogMarksPayload;
+  /** The sets this reader has saved off the character. State rather than a fixture, for the
+   * reason the marks are: saving one in the page under test writes here and the browser beside
+   * it then holds it, which is the same "write, then repaint from storage" the backend gives. */
+  customSets: CustomSetsPayload;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
   /** The body wearing an outfit, keyed by that outfit's display ids in ascending order and

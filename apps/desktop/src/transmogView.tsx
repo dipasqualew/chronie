@@ -9,16 +9,19 @@
  * from one and a robe from another — and a dialog that had to be closed to reach the second
  * set made that the hard way round.
  *
- * The left half browses **two ways**, and the switch between them is the one control above
- * both. Sets are what somebody at Blizzard put together; items are the game's whole wardrobe
- * cut by the kind of thing — every head, every staff — which is the only way to reach the
- * several thousand looks no set names. What survives the switch is the outfit, because it
- * lives here rather than in either browser: a helm out of a set is still on her while a
- * two-hander is picked out of the list.
+ * The left half browses **three ways**, and the switch between them is the one control above
+ * all of them. Sets are what somebody at Blizzard put together; items are the game's whole
+ * wardrobe cut by the kind of thing — every head, every staff — which is the only way to reach
+ * the several thousand looks no set names; and yours are the outfits assembled here and saved
+ * under a name, which is the only one of the three the game knows nothing about. What survives
+ * every switch is the outfit, because it lives here rather than in any browser: a helm out of a
+ * set is still on her while a two-hander is picked out of the list, and what she is wearing when
+ * all of that is done is what a set of the reader's own is made of.
  *
  * `transmog.ts` decides how sets group and filter, `wardrobe.ts` what a kind is and what a
- * filter over one leaves, `outfit.ts` what goes where, and `outfitPanel.tsx` draws the body.
- * This is the browsing over them.
+ * filter over one leaves, `customSets.ts` how a saved set becomes rows and back again,
+ * `outfit.ts` what goes where, and `outfitPanel.tsx` draws the body and holds the name box that
+ * saves one. This is the browsing over them.
  *
  * Two things about the left half are worth saying plainly, because both were the other way
  * round once. **A row's whole width puts the piece on**, and Wowhead is an icon at the end of
@@ -34,13 +37,16 @@
 import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { CustomSetList } from "./customSetList";
+import { rowsOf } from "./customSets";
 import { plural } from "./format";
 import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { wearable as canBeWorn } from "./modelPreview";
 import {
-  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, wearSet, wearable,
+  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, wearAll, wearSet,
+  wearable,
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
@@ -56,6 +62,8 @@ import { LinkOut } from "./ui";
 import { WardrobeList } from "./wardrobeList";
 import type {
   CharacterModelPayload,
+  CustomSetPiece,
+  CustomSetsPayload,
   IconsPayload,
   MarkSubjectKind,
   TransmogMark,
@@ -90,16 +98,38 @@ export interface TransmogViewProps {
    * on the screen is then marked, and the first attempt to mark something says why.
    */
   marks: MarkActions & { payload: TransmogMarksPayload | null };
+  /**
+   * The sets the reader saved off the character, and the two ways they change.
+   *
+   * The other thing on this screen that is not read out of the installed game, shaped like the
+   * marks above and for the same reasons: the payload lives in `app.tsx`, every write answers
+   * with all of them, and what came back is what the view then draws. `null` until it has been
+   * read; a reader who has never saved one sees an empty list rather than a missing browser.
+   */
+  custom: {
+    payload: CustomSetsPayload | null;
+    save: (name: string, pieces: CustomSetPiece[]) => Promise<CustomSetsPayload>;
+    remove: (id: number) => Promise<CustomSetsPayload>;
+    onApply: (payload: CustomSetsPayload) => void;
+    onError: (error: unknown) => string;
+  };
   /** Passed through too — it is the one thing here that needs a graphics card. */
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
 }
 
-/** Which half of the browser the reader is in: the game's sets, or the game's whole wardrobe. */
-type Browsing = "sets" | "items";
+/**
+ * Which of the three browsers the reader is in.
+ *
+ * The game's sets, the game's whole wardrobe by the kind of thing, and the sets they made
+ * themselves. Three lists of one kind of answer — something to put on her — and the outfit
+ * survives every switch between them, which is what makes assembling one out of all three the
+ * ordinary thing rather than a trick.
+ */
+type Browsing = "sets" | "items" | "yours";
 
 export function TransmogView(
   {
-    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, marks,
+    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, marks, custom,
     createStage,
   }: TransmogViewProps,
 ): ReactNode {
@@ -248,6 +278,13 @@ export function TransmogView(
             type="button" aria-pressed={browsing === "items"}
             onClick={() => setBrowsing("items")}
           >Items</button>
+          {/* Third rather than first, because the first two are the game and this is the
+              reader — and on a fresh install it is empty, which is not what a view should
+              open on. */}
+          <button
+            type="button" aria-pressed={browsing === "yours"}
+            onClick={() => setBrowsing("yours")}
+          >Yours</button>
         </div>
       <section className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}>
         <div className="table-head">
@@ -324,10 +361,26 @@ export function TransmogView(
         marks={marks} index={index}
         onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
       />
+      {/* Kept in the tree beside the other two, and for the stronger version of their reason:
+          this list is already in memory, so hiding it costs nothing and swapping it out would
+          throw away a search and a scroll for no saving at all. */}
+      <CustomSetList
+        hidden={browsing !== "yours"} payload={custom.payload} onDelete={custom.remove}
+        onSaved={custom.onApply} onError={custom.onError} icons={icons} wantIcons={wantIcons}
+        outfit={outfit} marks={marks} index={index}
+        onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
+        onWearAll={(set) => setOutfit((was) => wearAll(was, rowsOf(set), set.name))}
+      />
       </div>
       <OutfitPanel
         outfit={outfit} icons={icons} createStage={createStage}
         loadCharacter={loadCharacter} loadWorn={loadWorn}
+        save={{
+          sets: custom.payload?.sets ?? [],
+          onSave: custom.save,
+          onSaved: custom.onApply,
+          onError: custom.onError,
+        }}
         onTakeOff={(place) => setOutfit((was) => takeOff(was, place))}
         onClearAll={() => setOutfit(NOTHING_ON)}
       />

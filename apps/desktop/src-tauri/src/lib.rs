@@ -7,6 +7,7 @@ pub mod character;
 mod collector;
 pub mod combatlog;
 pub mod customization;
+pub mod customsets;
 pub mod db2;
 pub mod glb;
 pub mod icons;
@@ -347,6 +348,41 @@ fn delete_transmog_tag(
     state: State<'_, AppState>,
 ) -> Result<marks::MarksPayload, String> {
     collector::delete_transmog_tag(&state.database_path(), &kind, id, &key)
+}
+
+/// The sets the reader put together on the character themselves.
+///
+/// The other thing on the transmog screen that is not read out of the installed game, and the
+/// only one of the two that has clothes in it: an outfit assembled out of several sets and the
+/// game at large, saved under a name and browsed beside Blizzard's own ever after. Read whole
+/// for the reason the marks are — see `collector::custom_sets`.
+#[tauri::command]
+fn custom_sets(state: State<'_, AppState>) -> Result<customsets::CustomSetsPayload, String> {
+    collector::custom_sets(&state.database_path())
+}
+
+/// The two ways a saved set changes, each answering with every saved set rather than an
+/// acknowledgement — the same rule the marks and the activity edits follow.
+#[tauri::command]
+fn save_custom_set(
+    name: String,
+    pieces: Vec<customsets::Piece>,
+    state: State<'_, AppState>,
+) -> Result<customsets::CustomSetsPayload, String> {
+    collector::save_custom_set(
+        &state.database_path(),
+        &name,
+        pieces,
+        Utc::now().timestamp(),
+    )
+}
+
+#[tauri::command]
+fn delete_custom_set(
+    id: i64,
+    state: State<'_, AppState>,
+) -> Result<customsets::CustomSetsPayload, String> {
+    collector::delete_custom_set(&state.database_path(), id)
 }
 
 /// What the game says about the achievements a window is showing.
@@ -1214,6 +1250,9 @@ pub fn run() {
             set_transmog_favourite,
             set_transmog_tag,
             delete_transmog_tag,
+            custom_sets,
+            save_custom_set,
+            delete_custom_set,
             character_model,
             worn_set,
             achievement_details,

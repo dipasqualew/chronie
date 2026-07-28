@@ -96,6 +96,21 @@ export function onlyWearable(rows: AppearanceRow[]): AppearanceRow[] {
   return rows.filter((row) => wearable(row));
 }
 
+/**
+ * Where a place sits in the order the body reads, head downwards.
+ *
+ * Exported because a saved set is a handful of places out of a database, and the order they
+ * come back in is the database's rather than a body's. This is the one place that order is
+ * written down — see [`PLACES`] — and a saved set is listed by asking it rather than by
+ * inventing a second answer. A place nothing here knows sorts to the end rather than being
+ * dropped: it would be a set saved by a later Chronie that knew about a place this one does
+ * not, and losing a piece silently is worse than listing it last.
+ */
+export function placeOrder(place: string): number {
+  const at = (PLACES as readonly string[]).indexOf(place);
+  return at < 0 ? PLACES.length : at;
+}
+
 /** What the list beside the character calls a place. */
 export function placeName(place: string, row?: Placeable): string {
   if (HANDS[place]) return HANDS[place];
@@ -153,7 +168,18 @@ export function wear(outfit: Outfit, row: AppearanceRow, from = ""): Outfit {
  * than an arbitrary one.
  */
 export function wearSet(outfit: Outfit, rows: AppearanceRow[], set: TransmogSet): Outfit {
-  return rows.reduce((worn, row) => wear(worn, row, setLabel(set)), outfit);
+  return wearAll(outfit, rows, setLabel(set));
+}
+
+/**
+ * The same, for a set that is not one of the game's — which is what the reader saved.
+ *
+ * Nothing about wearing a set of clothes depends on who put it together, so this is the whole
+ * of the difference: a name to write under each piece, rather than a `TransmogSet` to take one
+ * from. [`wearSet`] is this with the game's own naming rule in front of it.
+ */
+export function wearAll(outfit: Outfit, rows: AppearanceRow[], from: string): Outfit {
+  return rows.reduce((worn, row) => wear(worn, row, from), outfit);
 }
 
 /** What the panel calls the set a piece came out of, which the game leaves unnamed for some. */
