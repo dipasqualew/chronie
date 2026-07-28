@@ -9,6 +9,8 @@
  * somebody has asked for a list.
  */
 
+import "./timeline.css";
+
 import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 

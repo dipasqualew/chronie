@@ -29,6 +29,8 @@
  * exactly the piece of text it was.
  */
 
+import "./qualitiesChips.css";
+
 import type { ReactNode } from "react";
 
 import { BUILT_IN, COLOUR, SIZE, colourName, qualitySummary } from "./qualities";

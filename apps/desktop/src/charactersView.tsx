@@ -12,6 +12,8 @@
  * wherever it is met.
  */
 
+import "./charactersView.css";
+
 import { useState } from "react";
 import type { ReactNode } from "react";
 

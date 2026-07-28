@@ -12,6 +12,8 @@
  * the whole reason the tabs are not a router.
  */
 
+import "./app.css";
+
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 

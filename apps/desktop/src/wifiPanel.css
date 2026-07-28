@@ -1,0 +1,24 @@
+/*
+ * Sending a history to another machine on the same network, and being offered one.
+ */
+
+.wifi-halves {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px;
+  margin-top: 12px;
+}
+.wifi-half h3 { margin: 0; font-size: 14px; }
+.wifi-half > .sub { margin-top: 4px; }
+.wifi-peers { display: grid; gap: 6px; margin-top: 12px; }
+.wifi-peer {
+  display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+  text-align: left; width: 100%;
+}
+.wifi-peer-address { color: var(--text-muted); font-size: 12px; }
+/* The one screen in the app that destroys data if it is answered without reading, so it
+   is drawn as an interruption rather than as another row of settings. */
+.wifi-offer {
+  margin-top: 12px; padding: 12px; border-radius: 8px;
+  border: 1px solid var(--series-1); background: var(--surface-2);
+}
+.wifi-offer p { margin: 0; }
+.wifi-offer .actions { margin-top: 10px; }

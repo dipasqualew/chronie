@@ -1,7 +1,7 @@
 /**
  * How an activity reads on screen, and what its editor offers.
  *
- * Kept out of index.html so it can be tested without a browser: everything here is a pure
+ * Kept out of the components so it can be tested without a browser: everything here is a pure
  * function of an activity, which is the only part of the feature worth a unit test. The
  * inference itself lives in the Rust backend — this module never guesses, it only presents.
  */

@@ -6,6 +6,8 @@
  * the next one in whatever the reader was already looking at.
  */
 
+import "./segmentModal.css";
+
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { ReactNode } from "react";
 

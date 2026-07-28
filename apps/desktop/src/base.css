@@ -1,0 +1,159 @@
+/*
+ * The window's own vocabulary: the palette it is drawn from, the elements it draws with,
+ * and the few shapes no single component owns.
+ *
+ * Read by `main.tsx` rather than by a view, because everything below it is written in these
+ * terms — a colour, a button, a panel, a table, a dialog — and a sheet that arrived with the
+ * first view to be opened would leave the ones before it drawn in the browser's defaults.
+ */
+
+:root {
+  color-scheme: light;
+  --surface-0: #f6f5f2;
+  --surface-1: #fcfcfb;
+  --surface-2: #efeeea;
+  --border: #dedcd5;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #85837c;
+  --series-1: #2a78d6;
+  --series-1-soft: #cde2fb;
+  --grid: #e6e4dd;
+  --gold: #a67c00;
+  --ok: #2f8f57;
+  --bad: #c65a5a;
+  --shadow: 0 1px 2px rgba(11, 11, 11, .06), 0 8px 24px rgba(11, 11, 11, .04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border: #34342f;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8d8c83;
+    --series-1: #3987e5;
+    --series-1-soft: #184f95;
+    --grid: #2a2a27;
+    --gold: #e0b64a;
+    --ok: #59d973;
+    --bad: #e07b7b;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --border: #34342f;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8d8c83;
+  --series-1: #3987e5;
+  --series-1-soft: #184f95;
+  --grid: #2a2a27;
+  --gold: #e0b64a;
+  --ok: #59d973;
+  --bad: #e07b7b;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 28px 24px 64px;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+h1 { font-size: 20px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
+.sub { color: var(--text-muted); font-size: 13px; }
+.muted { color: var(--text-muted); }
+.gold { color: var(--gold); font-weight: 550; }
+.loss { color: var(--bad); font-weight: 550; }
+.ok { color: var(--ok); font-weight: 550; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em;
+  background: var(--surface-2); border-radius: 4px; padding: 1px 5px;
+}
+
+button {
+  font: inherit; color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 7px; padding: 7px 11px; cursor: pointer;
+}
+button:hover { background: var(--surface-2); }
+button.primary { color: white; background: var(--series-1); border-color: var(--series-1); }
+button:disabled { cursor: default; opacity: .4; }
+
+/* `.circle` carries the other half of this rule, beside the circle itself. */
+button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+
+input, select {
+  font: inherit; color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px;
+}
+input:focus-visible, select:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+/* A chip and a badge turn up on rows this window draws in five different views. */
+.badge {
+  display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-secondary); background: var(--surface-2);
+  vertical-align: baseline;
+}
+.chip {
+  display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 6px;
+  background: var(--surface-2); color: var(--text-secondary);
+}
+
+.empty { padding: 44px 16px; text-align: center; color: var(--text-muted); }
+.empty p { max-width: 42ch; margin: 0 auto; }
+.empty-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px !important; }
+
+/* The head of a panel that lists things, and the row of controls under it. */
+.table-head { padding: 16px 16px 0; }
+.table-head h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.table-head .sub { margin-bottom: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.count { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 12px; white-space: nowrap; border-bottom: 1px solid var(--border); }
+th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-1); color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+}
+th:hover { color: var(--text-primary); }
+th .arrow { color: var(--series-1); font-size: 10px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+td.num { text-align: right; }
+tr:last-child td { border-bottom: none; }
+
+/* Every dialog in the window, and the row of buttons at the foot of one. */
+dialog {
+  border: 1px solid var(--border); border-radius: 12px; padding: 0;
+  background: var(--surface-1); color: var(--text-primary);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .3);
+}
+dialog::backdrop { background: rgba(0, 0, 0, .5); }
+
+.dialog-body { padding: 18px; }
+.dialog-body h2 { font-size: 15px; margin: 0 0 2px; }
+.dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.dialog-actions .spacer { margin-left: auto; }

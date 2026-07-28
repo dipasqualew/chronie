@@ -1,0 +1,18 @@
+/*
+ * Whether the game is writing a combat log, and whether it is writing a useful one.
+ */
+
+/* Bigger than the labels above it, because this one is a decision rather than a field. */
+.setup label.check {
+  display: flex; align-items: center; gap: 9px; margin: 14px 0 10px;
+  font-size: 14px; color: var(--text-primary); cursor: pointer;
+}
+.setup label.check input { width: 15px; height: 15px; cursor: pointer; }
+/* The two states that are not what the reader asked for say so in colour as well as in
+   words: on-but-not-advanced writes a log with nothing useful in it, and stale means
+   nothing is being written at all. */
+#combat-log-state[data-state="advanced"] { color: var(--ok); }
+#combat-log-state[data-state="basic"],
+#combat-log-state[data-state="stale"] { color: var(--bad); }
+#combat-log-detail { margin-top: 6px; }
+#combat-log-detail div + div { margin-top: 2px; }

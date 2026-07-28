@@ -6,6 +6,8 @@
  * through the table's current order rather than through a play session.
  */
 
+import "./details.css";
+
 import { useEffect, useMemo, useReducer, useState } from "react";
 import type { ReactNode } from "react";
 

@@ -1,0 +1,88 @@
+/*
+ * A segment opened in full: what was done, what was earned, and where it left the
+ * character.
+ */
+
+#segment-detail { width: min(680px, 94vw); max-height: 86vh; }
+#segment-detail[open] { display: flex; flex-direction: column; }
+
+.appearance-new { color: var(--ok); }
+.appearance-variant { color: #b373ff; }
+
+/* Beside the time on a transmog row, and quiet: the row is a name and a link out, and this
+   is a third errand that most readers will not be on. */
+.appearance-show { padding: 2px 8px; font-size: 11.5px; line-height: 1.5; }
+.detail-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 16px; border-bottom: 1px solid var(--border); flex: none;
+}
+.detail-title { font-size: 16px; font-weight: 620; margin: 0; letter-spacing: -0.01em; }
+.detail-position { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.detail-nav { margin-left: auto; display: flex; gap: 6px; flex: none; }
+.detail-nav button { padding: 5px 11px; line-height: 1.1; }
+.detail-body { padding: 16px; overflow-y: auto; }
+.detail-who { margin: 0 0 3px; font-size: 15px; }
+.detail-facts { margin: 0 0 12px; color: var(--text-secondary); font-size: 12.5px; }
+.detail-activities { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 14px; }
+.detail-activities button { font-size: 11px; padding: 2px 8px; }
+.detail-highlights { margin-top: 14px; }
+.detail-highlights .tally-row { margin-top: 0; }
+.detail-section h3 {
+  font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-secondary); margin: 16px 0 5px;
+}
+.detail-section ul { margin: 0; padding-left: 18px; }
+.detail-section li { margin: 3px 0; }
+.detail-section p { margin: 0; }
+.detail-section a { color: var(--series-1); }
+
+/* An achievement carries more than a line: the game's own sentence for it, what it
+   granted, where it sits and what it was worth. So it is a row rather than a bullet. */
+.earned { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.earned-item { display: flex; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.earned-item:hover { background: var(--surface-2); }
+/* Drawn before the lookup comes back, and left empty for the achievements this install
+   has nothing to show for — so the column of icons never goes ragged. */
+.earned-icon {
+  flex: none; width: 32px; height: 32px; border-radius: 6px; margin-top: 1px;
+  border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+}
+.earned-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.detail-section .earned-what { color: var(--text-secondary); margin: 2px 0 0; }
+.detail-section .earned-reward { color: var(--gold); font-size: 12px; margin: 2px 0 0; }
+.detail-section .earned-facts {
+  display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 0;
+}
+
+/* What the rest of the account has already done with the faction, and what it holds of
+   the currency. Set below the line it belongs to rather than beside it: this is context
+   for the number above, and it must never be mistaken for the number itself. */
+.detail-section .rep-account {
+  margin: 2px 0 0 12px; font-size: 12px;
+}
+.account-total { color: var(--text-secondary); font-size: 12px; }
+
+/* A change to an equipment set is a set and the slots it moved, so it is a list holding
+   lists. The slot rows line up in three columns — where, what was there, what is now —
+   because scanning down "what replaced what" is the whole reason to open one. */
+.equipsets { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.equipset { padding: 6px 8px; border-radius: 8px; }
+.equipset:hover { background: var(--surface-2); }
+.detail-section .equipset-name { margin: 0; }
+.equipset-slots {
+  list-style: none; margin: 4px 0 0; padding: 0 0 0 22px;
+  font-size: 12.5px; color: var(--text-secondary);
+}
+.equipset-slots li {
+  display: grid; grid-template-columns: 84px 1fr 1fr; gap: 8px; align-items: baseline;
+}
+.equipset-slot { color: var(--text-secondary); }
+/* The arrow is drawn rather than written so a screen reader is not made to say it on
+   every row; the two columns already read as before and after. */
+.equipset-now::before { content: "→ "; color: var(--text-secondary); }
+
+/* A list of items — the transmog a segment collected — is a list of rows rather than of
+   bullets, the way the achievements above it are. */
+.detail-section ul.items { list-style: none; padding-left: 0; display: grid; gap: 2px; }
+.detail-section ul.items li { margin: 0; padding: 4px 6px; border-radius: 8px; }
+.detail-section ul.items li:hover { background: var(--surface-2); }

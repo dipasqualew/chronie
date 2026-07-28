@@ -252,14 +252,32 @@ module is where the tests earn their keep.
 Python collector, watches SavedVariables, persists permanent history in embedded
 SQLite, and installs the addon. Its frontend replaces the standalone HTML report.
 
-The frontend is React. `index.html` carries the stylesheet and nothing else —
-everything below `#root` is drawn from `src/main.tsx`. A view is a `.tsx`
-component and the logic behind it is a `.ts` module beside it, the same split the
-addon's frames and pure modules use and for the same reason: `sessions.ts`,
-`characters.ts`, `transmog.ts`, `combatLog.ts` and `wifi.ts` are where the rules
-live and where the tests are, and the components over them only draw. Nothing
-builds markup out of strings, so nothing has to remember to escape a name out of
-the game.
+The frontend is React. `index.html` carries nothing at all — everything below
+`#root` is drawn from `src/main.tsx`. A view is a `.tsx` component and the logic
+behind it is a `.ts` module beside it, the same split the addon's frames and pure
+modules use and for the same reason: `sessions.ts`, `characters.ts`,
+`transmog.ts`, `combatLog.ts` and `wifi.ts` are where the rules live and where the
+tests are, and the components over them only draw. Nothing builds markup out of
+strings, so nothing has to remember to escape a name out of the game.
+
+**A component's styling is a `.css` file beside it, imported by it** —
+`wardrobeList.css` next to `wardrobeList.tsx`, `outfitPanel.css` next to
+`outfitPanel.tsx`. Vite handles the import natively. `src/base.css` is the
+exception and the only one: the palette, the element defaults and the few shapes
+no single component owns, read by `main.tsx` before anything else so that every
+sheet after it is written in those terms.
+
+This replaces the rule that `index.html` carried the stylesheet, which was the
+single largest producer of merge conflicts in this repository — six branches in a
+day all appending to the tail of one 1,400-line sheet, two unrelated features
+landing nine lines apart. The reason that rule existed was the packaged app's CSP:
+Tauri stamps a nonce onto `style-src` and onto the `<style>` tags it embeds, and a
+nonce makes every engine ignore `'unsafe-inline'`. It does not apply. A built page
+reaches its CSS through a `<link>` that `'self'` already allows, and the dev
+server hands Vite the same nonce through a `csp-nonce` meta tag — see
+`vite.config.ts`. What has not changed is that a `style=""` attribute can never
+carry a nonce, so **nothing the app draws may be styled from a `style` prop**;
+that is what `data-class` and `data-quality` are for.
 
 The frontend, its tests and this repository's own scripts are TypeScript, under
 `strict`. There is no JavaScript left in the tree and no new file should add any.

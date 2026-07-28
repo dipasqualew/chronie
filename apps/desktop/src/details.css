@@ -1,0 +1,14 @@
+/*
+ * The details table — every row of the history, sorted and scrolled.
+ *
+ * The table itself is drawn in `base.css`, because the query view lays its answers out in one
+ * too and neither of them owns the shape.
+ */
+
+.scroller { overflow-x: auto; padding: 0 4px 4px; }
+
+.row-open {
+  border: none; background: transparent; padding: 0; font: inherit;
+  color: inherit; text-align: left;
+}
+tbody tr:hover .row-open { text-decoration: underline; text-underline-offset: 3px; }

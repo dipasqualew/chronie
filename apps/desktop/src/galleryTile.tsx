@@ -14,6 +14,8 @@
  * and a grid somewhere else goes black.
  */
 
+import "./galleryTile.css";
+
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 

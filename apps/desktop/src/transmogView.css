@@ -1,0 +1,147 @@
+/*
+ * The transmog view: the character on one side, the sets on the other, and the switch
+ * between the browsers that fill it.
+ *
+ * The rows inside a set are the wardrobe's — see `wardrobeList.css`.
+ */
+
+.mog-list { padding: 0 16px 16px; }
+.mog-group + .mog-group { margin-top: 22px; }
+.mog-group h3 {
+  font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-secondary); margin: 0 0 9px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+.mog-group h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.mog-grid {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+}
+.mog-card {
+  border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px;
+  background: var(--surface-2); display: flex; flex-direction: column; gap: 8px;
+}
+/* Wider cards once each one holds a character, for the reason the wardrobe's tiles are wide:
+   the reader turned the pictures on to look at them, and a set at 232px is a hundred pixels
+   of woman under a heading. `auto-fill` so a narrow window drops a column rather than
+   shaving every card. */
+#transmog-list[data-models="true"] .mog-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+/* An opened set holds its own contents and stops being a tile on the grid: it runs the
+   full width so its rows are readable, and the sets after it close up around it. */
+.mog-card[data-open="true"] {
+  grid-column: 1 / -1; border-color: var(--series-1); background: var(--surface-1);
+}
+.mog-card h4 {
+  margin: 0; font-size: 13.5px; font-weight: 600; line-height: 1.35;
+  /* Set names run long and the cards have to stay on a grid, so let them wrap twice. */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mog-open {
+  border: none; background: transparent; padding: 0; font: inherit;
+  color: inherit; text-align: left; cursor: pointer;
+}
+.mog-open:hover, .mog-card:hover .mog-open {
+  background: transparent; text-decoration: underline; text-underline-offset: 3px;
+}
+.mog-card:hover { border-color: var(--series-1); }
+.mog-facts { display: flex; flex-wrap: wrap; gap: 4px; }
+.mog-foot {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: auto; font-size: 12px; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.mog-contents { border-top: 1px solid var(--border); padding-top: 8px; }
+.mog-contents-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.mog-wear-all {
+  margin-left: auto; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
+  padding: 3px 9px; cursor: pointer;
+}
+.mog-wear-all:hover { border-color: var(--series-1); }
+.mog-hide {
+  display: flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.mog-hide input { margin: 0; cursor: pointer; }
+
+/* The two halves that do not move: the sets are scrolled through and the character is not.
+   Sticky rather than fixed so the panel scrolls with the page's own header and then stays,
+   which is what "on screen at all times" means once the window is short.
+
+   The character is the subject of this view, so her half takes a third of a wide window and
+   the whole of its height — a 300px stage in a 330px column showed a body the size of a
+   thumbnail beside a list that had room to spare. The sets grid reflows to whatever is
+   left, which is what `auto-fill` was for. */
+.mog-layout {
+  display: grid; gap: 12px; align-items: start;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 34vw, 620px);
+}
+.mog-browser { min-width: 0; }
+/* The left half is two browsers and the switch above them, stacked — so the switch sits in
+   the same place whichever of them is showing, and neither of them moves when it changes. */
+.mog-half { display: grid; gap: 10px; min-width: 0; align-content: start; }
+.mog-modes { display: flex; gap: 4px; }
+.mog-modes button {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1);
+  color: var(--text-secondary); font: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 5px 14px; cursor: pointer;
+}
+.mog-modes button:hover { color: var(--text-primary); border-color: var(--series-1); }
+.mog-modes button[aria-pressed="true"] {
+  background: var(--surface-2); color: var(--text-primary); border-color: var(--series-1);
+}
+/* A kind of place is thousands of looks, and the button under them is the honest version of
+   an endless scroll: it says how many more there are before it fetches any of them. */
+.mog-more {
+  display: block; width: 100%; margin-top: 8px;
+  border: 1px dashed var(--border); border-radius: 8px; background: none;
+  color: var(--text-secondary); font: inherit; font-size: 12px; padding: 7px; cursor: pointer;
+}
+.mog-more:hover { color: var(--text-primary); border-color: var(--series-1); border-style: solid; }
+
+/* A window narrow enough that two columns would squeeze both puts the character above the
+   sets rather than beside them. What that costs the panel is said beside the panel. */
+@media (max-width: 900px) {
+  .mog-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The sets whose clothes these are. Quiet and under the chips: a reader is looking at one
+   set, and this is the footnote saying it is also three others. */
+.mog-alternates {
+  list-style: none; margin: 4px 0 0; padding: 0;
+  font-size: 12px; color: var(--text-secondary);
+}
+.mog-alternates li { padding: 1px 0 1px 10px; border-left: 2px solid var(--border); }
+
+/* The one fact a row volunteers. A reader whose class cannot wear the set's own version of a
+   look can still have the look, and it is worth a chip on the row rather than a line inside
+   a list they have to open first. */
+.chip.mog-lifted { border-color: var(--series-1); color: var(--series-1); }
+
+/* How many other items give this look. Deliberately quiet — it is a count, and the reader
+   came for the picture beside it. */
+.mog-sources-toggle {
+  flex: none; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px dashed var(--border); background: none;
+  font: inherit; font-size: 12px; color: var(--text-secondary);
+}
+.mog-sources-toggle:hover { color: var(--text); border-style: solid; }
+.mog-sources-toggle[aria-expanded="true"] { border-style: solid; color: var(--text); }
+/* The items themselves, indented under the look they give. The whole row wraps, so this
+   takes the full width and starts a line of its own. */
+.mog-sources {
+  flex: 1 0 100%; list-style: none; margin: 4px 0 0; padding: 0 0 0 42px;
+  display: grid; gap: 2px;
+}
+.mog-source {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 3px 6px; border-radius: 6px; font-size: 13px;
+  border-left: 2px solid var(--border);
+}
+.mog-source:hover { background: var(--surface-1); }
+.mog-source-name { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
+.mog-source .chip { font-size: 11px; }

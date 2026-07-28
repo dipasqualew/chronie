@@ -43,6 +43,8 @@
  * failure to draw, and no other one does.
  */
 
+import "./transmogView.css";
+
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

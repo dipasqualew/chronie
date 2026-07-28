@@ -11,6 +11,8 @@
  * somebody typing a minus sign. They are parsed once, on the way out.
  */
 
+import "./activityEditor.css";
+
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

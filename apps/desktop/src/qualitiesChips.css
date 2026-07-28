@@ -1,0 +1,24 @@
+/*
+ * What the game's artwork was measured to be, on a row beside what a reader said about it.
+ */
+
+/* What the game's artwork was measured to be, on a row beside what a reader said about it.
+   Dashed rather than filled, the way a guessed activity is: everything else on the row was
+   either typed by somebody or stated by the game, and this was worked out from pictures. */
+.chip.quality {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px;
+  background: none; border: 1px dashed var(--border);
+}
+.quality-swatch { flex: none; display: block; }
+.quality-said { white-space: nowrap; }
+/* Every part of the chip narrows the list to what that part says — see `terms.ts`. It has to
+   stay looking like the chip it was rather than like a button, because it is still the row
+   saying what it is; the underline on hover is the whole of what says it can be clicked. */
+.quality-ask {
+  flex: none; display: inline-flex; align-items: center; padding: 0; border: 0;
+  background: none; font: inherit; color: inherit; cursor: pointer;
+}
+.quality-ask:hover, .quality-ask:focus-visible { text-decoration: underline; }
+.quality-ask:hover .quality-swatch, .quality-ask:focus-visible .quality-swatch {
+  outline: 1px solid var(--text-secondary); outline-offset: 1px; border-radius: 3px;
+}

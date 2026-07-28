@@ -33,6 +33,8 @@
  * beside the form the preview.
  */
 
+import "./herselfPanel.css";
+
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 

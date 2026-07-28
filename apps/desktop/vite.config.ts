@@ -42,8 +42,17 @@ function tauriCsp(): Plugin {
   // Tauri nonces the `<style>` and `<script>` tags it finds in the HTML it embeds; doing the
   // same here is what keeps the page's own stylesheet alive under a policy that has stopped
   // trusting inline. It deliberately does not reach `style=""` attributes — nothing can.
+  //
+  // The meta tag is the other half of that, and it is only the dev server's problem. A built
+  // page reaches its CSS through a `<link>` that `'self'` already allows; a served one has
+  // Vite hand each `.css` module to the browser as a `<style>` element it creates at runtime,
+  // which no HTML transform can reach. Vite reads a nonce off `meta[property=csp-nonce]` and
+  // puts it on every one of those, so telling it the nonce here is what keeps `bun run dev`
+  // from opening on an unstyled page.
   const stamp = (html: string): string =>
-    html.replace(/<(style|script)(?=[\s>])/g, `<$1 nonce="${nonce}"`);
+    html
+      .replace(/<(style|script)(?=[\s>])/g, `<$1 nonce="${nonce}"`)
+      .replace("</head>", `<meta property="csp-nonce" nonce="${nonce}">\n</head>`);
 
   const policy = (server: ViteDevServer | PreviewServer): void => {
     server.middlewares.use((_request, response, next) => {

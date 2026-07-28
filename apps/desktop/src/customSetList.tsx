@@ -19,6 +19,8 @@
  * through exactly the code a set's row goes through.
  */
 
+import "./customSetList.css";
+
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 

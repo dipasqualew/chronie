@@ -1,0 +1,202 @@
+/*
+ * What `ui.tsx` draws, wherever it is drawn: a character's colour, a segment row, an
+ * activity, a summary chip and the panel it unfolds into.
+ */
+
+/* The client's own thirteen colours, so a character reads here the way they do in game,
+   and beside each the ink that can be written on it: no single one clears priest white
+   and shaman blue both, so each is the near-black or the white that reaches WCAG 4.5:1
+   against its fill. `ui.test.tsx` reads these rules back and re-measures that.
+
+   They live in the stylesheet, rather than being handed to it a character at a time,
+   because the packaged app's CSP carries a nonce in `style-src` — Tauri puts it there —
+   and a nonce makes every browser ignore `'unsafe-inline'`. A `style=""` attribute has
+   nowhere to carry a nonce, so a colour sent that way never arrives: that is what left
+   three attempts at these colours green in the tests and grey in the window. A
+   `data-class` the stylesheet matches on cannot be dropped by a policy.
+
+   The bare `[data-class]` first is the fallback, and it is deliberately a rule rather
+   than a `var()` default: a segment whose class nothing knows would otherwise inherit
+   the colour of whoever led the session and quietly claim to be them. */
+[data-class] { --class-color: var(--text-muted); --class-ink: #0b0b0b; }
+[data-class="DEATHKNIGHT"] { --class-color: #c41e3a; --class-ink: #ffffff; }
+[data-class="DEMONHUNTER"] { --class-color: #a330c9; --class-ink: #ffffff; }
+[data-class="DRUID"]       { --class-color: #ff7c0a; --class-ink: #0b0b0b; }
+[data-class="EVOKER"]      { --class-color: #33937f; --class-ink: #0b0b0b; }
+[data-class="HUNTER"]      { --class-color: #aad372; --class-ink: #0b0b0b; }
+[data-class="MAGE"]        { --class-color: #3fc7eb; --class-ink: #0b0b0b; }
+[data-class="MONK"]        { --class-color: #00ff98; --class-ink: #0b0b0b; }
+[data-class="PALADIN"]     { --class-color: #f48cba; --class-ink: #0b0b0b; }
+[data-class="PRIEST"]      { --class-color: #ffffff; --class-ink: #0b0b0b; }
+[data-class="ROGUE"]       { --class-color: #fff468; --class-ink: #0b0b0b; }
+[data-class="SHAMAN"]      { --class-color: #0070dd; --class-ink: #ffffff; }
+[data-class="WARLOCK"]     { --class-color: #8788ee; --class-ink: #0b0b0b; }
+[data-class="WARRIOR"]     { --class-color: #c69b6d; --class-ink: #0b0b0b; }
+
+/* Clear of the rings the circle already wears, or the focus ring reads as one of them. */
+.circle:focus-visible { outline: 2px solid var(--series-1); outline-offset: 4px; }
+
+/* The activities lead the card, so they are the one thing on it drawn as rows rather than
+   as chips: a row can carry a level, a dungeon and a verdict without any of the three
+   having to be abbreviated away, and four keys in an evening read as four keys.
+
+   They wear the class colour the way a segment row does — a rail and a wash that has faded
+   before the time on the right — because an evening across three characters is exactly
+   when "who did this one" is worth answering without reading a word. */
+.act-roll { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 3px; }
+.act {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px;
+  align-items: baseline; width: 100%; text-align: left; padding: 7px 10px 7px 13px;
+  border: none; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer;
+  --class-wash: linear-gradient(to right,
+    color-mix(in srgb, var(--class-color) 20%, transparent), transparent 46%);
+  background: var(--class-wash);
+  box-shadow: inset 3px 0 0 var(--class-color), inset 4px 0 0 var(--border);
+}
+.act:hover { background: var(--class-wash), var(--surface-2); }
+/* A guess Chronie was unsure about, marked the way an activity chip marks one: dashed,
+   so "Chronie thinks" and "I said so" can be told apart without hovering either. */
+.act.guess { outline: 1px dashed var(--border); outline-offset: -1px; }
+.act-icon { font-size: 14px; line-height: 1; }
+.act-body { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.act-name { font-weight: 570; }
+.act-detail { color: var(--text-secondary); font-size: 12px; }
+.act-who { color: var(--text-secondary); font-size: 12px; }
+.act-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.circle {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  font-size: 10px; font-weight: 700; letter-spacing: .03em;
+  /* Filled with the class colour outright, not washed with it: a 22% tint over the card
+     left every circle the colour of the page, which is the same as no colour at all.
+     The two rings hold a stacked cast apart and give a priest's white an edge. */
+  background: var(--class-color);
+  border: 2px solid var(--class-color);
+  color: var(--class-ink);
+  box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px var(--border);
+  cursor: default; flex: none;
+}
+
+.hl-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.hl {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; line-height: 1.4;
+  padding: 4px 11px 4px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-primary); text-align: left;
+}
+button.hl { cursor: pointer; }
+button.hl:hover { border-color: var(--series-1); background: var(--series-1-soft); }
+.hl-icon { font-size: 13px; line-height: 1; }
+.hl .detail { color: var(--text-muted); }
+.hl-caret { font-size: 9px; color: var(--text-muted); margin-left: 1px; }
+.hl.open { border-color: var(--series-1); background: var(--series-1-soft); }
+.hl.open .hl-caret { color: var(--text-secondary); }
+
+/* What a summary unfolds into. Capped and scrolled rather than allowed to run: a session
+   with sixty quests in it should still be a card, not a page. */
+.hl-panel {
+  list-style: none; margin: 8px 0 0; padding: 6px;
+  max-height: 232px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2);
+  display: grid; gap: 1px;
+}
+.hl-item {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  width: 100%; text-align: left; padding: 4px 8px;
+  border: none; border-radius: 6px; background: transparent;
+  font: inherit; font-size: 12px; cursor: pointer;
+}
+.hl-item:hover { background: var(--surface-1); }
+.hl-item-name { color: var(--text-primary); }
+.hl-item-meta { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+/* A tint for the three that are genuinely rare, so an evening with one is visible from
+   across the room; everything else stays neutral or the tinting means nothing. */
+.hl-achievement { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, var(--surface-1)); }
+.hl-levelUp { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--surface-1)); }
+.hl-mount { border-color: #b373ff; background: color-mix(in srgb, #b373ff 14%, var(--surface-1)); }
+
+/* The running numbers are one mark apiece, and the numbers themselves live in the hover.
+   A night that touched five factions used to end in five lines of name and number under a
+   card whose job is to say what happened; this is that strip reduced to what it is worth
+   at a glance, which is "there was gold, there was reputation". */
+.tally-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border);
+}
+.tally {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  font-size: 12px; line-height: 1; cursor: default;
+}
+.tally:hover, .tally:focus-visible { border-color: var(--series-1); background: var(--series-1-soft); }
+
+/* A chip that has given its words to the hover keeps its icon centred rather than sitting
+   where the label used to start, or a row of them comes out visibly ragged. */
+.hl-quiet { padding: 4px 8px; }
+
+/* A segment carries its own character's class colour, quietly: a rail down the left edge
+   and a wash that has faded out by a third of the way across. Quietly is the point — the
+   row is already a time, a name, a place and a summary, and the colour is there to let an
+   evening's characters be told apart at a glance, not to be read.
+
+   The rail wears a hairline on its inner side for the same reason the circle does: priest
+   is #ffffff, and a rail in it against the card would read as a gap rather than a colour. */
+.seg {
+  display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: start;
+  width: 100%; text-align: left; padding: 7px 8px 7px 13px;
+  border: none; border-radius: 8px;
+  --class-wash: linear-gradient(to right,
+    color-mix(in srgb, var(--class-color) 18%, transparent), transparent 38%);
+  background: var(--class-wash);
+  box-shadow: inset 3px 0 0 var(--class-color), inset 4px 0 0 var(--border);
+}
+/* The wash is named above so that hovering can lay the hover surface *under* it rather
+   than replace it — a row that lost its colour on the way to being clicked would be the
+   one place the colour mattered most. */
+.seg:hover { background: var(--class-wash), var(--surface-2); }
+.seg-time { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.seg-body { min-width: 0; }
+.seg-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.seg-who { font-weight: 550; }
+.seg-where { color: var(--text-secondary); }
+.seg-activities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; font-size: 11px; }
+/* The same summary as the session's, a size down: on a segment row it is the supporting
+   line, and drawn at full size it would compete with the place and the character. */
+.seg-summary { display: block; margin-top: 5px; }
+.seg-summary .hl-row { gap: 4px; }
+.seg-summary .hl { font-size: 11px; padding: 2px 8px 2px 7px; }
+.seg-summary .hl-icon { font-size: 11px; }
+.seg-dur { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+
+.chip.activity {
+  background: transparent; border: 1px solid var(--series-1);
+  color: var(--text-primary); font-weight: 550;
+}
+.chip.activity.guess { border-style: dashed; color: var(--text-secondary); }
+.chip.activity .detail { font-weight: 400; color: var(--text-secondary); }
+.dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 7px; vertical-align: baseline;
+  background: var(--class-color);
+}
+
+/* Where a reputation gain left the character: a bar under the faction, indented past its
+   name so the two read as one entry. A real <progress> rather than a pair of divs, so the
+   numbers under it are the caption of something a screen reader already announces as a
+   progress bar. */
+.detail-section .rep-standing {
+  display: flex; align-items: center; gap: 8px;
+  margin: 2px 0 0; font-size: 12px; color: var(--text-secondary);
+}
+.rep-bar {
+  flex: none; width: 180px; height: 8px;
+  appearance: none; border: none; border-radius: 4px;
+  background: var(--surface-2); color: var(--ok);
+}
+
+.rep-bar::-webkit-progress-bar { background: var(--surface-2); border-radius: 4px; }
+.rep-bar::-webkit-progress-value { background: var(--ok); border-radius: 4px; }
+.rep-bar::-moz-progress-bar { background: var(--ok); border-radius: 4px; }

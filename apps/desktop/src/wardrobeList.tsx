@@ -36,6 +36,8 @@
  * and `galleryStage.ts` is where the claim about the context is kept.
  */
 
+import "./wardrobeList.css";
+
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

@@ -17,6 +17,8 @@
  * before any of this existed, and it is what it falls back to rather than an apology.
  */
 
+import "./item.css";
+
 import { useEffect, useReducer } from "react";
 import type { ReactNode } from "react";
 

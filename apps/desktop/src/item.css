@@ -1,0 +1,47 @@
+/*
+ * One piece of gear, wherever one is named: its picture, its name in the colour the game
+ * writes it in, and the facts under it.
+ */
+
+/* One piece of gear: its picture, its name in the colour the game writes it in, and the
+   facts under it. The same three parts wherever an item turns up — a transmog source, a
+   slot of an equipment set, an unfolded summary — because it is the same component. */
+.item { display: inline-flex; gap: 7px; align-items: flex-start; vertical-align: top; }
+/* Drawn before the lookup comes back, and left empty for the items this install has no
+   picture for, so a column of items never goes ragged. */
+.item-icon {
+  flex: none; width: 26px; height: 26px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+}
+/* Icons are stored at 64 pixels and shown at a fraction of that, which bilinear suits. */
+.item-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.item-said { display: grid; gap: 3px; }
+.item-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.detail-section .item-name, .item-name { color: var(--text-primary); font-weight: 550; }
+.item-facts { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Smaller where the row is already small: a slot of an equipment set has two items side by
+   side, and an unfolded summary is a line of twelve-pixel text. */
+.equipset-slots .item-icon, .hl-item .item-icon { width: 18px; height: 18px; border-radius: 4px; }
+.equipset-slots .item, .hl-item .item { gap: 5px; }
+.hl-item .item-name { font-weight: inherit; }
+
+/* The colours the game writes an item's name in, which are the one thing about a piece of
+   gear every player already reads without being told. An item whose lookup has not come
+   back carries no quality at all and stays the colour of the text around it — which is why
+   this is keyed on the attribute rather than defaulted to poor grey.
+
+   The attribute rather than a `style` prop for the same reason `data-class` is one: the
+   packaged app's CSP nonces `style-src`, and every inline style the page writes is
+   dropped. */
+[data-quality="0"] { color: #9d9d9d; }
+[data-quality="1"] { color: var(--text-primary); }
+[data-quality="2"] { color: #1eff00; }
+[data-quality="3"] { color: #0070dd; }
+[data-quality="4"] { color: #a335ee; }
+[data-quality="5"] { color: #ff8000; }
+[data-quality="6"] { color: #e6cc80; }
+[data-quality="7"] { color: #00ccff; }
+/* On the frame it is a border rather than ink: a rare item's icon sits in a blue box the
+   way it does in the game's own bags. */
+.item-icon[data-quality] { border-color: currentColor; }
