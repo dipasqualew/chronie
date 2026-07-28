@@ -2876,6 +2876,12 @@ test("browses the game's transmog sets and dresses the character in them", async
   yours,
   outfit,
 }) => {
+  // The longest flow in the suite, and the only one that draws: a body per outfit tried on, and
+  // then a page of twenty of them at once. A CI runner has no graphics card and renders all of
+  // that in software, which is several times what the same steps cost on a desktop — so the
+  // budget is the runner's rather than the default, and what a step here is allowed to take is
+  // stated where that step is.
+  test.slow();
   await transmog.open();
 
   await test.step("every set arrives under the collection it belongs to", async () => {
