@@ -949,6 +949,32 @@ export interface GalleryPayload {
   models: GalleryModel[];
 }
 
+/**
+ * One card of the set grid, and the picture of the whole set on a body.
+ *
+ * There is no `kind` here and there never can be: a set is a body's worth of clothes, so the
+ * picture is always a character — even for the weapon rack, where every piece of it is
+ * something she is holding. `GalleryModel`'s two ways of framing a row are about showing one
+ * appearance, and a set is not one appearance.
+ */
+export interface SetGalleryModel {
+  setId: number;
+  /** `null` where this install has nothing to put on her for the set. The card draws without. */
+  model: string | null;
+}
+
+/**
+ * A page of the set grid, each set worn whole on a body of its own.
+ *
+ * Asked for by id rather than by pieces, which is the one thing it does not have in common with
+ * `GalleryPayload`. A card is a name and a count until somebody opens it, so the window has no
+ * clothes to send: what the set is wearing is read by the backend, for the whole page out of one
+ * walk of each table — see `gallery::sets`.
+ */
+export interface SetGalleryPayload {
+  models: SetGalleryModel[];
+}
+
 /* ---------- achievements, as the game describes them ---------- */
 
 /**

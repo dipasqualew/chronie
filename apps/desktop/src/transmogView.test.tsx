@@ -11,9 +11,9 @@ import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
   CharacterModelPayload, CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind,
-  MarkSubjectKind, QualitiesFile, SetQualitiesFile, TransmogAppearance, TransmogMark,
-  TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance,
-  WardrobePayload, WornPiece, WornSetPayload,
+  MarkSubjectKind, QualitiesFile, SetGalleryPayload, SetQualitiesFile, TransmogAppearance,
+  TransmogMark, TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload,
+  WardrobeAppearance, WardrobePayload, WornPiece, WornSetPayload,
 } from "./types";
 
 afterEach(cleanup);
@@ -77,6 +77,24 @@ const SETS: TransmogPayload = {
   ],
   readCount: 2,
   declaredCount: 2,
+  withheldCount: 0,
+};
+
+/**
+ * More sets than the grid draws pictures for, which is the only thing this payload is for.
+ *
+ * Sixteen, against a page of twelve — a few more than a page, so that turning the pictures on
+ * visibly shortens the grid and the button under it has something to say. One collection, so
+ * nothing here turns on how the groups happen to fall.
+ */
+const MANY_SETS: TransmogPayload = {
+  sets: Array.from({ length: 16 }, (_, index) => set({
+    id: 301 + index,
+    name: `Wardrobe of the Deep ${String(index).padStart(2, "0")}`,
+    group: "Deepwater Collection",
+  })),
+  readCount: 16,
+  declaredCount: 16,
   withheldCount: 0,
 };
 
@@ -541,6 +559,13 @@ function view(
       model: model(`${piece.displayInfoId} worn`),
     })),
   }));
+  // And the set grid drawn as characters, recorded for the reason the wardrobe's page is: what
+  // matters about it is which cards the window asked the backend for, and only the request can
+  // say. Ids rather than clothes, because a card holds nothing else until somebody opens it.
+  const loadSetGallery = vi.fn((setIds: number[]): Promise<SetGalleryPayload> =>
+    Promise.resolve({
+      models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+    }));
   const marks = options.marks ?? fakeMarks();
   const saved = options.saved ?? fakeCustomSets();
   // Recorded as well as answered: "a slot's file is not downloaded until somebody browses that
@@ -559,6 +584,7 @@ function view(
       loadCharacter={loadCharacter}
       loadWorn={loadWorn}
       loadGallery={loadGallery}
+      loadSetGallery={loadSetGallery}
       herself={herself}
       store={marks}
       saved={saved}
@@ -569,8 +595,8 @@ function view(
     />,
   );
   return {
-    rendered, loadWorn, loadCharacter, loadSet, loadAppearances, loadGallery, marks, saved,
-    herself, shown, resets, painted, loadQualities, loadSetQualities,
+    rendered, loadWorn, loadCharacter, loadSet, loadAppearances, loadGallery, loadSetGallery,
+    marks, saved, herself, shown, resets, painted, loadQualities, loadSetQualities,
   };
 }
 
@@ -937,6 +963,7 @@ describe("TransmogView", () => {
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         loadGallery={() => Promise.resolve({ models: [] })}
+        loadSetGallery={() => Promise.resolve({ models: [] })}
         herself={NOT_ASKED}
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
@@ -962,6 +989,7 @@ describe("TransmogView", () => {
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         loadGallery={() => Promise.resolve({ models: [] })}
+        loadSetGallery={() => Promise.resolve({ models: [] })}
         herself={NOT_ASKED}
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
@@ -1252,6 +1280,9 @@ describe("the wardrobe as models", () => {
             model: model("worn"),
           })),
         })}
+        loadSetGallery={(setIds) => Promise.resolve({
+          models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+        })}
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
@@ -1401,6 +1432,9 @@ describe("the wardrobe as models", () => {
             model: model("worn"),
           })),
         })}
+        loadSetGallery={(setIds) => Promise.resolve({
+          models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+        })}
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
@@ -1440,6 +1474,7 @@ describe("the wardrobe as models", () => {
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         herself={NOT_ASKED}
         loadGallery={() => Promise.reject(new Error("The game's files are not readable."))}
+        loadSetGallery={() => Promise.resolve({ models: [] })}
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
@@ -1453,6 +1488,180 @@ describe("the wardrobe as models", () => {
 
     expect(await screen.findByText("Coif of the Drowned Star")).toBeTruthy();
     await waitFor(() => expect(screen.queryByLabelText(/, drawn$/)).toBeNull());
+  });
+});
+
+/**
+ * The set grid drawn as the clothes it is, rather than as a list of names.
+ *
+ * A card is a name, a count and a row of chips, and none of that says what a set of clothes
+ * looks like — which is what issue #143 is. What every one of these is about is that the *page*
+ * is the unit, the same way it is for the wardrobe beside it: the backend builds one body and
+ * dresses it once per card, so a page costs about what a card costs and a window that asked a
+ * card at a time would give all of that back.
+ */
+describe("the sets as models", () => {
+  afterEach(cleanup);
+
+  /** Turns the pictures on, and waits for the page the grid asks for to arrive. */
+  async function showSets(already?: ReturnType<typeof view>): Promise<ReturnType<typeof view>> {
+    const shown = already ?? view();
+    fireEvent.click(screen.getByLabelText("Show each set worn"));
+    await waitFor(() => expect(shown.loadSetGallery).toHaveBeenCalled());
+    return shown;
+  }
+
+  /** The picture on one card, found by the set it is of. */
+  function shot(name: string): HTMLElement {
+    return screen.getByLabelText(`${name}, drawn`);
+  }
+
+  // One request for the whole page, and it names every card of it by id — because an id is all
+  // a card holds until somebody opens it, and reading what a set is made of to draw a picture
+  // of it is the trip this exists to avoid.
+  it("asks for a whole page of sets in one request", async () => {
+    const { loadSetGallery } = await showSets();
+    expect(loadSetGallery).toHaveBeenCalledTimes(1);
+    expect(loadSetGallery.mock.calls[0]?.[0]).toEqual([201, 203]);
+  });
+
+  // And each of them is painted on the grid's one stage, holding the whole of her. A set is a
+  // body's worth of clothes and there is no part of her it is about — which is the one framing
+  // decision a card makes, and the opposite of the wardrobe's.
+  it("draws every card as the whole of the character wearing that set", async () => {
+    const { painted } = await showSets();
+    await waitFor(() => expect(painted).toHaveLength(2));
+    expect(painted.map((one) => one.label))
+      .toEqual(["Tideglass Regalia, drawn", "Emberforge Plate, drawn"]);
+    for (const one of painted) expect(one.holds).toBe(1);
+  });
+
+  // The picture is something to drag, so it is not inside the button that opens the set: a
+  // click that turned out to be a drag would otherwise open a set every time somebody turned
+  // one round to look at the back of it.
+  it("keeps the picture out of the button that opens the set", async () => {
+    await showSets();
+    const picture = shot("Tideglass Regalia");
+    expect(picture.closest("button")).toBeNull();
+    expect(screen.getByRole("button", { name: "Tideglass Regalia" }).getAttribute("aria-expanded"))
+      .toBe("false");
+  });
+
+  // A card this install can put nothing on her for keeps everything it had. The name, the
+  // count and the chips are what the grid was before any of this, and they are still the
+  // answer to what the set is.
+  it("keeps a card the install can draw nothing for", async () => {
+    const shown = view();
+    shown.loadSetGallery.mockImplementation((setIds: number[]) => Promise.resolve({
+      models: setIds.map((setId) => ({ setId, model: setId === 201 ? null : model("worn") })),
+    }));
+    await showSets(shown);
+    await waitFor(() => expect(shot("Emberforge Plate")).toBeTruthy());
+    expect(screen.queryByLabelText("Tideglass Regalia, drawn")).toBeNull();
+    expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy();
+  });
+
+  // A page that will not come leaves the grid exactly as it was before anybody asked for
+  // pictures, rather than a column of cards waiting for ever.
+  it("keeps the grid when a page of sets will not come", async () => {
+    const shown = view();
+    shown.loadSetGallery.mockImplementation(() =>
+      Promise.reject(new Error("The game's files are not readable.")));
+    await showSets(shown);
+    await waitFor(() => expect(shown.loadSetGallery).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText(/, drawn$/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy();
+  });
+
+  // The grid is paged once there is a body behind each card, and only then: a grid of names is
+  // cheap to draw whole, and seeing every set a search left is what it is for.
+  it("draws fewer sets at a time than the same grid of names does", async () => {
+    const shown = view({ payload: MANY_SETS });
+    expect(screen.getAllByRole("heading", { level: 4 })).toHaveLength(MANY_SETS.sets.length);
+    expect(screen.getByText("16 sets shown")).toBeTruthy();
+
+    await showSets(shown);
+    expect(screen.getAllByRole("heading", { level: 4 })).toHaveLength(12);
+    expect(screen.getByText("12 of 16 sets")).toBeTruthy();
+    expect(shown.loadSetGallery.mock.calls[0]?.[0]).toHaveLength(12);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 4 more of 4 sets" }));
+    await waitFor(() => expect(shown.loadSetGallery).toHaveBeenCalledTimes(2));
+    // Only the four that were not already on screen: what is drawn stays drawn, and the second
+    // page is the four cards it added rather than the sixteen now showing.
+    expect(shown.loadSetGallery.mock.calls[1]?.[0]).toEqual([313, 314, 315, 316]);
+  });
+
+  // A search starts the grid again from the top. Otherwise a reader who had gone five pages
+  // down and then typed a name would be shown the sixtieth card of what the name left.
+  it("starts the grid again when the reader narrows it", async () => {
+    const shown = view({ payload: MANY_SETS });
+    await showSets(shown);
+    fireEvent.click(screen.getByRole("button", { name: "Show 4 more of 4 sets" }));
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 4 })).toHaveLength(16));
+
+    fireEvent.change(screen.getByLabelText("Filter transmog sets"), { target: { value: "deep" } });
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 4 })).toHaveLength(12));
+    expect(screen.getByText("12 of 16 sets")).toBeTruthy();
+  });
+
+  // Turning it off puts the plain cards back, and gives the graphics context back with them —
+  // one context is held only while somebody is looking at pictures.
+  it("goes back to the plain cards, and gives the context back", async () => {
+    const disposals = { count: 0 };
+    const stage: GalleryStage = {
+      paint: () => Promise.resolve(), dispose: () => { disposals.count += 1; },
+    };
+    render(
+      <TransmogView
+        payload={SETS}
+        status=""
+        loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
+        loadAppearances={(displayTypes) =>
+          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+        loadIcons={() => Promise.resolve({ icons: {} })}
+        loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
+        loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        loadGallery={() => Promise.resolve({ models: [] })}
+        loadSetGallery={(setIds) => Promise.resolve({
+          models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+        })}
+        herself={NOT_ASKED}
+        marks={UNMARKED}
+        custom={NO_SETS}
+        inGame={NO_IN_GAME_SETS}
+        createStage={() => fakeStage().stage}
+        createGalleryStage={() => stage}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Show each set worn"));
+    await waitFor(() => expect(screen.getAllByLabelText(/, drawn$/)).toHaveLength(2));
+
+    fireEvent.click(screen.getByLabelText("Show each set worn"));
+    expect(screen.queryByLabelText(/, drawn$/)).toBeNull();
+    await waitFor(() => expect(disposals.count).toBe(1));
+    // And the cards are the cards they always were.
+    expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy();
+  });
+
+  // Every card is a picture of her, so answering a question about her body makes all of them
+  // pictures of somebody else — and the page is asked for again rather than checked card by
+  // card.
+  it("reads the page again once she is somebody else", async () => {
+    const shown = await showSets();
+    const details = screen.getByText("Who she is").closest("details");
+    if (!details) throw new Error("the panel has no disclosure to open");
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    await waitFor(() => expect(shown.herself.load).toHaveBeenCalled());
+    await screen.findByRole("combobox", { name: "Hair Style" });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Hair Style" }), {
+      target: { value: "133" },
+    });
+
+    await waitFor(() => expect(shown.loadSetGallery).toHaveBeenCalledTimes(2));
+    expect(shown.loadSetGallery.mock.calls[1]?.[0]).toEqual([201, 203]);
   });
 });
 

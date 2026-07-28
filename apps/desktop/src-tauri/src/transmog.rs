@@ -509,6 +509,82 @@ pub fn set_appearances(files: &dyn GameFiles) -> Result<BTreeMap<u32, Vec<u32>>,
     Ok(held)
 }
 
+/// What several sets are wearing, as the three numbers a body is dressed from.
+///
+/// The narrow question, for the caller who has to ask it about many sets at once:
+/// [`crate::gallery::sets`], which draws a page of the grid as characters. [`set_items`] answers
+/// this and much more about *one* set — asked about a page of a dozen, that is sixty walks of
+/// tables with hundreds of thousands of rows in them to keep a hundred rows, which is the shape
+/// of read this app avoids everywhere else.
+///
+/// So `TransmogSetItem` is walked once for the whole page and [`appearances_of`] follows every
+/// row of it down the same four tables in one go. That the chain is shared rather than written
+/// again here is the point: what an appearance *is* has one answer, and this adds only the two
+/// rules a picture of a set needs, both of which the window would otherwise have applied itself.
+///
+/// - **A row with nowhere to go is dropped.** Armour always has a place; a thing the game files
+///   under a weapon slot has one only when its item says which hand — see [`crate::worn::held_in`],
+///   which is the same reading `modelPreview.wearable` does in the window. An arrow contributes
+///   nothing to a picture of a set, and neither does an appearance whose display the game keeps
+///   encrypted.
+/// - **A piece named twice is worn once.** A set sells one look through several items and the
+///   game stores a row per item, so a set of 126 items is a dozen pieces of clothing. Wearing the
+///   robe three times is the same body and three times the texture work.
+pub fn set_pieces(
+    files: &dyn GameFiles,
+    set_ids: &[u32],
+) -> Result<BTreeMap<u32, Vec<crate::worn::Piece>>, String> {
+    let mut found: BTreeMap<u32, Vec<crate::worn::Piece>> =
+        set_ids.iter().map(|id| (*id, Vec::new())).collect();
+    if found.is_empty() {
+        return Ok(found);
+    }
+
+    let wanted: HashSet<u32> = set_ids.iter().copied().collect();
+    let items = Db2::parse(files.read(TRANSMOG_SET_ITEM)?)?;
+    // Which set each row belongs to, in the order the table lists them. What order the pieces
+    // are laid in is `worn::each`'s and nothing here needs to know it.
+    let named: Vec<(u32, u32)> = items
+        .rows()
+        .filter(|row| wanted.contains(&row.number(set_item_column::SET_ID)))
+        .map(|row| {
+            (
+                row.number(set_item_column::SET_ID),
+                row.number(set_item_column::MODIFIED_APPEARANCE_ID),
+            )
+        })
+        .collect();
+    drop(items);
+
+    let ids: Vec<u32> = named.iter().map(|(_, id)| *id).collect();
+    // One row out per row in, in order — which is what lets the two lists be zipped back
+    // together. A row the install can say nothing about comes back zeroed and is dropped below.
+    for ((set_id, _), appearance) in named.iter().zip(appearances_of(files, &ids)?) {
+        if appearance.display_info_id == 0 {
+            continue;
+        }
+        // The one reading of "is there anywhere on her for this" there is: armour always has a
+        // place, and something carried has one when the item says which hand.
+        if crate::worn::held(appearance.display_type)
+            && crate::worn::held_in(appearance.inventory_type).is_none()
+        {
+            continue;
+        }
+        let piece = crate::worn::Piece {
+            display_info_id: appearance.display_info_id,
+            display_type: appearance.display_type,
+            inventory_type: appearance.inventory_type,
+        };
+        let Some(wearing) = found.get_mut(set_id) else {
+            continue;
+        };
+        if !wearing.contains(&piece) {
+            wearing.push(piece);
+        }
+    }
+    Ok(found)
+}
+
 /// What one set is made of, walked out of the game's own tables.
 ///
 /// The set is addressed by id rather than by anything the window carries, so this stays
@@ -1394,5 +1470,122 @@ mod tests {
         assert!(appearances_of(&files, &[]).unwrap().is_empty());
         assert!(files.asked.into_inner().is_empty());
     }
-}
 
+    /* ---------- what a page of sets is wearing ---------- */
+
+    /// The pieces of one set, as `(display, slot, where the item is worn)`.
+    fn wearing(set_id: u32) -> Vec<(u32, u32, u32)> {
+        pieces_of(&fixture_files(), &[set_id])[&set_id].clone()
+    }
+
+    fn pieces_of(files: &dyn GameFiles, set_ids: &[u32]) -> BTreeMap<u32, Vec<(u32, u32, u32)>> {
+        set_pieces(files, set_ids)
+            .unwrap()
+            .into_iter()
+            .map(|(set_id, pieces)| {
+                (
+                    set_id,
+                    pieces
+                        .into_iter()
+                        .map(|piece| {
+                            (piece.display_info_id, piece.display_type, piece.inventory_type)
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    // The point of it: a set id in, a body's worth of clothes out, with the slot each piece
+    // fills — which is what `worn::each` is asked to dress a character in.
+    #[test]
+    fn says_what_a_set_is_wearing() {
+        assert_eq!(
+            wearing(203),
+            vec![(900_001, 0, 1), (900_009, 1, 3), (900_003, 3, 5), (900_006, 5, 7)],
+        );
+    }
+
+    // Several sets out of one call, each answered separately — which is the whole reason this
+    // exists beside `set_items`. Every id asked about comes back, in the map, whatever it holds.
+    #[test]
+    fn answers_for_every_set_of_a_page() {
+        let page = pieces_of(&fixture_files(), &[201, 202, 203]);
+        assert_eq!(page.keys().copied().collect::<Vec<u32>>(), vec![201, 202, 203]);
+        assert_eq!(page[&202], vec![(900_004, 6, 8), (900_005, 8, 10)]);
+    }
+
+    // A set names one look once per item that gives it, and set 201 names its crown twice
+    // through the same row copied. Wearing it twice is the same body and twice the texture work.
+    #[test]
+    fn wears_a_piece_a_set_names_twice_once() {
+        assert_eq!(
+            wearing(201),
+            vec![(900_001, 0, 1), (900_002, 1, 3), (900_012, 3, 5)],
+        );
+    }
+
+    // Which hand a weapon goes in is `ItemSparse.InventoryType` and nothing else in the chain
+    // says it: set 204's four rows are filed under three display types between them.
+    #[test]
+    fn says_where_a_sets_weapons_are_held() {
+        assert_eq!(
+            wearing(204),
+            vec![(900_007, 11, 13), (900_014, 11, 17), (900_015, 13, 14), (900_007, 15, 23)],
+        );
+    }
+
+    // A hop of the chain that lands in a section the game encrypts takes its row with it, and
+    // the set keeps whatever else it holds. Set 205 names two appearances and only one of them
+    // can be reached at all.
+    #[test]
+    fn leaves_out_a_row_the_install_cannot_follow() {
+        // And the row it does keep carries a zero where the item would have said which hand:
+        // 30011's `ItemSparse` row is encrypted too. It is a chestpiece, so nothing turns on
+        // it — the slot has already said where the piece goes.
+        assert_eq!(wearing(205), vec![(900_900, 3, 0)]);
+    }
+
+    // Every table once for the whole page, which is the entire reason this exists beside
+    // `set_items`. `ItemSparse` is 63 MB on a shipping build and `Db2::rows` materialises a
+    // table before it yields its first row, so the difference between one walk and one per set
+    // is the difference between a page and a stall. `budget.rs` counts the same claim in rows.
+    #[test]
+    fn opens_each_table_once_for_a_whole_page() {
+        let files = Noted::new();
+        set_pieces(&files, &[201, 202, 203, 204]).unwrap();
+        let asked = files.asked.into_inner();
+        for table in [TRANSMOG_SET_ITEM, ITEM_MODIFIED_APPEARANCE, ITEM_APPEARANCE, ITEM_SPARSE] {
+            assert_eq!(
+                asked.iter().filter(|fdid| **fdid == table).count(),
+                1,
+                "table {table} was opened more than once for one page",
+            );
+        }
+    }
+
+    // And a page the install can see nothing in never reaches the tables past the first, the
+    // same way opening one such set does not.
+    #[test]
+    fn reads_no_further_for_a_page_of_sets_it_cannot_see_into() {
+        let files = Noted::new();
+        assert_eq!(pieces_of(&files, &[900]), BTreeMap::from([(900, vec![])]));
+        let asked = files.asked.into_inner();
+        assert!(!asked.contains(&ITEM_MODIFIED_APPEARANCE));
+        assert!(!asked.contains(&ITEM_APPEARANCE));
+    }
+
+    // A page of no sets asks the game nothing at all, which is what a filter that empties the
+    // grid comes to.
+    #[test]
+    fn asks_the_game_nothing_for_a_page_of_no_sets() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(set_pieces(&DirFiles::new(temp.path()), &[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn says_so_when_the_set_item_table_is_not_there_for_a_page() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(set_pieces(&DirFiles::new(temp.path()), &[201]).is_err());
+    }
+}

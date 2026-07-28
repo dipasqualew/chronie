@@ -621,6 +621,13 @@
     border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px;
     background: var(--surface-2); display: flex; flex-direction: column; gap: 8px;
   }
+  /* Wider cards once each one holds a character, for the reason the wardrobe's tiles are wide:
+     the reader turned the pictures on to look at them, and a set at 232px is a hundred pixels
+     of woman under a heading. `auto-fill` so a narrow window drops a column rather than
+     shaving every card. */
+  #transmog-list[data-models="true"] .mog-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
   /* An opened set holds its own contents and stops being a tile on the grid: it runs the
      full width so its rows are readable, and the sets after it close up around it. */
   .mog-card[data-open="true"] {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { PAGE, focusOf, piecesOf, stillWanted, turnedBy, type Thumbnail } from "./gallery";
+import {
+  PAGE, SET_PAGE, WHOLE, focusOf, piecesOf, stillWanted, stillWantedSets, turnedBy,
+  type Thumbnail,
+} from "./gallery";
 import type { AppearanceRow } from "./transmogModal";
 import type { WornPiece } from "./types";
 
@@ -85,6 +88,31 @@ describe("stillWanted", () => {
   it("asks once for a display two rows share", () => {
     const twice = [piece({ displayInfoId: 900001 }), piece({ displayInfoId: 900001 })];
     expect(stillWanted(twice, held([]))).toEqual([piece({ displayInfoId: 900001 })]);
+  });
+});
+
+describe("stillWantedSets", () => {
+  const held = (entries: Array<[number, Thumbnail]>): Map<number, Thumbnail> => new Map(entries);
+
+  it("asks for every card when it holds nothing", () => {
+    expect(stillWantedSets([201, 203], held([]))).toEqual([201, 203]);
+  });
+
+  // What is already drawn is not asked for again, whatever it came back as — the same rule the
+  // wardrobe's page keeps, and for the same reason: a set this install can dress nobody in
+  // answers `null` once, and asking again on every repaint is a page's cost to hear it twice.
+  it.each<[string, Thumbnail]>([
+    ["one already drawn", { kind: "model", glb: "data:model/gltf-binary;base64,AA", shows: "worn" }],
+    ["one already sent for", { kind: "wanted" }],
+    ["one that came back with nothing", { kind: "nothing", note: "nothing to put on her" }],
+  ])("leaves out %s", (_, thumbnail) => {
+    expect(stillWantedSets([201, 203], held([[201, thumbnail]]))).toEqual([203]);
+  });
+
+  // By set rather than by anything the set holds: two sets of exactly the same clothes are
+  // still two cards, and the backend answers per set.
+  it("asks once for a card named twice", () => {
+    expect(stillWantedSets([201, 201], held([]))).toEqual([201]);
   });
 });
 
@@ -184,5 +212,26 @@ describe("PAGE", () => {
   it("draws fewer looks as models than as names", async () => {
     const { PAGE: NAMES } = await import("./wardrobe");
     expect(PAGE).toBeLessThan(NAMES);
+  });
+});
+
+describe("SET_PAGE", () => {
+  // Smaller than a page of the wardrobe, because a row there is one appearance on a body and a
+  // card here is a dozen: the backend shares the body between them either way, so what a card
+  // costs over a row is the pieces, and a set is about ten times a row's worth of them.
+  it("draws fewer sets at a time than the wardrobe draws looks", () => {
+    expect(SET_PAGE).toBeLessThan(PAGE);
+  });
+});
+
+describe("WHOLE", () => {
+  // A set is a body's worth of clothes and there is no part of her it is about — the boots are
+  // as much of the answer as the helm. Every armour slot is framed on a part of her, and this
+  // is what says a card is not.
+  it("holds all of her, from her middle", () => {
+    expect(WHOLE).toEqual({ height: 0.5, holds: 1 });
+    for (const displayType of [0, 3, 5, 6, 9]) {
+      expect(focusOf(displayType).holds).toBeLessThan(WHOLE.holds);
+    }
   });
 });

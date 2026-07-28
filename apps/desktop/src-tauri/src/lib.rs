@@ -701,6 +701,19 @@ async fn gallery_models(
     read_game_files(&state, move |files| gallery::of(files, &pieces, &who)).await
 }
 
+/// A page of the set grid, each set worn whole on a body of its own.
+///
+/// Ids rather than pieces, which is the one thing this does not have in common with
+/// [`gallery_models`] beside it. A card in the grid is a name and a count until somebody opens
+/// it, so the window has no clothes to send: what a set is wearing is read here, for the whole
+/// page out of one walk of each table, rather than by opening a dozen sets one at a time. See
+/// [`gallery::sets`].
+#[tauri::command]
+async fn gallery_sets(set_ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value, String> {
+    let who = character_look_of(&state)?;
+    read_game_files(&state, move |files| gallery::sets(files, &set_ids, &who)).await
+}
+
 /// The look a list of items carries, as the three numbers a render is asked for by.
 ///
 /// The hop a segment needs and nothing else does. Every other view that draws an appearance
@@ -1548,6 +1561,7 @@ pub fn run() {
             save_character_look,
             worn_set,
             gallery_models,
+            gallery_sets,
             item_appearances,
             achievement_details,
             item_details,

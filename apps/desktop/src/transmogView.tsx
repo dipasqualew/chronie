@@ -29,6 +29,15 @@
  * rows with nowhere to go are hidden** until the checkbox above them says otherwise — see
  * `onlyWearable`, and the count each set gives of what it left out.
  *
+ * And a third: **a set can be shown as the clothes it is**. A card is a name, a count and a row
+ * of chips, and none of that says what a set of clothes looks like — so the checkbox above the
+ * grid draws each card as the character wearing that set, turnable under the hand, out of the
+ * same `galleryTile.tsx` the wardrobe's own pictures come from. It is off until asked for and
+ * it pages the grid when it is on, because a card of names is a string and a card of a set worn
+ * is a body read out of the game's own files. What a set is *wearing* is never worked out here:
+ * the backend reads it for the whole page at once — see `gallery::sets` — because a card holds
+ * nothing but an id until somebody opens it.
+ *
  * The list costs a second and a few hundred megabytes to read out of the game's own files, so
  * it arrives after the window has opened — which is why this view has a loading line and a
  * failure to draw, and no other one does.
@@ -42,11 +51,15 @@ import { rowsOf } from "./customSets";
 import { InGameSetList } from "./inGameSetList";
 import { setLabel as inGameSetLabel } from "./inGameSets";
 import { plural } from "./format";
+import { SET_PAGE, WHOLE, stillWantedSets } from "./gallery";
+import type { Thumbnail } from "./gallery";
+import { Turnable, lazyGalleryStage, useGalleryPaint } from "./galleryTile";
+import type { Paint } from "./galleryTile";
 import { lookKey } from "./herself";
 import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
-import { wearable as canBeWorn } from "./modelPreview";
+import { REASONS, wearable as canBeWorn } from "./modelPreview";
 import {
   NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, toggleAt, wearAll,
   wearAllAt, wearSet, wearable,
@@ -82,6 +95,7 @@ import type {
   MarkSubjectKind,
   Quality,
   QualitiesFile,
+  SetGalleryPayload,
   SetQualitiesFile,
   TransmogMark,
   TransmogMarksPayload,
@@ -110,6 +124,15 @@ export interface TransmogViewProps {
   loadWorn: (pieces: WornPiece[]) => Promise<WornSetPayload>;
   /** And through to the item browser: a page of looks, each on a body of its own. */
   loadGallery: (pieces: WornPiece[]) => Promise<GalleryPayload>;
+  /**
+   * The same for the sets: a page of the grid, each card worn whole.
+   *
+   * Ids rather than clothes, and that is the point. A card is a name and a count until somebody
+   * opens it, so the window has nothing to send — what a set is wearing is read by the backend,
+   * for the whole page out of one walk of each table, rather than by this view opening a dozen
+   * sets to draw one screen. See `gallery::sets`.
+   */
+  loadSetGallery: (setIds: number[]) => Promise<SetGalleryPayload>;
   /**
    * Who that body is, and how somebody says otherwise.
    *
@@ -192,8 +215,8 @@ type Browsing = "sets" | "items" | "yours" | "ingame";
 export function TransmogView(
   {
     payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, loadGallery,
-    herself, marks, custom, inGame, createStage, createGalleryStage,
-    loadQualities, loadSetQualities = loadSetStore,
+    loadSetGallery, herself, marks, custom, inGame, createStage,
+    createGalleryStage = lazyGalleryStage, loadQualities, loadSetQualities = loadSetStore,
   }: TransmogViewProps,
 ): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
@@ -219,6 +242,22 @@ export function TransmogView(
   const [hideUnwearable, setHideUnwearable] = useState(true);
   /** The sets a reader has opened, which stay open: comparing two of them is the ordinary use. */
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  /**
+   * Whether the cards are drawn as the character wearing each set.
+   *
+   * Off until asked for, the same way the wardrobe's is and for a stronger reason: a card
+   * costs a name and a count to draw and a picture of one costs a body out of the game's own
+   * files. What it changes besides the cards is how many of them there are — see `shown`.
+   */
+  const [asModels, setAsModels] = useState(false);
+  /**
+   * How many cards are drawn, which only means anything once the pictures are on.
+   *
+   * A grid of names is cheap enough to draw whole, and being able to see every set a search
+   * left is what the grid is for — so nothing is paged until there is a body behind each card,
+   * and then a page is [`SET_PAGE`] of them.
+   */
+  const [shown, setShown] = useState(SET_PAGE);
 
   // What a set is made of never changes under a running app — it is read out of the installed
   // game — so a set opened twice is read once. Kept outside React because a cache filling is
@@ -329,6 +368,63 @@ export function TransmogView(
       qualities: (id) => setQualities.of(id),
     })
     : [];
+  // Paged only once there is a body behind each card — see `shown`.
+  const drawn = asModels ? sets.slice(0, shown) : sets;
+
+  // The pictures, by the set each is of. Kept outside React for the reason the set contents
+  // are — one arriving is not a redraw, the counter above is what says one happened — and kept
+  // across a search, so narrowing and widening again draws from what is already here.
+  const bodies = useRef(new Map<number, Thumbnail>()).current;
+  // Of whichever woman they were drawn of. Written during the render rather than in an effect,
+  // so the request below is made once for the page as it now is: an effect that emptied the map
+  // afterwards would leave this one having already decided nothing was missing.
+  const drawnOf = useRef(look);
+  if (drawnOf.current !== look) {
+    drawnOf.current = look;
+    bodies.clear();
+  }
+  const wantedSets = asModels ? drawn.map((set) => set.id) : [];
+  const wantedKey = wantedSets.join(",");
+  useEffect(() => {
+    const missing = stillWantedSets(wantedSets, bodies);
+    if (!missing.length) return;
+    for (const setId of missing) bodies.set(setId, { kind: "wanted" });
+    void loadSetGallery(missing)
+      .then((answer) => {
+        for (const row of answer.models) {
+          bodies.set(row.setId, row.model
+            ? { kind: "model", glb: row.model, shows: "worn" }
+            : { kind: "nothing", note: REASONS.unshowable });
+        }
+      })
+      // A page that will not come leaves its cards without pictures rather than waiting for
+      // ever. Everything a card said before anybody asked for one is still on it.
+      .catch(() => {
+        for (const setId of missing) {
+          bodies.set(setId, { kind: "nothing", note: REASONS.unshowable });
+        }
+      })
+      .finally(redraw);
+    // The ids rather than the array, which is new on every render and would ask every time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedKey, look, loadSetGallery, bodies]);
+
+  // One graphics context for the whole grid, held only while the pictures are on — the same
+  // arrangement the wardrobe beside this makes, out of the same module.
+  const paint = useGalleryPaint(asModels, createGalleryStage);
+
+  /**
+   * Every narrowing starts the grid again from the top, where the reader is looking.
+   *
+   * Only ever visible once the pictures are on, because that is the only time the grid has a
+   * page — but done either way, so that turning them on after a search does not draw the
+   * twelfth page of it.
+   */
+  const narrow = (change: () => void): void => {
+    change();
+    setShown(SET_PAGE);
+  };
+
   // Only offer the expansions this install actually has sets for.
   const expansions = payload
     ? [...new Set(payload.sets.map((set) => set.expansionId))].sort((a, b) => b - a)
@@ -392,18 +488,18 @@ export function TransmogView(
               id="transmog-search" type="search"
               placeholder="Filter by name, class, or colour:brown…"
               aria-label="Filter transmog sets" value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => narrow(() => setSearch(event.target.value))}
             />
             <select
               id="transmog-expansion" aria-label="Expansion" value={expansion}
-              onChange={(event) => setExpansion(event.target.value)}
+              onChange={(event) => narrow(() => setExpansion(event.target.value))}
             >
               <option value="">All expansions</option>
               {expansions.map((id) => <option key={id} value={id}>{expansionName(id)}</option>)}
             </select>
             <select
               id="transmog-class" aria-label="Class" value={klass}
-              onChange={(event) => setKlass(event.target.value)}
+              onChange={(event) => narrow(() => setKlass(event.target.value))}
             >
               <option value="">All classes</option>
               {CLASSES.map((name, index) => <option key={name} value={index}>{name}</option>)}
@@ -417,20 +513,35 @@ export function TransmogView(
               />
               Hide what she cannot wear
             </label>
+            {/* Beside it, because both are statements about what a reader is here for. A set
+                is a set of clothes, and the one thing a name and a count cannot say is what it
+                looks like — so this is what the grid is for once somebody is choosing rather
+                than looking something up. It shortens the grid to a page: a card of names is a
+                string, and a card of a set worn is a body out of the game's own files. */}
+            <label className="mog-hide">
+              <input
+                type="checkbox" id="transmog-as-models" checked={asModels}
+                onChange={(event) => {
+                  setAsModels(event.target.checked);
+                  setShown(SET_PAGE);
+                }}
+              />
+              Show each set worn
+            </label>
             {/* Beside the game's own filters rather than somewhere of their own, because
                 "plate, Cataclysm, starred" is one question a reader asks and not two. */}
             <MarkFilters
               scope="transmog" favourite={marked.favourite} tag={marked.tag} choices={setTags}
-              onFavourite={(only) => setMarked((was) => ({ ...was, favourite: only }))}
-              onTag={(tag) => setMarked((was) => ({ ...was, tag }))}
+              onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
+              onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
             />
             <span className="count" id="transmog-count">
-              {payload ? `${plural(sets.length, "set")} shown` : ""}
+              {payload ? shownCount(drawn.length, sets.length) : ""}
             </span>
           </div>
         </div>
-        <div id="transmog-list" className="mog-list">
-          {groupSets(sets).map((group) => (
+        <div id="transmog-list" className="mog-list" data-models={asModels}>
+          {groupSets(drawn).map((group) => (
             <section className="mog-group" key={group.group}>
               <h3>{group.group}<span className="muted"> · {plural(group.sets.length, "set")}</span></h3>
               <div className="mog-grid">
@@ -440,7 +551,8 @@ export function TransmogView(
                     contents={known.get(set.id)} icons={icons} outfit={outfit}
                     hideUnwearable={hideUnwearable} marks={marks} markOf={markOf}
                     quality={setQualities.of(set.id)}
-                    onFilter={(term) => setSearch((was) => withTerm(was, term))}
+                    onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
+                    body={asModels ? bodies.get(set.id) : undefined} paint={paint}
                     onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
                     onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
                   />
@@ -448,6 +560,14 @@ export function TransmogView(
               </div>
             </section>
           ))}
+          {/* What is left, and the way to it — the same button the wardrobe has, and only ever
+              here for the same reason: a grid of pictures is paged and a grid of names is not. */}
+          {sets.length > drawn.length
+            ? <button
+              type="button" className="mog-more"
+              onClick={() => setShown((was) => was + SET_PAGE)}
+            >{`Show ${Math.min(SET_PAGE, sets.length - drawn.length)} more of ${plural(sets.length - drawn.length, "set")}`}</button>
+            : null}
         </div>
         <div className="empty" id="transmog-empty" hidden={!payload || sets.length > 0}>
           <p className="empty-title">Nothing matches</p>
@@ -510,16 +630,22 @@ export function TransmogView(
 }
 
 /**
- * One set: what it is, and — once opened — what it is made of.
+ * One set: what it is, what it looks like, and — once opened — what it is made of.
  *
  * Opening happens in place rather than in a dialog, which is what lets a reader keep two sets
  * open and take a piece out of each. The card is a heading and a button because a heading
  * cannot live inside a button.
+ *
+ * **The picture goes above the name, and is not part of the button that opens the set.** Above,
+ * because a reader with the pictures on is choosing by eye and the name is what they check
+ * afterwards; outside the button, because the picture is something to drag — a click that
+ * turned out to be a drag would otherwise open a set every time somebody looked at the back of
+ * one.
  */
 function Card(
   {
     set, open, onToggle, contents, icons, outfit, hideUnwearable, marks, markOf, quality,
-    onFilter, onWear, onWearAll,
+    onFilter, body, paint, onWear, onWearAll,
   }: {
     set: TransmogSet;
     open: boolean;
@@ -541,6 +667,14 @@ function Card(
      * given none of this: they are looks, and the box above the grid filters sets.
      */
     onFilter: (term: string) => void;
+    /**
+     * The character wearing this set, when the pictures are on and one has arrived.
+     *
+     * `undefined` is the pictures being off, and the card is exactly what it was before any of
+     * this existed.
+     */
+    body: Thumbnail | undefined;
+    paint: Paint;
     onWear: (row: AppearanceRow) => void;
     onWearAll: (rows: AppearanceRow[]) => void;
   },
@@ -554,12 +688,17 @@ function Card(
   const hidden = rows.length - shown.length;
   const name = set.name || "Unnamed set";
   const alternates = set.alternates ?? [];
+  const worn = body?.kind === "model" ? body : null;
 
   return (
     <article
       className="mog-card" data-open={open}
       title={classes.length ? classes.join(", ") : undefined}
     >
+      {/* A set is a body's worth of clothes, so the whole of her is the picture — there is no
+          part of her it is about, and zooming to one would be showing a fraction of the thing
+          the card is for. */}
+      {worn ? <Turnable glb={worn.glb} focus={WHOLE} label={name} paint={paint} /> : null}
       <h4>
         <button type="button" className="mog-open" aria-expanded={open} onClick={onToggle}>
           {name}
@@ -772,6 +911,18 @@ function Sources({ row }: { row: AppearanceRow }): ReactNode {
       ))}
     </ul>
   );
+}
+
+/**
+ * How far down the filtered sets the grid has got.
+ *
+ * Two sentences rather than one, because the grid only has a page when the pictures are on and
+ * "340 of 340 sets" would be an arithmetic problem set to a reader who is not being kept from
+ * anything. Phrased the way the wardrobe's own count is — see `shownSummary`.
+ */
+function shownCount(shown: number, total: number): string {
+  if (shown >= total) return `${plural(total, "set")} shown`;
+  return `${shown} of ${plural(total, "set")}`;
 }
 
 function message(error: unknown): string {
