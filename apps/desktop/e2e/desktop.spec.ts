@@ -2826,6 +2826,64 @@ test("digs from a session down into a single segment and back out again", async 
 });
 
 /**
+ * The same pane, on the kind of screen most readers have.
+ *
+ * Every other test in this file runs at one device pixel per CSS pixel, which is the one
+ * setting under which the pane above is correct by accident. `modelViewer.ts` sizes the
+ * *drawing buffer* and deliberately sets no inline style on the canvas — the packaged window's
+ * policy drops those — so a canvas laid out at the pane's size is a thing the stylesheet has to
+ * say, once per pane, and one of the two panes had never said it.
+ *
+ * What that costs on a Retina screen is not a canvas twice too big. The stage is a flex item in
+ * a column, so its automatic minimum size is its content, so a canvas twice the pane's height
+ * makes the pane twice as tall; the `ResizeObserver` reads the new height and sets a buffer
+ * twice *that*, and the pane doubles again on the next frame. It ends where the browser's
+ * maximum element height does, some thirty-three million pixels down, with the model spread
+ * across a canvas the reader is looking at a four-hundredth of — which is a modal that flickers
+ * for a moment and then shows nothing at all.
+ *
+ * So the assertion is the shape of the pane rather than anything about the picture on it: the
+ * canvas covers the stage and no more, and the stage is the 3:4 rectangle the stylesheet asks
+ * for. Both are true at any scale, and only one scale could ever have caught them being false.
+ */
+test.describe("on a screen with more device pixels than CSS pixels", () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test("draws an appearance on a pane the size of the pane", async ({ page, detail }) => {
+    await sessions(page).first().getByRole("button", { name: "2 segments" }).click();
+    await detail.openFromTimeline("Aster-Vale", "Glass Caverns");
+    await detail.transmogs().getByRole("button", { name: /^Show .* drawn$/ }).click();
+
+    const drawn = page.locator("#appearance-detail");
+    const stage = drawn.locator(".appearance-stage");
+    await expect(drawn).toBeVisible();
+    await expect.poll(
+      () => stage.getAttribute("data-vertices"),
+      { timeout: GALLERY_PATIENCE_MS },
+    ).toBe("1152");
+
+    // Read after the model is on the stage and the frames that follow it, because the runaway
+    // this rules out needs a `ResizeObserver` tick or two to become visible and every one of
+    // them makes it worse.
+    await page.waitForTimeout(500);
+    // The content box on both sides, which is the honest comparison: the pane draws a border
+    // along its bottom edge and the canvas fills what is inside it.
+    const measured = await stage.evaluate((pane) => {
+      const canvas = pane.querySelector("canvas");
+      return {
+        pane: [pane.clientWidth, pane.clientHeight],
+        canvas: [canvas?.clientWidth ?? 0, canvas?.clientHeight ?? 0],
+      };
+    });
+
+    expect(measured.canvas).toEqual(measured.pane);
+    // And the pane is still the shape the stylesheet asks for, which is what says the canvas
+    // was fitted to the pane rather than the pane stretched to some canvas.
+    expect(measured.pane[1]! / measured.pane[0]!).toBeCloseTo(4 / 3, 1);
+  });
+});
+
+/**
  * The photographs of an evening, which is what the rest of this history is a caption for.
  *
  * The whole loop in one test, because the pieces only mean anything together: an evening's
