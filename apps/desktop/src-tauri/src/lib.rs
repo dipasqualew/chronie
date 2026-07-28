@@ -1630,6 +1630,33 @@ mod tests {
         assert!(read.keep_original_screenshots);
     }
 
+    /// Who the character is crosses that file too, and it is the one setting the reader never
+    /// sees the storage of: a body drawn from an install nobody has answered anything about is
+    /// exactly the body this app drew before there was anywhere to answer, so a field that
+    /// stopped being written would look like nothing at all until somebody noticed her hair.
+    #[test]
+    fn round_trips_who_the_character_is_through_the_file() {
+        let settings = Settings {
+            character_look: vec![customization::Picked { question: 16, swatch: 133 }],
+            ..Settings::default()
+        };
+
+        let written = serde_json::to_string(&settings).unwrap();
+
+        assert!(written.contains(r#""characterLook":[{"question":16,"swatch":133}]"#), "{written}");
+        let read: Settings = serde_json::from_str(&written).unwrap();
+        assert_eq!(read.character_look, settings.character_look);
+    }
+
+    /// And a settings file older than the field is a reader who has said nothing about her,
+    /// which is what every install starts as rather than a file to refuse.
+    #[test]
+    fn reads_a_settings_file_that_predates_the_character_as_nobody_having_said() {
+        let settings: Settings = serde_json::from_str(r#"{"wowPath": "/games/wow"}"#).unwrap();
+
+        assert_eq!(settings.character_look, Vec::new());
+    }
+
     #[test]
     fn replaces_an_older_copy_rather_than_merging_with_it() {
         let root = tempfile::tempdir().unwrap();

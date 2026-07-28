@@ -831,6 +831,27 @@ mod tests {
         assert!(!geosets.contains(&1), "{geosets:?}");
     }
 
+    // And the same body once somebody has said who she is, which is the whole of what an answer
+    // does at this end: one group takes another of its values and nothing else about her moves.
+    // Her head is the part worth naming in that "nothing else" — it comes out of a question of
+    // its own, and an answer that reset the questions it was not about would take it with it.
+    #[test]
+    fn draws_the_hairstyle_the_reader_chose_rather_than_the_one_the_game_opens_on() {
+        let files = fixture_files();
+        let herself = crate::customization::of(&files, &[Picked { question: 16, swatch: 133 }])
+            .unwrap();
+        let model = Model::parse(&files.read(HUMAN_FEMALE).unwrap()).unwrap();
+        let skin = model.skin_file_data_id().unwrap();
+        let body = model.with_skin(&files.read(skin).unwrap()).unwrap();
+
+        let geosets = drawn(&dressed(&body, None, herself.as_ref()));
+
+        assert!(geosets.contains(&1), "the hairstyle she chose: {geosets:?}");
+        assert!(!geosets.contains(&2), "and not the one the game opens on: {geosets:?}");
+        assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
+        assert!(geosets.contains(&702), "she has no ears: {geosets:?}");
+    }
+
     // The last thing on that head, and the one geoset selection has nothing to say about: her
     // eye glow is *selected* — no ordinary eye colour turns group 17 off — and it is composited
     // by adding, which glTF cannot write. So the scene comes out with one primitive fewer than
