@@ -281,8 +281,11 @@ class TransmogView {
     await expect(this.view.getByRole("heading", { name: "Transmog", level: 1 })).toBeVisible();
   }
 
-  /** The switch above the browsers: the game's sets, its whole wardrobe, or the reader's own. */
-  async browseBy(what: "Sets" | "Items" | "Yours"): Promise<void> {
+  /**
+   * The switch above the browsers: the game's sets, its whole wardrobe, the reader's own, or
+   * the ones the player saved in the game itself.
+   */
+  async browseBy(what: "Sets" | "Items" | "Yours" | "Personal in-game sets"): Promise<void> {
     await this.view.getByRole("button", { name: what, exact: true }).click();
   }
 
@@ -662,6 +665,69 @@ class YourSets {
 
   tagFilter(): Locator {
     return this.list.getByLabel("Tag", { exact: true });
+  }
+}
+
+/**
+ * The fourth browser: the sets the player saved in the game itself.
+ *
+ * Grouped by character, which is the one way it is drawn differently from the three beside it —
+ * so a character is a level-3 heading and a set a level-4 one, the same shape a collection and
+ * a set have in `TransmogView`. A character who saves nothing in game is not drawn at all, so
+ * [`characters`] is what they have rather than who Chronie has read.
+ *
+ * A card starts closed and costs the game's own tables to open, so the locators read like the
+ * game's sets rather than like the reader's own: there is a button to click.
+ */
+class InGameSets {
+  readonly page: Page;
+  readonly list: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.list = page.locator("#ingame-sets");
+  }
+
+  /** The characters with something to show, in the order the backend sorted them. */
+  characters(): Locator {
+    return this.list.getByRole("heading", { level: 3 });
+  }
+
+  /** The sets on screen, by the names the game holds them under. */
+  names(): Locator {
+    return this.list.getByRole("heading", { level: 4 });
+  }
+
+  card(name: string): Locator {
+    return this.list
+      .getByRole("article")
+      .filter({ has: this.page.getByRole("heading", { name, exact: true, level: 4 }) });
+  }
+
+  /** Opens one in place, which is where the game's files are actually read. */
+  async openSet(name: string): Promise<Locator> {
+    await this.list.getByRole("button", { name, exact: true }).click();
+    const card = this.card(name);
+    await expect(card.getByRole("listitem").first()).toBeVisible();
+    return card;
+  }
+
+  /** One row per slot the player filled, which is what an opened set turned out to be. */
+  rows(name: string): Locator {
+    return this.card(name).locator(".mog-items > .mog-item");
+  }
+
+  /** The button on one row, which puts that piece on the character or takes it off again. */
+  wear(name: string, slot: string, label: string): Locator {
+    return this.card(name).getByRole("button", { name: `Wear ${slot}: ${label}` });
+  }
+
+  wearAll(name: string): Locator {
+    return this.card(name).getByRole("button", { name: `Wear all of ${name}` });
+  }
+
+  search(): Locator {
+    return this.list.getByLabel("Filter the sets you saved in game");
   }
 }
 
@@ -1082,6 +1148,7 @@ const test = base.extend<{
   transmog: TransmogView;
   wardrobe: Wardrobe;
   yours: YourSets;
+  inGame: InGameSets;
   outfit: Outfit;
   combat: CombatLoggingPanel;
   retention: LogRetentionPanel;
@@ -1109,6 +1176,9 @@ const test = base.extend<{
   },
   yours: async ({ page }, use) => {
     await use(new YourSets(page));
+  },
+  inGame: async ({ page }, use) => {
+    await use(new InGameSets(page));
   },
   outfit: async ({ page }, use) => {
     await use(new Outfit(page));
@@ -3090,6 +3160,7 @@ test("browses the game's transmog sets and dresses the character in them", async
   transmog,
   wardrobe,
   yours,
+  inGame,
   outfit,
 }) => {
   // The longest flow in the suite, and the only one that draws: a body per outfit tried on, and
@@ -3981,6 +4052,46 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(yours.list.getByText("No sets of your own yet")).toBeVisible();
     // What she has on is untouched by the set that held it going away.
     await expect(outfit.slots()).toHaveCount(1);
+  });
+
+  /* ---------- and the fourth: the ones the player saved in the game itself ---------- */
+
+  // The only browser of the four that is about a *character*. Blizzard's sets, the whole
+  // wardrobe and the reader's own are the same for everybody logged in; these were put together
+  // at a transmogrifier by somebody, and a roster of alts is a wardrobe each.
+  await test.step("the sets saved in the game are grouped by who saved them", async () => {
+    await transmog.browseBy("Personal in-game sets");
+    await expect(inGame.characters()).toHaveText(["Aster-Ravencrest"]);
+    // Nerine has been played with the addon on and saves nothing in game, which is a heading
+    // with nothing under it — so she is not drawn, and the count above is of what is.
+    await expect(inGame.names()).toHaveText(["Tideglass", "Unnamed set"]);
+    await expect(inGame.list.getByText("2 sets shown")).toBeVisible();
+    // A set the client would not name is still a set: it is headed by the label the app gives
+    // it, and says how little is in it without being opened.
+    await expect(inGame.card("Unnamed set")).toContainText("0 pieces");
+  });
+
+  // An in-game set names appearances and nothing else, so unlike a set of the reader's own it
+  // has to be opened — the same four walks of the game's tables a Blizzard set costs. This is
+  // the step that says those ids reach real items on a real install.
+  await test.step("a set saved in the game opens on what the game says is in it", async () => {
+    await inGame.openSet("Tideglass");
+    await expect(inGame.rows("Tideglass")).toHaveCount(2);
+    await expect(inGame.rows("Tideglass"))
+      .toContainText(["Tideglass Crown", "Tideglass Mantle"]);
+    await expect(inGame.wear("Tideglass", "Head", "Tideglass Crown")).toBeVisible();
+  });
+
+  // And the acceptance: what the player wears in the game goes onto the character here, out of
+  // ids that were all Chronie's database held. The head she has on is a look out of the game's
+  // whole wardrobe, so the set taking that place is also the swap working across two browsers.
+  await test.step("the character is dressed in a set she saved in the game", async () => {
+    await inGame.wearAll("Tideglass").click();
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Tideglass Crown · Head · Tideglass",
+      "Tideglass Mantle · Shoulder · Tideglass",
+    ]);
+    await expect(outfit.summary()).toHaveText("2 of 13 slots filled");
   });
 });
 
