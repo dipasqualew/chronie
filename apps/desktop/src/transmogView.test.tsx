@@ -635,7 +635,7 @@ function worn(): string[] {
 
 /**
  * What the pane around the character says it is doing, which the stylesheet reads and nothing
- * else does. `index.html` hides the stage for two of the values and leaves it alone for the
+ * else does. `outfitPanel.css` hides the stage for two of the values and leaves it alone for the
  * rest, so this string is the whole of whether the reader is looking at a body or at nothing.
  */
 function paneState(): string {
@@ -705,7 +705,7 @@ describe("TransmogView", () => {
     // stylesheet hides the stage for exactly two of these values —
     // `.outfit-preview[data-state="empty"] .outfit-stage,
     // .outfit-preview[data-state="loading"] .outfit-stage { visibility: hidden; }` in
-    // `index.html` — so the pane saying either of them here *is* the white flash.
+    // `outfitPanel.css` — so the pane saying either of them here *is* the white flash.
     expect(paneState()).toBe("redrawing");
     // And nothing new has reached the stage, which is what makes the picture still on it the
     // one that was there before the click.

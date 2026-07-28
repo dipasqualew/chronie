@@ -12,6 +12,8 @@
  * attributes — which are attributes, not style, and survive.
  */
 
+import "./queryChart.css";
+
 import type { ReactNode } from "react";
 
 import type { Plot } from "./query";

@@ -1,0 +1,19 @@
+/*
+ * Which moments Chronie photographs, and what a photograph costs.
+ */
+
+.capture-group { margin-top: 14px; }
+.capture-group h4 { margin: 0 0 2px; font-size: 13px; color: var(--text-secondary); }
+/* A box, then the moment it is about, then what that costs. The box is pulled to the top
+   line rather than centred, because the label beside it is two or three lines tall. */
+.setup label.capture-choice {
+  display: flex; align-items: flex-start; gap: 9px; margin: 0; padding: 6px 0;
+  font-size: 14px; color: var(--text-primary); cursor: pointer;
+}
+.setup label.capture-choice input { width: 15px; height: 15px; margin-top: 3px; flex: none; cursor: pointer; }
+.setup label.capture-choice .sub { display: block; }
+/* A rule a broader one already covers is still on, and still yours to untick — it is just
+   not doing anything on its own, and the line saying so is not a warning. */
+.capture-covered { font-style: italic; }
+.capture-quality { border: 0; padding: 0; margin: 12px 0 0; }
+.capture-quality legend { padding: 0; font-size: 13px; color: var(--text-secondary); }

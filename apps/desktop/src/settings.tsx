@@ -18,6 +18,8 @@
  * — and a button that silently succeeded or silently failed is the same button.
  */
 
+import "./settings.css";
+
 import { useState } from "react";
 import type { ReactNode } from "react";
 

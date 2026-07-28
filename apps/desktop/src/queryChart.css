@@ -1,0 +1,20 @@
+/*
+ * An answer drawn rather than listed.
+ */
+
+/* The drawing scales with the panel and keeps its proportions; every colour in it is a
+   class, because a nonce in `style-src` drops the `style` attribute a chart would
+   otherwise reach for. */
+.chart { display: block; width: 100%; height: auto; margin-top: 8px; }
+.chart-grid { stroke: var(--grid); stroke-width: 1; }
+.chart-axis { stroke: var(--border); stroke-width: 1; }
+.chart-tick { fill: var(--text-muted); font-size: 11px; }
+.chart-axis-label { fill: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.chart-bar { fill: var(--series-1); }
+.chart-bar:hover { fill: var(--text-primary); }
+.chart-line {
+  fill: none; stroke: var(--series-1); stroke-width: 2;
+  stroke-linejoin: round; stroke-linecap: round;
+}
+.chart-dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 1.5; }
+.chart-dot:hover { stroke: var(--text-primary); stroke-width: 2.5; }

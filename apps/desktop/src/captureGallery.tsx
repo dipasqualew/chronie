@@ -11,6 +11,8 @@
  * dashboard, the way an activity edit does, so what ends up on screen is what was stored.
  */
 
+import "./captureGallery.css";
+
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

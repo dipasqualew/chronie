@@ -13,6 +13,8 @@
  * The wording and the catalogues live in `captureSettings.ts`.
  */
 
+import "./capturePanel.css";
+
 import { useState } from "react";
 import type { ReactNode } from "react";
 

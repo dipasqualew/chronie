@@ -1,0 +1,15 @@
+/*
+ * Every canvas `modelViewer.ts` puts in a pane, at the size of the pane it was put in.
+ *
+ * Beside the viewer rather than beside each pane because the stage cannot say it itself: it
+ * sizes the drawing buffer in device pixels and sets no inline style, since the packaged
+ * window's policy drops those. So the element's own size is the stylesheet's to give, and a
+ * pane that is not given one gets a canvas laid out at its buffer — twice the pane on a Retina
+ * screen, which is not merely too big. A stage is a flex item, its automatic minimum size is
+ * its content, and the `ResizeObserver` reads the height that canvas just gave the pane and
+ * sizes the next buffer to twice *that*: the pane doubles every frame down to the browser's
+ * largest element, and the reader sees a flicker and then nothing. That is what shipped for
+ * the appearance modal, which had been given `display: block` and no size.
+ */
+
+.model-canvas { display: block; width: 100%; height: 100%; }

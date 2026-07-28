@@ -10,6 +10,8 @@
  * the whole app at that rate to move one box is work nobody asked for.
  */
 
+import "./tooltip.css";
+
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 

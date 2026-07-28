@@ -5,49 +5,59 @@
 ## Version: 0.7.0
 ## SavedVariables: ChronieDB
 
-src/Settings.lua
-src/Logger.lua
+# Alphabetical, with Main.lua last, and that is the whole of the ordering. Every file under
+# src/ does one thing when the client executes it — hang a `ns.newThing` factory off the
+# namespace — and nothing calls another module's factory until Main.lua wires them together,
+# so the client is free to read them in any order. Sorted rather than appended-to because an
+# append is where two unrelated branches meet: a list in the order features arrived in puts
+# every new one on the same line, and git merges by line locality (issue #155).
+#
+# If a file ever needs another to have run first, that is a reason to move the work into
+# Main.lua rather than a reason to move the line.
+
+src/AccountIdentity.lua
+src/AccountTooltip.lua
+src/CaptureBurst.lua
+src/CaptureTriggers.lua
+src/ClassDisplay.lua
+src/CombatLogging.lua
+src/CurrencyItems.lua
+src/CurrencyWindow.lua
+src/CustomSetRequests.lua
+src/CustomSetSnapshot.lua
+src/CustomSetWriter.lua
+src/DetailWindow.lua
+src/EntryLog.lua
+src/EntryPrompt.lua
+src/EntryText.lua
+src/EntryToast.lua
+src/EquipsetLedger.lua
 src/EventDispatcher.lua
+src/ExpansionIndex.lua
+src/FactionStanding.lua
+src/HoldingsStore.lua
+src/HoldingsSweep.lua
+src/Location.lua
+src/LockoutDetails.lua
 src/LockoutScanner.lua
 src/LockoutStore.lua
 src/LockoutTable.lua
-src/ClassDisplay.lua
-src/ExpansionIndex.lua
-src/LockoutDetails.lua
-src/SlashRouter.lua
-src/DetailWindow.lua
 src/LockoutWindow.lua
-src/SegmentSchema.lua
-src/FactionStanding.lua
-src/HoldingsSweep.lua
-src/HoldingsStore.lua
-src/AccountTooltip.lua
-src/SegmentTally.lua
-src/SegmentViews.lua
-src/ResultsWindow.lua
-src/MinimapButton.lua
-src/SegmentLog.lua
-src/AccountIdentity.lua
+src/Logger.lua
 src/MapPosition.lua
-src/Location.lua
-src/EntryLog.lua
-src/EntryText.lua
-src/EntryPrompt.lua
-src/EntryToast.lua
-src/CaptureTriggers.lua
-src/CaptureBurst.lua
-src/ScreenshotWatch.lua
-src/EquipsetLedger.lua
-src/CustomSetSnapshot.lua
-src/CustomSetRequests.lua
-src/CustomSetWriter.lua
-src/SegmentTracker.lua
-src/SegmentTable.lua
-src/CurrencyItems.lua
-src/CurrencyWindow.lua
+src/MinimapButton.lua
 src/ReportCommand.lua
 src/ReportWindow.lua
-src/CombatLogging.lua
+src/ResultsWindow.lua
+src/ScreenshotWatch.lua
+src/SegmentLog.lua
+src/SegmentSchema.lua
+src/SegmentTable.lua
+src/SegmentTally.lua
+src/SegmentTracker.lua
+src/SegmentViews.lua
+src/Settings.lua
+src/SlashRouter.lua
 Main.lua
 
 # There is no Bindings.xml, and adding one back is a decision rather than a detail. Chronie

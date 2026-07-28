@@ -1,0 +1,24 @@
+/*
+ * One appearance, drawn: a small dialog holding a pane and a line under it.
+ */
+
+/* Small, because it holds one thing: a picture of one appearance, over the segment the
+   reader is part way through rather than instead of it. */
+#appearance-detail { width: min(380px, 92vw); }
+#appearance-detail[open] { display: flex; flex-direction: column; }
+#appearance-detail .detail-head button { margin-left: auto; }
+/* The pane the model is drawn in. A fixed shape rather than a fixed height, so a standing
+   character and a sword laid across the frame both have room. */
+.appearance-stage {
+  width: 100%; aspect-ratio: 3 / 4; background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  /* Turning it is a drag, and the browser reads the same gesture as a scroll otherwise. */
+  touch-action: none; cursor: grab;
+  /* The shape above is the whole of what this pane is, so nothing inside it may add to its
+     height — which as a flex item in a column is what it would otherwise do. The same guard
+     `.outfit-stage` carries, and the second half of what made a canvas of the wrong size grow
+     this modal off the screen rather than merely overflow it. */
+  min-height: 0;
+}
+.appearance-stage[data-state="empty"] { cursor: default; }
+.appearance-hint { margin: 0; padding: 9px 16px; font-size: 12px; text-align: center; }

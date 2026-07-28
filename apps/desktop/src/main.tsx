@@ -13,6 +13,11 @@
  * and the dialogs drive an element that throws if it is opened while already open.
  */
 
+// First, and deliberately: every sheet below it is written in the terms this one sets, and a
+// module graph that reached a view's stylesheet before this one would have the view overriding
+// the page rather than the other way round.
+import "./base.css";
+
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";

@@ -18,6 +18,8 @@
  * `queryChart.tsx` draws it. What is left here is the screen.
  */
 
+import "./queryView.css";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

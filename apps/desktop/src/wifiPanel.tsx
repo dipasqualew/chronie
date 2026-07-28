@@ -11,6 +11,8 @@
  * hoped it did. `wifi.ts` is where the wording lives.
  */
 
+import "./wifiPanel.css";
+
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

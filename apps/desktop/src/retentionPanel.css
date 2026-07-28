@@ -1,0 +1,16 @@
+/*
+ * How long a combat log is kept, and what is about to be deleted.
+ */
+
+/* A window is two digits, not a path, so it does not take a path's width. */
+#retain-days { width: 5em; }
+#retain-days + .sub { align-self: center; }
+/* Files that are about to be deleted do not get to be drawn in the colour of a success. */
+#log-retention-state[data-state="stale"] { color: var(--bad); }
+/* The two lists a reader is meant to check the sentence against: what would go, and what
+   Chronie will never take. Indented so a name reads as evidence rather than as more copy. */
+#log-retention-doomed, #log-retention-unread { margin-top: 8px; padding-left: 10px; }
+#log-retention-detail { margin-top: 8px; }
+#log-retention-doomed div + div,
+#log-retention-unread div + div,
+#log-retention-detail div + div { margin-top: 2px; }

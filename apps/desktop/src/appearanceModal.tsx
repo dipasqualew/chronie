@@ -17,6 +17,8 @@
  * or a shield as its own mesh. `gallery.rs` decides which, and this only shows what came back.
  */
 
+import "./appearanceModal.css";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

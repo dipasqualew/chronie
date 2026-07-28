@@ -12,6 +12,8 @@
  * The wording lives in `retention.ts`.
  */
 
+import "./retentionPanel.css";
+
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 

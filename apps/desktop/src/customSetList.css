@@ -1,0 +1,13 @@
+/*
+ * A set of the reader's own, and the one control in this view that destroys something.
+ */
+
+/* The one control in this view that destroys something, and the only one behind a second
+   click — so it is drawn as an aside rather than as a button competing with "wear all of". */
+.mog-confirm { display: flex; gap: 6px; align-items: baseline; }
+.mog-delete {
+  border: 0; background: none; padding: 2px 4px;
+  color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+}
+.mog-delete:hover { color: var(--bad); text-decoration: underline; }
+.mog-confirm .mog-delete { color: var(--bad); }

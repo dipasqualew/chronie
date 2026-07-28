@@ -1,0 +1,15 @@
+/*
+ * The one hover in the window, and the lines that go in it.
+ */
+
+#tooltip .tip-line { display: block; font-variant-numeric: tabular-nums; }
+
+#tooltip {
+  position: fixed; pointer-events: none; opacity: 0;
+  transition: opacity .1s;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
+  padding: 8px 10px; font-size: 12px; z-index: 20; max-width: 280px;
+}
+#tooltip b { display: block; margin-bottom: 2px; }
+#tooltip .tip-places { display: block; margin-top: 3px; color: var(--text-muted); }

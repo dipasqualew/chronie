@@ -10,6 +10,8 @@
  * are what exercise it.
  */
 
+import "./modelViewer.css";
+
 import {
   ACESFilmicToneMapping,
   AmbientLight,
@@ -106,7 +108,7 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   // leaves is a drawing buffer sized in *device* pixels and an element with no size of its own,
   // which on a screen with two device pixels to the CSS pixel lays the canvas out at twice its
   // pane. A class rather than a rule per pane, because two panes draw on one of these and the
-  // second one forgot — see the note on `.model-canvas` in `index.html`.
+  // second one forgot — see the note on `.model-canvas` in `modelViewer.css`, imported above.
   renderer.domElement.className = "model-canvas";
   // And named for a reader as well as for the stylesheet: a canvas carries no role and says
   // nothing about itself, so a pane holding one is a blank rectangle to everything but a pair

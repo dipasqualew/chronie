@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-// The page itself, as text. Read through the bundler rather than off the disk so this asks
-// the same file the window is built from, wherever the suite happens to be run from.
-import indexHtml from "../index.html?raw";
 import { CLASS_FILES, CharacterCircle, ClassDot, HighlightList } from "./ui";
 import type { HighlightListProps } from "./ui";
 import { highlights } from "./sessions";
@@ -331,7 +332,7 @@ describe("the markup the components build", () => {
 });
 
 /**
- * The palette as `index.html` states it: class file to fill and ink, read back out of the
+ * The palette as `ui.css` states it: class file to fill and ink, read back out of the
  * stylesheet that owns it.
  *
  * Parsing the CSS is the point rather than a workaround. The colours used to live in this
@@ -340,9 +341,19 @@ describe("the markup the components build", () => {
  * to being the game's colours and to being readable.
  */
 const palette = ((): Record<string, { fill: string; ink: string }> => {
+  // Off the disk, and relative to this file rather than to a working directory, so the suite
+  // asks the same sheet `ui.tsx` imports wherever it is run from. Not through the bundler:
+  // Vitest answers every `.css` import with an empty module — `?raw` included — so a sheet
+  // imported here would parse as a palette of nothing and pass every assertion below.
+  //
+  // `dirname` rather than `new URL(…, import.meta.url)`, because these files run in a jsdom
+  // whose `URL` resolves a relative path against the document rather than against the base it
+  // was handed: `./ui.css` there comes out as `http://localhost:3000/src/ui.css`.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const stylesheet = readFileSync(join(here, "ui.css"), "utf8");
   const rule = /\[data-class="(\w+)"\]\s*{\s*--class-color:\s*(#[0-9a-f]{6});\s*--class-ink:\s*(#[0-9a-f]{6});/g;
   return Object.fromEntries(
-    [...indexHtml.matchAll(rule)].map(([, classFile, fill, ink]) => [classFile, { fill: fill!, ink: ink! }]),
+    [...stylesheet.matchAll(rule)].map(([, classFile, fill, ink]) => [classFile, { fill: fill!, ink: ink! }]),
   );
 })();
 

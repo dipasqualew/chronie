@@ -17,6 +17,8 @@
  * not. So the star and whatever tags exist are always there, and "+ tag" opens the rest.
  */
 
+import "./marksEditor.css";
+
 import { useState } from "react";
 import type { ReactNode } from "react";
 

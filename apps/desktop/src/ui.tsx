@@ -11,6 +11,8 @@
  * one way on the timeline and another on a character's page would be the same bug twice.
  */
 
+import "./ui.css";
+
 import { useEffect, useReducer } from "react";
 import type { ReactNode } from "react";
 
