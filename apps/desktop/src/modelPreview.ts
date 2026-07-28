@@ -129,50 +129,118 @@ export function glbBytes(dataUrl: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-/**
- * How far back a camera has to sit to hold a sphere of `radius` in a `fov` degree view.
- *
- * The margin is what keeps a helm from touching the edges of the pane, and the floor is for
- * the models that are nearly flat — a cloak is a sheet, and framing its radius exactly would
- * put the camera inside it.
- */
-export function framingDistance(radius: number, fov: number): number {
-  const half = (fov / 2) * (Math.PI / 180);
-  return Math.max(radius / Math.tan(half), 0.1) * 1.4;
-}
-
 /** Where a model can be looked at from. */
 export type View = "default" | "front" | "back" | "left" | "right";
 
 /**
  * Which way the camera sits, per named view, as a direction from the model's middle.
  *
- * `default` is the one the window opens on and is deliberately not square to anything: an
- * item seen exactly head on reads as a silhouette, and the whole point of showing it in 3D is
- * that it has a shape. The four named ones are square on purpose — they are what a render
- * asked for twice has to produce the same picture from.
- *
  * They name where the camera goes and not which way the model is facing, and on a character
  * the two are not the same: M2 is X-forward, so `right` is the view a character looks out of
  * and `front` is its left shoulder. Naming them after the axes is the only version of this
  * that stays true for a helm, a cloak and a body at once.
+ *
+ * **`default` is `right` by another name, and that is the point.** It used to be off every
+ * axis, on the argument that a thing seen exactly head on reads as a silhouette — which is
+ * true of a helm on its own and quite wrong about a person. What the window actually opens on
+ * is a woman in the clothes somebody is choosing for her, and the reader wanting to see the
+ * front of a tabard was being shown three quarters of her left side. Every view of her is one
+ * drag away and this is the one to start from; the axis it happens to be is the game's.
  */
 const DIRECTIONS: Record<View, [number, number, number]> = {
-  default: [0.45, 0.25, 1],
+  default: [1, 0, 0],
   front: [0, 0, 1],
   back: [0, 0, -1],
   left: [-1, 0, 0],
   right: [1, 0, 0],
 };
 
-/**
- * Where to put a camera that is `distance` from a model, looking at it from `view`.
- *
- * The named views are unit directions scaled by the distance. `default` is left at the
- * offsets the window has always used rather than normalised to them, because normalising it
- * would move the camera the reader is used to for the sake of a tidier rule.
- */
+/** Where to put a camera that is `distance` from a model, looking at it from `view`. */
 export function cameraFor(view: View, distance: number): [number, number, number] {
   const [x, y, z] = DIRECTIONS[view];
   return [x * distance, y * distance, z * distance];
+}
+
+/**
+ * How much of the pane's two directions a model takes up, and how much of it is depth.
+ *
+ * All half-sizes, in the model's own units, measured from a box centred on the origin — which
+ * is what `frameModel` has just made of it. `across` and `up` are what has to fit; `deep` is
+ * the part that does not show and still has to be paid for, because perspective enlarges what
+ * is nearest and the nearest corner of a body is half its depth in front of its middle.
+ */
+export interface OnScreen {
+  across: number;
+  up: number;
+  deep: number;
+}
+
+/** Which way is up in the world the models are put into, and the only one they are given. */
+const UP: readonly [number, number, number] = [0, 1, 0];
+
+type Triple = [number, number, number];
+
+const cross = (a: Triple | readonly [number, number, number], b: Triple): Triple => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+const unit = (a: Triple): Triple => {
+  const length = Math.hypot(...a);
+  return length < 1e-9 ? [0, 0, 1] : [a[0] / length, a[1] / length, a[2] / length];
+};
+
+/**
+ * A box of `size` seen from `view`, as the three half-sizes framing it needs.
+ *
+ * The box is axis-aligned and every view is square to an axis, so two of the three answers are
+ * always just half of one side. It is done in the general way regardless — project the box's
+ * extent onto the camera's own right, up and forward — because that stays correct for a view
+ * that is not square to anything, and this file has already had one of those and may again.
+ */
+export function onScreen(size: Triple, view: View): OnScreen {
+  const forward = unit([...DIRECTIONS[view]] as Triple);
+  const sideways = cross(UP, forward);
+  // Straight down at something is the one direction that leaves nothing to call sideways.
+  const right = unit(Math.hypot(...sideways) < 1e-9 ? [1, 0, 0] : sideways);
+  const up = unit(cross(forward, right));
+  const reach = (axis: Triple): number =>
+    (Math.abs(axis[0]) * size[0] + Math.abs(axis[1]) * size[1] + Math.abs(axis[2]) * size[2]) / 2;
+  return { across: reach(right), up: reach(up), deep: reach(forward) };
+}
+
+/**
+ * How much room to leave around a framed model: four per cent of it, and no more.
+ *
+ * It used to be forty, which is where "the model is tiny and I zoom in every time I open this"
+ * came from. A margin is worth having — a body whose scalp touches the top edge reads as one
+ * that has been cut off — but the pane is small and the clothes are the errand, so the margin
+ * is the smallest one that still reads as deliberate.
+ */
+const MARGIN = 1.04;
+
+/**
+ * How far back a camera has to sit to hold a model in a `fov` degree view of a pane `aspect`
+ * wide for its height.
+ *
+ * Both directions, which is the half that used to be missing. Framing was done against the
+ * radius of the model's bounding *sphere* and against the vertical field of view alone: the
+ * sphere around a person is nearly as wide as she is tall, so a body was framed as though it
+ * were a ball with her inside it, and the pane was left mostly empty around her.
+ *
+ * The horizontal field of view is the vertical one widened by the aspect, so a wide pane
+ * spends its extra room on nothing and a narrow one is what actually decides the distance.
+ *
+ * The depth is added rather than fitted. Everything else here is the arithmetic of a flat
+ * rectangle at the middle of the model, and the corner that overflows a tight frame is the one
+ * nearest the camera — so the camera is put where that face is framed, and the middle sits half
+ * a depth further off. The floor is for the models that are nearly flat: a cloak is a sheet,
+ * and framing one exactly would put the camera inside it.
+ */
+export function framingDistance(seen: OnScreen, fov: number, aspect: number): number {
+  const half = Math.tan((fov / 2) * (Math.PI / 180));
+  const wide = half * Math.max(aspect, 0.01);
+  const back = Math.max((seen.up * MARGIN) / half, (seen.across * MARGIN) / wide);
+  return Math.max(back + seen.deep, 0.1);
 }

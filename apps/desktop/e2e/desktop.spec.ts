@@ -712,6 +712,27 @@ class Outfit {
     };
   }
 
+  /**
+   * Where the camera is once it has stopped moving, which is not where a drag leaves it.
+   *
+   * A drag does not end when the mouse does: the controls carry a shrinking fraction of it
+   * into every frame after, which is what makes turning a model feel like turning something
+   * with weight. So a reading taken straight after one is of something still in flight, and
+   * two such readings are never the same number twice. This waits for two that are.
+   */
+  async settled(): Promise<string> {
+    let last = "";
+    await expect
+      .poll(async () => {
+        const now = (await this.stage().getAttribute("data-camera")) ?? "";
+        const still = now !== "" && now === last;
+        last = now;
+        return still;
+      }, { timeout: 15_000 })
+      .toBe(true);
+    return last;
+  }
+
   /** Drags across the middle of the canvas with one button held, the way a reader does. */
   async drag(button: "left" | "right", across: number, down: number): Promise<void> {
     const box = await this.canvas().boundingBox();
@@ -2860,7 +2881,10 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("the model can be moved as well as turned, and put back", async () => {
     const framed = await outfit.framing();
     expect(framed.target).toBe("0.000,0.000,0.000");
-    expect(framed.camera).not.toBe("");
+    // Face to face with her, which is what the window now opens on: out along the one axis she
+    // looks down, at her own height, dead centre. A reader opening a wardrobe is choosing
+    // clothes for a person, and three quarters of her left shoulder was never the view for it.
+    expect(framed.camera).toMatch(/^\d+\.\d{3},0\.000,0\.000$/);
 
     // Turning first, and it is exactly the half that was never enough: the camera goes
     // somewhere else and the middle of the pane stays on the middle of the model.
@@ -3080,6 +3104,45 @@ test("browses the game's transmog sets and dresses the character in them", async
     // covers the hair, and eight vertices fewer between them for the same reason — plus the
     // helm's own eight. Two nodes in one scene is the shape the converter gained for that, and
     // a loader reading only the first would say 968.
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "976");
+  });
+
+  // The camera belongs to the reader and not to whatever is on the stage. A new body is drawn
+  // for every piece put on or taken off, and framing each of them threw the reader's view away
+  // once per click: somebody comparing two helms on a face they had zoomed in on had to zoom
+  // in again for the second helm, and again after changing their mind.
+  await test.step("a new piece leaves the camera where the reader left it", async () => {
+    // A framed camera is always dead on the axis she faces down, and a dragged one never is,
+    // so this pattern is the whole test: it says "this camera was placed by the framing"
+    // without depending on how far out that framing happened to put it.
+    const onHerAxis = /^\d+\.\d{3},0\.000,0\.000$/;
+    await outfit.resetCamera();
+    const framed = await outfit.framing();
+    expect(framed.camera).toMatch(onHerAxis);
+
+    await outfit.drag("left", 60, 20);
+    const moved = await outfit.settled();
+    expect(moved).not.toBe(framed.camera);
+    const drawn = await outfit.stage().getAttribute("data-vertices");
+
+    // A different body on the stage — the helm off again, which is a body of its own.
+    await transmog.wear("Emberforge Plate", "Head", "Emberforge Helm").click();
+    await expect.poll(() => outfit.stage().getAttribute("data-vertices")).not.toBe(drawn);
+
+    // And the reader's own view of her still in force, to the digit. Framing every model put
+    // the camera back where `framed` is at this point, once per click, whatever the reader had
+    // been looking at instead.
+    await expect(outfit.stage()).toHaveAttribute("data-camera", moved);
+
+    // The button is what puts it back, and it frames the body that is on the stage now rather
+    // than the one the pane opened on — face to face with her again, pointed at her middle.
+    await outfit.resetCamera();
+    await expect(outfit.stage()).toHaveAttribute("data-target", "0.000,0.000,0.000");
+    await expect(outfit.stage()).toHaveAttribute("data-camera", onHerAxis);
+
+    // Back where the step found her, so the steps after this one still start from the outfit
+    // the one before it built.
+    await transmog.wear("Emberforge Plate", "Head", "Emberforge Helm").click();
     await expect(outfit.stage()).toHaveAttribute("data-vertices", "976");
   });
 
