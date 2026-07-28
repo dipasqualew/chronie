@@ -113,16 +113,45 @@ jobs:
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
+      # Keyed on the Playwright release, because that is what a downloaded browser belongs
+      # to. Hashing `bun.lock` threw the browsers away every time any dependency in the tree
+      # moved, which is most pushes, to re-download a Chromium that had not changed.
+      - name: Read the Playwright version
+        id: playwright
+        run: |
+          version=$(node -p "require('./apps/desktop/node_modules/@playwright/test/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Restored everywhere, written only from main, for the reason the Rust cache above is:
+      # the repository gets ten gigabytes and a branch has no browser of its own to cache.
+      - name: Restore the Playwright browsers
+        id: browsers
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-
-      - name: Install browser test dependencies
-        run: node apps/desktop/node_modules/@playwright/test/cli.js install --with-deps chromium
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
       # The Lua suite first: it is four seconds, and a luacheck warning is worth hearing
-      # before waiting on a browser.
+      # before waiting on a browser. It has been sitting below the browser install rather
+      # than above it, so it was heard six minutes late.
       - run: ./scripts/check-lua.sh
+
+      # No `--with-deps`, and that is where six minutes went. Every shared library Chromium
+      # needs is already on the ubuntu-latest image — `fonts-liberation` included — so the
+      # only thing apt had left to fetch was ten font packages for scripts this suite never
+      # renders: Japanese, Chinese, Thai, Cyrillic and unifont. 21.1 MB, off an Azure mirror
+      # serving 59.6 kB/s, to change nothing about how an English page draws.
+      #
+      # If a runner image ever does drop a library, Chromium fails to launch and says so.
+      # That is a red build with a legible cause, which is worth more than six minutes a run.
+      - name: Install the browser the suite drives
+        run: node apps/desktop/node_modules/@playwright/test/cli.js install chromium
+
+      - name: Save the Playwright browsers
+        if: github.ref == 'refs/heads/main' && steps.browsers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
       - run: ./scripts/check-frontend.sh
