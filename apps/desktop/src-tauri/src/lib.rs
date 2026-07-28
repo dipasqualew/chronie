@@ -123,12 +123,16 @@ struct AppState {
     station: wifi::Station,
     /// What this machine calls itself, which is how it is named on the other one's screen.
     device: String,
-    /// The game's own storage, held open between commands rather than opened per command.
+    /// The game's own storage, held open between commands rather than opened per command —
+    /// and holding on to the files that have come out of it.
     ///
     /// Opening it is a quarter of a second and a couple of hundred megabytes, and one click
     /// on a set asks for the game's files twice, so opening per command was most of what a
-    /// reader waited for. Shared for the same reason the caches below are: the read happens
-    /// on a worker thread that outlives the command that started it.
+    /// reader waited for. What was left after that was inflating the same dozen tables again
+    /// for every click, which is what [`casc::Remembered`] is; between them the two are the
+    /// difference between 1.1–2.4s and a tenth of a second. Shared for the same reason the
+    /// caches below are: the read happens on a worker thread that outlives the command that
+    /// started it.
     storage: Arc<casc::OpenStorage>,
     /// The icons decoded so far. Shared rather than owned, because reading the game's files
     /// happens on a worker thread that outlives the command that started it.

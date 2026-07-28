@@ -1664,7 +1664,7 @@ mod tests {
     }
 
     impl GameFiles for Noted {
-        fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+        fn read(&self, fdid: u32) -> Result<std::sync::Arc<Vec<u8>>, String> {
             self.asked.borrow_mut().push(fdid);
             self.files.read(fdid)
         }

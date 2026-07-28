@@ -7,10 +7,14 @@
 //! stopwatch on a shared runner measures the runner it got, and would either fail on a slow
 //! afternoon or pass through a change that doubled the reads.
 //!
-//! So this counts. Files asked of the game's storage, how many of those asks were for
-//! something already in hand, rows walked out of the tables, and — for the half that happens
-//! in the browser — how many bytes the `.glb` ships and how much of what it ships anything
-//! draws.
+//! So this counts. Files read out of the game's storage, how many of those were files it had
+//! already decoded, rows walked out of the tables, and — for the half that happens in the
+//! browser — how many bytes the `.glb` ships and how much of what it ships anything draws.
+//!
+//! **Where the counting happens is part of what it means.** [`Counted`] goes at the *bottom*
+//! of the stack, underneath [`crate::casc::Remembered`], because a read that is answered from
+//! memory costs nothing and counting it as work would make a ceiling say the opposite of what
+//! it is for.
 //!
 //! **The ceilings are a ratchet.** Each number below is the work as it stands, asserted from
 //! above, and the change that lowers one lowers its ceiling in the same commit. A number that
@@ -24,28 +28,34 @@
 //! same two structures for a real outfit and is where a claim about payload size has to come
 //! from. On build 12.0.5.67823, `set/5570`, eight pieces:
 //!
-//! | | counted |
-//! |---|---|
-//! | files read | 54, three of them twice |
-//! | bytes those reads decoded | 117.7 MB |
-//! | rows walked | 4,833,642 |
-//! | `.glb` | 10.36 MB, 253,251 vertices in 4 meshes |
-//! | her body | ships 248,958 and draws 4,894 — 2.0% |
+//! | | first click | every click after |
+//! |---|---|---|
+//! | files read | 51 | **0** |
+//! | bytes those reads decoded | 112.1 MB | **0** |
+//! | rows walked | 4,833,642 | 4,833,642 |
+//! | `.glb` | 10.36 MB, 253,251 vertices in 4 meshes | the same |
+//! | her body | ships 248,958 and draws 4,894 — 2.0% | the same |
+//!
+//! The two that have not moved are the two the remaining work is about: the rows are
+//! `worn::sections` walking a whole table per piece, and the vertex share is the `.glb`
+//! shipping a body it draws a fortieth of.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::casc::GameFiles;
 
 /// What one run of the pipeline was counted doing.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Work {
-    /// Every ask of the game's storage, repeats included.
+    /// Every read that reached the storage, repeats included — which is every file actually
+    /// inflated, rather than every file asked for.
     pub reads: usize,
-    /// How many of those asks were for a file this run had already read. Zero is the
-    /// destination: a table inflated once and kept is worth ~200ms of a real click.
+    /// How many of those reached it for a file it had already decoded this run. Zero is what
+    /// it should be: `crate::casc::Remembered` sits above and answers the second ask.
     pub repeated: usize,
-    /// Bytes handed back, decoded — which is what was inflated, and so what the reads cost.
+    /// Bytes those reads decoded, which is what they cost.
     pub read_bytes: usize,
     /// Rows [`crate::db2::Db2::rows`] materialised, summed over every walk of every table.
     /// A walk costs the whole table however few rows the caller keeps, so this counts the
@@ -53,21 +63,17 @@ pub struct Work {
     pub rows: usize,
 }
 
-/// Runs something against the game's files and says what it cost.
-///
-/// The run is handed a storage of its own rather than the one passed in, so that what it does
-/// is counted without anything below it knowing it is being counted. Rows are counted through
-/// a thread-local, because a table walk is four calls below here and threading a ledger down
-/// to it would put a test's bookkeeping into the shape of the code it tests.
-pub fn counting<T>(files: &dyn GameFiles, run: impl FnOnce(&dyn GameFiles) -> T) -> (T, Work) {
-    let counted = Counted::over(files);
-    ROWS.with(|rows| rows.set(0));
-    let answer = run(&counted);
-    (answer, counted.work())
-}
-
 /// A source of game files that keeps the receipts.
-struct Counted<'a> {
+///
+/// **Put it at the bottom of the stack, under whatever the app puts above it.** What a ceiling
+/// here is worth depends on where the counting happens: above
+/// [`crate::casc::Remembered`] this would count asks, and asks are free once the answer is in
+/// hand. Underneath it, a read is a file inflated, which is the thing that costs 190ms.
+///
+/// Long-lived on purpose, and [`restart`](Counted::restart) between runs — because the cache
+/// above it is long-lived too, and a counter that had to be built per run could only ever be
+/// built above the cache.
+pub struct Counted<'a> {
     files: &'a dyn GameFiles,
     seen: RefCell<HashMap<u32, usize>>,
     reads: Cell<usize>,
@@ -75,7 +81,7 @@ struct Counted<'a> {
 }
 
 impl<'a> Counted<'a> {
-    fn over(files: &'a dyn GameFiles) -> Self {
+    pub fn over(files: &'a dyn GameFiles) -> Self {
         Self {
             files,
             seen: RefCell::new(HashMap::new()),
@@ -84,7 +90,19 @@ impl<'a> Counted<'a> {
         }
     }
 
-    fn work(&self) -> Work {
+    /// Zeroes everything, so the next run is counted on its own.
+    ///
+    /// Rows too, which is why this and not just dropping the struct: the row counter is a
+    /// thread-local and belongs to nothing that can be dropped.
+    pub fn restart(&self) {
+        self.seen.borrow_mut().clear();
+        self.reads.set(0);
+        self.bytes.set(0);
+        ROWS.with(|rows| rows.set(0));
+    }
+
+    /// What has been counted since the last [`restart`](Counted::restart).
+    pub fn work(&self) -> Work {
         let seen = self.seen.borrow();
         Work {
             reads: self.reads.get(),
@@ -96,7 +114,7 @@ impl<'a> Counted<'a> {
 }
 
 impl GameFiles for Counted<'_> {
-    fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+    fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String> {
         // Counted whether or not it succeeds: a read that fails still went and looked, and a
         // file this install does not hold is asked for once per ask like any other.
         self.reads.set(self.reads.get() + 1);
@@ -105,6 +123,18 @@ impl GameFiles for Counted<'_> {
         self.bytes.set(self.bytes.get() + bytes.len());
         Ok(bytes)
     }
+}
+
+/// Runs something against the game's files and says what it cost.
+///
+/// The plain case: no cache above, one run, counted from nothing. Anything holding a storage
+/// between runs — the app, `trace_render` — wants [`Counted`] itself instead, kept underneath
+/// what it holds.
+pub fn counting<T>(files: &dyn GameFiles, run: impl FnOnce(&dyn GameFiles) -> T) -> (T, Work) {
+    let counted = Counted::over(files);
+    counted.restart();
+    let answer = run(&counted);
+    (answer, counted.work())
 }
 
 thread_local! {
@@ -291,7 +321,7 @@ fn number(value: &serde_json::Value) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::casc::{fixture_files, DirFiles};
+    use crate::casc::{fixture_files, DirFiles, Remembered};
     use crate::{character, transmog, worn};
 
     /// The fixture set a click is measured on: `Tideglass Regalia`, whose pieces are the ones
@@ -325,30 +355,62 @@ mod tests {
         character::glb_of(files, Some(&worn)).expect("the fixture outfit draws")
     }
 
+    /// One click through the stack the app has: the storage, the counter under everything so
+    /// that a read is counted where it costs something, and `Remembered` over it.
     fn cost() -> (Payload, Work) {
         let files = fixture_files();
-        let (glb, work) = counting(&files, click);
-        (payload_of(&glb).expect("what the pipeline wrote is a .glb"), work)
+        let counted = Counted::over(&files);
+        let remembered = Remembered::over(&counted);
+        counted.restart();
+        let glb = click(&remembered);
+        (
+            payload_of(&glb).expect("what the pipeline wrote is a .glb"),
+            counted.work(),
+        )
     }
 
     /* ---------- the ratchet ---------- */
 
-    // Every read is an inflate of a table or a texture, and on a real install the 54 of them
-    // are 117MB decoded and 190ms of a 450ms click. The storage is opened once already; the
-    // files it holds are still read afresh every time.
+    // Every read that reaches the storage is a file inflated, and on a real install the 51 of
+    // them are 117MB and 190ms of a 450ms click.
     #[test]
     fn reads_no_more_files_than_it_used_to() {
         let (_, work) = cost();
-        assert!(work.reads <= 41, "a click now reads {} files", work.reads);
+        assert!(work.reads <= 39, "a click now reads {} files", work.reads);
     }
 
-    // The one that is meant to reach zero. `TextureFileData` is read by both `worn` and
-    // `skin`, `ItemDisplayInfo` by both `transmog` and `worn`, and on a real install the same
-    // dozen tables are inflated again on every click of the session.
+    // Zero, and it stays zero. `TextureFileData` is read by both `worn` and `skin`,
+    // `ItemDisplayInfo` by both `transmog` and `worn`; neither was worth untangling once
+    // `Remembered` sits underneath them both and answers the second ask from the first.
     #[test]
-    fn asks_for_no_more_files_twice_than_it_used_to() {
+    fn inflates_nothing_twice() {
         let (_, work) = cost();
-        assert!(work.repeated <= 2, "a click reads {} files twice", work.repeated);
+        assert_eq!(work.repeated, 0, "a click inflated {} files twice", work.repeated);
+    }
+
+    // And the whole point of remembering: the same click again decodes nothing. On a real
+    // install that is 117MB not inflated and 190ms not spent, on every click after the first.
+    //
+    // Bytes rather than reads, because one read does happen again: the fixture tables name a
+    // texture the fixture directory holds no file for, and a read that found nothing is
+    // deliberately not remembered — an install being patched under the app can fail a read and
+    // answer the same one a moment later. It costs a look at the filesystem and decodes
+    // nothing, which is what this asserts.
+    #[test]
+    fn decodes_nothing_again_for_the_same_click() {
+        let files = fixture_files();
+        let counted = Counted::over(&files);
+        let remembered = Remembered::over(&counted);
+        click(&remembered);
+
+        counted.restart();
+        click(&remembered);
+        let again = counted.work();
+        assert_eq!(
+            again.read_bytes, 0,
+            "the second click decoded {} bytes again",
+            again.read_bytes
+        );
     }
 
     // `Db2::rows` materialises every row of a table before it yields the first, so a caller
