@@ -659,6 +659,27 @@ export interface InGameSetsPayload {
 }
 
 /**
+ * An outfit this app has asked the game to hold on to, as `ingamesets::Request` stores it.
+ *
+ * The one thing Chronie writes into a WoW account, and it happens in two steps: the request is
+ * recorded here and the *addon* carries it out at the player's next login, because nothing in a
+ * desktop app can reach a running game. So `outcome` is absent for as long as the game has not
+ * been opened — which is the ordinary state of a request, not an error.
+ */
+export interface SetRequest {
+  id: number;
+  name: string;
+  icon?: number | null;
+  createdAt: number;
+  /** `created`, `updated`, `full`, `refused` or `failed`, once the addon has answered. */
+  outcome?: string | null;
+  appliedAt?: number | null;
+  /** The client's id for the set that resulted, where one did. */
+  setId?: number | null;
+  slots: InGameSetSlot[];
+}
+
+/**
  * What an in-game set is made of, once the game's files have been asked.
  *
  * The same shape as `TransmogSetItemsPayload` minus the set id, and deliberately: it is built by
@@ -1309,6 +1330,10 @@ export interface E2EMock {
    * appearance ids ascending and joined by commas — the same keying the worn sets use, and for
    * the same reason: it says which set the window actually asked to open. */
   inGameSetAppearances: Record<string, InGameSetAppearancesPayload>;
+  /** The outfits somebody has asked the game to save. State rather than a fixture: sending one
+   * in the page under test writes here, and it stays unanswered — which is what a real request
+   * is until the player next logs in, and so the state the window mostly has to draw. */
+  setRequests: SetRequest[];
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
   /** What the reader may be asked about her, and what they have answered. State rather than a

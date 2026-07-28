@@ -340,6 +340,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             // Every write answers with every saved set, for the reason above it.
             onApply: setCustomSets,
             onError: message,
+            sendToGame: desktop.sendSetToGame,
           }}
           inGame={{
             payload: inGameSets,

@@ -20,12 +20,14 @@ import type { ReactNode } from "react";
 import { piecesFrom, setNamed } from "./customSets";
 import { Herself } from "./herselfPanel";
 import type { HerselfProps } from "./herselfPanel";
+import { iconFrom, requestSummary, slotsFrom } from "./inGameSets";
 import { glbBytes, REASONS, wornSetKey } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
 import { outfitSummary, piecesOf, wornPieces, wornTip } from "./outfit";
 import type { Outfit } from "./outfit";
 import type {
-  CharacterModelPayload, CustomSet, CustomSetPiece, CustomSetsPayload, WornPiece, WornSetPayload,
+  CharacterModelPayload, CustomSet, CustomSetPiece, CustomSetsPayload, InGameSetSlot, SetRequest,
+  WornPiece, WornSetPayload,
 } from "./types";
 
 /**
@@ -36,6 +38,17 @@ import type {
  * answers with all of them, and what came back is what the view then holds.
  */
 export interface SaveActions {
+  /**
+   * Asks the *game* to hold on to this outfit, under the name in the box beside it.
+   *
+   * The one action in this app that changes something inside a WoW account. Two steps rather
+   * than one, and the button says so: this records the request, and the addon saves the set the
+   * next time the player logs in — nothing in a desktop app can reach a running game. See
+   * `docs/transmog-sets.md`.
+   */
+  onSendToGame: (
+    name: string, icon: number | null, slots: InGameSetSlot[],
+  ) => Promise<SetRequest[]>;
   sets: CustomSet[];
   onSave: (name: string, pieces: CustomSetPiece[]) => Promise<CustomSetsPayload>;
   onSaved: (payload: CustomSetsPayload) => void;
@@ -306,6 +319,10 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
   const [failure, setFailure] = useState("");
   const [saved, setSaved] = useState("");
   const replacing = setNamed(save.sets, name);
+  // Only the pieces the game has a slot for. `outfit.ts` and the game disagree about nothing
+  // that matters here, but a look the game withholds has nowhere to go in either — see
+  // `slotsFrom`, which drops exactly what `placeOf` would.
+  const slots = slotsFrom(outfit);
 
   return (
     <form
@@ -337,6 +354,29 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
       <button type="submit" className="outfit-keep">
         {replacing ? `Replace ${replacing.name}` : "Save as a set"}
       </button>
+      {/* Beside saving rather than instead of it, because they are two different keepings and
+          a reader may want either or both: one puts the outfit in this app's own browser, the
+          other puts it in the game's, where the character can actually be dressed in it.
+
+          `type="button"`, so Enter in the name box still means the ordinary save. Sending an
+          outfit into somebody's WoW account is not what a stray keypress should do. */}
+      <button
+        type="button" className="outfit-send" disabled={!slots.length}
+        onClick={() => {
+          setFailure("");
+          setSaved("");
+          if (!name.trim()) return;
+          void save.onSendToGame(name, iconFrom(outfit), slots)
+            .then((requests) => {
+              const sent = requests[0];
+              setSaved(sent
+                ? requestSummary(sent)
+                : `Sent ${name.trim().replace(/\s+/g, " ")} to the game.`);
+              setName("");
+            })
+            .catch((error: unknown) => setFailure(save.onError(error)));
+        }}
+      >Send to the game</button>
       {/* A live region rather than a chip that appears: the reader's eye is on the character
           and the list, and the one thing worth interrupting them for is where the set went. */}
       {saved ? <span className="muted" role="status">{saved}</span> : null}

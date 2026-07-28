@@ -1926,6 +1926,10 @@ const mockDesktop: E2EMock = {
       ],
     },
   },
+  // And the outfits sent the other way, which start at none for the reason the reader's own
+  // sets do: a request is made by the page under test and by nothing else, so a fixture
+  // holding one would be the one thing on this screen that never had to survive being sent.
+  setRequests: [],
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
   // set 205 names it and the install holds no such file, which is the case a row has to

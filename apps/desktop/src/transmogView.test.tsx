@@ -358,6 +358,7 @@ function Marked(
         remove: saved.remove,
         onApply: setSets,
         onError: said,
+        sendToGame: () => Promise.resolve([]),
       }}
     />
   );
@@ -438,6 +439,7 @@ const NO_SETS = {
   remove: () => Promise.resolve({ sets: [] }),
   onApply: () => {},
   onError: String,
+  sendToGame: () => Promise.resolve([]),
 };
 
 /**

@@ -175,6 +175,146 @@ pub fn read(value: &Value) -> Vec<CharacterSets> {
     found
 }
 
+/* ---------- and the one thing this app says back ---------- */
+
+/// An outfit this app has asked the game to hold on to.
+///
+/// The shape of a row of `transmog_set_requests` and its slots, and also the shape written into
+/// the addon's own folder — one idea of what a send is, rather than one per hop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Request {
+    pub id: i64,
+    pub name: String,
+    pub icon: Option<i64>,
+    pub created_at: i64,
+    /// What the addon did about it, once it has: `created`, `updated`, `full`, `refused` or
+    /// `failed`. Absent while the request is still waiting to be seen, which is the state the
+    /// window draws differently and the state that keeps it being written into the game.
+    pub outcome: Option<String>,
+    pub applied_at: Option<i64>,
+    /// The client's id for the set that resulted, where one did.
+    pub set_id: Option<i64>,
+    pub slots: Vec<Slot>,
+}
+
+/// One string as a Lua literal, safe to drop into a source file the game will execute.
+///
+/// Escaped rather than filtered, which is the opposite of what `trigger_literal` does to a
+/// capture trigger next door — and the difference is that a trigger name is Chronie's own
+/// vocabulary while this is a name a person typed for their own outfit. Refusing the apostrophe
+/// in "Winter's Edge" would be this app deciding what a player may call their clothes.
+///
+/// So every character that could end the literal, start a comment, or break the line is written
+/// as an escape, and anything below a space becomes a decimal escape rather than travelling as
+/// a raw control byte. `\\` goes first, or it would escape the backslashes the others add.
+fn lua_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            found if (found as u32) < 0x20 || found as u32 == 0x7f => {
+                out.push_str(&format!("\\{}", found as u32));
+            }
+            found => out.push(found),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The contents of `src/CustomSetRequests.lua` for a given set of waiting requests.
+///
+/// Pure, so that the thing which actually reaches somebody's game folder is testable without a
+/// game folder — the same reason `settings_module` next door is pure, and the same file-writing
+/// machinery carries it.
+///
+/// The shape has to match the `ns.customSetRequests` the shipped `src/CustomSetRequests.lua`
+/// declares, because a hand-installed copy gets that one and must still load.
+pub fn requests_module(issued_at: i64, requests: &[Request]) -> String {
+    let mut body = String::new();
+    for request in requests {
+        let name = lua_string(&request.name);
+        let icon = match request.icon {
+            Some(icon) => format!("{icon}"),
+            // Omitted rather than written as nil, because the addon reads a missing icon and a
+            // nil one the same way and one of them is shorter to read by eye.
+            None => String::new(),
+        };
+        let icon = if icon.is_empty() {
+            String::new()
+        } else {
+            format!(" [\"icon\"] = {icon},")
+        };
+        body.push_str(&format!(
+            "        {{ [\"id\"] = {}, [\"name\"] = {name},{icon} [\"slots\"] = {{\n",
+            request.id
+        ));
+        for slot in &request.slots {
+            let secondary = slot
+                .secondary_appearance_id
+                .map(|id| format!(" [\"secondary\"] = {id},"))
+                .unwrap_or_default();
+            let illusion = slot
+                .illusion_id
+                .map(|id| format!(" [\"illusion\"] = {id},"))
+                .unwrap_or_default();
+            body.push_str(&format!(
+                "            {{ [\"slot\"] = {}, [\"appearance\"] = {},{secondary}{illusion} }},\n",
+                slot.slot, slot.appearance_id
+            ));
+        }
+        body.push_str("        } },\n");
+    }
+    format!(
+        "local _, ns = ...\n\
+         \n\
+         -- Written by the Chronie desktop app. Everything in here is an outfit somebody asked\n\
+         -- it to save into this account's transmog sets, and the addon carries each one out\n\
+         -- once and remembers that it did. Editing it by hand lasts until the app next writes\n\
+         -- it, which is whenever an outfit is sent or the addon is installed.\n\
+         --\n\
+         -- A request stays here until the addon has said what became of it, because the app\n\
+         -- has no way to know the game ever loaded. See docs/transmog-sets.md.\n\
+         ns.customSetRequests = {{\n\
+         \x20   [\"issuedAt\"] = {issued_at},\n\
+         \x20   [\"requests\"] = {{\n\
+         {body}\
+         \x20   }},\n\
+         }}\n"
+    )
+}
+
+/// What the addon said it did, read back out of SavedVariables.
+///
+/// Keyed by the request id the app gave it, which is the whole point of that id: the app can
+/// then stop writing the request into the game's folder, and the window can say what happened
+/// to an outfit somebody sent a week ago.
+pub fn outcomes(value: &Value) -> Vec<(i64, String, Option<i64>, Option<i64>)> {
+    let Some(done) = value.get("done").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(i64, String, Option<i64>, Option<i64>)> = done
+        .iter()
+        .filter_map(|(key, entry)| {
+            let id = key.parse::<i64>().ok()?;
+            let outcome = entry.get("outcome").and_then(Value::as_str)?.to_string();
+            Some((
+                id,
+                outcome,
+                number(entry.get("at")),
+                number(entry.get("setId")),
+            ))
+        })
+        .collect();
+    found.sort_by_key(|(id, ..)| *id);
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

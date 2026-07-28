@@ -76,6 +76,7 @@ import type {
   GalleryPayload,
   IconsPayload,
   InGameSetAppearancesPayload,
+  InGameSetSlot,
   InGameSetsPayload,
   MarkSubjectKind,
   Quality,
@@ -84,6 +85,7 @@ import type {
   TransmogMark,
   TransmogMarksPayload,
   TransmogPayload,
+  SetRequest,
   TransmogSet,
   TransmogSetItemsPayload,
   WardrobePayload,
@@ -142,6 +144,10 @@ export interface TransmogViewProps {
     remove: (id: number) => Promise<CustomSetsPayload>;
     onApply: (payload: CustomSetsPayload) => void;
     onError: (error: unknown) => string;
+    /** And the other keeping: asking the game itself to hold on to what she has on. */
+    sendToGame: (
+      name: string, icon: number | null, slots: InGameSetSlot[],
+    ) => Promise<SetRequest[]>;
   };
   /**
    * The sets the player saved in the *game*, and what one turns out to be made of.
@@ -480,6 +486,7 @@ export function TransmogView(
           onSave: custom.save,
           onSaved: custom.onApply,
           onError: custom.onError,
+          onSendToGame: custom.sendToGame,
         }}
         onTakeOff={(place) => setOutfit((was) => takeOff(was, place))}
         onClearAll={() => setOutfit(NOTHING_ON)}

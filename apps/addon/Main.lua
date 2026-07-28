@@ -37,6 +37,8 @@ local addonName, ns = ...
 ---@field equipmentSets fun(): table<integer, EquipsetState> Every equipment set the character has.
 ---@field equippedItems fun(): table<integer, EquippedItem> What the character is wearing, by slot.
 ---@field transmogCustomSets fun(): CustomSetState[] Every transmog set the player saved in game.
+---@field customSetRequests fun(): CustomSetRequest[] What the app left in the addon's own folder.
+---@field customSetClient CustomSetClient The four calls that change the player's own wardrobe.
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
 ---@field currencyInfo fun(currencyType: integer): string? Localised name of a currency.
@@ -306,6 +308,45 @@ function ns.main(env)
     ---show. Nothing in game needs telling — the player is looking at their own wardrobe.
     local function syncCustomSets()
         customSetSnapshot.sync(env.now())
+    end
+
+    ---Where the record of what the app has already asked for is kept.
+    ---
+    ---Account-wide rather than per character, unlike the snapshot above, because the thing it
+    ---is a record of is account-wide: a custom set belongs to the account, so a request carried
+    ---out on one character has been carried out for all of them. Keyed by character it would be
+    ---done once per alt, and the player would find the same outfit saved over their wardrobe
+    ---every time they logged a new one in.
+    local function customSetRequestStore()
+        env.db.customSetRequests = env.db.customSetRequests or {}
+        return env.db.customSetRequests
+    end
+
+    local customSetWriter = ns.newCustomSetWriter({
+        readRequests = env.customSetRequests,
+        readSets = env.transmogCustomSets,
+        client = env.customSetClient,
+        store = setmetatable({}, {
+            __index = function(_, key)
+                return customSetRequestStore()[key]
+            end,
+            __newindex = function(_, key, value)
+                customSetRequestStore()[key] = value
+            end,
+        }),
+        now = env.now,
+    })
+
+    ---Carries out whatever the app left in the addon's own folder, and says so.
+    ---
+    ---Out loud, because this is the one thing Chronie does that changes something in the game
+    ---rather than writing something down about it. A player whose wardrobe gained a set should
+    ---be told which, by name, in the moment it happened — finding it later and wondering is
+    ---exactly the experience an app writing to somebody's account has to avoid.
+    local function applyCustomSetRequests()
+        for _, outcome in ipairs(customSetWriter.run(env.now())) do
+            logger.info(ns.customSetOutcomeText(outcome))
+        end
     end
 
     local segmentTracker = ns.newSegmentTracker({
@@ -839,6 +880,10 @@ function ns.main(env)
         -- load screen rather than one moment that may be too early. The event above keeps it
         -- current in between, so this is only ever catching up on what happened out of sight.
         syncCustomSets()
+        -- After the read and never before it: the writer decides create-or-replace by looking
+        -- at what the account already has, and a stale list would make a second copy of a set
+        -- the player already owns.
+        applyCustomSetRequests()
         renderResults()
         resultsWindow.show()
     end
@@ -1400,6 +1445,54 @@ if CreateFrame then
                 end
                 return sets
             end,
+            ---What the desktop app has asked the game to hold on to.
+            ---
+            ---Read out of `src/CustomSetRequests.lua`, which the app writes and the client
+            ---never does — see that file for why it is not SavedVariables. A hand-installed
+            ---addon has the shipped copy, which asks for nothing.
+            customSetRequests = function()
+                local asked = ns.customSetRequests
+                return type(asked) == "table" and asked.requests or {}
+            end,
+            ---The four calls that change the player's own transmog sets.
+            ---
+            ---The only writes Chronie makes into a WoW account. All four are ordinary
+            ---collection calls: unprotected, free, and needing no transmogrifier, which is the
+            ---one fact the whole two-way sync rests on — see `docs/transmog-sets.md`, where it
+            ---was read out of the client's own API documentation rather than assumed.
+            ---
+            ---Guarded on the namespace the way the reader beside it is. On a client without
+            ---custom sets the writer is handed calls that do nothing and report nothing, which
+            ---comes out as "could not save" rather than as an error in the player's face.
+            customSetClient = {
+                create = function(name, icon, list)
+                    local collection = C_TransmogCollection
+                    if not (collection and collection.NewCustomSet) then
+                        return nil
+                    end
+                    return collection.NewCustomSet(name, icon, list)
+                end,
+                modify = function(setID, list)
+                    local collection = C_TransmogCollection
+                    if collection and collection.ModifyCustomSet then
+                        collection.ModifyCustomSet(setID, list)
+                    end
+                end,
+                maxSets = function()
+                    local collection = C_TransmogCollection
+                    if not (collection and collection.GetNumMaxCustomSets) then
+                        return nil
+                    end
+                    return collection.GetNumMaxCustomSets()
+                end,
+                validName = function(name)
+                    local collection = C_TransmogCollection
+                    if not (collection and collection.IsValidCustomSetName) then
+                        return nil
+                    end
+                    return collection.IsValidCustomSetName(name)
+                end,
+            },
             activeQuestIDs = function()
                 local ids = {}
                 local entries = C_QuestLog.GetNumQuestLogEntries()

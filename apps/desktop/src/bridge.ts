@@ -25,6 +25,7 @@ import type {
   GalleryPayload,
   IconsPayload,
   InGameSetAppearancesPayload,
+  InGameSetSlot,
   InGameSetsPayload,
   InstallResult,
   ItemDetail,
@@ -37,6 +38,7 @@ import type {
   QuerySchema,
   Release,
   Segment,
+  SetRequest,
   Settings,
   SyncResult,
   TransmogMark,
@@ -175,6 +177,36 @@ export const desktop = {
       mock.inGameSetAppearances[key] ?? { appearances: [], readCount: 0, withheldCount: 0 },
     ));
   },
+  // The one thing Chronie writes into a WoW account, and it is deliberately two steps: this
+  // records the request, and the *addon* saves the set the next time the player logs in. See
+  // `docs/transmog-sets.md` — nothing in a desktop app can reach a running game.
+  sendSetToGame: (
+    name: string, icon: number | null, slots: InGameSetSlot[],
+  ): Promise<SetRequest[]> => {
+    if (!mock) return invoke<SetRequest[]>("send_set_to_game", { name, icon, slots });
+    // The half of the backend's own refusals a test can tell apart from a working form, the
+    // same two `saveCustomSet` above models: a name is required, and an empty outfit is not
+    // an outfit.
+    const cleaned = name.trim().replace(/\s+/g, " ");
+    if (!cleaned) {
+      return Promise.reject(new Error("Give the set a name and it will be saved under it."));
+    }
+    if (!slots.length) {
+      return Promise.reject(
+        new Error("Put something on her first, and then it can be sent to the game."),
+      );
+    }
+    // Unanswered, which is what a real one is until the player has logged in — so the fixture
+    // is in the state the window actually has to draw rather than the one it ends in.
+    const id = mock.setRequests.reduce((highest, one) => Math.max(highest, one.id), 0) + 1;
+    mock.setRequests.unshift({
+      id, name: cleaned, icon, createdAt: Math.floor(Date.now() / 1000), slots,
+    });
+    return Promise.resolve(structuredClone(mock.setRequests));
+  },
+  setRequests: (): Promise<SetRequest[]> => mock
+    ? Promise.resolve(structuredClone(mock.setRequests))
+    : invoke<SetRequest[]>("set_requests"),
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.
   achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock

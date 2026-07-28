@@ -24,10 +24,13 @@
  */
 
 import { ago, plural } from "./format";
-import { ANY_CLASS, slotName } from "./transmogModal";
+import { wornPieces } from "./outfit";
+import type { Outfit } from "./outfit";
+import { ANY_CLASS, heldIn, slotName } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import type {
-  CharacterInGameSets, InGameSet, InGameSetsPayload, TransmogAppearance,
+  CharacterInGameSets, InGameSet, InGameSetSlot, InGameSetsPayload, SetRequest,
+  TransmogAppearance,
 } from "./types";
 
 /** What the game calls a set it would not name — its own API is documented as sometimes not. */
@@ -133,6 +136,109 @@ export function setSummary(set: InGameSet, now?: number): string {
   const pieces = plural(set.slots.length, "piece");
   if (!set.observedAt) return pieces;
   return `${pieces} · changed ${ago(set.observedAt, now)}`;
+}
+
+/* ---------- and the one thing this app sends the other way ---------- */
+
+/**
+ * `ItemAppearance.DisplayType` to the client's `TransmogSlot`, which are two different numberings
+ * of the same eleven places and agree about six of them.
+ *
+ * The disagreements are the reason this table is written out rather than computed: a shirt is
+ * display type 2 and transmog slot 4, a back is 9 and 2, a tabard 10 and 5, a waist 4 and 8, and
+ * legs and feet and wrists and hands all differ too. Nothing in either numbering hints at the
+ * other, and getting one wrong would put a cloak where the shirt goes and be discovered by a
+ * player looking at their own character wearing it.
+ *
+ * The index is the display type; the value is the transmog slot. Both are read off the game
+ * rather than guessed — `docs/game-files.md` for the first and `docs/transmog-sets.md` for the
+ * second, which took it from the client's own `TransmogSlot` enumeration.
+ */
+const TRANSMOG_SLOT_OF_DISPLAY = [0, 1, 4, 3, 8, 9, 10, 6, 7, 2, 5] as const;
+
+/** What the client calls the two hands, which no display type says — see `heldIn`. */
+const MAIN_HAND = 11;
+const OFF_HAND = 12;
+
+/**
+ * Where the game would put one of these, as the client's own `TransmogSlot`, or nothing.
+ *
+ * Nothing for exactly the things `outfit.ts` has nowhere to put either — an appearance the game
+ * withholds, a thing filed under a weapon slot that nobody holds — so a row that cannot be worn
+ * on the character in this app is a row that is not sent to the game either.
+ */
+export function transmogSlotOf(row: AppearanceRow): number | null {
+  const armour = TRANSMOG_SLOT_OF_DISPLAY[row.displayType];
+  if (armour !== undefined) return armour;
+  const hand = heldIn(row.displayType, row.inventoryType);
+  if (hand === "right") return MAIN_HAND;
+  if (hand === "left") return OFF_HAND;
+  return null;
+}
+
+/**
+ * What the character has on, as slots the game would understand.
+ *
+ * The translation the whole send rests on. Everything in this app describes a place the way
+ * `outfit.ts` does — `armour-3`, `hand-right` — and the game has never heard of any of it, so
+ * this is where an outfit stops being Chronie's idea of one and becomes the game's.
+ *
+ * Ascending by slot, and at most one per slot: a place holds one thing in `outfit.ts` and one
+ * thing in the game, so there is nothing to reconcile and the last writer would win anyway.
+ */
+export function slotsFrom(outfit: Outfit): InGameSetSlot[] {
+  const found = new Map<number, InGameSetSlot>();
+  for (const { row } of wornPieces(outfit)) {
+    const slot = transmogSlotOf(row);
+    if (slot === null) continue;
+    found.set(slot, { slot, appearanceId: row.appearanceId });
+  }
+  return [...found.values()].sort((left, right) => left.slot - right.slot);
+}
+
+/**
+ * The picture to give a set being sent, which is the first piece's.
+ *
+ * Blizzard's own `WardrobeCustomSetManager:NewCustomSet` picks it exactly this way — it walks
+ * the slots in order and takes the icon of the first one holding an appearance — so a set sent
+ * from here ends up wearing the same picture it would have worn if it had been saved in game.
+ *
+ * Not optional, whatever it looks like: the client's `NewCustomSet` documents `icon` as a
+ * `fileID` that may not be nil, so there is no "let the game decide" to fall back on. Nothing
+ * is the honest answer only when the outfit has no picture anywhere in it, and the caller has
+ * to decide what to do about that rather than send a nil the game will refuse.
+ */
+export function iconFrom(outfit: Outfit): number | null {
+  for (const { row } of wornPieces(outfit)) {
+    if (transmogSlotOf(row) !== null && row.iconFileDataId > 0) return row.iconFileDataId;
+  }
+  return null;
+}
+
+/**
+ * How a request reads once the game has answered it, or while it has not.
+ *
+ * Four sentences and a wait, because the wait is the ordinary state and the one somebody needs
+ * explaining: nothing this app does reaches a running game, so an outfit sent now is saved the
+ * next time that character logs in, and a line that said only "sent" would have people opening
+ * the game to look for something that is not there yet.
+ */
+export function requestSummary(request: SetRequest): string {
+  switch (request.outcome) {
+    case "created":
+      return `Saved in game as ${request.name}.`;
+    case "updated":
+      return `Saved over the in-game set called ${request.name}.`;
+    case "full":
+      return `Not saved: the account's transmog sets are full. Delete one in game and ${request.name} goes in next login.`;
+    case "refused":
+      return `Not saved: the game would not accept the name ${request.name}.`;
+    case null:
+    case undefined:
+      return `Waiting for ${request.name} to be saved — it goes in next time you log that account in.`;
+    default:
+      return `Could not save ${request.name} in game.`;
+  }
 }
 
 /**

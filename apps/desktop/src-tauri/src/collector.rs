@@ -38,6 +38,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0016_transmog_marks.sql"),
     include_str!("../migrations/0017_custom_sets.sql"),
     include_str!("../migrations/0018_in_game_sets.sql"),
+    include_str!("../migrations/0019_set_requests.sql"),
 ];
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -2605,6 +2606,9 @@ struct Incoming {
     holdings: Value,
     warband: Value,
     in_game_sets: Vec<ingamesets::CharacterSets>,
+    /// What the addon did about the outfits this app asked it to save: request id, outcome,
+    /// when, and the set that resulted. Account-wide, because a custom set is.
+    set_request_outcomes: Vec<(i64, String, Option<i64>, Option<i64>)>,
     markers: Vec<Marker>,
 }
 
@@ -2794,6 +2798,36 @@ fn sync_in_game_sets(
     Ok(())
 }
 
+/// Marks the outfits the addon has now carried out, so the app stops asking for them.
+///
+/// The first write is the last one: `applied_at IS NULL` is the guard, so an addon that keeps
+/// reporting the same outcome — which it does, because its own record outlives the request —
+/// leaves the first answer standing rather than moving the moment forward on every login.
+///
+/// Nothing is checked about *which* account answered. A custom set belongs to the account and a
+/// request names no character, so the first account to carry one out has carried it out; an
+/// install with two accounts would otherwise have the same outfit saved twice, once per roster.
+fn sync_set_request_outcomes(
+    transaction: &Transaction<'_>,
+    outcomes: &[(i64, String, Option<i64>, Option<i64>)],
+    now: i64,
+) -> Result<(), String> {
+    for (id, outcome, at, set_id) in outcomes {
+        transaction
+            .execute(
+                "UPDATE transmog_set_requests
+                 SET outcome = ?2, applied_at = COALESCE(?3, ?4), set_id = ?5
+                 WHERE id = ?1 AND applied_at IS NULL",
+                // The addon's own moment where it gave one, and this sync's where it did not:
+                // a request that has been answered has to carry a moment, or the guard above
+                // would let the next sync answer it again.
+                params![id, outcome, at, now, set_id],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 /// Every character's in-game sets, for the window to browse.
 ///
 /// All of them at once rather than a character at a time, for the reason the reader's own sets
@@ -2883,6 +2917,126 @@ pub fn in_game_sets(database_path: &Path) -> Result<ingamesets::InGameSetsPayloa
     Ok(ingamesets::InGameSetsPayload { characters })
 }
 
+/// Records an outfit for the game to hold on to, and answers with everything asked for so far.
+///
+/// The name is cleaned to exactly the rules a set saved in this app is held to — see
+/// `customsets::clean_name` — because both end up as a name somebody reads in a list, and one of
+/// them ends up inside a Lua source file the game executes.
+///
+/// A send is *recorded* and not performed. Nothing here touches the game: the caller writes the
+/// waiting requests into the addon's folder afterwards, and the addon carries them out the next
+/// time the player logs in. That is the whole shape of this direction and the reason the row
+/// outlives the file — see `0019_set_requests.sql`.
+pub fn request_set_in_game(
+    database_path: &Path,
+    name: &str,
+    icon: Option<i64>,
+    slots: &[ingamesets::Slot],
+    now: i64,
+) -> Result<Vec<ingamesets::Request>, String> {
+    let name = customsets::clean_name(name)?;
+    if slots.is_empty() {
+        return Err("Put something on her first, and then it can be sent to the game.".into());
+    }
+    let mut connection = open_database(database_path)?;
+    let transaction = connection.transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO transmog_set_requests (name, icon, created_at) VALUES (?1, ?2, ?3)",
+            params![name, icon, now],
+        )
+        .map_err(|error| error.to_string())?;
+    let request_id = transaction.last_insert_rowid();
+    for slot in slots {
+        transaction
+            .execute(
+                "INSERT OR REPLACE INTO transmog_set_request_slots
+                     (request_id, slot, appearance_id, secondary_appearance_id, illusion_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    request_id,
+                    slot.slot,
+                    slot.appearance_id,
+                    slot.secondary_appearance_id,
+                    slot.illusion_id
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    read_set_requests(&connection, false)
+}
+
+/// Every outfit this app has asked the game for, newest first.
+pub fn set_requests(database_path: &Path) -> Result<Vec<ingamesets::Request>, String> {
+    let connection = open_database(database_path)?;
+    read_set_requests(&connection, false)
+}
+
+/// The ones still waiting to be seen, which is what gets written into the addon's folder.
+pub fn waiting_set_requests(database_path: &Path) -> Result<Vec<ingamesets::Request>, String> {
+    let connection = open_database(database_path)?;
+    read_set_requests(&connection, true)
+}
+
+/// Reads requests, optionally only the unanswered ones, with their slots attached.
+fn read_set_requests(
+    connection: &Connection,
+    waiting_only: bool,
+) -> Result<Vec<ingamesets::Request>, String> {
+    let sql = if waiting_only {
+        "SELECT id, name, icon, created_at, outcome, applied_at, set_id
+         FROM transmog_set_requests WHERE applied_at IS NULL ORDER BY id"
+    } else {
+        "SELECT id, name, icon, created_at, outcome, applied_at, set_id
+         FROM transmog_set_requests ORDER BY id DESC"
+    };
+    let mut statement = connection.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ingamesets::Request {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                icon: row.get(2)?,
+                created_at: row.get(3)?,
+                outcome: row.get(4)?,
+                applied_at: row.get(5)?,
+                set_id: row.get(6)?,
+                slots: Vec::new(),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    let mut requests: Vec<ingamesets::Request> =
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+
+    let mut slots = connection
+        .prepare(
+            "SELECT request_id, slot, appearance_id, secondary_appearance_id, illusion_id
+             FROM transmog_set_request_slots ORDER BY request_id, slot",
+        )
+        .map_err(|error| error.to_string())?;
+    let held = slots
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                ingamesets::Slot {
+                    slot: row.get(1)?,
+                    appearance_id: row.get(2)?,
+                    secondary_appearance_id: row.get(3)?,
+                    illusion_id: row.get(4)?,
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in held {
+        let (request_id, slot) = row.map_err(|error| error.to_string())?;
+        if let Some(found) = requests.iter_mut().find(|request| request.id == request_id) {
+            found.slots.push(slot);
+        }
+    }
+    Ok(requests)
+}
+
 pub fn collect(
     wow_path: &Path,
     database_path: &Path,
@@ -2946,6 +3100,12 @@ pub fn collect(
                 .get("customSets")
                 .map(ingamesets::read)
                 .unwrap_or_default(),
+            // The other half of the two-way sync, coming back. The addon writes what it did
+            // under the request's own id, which is how the app knows to stop asking.
+            set_request_outcomes: saved
+                .get("customSetRequests")
+                .map(ingamesets::outcomes)
+                .unwrap_or_default(),
             markers: captures::markers(&saved),
         });
     }
@@ -2997,6 +3157,7 @@ pub fn collect(
         sync_holdings(&transaction, account_id, &account.holdings, now)?;
         sync_warband(&transaction, account_id, &account.warband)?;
         sync_in_game_sets(&transaction, account_id, &account.in_game_sets, now)?;
+        sync_set_request_outcomes(&transaction, &account.set_request_outcomes, now)?;
         for marker in &account.markers {
             if deleted.contains(&marker.source_id) {
                 continue;
