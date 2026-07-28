@@ -491,9 +491,11 @@ fn atlas(
 /// with the hair. She is also the one thing here with a hairstyle *chosen* for her, so group 0
 /// has an owner on every body and the exception has to come first rather than last.
 ///
-/// The vertices are left whole rather than compacted down to the ones the surviving parts
-/// use. They are shared by every part, a body has tens of thousands of them, and the indices
-/// would all have to be renumbered to save loading the ones the hidden geosets pointed at.
+/// The vertices are left whole here rather than compacted down to the ones the surviving parts
+/// use, because in this mesh a vertex id is still the game's own and the parts share the list.
+/// They do get compacted, one step later and at the edge: [`crate::glb::write`] carries only
+/// the vertices something points at and renumbers the indices to match, which on a real body
+/// is 248,958 shipped becoming 4,894.
 fn dressed(mesh: &Mesh, worn: Option<&Worn>, herself: Option<&Customization>) -> Mesh {
     let geosets = worn.map_or(&[][..], |worn| worn.geosets.as_slice());
     let hidden = worn.map_or(&[][..], |worn| worn.hidden.as_slice());

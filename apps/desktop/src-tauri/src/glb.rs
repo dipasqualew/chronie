@@ -9,6 +9,11 @@
 //! The pictures are asked for rather than passed in, because several parts of a model share
 //! one texture and decoding a BLP twice is the expensive half of the work.
 //!
+//! This is also where the geometry stops being the game's and becomes a download. A body holds
+//! every variant of every geoset at once and draws about 2% of them, so [`Kept`] carries the
+//! vertices something points at and renumbers the indices to match — 10.36MB of `.glb` for a
+//! dressed character became 2.83MB.
+//!
 //! A scene holds several [`Piece`]s rather than one mesh, because a dressed character is a body
 //! and the helm hanging off it — different files, different textures, and a translation between
 //! them. Keeping them apart rather than welding them into one vertex list is what lets each ask
@@ -100,7 +105,7 @@ pub fn write(pieces: &[Piece<'_>]) -> Result<Vec<u8>, String> {
 
     let mut nodes = Vec::with_capacity(pieces.len());
     for piece in pieces {
-        let node = write_piece(&mut root, &mut bin, sampler, piece);
+        let node = write_piece(&mut root, &mut bin, sampler, piece)?;
         nodes.push(node);
     }
 
@@ -135,15 +140,18 @@ fn write_piece(
     bin: &mut Binary,
     sampler: gltf_json::Index<gltf_json::texture::Sampler>,
     piece: &Piece<'_>,
-) -> gltf_json::Index<gltf_json::Node> {
+) -> Result<gltf_json::Index<gltf_json::Node>, String> {
     let mesh = piece.mesh;
+    let kept = Kept::of(mesh)?;
 
-    /* The vertices, as three lists the parts all share. */
-    let positions: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.position).collect();
-    let normals: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.normal).collect();
-    let uvs: Vec<[f32; 2]> = mesh.vertices.iter().map(|vertex| vertex.uv).collect();
+    /* The vertices, as three lists the parts all share — and only the ones the parts below
+    actually point at. */
+    let vertices = || kept.order.iter().map(|index| &mesh.vertices[*index as usize]);
+    let positions: Vec<[f32; 3]> = vertices().map(|vertex| vertex.position).collect();
+    let normals: Vec<[f32; 3]> = vertices().map(|vertex| vertex.normal).collect();
+    let uvs: Vec<[f32; 2]> = vertices().map(|vertex| vertex.uv).collect();
 
-    let count = mesh.vertices.len();
+    let count = kept.order.len();
     let position_view = bin.view(root, floats(&positions), Some(ARRAY_BUFFER));
     let normal_view = bin.view(root, floats(&normals), Some(ARRAY_BUFFER));
     let uv_view = bin.view(root, floats(&uvs), Some(ARRAY_BUFFER));
@@ -179,7 +187,7 @@ fn write_piece(
     these parts add to a still picture is light, and there is none here to add. */
     let mut painted: HashMap<Paint, Option<gltf_json::Index<gltf_json::Texture>>> = HashMap::new();
     let mut primitives = Vec::with_capacity(mesh.parts.len());
-    for part in mesh.parts.iter().filter(|part| part.blend != Blend::Glow) {
+    for part in drawn_parts(mesh) {
         let texture = match painted.get(&part.paint) {
             Some(known) => *known,
             None => {
@@ -206,7 +214,7 @@ fn write_piece(
 
         let indices = bin.view(
             root,
-            part.indices.iter().flat_map(|index| index.to_le_bytes()).collect(),
+            part.indices.iter().flat_map(|index| kept.at(*index).to_le_bytes()).collect(),
             Some(ELEMENT_ARRAY_BUFFER),
         );
         let indices = root.push(accessor(
@@ -271,7 +279,7 @@ fn write_piece(
         extras: Default::default(),
         weights: None,
     });
-    root.push(gltf_json::Node {
+    Ok(root.push(gltf_json::Node {
         mesh: Some(drawn),
         // Each left out entirely where it is the default, so that a model shown on its own
         // writes exactly the file it always did.
@@ -280,7 +288,70 @@ fn write_piece(
             .then_some(gltf_json::scene::UnitQuaternion(piece.rotation)),
         scale: (piece.scale != FULL_SIZE).then_some(piece.scale),
         ..Default::default()
-    })
+    }))
+}
+
+/// The parts of a mesh that become primitives, which is every part the format can composite.
+///
+/// One iterator rather than the filter written twice, because [`Kept`] and the loop that
+/// writes the primitives have to agree exactly: a vertex kept for a part that is then left out
+/// is a vertex nothing points at, and a part written against a vertex that was not kept names
+/// an index the file does not hold.
+fn drawn_parts(mesh: &Mesh) -> impl Iterator<Item = &crate::m2::Part> {
+    mesh.parts.iter().filter(|part| part.blend != Blend::Glow)
+}
+
+/// Which of a mesh's vertices the file carries, and what each one is called in it.
+///
+/// A body holds every variant of every geoset at once — a quarter of a million vertices for
+/// `humanfemale_hd` — and a dressed character draws about 2% of them: hiding a geoset drops
+/// its triangles and leaves its vertices behind, pointed at by nothing. Writing them out
+/// anyway cost 8MB of a 10.4MB `.glb`, and that 8MB was paid for a second time in the window,
+/// where the data URL carrying it has to be base64-decoded on the main thread before three.js
+/// sees a byte of it.
+///
+/// So the file carries a vertex when some primitive points at it, and the indices are
+/// renumbered to match. Nothing about the geometry changes — the same triangles, the same
+/// positions, the same UVs — which is what makes this safe to do here, at the very edge, rather
+/// than in [`crate::character::dressed`] where the mesh is still the game's own and the
+/// vertex ids still mean what the game meant by them.
+struct Kept {
+    /// The mesh's own vertex ids, in the order the file writes them out.
+    order: Vec<u32>,
+    /// What each of the mesh's vertices is called in the file. [`NOWHERE`] for one no part
+    /// points at, which by construction no index in the file can name.
+    at: Vec<u32>,
+}
+
+/// What [`Kept::at`] holds for a vertex the file does not carry.
+const NOWHERE: u32 = u32::MAX;
+
+impl Kept {
+    fn of(mesh: &Mesh) -> Result<Self, String> {
+        let mut kept = Self {
+            order: Vec::new(),
+            at: vec![NOWHERE; mesh.vertices.len()],
+        };
+        for part in drawn_parts(mesh) {
+            for index in &part.indices {
+                let slot = kept
+                    .at
+                    .get_mut(*index as usize)
+                    .ok_or("a part points past the end of the vertex list")?;
+                if *slot == NOWHERE {
+                    *slot = u32::try_from(kept.order.len())
+                        .map_err(|_| "the mesh draws more vertices than an index can name")?;
+                    kept.order.push(*index);
+                }
+            }
+        }
+        Ok(kept)
+    }
+
+    /// What the file calls one of the mesh's vertices.
+    fn at(&self, index: u32) -> u32 {
+        self.at[index as usize]
+    }
 }
 
 /// The two `target` values a buffer view can declare, which tell a loader what the bytes are
@@ -434,6 +505,40 @@ mod tests {
         bin: Vec<u8>,
     }
 
+    impl Parsed {
+        /// The bytes an accessor's view covers.
+        fn bytes_of(&self, accessor: usize) -> &[u8] {
+            let accessor = &self.json["accessors"][accessor];
+            let view = &self.json["bufferViews"][accessor["bufferView"].as_u64().unwrap() as usize];
+            let at = view["byteOffset"].as_u64().unwrap() as usize;
+            let length = view["byteLength"].as_u64().unwrap() as usize;
+            &self.bin[at..at + length]
+        }
+    }
+
+    /// The positions an accessor names, as a loader would read them back.
+    fn positions(parsed: &Parsed, accessor: usize) -> Vec<[f32; 3]> {
+        parsed
+            .bytes_of(accessor)
+            .chunks_exact(12)
+            .map(|chunk| {
+                let number = |index: usize| {
+                    f32::from_le_bytes(chunk[index * 4..index * 4 + 4].try_into().unwrap())
+                };
+                [number(0), number(1), number(2)]
+            })
+            .collect()
+    }
+
+    /// The indices a primitive draws with, which are what the renumbering has to get right.
+    fn indices(parsed: &Parsed, primitive: &Value) -> Vec<u32> {
+        parsed
+            .bytes_of(primitive["indices"].as_u64().unwrap() as usize)
+            .chunks_exact(4)
+            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
+
     fn parse(bytes: &[u8]) -> Parsed {
         assert_eq!(&bytes[0..4], b"glTF");
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 2);
@@ -479,30 +584,72 @@ mod tests {
     // The positions have to arrive intact, in the axes the parser turned them into, and the
     // accessor has to say where they are. Reading them back out of the blob is the only thing
     // that says both together.
+    //
+    // Read through the indices rather than straight down the list, because the file carries
+    // the vertices in the order the parts reach them rather than the order the game held them:
+    // what has to survive is the corner each triangle is drawn at, not the number it had.
     #[test]
     fn puts_the_vertices_where_the_accessors_say_they_are() {
         let mesh = mesh(HELM, HELM_SKIN);
         let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
-        let Parsed { json, bin } = parse(&glb);
+        let parsed = parse(&glb);
 
-        let accessor = &json["accessors"][0];
+        let accessor = &parsed.json["accessors"][0];
         assert_eq!(accessor["type"], "VEC3");
         assert_eq!(accessor["componentType"], 5126);
-        assert_eq!(accessor["count"].as_u64().unwrap() as usize, mesh.vertices.len());
 
-        let view = &json["bufferViews"][accessor["bufferView"].as_u64().unwrap() as usize];
-        let at = view["byteOffset"].as_u64().unwrap() as usize;
-        let read: Vec<[f32; 3]> = bin[at..at + mesh.vertices.len() * 12]
-            .chunks_exact(12)
-            .map(|chunk| {
-                let number = |index: usize| {
-                    f32::from_le_bytes(chunk[index * 4..index * 4 + 4].try_into().unwrap())
-                };
-                [number(0), number(1), number(2)]
-            })
+        let carried = positions(&parsed, 0);
+        assert_eq!(accessor["count"].as_u64().unwrap() as usize, carried.len());
+        let drawn: Vec<[f32; 3]> = indices(&parsed, &parsed.json["meshes"][0]["primitives"][0])
+            .into_iter()
+            .map(|index| carried[index as usize])
             .collect();
-        let expected: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.position).collect();
-        assert_eq!(read, expected);
+        let expected: Vec<[f32; 3]> = mesh.parts[0]
+            .indices
+            .iter()
+            .map(|index| mesh.vertices[*index as usize].position)
+            .collect();
+        assert_eq!(drawn, expected);
+    }
+
+    // And the reason to read it that way: the file carries a vertex because something points
+    // at it. A body holds every variant of every geoset at once and a dressed one draws about
+    // a fortieth of them, so on a real character this is 248,958 vertices shipped becoming
+    // 4,894 — 8MB of a 10.4MB `.glb`, paid for again in the window where the data URL carrying
+    // them is base64-decoded on the main thread.
+    #[test]
+    fn carries_no_vertex_nothing_points_at() {
+        let whole = mesh(HELM, HELM_SKIN);
+        let mut one_triangle = whole.clone();
+        one_triangle.parts.truncate(1);
+        one_triangle.parts[0].indices.truncate(3);
+        assert!(whole.vertices.len() > 3, "the fixture helm has a mesh to cut down");
+
+        let glb = write(&[Piece::only(&one_triangle, &always(b"a picture"))]).unwrap();
+        let parsed = parse(&glb);
+        let carried = positions(&parsed, 0);
+        assert_eq!(carried.len(), 3, "the file carries {} vertices for one triangle", carried.len());
+
+        // Renumbered to match, in the order the part reaches them, and drawn at the same three
+        // corners the game named.
+        let primitive = &parsed.json["meshes"][0]["primitives"][0];
+        assert_eq!(indices(&parsed, primitive), vec![0, 1, 2]);
+        let expected: Vec<[f32; 3]> = one_triangle.parts[0]
+            .indices
+            .iter()
+            .map(|index| whole.vertices[*index as usize].position)
+            .collect();
+        assert_eq!(carried, expected);
+    }
+
+    // A part that names a vertex the mesh does not hold is a file this app has misread, and it
+    // used to become a `.glb` with an index past the end of its own accessor — geometry that
+    // fails in the window rather than here.
+    #[test]
+    fn refuses_a_part_that_points_past_the_end_of_the_vertex_list() {
+        let mut mesh = mesh(HELM, HELM_SKIN);
+        mesh.parts[0].indices[0] = mesh.vertices.len() as u32;
+        assert!(write(&[Piece::only(&mesh, &always(b"a picture"))]).is_err());
     }
 
     // Every viewer frames what it is about to show from the position accessor's bounds, and
