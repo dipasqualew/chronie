@@ -81,10 +81,11 @@ jobs:
       # everything downstream of them — which is nearly the whole tree, tauri included — got
       # a different fingerprint and were compiled twice. 10m44s, then 5m11s, on one runner.
       #
-      # What went with it is the only Windows coverage this repository had: paths, the
-      # install root, and the SavedVariables folder under it. That is a real gap, but it was
-      # never a gate — it ran after the merge, on the way to a release nobody had to approve.
-      # Somewhere it would gate something is `check`, on the pull request.
+      # The Windows coverage that used to justify it — paths, the install root, the
+      # SavedVariables folder under it — did not go anywhere. It moved to `check`, where it
+      # runs on windows-latest against the pull request, which is somewhere it gates something.
+      # Here it never did: it ran after the merge, on the way to a release nobody approves,
+      # and a failure only meant the installer quietly did not appear.
       - name: Build signed Windows installer
         working-directory: apps/desktop
         run: bun run tauri build

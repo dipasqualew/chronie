@@ -1,8 +1,10 @@
 name: check
 
 # The same gate humans run locally (./scripts/check.sh), split so that Rust — which is most
-# of the wall clock and all of the toolchain — stops holding the Lua and frontend suites
-# behind a WebKit tree and a cache restore they have no use for.
+# of the wall clock — stops holding the Lua and frontend suites behind a toolchain and a cache
+# restore they have no use for, and so that the Rust half can run on the operating system this
+# application is actually for. Each job is on the platform its suite is about: Windows for the
+# desktop backend, Linux for the two that are the same everywhere. See each for why.
 #
 # Two jobs, not three. A Free plan gets twenty concurrent jobs across the whole account, and
 # with several branches in flight at once the rolling Windows release is the job that ends up
@@ -24,34 +26,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Chronie is a Windows application, so this is the job that runs where it ships. Paths, the
+  # install root, the SavedVariables folder under it and everything the collector does to a
+  # file are the half of this app an Ubuntu runner could only ever approximate, and until now
+  # the only machine that compiled them for Windows did it after the merge, on the way to a
+  # release nobody approves. It gates a pull request now, which is the point of a gate.
+  #
+  # It is also the cheaper of the two: no `apt-get` at all, because the webview here is
+  # WebView2 rather than the GTK and WebKit tree Linux has to install, and standard runners
+  # are free on a public repository whatever the operating system.
   rust:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      # What the tauri crate links against. The frontend is not built for a debug run — that
-      # configuration points at `devUrl` — so this job needs no bun and no node_modules.
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev
 
       # Without this the whole dependency tree (tauri, reqwest, bundled SQLite) is
       # recompiled from scratch on every push.
       #
       # Restored everywhere, written only from main. A repository gets ten gigabytes of
-      # Actions cache and this archive is two and a half of them, so branches saving their own
+      # Actions cache and this archive is a couple of them, so branches saving their own
       # copies filled the budget on their own: four debug caches holding 8.37 GB, and the
-      # Windows release cache the rolling release depends on evicted down to a 0.71 GB stub
-      # that restored in six seconds and left `tauri build` to compile the tree from nothing.
-      # A pull request branch has no dependency tree of its own to cache anyway — main's is
-      # the same one, minus whatever that branch changed.
+      # release cache the rolling build depends on evicted down to a 0.71 GB stub that
+      # restored in six seconds and left `tauri build` to compile the tree from nothing. A
+      # pull request branch has no dependency tree of its own to cache anyway — main's is the
+      # same one, minus whatever that branch changed.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
@@ -60,14 +58,20 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: ./scripts/check-rust.sh
+        shell: bash
 
+  # These two stay on Linux, and not out of habit. The addon's Lua never runs on the host
+  # operating system at all — it runs inside the game client's own 5.1 interpreter, which is
+  # the same interpreter whatever the machine underneath is — and Playwright drives Chromium
+  # on either platform, not the WebView2 the packaged app actually shows. Moving them to
+  # Windows would buy no coverage and cost a Lua 5.1 toolchain that apt hands over in ten
+  # seconds and Windows does not.
   lua-and-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       # WoW runs Lua 5.1; the rocks have to be built against it to match game semantics.
-      # Nothing here needs the GTK and WebKit tree the desktop app links against.
       - name: Install Lua 5.1
         run: |
           sudo apt-get update
