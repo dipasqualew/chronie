@@ -58,6 +58,15 @@ fn main() {
         report(&format!(
             "after open {open}/{opens} ({opened:?} to open, {read:?} to read {bytes}B)"
         ));
+        let weight = files.weight();
+        println!(
+            "    of which the handle itself: {:.1} MB \
+             ({:.1} index + {:.1} encoding + {:.1} root)",
+            mb(weight.total()),
+            mb(weight.locations),
+            mb(weight.encoding),
+            mb(weight.root),
+        );
         held.push(files);
     }
 
@@ -71,9 +80,13 @@ fn main() {
 
 fn report(label: &str) {
     match resident_bytes() {
-        Some(bytes) => println!("{label:<58} {:>8.1} MB", bytes as f64 / 1_048_576.0),
+        Some(bytes) => println!("{label:<58} {:>8.1} MB", mb(bytes as usize)),
         None => println!("{label:<58} {:>8} MB", "?"),
     }
+}
+
+fn mb(bytes: usize) -> f64 {
+    bytes as f64 / 1_048_576.0
 }
 
 /// The process's resident set, via `ps`, in bytes.
