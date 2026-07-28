@@ -71,6 +71,14 @@ export interface StageOptions {
   unlit?: boolean;
   /** Where the camera sits once a model has been framed. */
   view?: View;
+  /**
+   * What the picture on the canvas is of, as a screen reader is told it.
+   *
+   * A canvas carries no role and says nothing about itself, so a pane holding one is a blank
+   * rectangle to everything but a pair of eyes. This is the whole of what anything else — a
+   * reader on a screen reader, a test asking for the character — has to go on.
+   */
+  label?: string;
 }
 
 /**
@@ -100,6 +108,11 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   // pane. A class rather than a rule per pane, because two panes draw on one of these and the
   // second one forgot — see the note on `.model-canvas` in `index.html`.
   renderer.domElement.className = "model-canvas";
+  // And named for a reader as well as for the stylesheet: a canvas carries no role and says
+  // nothing about itself, so a pane holding one is a blank rectangle to everything but a pair
+  // of eyes.
+  renderer.domElement.setAttribute("role", "img");
+  renderer.domElement.setAttribute("aria-label", options.label ?? "The model, drawn");
   container.replaceChildren(renderer.domElement);
 
   const scene = new Scene();

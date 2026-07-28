@@ -108,7 +108,10 @@ export function InGameSetList(
   const held = charactersWithSets(payload).reduce((total, one) => total + one.sets.length, 0);
 
   return (
-    <section className="panel mog-browser" id="ingame-sets" hidden={hidden}>
+    <section
+      className="panel mog-browser" id="ingame-sets" hidden={hidden}
+      aria-label="The sets you saved in the game"
+    >
       <div className="table-head">
         <div className="controls">
           <input
@@ -213,7 +216,7 @@ function Card(
               >{`Wear all of ${name}`}</button>
             </div>
             : null}
-          <ul className="mog-items">
+          <ul className="mog-items" aria-label={`Pieces of ${name}`}>
             {pieces.map(({ place, slot, row }, at) => (
               <Piece
                 // The slot rather than the appearance, because one appearance can fill two
@@ -259,7 +262,9 @@ function Piece(
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
         disabled={!onWear}
       >
-        <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
+        <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
+          {icon ? <img src={icon} alt="" /> : null}
+        </span>
         <span className="badge">{row.slot}</span>
         <span className="mog-name">{row.label}</span>
       </button>

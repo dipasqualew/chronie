@@ -292,7 +292,10 @@ export function WardrobeList(
     narrow(() => setSearch((was) => withTerm(was, term)));
 
   return (
-    <section className="panel mog-browser" id="wardrobe" hidden={hidden}>
+    <section
+      className="panel mog-browser" id="wardrobe" hidden={hidden}
+      aria-label="Every look the game holds"
+    >
       <div className="table-head">
         <div className="controls">
           {/* The kinds are grouped because seventeen weapons in one flat list of thirty is a
@@ -353,7 +356,10 @@ export function WardrobeList(
             onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
             onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
           />
-          <span className="count" id="wardrobe-count">
+          <span
+            className="count" id="wardrobe-count" role="status"
+            aria-label="How much of the wardrobe is shown"
+          >
             {typeof answer === "object"
               ? shownSummary(drawn.length, kept.length, answer.withheldCount)
               : ""}
@@ -363,7 +369,7 @@ export function WardrobeList(
       <div className="mog-list" id="wardrobe-list" data-models={asModels}>
         {answer === undefined ? <p className="muted">{READING}</p> : null}
         {typeof answer === "string" ? <p className="muted">{answer}</p> : null}
-        <ul className="mog-items">
+        <ul className="mog-items" aria-label="Appearances">
           {drawn.map((row) => (
             <Look
               key={row.appearanceId} row={row} worn={isWorn(outfit, row)}
@@ -495,7 +501,9 @@ function Look(
         type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
       >
-        <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
+        <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
+          {icon ? <img src={icon} alt="" /> : null}
+        </span>
         <span className="badge">{row.slot}</span>
         {name}
       </button>

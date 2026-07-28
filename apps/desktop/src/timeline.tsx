@@ -147,7 +147,9 @@ function SessionCard(
             <span className="session-clock">
               {clock(session.startedAt)} – {clock(session.endedAt)}
             </span>
-            <span className="session-cast">
+            {/* Named, so the row of circles is one thing — "who played" — rather than two or
+                five unrelated pictures beside a clock. */}
+            <span className="session-cast" role="group" aria-label="Who played">
               {cast.map((character) =>
                 <CharacterCircle key={character.name} character={character} />)}
             </span>

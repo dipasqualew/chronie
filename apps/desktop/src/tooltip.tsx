@@ -66,5 +66,7 @@ export function Tooltip(): ReactNode {
     };
   }, []);
 
-  return <div id="tooltip" role="status" ref={element} />;
+  // Named as well as live, because the window is full of status lines and this is the only one
+  // that is about wherever the pointer happens to be.
+  return <div id="tooltip" role="status" aria-label="What the pointer is on" ref={element} />;
 }

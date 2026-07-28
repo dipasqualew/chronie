@@ -56,12 +56,18 @@ function itemName(event: { id: number; name?: string | null }, items: ItemBook):
   return items.detail(event.id)?.name || event.name || `Item ${event.id}`;
 }
 
-/** A section of the modal, or nothing when the segment has no events of that kind. */
+/**
+ * A section of the modal, or nothing when the segment has no events of that kind.
+ *
+ * Named as well as headed, which makes each one a landmark of its own: the modal is a dozen
+ * lists of different things and "the achievements" is how somebody asks for one of them —
+ * whether they are jumping between regions with a screen reader or scoping a test to it.
+ */
 function Section(
   { title, children }: { title: string; children: ReactNode },
 ): ReactNode {
   return (
-    <section className="detail-section">
+    <section className="detail-section" aria-label={title}>
       <h3>{title}</h3>
       {children}
     </section>
@@ -118,7 +124,7 @@ function Equipsets({ segment, items }: { segment: Segment; items: ItemBook }): R
   if (!changes.length) return null;
   return (
     <Section title="Equipment sets">
-      <ul className="equipsets">
+      <ul className="equipsets" aria-label="Equipment sets that changed">
         {changes.map((change, index) => (
           <li className="equipset" key={`${change.setId}-${index}`}>
             <p className="equipset-name">
@@ -127,7 +133,9 @@ function Equipsets({ segment, items }: { segment: Segment; items: ItemBook }): R
             </p>
             {(change.items || []).length === 0
               ? null
-              : <ul className="equipset-slots">
+              // Named after the set it belongs to, because a segment can change several and a
+              // list of slots means nothing without saying whose slots they are.
+              : <ul className="equipset-slots" aria-label={`Slots in ${equipsetTitle(change)}`}>
                 {(change.items || []).map((item) => {
                   const line = equipsetSlotLine(item);
                   return (
@@ -590,7 +598,9 @@ export function SegmentModal(
       <div className="detail-head">
         <div>
           <h2 className="detail-title" id="segment-detail-title">{segment?.instance ?? ""}</h2>
-          <span className="detail-position">
+          {/* Where in the list the reader is, announced as it changes — stepping to the next
+              segment is exactly the moment "2 of 2" is worth hearing. */}
+          <span className="detail-position" role="status" aria-label="Which segment">
             {showing ? `${showing.index + 1} of ${showing.order.length}` : ""}
           </span>
         </div>

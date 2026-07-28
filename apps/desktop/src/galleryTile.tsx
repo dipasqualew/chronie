@@ -154,7 +154,7 @@ export function Turnable(
   return (
     <span className="mog-shot">
       <canvas
-        ref={canvas} aria-label={`${label}, drawn`}
+        ref={canvas} role="img" aria-label={`${label}, drawn`}
         onPointerDown={(event) => {
           // Captured, so a drag that leaves the tile keeps turning it rather than stopping at
           // the edge — twenty tiles side by side means most drags cross one.

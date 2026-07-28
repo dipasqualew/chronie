@@ -382,7 +382,9 @@ export function HighlightList(
       />
       : null}
     {tallies.length
-      ? <div className="tally-row">
+      // Named for the same reason the cast is: a row of marks each announcing a number of its
+      // own is a set of unrelated figures until something says what they are a set of.
+      ? <div className="tally-row" role="group" aria-label="Running totals">
         {tallies.map((badge) => <TallyMark key={badge.kind} badge={badge} />)}
       </div>
       : null}
@@ -488,7 +490,7 @@ export function ActivityRoll(
 ): ReactNode {
   if (!activities.length) return null;
   return (
-    <ol className="act-roll">
+    <ol className="act-roll" aria-label="What was done">
       {activities.map((entry, index) => {
         const detail = activitySummary(entry.activity);
         const label = activityLabel(entry.activity.kind);

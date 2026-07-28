@@ -183,6 +183,44 @@ the suite gets slower and vaguer for no more coverage; reach for a smaller one
 than it needs and the test passes while the bug survives. `/test` describes what
 each level means here.
 
+## The browser suite
+
+`apps/desktop/e2e/` drives the built page in a real browser. It is **one spec
+file per area** — `timeline.spec.ts`, `transmog.spec.ts`, `wifi.spec.ts` — with
+the page objects under `e2e/pages/` and the fixture under `e2e/mock/`, both split
+the same way. That is not tidiness: `playwright.config.ts` asks for
+`fullyParallel`, one file cannot use it, and six branches appending to the tail
+of one file all collide within a few lines of each other. A new area is a new
+file, and a feature edits its own.
+
+Four rules hold inside those files.
+
+1. **A scenario stays one test, structured with `test.step()`.** Steps say where
+   a run failed and carry the semantics of what was being attempted, and keeping
+   the scenario whole avoids repeating its setup once per assertion. Do not chop
+   a scenario into a test per claim; do start a new test where a genuinely
+   different scenario starts.
+2. **No raw locators in a test file.** Every locator lives in a page object. A
+   spec names behaviour and never reaches into the DOM — not even through a
+   locator a page object handed it.
+3. **A page object defines only methods that are actually called.** No method
+   kept for a caller that no longer exists.
+4. **Locators use accessibility selectors only — `getByRole`, `getByLabel`,
+   `getByText`, `getByAltText`, `getByTitle` — and never a class, an id or a
+   position.** Where the window does not expose the roles and accessible names
+   that needs, **add them to the window**; that is part of the work rather than a
+   reason to fall back to CSS. A test that cannot ask for a thing by name has
+   found a thing a screen reader cannot ask for either.
+
+What is *not* a locator is still fair game: reading a computed colour, a
+`data-` attribute or the pixels of a canvas is how this suite checks things the
+accessibility tree has no opinion about — see `e2e/pages/paint.ts`. Keep those
+readings in a page object too, on a locator that was found by name.
+
+One consequence worth knowing before it bites: `toHaveAttribute` retries and
+`expect(somePromise).resolves` does not. Anything that arrives from the backend —
+a body on the stage, a picture in a tile — wants `expect.poll`.
+
 ## Checks
 
 `./scripts/check.sh` runs luacheck, busted, the Rust collector tests, the TypeScript
