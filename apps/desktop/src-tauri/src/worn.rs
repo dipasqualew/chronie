@@ -491,8 +491,11 @@ pub fn of(
 ///   a loop over a list.
 /// - **Each contested geoset group is resolved once**, by [`GEOSET_PRIORITY`], so what comes
 ///   back is at most one [`Geoset`] per group and nothing downstream has to arbitrate.
-/// - **Each of the game's tables is parsed once for the whole outfit** rather than once per
-///   piece, which is where twelve appearances stop being twelve times the work.
+/// - **Each of the game's tables is parsed once for the whole outfit, and walked once**, rather
+///   than either happening per piece — which is where twelve appearances stop being twelve
+///   times the work. The walk is the half that costs: `Db2::rows` materialises every row of a
+///   table before it yields the first, so a walk is the whole table however few rows the
+///   caller keeps.
 ///
 /// A set may name the same appearance twice and may name pieces whose slots conflict outright —
 /// a robe and a pair of legs. Neither is deduplicated on the way in: the priority table is the
@@ -507,10 +510,7 @@ pub fn of_set(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Worn, String> {
     layered.sort_by_key(|piece| layer_of(piece.display_type));
 
     let materials = Db2::parse(files.read(ITEM_DISPLAY_INFO_MATERIAL_RES)?)?;
-    let painted: Vec<Vec<(u32, u32)>> = layered
-        .iter()
-        .map(|piece| sections(&materials, piece.display_info_id))
-        .collect();
+    let painted = sections(&materials, &layered);
     drop(materials);
 
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
@@ -873,27 +873,40 @@ fn hidden_of(files: &dyn GameFiles, drawn: &[(Piece, &Row<'_>)]) -> Result<Vec<u
     Ok(groups)
 }
 
-/// The sections one appearance paints, as `(section, material resource)`.
+/// The sections each piece of an outfit paints, as `(section, material resource)`.
 ///
-/// In section order, so that an atlas is composited the same way twice. The game does not
-/// order the rows, and two appearances that paint the same parts should not differ by the
-/// order their rows happen to sit in. Between appearances the order is the draw order, which is
-/// [`SLOT_LAYER`] and not this.
-#[tracing::instrument(name = "worn.sections", skip_all, fields(display = display_info_id))]
-fn sections(table: &Db2, display_info_id: u32) -> Vec<(u32, u32)> {
-    let mut found: Vec<(u32, u32)> = table
-        .rows()
-        .filter(|row| row.foreign_id() == display_info_id)
-        .map(|row| {
-            (
-                row.number(material_column::COMPONENT_SECTION),
-                row.number(material_column::MATERIAL_RESOURCES_ID),
-            )
-        })
-        .filter(|(_, material)| *material != 0)
-        .collect();
-    found.sort_by_key(|(section, _)| *section);
-    found
+/// In section order within a piece, so that an atlas is composited the same way twice. The
+/// game does not order the rows, and two appearances that paint the same parts should not
+/// differ by the order their rows happen to sit in. Between pieces the order is the one they
+/// arrive in, which is the draw order — [`SLOT_LAYER`], and not this.
+///
+/// **The whole outfit at once, and once.** `Db2::rows` builds a `Vec` of every row and a map of
+/// every row id before it yields the first one, so a walk costs the whole table however few
+/// rows the caller keeps — and this table has 604,000 of them. Asked a piece at a time, an
+/// eight-piece set walked 4.8 million rows to keep about twenty; asked once, it walks 604,000.
+/// The same set may name one appearance twice, which is why what comes back is per piece rather
+/// than per display id.
+#[tracing::instrument(name = "worn.sections", skip_all, fields(pieces = pieces.len()))]
+fn sections(table: &Db2, pieces: &[Piece]) -> Vec<Vec<(u32, u32)>> {
+    let wanted: HashSet<u32> = pieces.iter().map(|piece| piece.display_info_id).collect();
+    let mut found: HashMap<u32, Vec<(u32, u32)>> = HashMap::new();
+    for row in table.rows().filter(|row| wanted.contains(&row.foreign_id())) {
+        let material = row.number(material_column::MATERIAL_RESOURCES_ID);
+        if material == 0 {
+            continue;
+        }
+        found
+            .entry(row.foreign_id())
+            .or_default()
+            .push((row.number(material_column::COMPONENT_SECTION), material));
+    }
+    for sections in found.values_mut() {
+        sections.sort_by_key(|(section, _)| *section);
+    }
+    pieces
+        .iter()
+        .map(|piece| found.get(&piece.display_info_id).cloned().unwrap_or_default())
+        .collect()
 }
 
 /// Which body each file in a component table belongs to, keyed by the file's own FileDataID.
