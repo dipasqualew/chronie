@@ -3,11 +3,13 @@ import {
   cameraFor,
   framingDistance,
   glbBytes,
+  onScreen,
   outfitOf,
   REASONS,
   wearable,
   wornSetKey,
   type Previewable,
+  type View,
 } from "./modelPreview";
 
 /** One appearance with only the fields a test cares about spelled out. */
@@ -147,31 +149,96 @@ describe("glbBytes", () => {
   });
 });
 
-describe("framingDistance", () => {
-  // The camera has to sit far enough back that the whole model fits the view. At the tangent
-  // of half the field of view it exactly touches the edges, so the answer is beyond that.
-  it("puts the camera far enough back to hold the whole model", () => {
-    const exact = 1 / Math.tan((35 / 2) * (Math.PI / 180));
-    expect(framingDistance(1, 35)).toBeGreaterThan(exact);
-    expect(framingDistance(1, 35)).toBeLessThan(exact * 2);
+/**
+ * A body's bounding box, in the axes a `.glb` out of this pipeline uses: X is the way she
+ * faces, Y is up, Z is shoulder to shoulder. Roughly the proportions of `humanfemale_hd`,
+ * which is the model every one of these numbers is really about.
+ */
+const BODY: [number, number, number] = [0.4, 2, 1.2];
+
+/** The field of view the window's stage uses, which is the only one worth testing against. */
+const FOV = 35;
+
+/**
+ * How much of the pane's height and width a model actually covers, once framed.
+ *
+ * The property "as close as it can be and still fit" is about the picture rather than about
+ * the distance, and this is the picture: the fraction of the frame the model takes up on each
+ * axis. Anything over 1 has gone off the edge.
+ */
+function fills(size: [number, number, number], view: View, aspect: number): [number, number] {
+  const seen = onScreen(size, view);
+  const distance = framingDistance(seen, FOV, aspect);
+  // The near face of the model is what a frustum has to hold, which is where the depth goes.
+  const half = Math.tan((FOV / 2) * (Math.PI / 180)) * (distance - seen.deep);
+  return [seen.up / half, seen.across / (half * aspect)];
+}
+
+describe("onScreen", () => {
+  // Face to face with her: what has to fit across the pane is her shoulders and what has to
+  // fit up it is her height. Her depth shows as nothing at all, and still costs — see below.
+  it("measures a body by the two sides that face the camera", () => {
+    expect(onScreen(BODY, "default")).toEqual({ across: 0.6, up: 1, deep: 0.2 });
   });
 
-  it("backs off further for a bigger model", () => {
-    expect(framingDistance(4, 35)).toBeCloseTo(framingDistance(1, 35) * 4);
+  // The same body a quarter turn round: now it is her depth that has to fit across the pane,
+  // and her shoulders that are pointed at the camera.
+  it("swaps them when the view is round the side", () => {
+    expect(onScreen(BODY, "front")).toEqual({ across: 0.2, up: 1, deep: 0.6 });
+  });
+
+  // A view and the view opposite it see the same silhouette. Nothing chooses a camera by this,
+  // but it is the cheapest statement of "these are extents and not positions".
+  it("sees the same size from either end of an axis", () => {
+    expect(onScreen(BODY, "back")).toEqual(onScreen(BODY, "front"));
+    expect(onScreen(BODY, "left")).toEqual(onScreen(BODY, "right"));
+  });
+});
+
+describe("framingDistance", () => {
+  // The whole of the change: a body framed in a square pane fills nearly the whole of its
+  // height. The framing this replaced went by the radius of the sphere around her — nearly her
+  // full height in every direction — and left her at about two thirds of the pane with the rest
+  // of it empty. Only the taller axis is expected to be full; nothing can fill both.
+  it("frames a body as closely as the pane will hold it", () => {
+    const [tall, wide] = fills(BODY, "default", 1);
+    expect(tall).toBeGreaterThan(0.9);
+    expect(tall).toBeLessThanOrEqual(1);
+    expect(wide).toBeLessThanOrEqual(1);
+  });
+
+  // The pane is a column beside the sets, so it is usually taller than it is wide, and the
+  // width is then what decides the distance. A model framed against the height alone — which
+  // is what a single field of view amounts to — hangs off both sides of a pane like that.
+  it("holds the model in a pane narrower than it is tall", () => {
+    for (const aspect of [0.4, 0.7, 1, 1.6]) {
+      const [tall, wide] = fills(BODY, "default", aspect);
+      expect(tall).toBeLessThanOrEqual(1);
+      expect(wide).toBeLessThanOrEqual(1);
+      expect(Math.max(tall, wide)).toBeGreaterThan(0.9);
+    }
+  });
+
+  // Twice the model, twice the distance, same picture. What makes a set of renders comparable.
+  it("backs off in proportion to the model", () => {
+    const twice: [number, number, number] = [0.8, 4, 2.4];
+    expect(framingDistance(onScreen(twice, "default"), FOV, 1))
+      .toBeCloseTo(framingDistance(onScreen(BODY, "default"), FOV, 1) * 2);
   });
 
   // A cloak is a sheet and a dagger is nearly a line; framing either by its own size exactly
   // would put the camera inside it.
   it("keeps its distance from something with almost no size at all", () => {
-    expect(framingDistance(0, 35)).toBeGreaterThan(0);
+    expect(framingDistance({ across: 0, up: 0, deep: 0 }, FOV, 1)).toBeGreaterThan(0);
   });
 });
 
 describe("cameraFor", () => {
-  // The window's own view, unchanged. It is the one a reader sees on every model, and it is
-  // deliberately off every axis: an item seen exactly head on reads as a silhouette.
-  it("leaves the view the window opens on where it has always been", () => {
-    expect(cameraFor("default", 10)).toEqual([4.5, 2.5, 10]);
+  // What the window opens on, and the reason this file has a view called `default` at all: it
+  // is her front, so the reader meets her face on rather than over her left shoulder.
+  it("opens face to face with the character", () => {
+    expect(cameraFor("default", 10)).toEqual(cameraFor("right", 10));
+    expect(cameraFor("default", 10)).toEqual([10, 0, 0]);
   });
 
   // The named ones are square to the axes, which is what makes a render asked for twice the
@@ -183,12 +250,12 @@ describe("cameraFor", () => {
     expect(cameraFor("right", 3)).toEqual([3, 0, 0]);
   });
 
-  // Every named view is exactly the framing distance from the middle, so one model photographed
-  // from four sides is photographed at one scale. `default` is the exception and is meant to be:
-  // it is a direction the window chose rather than a unit vector.
-  it("keeps every named view the same distance out", () => {
+  // Every view is exactly the framing distance from the middle, so one model photographed from
+  // four sides is photographed at one scale — and the distance a caller worked out is the
+  // distance it gets, which is what lets the framing above be reasoned about at all.
+  it("keeps every view the same distance out", () => {
     const length = (at: [number, number, number]): number => Math.hypot(...at);
-    for (const view of ["front", "back", "left", "right"] as const) {
+    for (const view of ["default", "front", "back", "left", "right"] as const) {
       expect(length(cameraFor(view, 7))).toBeCloseTo(7);
     }
   });

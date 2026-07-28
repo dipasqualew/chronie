@@ -11,7 +11,7 @@ character's body. There is no mesh to show in isolation.
 **Provenance.** Constants marked *verified* were read from build `12.0.5.67` on
 2026-07-26; the attachments, the geoset groups the body actually holds, and the cape on
 2026-07-27; the hands, the shield, and the bone chains that place them on 2026-07-27 as
-well. The rest is from [wowdev.wiki](https://wowdev.wiki) and
+well; that the bind pose leaves her eyes shut on 2026-07-28. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
 ## One item, and then a set of them
@@ -530,6 +530,21 @@ Chunks that matter:
 `bone_indices` — the vertex position is already the bind pose. Sequences, `.anim` files and
 per-animation `M2Track` decoding are all skippable. **Bones are not**, quite: see
 [the bone is not always identity](#the-bone-is-not-always-identity-verified).
+
+**What the bind pose costs is her eyes: they are shut.** *(Read from build `12.0.5.67` on
+2026-07-28.)* The lids are geometry on the head and closed is where the file leaves them.
+The eyeball is a geoset of its own — `3301`, on texture type 19 — and it does reach the
+`.glb`: the character's model comes out as thirteen parts over four images, one of which is
+the eye texture bound to that geoset. It is simply behind the lids. So nothing is missing and
+nothing is being dropped; a still render of a character is a woman with her eyes closed,
+which is what a pose with no animation in it looks like.
+
+There is therefore **no geoset, customization or texture that opens them**, and none that
+puts an expression on her: the lids and the mouth are moved by their own bones, and those are
+moved by a sequence. Anything wanting an open eye wants sequences, the `.anim` files and
+per-vertex skinning — the whole of what the paragraph above skips — and wants them applied to
+every model the app draws rather than to the face alone, which is also what would move the
+hands the attachments are placed against.
 
 **Coordinate system:** M2 is Z-up with X forward. To Y-up: `(X, Y, Z) → (X, Z, -Y)`, which
 is what wow.export's `M2Loader.js` does and what `m2.rs` follows. Both this and its mirror
