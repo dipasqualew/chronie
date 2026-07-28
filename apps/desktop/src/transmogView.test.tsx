@@ -449,12 +449,27 @@ async function browseItems(
   return shown;
 }
 
-/** What the outfit list says is on, by slot and item. */
+/**
+ * What the rail beside the character says is on, by slot and item.
+ *
+ * The rail is pictures, so what it says is on its tips: the item in bold and the place it
+ * occupies — with the set it came out of after that — on the line under. This reads them back
+ * out in the order a row used to print them.
+ */
 function worn(): string[] {
+  return wornTips().map((tip) => `${tip.place} ${tip.item}`);
+}
+
+/** The same tips, taken apart: what each piece is, where it is, and where it came from. */
+function wornTips(): { item: string; place: string; from: string }[] {
   const list = document.querySelector("#outfit-list");
   if (!list) return [];
-  return [...list.querySelectorAll(".outfit-slot")].map((slot) =>
-    `${slot.querySelector(".outfit-where")?.textContent} ${slot.querySelector(".outfit-item")?.textContent}`);
+  return [...list.querySelectorAll<HTMLElement>(".outfit-slot [data-tip]")].map((tile) => {
+    const tip = document.createElement("div");
+    tip.innerHTML = tile.dataset.tip ?? "";
+    const [place, from] = (tip.querySelector(".tip-line")?.textContent ?? "").split(" · ");
+    return { item: tip.querySelector("b")?.textContent ?? "", place: place ?? "", from: from ?? "" };
+  });
 }
 
 describe("TransmogView", () => {
@@ -791,7 +806,7 @@ describe("TransmogView", () => {
     ]);
     // And says nothing about a set, because there is no set behind it — the line under the
     // name is where a set's name goes and inventing one would be a line saying nothing.
-    expect(document.querySelector("#outfit-list .outfit-what .muted")).toBeNull();
+    expect(wornTips()).toEqual([{ item: "Coif of the Drowned Star", place: "Head", from: "" }]);
   });
 
   // The reason the browser reads the item's own subclass at all: the game files a staff and a

@@ -20,6 +20,7 @@
  * This decides only what is handed to it.
  */
 
+import { escapeHtml } from "./format";
 import { wearable as canBeWorn } from "./modelPreview";
 import type { Previewable } from "./modelPreview";
 import { heldIn, slotName } from "./transmogModal";
@@ -35,7 +36,7 @@ import type { TransmogSet, WornPiece } from "./types";
 const LAST_ARMOUR_SLOT = 10;
 
 /**
- * Every place something can be worn, in the order the list beside the character reads.
+ * Every place something can be worn, in the order the rail beside the character reads.
  *
  * Head down the body to the feet and then the two hands, which is roughly how the game's own
  * character sheet is laid out. It is deliberately **not** `worn::SLOT_LAYER`: that order is
@@ -111,7 +112,7 @@ export function placeOrder(place: string): number {
   return at < 0 ? PLACES.length : at;
 }
 
-/** What the list beside the character calls a place. */
+/** What the rail beside the character calls a place, on the tip of its tile. */
 export function placeName(place: string, row?: Placeable): string {
   if (HANDS[place]) return HANDS[place];
   return slotName(Number(place.slice("armour-".length)), row?.inventoryType ?? 0);
@@ -123,13 +124,13 @@ export interface Worn {
   place: string;
   row: AppearanceRow;
   /**
-   * Where the reader took it from, as the line the panel prints under the item's name.
+   * Where the reader took it from, as the second half of the line under the item's name.
    *
    * A set's name, and **empty for a look picked out of the game at large** — which is the
    * whole of what the two halves of the view differ by once a piece is on. A wardrobe list
    * browses appearances rather than anybody's idea of an outfit, so there is no second name
    * to give, and inventing one ("the wardrobe", the slot it fills) would be a line saying
-   * either nothing or what the badge beside it already says.
+   * either nothing or what the place beside it already says.
    */
   from: string;
 }
@@ -218,6 +219,19 @@ export function isWorn(outfit: Outfit, row: AppearanceRow): boolean {
 /** The outfit as a list, head downwards, which is how it is drawn beside the character. */
 export function wornPieces(outfit: Outfit): Worn[] {
   return PLACES.map((place) => outfit[place]).filter((piece): piece is Worn => Boolean(piece));
+}
+
+/**
+ * Everything one worn piece is, as the tip that appears when the pointer stops on it.
+ *
+ * The rail beside the character is pictures and nothing else — see `outfitPanel.tsx` — so this
+ * is where the three things each row used to print went: what it is, where on her it is, and
+ * which set it came out of. HTML, because the one tooltip on the page is written through
+ * `innerHTML`, and escaped here because an item's name is the game's text rather than ours.
+ */
+export function wornTip({ place, row, from }: Worn): string {
+  const under = from ? `${placeName(place, row)} · ${from}` : placeName(place, row);
+  return `<b>${escapeHtml(row.label)}</b><span class="tip-line">${escapeHtml(under)}</span>`;
 }
 
 /**

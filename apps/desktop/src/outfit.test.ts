@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   NOTHING_ON, isWorn, onlyWearable, outfitSummary, piecesOf, placeName, placeOf, setLabel,
-  takeOff, toggle, wear, wearSet, wearable, wornPieces,
+  takeOff, toggle, wear, wearSet, wearable, wornPieces, wornTip,
 } from "./outfit";
 import type { AppearanceRow } from "./transmogModal";
 import type { TransmogSet } from "./types";
@@ -226,7 +226,7 @@ describe("isWorn", () => {
 
 describe("toggle", () => {
   // Clicking a row a second time is how a reader takes one piece off without going to the
-  // list beside the character.
+  // rail beside the character.
   it("puts an appearance on, and takes the same one off again", () => {
     const on = toggle(NOTHING_ON, HELM, "Tideglass Regalia");
     expect(wornPieces(on)).toHaveLength(1);
@@ -279,6 +279,34 @@ describe("piecesOf", () => {
       { displayInfoId: 900_001, displayType: 0, inventoryType: 0 },
       { displayInfoId: 900_007, displayType: 11, inventoryType: 13 },
     ]);
+  });
+});
+
+describe("wornTip", () => {
+  // The rail beside the character is pictures, so everything a row used to print is here or
+  // nowhere: what it is, where on her it is, and which set it was taken out of.
+  it("says what the piece is, where it goes and where it came from", () => {
+    const [piece] = wornPieces(wear(NOTHING_ON, HELM, "Tideglass Regalia"));
+    expect(wornTip(piece!))
+      .toBe('<b>A helm</b><span class="tip-line">Head · Tideglass Regalia</span>');
+  });
+
+  // A look picked out of the game's whole wardrobe came out of no set, and naming one — "the
+  // wardrobe", the slot it fills — would be a line saying nothing or saying it twice.
+  it("names no set for a look that came out of none", () => {
+    const [piece] = wornPieces(wear(NOTHING_ON, HELM));
+    expect(wornTip(piece!)).toBe('<b>A helm</b><span class="tip-line">Head</span>');
+  });
+
+  // The tip is assigned to `innerHTML` by the one tooltip on the page, and an item's name is
+  // the game's text rather than ours.
+  it("escapes the game's own text on the way in", () => {
+    const rude = row({ displayType: 0, label: '<img src=x onerror="alert(1)">' });
+    const [piece] = wornPieces(wear(NOTHING_ON, rude, "<b>Set</b>"));
+    expect(wornTip(piece!)).toBe(
+      '<b>&lt;img src=x onerror=&quot;alert(1)&quot;&gt;</b>'
+      + '<span class="tip-line">Head · &lt;b&gt;Set&lt;/b&gt;</span>',
+    );
   });
 });
 
