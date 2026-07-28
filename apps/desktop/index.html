@@ -1018,6 +1018,42 @@
   }
   .mog-wowhead:hover { color: var(--series-1); background: var(--surface-1); }
 
+  /* The sets whose clothes these are. Quiet and under the chips: a reader is looking at one
+     set, and this is the footnote saying it is also three others. */
+  .mog-alternates {
+    list-style: none; margin: 4px 0 0; padding: 0;
+    font-size: 12px; color: var(--text-secondary);
+  }
+  .mog-alternates li { padding: 1px 0 1px 10px; border-left: 2px solid var(--border); }
+
+  /* The one fact a row volunteers. A reader whose class cannot wear the set's own version of a
+     look can still have the look, and it is worth a chip on the row rather than a line inside
+     a list they have to open first. */
+  .chip.mog-lifted { border-color: var(--series-1); color: var(--series-1); }
+  /* How many other items give this look. Deliberately quiet — it is a count, and the reader
+     came for the picture beside it. */
+  .mog-sources-toggle {
+    flex: none; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+    border: 1px dashed var(--border); background: none;
+    font: inherit; font-size: 12px; color: var(--text-secondary);
+  }
+  .mog-sources-toggle:hover { color: var(--text); border-style: solid; }
+  .mog-sources-toggle[aria-expanded="true"] { border-style: solid; color: var(--text); }
+  /* The items themselves, indented under the look they give. The whole row wraps, so this
+     takes the full width and starts a line of its own. */
+  .mog-sources {
+    flex: 1 0 100%; list-style: none; margin: 4px 0 0; padding: 0 0 0 42px;
+    display: grid; gap: 2px;
+  }
+  .mog-source {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 3px 6px; border-radius: 6px; font-size: 13px;
+    border-left: 2px solid var(--border);
+  }
+  .mog-source:hover { background: var(--surface-1); }
+  .mog-source-name { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
+  .mog-source .chip { font-size: 11px; }
+
   .mog-note { text-align: center; margin: 0; }
 
   /* ---------- screenshots ---------- */

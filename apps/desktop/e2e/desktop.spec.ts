@@ -300,9 +300,36 @@ class TransmogView {
     await expect(this.card(name).getByRole("listitem")).toHaveCount(0);
   }
 
-  /** One row per appearance a set names, in the order the backend sorted them. */
+  /**
+   * One row per appearance a set names, in the order the backend sorted them.
+   *
+   * The rows of the outer list only. A row that several items reach carries a list of its own,
+   * and those are listitems too — so "every listitem in the card" would count the items a
+   * reader expanded as though they were looks, which is the very thing this view stopped
+   * doing.
+   */
   rows(name: string): Locator {
-    return this.card(name).getByRole("listitem");
+    return this.card(name).locator(".mog-items > .mog-item");
+  }
+
+  /**
+   * The count on a row that opens the items giving that look, named by what it says.
+   *
+   * By role and text rather than by class: it is a real button with a real label, and a
+   * reader deciding whether to open it reads that label.
+   */
+  sourcesToggle(set: string, others: number): Locator {
+    return this.card(set).getByRole("button", {
+      name: `+${others} ${others === 1 ? "item" : "items"}`,
+      exact: true,
+    });
+  }
+
+  /** The items behind one look, once its count has been clicked. */
+  sources(set: string, label: string): Locator {
+    return this.card(set)
+      .getByRole("list", { name: `Items that give ${label}` })
+      .getByRole("listitem");
   }
 
   /**
@@ -323,7 +350,7 @@ class TransmogView {
    * a reader clicking the words gets the piece put on — the whole row is one button.
    */
   name(set: string, label: string): Locator {
-    return this.card(set).getByText(label, { exact: true });
+    return this.card(set).locator(".mog-pick").getByText(label, { exact: true });
   }
 
   /** The one box above the grid: whether the rows with nowhere to go are left out. */
@@ -350,8 +377,9 @@ class TransmogView {
   /**
    * The button on one row, which puts that piece on the character or takes it off again.
    *
-   * `nth` because a set naming one appearance twice has two rows for it, and both are the
-   * same appearance in the same place — picking either is picking the same thing.
+   * `nth` because two rows of one set can carry the same slot and the same name — two looks
+   * an install cannot tell apart by their labels alone — and picking either is picking what
+   * that row is for.
    */
   wear(set: string, slot: string, label: string, nth = 0): Locator {
     return this.card(set).getByRole("button", { name: `Wear ${slot}: ${label}` }).nth(nth);
@@ -741,6 +769,18 @@ const FULL_SIZE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAAB
 // viewer, and the tooltip that is handed HTML rather than a value in a React tree.
 const NOTED = "<b>first</b> Yogg kill";
 
+/**
+ * What every item of the transmog fixtures says about itself beyond its name.
+ *
+ * The window groups a set's rows by appearance and reads these three to say what separates two
+ * items that give the same look, so a row has to carry them whether or not the flow below
+ * looks at them. Every item here is one anybody may wear.
+ */
+const ANY_CLASS_ITEM = { allowableClass: 0xffff, requiredLevel: 0, quality: 4 } as const;
+
+/** And what the backend answers for an appearance whose item the game keeps encrypted. */
+const WITHHELD_ITEM = { allowableClass: 0, requiredLevel: 0, quality: 0 } as const;
+
 // Typed as the real backend's answers, so a fixture that has drifted from what a command
 // actually returns fails the type check rather than the assertion three steps later.
 //
@@ -1009,8 +1049,8 @@ const mockDesktop: E2EMock = {
   // The same invented sets the backend fixtures hold, so the two halves of the transmog
   // view are exercised against one story rather than two.
   transmog: {
-    readCount: 4,
-    declaredCount: 6,
+    readCount: 5,
+    declaredCount: 7,
     withheldCount: 2,
     sets: [
       {
@@ -1026,12 +1066,26 @@ const mockDesktop: E2EMock = {
       {
         id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe", groupId: 1,
         classMask: 0x0190, expansionId: 3, parentId: 0, flags: 1, uiOrder: 5,
-        patchIntroduced: 100200, itemCount: 4,
+        patchIntroduced: 100200, itemCount: 6,
       },
       {
         id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe", groupId: 1,
         classMask: 0x0e08, expansionId: 3, parentId: 201, flags: 1, uiOrder: 10,
         patchIntroduced: 100200, itemCount: 2,
+        // The other faction bought exactly these clothes under another name, so 210 is shown
+        // in its place and 202 says which card carries it. 436 of a shipping install's sets
+        // are somebody else's wardrobe like this.
+        alternates: [{
+          id: 210, name: "Deepglass Hide", group: "Deepglass Wardrobe", classMask: 0x0e08,
+          expansionId: 3, patchIntroduced: 100200, reason: "faction" as const,
+        }],
+      },
+      // And the other end of that pair, still in the payload — the counts above are about what
+      // the game holds — and left out of the grid by the window rather than by the backend.
+      {
+        id: 210, name: "Deepglass Hide", group: "Deepglass Wardrobe", groupId: 4,
+        classMask: 0x0e08, expansionId: 3, parentId: 0, flags: 8, uiOrder: 15,
+        patchIntroduced: 100200, itemCount: 2, sameLookAs: 202,
       },
     ],
   },
@@ -1041,28 +1095,49 @@ const mockDesktop: E2EMock = {
   transmogItems: {
     201: {
       setId: 201,
-      readCount: 4,
+      readCount: 6,
       withheldCount: 0,
       appearances: [
         {
           modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
           displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
-        // The set names the same appearance twice, which is why the card counts four.
+        // The set names the same appearance through the same `ItemModifiedAppearance` twice,
+        // which the game stores as one row copied. One look, and one item giving it — so the
+        // two rows are one row, and it says nothing about there being another item.
         {
           modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
           displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
           modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle", appearanceId: 80002,
           displayType: 1, inventoryType: 3,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
         },
         {
           modifiedAppearanceId: 71003, itemId: 30003, name: "Tideglass Robe", appearanceId: 80003,
           displayType: 3, inventoryType: 5,
+          ...ANY_CLASS_ITEM,
+          displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
+        },
+        // And the ordinary shape of a shipping set: two more items giving the robe's look,
+        // one of them locked to a class the set itself is not, one of them cheaper. Three
+        // items, one row, and the whole reason a row opens.
+        {
+          modifiedAppearanceId: 71030, itemId: 30030, name: "Robe of the Tideglass Court",
+          appearanceId: 80003, displayType: 3, inventoryType: 5,
+          allowableClass: 0x0010, requiredLevel: 60, quality: 4,
+          displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
+        },
+        {
+          modifiedAppearanceId: 71031, itemId: 30031, name: "Sea-Touched Vestment",
+          appearanceId: 80003, displayType: 3, inventoryType: 5,
+          allowableClass: 0xffff, requiredLevel: 45, quality: 3,
           displayInfoId: 900012, iconFileDataId: 130003, hasModel: false,
         },
       ],
@@ -1076,11 +1151,13 @@ const mockDesktop: E2EMock = {
           modifiedAppearanceId: 71004, itemId: 30004, name: "Tideglass Sandals",
           appearanceId: 80004,
           displayType: 6, inventoryType: 8,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900004, iconFileDataId: 130004, hasModel: false,
         },
         {
           modifiedAppearanceId: 71005, itemId: 30005, name: "Tideglass Gloves", appearanceId: 80005,
           displayType: 8, inventoryType: 10,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900005, iconFileDataId: 130005, hasModel: false,
         },
       ],
@@ -1094,24 +1171,28 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71006, itemId: 30006, name: "Emberforge Helm", appearanceId: 80006,
           displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
         },
         {
           modifiedAppearanceId: 71007, itemId: 30007, name: "Emberforge Pauldrons",
           appearanceId: 80007,
           displayType: 1, inventoryType: 3,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900009, iconFileDataId: 130002, hasModel: true,
         },
         {
           modifiedAppearanceId: 71008, itemId: 30008, name: "Emberforge Breastplate",
           appearanceId: 80008,
           displayType: 3, inventoryType: 5,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900003, iconFileDataId: 130003, hasModel: false,
         },
         {
           modifiedAppearanceId: 71009, itemId: 30009, name: "Emberforge Greaves",
           appearanceId: 80009,
           displayType: 5, inventoryType: 7,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900006, iconFileDataId: 130006, hasModel: false,
         },
         // A weapon, which the game files under a display type that says only "a weapon" —
@@ -1120,6 +1201,7 @@ const mockDesktop: E2EMock = {
           modifiedAppearanceId: 71010, itemId: 30010, name: "Emberforge Blade",
           appearanceId: 80010,
           displayType: 11, inventoryType: 13,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
         // And one whose item the game withholds, so nothing says a hand — or a name. That
@@ -1129,6 +1211,7 @@ const mockDesktop: E2EMock = {
           modifiedAppearanceId: 71017, itemId: 30017, name: "",
           appearanceId: 80017,
           displayType: 12, inventoryType: 0,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900007, iconFileDataId: 130005, hasModel: true,
         },
       ],
@@ -1143,11 +1226,13 @@ const mockDesktop: E2EMock = {
         {
           modifiedAppearanceId: 71011, itemId: 30011, name: "", appearanceId: 80011,
           displayType: 3, inventoryType: 5,
+          ...ANY_CLASS_ITEM,
           displayInfoId: 900900, iconFileDataId: 130008, hasModel: false,
         },
         {
           modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0,
           displayType: 0, inventoryType: 1,
+          ...WITHHELD_ITEM,
           displayInfoId: 0, iconFileDataId: 0, hasModel: false,
         },
       ],
@@ -2322,7 +2407,9 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(card).toContainText("Cloth");
     await expect(card).toContainText("Cataclysm");
     await expect(card).toContainText("Patch 10.2.0");
-    await expect(card).toContainText("4 appearances");
+    // Items, because items is what the game's own table counts. How many looks they come to
+    // takes four more tables and is what opening the set is for.
+    await expect(card).toContainText("6 items");
     // A set for nobody in particular is for everybody, and says so.
     await expect(transmog.card("Duskwoven Shroud")).toContainText("Any class");
   });
@@ -2330,7 +2417,34 @@ test("browses the game's transmog sets and dresses the character in them", async
   // Coming up short is expected — the game encrypts what it has not released — so the view
   // has to say so rather than quietly show fewer sets than the game holds.
   await test.step("the sets the game keeps encrypted are accounted for", async () => {
-    await expect(transmog.view.getByText("2 sets the game keeps encrypted")).toBeVisible();
+    await expect(transmog.view.getByText(/2 sets the game keeps encrypted/)).toBeVisible();
+  });
+
+  // A set that is another set's clothes is shown once, under the set that carries it, and the
+  // one shown says so. Otherwise a reader browsing the game's several thousand sets meets the
+  // same wardrobe up to six times over.
+  await test.step("a set holding another's appearances is shown once, and named", async () => {
+    await expect(transmog.sets()).not.toContainText(["Deepglass Hide"]);
+    // The name and nothing else: a faction pair is the same armour for the same classes out of
+    // the same patch, so a qualifier here would repeat the chip directly above it.
+    await expect(transmog.card("Tideglass Hide"))
+      .toContainText("the other faction's Deepglass Hide");
+    await expect(transmog.card("Tideglass Hide"))
+      .not.toContainText("the other faction's Deepglass Hide · ");
+    // And the grid says why it is shorter than the count above it.
+    await expect(
+      transmog.view.getByText(/1 set shown under another holding the same appearances/),
+    ).toBeVisible();
+  });
+
+  // The whole risk of folding a set away: a reader who types its name has to find it. The
+  // filters read the cluster rather than the card, so the set folded away is still reachable
+  // by every route it had before — its name, its collection, and its class.
+  await test.step("a folded set is still found by its own name", async () => {
+    await transmog.search().fill("deepglass");
+    await expect(transmog.sets()).toHaveText(["Tideglass Hide"]);
+    await transmog.search().fill("");
+    await expect(transmog.sets()).toHaveCount(4);
   });
 
   // The character is there before a single set has been touched, which is the shape of this
@@ -2389,15 +2503,23 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(transmog.sets()).toHaveCount(0);
   });
 
-  await test.step("a set opens in place on what the game says it is made of", async () => {
+  // The acceptance for the whole redesign: six items, three looks, and a list one row per
+  // look rather than one row per thing that happens to wear the model.
+  await test.step("a set opens on its looks rather than on its items", async () => {
     await transmog.search().fill("");
     await transmog.klass().selectOption("");
-    await expect(transmog.card("Tideglass Regalia")).toContainText("4 appearances");
+    await expect(transmog.card("Tideglass Regalia")).toContainText("6 items");
 
     await transmog.openSet("Tideglass Regalia");
-    // The set names one of its appearances twice, so a list agreeing with the card is four
-    // rows long rather than three.
-    await expect(transmog.rows("Tideglass Regalia")).toHaveCount(4);
+    await expect(transmog.rows("Tideglass Regalia")).toHaveCount(3);
+    // And the sentence that explains why a card promising six opened as a list of three.
+    //
+    // Five items rather than the card's six, and both are right. The card counts rows of
+    // `TransmogSetItem`, which is all the grid has; this counts the items those rows reach,
+    // and one of the six is the game naming a single item twice. The refined number is the
+    // one worth printing next to the list it describes.
+    await expect(transmog.card("Tideglass Regalia"))
+      .toContainText("3 appearances from 5 items");
     // And the sets beside it are still there, which is what a dialog took away.
     await expect(transmog.sets()).toHaveCount(4);
   });
@@ -2406,9 +2528,9 @@ test("browses the game's transmog sets and dresses the character in them", async
   // reading as an item rather than as a number is what says that reader works end to end.
   await test.step("every appearance says which slot it fills and leads to the item", async () => {
     await expect(transmog.rows("Tideglass Regalia"))
-      .toContainText(["Head", "Head", "Shoulder", "Chest"]);
+      .toContainText(["Head", "Shoulder", "Chest"]);
     await expect(transmog.rows("Tideglass Regalia")).toContainText([
-      "Tideglass Crown", "Tideglass Crown", "Tideglass Mantle", "Tideglass Robe",
+      "Tideglass Crown", "Tideglass Mantle", "Tideglass Robe",
     ]);
     await expect(transmog.link("Tideglass Regalia", "Tideglass Mantle"))
       .toHaveAttribute("href", "https://www.wowhead.com/item=30002");
@@ -2418,13 +2540,52 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30002");
   });
 
+  // Nothing is lost by collapsing: every item is still there, one click further in, and the
+  // row says how many before it is asked. Three items give the robe's look and the row is
+  // named after the one closest to the set's own name rather than after whichever the backend
+  // listed first.
+  await test.step("a row opens on every item that gives its look", async () => {
+    await expect(transmog.sourcesToggle("Tideglass Regalia", 2)).toBeVisible();
+    await transmog.sourcesToggle("Tideglass Regalia", 2).click();
+
+    // Whatever anybody can wear first, then the cheapest way in, then the class-locked one —
+    // which is the order of the question the list is open for.
+    await expect(transmog.sources("Tideglass Regalia", "Tideglass Robe")).toHaveText([
+      /Tideglass Robe/,
+      /Sea-Touched Vestment/,
+      /Robe of the Tideglass Court/,
+    ]);
+    // Only the facts that differ between them, and here all three do.
+    await expect(transmog.sources("Tideglass Regalia", "Tideglass Robe").last())
+      .toContainText("Priest");
+    await expect(transmog.sources("Tideglass Regalia", "Tideglass Robe").nth(1))
+      .toContainText("Level 45");
+    // And each is still its own item, with its own way out of the app.
+    await expect(transmog.link("Tideglass Regalia", "Sea-Touched Vestment"))
+      .toHaveAttribute("href", "https://www.wowhead.com/item=30031");
+
+    // Collapsing a look does not put it on or take it off: the row above is still the button.
+    await expect(transmog.rows("Tideglass Regalia")).toHaveCount(3);
+  });
+
+  // The one fact a row volunteers without being opened, and the most useful thing this view
+  // can say: a reader whose class cannot wear the set's own version of a look can still have
+  // the look. Nothing else on the row would ever tell them so.
+  await test.step("a look sold to everybody as well as to one class says so", async () => {
+    await expect(transmog.card("Tideglass Regalia").getByText("Any class too")).toHaveCount(1);
+    // The head is one item and says nothing of the kind.
+    const head = transmog.rows("Tideglass Regalia").first();
+    await expect(head).not.toContainText("Any class too");
+  });
+
   // The pictures come out of the game's own textures, and they arrive after the rows do —
   // so what is checked here is that every row ends up carrying one, not that it had one the
   // moment the list appeared.
   await test.step("every appearance carries the game's own picture of it", async () => {
-    await expect(transmog.iconFrames("Tideglass Regalia")).toHaveCount(4);
-    await expect(transmog.icons("Tideglass Regalia")).toHaveCount(4);
-    // The set names its first appearance twice, so two of the four rows show one texture.
+    await expect(transmog.iconFrames("Tideglass Regalia")).toHaveCount(3);
+    await expect(transmog.icons("Tideglass Regalia")).toHaveCount(3);
+    // One per look now, and three different ones: the pictures were the clearest sign of the
+    // old shape, where a set naming one appearance twice drew the same texture twice.
     const sources = await transmog.icons("Tideglass Regalia").evaluateAll(
       (images) => images.map((image) => (image as HTMLImageElement).currentSrc),
     );
@@ -2436,7 +2597,7 @@ test("browses the game's transmog sets and dresses the character in them", async
     const widths = await transmog.icons("Tideglass Regalia").evaluateAll(
       (images) => images.map((image) => (image as HTMLImageElement).naturalWidth),
     );
-    expect(widths).toEqual([8, 8, 8, 8]);
+    expect(widths).toEqual([8, 8, 8]);
   });
 
   // The change this whole view was rebuilt for: an appearance clicked in a set goes onto the
@@ -2477,8 +2638,11 @@ test("browses the game's transmog sets and dresses the character in them", async
   // leaves. Taking it hands the url to the operating system and leaves her dressed exactly as
   // she was, rather than taking the piece back off on the way out.
   await test.step("the corner of a row leaves for Wowhead without undressing her", async () => {
-    await transmog.link("Tideglass Regalia", "Tideglass Robe").click();
-    await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30003");
+    // The shoulder, which one item gives. The robe's row has no corner of its own — three
+    // items give that look and none of them is the one the row means — and its items carry
+    // their own, which the step above followed.
+    await transmog.link("Tideglass Regalia", "Tideglass Mantle").click();
+    await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30002");
     await expect(outfit.slots()).toHaveText([/Chest.*Tideglass Robe.*Tideglass Regalia/s]);
   });
 
@@ -2492,7 +2656,7 @@ test("browses the game's transmog sets and dresses the character in them", async
       /Head.*Emberforge Helm.*Emberforge Plate/s,
       /Chest.*Tideglass Robe.*Tideglass Regalia/s,
     ]);
-    await expect(transmog.rows("Tideglass Regalia")).toHaveCount(4);
+    await expect(transmog.rows("Tideglass Regalia")).toHaveCount(3);
     // Five of that set's six: the sixth is filed under a weapon slot with nothing saying a
     // hand, so it has nowhere on her to go and is left out until somebody asks for it.
     await expect(transmog.rows("Emberforge Plate")).toHaveCount(5);

@@ -71,7 +71,9 @@ const transmogSet: TableSpec = {
     { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 14 }, // ID
     { storage: Storage.bitpackedSigned, offsetBits: 46, sizeBits: 16 }, // ClassMask
     { storage: Storage.common, offsetBits: 62, sizeBits: 0, default: 0, common: new Map([[204, 8801]]) }, // TrackingQuestID
-    { storage: Storage.indexed, offsetBits: 62, sizeBits: 6, palette: [0, 1, 2, 16] }, // Flags
+    // Bits 2 and 3 are the two factions, and the install never sets both: 435 sets carry one
+    // and 438 the other across the whole shipping table.
+    { storage: Storage.indexed, offsetBits: 62, sizeBits: 6, palette: [0, 1, 2, 4, 8, 16] }, // Flags
     { storage: Storage.bitpackedSigned, offsetBits: 68, sizeBits: 10 }, // GroupID
     { storage: Storage.bitpackedSigned, offsetBits: 78, sizeBits: 15 }, // ItemNameDescriptionID
     { storage: Storage.bitpackedSigned, offsetBits: 93, sizeBits: 14 }, // ParentID
@@ -93,6 +95,12 @@ const transmogSet: TableSpec = {
         ["Emberforge Scales", 204, 0x1044, 0, 2, 2, 0, 203, 0, 4, 100300, 10, 0],
         ["Duskwoven Shroud", 205, 0x0000, 0, 0, 3, 0, 0, 0, 5, 110000, 15, 0],
         ["Lantern-Keeper's Coat", 206, 0x7fff, 0, 16, 3, 0, 0, 0, 5, 110000, 20, 0],
+        ["Stormforged Vestments", 207, 0x0023, 0, 2, 2, 0, 0, 0, 4, 100300, 15, 0],
+        // The faction pair, and the one thing that separates them: bit 2 against bit 3. They
+        // name the same two appearances, so they are one set as far as a wardrobe is
+        // concerned, and 208 is the one a reader is shown because it orders first.
+        ["Stormbreaker's Warplate", 208, 0x0023, 0, 4, 2, 0, 0, 0, 4, 100300, 20, 0],
+        ["Stormbreaker's Battleplate", 209, 0x0023, 0, 8, 2, 0, 0, 0, 4, 100300, 25, 0],
       ],
     },
     {
@@ -178,8 +186,25 @@ const transmogSetItem: TableSpec = {
         [205, 71011, 0],
         [205, 71012, 0],
         [206, 71013, 0],
+        // Set 207 is the ordinary shape of a shipping set: five rows, two looks. Three items
+        // give the head and two give the chest, and the only thing that separates them is
+        // who may wear one and what it costs.
+        [207, 71017, 0],
+        [207, 71018, 0],
+        [207, 71019, 0],
+        [207, 71020, 0],
+        [207, 71021, 0],
+        // Sets 208 and 209 are the same wardrobe sold to the two factions, which is the
+        // commonest reason two sets in the game are the same set.
+        [208, 71022, 0],
+        [208, 71023, 0],
+        [209, 71022, 0],
+        [209, 71023, 0],
       ],
-      idList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+      idList: [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25,
+        26, 27,
+      ],
       // One more appearance for set 201, stored as row 1 again — so the set holds the same
       // appearance twice, and a detail view has to show four rows rather than three.
       copies: [[17, 1]],
@@ -234,6 +259,16 @@ const itemModifiedAppearance: TableSpec = {
         [71014, 30014, 0, 80014, 1, 2],
         [71015, 30015, 0, 80015, 2, 2],
         [71016, 30016, 0, 80016, 3, 2],
+        // Three items and one look: this is the hop that makes a set of five rows a set of
+        // two appearances, and the modifier column is the difficulty the game sold each at.
+        [71017, 30017, 0, 80017, 0, 1],
+        [71018, 30018, 1, 80017, 0, 2],
+        [71019, 30019, 3, 80017, 0, 2],
+        [71020, 30020, 0, 80018, 1, 1],
+        [71021, 30021, 1, 80018, 1, 2],
+        // What both faction sets are made of.
+        [71022, 30022, 0, 80019, 0, 1],
+        [71023, 30023, 0, 80020, 1, 1],
       ],
     },
     {
@@ -297,10 +332,16 @@ const itemAppearance: TableSpec = {
         [11, 900014, 130007],
         [13, 900015, 130007],
         [15, 900007, 130007],
+        // The two looks set 207 sells six ways, and sets 208 and 209 sell twice. Several
+        // items reach each of these, which is what a row grouped by appearance is one of.
+        [0, 900001, 130001],
+        [3, 900003, 130003],
+        [0, 900001, 130001],
+        [3, 900003, 130003],
       ],
       idList: [
         80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013,
-        80014, 80015, 80016,
+        80014, 80015, 80016, 80017, 80018, 80019, 80020,
       ],
     },
     {
@@ -561,16 +602,30 @@ const itemDisplayInfoMaterialRes: TableSpec = {
  * was read off an install. `Display_lang` reading as something other than a name is therefore
  * the first thing to suspect if a patch ever empties the detail view's labels.
  *
- * **`InventoryType` is not**: column 66 was found on 12.0.5.67 by `dump_inventory_types`, and
- * it is where a weapon says which hand it goes in. So the fixture puts it there too, sixty
- * columns past the strings — which is the distance a reader has to walk a variable-length
- * record to reach it, and the whole of what makes reading it different from reading a name.
- * The columns in between are filler of the right shape.
+ * **The four columns after the strings are not**: 52, 65, 66 and 67 were read off 12.0.5.67
+ * by `dump_item_facts` and `dump_inventory_types`, and they are where the game says who may
+ * wear a thing, what it takes to wear it, which hand it goes in and what it is worth. So the
+ * fixture puts them there too, fifty and sixty columns past the strings — which is the
+ * distance a reader has to walk a variable-length record to reach them, and the whole of what
+ * makes reading them different from reading a name. The columns in between are filler of the
+ * right shape.
+ *
+ * Three of those four are what tells two items apart when they are the same appearance, which
+ * is what the detail view now groups by: a set sells one look through a class-locked version,
+ * an unrestricted one and a cheaper one, and the only thing separating the rows is this.
  *
  * [WoWDBDefs]: https://github.com/wowdev/WoWDBDefs
  */
-/** Where the column that says which hand a weapon goes in sits, as the install keeps it. */
-const ITEM_INVENTORY_TYPE = 66;
+/** Where the columns this app reads sit, as the install keeps them. */
+const SPARSE = {
+  allowableClass: 52,
+  requiredLevel: 65,
+  inventoryType: 66,
+  quality: 67,
+} as const;
+
+/** A class mask nobody is excluded by, which is what nearly every item carries. */
+const ANY_CLASS = 0xffff;
 
 /**
  * One item, as the game lays one out: the numbers this app reads, and filler in between.
@@ -583,13 +638,17 @@ const ITEM_INVENTORY_TYPE = 66;
 function item(
   name: string,
   description: string,
-  itemLevel: number,
-  quality: number,
-  inventoryType: number,
+  {
+    quality, inventoryType, requiredLevel = 0, allowableClass = ANY_CLASS,
+  }: {
+    quality: number; inventoryType: number; requiredLevel?: number; allowableClass?: number;
+  },
 ): Array<number | string> {
-  const row: Array<number | string> = [0, description, "", "", "", name, itemLevel, quality];
-  while (row.length < ITEM_INVENTORY_TYPE) row.push(row.length);
-  row.push(inventoryType);
+  const row: Array<number | string> = [0, description, "", "", "", name];
+  while (row.length < SPARSE.allowableClass) row.push(row.length);
+  row.push(allowableClass);
+  while (row.length < SPARSE.requiredLevel) row.push(row.length);
+  row.push(requiredLevel, inventoryType, quality);
   return row;
 }
 const itemSparse: TableSpec = {
@@ -612,51 +671,90 @@ const itemSparse: TableSpec = {
     { storage: Storage.plain, offsetBits: 128, sizeBits: 32 }, // Display2_lang
     { storage: Storage.plain, offsetBits: 160, sizeBits: 32 }, // Display1_lang
     { storage: Storage.plain, offsetBits: 192, sizeBits: 32 }, // Display_lang
-    { storage: Storage.plain, offsetBits: 224, sizeBits: 32 }, // ItemLevel
-    { storage: Storage.plain, offsetBits: 256, sizeBits: 8 }, // OverallQualityID
-    // The sixty columns of item between the quality and where it is worn, laid out so that
-    // the one this app reads is where the install keeps it.
-    ...Array.from({ length: ITEM_INVENTORY_TYPE - 8 }, (_, index) => ({
+    // Everything between the name and the class mask, then the mask, then everything up to
+    // the three the table ends on: the level it takes, where it is worn, and what it is worth.
+    ...Array.from({ length: SPARSE.allowableClass - 6 }, (_, index) => ({
+      storage: Storage.plain, offsetBits: 224 + index * 32, sizeBits: 32,
+    })),
+    {
       storage: Storage.plain,
-      offsetBits: 264 + index * 32,
+      offsetBits: 224 + (SPARSE.allowableClass - 6) * 32,
+      sizeBits: 16,
+    }, // AllowableClass
+    ...Array.from({ length: SPARSE.requiredLevel - SPARSE.allowableClass - 1 }, (_, index) => ({
+      storage: Storage.plain,
+      offsetBits: 240 + (SPARSE.allowableClass - 6) * 32 + index * 32,
       sizeBits: 32,
     })),
     {
       storage: Storage.plain,
-      offsetBits: 264 + (ITEM_INVENTORY_TYPE - 8) * 32,
+      offsetBits: 240 + (SPARSE.requiredLevel - 7) * 32,
+      sizeBits: 8,
+    }, // RequiredLevel
+    {
+      storage: Storage.plain,
+      offsetBits: 248 + (SPARSE.requiredLevel - 7) * 32,
       sizeBits: 8,
     }, // InventoryType
+    {
+      storage: Storage.plain,
+      offsetBits: 256 + (SPARSE.requiredLevel - 7) * 32,
+      sizeBits: 8,
+    }, // OverallQualityID
   ],
   sections: [
     {
       key: 0n,
       rows: [
-        item("Tideglass Crown", "", 447, 4, 1),
-        item("Tideglass Mantle", "", 447, 4, 3),
+        item("Tideglass Crown", "", { quality: 4, inventoryType: 1 }),
+        item("Tideglass Mantle", "", { quality: 4, inventoryType: 3 }),
         // The one item with a description, so that two rows of the same shape are still
         // different lengths and the offset map is doing something.
-        item("Tideglass Robe", "Woven from the glass the tide leaves behind.", 450, 4, 5),
-        item("Tideglass Sandals", "", 447, 3, 8),
-        item("Tideglass Gloves", "", 447, 3, 10),
-        item("Emberforge Helm", "", 489, 4, 1),
-        item("Emberforge Pauldrons", "", 489, 4, 3),
-        item("Emberforge Breastplate", "", 502, 5, 5),
-        item("Emberforge Greaves", "", 489, 4, 7),
+        item("Tideglass Robe", "Woven from the glass the tide leaves behind.", {
+          quality: 4, inventoryType: 5,
+        }),
+        item("Tideglass Sandals", "", { quality: 3, inventoryType: 8 }),
+        item("Tideglass Gloves", "", { quality: 3, inventoryType: 10 }),
+        item("Emberforge Helm", "", { quality: 4, inventoryType: 1 }),
+        item("Emberforge Pauldrons", "", { quality: 4, inventoryType: 3 }),
+        item("Emberforge Breastplate", "", { quality: 5, inventoryType: 5 }),
+        item("Emberforge Greaves", "", { quality: 4, inventoryType: 7 }),
         // The weapon rack, and the whole reason this column is read: four appearances the
         // game files under three display types and would otherwise say nothing else about.
         // 13 is a one-hander, 17 a two-hander, 14 a shield and 23 a thing held in the other
         // hand — which is four different places on a body.
-        item("Emberforge Blade", "", 502, 5, 13),
-        item("Emberforge Greatsword", "", 502, 5, 17),
-        item("Emberforge Aegis", "", 502, 5, 14),
-        item("Emberforge Censer", "", 502, 5, 23),
+        item("Emberforge Blade", "", { quality: 5, inventoryType: 13 }),
+        item("Emberforge Greatsword", "", { quality: 5, inventoryType: 17 }),
+        item("Emberforge Aegis", "", { quality: 5, inventoryType: 14 }),
+        item("Emberforge Censer", "", { quality: 5, inventoryType: 23 }),
         // An item the game holds a row for and no name in it, which is what a reader has to
         // fall back from rather than draw as a blank.
-        item("", "", 421, 1, 4),
+        item("", "", { quality: 1, inventoryType: 4 }),
+        // Set 207's wardrobe: two looks sold six ways, which is the ordinary shape of a set
+        // in the shipping game and the reason the detail view groups by appearance at all.
+        // The head is the interesting one — the set's own version is Warrior-only and two
+        // other items give the same look to anybody, at a lower price the second time.
+        item("Stormforged Helm", "", {
+          quality: 4, inventoryType: 1, requiredLevel: 60, allowableClass: 0b1,
+        }),
+        item("Stormforged Greathelm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
+        item("Helm of the Tempest", "", { quality: 3, inventoryType: 1, requiredLevel: 45 }),
+        item("Stormforged Breastplate", "", {
+          quality: 4, inventoryType: 5, requiredLevel: 60, allowableClass: 0b1,
+        }),
+        item("Breastplate of the Tempest", "", {
+          quality: 4, inventoryType: 5, requiredLevel: 60,
+        }),
+        // What sets 208 and 209 are both made of: one wardrobe, sold to each faction under a
+        // name of its own.
+        item("Stormbreaker's Helm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
+        item("Stormbreaker's Breastplate", "", {
+          quality: 4, inventoryType: 5, requiredLevel: 60,
+        }),
       ],
       idList: [
         30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015,
-        30016, 30013,
+        30016, 30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
       ],
     },
     {
@@ -664,9 +762,9 @@ const itemSparse: TableSpec = {
       // neither can 30011, whose appearance the readable tables do describe.
       key: 0x4e91d2c73b05a86fn,
       rows: [
-        item("Duskwoven Cowl", "", 528, 4, 1),
-        item("Duskwoven Wraps", "", 528, 4, 9),
-        item("Unreleased Trinket", "", 600, 5, 12),
+        item("Duskwoven Cowl", "", { quality: 4, inventoryType: 1 }),
+        item("Duskwoven Wraps", "", { quality: 4, inventoryType: 9 }),
+        item("Unreleased Trinket", "", { quality: 5, inventoryType: 12 }),
       ],
       idList: [30011, 30012, 30900],
     },

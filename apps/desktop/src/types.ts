@@ -417,6 +417,33 @@ export interface TransmogSet {
   /** The patch the set arrived in, written as major then two digits each of minor and patch. */
   patchIntroduced: number;
   itemCount: number;
+  /**
+   * The other sets holding exactly this set's appearances, where this is the one shown.
+   *
+   * Absent for all but 329 of the game's sets. See `sameLookAs` for the other end of it.
+   */
+  alternates?: Alternate[];
+  /**
+   * The set this one is shown under, when it is not the one shown. Absent otherwise.
+   *
+   * 436 sets of a shipping install carry one. They stay in the payload — the counts above are
+   * about what the game holds — and the grid leaves them out while still searching their names.
+   */
+  sameLookAs?: number;
+}
+
+/** Why two sets that hold exactly the same appearances are two sets at all. */
+export type SameLookReason = "faction" | "class" | "reissue";
+
+/** A set that is another set's clothes, named so the one shown can say who else wears it. */
+export interface Alternate {
+  id: number;
+  name: string;
+  group: string;
+  classMask: number;
+  expansionId: number;
+  patchIntroduced: number;
+  reason: SameLookReason;
 }
 
 export interface TransmogPayload {
@@ -452,6 +479,18 @@ export interface TransmogAppearance {
    * above cover a sword, a bow, a shield and a tome between them and distinguish none of it.
    */
   inventoryType: number;
+  /**
+   * Who may wear the item, as a bit per class, or `0xffff` for anybody.
+   *
+   * This and the two below it are facts about the *item* rather than about the appearance,
+   * and they are here because several items reach one appearance and this is what tells them
+   * apart. Zero where the game withholds the item.
+   */
+  allowableClass: number;
+  /** The level a character has to have reached to equip it. Zero is the ordinary answer. */
+  requiredLevel: number;
+  /** The colour the game writes the name in: 0 poor, 2 uncommon, 4 epic, 5 legendary. */
+  quality: number;
   displayInfoId: number;
   /** The game's icon for it, as a FileDataID, or zero when it names none. */
   iconFileDataId: number;

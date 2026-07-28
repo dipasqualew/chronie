@@ -907,12 +907,14 @@ mod tests {
         pub const TEXT: [usize; 5] = [1, 2, 3, 4, 5];
         pub const DESCRIPTION: usize = 1;
         pub const NAME: usize = 5;
-        /// The three columns behind the strings, which only a reader that walked them finds.
-        pub const ITEM_LEVEL: usize = 6;
-        pub const QUALITY: usize = 7;
-        /// And the far one, sixty columns further on, which is where the install keeps
-        /// `InventoryType` — the column that says which hand a weapon goes in.
+        /// The four columns behind the strings, which only a reader that walked them finds,
+        /// and which are where the install keeps them: who may wear the thing, what it takes
+        /// to wear it, which hand a weapon goes in, and what it is worth. The nearest is
+        /// fifty columns past the last string and the furthest sixty-two.
+        pub const ALLOWABLE_CLASS: usize = 52;
+        pub const REQUIRED_LEVEL: usize = 65;
         pub const INVENTORY_TYPE: usize = 66;
+        pub const QUALITY: usize = 67;
     }
 
     fn table(fdid: u32) -> Db2 {
@@ -982,6 +984,9 @@ mod tests {
                 (204, 8801, 0),
                 (205, 0, 0),
                 (206, 0, 44),
+                (207, 0, 0),
+                (208, 0, 0),
+                (209, 0, 0),
             ]
         );
     }
@@ -999,6 +1004,9 @@ mod tests {
                 "Emberforge Scales",
                 "Duskwoven Shroud",
                 "Lantern-Keeper's Coat",
+                "Stormforged Vestments",
+                "Stormbreaker's Warplate",
+                "Stormbreaker's Battleplate",
             ]
         );
         assert_eq!(
@@ -1016,7 +1024,10 @@ mod tests {
     #[test]
     fn takes_ids_from_an_id_list_or_from_the_row_itself() {
         // `TransmogSet` keeps its ids in a column of the row.
-        assert_eq!(ids(&table(TRANSMOG_SET)), vec![201, 202, 203, 204, 205, 206]);
+        assert_eq!(
+            ids(&table(TRANSMOG_SET)),
+            vec![201, 202, 203, 204, 205, 206, 207, 208, 209]
+        );
         // `TransmogSetGroup` keeps them in a list beside the rows, and 7 is the copy.
         assert_eq!(ids(&table(TRANSMOG_SET_GROUP)), vec![1, 2, 3, 7]);
     }
@@ -1027,7 +1038,7 @@ mod tests {
     fn reads_a_copied_row_under_its_new_id_with_the_data_it_copied() {
         let table = table(TRANSMOG_SET_ITEM);
         let rows: Vec<Row<'_>> = table.rows().collect();
-        assert_eq!(rows.len(), 17);
+        assert_eq!(rows.len(), 26);
 
         let original = rows.iter().find(|row| row.id() == 1).unwrap();
         let copy = rows
@@ -1053,8 +1064,8 @@ mod tests {
     #[test]
     fn skips_a_section_that_arrived_encrypted_but_still_counts_it() {
         let sets = table(TRANSMOG_SET);
-        assert_eq!(sets.rows().count(), 6);
-        assert_eq!(sets.declared_rows(), 8);
+        assert_eq!(sets.rows().count(), 9);
+        assert_eq!(sets.declared_rows(), 11);
         assert!(!names(&sets, set::NAME).iter().any(|name| name.contains("Unreleased")));
         assert!(!ids(&sets).contains(&900));
 
@@ -1327,6 +1338,13 @@ mod tests {
                 (30016, "Emberforge Censer".into()),
                 // The row the table holds and puts no name in.
                 (30013, String::new()),
+                (30017, "Stormforged Helm".into()),
+                (30018, "Stormforged Greathelm".into()),
+                (30019, "Helm of the Tempest".into()),
+                (30020, "Stormforged Breastplate".into()),
+                (30021, "Breastplate of the Tempest".into()),
+                (30022, "Stormbreaker's Helm".into()),
+                (30023, "Stormbreaker's Breastplate".into()),
             ]
         );
     }
@@ -1334,38 +1352,54 @@ mod tests {
     // The strings are in the record rather than in a block of their own, and the columns
     // behind them are only findable by walking past them — so reading a number out of one is
     // what says the walk happened. A reader that trusted the offsets the file declares finds
-    // the level of a short-named item somewhere inside the name of another.
+    // the quality of a short-named item somewhere inside the name of another.
+    //
+    // Sixty-two columns of walk, and the last three are adjacent: a reader that lost count
+    // anywhere along the way reads the required level as the slot, or the slot as the quality.
     #[test]
     fn reads_the_columns_behind_an_inline_string() {
         let table = sparse_table();
-        let read: Vec<(String, u32, u32, u32)> = table
+        let read: Vec<(String, u32, u32, u32, u32)> = table
             .rows()
             .map(|row| {
                 (
                     row.text(sparse::NAME),
-                    row.number(sparse::ITEM_LEVEL),
-                    row.number(sparse::QUALITY),
+                    row.number(sparse::ALLOWABLE_CLASS),
+                    row.number(sparse::REQUIRED_LEVEL),
                     row.number(sparse::INVENTORY_TYPE),
+                    row.number(sparse::QUALITY),
                 )
             })
             .collect();
+        const ANY: u32 = 0xffff;
         assert_eq!(
             read,
             vec![
-                ("Tideglass Crown".into(), 447, 4, 1),
-                ("Tideglass Mantle".into(), 447, 4, 3),
-                ("Tideglass Robe".into(), 450, 4, 5),
-                ("Tideglass Sandals".into(), 447, 3, 8),
-                ("Tideglass Gloves".into(), 447, 3, 10),
-                ("Emberforge Helm".into(), 489, 4, 1),
-                ("Emberforge Pauldrons".into(), 489, 4, 3),
-                ("Emberforge Breastplate".into(), 502, 5, 5),
-                ("Emberforge Greaves".into(), 489, 4, 7),
-                ("Emberforge Blade".into(), 502, 5, 13),
-                ("Emberforge Greatsword".into(), 502, 5, 17),
-                ("Emberforge Aegis".into(), 502, 5, 14),
-                ("Emberforge Censer".into(), 502, 5, 23),
-                (String::new(), 421, 1, 4),
+                ("Tideglass Crown".into(), ANY, 0, 1, 4),
+                ("Tideglass Mantle".into(), ANY, 0, 3, 4),
+                // The one row with a description, so it is longer than the rest and every
+                // column behind its strings sits somewhere else in the file.
+                ("Tideglass Robe".into(), ANY, 0, 5, 4),
+                ("Tideglass Sandals".into(), ANY, 0, 8, 3),
+                ("Tideglass Gloves".into(), ANY, 0, 10, 3),
+                ("Emberforge Helm".into(), ANY, 0, 1, 4),
+                ("Emberforge Pauldrons".into(), ANY, 0, 3, 4),
+                ("Emberforge Breastplate".into(), ANY, 0, 5, 5),
+                ("Emberforge Greaves".into(), ANY, 0, 7, 4),
+                ("Emberforge Blade".into(), ANY, 0, 13, 5),
+                ("Emberforge Greatsword".into(), ANY, 0, 17, 5),
+                ("Emberforge Aegis".into(), ANY, 0, 14, 5),
+                ("Emberforge Censer".into(), ANY, 0, 23, 5),
+                (String::new(), ANY, 0, 4, 1),
+                // The items a class restriction separates from the two that give the same
+                // look to anybody, which is the one disagreement worth reading this far for.
+                ("Stormforged Helm".into(), 0b1, 60, 1, 4),
+                ("Stormforged Greathelm".into(), ANY, 60, 1, 4),
+                ("Helm of the Tempest".into(), ANY, 45, 1, 3),
+                ("Stormforged Breastplate".into(), 0b1, 60, 5, 4),
+                ("Breastplate of the Tempest".into(), ANY, 60, 5, 4),
+                ("Stormbreaker's Helm".into(), ANY, 60, 1, 4),
+                ("Stormbreaker's Breastplate".into(), ANY, 60, 5, 4),
             ]
         );
     }
@@ -1388,8 +1422,8 @@ mod tests {
     #[test]
     fn skips_the_variable_records_of_a_section_it_cannot_decrypt() {
         let table = sparse_table();
-        assert_eq!(table.rows().count(), 14);
-        assert_eq!(table.declared_rows(), 17);
+        assert_eq!(table.rows().count(), 21);
+        assert_eq!(table.declared_rows(), 24);
         for id in [30011, 30012, 30900] {
             assert!(!table.rows().any(|row| row.id() == id), "{id} was decrypted");
         }
@@ -1401,14 +1435,14 @@ mod tests {
     #[test]
     fn reads_a_variable_table_no_further_than_its_first_string_when_told_of_none() {
         let table = Db2::parse(fixture_files().read(ITEM_SPARSE).unwrap()).unwrap();
-        assert_eq!(table.rows().count(), 14);
+        assert_eq!(table.rows().count(), 21);
         assert_eq!(
             table.rows().map(|row| row.id()).take(3).collect::<Vec<u32>>(),
             vec![30001, 30002, 30003]
         );
         for row in table.rows() {
             row.text(sparse::NAME);
-            row.number(sparse::ITEM_LEVEL);
+            row.number(sparse::QUALITY);
         }
     }
 

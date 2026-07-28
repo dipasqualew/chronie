@@ -18,6 +18,11 @@ const row = (fields: Partial<AppearanceRow> = {}): AppearanceRow => ({
   displayInfoId: 100,
   iconFileDataId: 0,
   hasModel: false,
+  sources: [{
+    label: "Something", itemId: 1, modifiedAppearanceId: 1, inventoryType: 0,
+    allowableClass: 0xffff, requiredLevel: 0, quality: 4, itemCount: 1,
+  }],
+  liftsRestriction: false,
   withheld: false,
   ...fields,
 });
