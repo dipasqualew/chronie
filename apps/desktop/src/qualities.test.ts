@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NO_QUALITIES, colourName, indexQualities, qualitySummary, qualityWords,
+  COLOUR, NO_QUALITIES, SIZE, colourName, indexQualities, qualityFacets, qualitySummary,
+  qualityWords,
 } from "./qualities";
 import type { Quality, QualitiesFile } from "./types";
 
@@ -115,6 +116,32 @@ describe("what a measured look adds to a search", () => {
   // often enough to be a nuisance.
   it("is not the hex", () => {
     expect(qualityWords(quality(1, { primary: "#e02020" }))).not.toContain("e02020");
+  });
+});
+
+describe("what a measured look adds to the terms the search box reads", () => {
+  // Both colours under the one key a reader would type: somebody looking at two swatches is
+  // looking at a thing that is brown and yellow, and which of them the measurement called the
+  // fuller is a detail of the measuring rather than a question anybody asks.
+  it("puts both colours under the one key, and the size under its own", () => {
+    expect(qualityFacets(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" })))
+      .toEqual([
+        { key: COLOUR, value: "brown" },
+        { key: COLOUR, value: "yellow" },
+        { key: SIZE, value: "large" },
+      ]);
+  });
+
+  // A look that is all one colour has no accent and a slot with no mesh to measure has no size,
+  // and neither is a facet with nothing in it — `colour:` is a question about what was measured
+  // and would be answered by every row in the store if the gaps were offered as answers.
+  it("leaves out what the store could not measure", () => {
+    expect(qualityFacets(quality(1, { primary: "#e02020" })))
+      .toEqual([{ key: COLOUR, value: "red" }]);
+  });
+
+  it("says nothing at all about a look the store does not hold", () => {
+    expect(qualityFacets(undefined)).toEqual([]);
   });
 });
 

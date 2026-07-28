@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NO_MARK_FILTER, choiceOf, indexMarks, markWords, marksNarrow, sameKey, survivesMarks,
-  tagChoices, tagLabel, tokenOf,
+  NO_MARK_FILTER, choiceOf, indexMarks, markFacets, markWords, marksNarrow, sameKey,
+  survivesMarks, tagChoices, tagLabel, tokenOf,
 } from "./marks";
 import type { MarkSubjectKind, TransmogMark, TransmogTag } from "./types";
 
@@ -207,5 +207,32 @@ describe("what a mark adds to the search box", () => {
   it("says nothing about a subject nobody has touched", () => {
     expect(markWords(undefined)).toBe("");
     expect(markWords(mark("set", 1))).toBe("");
+  });
+});
+
+describe("what a mark adds to the terms the search box reads", () => {
+  // The reason a tag was ever a key and a value: "horde" typed as a word finds the Horde's own
+  // collections too, and `faction:horde` is the reader saying they meant the thing they filed.
+  it("gives a property its value and a label none", () => {
+    expect(markFacets(mark("set", 1, { tags: [tag("faction", "horde"), tag("wishlist")] })))
+      .toEqual([{ key: "faction", value: "horde" }, { key: "wishlist", value: "" }]);
+  });
+
+  // The reader's own spelling, because it is theirs and it is what the chip prints. Whether
+  // "Faction" answers `faction:` is settled where the term is matched, not here.
+  it("keeps a key exactly as it was typed", () => {
+    expect(markFacets(mark("set", 1, { tags: [tag("Faction", "Horde")] })))
+      .toEqual([{ key: "Faction", value: "Horde" }]);
+  });
+
+  // A star is a checkbox above the list rather than a word under a key, and the box beside it
+  // already reads it as one of the words — see `markWords`.
+  it("says nothing under a name about a star", () => {
+    expect(markFacets(mark("set", 1, { favourite: true }))).toEqual([]);
+  });
+
+  it("says nothing at all about a subject nobody has touched", () => {
+    expect(markFacets(undefined)).toEqual([]);
+    expect(markFacets(mark("set", 1))).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { NO_MARK_FILTER, indexMarks, tokenOf } from "./marks";
 import type { MarkFilter } from "./marks";
+import { indexQualities } from "./qualities";
 import {
   alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
 } from "./transmog";
@@ -431,5 +432,102 @@ describe("narrowing the grid to what the reader said about it", () => {
   it("says nothing about marks when it was given none", () => {
     expect(filterSets(sets, { search: "", expansion: "", klass: "" })).toHaveLength(3);
     expect(filterSets(sets, { search: "horde", expansion: "", klass: "" })).toHaveLength(0);
+  });
+});
+
+describe("asking the grid for one thing a set says", () => {
+  const sets = [
+    set({
+      id: 301, name: "Wild Combatant's Plate Armor", group: "Wild Gladiator",
+      classMask: 0x0023, expansionId: 5, patchIntroduced: 60200,
+      alternates: [alternate({
+        id: 312, name: "Ebon Blade Battlegear", group: "Knightly Vanguard",
+        classMask: 1 << 9, expansionId: 9, reason: "class",
+      })],
+    }),
+    set({
+      id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe",
+      classMask: 0x0190, expansionId: 3, patchIntroduced: 40001,
+    }),
+  ];
+  const marks = indexMarks({
+    marks: [{
+      kind: "set", id: 201, favourite: false,
+      tags: [{ key: "faction", value: "horde" }, { key: "wishlist", value: null }],
+    }],
+  });
+  const measured = indexQualities({
+    build: "12.0.5.67823",
+    sets: [{ id: 301, primary: "#4a3b2c" }, { id: 201, primary: "#2060e0", accent: "#f6f6f6" }],
+  });
+  const found = (search: string): number[] => filterSets(sets, {
+    search,
+    expansion: "",
+    klass: "",
+    marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("set", id) },
+    qualities: (id) => measured.of(id),
+  }).map((one) => one.id);
+
+  // Everything the card already shows, asked for one at a time: a reader looking at "Plate ·
+  // Warlords of Draenor · Patch 6.2.0" can now say which of the three they meant.
+  it.each<[string, string, number[]]>([
+    ["the collection over the card", "collection:tideglass", [201]],
+    ["the armour a class mask names", "class:plate", [301]],
+    ["a class inside the mask", "class:priest", [201]],
+    ["the expansion", "expansion:warlords", [301]],
+    ["the patch", "patch:4.0.1", [201]],
+    ["the name the game gave it", "name:regalia", [201]],
+  ])("finds a set by %s", (_what, search, expected) => {
+    expect(found(search)).toEqual(expected);
+  });
+
+  // Two names on one card, which the one flattened string it used to search could not tell
+  // apart: "Gladiator" is the collection and is no part of what the set itself is called.
+  it("keeps what a set is called apart from the collection it is in", () => {
+    expect(found("collection:gladiator")).toEqual([301]);
+    expect(found("name:gladiator")).toEqual([]);
+  });
+
+  // The whole risk of folding a set away, asked the new way: a fact only the folded version
+  // carries has to answer for the card standing in its place, or the look is unfindable.
+  it.each<[string, string]>([
+    ["a class only the folded set is for", "class:monk"],
+    ["an expansion only the folded set came out in", "expansion:dragonflight"],
+    ["a collection only the folded set is in", "collection:vanguard"],
+  ])("answers %s with the card shown in its place", (_what, search) => {
+    expect(found(search)).toEqual([301]);
+  });
+
+  it("finds a set by a tag the reader wrote against it", () => {
+    expect(found("faction:horde")).toEqual([201]);
+    expect(found("faction:alliance")).toEqual([]);
+  });
+
+  it("takes a bare key as any value the reader filed under it", () => {
+    expect(found("faction:")).toEqual([201]);
+  });
+
+  // The thing this grid could not do at all: nothing in the game's own words about the Wild
+  // Combatant's armour says that it is brown, and now both ways of asking find it.
+  it("finds a set by the colour its artwork was measured to be", () => {
+    expect(found("brown")).toEqual([301]);
+    expect(found("colour:brown")).toEqual([301]);
+  });
+
+  it("narrows on every term together", () => {
+    expect(found("class:plate expansion:warlords")).toEqual([301]);
+    expect(found("class:plate expansion:cataclysm")).toEqual([]);
+  });
+
+  it("reads a word beside a term", () => {
+    expect(found("colour:blue tideglass")).toEqual([201]);
+    expect(found("colour:blue gladiator")).toEqual([]);
+  });
+
+  // An empty grid is the answer to "which of these is large", the sets' file measuring no
+  // sizes at all — rather than the term being dropped and the grid left as it was.
+  it("leaves an empty grid for a term nothing carries", () => {
+    expect(found("size:large")).toEqual([]);
+    expect(found("colour:pink")).toEqual([]);
   });
 });

@@ -21,6 +21,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { tagLabel } from "./marks";
+import { termText } from "./terms";
 import { Star } from "./ui";
 import type { MarkSubjectKind, TransmogMark, TransmogMarksPayload } from "./types";
 
@@ -58,6 +59,16 @@ export interface MarkControlsProps {
    */
   name: string;
   actions: MarkActions;
+  /**
+   * What the list wants asked of it when a tag is clicked, where it takes terms at all.
+   *
+   * A tag is a `key: value` and the box above the list reads `key:value`, so the chip is the way
+   * in: click "faction: horde" and the list narrows to what carries it, with the term written out
+   * in the box where a second one can be added beside it. Absent on a row that is not part of the
+   * list being filtered — a look inside an opened set is drawn under a box that filters *sets*,
+   * and a chip there that narrowed the grid by its own tag would be answering another question.
+   */
+  onFilter?: (term: string) => void;
 }
 
 /**
@@ -72,7 +83,7 @@ export function canBeMarked(id: number): boolean {
 }
 
 export function MarkControls(
-  { kind, id, mark, name, actions }: MarkControlsProps,
+  { kind, id, mark, name, actions, onFilter }: MarkControlsProps,
 ): ReactNode {
   const [adding, setAdding] = useState(false);
   const [key, setKey] = useState("");
@@ -109,8 +120,15 @@ export function MarkControls(
         <span className="chip mark-tag" key={tag.key.toLowerCase()}>
           {/* In its own element rather than as a bare text node, so that what the tag says
               can be read on its own — the × beside it is part of the chip and not part of
-              the sentence. */}
-          <span className="mark-tag-text">{tagLabel(tag)}</span>
+              the sentence. And a button wherever the list beneath can be narrowed by it, which
+              is how a reader gets from "I filed six of these under horde" to seeing the six. */}
+          {onFilter
+            ? <button
+              type="button" className="mark-tag-text mark-tag-ask"
+              aria-label={`Filter by ${tagLabel(tag)}`} title={`Filter by ${tagLabel(tag)}`}
+              onClick={() => onFilter(termText(tag.key, tag.value))}
+            >{tagLabel(tag)}</button>
+            : <span className="mark-tag-text">{tagLabel(tag)}</span>}
           <button
             type="button" className="mark-drop"
             aria-label={`Remove the tag ${tagLabel(tag)} from ${name}`}

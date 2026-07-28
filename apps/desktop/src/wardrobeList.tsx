@@ -54,6 +54,7 @@ import type { Outfit } from "./outfit";
 import { NO_QUALITIES, indexQualities, loadQualities as loadStore } from "./qualities";
 import type { QualityIndex } from "./qualities";
 import { Qualities } from "./qualitiesChips";
+import { withTerm } from "./terms";
 import { CLASSES } from "./transmog";
 import { LinkOut } from "./ui";
 import { ANY_CLASS, qualityLabel, wearerLabel } from "./transmogModal";
@@ -311,6 +312,10 @@ export function WardrobeList(
     setShown(page);
   };
 
+  /** A chip on a row, clicked: the term it stands for goes into the box beside the others. */
+  const askFor = (term: string): void =>
+    narrow(() => setSearch((was) => withTerm(was, term)));
+
   return (
     <section className="panel mog-browser" id="wardrobe" hidden={hidden}>
       <div className="table-head">
@@ -329,8 +334,11 @@ export function WardrobeList(
               </optgroup>
             ))}
           </select>
+          {/* The terms in the placeholder rather than in a note under the box: `colour:brown` is
+              not a thing anybody guesses, and the row of chips below is the other half of how it
+              is found out — see `terms.ts`. */}
           <input
-            id="wardrobe-search" type="search" placeholder="Filter by name…"
+            id="wardrobe-search" type="search" placeholder="Filter by name, or colour:brown…"
             aria-label="Filter appearances" value={search}
             onChange={(event) => narrow(() => setSearch(event.target.value))}
           />
@@ -387,6 +395,7 @@ export function WardrobeList(
               icon={icons.get(row.iconFileDataId)} marks={marks}
               mark={index.of("appearance", row.appearanceId)}
               quality={qualityOf(row.appearanceId)} onWear={() => onWear(row)}
+              onFilter={askFor}
               body={asModels ? bodies.get(row.displayInfoId) : undefined} paint={paint}
             />
           ))}
@@ -419,7 +428,7 @@ export function WardrobeList(
  * otherwise put a piece on the character every time somebody looked at the back of a helm.
  */
 function Look(
-  { row, worn, icon, marks, mark, quality, onWear, body, paint }: {
+  { row, worn, icon, marks, mark, quality, onWear, onFilter, body, paint }: {
     row: AppearanceRow;
     worn: boolean;
     icon?: string;
@@ -429,6 +438,8 @@ function Look(
     /** What the committed store measured of it, or nothing where it holds no row. */
     quality: Quality | undefined;
     onWear: () => void;
+    /** What a chip on this row asks of the list it is in when it is clicked — see `terms.ts`. */
+    onFilter: (term: string) => void;
     /**
      * The picture of this look, when the gallery is on and one has arrived.
      *
@@ -456,9 +467,10 @@ function Look(
     {/* Before what the reader said about it, because it is of the same kind as the game's own
         facts beside it — measured rather than typed — and because it is what the eye is
         actually looking for in a list of five thousand chestpieces. */}
-    <Qualities quality={quality} />
+    <Qualities quality={quality} onFilter={onFilter} />
     <MarkControls
       kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
+      onFilter={onFilter}
     />
     {source.allowableClass !== 0 && source.allowableClass !== ANY_CLASS
       ? <span className="chip">{wearerLabel(source.allowableClass)}</span>

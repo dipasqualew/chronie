@@ -1228,6 +1228,17 @@
   }
   .quality-swatch { flex: none; display: block; }
   .quality-said { white-space: nowrap; }
+  /* Every part of the chip narrows the list to what that part says — see `terms.ts`. It has to
+     stay looking like the chip it was rather than like a button, because it is still the row
+     saying what it is; the underline on hover is the whole of what says it can be clicked. */
+  .quality-ask {
+    flex: none; display: inline-flex; align-items: center; padding: 0; border: 0;
+    background: none; font: inherit; color: inherit; cursor: pointer;
+  }
+  .quality-ask:hover, .quality-ask:focus-visible { text-decoration: underline; }
+  .quality-ask:hover .quality-swatch, .quality-ask:focus-visible .quality-swatch {
+    outline: 1px solid var(--text-secondary); outline-offset: 1px; border-radius: 3px;
+  }
 
   /* The star and the tags, on a set's card and on every row of both browsers. It wraps to a
      line of its own inside a card and sits inline on a row, which is the whole reason it is a
@@ -1252,6 +1263,14 @@
     max-width: 100%; overflow: hidden;
   }
   .mark-tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* And where the list under it takes terms, the words are the way to ask for them. A button
+     dressed as the text it replaced, for the reason the quality chip's is: what it says is still
+     the tag, and the underline is what says it does something. */
+  .mark-tag-ask {
+    padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer;
+    text-align: left;
+  }
+  .mark-tag-ask:hover, .mark-tag-ask:focus-visible { text-decoration: underline; }
   .mark-drop {
     flex: none; padding: 0 3px; border: 0; border-radius: 4px; background: none;
     font: inherit; line-height: 1; color: var(--text-secondary); cursor: pointer;

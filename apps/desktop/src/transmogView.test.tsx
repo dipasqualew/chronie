@@ -1804,6 +1804,165 @@ describe("what the reader says about the wardrobe", () => {
 });
 
 /**
+ * Asking for a look by clicking what is written on it, rather than by knowing what to type.
+ *
+ * A chip states one thing about a row under a name — brown, large, `faction: horde` — and the box
+ * above the list reads exactly that shape of question. So every chip is the way in: clicking one
+ * writes its term into the box, and that is also the whole of how anybody finds out the box takes
+ * terms at all. What a term means and how one parses is `terms.test.ts`; what these ask is the
+ * other half, which only the assembled view can answer — that the chip a reader can see and the
+ * box above it are wired to each other, and that a chip on a row the box does not filter is not
+ * offered as a way of filtering it.
+ */
+describe("narrowing a list by clicking what is written on it", () => {
+  /** The one box above the wardrobe, which is where a clicked chip writes what it asks for. */
+  const box = (): HTMLInputElement =>
+    screen.getByLabelText("Filter appearances") as HTMLInputElement;
+
+  /** The row one look is on, which is where its own chips are. */
+  const rowOf = (label: string): HTMLElement => {
+    const row = screen.getByText(label).closest("li");
+    if (!row) throw new Error(`${label} is on no row`);
+    return row as HTMLElement;
+  };
+
+  /** A chip on that row, which is named by what clicking it would ask the list for. */
+  const chip = (label: string, asks: string): HTMLElement =>
+    within(rowOf(label)).getByRole("button", { name: `Filter by ${asks}` });
+
+  /** Waits for the slot's measurements, without which a row has nothing measured to click. */
+  const measured = (): Promise<HTMLElement> =>
+    screen.findByRole("button", { name: "Filter by size: large" });
+
+  // The colour is the whole reason the artwork was measured, and the swatch is the only place a
+  // reader ever meets the word "brown" — so it has to be the way to ask for the brown ones.
+  it("finds the browns when the swatch beside a name is clicked", async () => {
+    await browseItems();
+    await measured();
+
+    fireEvent.click(chip("Coif of the Drowned Star", "colour: brown"));
+
+    expect(box().value).toBe("colour:brown");
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  // And the word beside the swatches asks about the size rather than about the colour, which is
+  // the difference the key in the term is there to keep.
+  it("finds the large ones when the word beside the swatches is clicked", async () => {
+    await browseItems();
+
+    fireEvent.click(await measured());
+
+    expect(box().value).toBe("size:large");
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  // No two parts of one chip ask the same thing. A set is a body's worth of clothes and has no
+  // size, so the word beside its swatches *is* the primary colour's name — and a swatch there
+  // asking for that colour a second time would be two buttons doing one thing under one name,
+  // which is a list to get past for anybody reading the card through a screen reader. A look
+  // with a size is the other case: the word is spent on the size, so the square under it is the
+  // only way to the colour and has to stay a control.
+  it("offers one way to ask for a colour rather than two", async () => {
+    const shown = view();
+    const card = screen.getByRole("button", { name: "Tideglass Regalia" })
+      .closest("article") as HTMLElement;
+    await within(card).findByTitle(/blue and white/);
+
+    // The word says blue and the swatch beside it is blue, and between them there is one button.
+    expect(within(card).getAllByRole("button", { name: "Filter by colour: blue" }))
+      .toHaveLength(1);
+    // The accent is the colour the word does not say, so that square is still a way to ask.
+    expect(within(card).getByRole("button", { name: "Filter by colour: white" })).toBeTruthy();
+
+    // And a look whose word is its size says the two things separately, which is the whole
+    // reason a term carries a key at all.
+    await browseItems(shown);
+    await measured();
+    const row = rowOf("Coif of the Drowned Star");
+    expect(within(row).getByRole("button", { name: "Filter by colour: brown" })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Filter by size: large" })).toBeTruthy();
+  });
+
+  // The reader's own half of it: "I filed six of these under horde" to seeing the six, without
+  // going to the picker for it or remembering what they called it.
+  it("finds what the reader filed a look under from the tag written on it", async () => {
+    await browseItems(view({
+      marks: fakeMarks([
+        {
+          kind: "appearance", id: 40, favourite: false,
+          tags: [{ key: "faction", value: "horde" }],
+        },
+      ]),
+    }));
+    await screen.findByText("Emberforge Helm");
+
+    fireEvent.click(chip("Coif of the Drowned Star", "faction: horde"));
+
+    expect(box().value).toBe("faction:horde");
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  // Narrowing is the point of a second click, so the second term is added to the first rather
+  // than put in its place. Both looks carry the label, so a box that replaced would hand the
+  // helm back — which is what nobody who clicked two chips is asking for.
+  it("asks for both when a second chip is clicked, rather than for the second one", async () => {
+    await browseItems(view({
+      marks: fakeMarks([
+        {
+          kind: "appearance", id: 40, favourite: false,
+          tags: [{ key: "faction", value: "horde" }, { key: "wishlist", value: null }],
+        },
+        { kind: "appearance", id: 3, favourite: false, tags: [{ key: "wishlist", value: null }] },
+      ]),
+    }));
+    await screen.findByText("Emberforge Helm");
+
+    fireEvent.click(chip("Coif of the Drowned Star", "faction: horde"));
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    fireEvent.click(chip("Coif of the Drowned Star", "wishlist"));
+
+    expect(box().value).toBe("faction:horde wishlist:");
+    expect(screen.queryByText("Emberforge Helm")).toBeNull();
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  // And the same question typed rather than clicked, because the chips are a way to the box and
+  // not a way round it: what a reader can be shown once, they can type ever after.
+  it("narrows a kind by a term typed into the box by hand", async () => {
+    await browseItems();
+    await screen.findByText("Emberforge Helm");
+
+    fireEvent.change(box(), { target: { value: "size:large" } });
+
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  // The rows inside an opened set are looks and the box above that grid filters *sets*, so a
+  // chip there that narrowed the grid by its own tag would be answering another question.
+  it("leaves the chips inside an opened set as the words they were", async () => {
+    view({
+      marks: fakeMarks([
+        { kind: "set", id: 201, favourite: false, tags: [{ key: "faction", value: "horde" }] },
+        { kind: "appearance", id: 1, favourite: false, tags: [{ key: "wishlist", value: null }] },
+      ]),
+    });
+    const card = await open("Tideglass Regalia");
+    const row = rowFor(card, "Wear Head: Crown of Tides");
+
+    expect(within(row).getByText("wishlist")).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Filter by wishlist" })).toBeNull();
+    // The set's own chip on the card above it is a button, so what the row is missing is about
+    // the row rather than about the feature.
+    expect(within(card).getByRole("button", { name: "Filter by faction: horde" })).toBeTruthy();
+  });
+});
+
+/**
  * The third browser: the sets the reader made, which is the other thing on this screen that the
  * game knows nothing about.
  *

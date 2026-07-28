@@ -245,6 +245,55 @@ describe("filterCustomSets", () => {
   });
 });
 
+describe("asking a saved set for one thing it says", () => {
+  const HORDE = set({ id: 1, name: "Horde look" });
+  const ALLIANCE = set({
+    id: 2, name: "Alliance look", pieces: [piece({ name: "Crown of Tides" })],
+  });
+  const tagged: TransmogMark = {
+    kind: "custom", id: 2, favourite: false,
+    tags: [{ key: "faction", value: "alliance" }, { key: "wishlist", value: null }],
+  };
+  const found = (search: string): string[] => filterCustomSets([HORDE, ALLIANCE], {
+    search,
+    marks: { filter: NO_MARK_FILTER, of: (id) => (id === tagged.id ? tagged : undefined) },
+  }).map((one) => one.name);
+
+  // Two kinds of name on one card — the one the reader chose and the ones the game gave the
+  // pieces — which the one flattened string this used to search could not tell apart.
+  it("keeps what a set is called apart from what is in it", () => {
+    expect(found("piece:crown")).toEqual(["Alliance look"]);
+    expect(found("name:crown")).toEqual([]);
+    expect(found("name:alliance")).toEqual(["Alliance look"]);
+  });
+
+  it("finds a saved set by a tag the reader wrote against it", () => {
+    expect(found("faction:alliance")).toEqual(["Alliance look"]);
+    expect(found("faction:horde")).toEqual([]);
+  });
+
+  it("takes a bare key as any value the reader filed under it", () => {
+    expect(found("faction:")).toEqual(["Alliance look"]);
+  });
+
+  it("narrows on two terms together", () => {
+    expect(found("faction:alliance piece:crown")).toEqual(["Alliance look"]);
+    expect(found("faction:alliance piece:robe")).toEqual([]);
+  });
+
+  // Both sets hold something of the Tides, so the word beside the term is what picks one.
+  it("reads a word beside a term", () => {
+    expect(found("piece:tides alliance")).toEqual(["Alliance look"]);
+    expect(found("piece:tides horde")).toEqual(["Horde look"]);
+  });
+
+  // The measured colours are not here and cannot be: what was saved is a body's worth of looks
+  // out of several slots, and the store measures one look at a time.
+  it("leaves an empty list for a term nothing carries", () => {
+    expect(found("colour:brown")).toEqual([]);
+  });
+});
+
 describe("savedSummary", () => {
   const NOW = 2_100_000_000;
 
