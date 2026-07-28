@@ -383,6 +383,11 @@ impl Db2 {
     ///
     /// Copied rows come last. A table can say "row 40 is row 12 again under a new id"
     /// instead of storing it twice, and a caller counting or listing rows wants both.
+    ///
+    /// **A walk costs the whole table however few rows the caller keeps**: the `Vec` and the
+    /// id map below are built before the first row comes out. That is what
+    /// [`crate::budget::note_rows`] is told about, so that a caller walking one table once per
+    /// piece of an outfit shows up as a number a test can hold still.
     pub fn rows(&self) -> impl Iterator<Item = Row<'_>> {
         let direct: Vec<Row<'_>> = self
             .sections
@@ -417,6 +422,7 @@ impl Db2 {
             })
             .collect();
 
+        crate::budget::note_rows(direct.len() + copied.len());
         direct.into_iter().chain(copied)
     }
 
