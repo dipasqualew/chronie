@@ -69,38 +69,60 @@ a queue.
 
 ## The base model, and which one
 
-Two bodies: Human Female and Human Male. Gear is authored to look right on human proportions,
-and Dracthyr, Worgen and Mechagnome carry extra geoset groups and limb handling worth avoiding.
+**Every body of every playable race**, which on build 12.0.5.67823 is fifty-one of them: from the
+Human to the Haranir, male and female, plus the Dracthyr's one model that is neither. Human
+Female is still the default, because gear is authored to look right on human proportions.
 
-**Everything that used to be a constant about the body is now a read**, in `body.rs`, because
-there is more than one of them and the races to come are not all shaped like these two:
+**Nothing about the body is a constant any more**, in `body.rs`. It was one mesh, one layout, one
+2048 × 1024 atlas and ten hard-coded rectangles; every line of it is now a read, because the
+races do not agree about any of them:
 
 | What | Where it comes from |
 |---|---|
-| `Sex` | `ChrModel` col3 — 0 male, 1 female |
-| `CharComponentTextureLayoutID` | `ChrModel` col5 — **103** for the male body, **104** for the female |
+| Which bodies exist | `ChrRaceXChrModel` col0 `ChrRacesID`, col1 `ChrModelID` |
+| Which of those a person can be | `ChrRaces` col15 `Flags`, **bit 0 set = nobody can** |
+| What to call one | `ChrRaces` col2 `Name`, plus the sex below |
+| `Sex` | `ChrModel` col3 — 0 male, 1 female, **3 a body the game gives neither** |
+| `CharComponentTextureLayoutID` | `ChrModel` col5 — **103** for the Human male body, **104** for the female |
 | The section rectangles | `CharComponentTextureSections`, filtered to that layout |
 | The composite atlas size | `ChrModelMaterial`, that layout at `TextureType == 1` |
-| The mesh | **still a constant** — see below |
+| The mesh | `ChrModel` col4 `DisplayID` → `CreatureDisplayInfo` col1 → `CreatureModelData` col2 |
 
-Read off 12.0.5.67 on 2026-07-28, and each agrees with something already written down: `ChrModel`
-2 comes out as layout 104, and 104's ten sections come out as exactly the table below, which
-wago.tools produced independently. The two Human layouts state the same rectangles and the same
-2048 × 1024 atlas as each other — worth knowing and not worth assuming, because the other races'
-layouts do not all agree with them.
+Read off 12.0.5.67823 on 2026-07-28, and each agrees with something already written down:
+`ChrModel` 2 comes out as layout 104, and 104's ten sections come out as exactly the table below,
+which wago.tools produced independently. The two Human layouts state the same rectangles and the
+same 2048 × 1024 atlas as each other — worth knowing and not worth assuming, because the other
+races' layouts do not all agree with them.
 
-**The mesh is the one hop still not read from the install.** The chain is `ChrModel.DisplayID` →
-`CreatureDisplayInfo.ModelID` → `CreatureModelData.FileDataID`, and it works — `ChrModel` 2 goes
-56658 → 7599 → **1000764**, and `ChrModel` 1 goes 57899 → 7661 → **1011653** — but the
-FileDataIDs of those two tables are not known to this repository, and scanning the storage for
-them came up empty. So the last hop was followed on [wago.tools](https://wago.tools) and the two
-answers are constants in `body::KNOWN`, each with a render behind it: the body parses, its
-geosets are the ones a body of that sex has, its own skin paints onto it seamlessly, and a leg
-appearance lands on its legs. `1005887` — which a scan offered first — failed exactly that test,
-drawing a hooved, horned body wearing a Human's skin. Finding those two tables is what the races
-after these two need.
+**The mesh used to be the one hop not read**, and it is the reason this was two bodies for as
+long as it was. The chain was known to work — `ChrModel` 2 goes 56658 → 7599 → **1000764** and
+`ChrModel` 1 goes 57899 → 7661 → **1011653** — but `CreatureDisplayInfo`'s and
+`CreatureModelData`'s own FileDataIDs were not known here, so the last hop was followed on
+[wago.tools](https://wago.tools) and the two answers were constants. They are **1108759** and
+**1365368**, out of the [community listfile](https://github.com/wowdev/wow-listfile), and
+following the chain in the install reproduces both of those numbers exactly. It also reproduces
+`1005887` for `ChrModel` 21 — the hooved, horned body a scan once offered for the Human Female,
+which turns out to be the Draenei Male and to have been right about everything except whose it
+was.
+
+**What "playable" means is the game's own answer, and it is one bit.** `ChrRaces`'s first flag is
+set on every race nobody can make, and clearing it leaves exactly the thirty-one the character
+creation screen offers. Three of the ones it excludes are subtler than the Naga and the Vrykul,
+because every other column of theirs reads like a playable race's: the Gilnean a Worgen was, the
+`ThinHuman` the game keeps for cutscenes, and the visage a Dracthyr wears — a form of a race
+rather than a race to be. Those thirty-one name fifty-one distinct `ChrModel`s, because the
+Pandaren's two bodies are shared by all three of their races, the Earthen's and the Haranir's by
+both of theirs, and the Dracthyr's single body by both of theirs *and* by both sexes.
 
 `humanfemale.m2` (119563) is the *vanilla* model. Retail uses the `_hd` one.
+
+**A body the game gives no sex is not a body with a missing column.** `ChrModel` 89, the
+Dracthyr's, states sex 3 — one model both sexes wear — and it is the only such body on offer.
+Two things downstream ask a body its sex, and neither may read that as a third option:
+`ItemDisplayInfo.HelmetGeosetVis` has two entries and reading past them comes back zero, which is
+the game's word for a helm that hides nothing, so `Body::helmet_slot` clamps to the first; and
+`ComponentTextureFileData`'s gender narrowing falls through to what the game marks as fitting any
+body, which is what a Dracthyr's armour is authored as.
 
 **Which body, and which of that body, are both the reader's.** Every question the game's own
 character creation screen asks about the chosen `ChrModel` is read out of the install and
@@ -115,27 +137,39 @@ Two things about an answer are checked rather than believed, because the setting
 an install: a question this `ChrModel` has not got, and a swatch that belongs to another
 question. `ChrCustomizationChoice` is one table for every playable body in the game, so an
 unchecked answer resolves to somebody else's hairstyle. Both are dropped and the question falls
-back to the swatch the game opens on. A stored *body* this build has no mesh for falls back the
+back to the swatch the game opens on. A stored *body* this install does not offer falls back the
 same way, to the Human Female.
+
+**A swatch's geoset can decline in two opposite ways, and one of them is a row to drop.**
+`ChrCustomizationGeoset` states a group and a value, and `0` means the group is switched off —
+which has to be kept, or a character wears the necklace she declined. `-1` is the other thing,
+and it is the same sentinel `ItemDisplayInfo.GeosetGroup` carries: no geoset at all. Read as a
+value it is 65,535, and `group × 100` on top of that is not a number the body could hold. Every
+row of the shipping table that says it is on a race added after the two this app used to draw —
+twenty-odd of them, all in group 17, the eye glow — which is why nothing had to know until every
+race was drawable.
 
 ```sh
 cargo run --example dump_bodies -- "/Applications/World of Warcraft"
 bun run render character him.png --install "/Applications/World of Warcraft" --body 1 --as 11:48
 ```
 
-**`ChrModel.ID` 2 is now load-bearing rather than decorative.** `ChrCustomizationOption`
-describes every playable body at once and it is the only column that says which rows are this
-one's — so a wrong id here is no longer a body that still draws, it is another race's head. It
-is still the community's number, and what stands behind it is that filtering on it yields
-thirteen options whose names read as a Human's and whose geosets land on this body's parts.
+**`ChrModel.ID` is load-bearing rather than decorative.** `ChrCustomizationOption` describes
+every playable body at once and it is the only column that says which rows are this one's — so a
+wrong id is not a body that still draws, it is another race's head. It is no longer a number this
+app has to be told: `ChrRaceXChrModel` is where the ids come from, and what stands behind 2 in
+particular is that filtering on it yields thirteen options whose names read as a Human's and
+whose geosets land on that body's parts.
 
-**The two community values have now been rendered, which is not the same as read.** Nothing
-here has opened `ChrModel` — but 1000764 parses as a Human Female body, and a leg appearance
-composited into layout 104's sections 5 and 6 comes out painted on that body's legs and
-nowhere else (`scripts/render-model.ts`, display 712245, build 12.0.5.67). Three guesses in a
-row landing armour on the right limb is not proof of the ids, and it does rule out the failure
-they were suspected of. `dump_paint` prints the arithmetic behind it: which of the body's parts
-survive geoset selection, and which of the layout's rectangles those parts' UVs actually read.
+**Every number on the chain has now been rendered as well as read**, which is a different claim
+and the one that matters. 1000764 parses as a Human Female body, and a leg appearance composited
+into layout 104's sections 5 and 6 comes out painted on that body's legs and nowhere else
+(`scripts/render-model.ts`, display 712245, build 12.0.5.67). Five races were put through the
+same instrument on 2026-07-28 — Draenei Male, Worgen Male, Pandaren Female, Dracthyr, Haranir
+Male — and each drew as itself: its own skin and body paint seamless on its own mesh, hooves,
+tail, talons and ears where they belong. `dump_paint` prints the arithmetic behind it: which of
+the body's parts survive geoset selection, and which of the layout's rectangles those parts' UVs
+actually read.
 
 The atlas size comes from `ChrModelMaterial` where the layout is 104 and
 `TextureType == 1`; observed on this build as `[layout 104, texType 1, 2048, 1024]`.

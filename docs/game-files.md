@@ -133,6 +133,10 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `ChrModelMaterial` | 3566562 | fixed | yes |
 | `ChrModelTextureLayer` | 3548976 | fixed | yes |
 | `ChrModel` | 3384313 | fixed | yes, **columns read** |
+| `ChrRaces` | 1305311 | fixed | yes, **columns read** |
+| `ChrRaceXChrModel` | 3490304 | fixed | yes |
+| `CreatureDisplayInfo` | 1108759 | fixed | yes, 119,028 rows |
+| `CreatureModelData` | 1365368 | fixed | yes, id beside the rows |
 | `ChrCustomizationChoice` | 3450554 | fixed | yes |
 | `ChrCustomizationOption` | 3384247 | fixed | yes |
 | `ChrCustomizationElement` | 3512765 | fixed | yes |
@@ -690,13 +694,27 @@ Layout 104's ten sections come out as exactly the table
 states a size per layout as well — two columns, width then height — and is not read, because
 `ChrModelMaterial` states one per *texture type* and the body's is the one that matters.
 
-**The mesh is not reachable from this repository yet.** `ChrModel.DisplayID` →
-`CreatureDisplayInfo.ModelID` → `CreatureModelData.FileDataID` is the chain, and it resolves:
-56658 → 7599 → 1000764 for the female body and 57899 → 7661 → 1011653 for the male. Neither of
-those two tables' own FileDataIDs is known here — a scan of the storage for a table holding
-1000764 found none — so the last hop was followed on [wago.tools](https://wago.tools) and the
-two answers are constants in `body::KNOWN`, each with a render behind it. Finding those two
-tables is the first thing the next race needs.
+### The mesh, and which races there are, verified
+
+`ChrModel.DisplayID` → `CreatureDisplayInfo.ModelID` (col1) → `CreatureModelData.FileDataID`
+(col2) is the chain to a body's mesh, and it resolves: 56658 → 7599 → 1000764 for the female
+body and 57899 → 7661 → 1011653 for the male. Those two answers used to be constants, because
+neither table's own FileDataID was known here and a scan of the storage for a table holding
+1000764 found none. They are **1108759** and **1365368**, out of the community listfile, and
+following the chain in the install reproduces both constants exactly and resolves all fifty-one
+playable bodies besides. `CreatureModelData` keeps its ids **beside** the rows and its own
+column 0 is a name hash large enough to read as a plausible anything, which is the pair's trap.
+
+Which bodies those are comes from two more tables. `ChrRaceXChrModel` is a row per race and
+body — col0 `ChrRacesID`, col1 `ChrModelID` — and it states a sex of its own that is *not* the
+one to read: the Dracthyr's single body is listed twice there, once under each, while `ChrModel`
+says it belongs to neither. `ChrRaces` carries the name at col2 and the flags at col15, and
+**bit 0 of those flags is set on every race nobody can make**. Clearing it leaves exactly the
+thirty-one the character creation screen offers, which is what says the column is right — and it
+excludes three that no other column would: the Gilnean a Worgen was, the `ThinHuman` kept for
+cutscenes, and the visage a Dracthyr wears.
+
+Read off 12.0.5.67823 on 2026-07-28. `cargo run --example dump_bodies` prints all fifty-one.
 
 ### Every swatch, not only the first, verified
 

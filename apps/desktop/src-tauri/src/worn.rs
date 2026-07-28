@@ -591,7 +591,7 @@ pub fn each(files: &dyn GameFiles, body: &Body, outfits: &[&[Piece]]) -> Result<
         wanting.push(Wanted {
             hangs: hangs_in(&drawn),
             cape: cape_in(&drawn),
-            vis: helmet_vis(&drawn, body.sex as usize),
+            vis: helmet_vis(&drawn, body.helmet_slot()),
             paints,
             drawn,
         });

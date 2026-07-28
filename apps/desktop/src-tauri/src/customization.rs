@@ -509,10 +509,18 @@ fn elements_of(files: &dyn GameFiles, chosen: &[u32]) -> Result<Vec<(u32, u32)>,
 
 /// The geosets those elements switch on, as a group and the value it takes.
 ///
-/// `geoset = GeosetType × 100 + GeosetID`, the same arithmetic an item's groups get — and a
-/// value of **0** is the game saying the group is off. That is not a row to drop: a group
-/// switched off has to take its bare default with it, or a character wears the jewellery she
-/// declined.
+/// `geoset = GeosetType × 100 + GeosetID`, the same arithmetic an item's groups get — and the
+/// two ways a row can decline to name a geoset are opposite, which is the whole of what is
+/// fiddly here:
+///
+/// - **0 is the group switched off.** That is not a row to drop: a group switched off has to
+///   take its bare default with it, or a character wears the jewellery she declined.
+/// - **`-1` is no geoset at all**, the same sentinel `ItemDisplayInfo.GeosetGroup` carries, and
+///   it *is* a row to drop. Read as a value it is 65,535 and the multiply on top of it is not a
+///   number the body could hold; nothing in group 17 belongs to a swatch that says this.
+///
+/// No Human swatch carries `-1`, which is why nothing here had to know: every one of the
+/// shipping table's is on a race added after the two this app used to draw.
 fn geosets_of(files: &dyn GameFiles, elements: &[(u32, u32)]) -> Result<Vec<Geoset>, String> {
     let wanted: HashSet<u32> = elements
         .iter()
@@ -527,9 +535,11 @@ fn geosets_of(files: &dyn GameFiles, elements: &[(u32, u32)]) -> Result<Vec<Geos
     Ok(table
         .rows()
         .filter(|row| wanted.contains(&row.id()))
-        .map(|row| {
-            let group = row.number(geoset_column::TYPE) as u16;
-            Geoset { group, geoset: group * 100 + row.number(geoset_column::VALUE) as u16 }
+        .filter_map(|row| {
+            let group = u16::try_from(row.number(geoset_column::TYPE)).ok()?;
+            let value = u16::try_from(row.number(geoset_column::VALUE)).ok()?;
+            let geoset = group.checked_mul(100)?.checked_add(value)?;
+            Some(Geoset { group, geoset })
         })
         .collect())
 }
@@ -757,6 +767,23 @@ mod tests {
         // which is what keeps her from wearing the necklace she declined.
         let necklace = hers.iter().find(|geoset| geoset.group == 36).expect("group 36 is decided");
         assert_eq!(necklace.geoset, 3600);
+    }
+
+    // `-1` is the other thing a value can be, and it is the opposite of zero: not a group
+    // switched off but a row that names no geoset at all, the same sentinel an item's
+    // `GeosetGroup` carries. Read as a value it is 65,535, and `group × 100` on top of that is
+    // not a number — which on a build where that arithmetic is checked is a panic in the middle
+    // of drawing somebody, and on one where it is not is a geoset id that wrapped.
+    //
+    // No Human swatch carries one, which is why this went unseen while there were two bodies:
+    // the shipping table's rows are all on races added later, in group 17, the eye glow.
+    #[test]
+    fn drives_no_geoset_at_all_for_a_value_of_minus_one() {
+        let hers = herself().geosets;
+        assert!(
+            !hers.iter().any(|geoset| geoset.group == 17),
+            "a row naming no geoset switched one on: {hers:?}"
+        );
     }
 
     // Which swatch is the first one is the order index and not the row order. The fixture lists

@@ -841,11 +841,12 @@ export interface WornSetPayload {
 /**
  * The character an appearance is worn on, bare, as a `.glb` in a data URL.
  *
- * One model for the whole app — a Human Female, because gear is authored to look right on
- * human proportions — so it is asked for once and shown for every set opened after. There is
- * no `null` here, unlike an appearance's own model: every armour slot in the game is drawn on
- * this one mesh, so an install that cannot produce it has nothing to fall back to and the
- * command says what went wrong instead.
+ * One model for the whole app — whichever body the reader picked, and a Human Female until
+ * somebody says otherwise, because gear is authored to look right on human proportions — so it
+ * is asked for once and shown for every set opened after. There is no `null` here, unlike an
+ * appearance's own model: every armour slot in the game is drawn on whatever body is chosen, so
+ * an install that cannot produce it has nothing to fall back to and the command says what went
+ * wrong instead.
  */
 export interface CharacterModelPayload {
   model: string;

@@ -55,7 +55,10 @@ fn main() {
     let files = files.as_ref();
 
     let wanted: Vec<u32> = args.filter_map(|arg| arg.parse().ok()).collect();
-    let playable = body::playable();
+    let playable = body::playable(files).unwrap_or_else(|error| {
+        eprintln!("Could not read what bodies this game offers: {error}");
+        std::process::exit(1);
+    });
     println!("{} bodies this build can draw:", playable.len());
     for body in &playable {
         println!("  ChrModel {:<4} {}", body.id, body.name);
