@@ -32,14 +32,13 @@
 //! |---|---|---|
 //! | files read | 51 | **0** |
 //! | bytes those reads decoded | 112.1 MB | **0** |
-//! | rows walked | 3,285,452 | 3,285,452 |
+//! | rows walked | 1,810,174 | 1,810,174 |
 //! | `.glb` | 10.36 MB, 253,251 vertices in 4 meshes | the same |
 //! | her body | ships 248,958 and draws 4,894 — 2.0% | the same |
 //!
-//! The rows are a walk per table now rather than one per piece of the outfit, and what is left
-//! is the large tables being read end to end once each. The vertex share has not moved at all:
-//! that is the `.glb` shipping a body it draws a fortieth of, and it is the piece of #99 that
-//! is still entirely ahead.
+//! Every walk left is one per table, and what remains is the large ones being read end to end
+//! once each. The vertex share has not moved at all: that is the `.glb` shipping a body it
+//! draws a fortieth of, and it is the piece of #99 that is still entirely ahead.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -415,13 +414,13 @@ mod tests {
     }
 
     // `Db2::rows` materialises every row of a table before it yields the first, so a walk costs
-    // the whole table however few rows the caller keeps. What is left is a walk per table
-    // rather than one per piece of the outfit — and a real click is still 3.3 million rows,
-    // because `ItemSparse` and the customization tables are large and are walked whole.
+    // the whole table however few rows the caller keeps. Every walk left is one per table, and
+    // a real click is 1.8 million rows — `ItemSparse` and `ChrCustomizationElement` being large
+    // and read end to end.
     #[test]
     fn walks_no_more_rows_than_it_used_to() {
         let (_, work) = cost();
-        assert!(work.rows <= 414, "a click walks {} rows", work.rows);
+        assert!(work.rows <= 274, "a click walks {} rows", work.rows);
     }
 
     // The invariant behind sending the body once and only the atlas per click: the vertices
