@@ -47,8 +47,8 @@
 //! first thing in this app whose cost is a multiple of something a reader chose. So the second
 //! half of this module's tests is a page rather than a click, and it asserts the two properties
 //! the gallery is built on rather than a total: **the body is built once** for the whole page,
-//! and **each table is walked once**. A page of twenty walks 170 rows against a single
-//! eight-piece click's 274, which is what "walked once" buys.
+//! and **each table is walked once**. A page of twenty walks 279 rows against a single
+//! eight-piece click's 407, which is what "walked once" buys.
 //!
 //! Two of the counters exist only because of that page. [`Work::atlases`] and [`Work::encodes`]
 //! are the `atlas.base` and `character.atlas_png` spans — 27ms and 12ms of a click on a real
@@ -435,14 +435,21 @@ mod tests {
     // Every read that reaches the storage is a file inflated, and on a real install the 51 of
     // them are 117MB and 190ms of a 450ms click.
     //
-    // Three of them are the body itself — `ChrModel`, its layout's sections and that layout's
-    // atlas size — which used to be constants in `character.rs` and are read now that there is
-    // more than one body to draw. They are the three smallest tables on any of these chains:
-    // 107, 772 and 336 rows against `ItemDisplayInfoMaterialRes`'s 604,000.
+    // Seven of them are the body itself, and none of them used to be read at all. Three say how
+    // it is painted — `ChrModel`, its layout's sections and that layout's atlas size — and four
+    // say which body it is: `ChrRaces` and `ChrRaceXChrModel` for the races a person can be, and
+    // then `CreatureDisplayInfo` and `CreatureModelData` for the mesh, which used to be a table
+    // of two constants and is now the far end of a chain. All seven were constants in
+    // `character.rs` when there was one body; there are fifty-one now.
+    //
+    // Five of the seven are among the smallest tables on any of these chains — 107, 772, 336, 58
+    // and 116 rows against `ItemDisplayInfoMaterialRes`'s 604,000. The other two are not, and
+    // `CreatureDisplayInfo`'s 119,000 rows are the price of every playable race: see
+    // `body::offered`, which pays it once for the whole list rather than once per body.
     #[test]
     fn reads_no_more_files_than_it_used_to() {
         let (_, work) = cost();
-        assert!(work.reads <= 42, "a click now reads {} files", work.reads);
+        assert!(work.reads <= 46, "a click now reads {} files", work.reads);
     }
 
     // Zero, and it stays zero. `TextureFileData` is read by both `worn` and `skin`,
@@ -486,7 +493,7 @@ mod tests {
     #[test]
     fn walks_no_more_rows_than_it_used_to() {
         let (_, work) = cost();
-        assert!(work.rows <= 351, "a click walks {} rows", work.rows);
+        assert!(work.rows <= 407, "a click walks {} rows", work.rows);
     }
 
     // What the body ships now depends on what is worn, and that is the point: a body holds
@@ -682,7 +689,7 @@ mod tests {
 
     // The ratchet, as elsewhere in this module: the work as it stands, asserted from above.
     //
-    // The rows are worth looking at beside the click's 351: twenty rows of a wardrobe walk fewer
+    // The rows are worth looking at beside the click's 407: twenty rows of a wardrobe walk fewer
     // tables' worth of rows than one eight-piece outfit does, because a walk costs the whole
     // table and a page pays for one walk of each.
     //
@@ -696,8 +703,8 @@ mod tests {
     #[test]
     fn draws_a_page_within_what_it_costs_today() {
         let work = page_cost(&page());
-        assert!(work.reads <= 53, "a page reads {} files", work.reads);
-        assert!(work.rows <= 250, "a page walks {} rows", work.rows);
+        assert!(work.reads <= 57, "a page reads {} files", work.reads);
+        assert!(work.rows <= 279, "a page walks {} rows", work.rows);
         // Not zero, and for the reason `decodes_nothing_again_for_the_same_click` gives: the
         // fixture tables name a texture the fixture directory holds no file for, and a read that
         // found nothing is deliberately not remembered. The page names each display twice, so
@@ -875,8 +882,8 @@ mod tests {
     #[test]
     fn draws_a_page_of_sets_within_what_it_costs_today() {
         let work = set_page_cost(&SET_PAGE);
-        assert!(work.reads <= 58, "a page of sets reads {} files", work.reads);
-        assert!(work.rows <= 323, "a page of sets walks {} rows", work.rows);
+        assert!(work.reads <= 62, "a page of sets reads {} files", work.reads);
+        assert!(work.rows <= 352, "a page of sets walks {} rows", work.rows);
     }
 
     /* ---------- the counting itself ---------- */

@@ -2,11 +2,11 @@
  * Who she is, as a form under the character.
  *
  * Everything else in the transmog view is about what she has *on*. This is the one control over
- * the body under the clothes: **which body** — the game's Human Male or Human Female, as
- * `ChrModel` numbers them — and then the questions the game's own character creation screen asks
- * about that one. Her skin, her face, her hair and its colour, her ears; his beard, his
- * moustache, his sideburns. `herself.ts` is the rules and `body.rs` and `customization.rs` are
- * where they come from.
+ * the body under the clothes: **which body** — a body of any race a person can be, as `ChrModel`
+ * numbers them, which on a shipping install is fifty-one of them — and then the questions the
+ * game's own character creation screen asks about that one. Her skin, her face, her hair and its
+ * colour, her ears; his beard, his moustache, his sideburns; a Dracthyr's horns. `herself.ts` is
+ * the rules and `body.rs` and `customization.rs` are where they come from.
  *
  * Three decisions worth stating, because each had an obvious alternative:
  *

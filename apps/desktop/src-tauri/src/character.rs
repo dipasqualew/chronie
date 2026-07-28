@@ -1526,13 +1526,14 @@ mod tests {
     // showing an empty pane over: unlike an appearance with no model, there is no icon to fall
     // back to and nothing ordinary about a game with no bodies in it.
     //
-    // What it fails on now is `ChrModel` rather than the mesh, because the body is read before
-    // it is drawn — the layout, the atlas size and the rectangles all come out of the install,
-    // and a body with none of those is nothing to draw rather than a character missing a part.
+    // What it fails on now is `ChrRaces` rather than the mesh, because *which* body is read
+    // before the body is — the races a person can be, the layout, the atlas size and the
+    // rectangles all come out of the install, and a game with none of those is nothing to draw
+    // rather than a character missing a part.
     #[test]
     fn says_so_when_the_install_holds_no_character_model() {
         let temp = tempfile::tempdir().unwrap();
         let error = glb_of(&DirFiles::new(temp.path()), None, &Who::default()).unwrap_err();
-        assert!(error.contains("3384313.db2"), "{error}");
+        assert!(error.contains("1305311.db2"), "{error}");
     }
 }

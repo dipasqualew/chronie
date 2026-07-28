@@ -52,6 +52,10 @@ const FILE_DATA_ID = {
   chrModel: 3384313,
   charComponentTextureSections: 1360263,
   chrModelMaterial: 3566562,
+  chrRaces: 1305311,
+  chrRaceXChrModel: 3490304,
+  creatureDisplayInfo: 1108759,
+  creatureModelData: 1365368,
 } as const;
 
 /* ---------- the tables ---------- */
@@ -1347,8 +1351,10 @@ const chrCustomizationElement: TableSpec = {
         // Another body's face shape, which is the trap the ChrModel filter exists for: drop
         // it and group 32 has two owners, and which head this app draws is a row order.
         [9001, 0, 11351, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        // The eyes' colour, on a third atlas.
+        // The eyes' colour, on a third atlas — and, on the same swatch, the eye glow it does
+        // not switch on. `-1` there is the game saying this choice drives no geoset at all.
         [4150, 0, 0, 0, 14914, 0, 0, 0, 0, 0, 0, 0, 0],
+        [4150, 0, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         // The necklace, whose first swatch is *no necklace*: a geoset value the body holds
         // nothing for, which is how the game says a group is off.
         [4908, 0, 2068, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -1428,10 +1434,11 @@ const chrCustomizationMaterial: TableSpec = {
  * `ChrCustomizationGeoset` — a customization's geoset, as a group and a value rather than an id.
  *
  * `GeosetType × 100 + GeosetID` is the number the model uses, which is the same arithmetic an
- * item's geoset groups get and the same arithmetic a reader can get backwards. Two of the rows
+ * item's geoset groups get and the same arithmetic a reader can get backwards. Three of the rows
  * here are the ones worth being right about: the head, whose group has no value 1 to fall back
- * on, and a necklace whose value is **0** — the game's way of saying a group is switched off,
- * and a value the body deliberately holds nothing for.
+ * on; a necklace whose value is **0**, the game's way of saying a group is switched off, and a
+ * value the body deliberately holds nothing for; and an eye glow whose value is **-1**, which is
+ * not a value at all and is a row that drives nothing.
  */
 const chrCustomizationGeoset: TableSpec = {
   fileDataId: FILE_DATA_ID.chrCustomizationGeoset,
@@ -1441,8 +1448,8 @@ const chrCustomizationGeoset: TableSpec = {
   flags: 4,
   recordSize: 4,
   columns: [
-    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [0, 1, 7, 21, 32, 36] }, // GeosetType
-    { storage: Storage.indexed, offsetBits: 6, sizeBits: 3, palette: [0, 1, 2, 3] }, // GeosetID
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [0, 1, 7, 17, 21, 32, 36] }, // GeosetType
+    { storage: Storage.indexed, offsetBits: 6, sizeBits: 3, palette: [0, 1, 2, 3, -1] }, // GeosetID
     { storage: Storage.indexed, offsetBits: 9, sizeBits: 2, palette: [-1] }, // Modifier
   ],
   sections: [
@@ -1458,8 +1465,14 @@ const chrCustomizationGeoset: TableSpec = {
         [7, 2, -1], // 13292, the ears — a group whose values start at 2
         // The other body's beard: group 1, which a female body holds nothing for at all.
         [1, 1, -1], // 47
+        // A row whose value is **-1**, which is the game's word for no geoset rather than for
+        // a geoset numbered nothing. Group 17 is the eye glow, which is where the shipping
+        // table actually carries these — twenty-odd rows of it, all on races added after the
+        // Human. Multiplied out as a value it is 65,535, and `group × 100 + 65,535` is not a
+        // geoset the body could hold.
+        [17, -1, -1], // 49
       ],
-      idList: [45, 46, 2068, 2410, 11350, 11351, 13292, 47],
+      idList: [45, 46, 2068, 2410, 11350, 11351, 13292, 47, 49],
     },
   ],
 };
@@ -1589,13 +1602,180 @@ const chrCustomizationOption: TableSpec = {
 };
 
 /**
+ * `ChrRaces` — every race the game ships, and whether anybody can be one.
+ *
+ * Two columns of it are read and the other fourteen are here to hold them apart, because both
+ * are addressed by position: the name at 2 and the flags at 15. What the flags decide is the
+ * whole of what "playable" means — the Naga below has a body, a layout, a mesh and a name, and
+ * the single bit is all that keeps it off a reader's list.
+ */
+const chrRaces: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrRaces,
+  layoutHash: 0x2f61a8d4,
+  tableHash: 0x7c04b3e9,
+  idColumn: 3,
+  flags: 0,
+  recordSize: 16,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // ClientPrefix
+    { storage: Storage.plain, offsetBits: 32, sizeBits: 32 }, // ClientFileString
+    { storage: Storage.plain, offsetBits: 64, sizeBits: 32 }, // Name_lang
+    { storage: Storage.bitpackedSigned, offsetBits: 96, sizeBits: 8 }, // ID
+    ...Array.from({ length: 11 }, (_, at) => ({
+      storage: Storage.indexed,
+      offsetBits: 104 + at,
+      sizeBits: 1,
+      palette: [0],
+    })),
+    { storage: Storage.bitpackedSigned, offsetBits: 115, sizeBits: 8 }, // Flags
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Prefix, file string, name, ID, eleven columns of nothing, Flags.
+      rows: [
+        ["Hu", "human", "Human", 1, ...Array(11).fill(0), 0],
+        ["Or", "orc", "Orc", 2, ...Array(11).fill(0), 0],
+        // A second race whose bodies are the Orc's, which is what the Mag'har, the Pandaren's
+        // three races and the Earthen's two are: one body, filed under each of them.
+        ["Mag", "orc", "Mag'har Orc", 3, ...Array(11).fill(0), 0],
+        // A race with one body for both sexes, which is what the Dracthyr is.
+        ["Dra", "dracthyr", "Dracthyr", 4, ...Array(11).fill(0), 0],
+        // A playable race whose body the chain to a mesh runs out on. Nothing about the race
+        // is wrong; there is simply nothing to draw.
+        ["Vul", "vulpera", "Vulpera", 5, ...Array(11).fill(0), 0],
+        // And a race nobody can be. Everything else about it reads.
+        ["Nag", "naga", "Naga", 13, ...Array(11).fill(0), 1],
+      ],
+    },
+  ],
+};
+
+/**
+ * `ChrRaceXChrModel` — which bodies a race is made of.
+ *
+ * It states a sex of its own and the app does not read it: the Dracthyr's one body is listed
+ * twice here, once under each sex, while `ChrModel` says it belongs to neither. A reader taking
+ * the sex from this table would offer that body twice under two names it does not have.
+ */
+const chrRaceXChrModel: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrRaceXChrModel,
+  layoutHash: 0x18b70c5a,
+  tableHash: 0x4e29d160,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 3,
+  columns: [
+    { storage: Storage.bitpackedSigned, offsetBits: 0, sizeBits: 8 }, // ChrRacesID
+    { storage: Storage.bitpackedSigned, offsetBits: 8, sizeBits: 10 }, // ChrModelID
+    { storage: Storage.bitpackedSigned, offsetBits: 18, sizeBits: 3 }, // Sex
+    { storage: Storage.bitpackedSigned, offsetBits: 21, sizeBits: 3 }, // Flags
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Race, ChrModel, Sex, Flags.
+      rows: [
+        [1, 1, 0, 0],
+        [1, 2, 1, 0],
+        [2, 7, 0, 0],
+        // The Mag'har's, which is the Orc's body again and is offered once.
+        [3, 7, 0, 0],
+        // The Dracthyr's, listed once per sex against one body.
+        [4, 8, 0, 0],
+        [4, 8, 1, 0],
+        // The Vulpera's, whose mesh does not resolve.
+        [5, 9, 0, 0],
+        // The Naga's, whose race nobody can be.
+        [13, 5, 1, 0],
+      ],
+      idList: [1, 2, 3, 4, 5, 6, 7, 8],
+    },
+  ],
+};
+
+/**
+ * `CreatureDisplayInfo` — what a `ChrModel`'s display id actually displays.
+ *
+ * The first of the two hops from a body to its mesh. This one keeps its id **inside** the row,
+ * in column 0, and the one below keeps its beside the rows — which is the pair's own trap and
+ * is why the fixtures state it both ways.
+ */
+const creatureDisplayInfo: TableSpec = {
+  fileDataId: FILE_DATA_ID.creatureDisplayInfo,
+  layoutHash: 0x63d0a71e,
+  tableHash: 0x2a94f085,
+  idColumn: 0,
+  flags: 0,
+  recordSize: 8,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // ID
+    { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 16 }, // ModelID
+    { storage: Storage.indexed, offsetBits: 48, sizeBits: 2, palette: [0] }, // ExtendedDisplayInfoID
+  ],
+  sections: [
+    {
+      key: 0n,
+      // ID, ModelID, and a column of nothing.
+      rows: [
+        [57899, 7661, 0], // the male body's
+        [56658, 7599, 0], // the female body's, which is what the app opens on
+        [49242, 5408, 0], // the Orc male's
+        [53768, 7203, 0], // the sexless body's
+        [51894, 6838, 0], // the Naga's
+        // Nothing here for display 60000, which is the Vulpera's: a body whose chain to a mesh
+        // stops at the first hop.
+      ],
+    },
+  ],
+};
+
+/**
+ * `CreatureModelData` — and the mesh that model actually is.
+ *
+ * Its id is kept **beside** the rows rather than in one, and its own first column is a hash
+ * large enough to read as a plausible anything: a reader that took column 0 for the id would
+ * find no model at all, and one that took it for the file would ask the storage for a
+ * three-billionth file.
+ */
+const creatureModelData: TableSpec = {
+  fileDataId: FILE_DATA_ID.creatureModelData,
+  layoutHash: 0x91c4e207,
+  tableHash: 0x5b6803af,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 9,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // ModelName hash
+    { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 18 }, // Flags
+    { storage: Storage.bitpackedSigned, offsetBits: 50, sizeBits: 22 }, // FileDataID
+  ],
+  sections: [
+    {
+      key: 0n,
+      // A hash, flags, and the FileDataID this whole chain exists to reach.
+      rows: [
+        [3203432826, 133124, 1011653], // model 7661 — the male body
+        [3200712692, 133124, 1000764], // model 7599 — the female body
+        [0, 0, 1011653], // model 5408 — the Orc male, drawn from the same mesh here
+        [0, 0, 1000764], // model 7203 — the sexless body, likewise
+        [0, 0, 917116], // model 6838 — the Naga's, which is a mesh like any other
+      ],
+      idList: [7661, 7599, 5408, 7203, 6838],
+    },
+  ],
+};
+
+/**
  * `ChrModel` — every body the game can draw, and the texture layout each is composited in.
  *
- * Two of them here are the two the app draws, and the third is another body's: the same shape
- * of row, a sex and a layout of its own, and nothing about it this app may reach. The id is
- * kept **inside** the row, in column 2, which is what puts the sex at 3 and the layout at 5 —
- * a reader that expected the id beside the rows would take the sex for a display and the
- * layout for a flag.
+ * The id is kept **inside** the row, in column 2, which is what puts the sex at 3, the display
+ * at 4 and the layout at 5 — a reader that expected the id beside the rows would take the sex
+ * for a display and the layout for a flag.
+ *
+ * Six bodies, and each of the last four is a way of being left off a reader's list or of being
+ * on it under a name the row does not carry: a race nobody can be, a body two races share, a
+ * body the game gives no sex, and a body whose display names no model.
  */
 const chrModel: TableSpec = {
   fileDataId: FILE_DATA_ID.chrModel,
@@ -1620,9 +1800,16 @@ const chrModel: TableSpec = {
       rows: [
         [0, 0, 1, 0, 57899, 103, 2], // the male body, in a layout of its own
         [0, 0, 2, 1, 56658, 104, 2], // the female one, which is what the app opens on
-        // A body the app has no mesh for. Everything about the row reads; what stops it being
-        // drawn is that nothing here holds a mesh for it, which is `body::of`'s fallback.
+        // The Naga's. Everything about the row reads and its mesh resolves; what keeps it off
+        // a reader's list is the flag on the race that names it, and nothing else.
         [0, 0, 5, 1, 51894, 105, 2],
+        // The Orc male's, which two races name and which is offered once.
+        [0, 0, 7, 0, 49242, 103, 2],
+        // A body the game gives no sex, which is what the Dracthyr's one model is.
+        [0, 0, 8, 3, 53768, 104, 2],
+        // The Vulpera's, whose display id names no model — a playable race this install has
+        // nothing to draw.
+        [0, 0, 9, 0, 60000, 103, 2],
       ],
     },
   ],
@@ -2679,6 +2866,10 @@ emit("transmog", {
     chrModel,
     charComponentTextureSections,
     chrModelMaterial,
+    chrRaces,
+    chrRaceXChrModel,
+    creatureDisplayInfo,
+    creatureModelData,
   ],
   icons,
   raw: [

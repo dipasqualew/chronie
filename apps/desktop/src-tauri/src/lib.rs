@@ -612,10 +612,12 @@ async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
 async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
     let who = character_look_of(&state)?;
     let body = who.body;
-    let questions =
-        read_game_files(&state, move |files| customization::questions(files, body)).await?;
+    let (bodies, questions) = read_game_files(&state, move |files| {
+        Ok((body::playable(files)?, customization::questions(files, body)?))
+    })
+    .await?;
     Ok(serde_json::json!({
-        "bodies": body::playable(),
+        "bodies": bodies,
         "body": who.body,
         "questions": questions,
         "picked": who.picked,
@@ -624,17 +626,19 @@ async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
 
 /// Says who she is from now on, and answers with what was stored.
 ///
-/// Nothing is read out of the game here and nothing is drawn: the window redraws her by asking
-/// for the bodies again, which is the same errand it runs whenever what she is wearing changes.
-/// What the *game* says about an answer is checked every time a body is drawn rather than here,
-/// because an install can change under a settings file — see [`customization::of`].
+/// Nothing is drawn here: the window redraws her by asking for the bodies again, which is the
+/// same errand it runs whenever what she is wearing changes. The one thing read out of the game
+/// is whether the body named is one the game offers — a question only the install can answer now
+/// that every playable race is on the list. What the game says about an *answer* is checked every
+/// time a body is drawn rather than here, because an install can change under a settings file —
+/// see [`customization::of`].
 #[tauri::command]
-fn save_character_look(
+async fn save_character_look(
     body: u32,
     picked: Vec<customization::Picked>,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let body = body::known(body)?;
+    let body = read_game_files(&state, move |files| body::known(files, body)).await?;
     let cleaned = customization::clean(picked)?;
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.character_body = body;

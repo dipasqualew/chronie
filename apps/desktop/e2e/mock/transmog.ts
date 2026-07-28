@@ -473,6 +473,11 @@ export const characterModel: E2EMock["characterModel"] = fixtureModel("character
 // what has been answered. The names are the fixtures' own — most of the game's real swatches
 // have none at all, which is the case worth having in front of the window, so the skin tones
 // here have none either.
+//
+// A shipping install offers fifty-one bodies here rather than two. Two is what this file
+// holds because the picker is a `<select>` and the only thing about it worth driving from
+// outside is that changing it replaces the form underneath, which one other body proves and
+// fifty do not.
 export const characterLook: E2EMock["characterLook"] = {
   bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
   body: 2,
