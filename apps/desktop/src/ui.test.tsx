@@ -51,11 +51,18 @@ function segment(overrides: Partial<Segment> = {}): Segment {
   };
 }
 
+/**
+ * Three of the loud sort, which is the shortest way to a chip that stands for several.
+ *
+ * All three are account firsts on purpose: a character first is drawn as a mark now, and a
+ * mixed evening would split into a chip and a mark rather than into the one summary these
+ * tests are about. Which sort goes where is `sessions.ts`' rule and is held to there.
+ */
 const three = (): Segment => segment({
   achievements: [
-    { id: 1, name: "Just Me", accountFirst: false, at: BASE + 60 },
-    { id: 2, name: "Warband First", accountFirst: true, at: BASE + 120 },
-    { id: 3, name: "Also Just Me", accountFirst: false },
+    { id: 1, name: "Warband First", accountFirst: true, at: BASE + 60 },
+    { id: 2, name: "Another First", accountFirst: true, at: BASE + 120 },
+    { id: 3, name: "A Third First", accountFirst: true },
   ],
 });
 
@@ -107,7 +114,7 @@ describe("HighlightList", () => {
 
     expect(screen.getByRole("button", { name: /3 achievements/ }).getAttribute("aria-expanded"))
       .toBe("true");
-    for (const name of ["Warband First", "Just Me", "Also Just Me"]) {
+    for (const name of ["Warband First", "Another First", "A Third First"]) {
       expect(screen.getByText(name)).toBeTruthy();
     }
   });
@@ -155,12 +162,20 @@ describe("HighlightList", () => {
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 
+  // A segment row asks for no running numbers: on one segment they are four more figures
+  // beside the two things that actually happened. What it keeps is the marks that are things
+  // rather than numbers — a quest handed in on that run belongs to that run.
   it("leaves the running totals off where they were not asked for", () => {
-    const rich = segment({ goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }] });
+    const rich = segment({
+      goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }], quests: [{ id: 81 }],
+    });
 
-    expect(draw([rich]).container.querySelector(".tally-row")).toBeTruthy();
+    expect(draw([rich]).container.querySelectorAll(".tally")).toHaveLength(1);
     cleanup();
-    expect(draw([rich], { tallies: false }).container.querySelector(".tally-row")).toBeNull();
+
+    const row = draw([rich], { tallies: false }).container;
+    expect(row.querySelectorAll(".tally")).toHaveLength(0);
+    expect(row.querySelector(".tally-row .hl-quest")).toBeTruthy();
   });
 
   /**
@@ -214,46 +229,111 @@ describe("HighlightList", () => {
   });
 
   /**
-   * Saving a set of gear is housekeeping: worth a mark on the card, not worth the width of
-   * "Raid · 2 slots, +16 item levels" beside a mount and an account first.
+   * The small change of an evening: a character catching up on an achievement the warband
+   * already had, another colour of a piece already owned, a quest handed in, a set of gear
+   * saved. Each is worth a mark on the card — somebody who reshuffled their raid set on Tuesday
+   * can find the evening again — and none is worth the width of "Raid · 1 slot, +16 ilvl"
+   * beside a mount and an account first. So each is drawn where the running numbers are drawn,
+   * as its icon, and the sentence it gave up becomes the hover and the name.
    */
-  describe("an equipment set change", () => {
-    const changed = (): Segment => segment({
-      equipsetChanges: [{
-        setId: 3, name: "Raid", kind: "updated",
-        items: [{ slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 }],
-      }],
+  describe("the quiet milestones", () => {
+    const raid = {
+      setId: 3, name: "Raid", kind: "updated" as const,
+      items: [{ slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 }],
+    };
+
+    /** Each quiet kind: what turns it up, the class it draws under, its icon, and its sentence. */
+    const quiet: Array<[string, Partial<Segment>, string, string, string]> = [
+      ["an achievement that only caught this character up",
+        { achievements: [{ id: 9, name: "Into the Light", accountFirst: false }] },
+        "hl-achievementCharacter", "🏆", "Into the Light · character first"],
+      ["another colour of a piece already owned",
+        { transmogs: [{ id: 4200, name: "Storm Cloak", newAppearance: false }] },
+        "hl-transmogVariant", "👘", "Storm Cloak · variant of one owned"],
+      ["a quest handed in", { quests: [{ id: 81 }] }, "hl-quest", "📜", "Quest 81"],
+      ["a set of gear saved", { equipsetChanges: [raid] },
+        "hl-equipset", "🎽", "Raid updated · 1 slot, +16 ilvl"],
+    ];
+
+    it.each(quiet)("draws %s as its icon, down in the strip", (_case, happened, style, icon) => {
+      const view = draw([segment(happened)]);
+
+      const mark = view.container.querySelector(`.tally-row .${style}`);
+      expect(mark?.textContent).toBe(icon);
+      // And nowhere near the chips, which is the half of it a reader would actually notice.
+      expect(view.container.querySelector(`.hl-row .${style}`)).toBeNull();
     });
 
-    it("is drawn as its icon, with the words moved into the hover", () => {
-      const view = draw([changed()]);
+    // A chip with no words on it still has to say what it is to anybody not looking at it,
+    // and still has to be readable by whoever does look — which is the whole bargain that
+    // made drawing it quietly acceptable in the first place.
+    it.each(quiet)("moves the sentence of %s into the hover and the name",
+      (_case, happened, style, _icon, said) => {
+        const view = draw([segment(happened)]);
 
-      const chip = view.container.querySelector(".hl-equipset");
-      expect(chip?.textContent).toBe("🎽");
-      expect(chip?.getAttribute("data-tip")).toContain("Raid");
-    });
-
-    // A chip with no words on it still has to say what it is to anybody not looking at it.
-    it("still says what it is to a screen reader", () => {
-      draw([changed()]);
-
-      expect(screen.getByRole("button", { name: /Raid/ })).toBeTruthy();
-    });
+        expect(view.container.querySelector(`.${style}`)?.getAttribute("data-tip")).toBe(said);
+        expect(screen.getByRole("button", { name: said })).toBeTruthy();
+      });
 
     it("keeps its label where it is not the one drawn quietly", () => {
       const view = draw([segment({ mounts: [{ id: 11, name: "Clockwork Glider" }] })]);
 
       expect(view.container.querySelector(".hl-mount")?.textContent).toContain("Clockwork Glider");
+      expect(view.container.querySelector(".hl-row .hl-mount")).toBeTruthy();
+    });
+
+    // A mark gives up its words, not its list. The reader who presses one still gets the things
+    // it counted, and gets them under the strip they pressed rather than above it — a list that
+    // opens somewhere other than where it was asked for is a list nobody sees arrive.
+    it("unfolds a mark of several into its entries, underneath the strip", () => {
+      const view = draw(
+        [segment({ goldDiff: 4200, quests: [{ id: 81 }, { id: 82 }] })], { expanded: "quest" },
+      );
+
+      expect(screen.getByRole("button", { name: "2 quests" }).getAttribute("aria-expanded"))
+        .toBe("true");
+      expect(screen.getByText("Quest 81")).toBeTruthy();
+      expect(screen.getByText("Quest 82")).toBeTruthy();
+
+      const strip = view.container.querySelector(".tally-row")!;
+      const panel = view.container.querySelector(".hl-panel")!;
+      expect(strip.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    // A loud chip's list goes the other way, above the strip, for exactly the same reason.
+    it("leaves a chip's list above the strip, where that is where it was asked for", () => {
+      const view = draw(
+        [segment({ goldDiff: 4200, achievements: three().achievements })],
+        { expanded: "achievement" },
+      );
+
+      const strip = view.container.querySelector(".tally-row")!;
+      const panel = view.container.querySelector(".hl-panel")!;
+      expect(strip.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    });
+
+    // Nothing else on the card earned a number, and the strip is still where these go: there
+    // is no second row for them, because they are the same sort of not-news.
+    it("makes the strip on its own, for an evening that earned no numbers at all", () => {
+      const view = draw([segment({ quests: [{ id: 81 }] })]);
+
+      expect(view.container.querySelector(".tally-row .hl-quest")).toBeTruthy();
+      expect(view.container.querySelectorAll(".tally")).toHaveLength(0);
     });
   });
 
+  // Every milestone is listed in full a few lines further down there, the quiet ones included,
+  // so repeating any of them as marks first would only make the same page longer.
   it("keeps only the totals for the detail modal, which lists the rest in full below", () => {
-    const rich = segment({ goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }] });
+    const rich = segment({
+      goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }], quests: [{ id: 81 }],
+    });
 
     const view = draw([rich], { milestones: false });
 
-    expect(view.container.querySelector(".tally-row")).toBeTruthy();
+    expect(view.container.querySelectorAll(".tally")).toHaveLength(1);
     expect(view.container.textContent).not.toContain("Clockwork Glider");
+    expect(view.container.querySelector(".hl-quest")).toBeNull();
   });
 
   it("has nothing to draw for a segment nothing happened in", () => {

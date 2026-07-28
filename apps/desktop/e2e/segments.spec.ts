@@ -46,7 +46,7 @@ test("digs from a session down into a single segment and back out again", async 
   // of the installed game after the segment is already on screen.
   await test.step("an achievement fills in with what the game says about it", async () => {
     const earned = detail.rowsIn("Achievements");
-    await expect(earned).toHaveCount(2);
+    await expect(earned).toHaveCount(3);
     await expect(earned.first()).toContainText("Reach the lighthouse at the end of the pier.");
     await expect(earned.first()).toContainText("Chronicles › Tideglass Deeps");
     await expect(earned.first()).toContainText("25 points");

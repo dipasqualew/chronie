@@ -87,7 +87,12 @@ test("stitches segments into play sessions and leads with what happened", async 
     await expect(done.first()).toContainText("Mythic+ run");
     await expect(done.first()).toContainText("+14 · Glass Caverns · timed");
 
-    await expect(first).toContainText("2 achievements");
+    // Three achievements that evening and only one of them news: the warband's own first is
+    // what the card names, and the two that merely caught a character up are a mark below with
+    // no words at all. A chip reading "3 achievements" is the state this replaced — it made an
+    // evening of catching up look like an evening of rare ones.
+    await expect(first).toContainText("Quiet Ascent");
+    await expect(first).not.toContainText("achievements");
     await expect(first).toContainText("Clockwork Glider");
     await expect(first).not.toContainText("Glass Token");
   });
@@ -102,12 +107,49 @@ test("stitches segments into play sessions and leads with what happened", async 
     );
   });
 
-  // Two achievements and two characters' levelling that evening, so the card says how much
-  // of each there was rather than picking one of them to name and dropping the rest.
+  // Two characters levelled that evening, so the card says how much of it there was rather
+  // than picking one of them to name and dropping the rest.
   await test.step("what happened several times is counted, not listed", async () => {
     await expect(first).toContainText("2 levels");
     await expect(first).not.toContainText("Into the Light");
     await expect(first).not.toContainText("Level 12");
+  });
+
+  /**
+   * The quieter half of the card, which is what issue #161 was about. A quest handed in, a set
+   * of gear saved and a character catching up on an achievement the warband already had are all
+   * things that happened, and none of them is why anybody came back to the evening. So each is a
+   * mark down among the running numbers with every word it would have worn in its name — and
+   * pressing one still gets the reader everything a chip would have.
+   */
+  await test.step("what was not news is a mark, and still comes apart", async () => {
+    for (const [said, icon] of [
+      ["Quest 81", "📜"],
+      [/Raid updated · 2 slots/, "🎽"],
+      ["2 achievements · character firsts", "🏆"],
+    ] as const) {
+      await expect(timeline.mark(first, said)).toHaveText(icon);
+    }
+
+    // While the three that are worth telling somebody about still say so in words.
+    for (const said of ["Quiet Ascent", "Clockwork Glider", "2 levels"]) {
+      await expect(timeline.chip(first, said)).toContainText(said);
+    }
+
+    const caught = timeline.mark(first, "character firsts");
+    await expect(caught).toHaveAttribute("aria-expanded", "false");
+    await caught.click();
+    await expect(first).toContainText("Into the Light");
+    await expect(first).toContainText("Tideglass Delver");
+
+    // And each of them is still the way back to the run it was recorded in, which is the whole
+    // reason a summary is allowed to swallow the names in the first place.
+    await timeline.unfolded(first, "Tideglass Delver").click();
+    await expect(detail.title()).toHaveText("Glass Caverns");
+    await detail.close();
+
+    await caught.click();
+    await expect(first).not.toContainText("Into the Light");
   });
 
   // The night before caught the same critter twice. A pet is the one collectible a player
@@ -171,11 +213,15 @@ test("stitches segments into play sessions and leads with what happened", async 
     await timeline.fold(first, "2 segments").click();
 
     const row = timeline.segments(first).first();
-    await expect(row).toContainText("2 achievements");
+    await expect(row).toContainText("Quiet Ascent");
     await expect(row).toContainText("Clockwork Glider");
     await expect(row).toContainText("Level 12");
-    // The running totals belong to the evening, not to a row inside it.
+    // The running totals belong to the evening, not to a row inside it — but the small change
+    // of the run does belong to the run, so the row keeps its marks after they are gone.
     await expect(row).not.toContainText("Glass Token");
+    await expect(timeline.tallies(row)).toHaveCount(0);
+    await expect(timeline.mark(row, "2 achievements · character firsts")).toBeVisible();
+    await expect(timeline.mark(row, /Raid updated/)).toBeVisible();
   });
 
   // Each row carries its own character's colour rather than the session's. This evening
