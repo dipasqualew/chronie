@@ -94,6 +94,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The history gate below needs both sides of every merge in the branch.
+          fetch-depth: 0
+
+      # Squash-merging a pull request gives its work a new identity on main. Merging that
+      # main commit back into the original branch therefore puts two unrelated copies of
+      # the same change in its history and manufactures conflicts. A branch moves forward
+      # by rebasing instead; the guard says so before another branch has to untangle it.
+      - name: Reject merges from main into a feature branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash ./scripts/check-branch-history.sh "$BASE_SHA" "$HEAD_SHA"
 
       # WoW runs Lua 5.1; the rocks have to be built against it to match game semantics.
       - name: Install Lua 5.1
