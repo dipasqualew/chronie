@@ -72,9 +72,11 @@ describe("segment views", function()
     ---Build the strip with hand-written deps: no frames, no panel, just the module and
     ---the six seams it reads the world through.
     ---
-    ---`options.segments` is kept by reference rather than copied, so a test can file a new
-    ---segment into it half way through and watch what that does to the selection — which is
-    ---exactly what the game does while the panel is open.
+    ---The options table itself is kept by reference rather than read once, so a test can file
+    ---a new segment into `options.segments`, or move `options.opened` onto the segment that
+    ---just started, half way through and watch what that does to the selection — which is
+    ---exactly what the game does while the panel is open. `options.live` is the exception: it
+    ---is the tally, and the tally is one object that mutates rather than one that is replaced.
     ---@param options table? `{ live, location, opened, segments, character, now }`
     ---@return SegmentViews views, table counted `{ liveSummary = integer }`
     local function newViews(options)
@@ -133,6 +135,36 @@ describe("segment views", function()
             titles[index] = view.title
         end
         return titles
+    end
+
+    ---@param views SegmentView[]
+    ---@return string[] the key of each, in strip order
+    local function keysOf(views)
+        local keys = {}
+        for index, view in ipairs(views) do
+            keys[index] = view.key
+        end
+        return keys
+    end
+
+    ---@param views SegmentView[]
+    ---@return string[] what the picker calls each, in strip order
+    local function labelsOf(views)
+        local labels = {}
+        for index, view in ipairs(views) do
+            labels[index] = view.label
+        end
+        return labels
+    end
+
+    ---@param views SegmentView[]
+    ---@return string[] the metadata beside each label, in strip order
+    local function detailsOf(views)
+        local details = {}
+        for index, view in ipairs(views) do
+            details[index] = view.detail
+        end
+        return details
     end
 
     it("is exported by the addon files", function()
@@ -563,6 +595,105 @@ describe("segment views", function()
             end
         end)
 
+        describe("what the picker calls each view", function()
+            -- The header has one line and has to both name a view and place it in time, which
+            -- is why it reads "Deadmines · 12m ago". A menu row has two columns, so the name
+            -- goes in one and everything that tells two runs of the same dungeon apart goes in
+            -- the other — and the two halves have to be separable to be laid out that way.
+            it("splits the header's one line into a name and the metadata beside it", function()
+                local views = newViews({
+                    location = "Wailing Caverns",
+                    segments = { record({ id = "a", instance = "Deadmines", endedAt = OPENED - 60 }) },
+                })
+
+                local strip = walk(views)
+
+                assert.same({ "Session", "Wailing Caverns", "Deadmines" }, labelsOf(strip))
+                assert.same({ "2 segments", "2m · playing", "5m · 3m ago" }, detailsOf(strip))
+            end)
+
+            -- The open segment counts as one of them, the same as it does in the header: a
+            -- menu offering "1 segment" beside two rows of segments would be contradicting
+            -- itself on one line.
+            for _, case in ipairs({
+                { finished = 0, detail = "1 segment" },
+                { finished = 1, detail = "2 segments" },
+                { finished = 2, detail = "3 segments" },
+            }) do
+                it("counts the open segment into the session's " .. case.detail, function()
+                    local segments = {}
+                    for index = 1, case.finished do
+                        segments[index] = record({ id = "a" .. index, endedAt = OPENED - index * 60 })
+                    end
+                    local views = newViews({ segments = segments })
+
+                    assert.equal(case.detail, views.move(-1).detail)
+                end)
+            end
+
+            -- Rounded down to one unit, the same as the age beside it and for the same reason:
+            -- this is a label on a menu row rather than a stopwatch, and "42m" is all it takes
+            -- to tell one evening's Deadmines run from the other. Anything under a minute is
+            -- "<1m" rather than "0m", because a zone walked straight through is a real thing to
+            -- find on the list and "0m" reads as the module not knowing.
+            for _, case in ipairs({
+                { what = "a zone walked straight through", ran = 0, lasted = "<1m" },
+                { what = "a second short of a minute", ran = 59, lasted = "<1m" },
+                { what = "a minute exactly", ran = 60, lasted = "1m" },
+                { what = "a second short of an hour", ran = 3599, lasted = "59m" },
+                { what = "an hour exactly", ran = 3600, lasted = "1h" },
+                { what = "a whole evening in one zone", ran = 4 * 3600, lasted = "4h" },
+            }) do
+                it("says a segment that has run for " .. case.what .. " lasted " .. case.lasted, function()
+                    local views = newViews({ opened = NOW - case.ran })
+
+                    assert.equal(case.lasted .. " · playing", views.selected().detail)
+                end)
+            end
+
+            -- Between two zones, or before the first loading screen, there is no open segment
+            -- to have been running for any length of time. The row still has to exist, because
+            -- it is what the panel comes back to; it simply has no duration to report.
+            it("says only that it is playing while no segment is open", function()
+                local views = newViews({ opened = false })
+
+                local view = views.selected()
+
+                assert.equal("Current Segment", view.label)
+                assert.equal("playing", view.detail)
+            end)
+
+            -- An evening survives hopping alts, so the strip holds the alt's segments too, and
+            -- one of those has to say whose it was or it reads as somewhere this character has
+            -- been. Only the first name: the realm is this evening's either way.
+            it("puts an alt's name in front of the place, and this character's nowhere", function()
+                local views = newViews({
+                    segments = {
+                        record({ id = "mine", instance = "Stockade", endedAt = OPENED - 60 }),
+                        record({ id = "theirs", instance = "Deadmines", endedAt = OPENED - 420,
+                            character = "Alt-Ravencrest" }),
+                    },
+                })
+
+                local strip = walk(views)
+
+                assert.equal("Stockade", strip[3].label)
+                assert.equal("Alt — Deadmines", strip[4].label)
+            end)
+
+            -- The same reasoning the header's own dates were given: "now" is a fine staleness
+            -- warning and a poor label, because a segment that just closed sits one row from
+            -- the one being played.
+            it("dates a segment that closed inside the last minute as just now", function()
+                local views = newViews({
+                    segments = { record({ id = "a", endedAt = NOW - 30 }) },
+                    opened = NOW - 30,
+                })
+
+                assert.equal("5m · just now", views.move(1).detail)
+            end)
+        end)
+
         describe("what each view is drawn from", function()
             it("adds the running tally into the session total as well as the filed segments", function()
                 local views = newViews({
@@ -622,6 +753,197 @@ describe("segment views", function()
 
                 assert.is_nil(views.move(1).record)
             end)
+        end)
+    end)
+
+    describe("the list the picker draws", function()
+        -- The arrows walk one step at a time, which is fine for the segment next door and
+        -- useless four dungeons in. The list is the other way at the same strip: everything on
+        -- offer at once, in the order the arrows would reach it, so the menu and the arrows can
+        -- never disagree about what the evening holds.
+        it("hands over every view on the strip, in the order the arrows walk them", function()
+            local views = newViews({
+                location = "Wailing Caverns",
+                segments = {
+                    record({ id = "newer", instance = "Deadmines", endedAt = OPENED - 60 }),
+                    record({ id = "older", instance = "Stockade", endedAt = OPENED - 420 }),
+                },
+            })
+
+            local listed = views.list()
+
+            assert.same({ "session", "live", "record:newer", "record:older" }, keysOf(listed))
+            assert.same({ "Session", "Wailing Caverns", "Deadmines", "Stockade" }, labelsOf(listed))
+        end)
+
+        -- The menu's whole job is to say which of them is on screen: a list that named the
+        -- same three things whatever was being looked at would leave the player clicking the
+        -- row they are already standing on.
+        for _, case in ipairs({
+            { what = "the session total", delta = -99, current = { true, false, false } },
+            { what = "the segment being played", delta = 0, current = { false, true, false } },
+            { what = "a segment already filed", delta = 99, current = { false, false, true } },
+        }) do
+            it("ticks " .. case.what .. " while that is the view on screen", function()
+                local views = newViews({ segments = { record({ id = "a" }) } })
+                views.move(case.delta)
+
+                local ticked = {}
+                for index, view in ipairs(views.list()) do
+                    ticked[index] = view.current
+                end
+                assert.same(case.current, ticked)
+            end)
+        end
+
+        -- A menu of five segments that materialised every row would add the whole evening up
+        -- five times over to print five names. The list says what is on offer; the one view
+        -- that is actually going to be drawn is the only one worth the arithmetic.
+        it("names the views without adding a single one of them up", function()
+            local views, counted = newViews({
+                segments = {
+                    record({ id = "newer", endedAt = OPENED - 60 }),
+                    record({ id = "older", endedAt = OPENED - 420 }),
+                },
+            })
+
+            local listed = views.list()
+
+            assert.equal(4, #listed)
+            for _, view in ipairs(listed) do
+                assert.is_nil(view.summary)
+            end
+            assert.equal(0, counted.liveSummary)
+        end)
+
+        it("leaves no record field behind on the views it hands back", function()
+            local views = newViews({ segments = { record({ id = "a" }) } })
+
+            for _, view in ipairs(views.list()) do
+                assert.is_nil(view.record)
+            end
+        end)
+
+        -- Reading the menu is not choosing from it. A player who opens the list, thinks better
+        -- of it and closes it again is looking at the same panel they were before.
+        it("leaves the panel standing where it was", function()
+            local views = newViews({ segments = { record({ id = "a" }) } })
+            assert.equal("record:a", views.move(1).key)
+
+            views.list()
+
+            assert.equal("record:a", views.selected().key)
+        end)
+    end)
+
+    describe("standing on a view by name", function()
+        -- Held by name rather than by position for the reason the arrows are: the strip grows
+        -- underneath the menu, and a row clicked a moment after a segment closed would
+        -- otherwise land on its neighbour.
+        it("stands on the session total, and adds it up on the way", function()
+            local views = newViews({
+                live = summary({ lootValue = 5 }),
+                segments = { record({ id = "a", lootValue = 100, endedAt = OPENED - 60 }) },
+            })
+
+            local view = views.select("session")
+
+            assert.equal("session", view.kind)
+            assert.equal(105, view.summary.lootValue)
+        end)
+
+        it("stands on a filed segment, and hands the record straight through", function()
+            local filed = record({ id = "a", lootValue = 100 })
+            local views = newViews({ segments = { filed } })
+
+            assert.equal(filed, views.select("record:a").summary)
+        end)
+
+        it("leaves the panel there afterwards, the way the arrows do", function()
+            local views = newViews({ segments = { record({ id = "a" }) } })
+
+            views.select("record:a")
+
+            assert.equal("record:a", views.selected().key)
+        end)
+
+        -- A menu row is drawn from a strip that was read a moment ago, and a segment can fall
+        -- out of the evening between the list being drawn and a row on it being clicked.
+        -- Standing on nothing is worse than standing where the player already was.
+        it("leaves the panel where it is when the key names nothing on the strip", function()
+            local views = newViews({ segments = { record({ id = "a" }) } })
+            views.select("record:a")
+
+            local view = views.select("record:pruned")
+
+            assert.equal("record:a", view.key)
+            assert.equal("record:a", views.selected().key)
+        end)
+    end)
+
+    describe("following the segment that just opened", function()
+        ---The strip with one filed segment close enough behind the open one that moving the
+        ---open one forward two minutes cannot push it out of the evening. Handed back as the
+        ---options table itself, so a test can move `opened` the way a loading screen does.
+        ---@return table options
+        local function evening()
+            return { segments = { record({ id = "a", endedAt = OPENED - 60 }) } }
+        end
+
+        -- A segment opening pulls the panel forward onto it, the way a damage meter jumps to
+        -- the pull that just started. A player parked on a dungeon that finished twenty
+        -- minutes ago is looking at history, and history is not what a HUD is for once
+        -- something new is happening.
+        it("pulls the panel off a filed segment when a new one opens", function()
+            local options = evening()
+            local views = newViews(options)
+            assert.equal("record:a", views.move(1).key)
+
+            options.opened = OPENED + 120
+
+            local view = views.selected()
+            assert.equal("live", view.kind)
+            -- And the segment it was parked on is still on the strip: the panel moved because
+            -- something new opened, not because the view under it was pruned away.
+            assert.equal(3, view.count)
+        end)
+
+        -- The session total is the exception to that. Parking there is a deliberate "show me
+        -- the evening", and the evening is still the evening after a loading screen.
+        it("leaves the panel on the session total when a new segment opens", function()
+            local options = evening()
+            local views = newViews(options)
+            assert.equal("session", views.move(-99).kind)
+
+            options.opened = OPENED + 120
+
+            assert.equal("session", views.selected().kind)
+        end)
+
+        -- Every repaint asks, and a panel that moved on every repaint would be unusable: only
+        -- a start that is not the one already seen counts as somewhere new.
+        it("leaves the panel alone while the same segment is still being played", function()
+            local views = newViews(evening())
+            assert.equal("record:a", views.move(1).key)
+
+            assert.equal("record:a", views.selected().key)
+            assert.equal("record:a", views.selected().key)
+        end)
+
+        -- Between one segment closing and the next opening there is no open segment at all —
+        -- a loading screen, a flight path, the walk back out of a dungeon — and that gap is
+        -- not a change of its own. The next start is compared against the last one actually
+        -- seen, so closing and reopening counts once rather than twice.
+        it("treats a gap with nothing open as no change, and the reopen as the one change", function()
+            local options = evening()
+            local views = newViews(options)
+            assert.equal("record:a", views.move(1).key)
+
+            options.opened = false
+            assert.equal("record:a", views.selected().key)
+
+            options.opened = OPENED + 120
+            assert.equal("live", views.selected().kind)
         end)
     end)
 end)

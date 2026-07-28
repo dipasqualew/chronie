@@ -2962,6 +2962,66 @@ describe("addon integration", function()
             return header
         end
 
+        ---What the header says, without the disclosure icon in front of it.
+        ---
+        ---The title is the picker's own button — clicking it opens the list of everything the
+        ---panel can be pointed at — so it carries the same `|T...|t` marker every openable
+        ---block in the body does. That is markup rather than anything the header says, and it
+        ---is stripped here for the same reason the body's headings are found by their names.
+        ---@param frame table
+        ---@return string?
+        local function titleOf(frame)
+            local title = headerOf(frame).title
+            return title and (title.text:gsub("^|T.-|t ", ""))
+        end
+
+        ---The picker's own frame, once the title has been clicked: a second frame parented to
+        ---the panel. Found by its parent rather than by position, because a great many frames
+        ---exist by the time the whole addon has booted.
+        ---@param recorded table
+        ---@param panel table
+        ---@return table?
+        local function pickerFrame(recorded, panel)
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameType == "Frame" and frame.parent == panel then
+                    return frame
+                end
+            end
+        end
+
+        ---The list the picker drew, as it reads: what a view is called on the left, and the
+        ---metadata that tells one run of a dungeon from the next on the right.
+        ---@param frame table the picker's frame
+        ---@return table[] `{ { label = string, detail = string }, ... }`
+        local function pickerRows(frame)
+            local labels, details = {}, {}
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and fontString.justify == "LEFT" then
+                    labels[#labels + 1] = fontString.text
+                elseif fontString.shown and fontString.justify == "RIGHT" then
+                    details[#details + 1] = fontString.text
+                end
+            end
+            local rows = {}
+            for index, label in ipairs(labels) do
+                rows[index] = { label = label, detail = details[index] }
+            end
+            return rows
+        end
+
+        ---Clicks the row of the list naming `label`, the way a player picks from a menu.
+        ---@param frame table the picker's frame
+        ---@param label string
+        local function pickRow(frame, label)
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and fontString.justify == "LEFT" and fontString.text == label then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    return
+                end
+            end
+            error("no row saying " .. label .. " on the list to pick")
+        end
+
         ---What the panel is showing against one of the body's labels. The value font string
         ---is created straight after its label, which is what pairs the two.
         ---@param frame table
@@ -2998,12 +3058,12 @@ describe("addon integration", function()
 
             local frame = panelFrame(recorded)
             local header = headerOf(frame)
-            assert.equal("Westfall", header.title.text)
+            assert.equal("Westfall", titleOf(frame))
             assert.equal("0c", panelValueFor(frame, "Gold Δ"))
 
             header.back:run("OnMouseUp", "LeftButton")
 
-            assert.equal("Session · 2 segments", header.title.text)
+            assert.equal("Session · 2 segments", titleOf(frame))
             -- Deadmines' five silver plus the open segment's nothing: the body follows the
             -- header rather than staying on whatever was drawn before the arrow was clicked.
             assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
@@ -3011,8 +3071,113 @@ describe("addon integration", function()
             header.forward:run("OnMouseUp", "LeftButton")
             header.forward:run("OnMouseUp", "LeftButton")
 
-            assert.equal("Deadmines · 12m ago", header.title.text)
+            assert.equal("Deadmines · 12m ago", titleOf(frame))
             assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
+        end)
+
+        -- The arrows walk the strip one step at a time, which is fine for the segment next
+        -- door and useless four dungeons into an evening. The picker is the damage meter's own
+        -- answer: a list of everything on offer, named and dated well enough to recognise,
+        -- with the session total set apart from the segments. Only the whole addon wired
+        -- together can say whether the panel was handed the real strip to draw a list from and
+        -- a chooser that reaches back to it — a panel given neither is silently a panel whose
+        -- title does nothing when it is clicked.
+        it("opens the list from the title and stands on the session total picked out of it", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 0,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            -- Coin picked up in Deadmines, or the segment is dropped as empty on the way out.
+            recorded.setMoney(500)
+            recorded.frame:fire("PLAYER_MONEY")
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            -- Twelve minutes of Westfall, so the dungeon left behind has an age to report and
+            -- the open segment has a length.
+            recorded.clock.advance(720)
+
+            local frame = panelFrame(recorded)
+            headerOf(frame).title:run("OnMouseUp", "LeftButton")
+
+            local list = pickerFrame(recorded, frame)
+            assert.same({
+                { label = "Session", detail = "2 segments" },
+                { label = "Westfall", detail = "12m · playing" },
+                { label = "Deadmines", detail = "<1m · 12m ago" },
+            }, pickerRows(list))
+
+            pickRow(list, "Session")
+
+            assert.equal("Session · 2 segments", titleOf(frame))
+            -- Deadmines' five silver plus the open segment's nothing: the body follows the
+            -- choice rather than staying on whatever the list was opened over.
+            assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
+            assert.is_false(list.shown)
+        end)
+
+        -- A segment opening pulls the panel forward onto it, the way a damage meter jumps to
+        -- the pull that just started. A player parked on the dungeon they left twenty minutes
+        -- ago is looking at history, and history is not what a HUD is for once something new
+        -- is happening. Nothing smaller than the whole addon can say this, because the module
+        -- only learns a segment opened by being asked what to draw.
+        it("comes back to the open segment when a new one starts under a filed view", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 0,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.setMoney(500)
+            recorded.frame:fire("PLAYER_MONEY")
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.clock.advance(120)
+
+            local frame = panelFrame(recorded)
+            headerOf(frame).forward:run("OnMouseUp", "LeftButton")
+            assert.equal("Deadmines · 2m ago", titleOf(frame))
+
+            recorded.setInstance({ name = "Elwynn Forest", kind = "none", difficultyId = 0,
+                difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal("Elwynn Forest", titleOf(frame))
+            -- And the dungeon is still one arrow away: the panel moved because something new
+            -- opened, not because the view it was parked on fell out of the evening.
+            headerOf(frame).forward:run("OnMouseUp", "LeftButton")
+            assert.equal("Deadmines · 2m ago", titleOf(frame))
+        end)
+
+        -- The session total is the exception to that. Parking there is a deliberate "show me
+        -- the evening", and the evening is still the evening on the far side of a loading
+        -- screen — a panel that jumped off it at every zone boundary could never be left on it.
+        it("stays on the session total through a new segment opening", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                money = 0,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.setMoney(500)
+            recorded.frame:fire("PLAYER_MONEY")
+            recorded.setInstance({ name = "Westfall", kind = "none", difficultyId = 0, difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local frame = panelFrame(recorded)
+            headerOf(frame).back:run("OnMouseUp", "LeftButton")
+            assert.equal("Session · 2 segments", titleOf(frame))
+
+            recorded.clock.advance(120)
+            recorded.setInstance({ name = "Elwynn Forest", kind = "none", difficultyId = 0,
+                difficulty = "" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal("Session · 2 segments", titleOf(frame))
         end)
 
         -- Where the rest of the account stands is three parts wired together — the store that

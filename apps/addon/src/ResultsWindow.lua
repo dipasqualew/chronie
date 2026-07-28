@@ -36,6 +36,10 @@ local _, ns = ...
 ---@field navigate fun(delta: integer)? Walk to another view: -1 towards the session total,
 ---+1 back through the segments already played. Given one, the header grows an arrow at each
 ---end; without one the panel shows whatever it is handed and nothing else.
+---@field views fun(): SegmentView[]? Everything the panel could be pointed at, read when the
+---picker is opened rather than held, because a segment closes while the panel is on screen.
+---@field select fun(key: string)? Point the panel at one of them. Given both this and
+---`views`, the title becomes the picker's button; given neither, it is only a title.
 ---@field closable boolean?
 ---@field specialFrames string[]?
 ---@field frameStrata string?
@@ -61,6 +65,10 @@ local BAR_INDENT = 10
 -- Room for one arrow at each end of the header strip, which the title is then squeezed
 -- between rather than drawn over.
 local ARROW_WIDTH = 14
+-- The right-hand column of the picker, which carries how long a segment ran and how long
+-- ago it closed. Wider than the body's values because "42m · 3h ago" is the widest thing
+-- either column ever has to hold and clipping it would defeat the point of listing it.
+local PICKER_DETAIL_WIDTH = 96
 
 local TITLE_COLOR = { 1, 0.82, 0 }
 -- An arrow with nowhere left to go is dimmed rather than taken away, so the header keeps
@@ -132,6 +140,16 @@ function ns.newResultsWindow(deps)
     local frame, title
     ---@type table?, table?
     local backArrow, forwardArrow
+    ---The picker: the frame it is drawn on, the rows pooled on it, and whether it is open.
+    ---Built on the first click rather than with the panel, because a player who never opens
+    ---it never pays for it.
+    ---@type table?
+    local picker
+    ---@type { label: table, value: table }[]
+    local pickerRows = {}
+    ---@type table?
+    local pickerRule
+    local pickerOpen = false
     local latest, latestView
     local expanded = {
         transmogs = false,
@@ -149,6 +167,18 @@ function ns.newResultsWindow(deps)
     local reviewedTransmogs = {}
     local reviewedSegmentKey
     local lastTransmogCount = 0
+
+    ---Whether this panel has anything to pick between. The panel predates having more than
+    ---one view and the detail window still has exactly one, so the picker is something the
+    ---HUD gets and the other callers do not.
+    ---@return boolean
+    local function hasPicker()
+        return deps.views ~= nil and deps.select ~= nil
+    end
+
+    ---Declared here and filled in below the row pools they draw with, because the header
+    ---is built before them and has to hang the click on something.
+    local togglePicker
 
     local function build()
         frame = createFrame("Frame", deps.name, deps.uiParent, "BackdropTemplate")
@@ -238,6 +268,15 @@ function ns.newResultsWindow(deps)
         title:SetWidth(WIDTH - PADDING * 2 - arrows * 2 - (deps.closable and HEADER_HEIGHT or 0))
         title:SetText(type(deps.title) == "string" and deps.title or "Current Segment")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
+        -- The title is the picker's button. A button widget would be the only piece of
+        -- client chrome on the panel, and the header has room for the name of the thing
+        -- being looked at or for a control beside it, not comfortably for both — so the
+        -- name is the control, marked with the same disclosure icon every openable block
+        -- in the body carries.
+        if hasPicker() then
+            title:EnableMouse(true)
+            title:SetScript("OnMouseUp", togglePicker)
+        end
 
         if deps.closable then
             local close = createFrame("Button", nil, frame, "UIPanelCloseButton")
@@ -341,16 +380,141 @@ function ns.newResultsWindow(deps)
         return rule
     end
 
+    ---A row of the picker: what the view is called on the left, the metadata that tells it
+    ---from the one above it on the right. Pooled the way the body's rows are, and for the
+    ---same reason — a segment closing adds a row to a list that is redrawn every time it
+    ---is opened.
+    ---@param index integer
+    ---@return table label, table value
+    local function pickerRowAt(index)
+        local row = pickerRows[index]
+        if not row then
+            local label = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local value = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            label:SetJustifyH("LEFT")
+            value:SetJustifyH("RIGHT")
+            label:SetWordWrap(false)
+            value:SetWordWrap(false)
+            label:EnableMouse(true)
+            value:EnableMouse(true)
+            row = { label = label, value = value }
+            pickerRows[index] = row
+        end
+        return row.label, row.value
+    end
+
+    ---The list the title opens: the session on top, then every segment on offer under it.
+    ---
+    ---Read fresh on every open rather than kept, because the strip grows while the panel is
+    ---on screen — a segment that closed since the last look is exactly the row somebody
+    ---opening this is reaching for.
+    local function drawPicker()
+        local views = deps.views()
+        local y = -PADDING
+        local used = 0
+        local separated = false
+
+        for _, view in ipairs(views) do
+            -- The whole point of the issue this was built for: the session total is one
+            -- choice and the individual segments are another list, rather than the two
+            -- being the same strip walked end to end. A hairline is what says so.
+            if view.kind ~= "session" and not separated then
+                separated = true
+                pickerRule:SetPoint("TOPLEFT", PADDING, y - (RULE_LINE - RULE_HEIGHT) / 2)
+                pickerRule:SetWidth(WIDTH - PADDING * 2)
+                pickerRule:SetHeight(RULE_HEIGHT)
+                pickerRule:Show()
+                y = y - RULE_LINE
+            end
+
+            used = used + 1
+            local label, value = pickerRowAt(used)
+            local color = view.current and TITLE_COLOR or HEADING_COLOR
+            label:SetWidth(WIDTH - PADDING * 2 - PICKER_DETAIL_WIDTH - COLUMN_GAP)
+            label:SetPoint("TOPLEFT", PADDING, y)
+            label:SetText(view.label or view.title or "")
+            label:SetTextColor(color[1], color[2], color[3])
+            label:Show()
+            value:SetWidth(PICKER_DETAIL_WIDTH)
+            value:SetPoint("TOPRIGHT", -PADDING, y)
+            value:SetText(view.detail or "")
+            value:SetTextColor(LABEL_COLOR[1], LABEL_COLOR[2], LABEL_COLOR[3])
+            value:Show()
+
+            local key = view.key
+            for _, region in ipairs({ label, value }) do
+                region:SetScript("OnMouseUp", function()
+                    deps.select(key)
+                    togglePicker()
+                end)
+            end
+            y = y - LINE
+        end
+
+        if not separated then
+            pickerRule:Hide()
+        end
+        for index = used + 1, #pickerRows do
+            for _, region in ipairs({ pickerRows[index].label, pickerRows[index].value }) do
+                region:Hide()
+                region:SetScript("OnMouseUp", nil)
+            end
+        end
+        picker:SetHeight(-y + PADDING)
+    end
+
+    ---Builds the picker's own frame, once.
+    ---
+    ---A frame of its own rather than rows drawn into the panel: the list covers the body
+    ---while it is open, and a panel that had to redraw its own contents around a menu would
+    ---be two layouts in one function. It sits on DIALOG so it is over the body it covers,
+    ---and it is dark with the same hairline edge the panel has, because it is the panel's
+    ---own header opening downwards rather than a window in its own right.
+    local function buildPicker()
+        picker = createFrame("Frame", nil, frame, "BackdropTemplate")
+        picker:SetWidth(WIDTH)
+        picker:SetHeight(LINE)
+        picker:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -HEADER_HEIGHT - RULE_HEIGHT)
+        picker:SetFrameStrata("DIALOG")
+        picker:SetToplevel(true)
+        picker:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        picker:SetBackdropColor(HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], 1)
+        picker:SetBackdropBorderColor(BORDER_COLOR[1], BORDER_COLOR[2], BORDER_COLOR[3], BORDER_COLOR[4])
+        -- Mouse-enabled with nothing to do: it is what stops a click meant for a menu row
+        -- landing on the panel underneath and dragging the whole HUD across the screen.
+        picker:EnableMouse(true)
+        pickerRule = picker:CreateTexture(nil, "BORDER")
+        pickerRule:SetColorTexture(RULE_COLOR[1], RULE_COLOR[2], RULE_COLOR[3], RULE_COLOR[4])
+        picker:Hide()
+    end
+
     ---@param summary SegmentSummary
     local function render(summary)
         -- A view names itself — "Session", the zone being played, a zone left an hour ago —
         -- and that name outranks anything the panel was built with, because it is the only
         -- thing on screen saying which of them is being looked at.
+        local named
         if latestView and latestView.title then
-            title:SetText(latestView.title)
+            named = latestView.title
         elseif type(deps.title) == "function" then
-            title:SetText(deps.title(summary) or "Segment Details")
+            named = deps.title(summary) or "Segment Details"
+        else
+            -- What the header was built with, spelled out again rather than left standing,
+            -- because the icon below is prepended to it and a title left alone would keep
+            -- whichever icon the last repaint put there.
+            named = type(deps.title) == "string" and deps.title or "Current Segment"
         end
+        if hasPicker() then
+            -- Whatever it is called, prefixed by the same icon every openable block in the
+            -- body carries, because the title is the thing that opens the list.
+            named = (pickerOpen and COLLAPSE_ICON or EXPAND_ICON) .. named
+        end
+        title:SetText(named)
         if backArrow and forwardArrow then
             local index = latestView and latestView.index or 1
             local count = latestView and latestView.count or 1
@@ -789,6 +953,35 @@ function ns.newResultsWindow(deps)
         frame:SetHeight(-y + PADDING)
     end
 
+    ---Opens the list, or shuts it again. Built on the first open, drawn on every one.
+    function togglePicker()
+        if not picker then
+            buildPicker()
+        end
+        pickerOpen = not pickerOpen
+        if pickerOpen then
+            drawPicker()
+            picker:Show()
+        else
+            picker:Hide()
+        end
+        -- Only the icon on the title changes, but it changes from the render that draws
+        -- everything else, and the panel has exactly one of those.
+        if latest then
+            render(latest)
+        end
+    end
+
+    ---Shuts the list without redrawing anything, for when the panel itself goes away.
+    ---A menu left open behind a hidden HUD is a menu that reappears over whatever the
+    ---player opened it for next.
+    local function closePicker()
+        if picker and pickerOpen then
+            pickerOpen = false
+            picker:Hide()
+        end
+    end
+
     return {
         ---@param summary SegmentSummary
         ---@param view SegmentView?
@@ -821,6 +1014,7 @@ function ns.newResultsWindow(deps)
         end,
 
         hide = function()
+            closePicker()
             if frame then
                 frame:Hide()
             end
@@ -831,6 +1025,7 @@ function ns.newResultsWindow(deps)
                 build()
             end
             if frame:IsShown() then
+                closePicker()
                 frame:Hide()
             else
                 frame:Show()
