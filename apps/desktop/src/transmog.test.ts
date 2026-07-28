@@ -289,39 +289,63 @@ describe("filterSets", () => {
 });
 
 describe("alternateLabel", () => {
+  /** The card the folded sets below are written under: plate, Warlords, patch 6.2.0. */
+  const shown = set({
+    id: 301, name: "Wild Combatant's Plate Armor", classMask: 0x0023, expansionId: 5,
+    patchIntroduced: 60200,
+  });
+
   it.each<[string, Alternate, string]>([
-    [
-      "faction",
-      alternate({
-        id: 302, name: "Warmongering Combatant's Plate Armor", classMask: 0x0023, reason: "faction",
-      }),
-      "the other faction's Warmongering Combatant's Plate Armor · Plate",
-    ],
     [
       "class",
       alternate({ id: 312, name: "Ebon Blade Battlegear", classMask: 1 << 5, reason: "class" }),
       "another class's Ebon Blade Battlegear · Death Knight",
     ],
     [
-      "reissue",
-      alternate({ id: 322, name: "Sunwarmed Finery", classMask: 0x0190, reason: "reissue" }),
-      "released again as Sunwarmed Finery · Cloth",
+      "reissue a whole expansion later",
+      alternate({
+        id: 322, name: "Sunwarmed Finery", classMask: 0x0023, expansionId: 9,
+        patchIntroduced: 100200, reason: "reissue",
+      }),
+      "released again as Sunwarmed Finery · Dragonflight",
+    ],
+    [
+      "reissue a patch later",
+      alternate({
+        id: 332, name: "Warmongering Combatant's Plate Armor", classMask: 0x0023, expansionId: 5,
+        patchIntroduced: 60201, reason: "reissue",
+      }),
+      "released again as Warmongering Combatant's Plate Armor · Patch 6.2.1",
     ],
   ])("says a set was folded in because it is a %s", (_reason, folded, expected) => {
-    expect(alternateLabel(folded)).toBe(expected);
+    expect(alternateLabel(folded, shown)).toBe(expected);
   });
 
-  // "Any class" tells a reader nothing they cannot see from the card they are already looking
-  // at, so a set nobody in particular wears is placed by when it arrived instead. The game
-  // writes "anyone" both ways, and a label that only handled one of them would leak the other.
-  it.each<[string, number]>([
-    ["no class at all", 0],
-    ["every class at once", 0x1fff],
-  ])("names the expansion rather than the class of a set for %s", (_what, classMask) => {
+  // The qualifier is only ever what differs from the card the line is written under. A faction
+  // pair is the same armour, for the same classes, out of the same patch — that is what makes
+  // it a pair — so naming any of those spends the line repeating the chip directly above it.
+  it("names nothing about a set that differs from its card only by faction", () => {
     const folded = alternate({
-      id: 322, name: "Sunwarmed Finery", classMask, expansionId: 9, reason: "reissue",
+      id: 302, name: "Warmongering Combatant's Plate Armor", classMask: 0x0023, expansionId: 5,
+      patchIntroduced: 60200, reason: "faction",
     });
-    expect(alternateLabel(folded)).toBe("released again as Sunwarmed Finery · Dragonflight");
+    expect(alternateLabel(folded, shown))
+      .toBe("the other faction's Warmongering Combatant's Plate Armor");
+  });
+
+  // The game writes "anyone" as a mask of zero and as every bit at once, and a card for one of
+  // them beside a folded set carrying the other is the same audience written two ways — so it
+  // is not a difference, and the line falls through to where the set came from instead.
+  it.each<[string, number, number]>([
+    ["no class at all against every class", 0, 0x1fff],
+    ["every class at once against none", 0x1fff, 0],
+  ])("treats %s as the same audience", (_what, shownMask, foldedMask) => {
+    const anyone = set({ id: 340, name: "Sunwarmed Finery", classMask: shownMask, expansionId: 5 });
+    const folded = alternate({
+      id: 341, name: "Sunwarmed Regalia", classMask: foldedMask, expansionId: 9, reason: "reissue",
+    });
+    // The masks differ as numbers, so this is the label reading them rather than comparing them.
+    expect(alternateLabel(folded, anyone)).toBe("released again as Sunwarmed Regalia · Dragonflight");
   });
 });
 

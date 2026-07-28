@@ -116,12 +116,28 @@ const REASONS: Record<SameLookReason, string> = {
   reissue: "released again as",
 };
 
-/** One line naming a set folded into this one, and what makes it its own set. */
-export function alternateLabel(alternate: Alternate): string {
-  const where = alternate.classMask === 0 || alternate.classMask === ALL_CLASSES
-    ? expansionName(alternate.expansionId)
-    : classLabel(alternate.classMask);
-  return `${REASONS[alternate.reason]} ${alternate.name} · ${where}`;
+/**
+ * One line naming a set folded into this one, and what makes it its own set.
+ *
+ * The qualifier is **only what differs from the card it is written under**. A faction pair is
+ * the same armour for the same classes out of the same patch, so "the other faction's Deepglass
+ * Hide · Leather" spends its last two words repeating the chip directly above it; a class
+ * variant genuinely is another class, and a reissue genuinely is another expansion or patch.
+ * Naming the first difference there is one keeps every line worth reading.
+ */
+export function alternateLabel(alternate: Alternate, shown: TransmogSet): string {
+  // The labels rather than the masks, because the label is what would be printed and the game
+  // writes "anyone" two ways — a mask of zero and every bit at once. Those are the same
+  // audience, and a line saying "Any class" under a card already saying it is a wasted line.
+  const wearers = classLabel(alternate.classMask);
+  const qualifier = wearers !== classLabel(shown.classMask)
+    ? wearers
+    : alternate.expansionId !== shown.expansionId
+      ? expansionName(alternate.expansionId)
+      : patchName(alternate.patchIntroduced) !== patchName(shown.patchIntroduced)
+        ? `Patch ${patchName(alternate.patchIntroduced)}`
+        : "";
+  return `${REASONS[alternate.reason]} ${alternate.name}${qualifier ? ` · ${qualifier}` : ""}`;
 }
 
 /**

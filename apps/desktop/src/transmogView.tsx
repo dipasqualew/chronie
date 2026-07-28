@@ -287,7 +287,7 @@ function Card(
       {alternates.length
         ? <ul className="mog-alternates" aria-label={`Sets holding the same appearances as ${name}`}>
           {alternates.map((alternate) => (
-            <li key={alternate.id}>{alternateLabel(alternate)}</li>
+            <li key={alternate.id}>{alternateLabel(alternate, set)}</li>
           ))}
         </ul>
         : null}

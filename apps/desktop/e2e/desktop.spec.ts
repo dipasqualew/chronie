@@ -2425,8 +2425,12 @@ test("browses the game's transmog sets and dresses the character in them", async
   // same wardrobe up to six times over.
   await test.step("a set holding another's appearances is shown once, and named", async () => {
     await expect(transmog.sets()).not.toContainText(["Deepglass Hide"]);
+    // The name and nothing else: a faction pair is the same armour for the same classes out of
+    // the same patch, so a qualifier here would repeat the chip directly above it.
     await expect(transmog.card("Tideglass Hide"))
       .toContainText("the other faction's Deepglass Hide");
+    await expect(transmog.card("Tideglass Hide"))
+      .not.toContainText("the other faction's Deepglass Hide · ");
     // And the grid says why it is shorter than the count above it.
     await expect(
       transmog.view.getByText(/1 set shown under another holding the same appearances/),
