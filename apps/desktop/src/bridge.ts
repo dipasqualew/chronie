@@ -14,6 +14,7 @@ import type {
   CaptureQuality,
   CaptureThumbnailsPayload,
   CharacterLookPayload,
+  CharacterChosen,
   CharacterModelPayload,
   CharacterPick,
   CombatLogStatus,
@@ -181,10 +182,13 @@ export const desktop = {
   // And says who she is from now on, answering with what was stored. Nothing is drawn by this:
   // the window redraws her by asking for the bodies again, which is the errand it already runs
   // whenever what she is wearing changes.
-  saveCharacterLook: (picked: CharacterPick[]): Promise<CharacterPick[]> => {
-    if (!mock) return invoke<CharacterPick[]>("save_character_look", { picked });
-    // The half of `customization::clean` a test can tell apart from a working form: one answer
-    // per question, the last of them winning.
+  saveCharacterLook: (body: number, picked: CharacterPick[]): Promise<CharacterChosen> => {
+    if (!mock) return invoke<CharacterChosen>("save_character_look", { body, picked });
+    // The half of `body::known` and `customization::clean` a test can tell apart from a working
+    // form: a body has to be one on offer, and a question takes one answer, the last winning.
+    if (!mock.characterLook.bodies.some((one) => one.id === body)) {
+      return Promise.reject(new Error("There is no body of that kind to draw her on."));
+    }
     const cleaned: CharacterPick[] = [];
     for (const answer of picked) {
       if (!answer.question || !answer.swatch) {
@@ -194,8 +198,12 @@ export const desktop = {
       if (held) held.swatch = answer.swatch;
       else cleaned.push({ ...answer });
     }
+    mock.characterLook.body = body;
     mock.characterLook.picked = cleaned;
-    return Promise.resolve(structuredClone(cleaned));
+    // The questions the *other* body is asked, because that is what changing body means: the
+    // real backend re-reads them out of the game for whichever body is now being drawn.
+    mock.characterLook.questions = mock.characterQuestions[body] ?? [];
+    return Promise.resolve({ body, picked: structuredClone(cleaned) });
   },
   // The same body wearing a set of clothes, which is how every slot is shown. A list rather
   // than one appearance because two of the three subsystems behind character rendering exist

@@ -17,7 +17,13 @@ const SKIN: CharacterQuestion = {
   swatches: [{ id: 85, name: "" }, { id: 86, name: "" }, { id: 87, name: "" }],
 };
 
-const ASKED: CharacterLookPayload = { questions: [HAIR, SKIN], picked: [] };
+/** The two bodies, as the backend offers them, with hers the one being drawn. */
+const ASKED: CharacterLookPayload = {
+  bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+  body: 2,
+  questions: [HAIR, SKIN],
+  picked: [],
+};
 
 describe("which swatch is on her", () => {
   // The one thing this has to agree with the backend about. A question nobody has answered is
@@ -77,6 +83,21 @@ describe("answering a question", () => {
     ]);
   });
 
+  // The other body's answers ride along untouched. One settings file holds every body's, and
+  // this form cannot see the questions of the body it is not drawing — so stating only what it
+  // knows would forget his hair every time somebody switched to hers.
+  it("keeps the answers about the body it is not showing", () => {
+    const both: CharacterLookPayload = {
+      ...ASKED,
+      picked: [{ question: 11, swatch: 48 }, { question: 14, swatch: 87 }],
+    };
+    expect(withAnswer(both, 16, 133)).toEqual([
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 87 },
+      { question: 11, swatch: 48 },
+    ]);
+  });
+
   it("keeps what was already answered about the others", () => {
     const answered: CharacterLookPayload = { ...ASKED, picked: [{ question: 14, swatch: 87 }] };
     expect(withAnswer(answered, 16, 133)).toEqual([
@@ -90,20 +111,25 @@ describe("her as a cache key", () => {
   // What the panes holding pictures of her key on. It has to change when she does and not
   // otherwise: a key that moved for nothing throws away twenty rendered bodies.
   it("changes when an answer does", () => {
-    expect(lookKey([{ question: 16, swatch: 132 }]))
-      .not.toBe(lookKey([{ question: 16, swatch: 133 }]));
-    expect(lookKey([])).toBe("");
+    expect(lookKey(2, [{ question: 16, swatch: 132 }]))
+      .not.toBe(lookKey(2, [{ question: 16, swatch: 133 }]));
   });
 
-  it("is the same woman whichever order her answers arrive in", () => {
+  // And when the body does, which is the coarser half of the same statement: every picture in
+  // the window is of one body or the other, and none of them survives the switch.
+  it("changes when the body does", () => {
+    expect(lookKey(1, [])).not.toBe(lookKey(2, []));
+  });
+
+  it("is the same person whichever order the answers arrive in", () => {
     const one = [{ question: 16, swatch: 133 }, { question: 14, swatch: 86 }];
     const other = [{ question: 14, swatch: 86 }, { question: 16, swatch: 133 }];
-    expect(lookKey(one)).toBe(lookKey(other));
+    expect(lookKey(2, one)).toBe(lookKey(2, other));
   });
 
   it("leaves the list it was given alone", () => {
     const picked = [{ question: 16, swatch: 133 }, { question: 14, swatch: 86 }];
-    lookKey(picked);
+    lookKey(2, picked);
     expect(picked[0]).toEqual({ question: 16, swatch: 133 });
   });
 });

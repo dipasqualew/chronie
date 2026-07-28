@@ -1,5 +1,6 @@
 mod activity;
 pub mod achievements;
+pub mod body;
 pub mod budget;
 pub mod captures;
 pub mod casc;
@@ -63,6 +64,11 @@ fn default_capture_triggers() -> Vec<String> {
     vec!["accountFirstAchievement".to_string()]
 }
 
+/// The body a settings file that says nothing is drawn on.
+fn body_default() -> u32 {
+    body::DEFAULT
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
@@ -105,8 +111,18 @@ struct Settings {
     /// Kept here rather than in the database because it is a preference and not a record: there
     /// is one of it, it is what this reader wants to look at, and a machine that has never been
     /// sent a database still has one.
+    ///
+    /// Every body's answers at once, rather than the current body's: the questions are the
+    /// game's own ids and no two bodies share one, so switching to the other body and back
+    /// finds the answers still there. [`customization::of`] is what narrows them to the body
+    /// being drawn, every time it draws one.
     #[serde(default)]
     character_look: Vec<customization::Picked>,
+    /// Which body those answers are about: a `ChrModel`, and one this build has a mesh for. A
+    /// settings file that predates this — or one naming a body a later Chronie dropped — gets
+    /// [`body::DEFAULT`], which is the Human Female every reader has been shown until now.
+    #[serde(default = "body_default")]
+    character_body: u32,
 }
 
 impl Default for Settings {
@@ -120,6 +136,7 @@ impl Default for Settings {
             capture_quality: captures::Quality::default(),
             capture_triggers: default_capture_triggers(),
             character_look: Vec::new(),
+            character_body: body::DEFAULT,
         }
     }
 }
@@ -469,8 +486,8 @@ async fn game_icons(
 /// which would be a wardrobe of strangers.
 #[tauri::command]
 async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
-    let picked = character_look_of(&state)?;
-    read_game_files(&state, move |files| character::model_of(files, &picked)).await
+    let who = character_look_of(&state)?;
+    read_game_files(&state, move |files| character::model_of(files, &who)).await
 }
 
 /// What the reader may be asked about her, and what they have answered so far.
@@ -481,9 +498,16 @@ async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
 /// out of the installed game, so a patch that adds a hairstyle adds it here with no code.
 #[tauri::command]
 async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
-    let picked = character_look_of(&state)?;
-    let questions = read_game_files(&state, customization::questions).await?;
-    Ok(serde_json::json!({ "questions": questions, "picked": picked }))
+    let who = character_look_of(&state)?;
+    let body = who.body;
+    let questions =
+        read_game_files(&state, move |files| customization::questions(files, body)).await?;
+    Ok(serde_json::json!({
+        "bodies": body::playable(),
+        "body": who.body,
+        "questions": questions,
+        "picked": who.picked,
+    }))
 }
 
 /// Says who she is from now on, and answers with what was stored.
@@ -494,25 +518,31 @@ async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
 /// because an install can change under a settings file — see [`customization::of`].
 #[tauri::command]
 fn save_character_look(
+    body: u32,
     picked: Vec<customization::Picked>,
     state: State<'_, AppState>,
-) -> Result<Vec<customization::Picked>, String> {
+) -> Result<Value, String> {
+    let body = body::known(body)?;
     let cleaned = customization::clean(picked)?;
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+    settings.character_body = body;
     settings.character_look = cleaned.clone();
     state.save(&settings)?;
-    Ok(cleaned)
+    Ok(serde_json::json!({ "body": body, "picked": cleaned }))
 }
 
 /// The answers the settings file holds, copied out from under the lock.
 ///
 /// A copy rather than a borrow because every caller hands it to a worker thread that outlives
 /// the command — the same bargain [`read_game_files`] makes about the path.
-fn character_look_of(state: &State<'_, AppState>) -> Result<Vec<customization::Picked>, String> {
+fn character_look_of(state: &State<'_, AppState>) -> Result<character::Who, String> {
     state
         .settings
         .lock()
-        .map(|settings| settings.character_look.clone())
+        .map(|settings| character::Who {
+            body: settings.character_body,
+            picked: settings.character_look.clone(),
+        })
         .map_err(|_| "Settings lock failed.".to_string())
 }
 
@@ -535,9 +565,9 @@ fn character_look_of(state: &State<'_, AppState>) -> Result<Vec<customization::P
 /// about, and leaves the window showing the icons.
 #[tauri::command]
 async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Result<Value, String> {
-    let picked = character_look_of(&state)?;
+    let who = character_look_of(&state)?;
     read_game_files(&state, move |files| {
-        character::worn_set_of(files, &pieces, &picked)
+        character::worn_set_of(files, &pieces, &who)
     })
     .await
 }
@@ -555,8 +585,8 @@ async fn gallery_models(
     pieces: Vec<worn::Piece>,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let picked = character_look_of(&state)?;
-    read_game_files(&state, move |files| gallery::of(files, &pieces, &picked)).await
+    let who = character_look_of(&state)?;
+    read_game_files(&state, move |files| gallery::of(files, &pieces, &who)).await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.

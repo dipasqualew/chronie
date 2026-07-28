@@ -114,7 +114,14 @@ fn main() {
 
     let rest: Vec<String> = args.collect();
     if rest.iter().any(|arg| arg == "--questions") {
-        questions(files);
+        // Which body's questions, defaulting to the one the app opens on. Another `ChrModel`
+        // is another set of questions entirely — that is the filter this whole chain turns on.
+        let body = rest
+            .iter()
+            .filter_map(|arg| arg.parse().ok())
+            .next()
+            .unwrap_or(chronie_desktop_lib::body::DEFAULT);
+        questions(files, body);
         return;
     }
 
@@ -134,8 +141,9 @@ fn main() {
 /// out here is one whose swatches drive nothing, and a swatch with no name beside it is one the
 /// game itself does not name — the character creation screen draws those as squares of colour,
 /// and a window over this has to number them.
-fn questions(files: &dyn casc::GameFiles) {
-    let asked = match chronie_desktop_lib::customization::questions(files) {
+fn questions(files: &dyn casc::GameFiles, body: u32) {
+    println!("ChrModel {body}:");
+    let asked = match chronie_desktop_lib::customization::questions(files, body) {
         Ok(asked) => asked,
         Err(error) => {
             println!("what she may be asked could not be read: {error}");

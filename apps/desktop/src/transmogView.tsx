@@ -63,6 +63,7 @@ import type { ModelStage } from "./modelViewer";
 import { LinkOut } from "./ui";
 import { WardrobeList } from "./wardrobeList";
 import type {
+  CharacterChosen,
   CharacterLookPayload,
   CharacterModelPayload,
   CharacterPick,
@@ -107,7 +108,7 @@ export interface TransmogViewProps {
    */
   herself: {
     load: () => Promise<CharacterLookPayload>;
-    save: (picked: CharacterPick[]) => Promise<CharacterPick[]>;
+    save: (body: number, picked: CharacterPick[]) => Promise<CharacterChosen>;
     onError: (error: unknown) => string;
   };
   /**
@@ -406,7 +407,10 @@ export function TransmogView(
       <OutfitPanel
         outfit={outfit} icons={icons} createStage={createStage} look={look}
         loadCharacter={loadCharacter} loadWorn={loadWorn}
-        herself={{ ...herself, onChanged: (picked) => setLook(lookKey(picked)) }}
+        herself={{
+          ...herself,
+          onChanged: (chosen) => setLook(lookKey(chosen.body, chosen.picked)),
+        }}
         save={{
           sets: custom.payload?.sets ?? [],
           onSave: custom.save,

@@ -373,22 +373,29 @@ const UNMARKED = {
  */
 function fakeHerself() {
   let picked: CharacterPick[] = [];
+  let body = 2;
   return {
     load: vi.fn(() => Promise.resolve({
-      questions: [
-        {
-          id: 16,
-          name: "Hair Style",
-          swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
-        },
-        // Unnamed, as most of the game's own swatches are: a skin tone is a square of colour.
-        { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
-      ],
+      bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+      body,
+      questions: body === 2
+        ? [
+          {
+            id: 16,
+            name: "Hair Style",
+            swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+          },
+          // Unnamed, as most of the game's are: a skin tone is a square of colour.
+          { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
+        ]
+        // The other body is asked its own questions, which is what changing body means.
+        : [{ id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] }],
       picked: [...picked],
     })),
-    save: vi.fn((answers: CharacterPick[]) => {
+    save: vi.fn((chosen: number, answers: CharacterPick[]) => {
+      body = chosen;
       picked = answers;
-      return Promise.resolve([...picked]);
+      return Promise.resolve({ body, picked: [...picked] });
     }),
     onError: String,
   };
@@ -398,8 +405,8 @@ type FakeHerself = ReturnType<typeof fakeHerself>;
 
 /** And nobody the reader can be, for the tests that are about something else entirely. */
 const NOT_ASKED = {
-  load: () => Promise.resolve({ questions: [], picked: [] }),
-  save: (picked: CharacterPick[]) => Promise.resolve(picked),
+  load: () => Promise.resolve({ bodies: [], body: 0, questions: [], picked: [] }),
+  save: (body: number, picked: CharacterPick[]) => Promise.resolve({ body, picked }),
   onError: String,
 };
 
@@ -1110,6 +1117,20 @@ describe("who the character is", () => {
     await waitFor(() => expect(shown.loadGallery).toHaveBeenCalledTimes(2));
     expect(shown.loadGallery.mock.calls[1]?.[0].map((piece) => piece.displayInfoId))
       .toEqual([900_040, 900_099]);
+  });
+
+  // The other half of it, and the coarser one: another body entirely. Every picture in the
+  // window is of one body or the other, so the same cache has to let go of all of them.
+  it("reads the character again on the other body", async () => {
+    const shown = view();
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(1));
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Body" }), { target: { value: "1" } });
+
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(2));
+    // And the form under the picker is that body's questions rather than hers relabelled.
+    expect(await screen.findByRole("combobox", { name: "Beard" })).toBeTruthy();
   });
 
   // And what is on her survives it. She is the body under the clothes; changing her hair is not

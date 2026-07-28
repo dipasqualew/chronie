@@ -3,21 +3,32 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Herself } from "./herselfPanel";
 import type { HerselfProps } from "./herselfPanel";
-import type { CharacterLookPayload, CharacterPick } from "./types";
+import type { CharacterChosen, CharacterLookPayload, CharacterPick, CharacterQuestion } from "./types";
 
 afterEach(cleanup);
 
 /** What the game asks about a Human Female, cut down to the two shapes that differ: a question
  * whose swatches are named, and one whose are not. */
+const HERS: CharacterQuestion[] = [
+  {
+    id: 16,
+    name: "Hair Style",
+    swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+  },
+  { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
+];
+
+/** And what it asks about the other body, which is not the same list under other names: a
+ * beard is a question no female body is ever asked. */
+const HIS: CharacterQuestion[] = [
+  { id: 11, name: "Hair Style", swatches: [{ id: 44, name: "Bald" }, { id: 45, name: "Peasant" }] },
+  { id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] },
+];
+
 const ASKED: CharacterLookPayload = {
-  questions: [
-    {
-      id: 16,
-      name: "Hair Style",
-      swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
-    },
-    { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
-  ],
+  bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+  body: 2,
+  questions: HERS,
   picked: [],
 };
 
@@ -30,11 +41,19 @@ const ASKED: CharacterLookPayload = {
  */
 function panel(overrides: Partial<HerselfProps> = {}) {
   let picked: CharacterPick[] = [...ASKED.picked];
+  let body = ASKED.body;
   const props: HerselfProps = {
-    load: vi.fn(() => Promise.resolve({ ...ASKED, picked: [...picked] })),
-    save: vi.fn((answers: CharacterPick[]) => {
+    load: vi.fn(() => Promise.resolve({
+      ...ASKED,
+      body,
+      // The questions of whichever body is being drawn, which is what the backend re-reads.
+      questions: body === ASKED.body ? HERS : HIS,
+      picked: [...picked],
+    })),
+    save: vi.fn((chosen: number, answers: CharacterPick[]): Promise<CharacterChosen> => {
+      body = chosen;
       picked = answers;
-      return Promise.resolve([...picked]);
+      return Promise.resolve({ body, picked: [...picked] });
     }),
     onChanged: vi.fn(),
     onError: (error: unknown) => String(error),
@@ -120,8 +139,8 @@ describe("Herself", () => {
     fireEvent.change(field("Hair Style"), { target: { value: "133" } });
 
     const answered = [{ question: 16, swatch: 133 }, { question: 14, swatch: 85 }];
-    await waitFor(() => expect(save).toHaveBeenCalledWith(answered));
-    expect(onChanged).toHaveBeenCalledWith(answered);
+    await waitFor(() => expect(save).toHaveBeenCalledWith(2, answered));
+    expect(onChanged).toHaveBeenCalledWith({ body: 2, picked: answered });
     expect(field("Hair Style").value).toBe("133");
   });
 
@@ -136,7 +155,7 @@ describe("Herself", () => {
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     fireEvent.change(field("Skin Color"), { target: { value: "86" } });
 
-    await waitFor(() => expect(save).toHaveBeenLastCalledWith([
+    await waitFor(() => expect(save).toHaveBeenLastCalledWith(2, [
       { question: 16, swatch: 133 },
       { question: 14, swatch: 86 },
     ]));
@@ -145,7 +164,7 @@ describe("Herself", () => {
   // An install whose tables this app cannot read says so. A form of empty selects would look
   // like a body nobody is allowed to change rather than a game nothing could be read out of.
   it("says so when the game can say nothing about how she is put together", async () => {
-    panel({ load: () => Promise.resolve({ questions: [], picked: [] }) });
+    panel({ load: () => Promise.resolve({ ...ASKED, bodies: [], questions: [] }) });
 
     open();
 

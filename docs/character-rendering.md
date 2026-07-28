@@ -11,8 +11,8 @@ character's body. There is no mesh to show in isolation.
 **Provenance.** Constants marked *verified* were read from build `12.0.5.67` on
 2026-07-26; the attachments, the geoset groups the body actually holds, and the cape on
 2026-07-27; the hands, the shield, and the bone chains that place them on 2026-07-27 as
-well; that the bind pose leaves her eyes shut, and every question this body can be asked, on
-2026-07-28. The rest is from [wowdev.wiki](https://wowdev.wiki) and
+well; that the bind pose leaves her eyes shut, every question a body can be asked, and what a
+body *is* — its layout, its sections and its atlas — on 2026-07-28. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
 ## One item, and then a set of them
@@ -67,38 +67,61 @@ body has nothing for leaves the group where a bare body had it; it does not fall
 the piece that lost, because the game's answer to "who owns this group" is one item and not
 a queue.
 
-## The base model
+## The base model, and which one
 
-Human Female. Gear is authored to look right on human proportions, and Dracthyr, Worgen
-and Mechagnome carry extra geoset groups and limb handling worth avoiding.
+Two bodies: Human Female and Human Male. Gear is authored to look right on human proportions,
+and Dracthyr, Worgen and Mechagnome carry extra geoset groups and limb handling worth avoiding.
 
-**Which** Human Female is the reader's. Every question the game's own character creation screen
-asks about this body is read out of the install and offered — see
-[game-files.md](game-files.md#every-swatch-not-only-the-first-verified) for what those are on
-12.0.5.67 — and the answers are kept in the app's settings file, one swatch per question, as
-`customization::Picked`. A question nobody has answered keeps the swatch the game itself opens
-on, so a fresh install draws exactly the body this app drew before any of it existed. Everything
-below this line is the same whichever swatches are chosen: the atlas, the sections, the layers
-and the geoset rules do not know who she is.
+**Everything that used to be a constant about the body is now a read**, in `body.rs`, because
+there is more than one of them and the races to come are not all shaped like these two:
+
+| What | Where it comes from |
+|---|---|
+| `Sex` | `ChrModel` col3 — 0 male, 1 female |
+| `CharComponentTextureLayoutID` | `ChrModel` col5 — **103** for the male body, **104** for the female |
+| The section rectangles | `CharComponentTextureSections`, filtered to that layout |
+| The composite atlas size | `ChrModelMaterial`, that layout at `TextureType == 1` |
+| The mesh | **still a constant** — see below |
+
+Read off 12.0.5.67 on 2026-07-28, and each agrees with something already written down: `ChrModel`
+2 comes out as layout 104, and 104's ten sections come out as exactly the table below, which
+wago.tools produced independently. The two Human layouts state the same rectangles and the same
+2048 × 1024 atlas as each other — worth knowing and not worth assuming, because the other races'
+layouts do not all agree with them.
+
+**The mesh is the one hop still not read from the install.** The chain is `ChrModel.DisplayID` →
+`CreatureDisplayInfo.ModelID` → `CreatureModelData.FileDataID`, and it works — `ChrModel` 2 goes
+56658 → 7599 → **1000764**, and `ChrModel` 1 goes 57899 → 7661 → **1011653** — but the
+FileDataIDs of those two tables are not known to this repository, and scanning the storage for
+them came up empty. So the last hop was followed on [wago.tools](https://wago.tools) and the two
+answers are constants in `body::KNOWN`, each with a render behind it: the body parses, its
+geosets are the ones a body of that sex has, its own skin paints onto it seamlessly, and a leg
+appearance lands on its legs. `1005887` — which a scan offered first — failed exactly that test,
+drawing a hooved, horned body wearing a Human's skin. Finding those two tables is what the races
+after these two need.
+
+`humanfemale.m2` (119563) is the *vanilla* model. Retail uses the `_hd` one.
+
+**Which body, and which of that body, are both the reader's.** Every question the game's own
+character creation screen asks about the chosen `ChrModel` is read out of the install and
+offered — see [game-files.md](game-files.md#every-swatch-not-only-the-first-verified) — and the
+answers are kept in the app's settings file, one swatch per question, as `customization::Picked`.
+Every body's answers live in that one list, because the question ids are the game's own and no
+two bodies share one; `customization::of` narrows them to the body being drawn. A question nobody
+has answered keeps the swatch the game itself opens on, so a fresh install draws exactly the body
+this app drew before any of it existed.
 
 Two things about an answer are checked rather than believed, because the settings file outlives
 an install: a question this `ChrModel` has not got, and a swatch that belongs to another
 question. `ChrCustomizationChoice` is one table for every playable body in the game, so an
 unchecked answer resolves to somebody else's hairstyle. Both are dropped and the question falls
-back to the swatch the game opens on.
+back to the swatch the game opens on. A stored *body* this build has no mesh for falls back the
+same way, to the Human Female.
 
-The body itself is still fixed. Another race or the male model is not one more column: the
-composite layout is 104's, the section rectangles below are 104's, and the 2048 × 1024 atlas is
-what `ChrModelMaterial` states for it — all three are constants here rather than reads.
-
-| What | Value | Status |
-|---|---|---|
-| `ChrModel.ID` | 2 | community, **used** |
-| `CharComponentTextureLayoutID` | **104** | **verified** |
-| Model FileDataID | 1000764 (`humanfemale_hd.m2`) | community, **rendered** |
-| Composite atlas size | **2048 × 1024** | **verified** |
-
-`humanfemale.m2` (119563) is the *vanilla* model. Retail uses the `_hd` one.
+```sh
+cargo run --example dump_bodies -- "/Applications/World of Warcraft"
+bun run render character him.png --install "/Applications/World of Warcraft" --body 1 --as 11:48
+```
 
 **`ChrModel.ID` 2 is now load-bearing rather than decorative.** `ChrCustomizationOption`
 describes every playable body at once and it is the only column that says which rows are this
@@ -123,8 +146,9 @@ those atlases are one file each, at whatever size that file is.
 
 ## The composite layout, verified
 
-`CharComponentTextureSections` for layout 104, read directly off the install. These are
-the rectangles an item's textures are blitted into:
+`CharComponentTextureSections` for layout 104, read directly off the install — and what
+`body::sections_of` now reads for whichever layout the chosen body composites in. These are the
+rectangles an item's textures are blitted into:
 
 | `SectionType` | Region | X | Y | W | H |
 |---|---|---|---|---|---|

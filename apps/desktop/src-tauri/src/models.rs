@@ -55,7 +55,11 @@ const LARGEST_TEXTURE: u32 = 2048;
 /// an install can be missing the file an appearance names; and the game withholds content it
 /// has not shipped. What does fail is a model that is there and cannot be read, because that is
 /// this app being wrong about the format rather than the install being short of a file.
-pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<u8>>, String> {
+pub fn glb_of(
+    files: &dyn GameFiles,
+    body: &crate::body::Body,
+    display_info_id: u32,
+) -> Result<Option<Vec<u8>>, String> {
     let Some((slot, model_resource, material_resource)) = resources(files, display_info_id)?
     else {
         return Ok(None);
@@ -64,7 +68,7 @@ pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<
     // The same question `worn` asks of a helm about to go on a head, and the same answer: a
     // model resource names a file per body, or a pair of files one per shoulder, and this app
     // draws one body and one shoulder at a time. The slot is which shoulder.
-    let Some(model_file) = crate::worn::model_file(files, model_resource, slot)? else {
+    let Some(model_file) = crate::worn::model_file(files, body, model_resource, slot)? else {
         return Ok(None);
     };
     let Ok(bytes) = files.read(model_file) else {
@@ -153,6 +157,12 @@ mod tests {
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
 
+    /// The body a model is being shown for, which decides which of a resource's files is the
+    /// one to draw — a helm is modelled per body.
+    fn hers() -> crate::body::Body {
+        crate::body::of(&fixture_files(), crate::body::DEFAULT).unwrap()
+    }
+
     /// The fixture displays, by what the generator made each of them.
     const HELM: u32 = 900001;
     const SHOULDERS: u32 = 900002;
@@ -165,7 +175,7 @@ mod tests {
 
     /// The `.glb` an appearance's own geometry comes out as, or nothing when it has none.
     fn model(display_info_id: u32) -> Option<Vec<u8>> {
-        glb_of(&fixture_files(), display_info_id).unwrap()
+        glb_of(&fixture_files(), &hers(), display_info_id).unwrap()
     }
 
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
@@ -212,7 +222,7 @@ mod tests {
     #[test]
     fn reads_the_model_its_skin_and_the_textures_the_two_of_them_name() {
         let files = Noted::new();
-        glb_of(&files, HELM).unwrap();
+        glb_of(&files, &hers(), HELM).unwrap();
         assert_eq!(
             files.asked.into_inner(),
             vec![
@@ -233,7 +243,7 @@ mod tests {
     #[test]
     fn paints_a_model_with_the_texture_the_item_supplies() {
         let files = Noted::new();
-        let answer = glb_of(&files, SHOULDERS).unwrap().expect("the pad has geometry");
+        let answer = glb_of(&files, &hers(), SHOULDERS).unwrap().expect("the pad has geometry");
         let asked = files.asked.into_inner();
         assert!(asked.contains(&TEXTURE_FILE_DATA), "{asked:?}");
         // 51002 is the shoulder's first material, and 150002 the texture the table gives it.
@@ -246,7 +256,7 @@ mod tests {
     #[test]
     fn finds_a_model_kept_only_in_the_second_slot() {
         let files = Noted::new();
-        assert!(glb_of(&files, SECOND_SLOT_ONLY).unwrap().is_some());
+        assert!(glb_of(&files, &hers(), SECOND_SLOT_ONLY).unwrap().is_some());
         // 41005 is that display's second model resource, and 140005 the file behind it.
         assert!(files.asked.into_inner().contains(&140005));
     }
@@ -282,7 +292,7 @@ mod tests {
         // Display 900010 names a model resource whose file the fixture directory omits.
         assert_eq!(model(900_010), None);
         // Display 900011 names one that is there and holds no MD21 chunk.
-        let error = glb_of(&fixture_files(), 900_011).unwrap_err();
+        let error = glb_of(&fixture_files(), &hers(), 900_011).unwrap_err();
         assert!(error.contains("MD21"), "{error}");
     }
 
@@ -303,7 +313,7 @@ mod tests {
         )
         .expect("the fixture glb is committed");
         assert_eq!(
-            glb_of(&fixture_files(), HELM).unwrap(),
+            glb_of(&fixture_files(), &hers(), HELM).unwrap(),
             Some(committed),
             "helm.glb is stale; regenerate it with the dump_model example"
         );
@@ -312,7 +322,7 @@ mod tests {
     #[test]
     fn says_so_when_the_chain_starts_at_a_table_that_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        let error = glb_of(&DirFiles::new(temp.path()), HELM).unwrap_err();
+        let error = glb_of(&DirFiles::new(temp.path()), &hers(), HELM).unwrap_err();
         assert!(error.contains("1266429.db2"), "{error}");
     }
 }

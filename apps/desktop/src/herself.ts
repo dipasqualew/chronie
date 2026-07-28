@@ -15,15 +15,24 @@
  *   fifty-eight. Numbering them is this side's job, because inventing a name in the payload
  *   would be inventing it where a later build could contradict it. [`swatchLabel`].
  * - **The bodies already drawn are of somebody else.** Every picture of her in the window — the
- *   one on the stage, the twenty in a wardrobe gallery — was drawn with the answers as they
- *   were, so changing one is what invalidates them. [`lookKey`] is what the panes hold their
- *   caches against, and it changes exactly when she does.
+ *   one on the stage, the twenty in a wardrobe gallery — was drawn with the body and the answers
+ *   as they were, so changing either is what invalidates them. [`lookKey`] is what the panes hold
+ *   their caches against, and it changes exactly when she does.
+ * - **The other body's answers are not hers.** One settings file holds every body's, because the
+ *   question ids are the game's own and no two bodies share one — so a form that sent only the
+ *   questions it can see would forget the other body's every time somebody switched.
+ *   [`withAnswer`] keeps them.
  */
 
 import type { CharacterLookPayload, CharacterPick, CharacterQuestion } from "./types";
 
 /** Nobody has been asked anything yet, which is the payload's own empty state. */
-export const NOBODY_ASKED: CharacterLookPayload = { questions: [], picked: [] };
+export const NOBODY_ASKED: CharacterLookPayload = {
+  bodies: [],
+  body: 0,
+  questions: [],
+  picked: [],
+};
 
 /**
  * Which swatch of a question is on her: the answer if there is one, and the first swatch if not.
@@ -65,22 +74,31 @@ export function swatchLabel(question: CharacterQuestion, swatchId: number): stri
 export function withAnswer(
   payload: CharacterLookPayload, question: number, swatch: number,
 ): CharacterPick[] {
-  return payload.questions.map((asked) => ({
-    question: asked.id,
-    swatch: asked.id === question ? swatch : answerOf(asked, payload.picked),
-  }));
+  const asked = payload.questions.map((question) => question.id);
+  // The other body's answers, untouched. They are in the same list and this form cannot see
+  // them, which is exactly why it has to carry them rather than state what it knows.
+  const elsewhere = payload.picked.filter((answer) => !asked.includes(answer.question));
+  return [
+    ...payload.questions.map((one) => ({
+      question: one.id,
+      swatch: one.id === question ? swatch : answerOf(one, payload.picked),
+    })),
+    ...elsewhere,
+  ];
 }
 
 /**
  * Her, as a string that changes when she does.
  *
- * What the panes that hold pictures of her key their caches on. Sorted by question, so two
- * lists of the same answers in different orders are the same woman and no picture is thrown
- * away for having been described differently.
+ * What the panes that hold pictures of her key their caches on. The body leads, because it is
+ * the coarsest thing about her and the one that changes every picture at once; the answers are
+ * sorted by question, so two lists of the same answers in different orders are the same person
+ * and no picture is thrown away for having been described differently.
  */
-export function lookKey(picked: CharacterPick[]): string {
-  return [...picked]
+export function lookKey(body: number, picked: CharacterPick[]): string {
+  const answers = [...picked]
     .sort((left, right) => left.question - right.question)
     .map((answer) => `${answer.question}:${answer.swatch}`)
     .join(",");
+  return `${body}|${answers}`;
 }
