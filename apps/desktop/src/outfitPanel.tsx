@@ -169,6 +169,17 @@ export function OutfitPanel(
           make the list under it jump. */}
       <div className="outfit-preview" data-state={pane.state}>
         <div className="outfit-stage" ref={stagePane} />
+        {/* Over the corner of the stage, because it belongs to the picture rather than to the
+            list of clothes under it — and only while there is a picture: a pane showing a
+            sentence because this machine cannot draw 3D has no camera to put back. */}
+        {pane.state === "shown"
+          ? (
+            <button
+              type="button" className="outfit-reset"
+              onClick={() => stage.current?.resetCamera()}
+            >Reset camera</button>
+          )
+          : null}
         <p className="mog-note muted" role="status" id="outfit-note">{pane.note}</p>
       </div>
       <div className="outfit-head">

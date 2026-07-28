@@ -604,6 +604,37 @@ class Outfit {
   note(): Locator {
     return this.panel.locator("#outfit-note");
   }
+
+  /**
+   * Where the camera is and what it is pointed at, as the stage writes them down.
+   *
+   * A canvas draws the same rectangle whichever way round the model on it is, so this is the
+   * only thing outside a pair of eyes that can tell a model that moved from one that did not.
+   */
+  async framing(): Promise<{ camera: string; target: string }> {
+    const stage = this.stage();
+    return {
+      camera: (await stage.getAttribute("data-camera")) ?? "",
+      target: (await stage.getAttribute("data-target")) ?? "",
+    };
+  }
+
+  /** Drags across the middle of the canvas with one button held, the way a reader does. */
+  async drag(button: "left" | "right", across: number, down: number): Promise<void> {
+    const box = await this.canvas().boundingBox();
+    if (!box) throw new Error("there is no canvas on the stage to drag");
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    await this.page.mouse.move(x, y);
+    await this.page.mouse.down({ button });
+    // In steps, because a single jump is one pointer event and the controls read movement
+    // between them — the same reason a real drag is a hundred of these.
+    await this.page.mouse.move(x + across, y + down, { steps: 8 });
+    await this.page.mouse.up({ button });
+  }
+
+  resetCamera(): Promise<void> {
+    return this.panel.getByRole("button", { name: "Reset camera" }).click();
+  }
 }
 
 /**
@@ -2703,7 +2734,8 @@ test("browses the game's transmog sets and dresses the character in them", async
   // view: the body is the view, rather than something a dialog opens over it.
   await test.step("the character is on screen before anything has been picked", async () => {
     await expect(outfit.summary()).toHaveText("Nothing on yet. Pick an appearance from any set.");
-    await expect(outfit.note()).toHaveText("Nothing is worn. Drag to turn it.");
+    await expect(outfit.note())
+      .toHaveText("Nothing is worn. Drag to turn it, right-drag to move it.");
     await expect(outfit.canvas()).toBeVisible();
 
     // 12 × 200: the fixture body holds twenty-five geosets and a bare one draws thirteen of
@@ -2715,6 +2747,32 @@ test("browses the game's transmog sets and dresses the character in them", async
     // Two of the twelve are her head and her ears, which nothing but her own customization
     // asks for.
     await expect(outfit.stage()).toHaveAttribute("data-vertices", "2400");
+  });
+
+  // The one thing zoom on its own cannot do. Magnified far enough to look at a boot, the head
+  // is somewhere off the top of the pane, and turning is no way back to it — an orbit moves
+  // the camera and never what it is pointed at. So the right button moves the model, and the
+  // button over the corner of the stage puts it back where framing it left it.
+  await test.step("the model can be moved as well as turned, and put back", async () => {
+    const framed = await outfit.framing();
+    expect(framed.target).toBe("0.000,0.000,0.000");
+    expect(framed.camera).not.toBe("");
+
+    // Turning first, and it is exactly the half that was never enough: the camera goes
+    // somewhere else and the middle of the pane stays on the middle of the model.
+    await outfit.drag("left", 90, 0);
+    await expect.poll(() => outfit.stage().getAttribute("data-camera")).not.toBe(framed.camera);
+    expect((await outfit.framing()).target).toBe(framed.target);
+
+    // And the right button, which is the change: what the camera is pointed at moves.
+    await outfit.drag("right", 70, 45);
+    await expect.poll(() => outfit.stage().getAttribute("data-target")).not.toBe(framed.target);
+
+    // Back to the framing, to the digit — a reset that lands near where it started is a
+    // reader still hunting for the model, which is the thing this is here to end.
+    await outfit.resetCamera();
+    await expect(outfit.stage()).toHaveAttribute("data-camera", framed.camera);
+    await expect(outfit.stage()).toHaveAttribute("data-target", framed.target);
   });
 
   await test.step("the search reaches the collection as well as the set", async () => {
@@ -2861,7 +2919,8 @@ test("browses the game's transmog sets and dresses the character in them", async
     await transmog.name("Tideglass Regalia", "Tideglass Robe").click();
     await expect(outfit.slots()).toHaveText([/Chest.*Tideglass Robe.*Tideglass Regalia/s]);
     await expect(outfit.summary()).toHaveText("1 of 13 slots filled");
-    await expect(outfit.note()).toHaveText("Worn on the character. Drag to turn it.");
+    await expect(outfit.note())
+      .toHaveText("Worn on the character. Drag to turn it, right-drag to move it.");
 
     // A body, not the item: 12 × 200, the same one part per geoset group a bare character
     // draws, out of the vertices the whole model shares. A robe that arrived as geometry of

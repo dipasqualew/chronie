@@ -36,9 +36,20 @@ import { cameraFor, framingDistance, type View } from "./modelPreview";
  * rather than bulging the way a wide angle makes close things bulge. */
 const FIELD_OF_VIEW = 35;
 
+/** A point as the readout writes it: three axes, three decimals, one string to compare. */
+const triple = (point: Vector3): string =>
+  [point.x, point.y, point.z].map((axis) => axis.toFixed(3)).join(",");
+
 export interface ModelStage {
   /** Puts a model on the stage, replacing whatever was there. */
   show(glb: Uint8Array): Promise<void>;
+  /**
+   * Puts the camera back exactly where framing the model left it.
+   *
+   * The way out of a drag that went too far. Turning, zooming and moving compose into a great
+   * many places to be lost, and none of them looks any different from an empty pane.
+   */
+  resetCamera(): void;
   /** Gives back the graphics memory and stops the loop. The stage is finished afterwards. */
   dispose(): void;
 }
@@ -95,8 +106,12 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  // Panning a single item off the middle of its own pane is only ever an accident.
-  controls.enablePan = false;
+  // Moving the model, on the right button, because zoom on its own only ever reaches its
+  // middle: a character magnified far enough to look at a boot has her head somewhere off the
+  // top of the pane, and an orbit moves the camera without moving what it is pointed at. How
+  // far it may be moved is a fact about the model rather than about the stage, so the leash is
+  // put on in `frameModel` below.
+  controls.enablePan = true;
   controls.minDistance = 0.2;
   controls.maxDistance = 40;
 
@@ -116,11 +131,27 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
 
   const frame = (): void => {
     if (!running) return;
-    controls.update();
+    // `update` answers whether it moved anything, which is the only frame the readout below
+    // has anything new to say — and with damping on, the frames after a drag ends are moving
+    // frames too. Everything else is a string nobody would have been able to tell apart.
+    if (controls.update()) report();
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
+
+  /**
+   * Where the camera is and what it is pointed at, written where anything outside can see it.
+   *
+   * The same argument as `announce` below, one property further out: a canvas draws the same
+   * rectangle whichever way round the model on it is, so nothing but an eye can tell a model
+   * that moved from one that did not, or a reset that put the camera back from one that left
+   * it somewhere near. Three decimals, because "near enough" is the failure being ruled out.
+   */
+  function report(): void {
+    container.dataset.camera = triple(camera.position);
+    container.dataset.target = triple(controls.target);
+  }
 
   /**
    * What the stage is holding, written where anything outside can see it.
@@ -170,7 +201,16 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
     // as a silhouette and the whole point of showing it in 3D is that it has a shape.
     camera.position.set(...cameraFor(view, framingDistance(radius, FIELD_OF_VIEW)));
     controls.target.set(0, 0, 0);
+    // How far off the middle of the model the middle of the pane may be dragged: to anywhere
+    // on the model and no further. Zoomed into a helm that reaches the boots, which is the
+    // whole errand; what it rules out is the drag that carries the model off the pane
+    // entirely and leaves nothing on screen to say which way it went.
+    controls.maxTargetRadius = radius;
     controls.update();
+    // What the reset goes back to. Saved here rather than when the stage was built, because
+    // the framing is what the reader started from and it is different for every model.
+    controls.saveState();
+    report();
   }
 
   /**
@@ -245,6 +285,23 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
           reject(error instanceof Error ? error : new Error(String(error)));
         });
       });
+    },
+    /**
+     * The damping is spent before the state is restored, and that order is the whole of it.
+     *
+     * A drag does not stop when the mouse does: `update` carries a shrinking fraction of it
+     * into every frame after, which is what makes turning a model feel like turning something
+     * with weight. `reset` restores the saved position and then calls `update` itself — so a
+     * reset while any of that remainder is still owed hands it straight back, and the camera
+     * settles beside the framing rather than on it. One undamped update spends what is left
+     * first; the restore that follows has nothing working against it.
+     */
+    resetCamera(): void {
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = true;
+      controls.reset();
+      report();
     },
     dispose(): void {
       running = false;
