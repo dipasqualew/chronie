@@ -37,7 +37,8 @@ import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
 import { VersionTag } from "./versionTag";
 import type {
-  CustomSetsPayload, DashboardPayload, Release, Segment, Settings, TransmogMarksPayload,
+  CustomSetsPayload, DashboardPayload, InGameSetsPayload, Release, Segment, Settings,
+  TransmogMarksPayload,
   TransmogPayload,
 } from "./types";
 
@@ -81,6 +82,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // And the sets they put together out of it themselves, which come from the same place and
   // are read in the same breath.
   const [customSets, setCustomSets] = useState<CustomSetsPayload | null>(null);
+  const [inGameSets, setInGameSets] = useState<InGameSetsPayload | null>(null);
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
@@ -166,6 +168,18 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     if (view !== "transmog" || customSets) return;
     void desktop.customSets().then(setCustomSets).catch(() => undefined);
   }, [view, customSets]);
+
+  // And the sets the player saved in the game, on the same terms. Also Chronie's own database —
+  // the addon put them there and the collector filed them — so this is a millisecond and not the
+  // second the game's files cost. Silent about a failure for the reason above.
+  //
+  // Wanted by two views rather than one, which is why this asks about both: the transmog view
+  // browses them and the characters view says what each character has got. One read serves
+  // whichever is opened first.
+  useEffect(() => {
+    if ((view !== "transmog" && view !== "characters") || inGameSets) return;
+    void desktop.inGameSets().then(setInGameSets).catch(() => undefined);
+  }, [view, inGameSets]);
 
   // Somebody may be playing while this window is open, and the collector picks up what the
   // game wrote within half a minute. Anything new means every view is out of date at once.
@@ -269,7 +283,9 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           <h1>Characters</h1>
           <div className="sub" id="characters-meta">{rosterMeta}</div>
         </header>
-        <Characters profiles={profiles} onOpenSegment={openSegment} items={items} />
+        <Characters
+          profiles={profiles} onOpenSegment={openSegment} items={items} inGameSets={inGameSets}
+        />
       </section>
 
       <section id="details-view" hidden={view !== "details"}>
@@ -324,6 +340,11 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             // Every write answers with every saved set, for the reason above it.
             onApply: setCustomSets,
             onError: message,
+            sendToGame: desktop.sendSetToGame,
+          }}
+          inGame={{
+            payload: inGameSets,
+            loadAppearances: desktop.inGameSetAppearances,
           }}
         />
       </section>

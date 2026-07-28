@@ -3677,6 +3677,210 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("the player's own transmog sets", function()
+        ---One set in the shape Main.lua reduces the client's three transmog calls to, so a
+        ---test says only the part it is about.
+        ---@param fields table
+        ---@return table
+        local function customSet(fields)
+            return {
+                id = fields.id,
+                name = fields.name or "Look",
+                icon = fields.icon,
+                slots = fields.slots or {},
+            }
+        end
+
+        -- Nothing in game is told about this and no panel shows it: the whole point is the
+        -- file the app reads at logout, so the file is what the test looks at.
+        it("files the wardrobe under the character on the way into the world", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                transmogCustomSets = {
+                    customSet({
+                        id = 3,
+                        name = "Raid",
+                        icon = 626185,
+                        slots = { { slot = 0, appearance = 100 }, { slot = 11, appearance = 300 } },
+                    }),
+                },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local filed = recorded.db.customSets["Thrall-Ragnaros"]
+            assert.same({
+                {
+                    id = 3,
+                    name = "Raid",
+                    icon = 626185,
+                    slots = { { slot = 0, appearance = 100 }, { slot = 11, appearance = 300 } },
+                },
+            }, filed.sets)
+            assert.equal(1700000000, filed.at)
+        end)
+
+        -- The event is what keeps the file current through a session. Everything the player
+        -- does to their wardrobe while Chronie is watching arrives this way; the read inside
+        -- the zoning handler above only ever catches up on what happened out of sight.
+        it("files the wardrobe again when the client says it changed", function()
+            local sets = { customSet({ id = 3, name = "Raid" }) }
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                transmogCustomSets = sets,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            sets[2] = customSet({ id = 5, name = "Town", slots = { { slot = 3, appearance = 200 } } })
+            recorded.clock.set(1700000500)
+            recorded.frame:fire("TRANSMOG_CUSTOM_SETS_CHANGED")
+
+            local filed = recorded.db.customSets["Thrall-Ragnaros"]
+            assert.equal(2, #filed.sets)
+            assert.same({ { slot = 3, appearance = 200 } }, filed.sets[2].slots)
+            assert.equal(1700000500, filed.at)
+        end)
+
+        -- The client fires that event for things that leave the wardrobe exactly as it was,
+        -- reselecting a set in the dropdown among them. A stamp that crept forward on those
+        -- would tell the app the player spent the evening on their wardrobe.
+        it("leaves the moment alone when the event announced no real change", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                transmogCustomSets = { customSet({ id = 3, name = "Raid" }) },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.clock.set(1700000500)
+            recorded.frame:fire("TRANSMOG_CUSTOM_SETS_CHANGED")
+
+            assert.equal(1700000000, recorded.db.customSets["Thrall-Ragnaros"].at)
+        end)
+
+        -- The sets are the account's, but whether Chronie has ever looked is a fact about a
+        -- character. Filed under one key, the last alt to log out would speak for every one
+        -- of them, and an alt that has not been played since Chronie was installed would
+        -- look like it shares a wardrobe it has never been shown.
+        it("keeps each character's wardrobe apart in the saved file", function()
+            local db = {}
+            local _, thrall = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                db = db,
+                transmogCustomSets = { customSet({ id = 3, name = "Raid" }) },
+            })
+            thrall.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local _, jaina = boot({
+                playerName = "Jaina",
+                realmName = "Ragnaros",
+                db = db,
+                transmogCustomSets = { customSet({ id = 5, name = "Town" }) },
+            })
+            jaina.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal("Raid", db.customSets["Thrall-Ragnaros"].sets[1].name)
+            assert.equal("Town", db.customSets["Jaina-Ragnaros"].sets[1].name)
+        end)
+    end)
+
+    describe("an outfit the app asked the game to hold", function()
+        -- The one thing Chronie does that changes something in a WoW account rather than
+        -- writing something down about it, so the test looks at both halves of that: the
+        -- call the client actually received, and the player being told it happened.
+        it("saves it on the way into the world, and says so by name", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                customSetRequests = {
+                    {
+                        id = 7,
+                        name = "Winter Look",
+                        icon = 626185,
+                        slots = { { slot = 0, appearance = 100 }, { slot = 12, appearance = 900 } },
+                    },
+                },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local created = recorded.customSetWrites.created
+            assert.equal(1, #created)
+            assert.equal("Winter Look", created[1].name)
+            assert.equal(626185, created[1].icon)
+            assert.equal(13, #created[1].list)
+            assert.equal(100, created[1].list[1].appearanceID)
+            assert.equal(900, created[1].list[13].appearanceID)
+            assert.is_truthy(recorded.lines[1]:find("Saved Winter Look to your transmog sets.", 1, true))
+        end)
+
+        -- The app keeps writing the same file until it has been told the request landed, so
+        -- every load screen for the rest of the session reads a request that is already
+        -- carried out. Doing it again would save the outfit over the player's wardrobe once
+        -- per zoning, and pile up duplicates of it besides.
+        it("does not save it a second time on the next load screen", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                customSetRequests = {
+                    { id = 7, name = "Winter Look", slots = { { slot = 0, appearance = 100 } } },
+                },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(1, #recorded.customSetWrites.created)
+            assert.same({}, recorded.customSetWrites.modified)
+            assert.equal(1, #recorded.lines)
+        end)
+
+        -- Account-wide, because the thing it is a record of is: a custom set belongs to the
+        -- account, so a request carried out on one character has been carried out for all of
+        -- them. Kept per character, the player would find the same outfit saved over their
+        -- wardrobe again every time they logged a new alt in.
+        it("is not carried out again by the next character to log in", function()
+            local db = {}
+            local requests = {
+                { id = 7, name = "Winter Look", slots = { { slot = 0, appearance = 100 } } },
+            }
+            local _, thrall = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                db = db,
+                customSetRequests = requests,
+            })
+            thrall.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local _, jaina = boot({
+                playerName = "Jaina",
+                realmName = "Ragnaros",
+                db = db,
+                customSetRequests = requests,
+            })
+            jaina.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(1, #thrall.customSetWrites.created)
+            assert.same({}, jaina.customSetWrites.created)
+        end)
+
+        -- A hand-installed copy carries the shipped-empty module, which asks for nothing.
+        it("stays quiet when the app has asked for nothing", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.same({}, recorded.customSetWrites.created)
+            assert.same({}, recorded.lines)
+        end)
+    end)
+
     describe("the /chronie segments slash command", function()
         it("opens from the minimap button", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })

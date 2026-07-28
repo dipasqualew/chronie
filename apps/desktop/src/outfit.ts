@@ -183,6 +183,40 @@ export function wearAll(outfit: Outfit, rows: AppearanceRow[], from: string): Ou
   return rows.reduce((worn, row) => wear(worn, row, from), outfit);
 }
 
+/**
+ * The same, for a set that already knows which place each of its pieces goes in.
+ *
+ * There is exactly one such set, and it is the reason this exists: a set the player saved *in
+ * game* names a `TransmogSlot` per piece, and that is the only statement anywhere of which hand
+ * a one-hander is held in. Everything else in this app has to work it out from the inventory
+ * type — see `placeOf` — and that reading cannot tell a sword worn in the off hand from the
+ * same sword worn in the main hand, because it is the same item. Dual wield is ordinary, so
+ * without this a rogue's saved set comes out holding one weapon.
+ *
+ * A row that cannot be worn at all is still refused: the place says *where*, not *whether*.
+ */
+export function wearAllAt(
+  outfit: Outfit,
+  pieces: { place: string; row: AppearanceRow }[],
+  from: string,
+): Outfit {
+  return pieces.reduce((worn, { place, row }) => wearAt(worn, place, row, from), outfit);
+}
+
+/** One piece into a place its set named, rather than one this app worked out. */
+export function wearAt(outfit: Outfit, place: string, row: AppearanceRow, from = ""): Outfit {
+  if (!wearable(row)) return outfit;
+  return { ...outfit, [place]: { place, row, from } };
+}
+
+/** And the toggle over it, which is what a row in a set of the player's own does when clicked. */
+export function toggleAt(outfit: Outfit, place: string, row: AppearanceRow, from = ""): Outfit {
+  if (!wearable(row)) return outfit;
+  return outfit[place]?.row.appearanceId === row.appearanceId
+    ? takeOff(outfit, place)
+    : wearAt(outfit, place, row, from);
+}
+
 /** What the panel calls the set a piece came out of, which the game leaves unnamed for some. */
 export function setLabel(set: TransmogSet): string {
   return set.name || `Set ${set.id}`;

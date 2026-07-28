@@ -18,11 +18,13 @@ import type { ReactNode } from "react";
 import { byDay, dayOf } from "./characters";
 import type { CharacterGold, CharacterProfile } from "./characters";
 import { ago, dayLabel, duration, gold, initials, plural, signedGold } from "./format";
+import { setLabel, setSummary, setsFor, wardrobeSummary } from "./inGameSets";
 import type { ItemBook } from "./items";
 import {
   HighlightList, SegmentButton, StandingBar, classProps, className, shownHighlights,
 } from "./ui";
 import type { OpenSegment } from "./ui";
+import type { InGameSet, InGameSetsPayload } from "./types";
 
 /** Only one summary is ever unfolded here, so its panels need only one namespace. */
 const SCOPE = "character";
@@ -32,9 +34,19 @@ export interface CharactersProps {
   onOpenSegment: OpenSegment;
   /** What the game says about an item, for the summaries that unfold into transmog. */
   items: ItemBook;
+  /**
+   * The transmog sets every character saved in the game, or null until they have been read.
+   *
+   * Passed down whole rather than per character, because that is the shape the backend answers
+   * in and because the three-way distinction it carries — never read, read and empty, read and
+   * full — is one this view says out loud. See `inGameSets.ts`.
+   */
+  inGameSets: InGameSetsPayload | null;
 }
 
-export function Characters({ profiles, onOpenSegment, items }: CharactersProps): ReactNode {
+export function Characters(
+  { profiles, onOpenSegment, items, inGameSets }: CharactersProps,
+): ReactNode {
   // Held by name rather than by index: an activity edit repaints the whole view, and the
   // reader should come back to the character they were reading, wherever they have moved to
   // in the roster since.
@@ -71,6 +83,7 @@ export function Characters({ profiles, onOpenSegment, items }: CharactersProps):
         {showing
           ? <Profile
             entry={showing} unfolded={unfolded} items={items}
+            wardrobe={setsFor(inGameSets, showing.name)}
             onUnfold={(kind) => setUnfolded((open) => (open === kind ? null : kind))}
             // A summary chip, one of the things it unfolded into, and a segment row all open
             // the modal, and all three walk this character's own segments.
@@ -125,12 +138,16 @@ interface ProfileProps {
   entry: CharacterProfile;
   unfolded: string | null;
   items: ItemBook;
+  /** What this character has saved in game, or null when Chronie has never read their wardrobe. */
+  wardrobe: InGameSet[] | null;
   onUnfold: (kind: string) => void;
   onOpenSegment: (segmentId: number) => void;
 }
 
 /** Everything known about the chosen character, and everything they did. */
-function Profile({ entry, unfolded, items, onUnfold, onOpenSegment }: ProfileProps): ReactNode {
+function Profile(
+  { entry, unfolded, items, wardrobe, onUnfold, onOpenSegment }: ProfileProps,
+): ReactNode {
   const where = entry.places.slice(0, 3).join(", ");
   return <>
     <header className="profile-head" {...classProps(entry.classFile)}>
@@ -171,6 +188,7 @@ function Profile({ entry, unfolded, items, onUnfold, onOpenSegment }: ProfilePro
     </div>
     <Currencies entry={entry} />
     <Factions entry={entry} />
+    <Wardrobe sets={wardrobe} />
     <section className="detail-section profile-segments">
       <h3>{plural(entry.segmentCount, "segment")}</h3>
       {byDay(entry.segments).map((group) => (
@@ -187,6 +205,37 @@ function Profile({ entry, unfolded, items, onUnfold, onOpenSegment }: ProfilePro
       ))}
     </section>
   </>;
+}
+
+/**
+ * The transmog sets this character saved in the game itself.
+ *
+ * Named and counted here and opened nowhere: what a set is *made of* costs four walks of the
+ * game's own tables and a graphics context to show, and neither belongs on a page about who
+ * somebody is. The transmog view is where a set gets worn — this is the roster answering "and
+ * what have they got".
+ *
+ * Always drawn, even for a character that has saved none, because "none" is an answer somebody
+ * came here for and a silently absent section is not. The one case that stays quiet is the
+ * character Chronie has never read a wardrobe on, which is a question this app has not asked
+ * rather than one the game answered.
+ */
+function Wardrobe({ sets }: { sets: InGameSet[] | null }): ReactNode {
+  if (!sets) return null;
+  return (
+    <section className="detail-section profile-wardrobe">
+      <h3>Transmog sets</h3>
+      <p className="sub">{wardrobeSummary(sets)}</p>
+      <ul className="profile-sets">
+        {sets.map((set) => (
+          <li key={set.id}>
+            <span className="mog-name">{setLabel(set)}</span>
+            <span className="muted"> · {setSummary(set)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 /**

@@ -333,7 +333,8 @@ type FakeCustomSets = ReturnType<typeof fakeCustomSets>;
  */
 function Marked(
   { store, saved, ...props }:
-    Omit<TransmogViewProps, "marks" | "custom"> & { store: FakeMarks; saved: FakeCustomSets },
+    Omit<TransmogViewProps, "marks" | "custom" | "inGame">
+    & { store: FakeMarks; saved: FakeCustomSets; inGame?: TransmogViewProps["inGame"] },
 ): ReactNode {
   const [payload, setPayload] = useState<TransmogMarksPayload>(store.starting);
   const [sets, setSets] = useState<CustomSetsPayload>(saved.starting);
@@ -342,6 +343,7 @@ function Marked(
   return (
     <TransmogView
       {...props}
+      inGame={props.inGame ?? NO_IN_GAME_SETS}
       marks={{
         payload,
         setFavourite: store.setFavourite,
@@ -356,10 +358,23 @@ function Marked(
         remove: saved.remove,
         onApply: setSets,
         onError: said,
+        sendToGame: () => Promise.resolve([]),
       }}
     />
   );
 }
+
+/**
+ * A wardrobe Chronie has never read, for the tests that are about something else entirely.
+ *
+ * Null rather than an empty payload, because that is what the view is handed until the read
+ * lands, and it is the state every one of these tests is actually in: they are about the game's
+ * sets and the reader's own, and the fourth browser is not what they are looking at.
+ */
+const NO_IN_GAME_SETS = {
+  payload: null,
+  loadAppearances: () => Promise.resolve({ appearances: [], readCount: 0, withheldCount: 0 }),
+};
 
 /** Marks nobody can write, for the tests that are about something else entirely. */
 const UNMARKED = {
@@ -424,6 +439,7 @@ const NO_SETS = {
   remove: () => Promise.resolve({ sets: [] }),
   onApply: () => {},
   onError: String,
+  sendToGame: () => Promise.resolve([]),
 };
 
 /**
@@ -808,6 +824,7 @@ describe("TransmogView", () => {
         loadGallery={() => Promise.resolve({ models: [] })}
         herself={NOT_ASKED}
         marks={UNMARKED}
+        inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => stage}
       />,
@@ -832,6 +849,7 @@ describe("TransmogView", () => {
         loadGallery={() => Promise.resolve({ models: [] })}
         herself={NOT_ASKED}
         marks={UNMARKED}
+        inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => { throw new Error("This machine cannot draw 3D."); }}
       />,
@@ -1120,6 +1138,7 @@ describe("the wardrobe as models", () => {
           })),
         })}
         marks={UNMARKED}
+        inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => fakeStage().stage}
         createGalleryStage={() => stage}
@@ -1268,6 +1287,7 @@ describe("the wardrobe as models", () => {
           })),
         })}
         marks={UNMARKED}
+        inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => fakeStage().stage}
         createGalleryStage={() => coming}
@@ -1306,6 +1326,7 @@ describe("the wardrobe as models", () => {
         herself={NOT_ASKED}
         loadGallery={() => Promise.reject(new Error("The game's files are not readable."))}
         marks={UNMARKED}
+        inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => fakeStage().stage}
         createGalleryStage={() => ({ paint: () => Promise.resolve(), dispose: () => {} })}

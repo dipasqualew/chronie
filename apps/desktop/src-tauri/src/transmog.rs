@@ -524,10 +524,43 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
         .map(|row| row.number(set_item_column::MODIFIED_APPEARANCE_ID))
         .collect();
 
+    let mut found = appearances_of(files, &wanted)?;
+
+    // By slot, which is the order the set is worn in and the order the detail view groups
+    // by. The rows nothing could be resolved for go last rather than leading with a slot
+    // they only appear to fill.
+    found.sort_by_key(|appearance| {
+        (
+            appearance.item_id == 0,
+            appearance.display_type,
+            appearance.item_id,
+            appearance.modified_appearance_id,
+        )
+    });
+    Ok(payload(set_id, found))
+}
+
+/// What a list of appearances is, walked out of the game's own tables.
+///
+/// One row out per id in, **in the order they were asked for**, including an id the game says
+/// nothing about — which comes back named after nothing and zeroed, the way a withheld row of a
+/// Blizzard set does. Keeping the order is what makes this usable by a caller that already knows
+/// what order it wants: a Blizzard set sorts by slot afterwards, and a set the player saved in
+/// game arrives in slot order already and would be spoiled by being sorted again.
+///
+/// Split out of [`set_items`] rather than written twice because the two callers differ only in
+/// where the list of ids comes from. A Blizzard set names its appearances in `TransmogSetItem`;
+/// a set the player saved in game names them through the addon, in `ItemTransmogInfo`. From here
+/// down they are the same numbers and deserve the same four table walks.
+#[tracing::instrument(name = "transmog.appearances_of", skip_all, fields(wanted = wanted.len()))]
+pub fn appearances_of(
+    files: &dyn GameFiles,
+    wanted: &[u32],
+) -> Result<Vec<TransmogSetAppearance>, String> {
     // Nothing further needs reading for a set this install cannot see into, and the tables
     // below are the expensive ones.
     if wanted.is_empty() {
-        return Ok(payload(set_id, Vec::new()));
+        return Ok(Vec::new());
     }
 
     let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
@@ -571,7 +604,8 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
         .collect();
 
     let mut found: Vec<TransmogSetAppearance> = wanted
-        .into_iter()
+        .iter()
+        .copied()
         .map(|modified_appearance_id| {
             let (item_id, appearance_id) = by_modified
                 .get(&modified_appearance_id)
@@ -598,19 +632,8 @@ pub fn set_items(files: &dyn GameFiles, set_id: u32) -> Result<Value, String> {
         })
         .collect();
 
-    // By slot, which is the order the set is worn in and the order the detail view groups
-    // by. The rows nothing could be resolved for go last rather than leading with a slot
-    // they only appear to fill.
-    found.sort_by_key(|appearance| {
-        (
-            appearance.item_id == 0,
-            appearance.display_type,
-            appearance.item_id,
-            appearance.modified_appearance_id,
-        )
-    });
     describe_items(files, &mut found)?;
-    Ok(payload(set_id, found))
+    Ok(found)
 }
 
 /// What one row of `ItemSparse` says about an item, out of the five columns this app reads.
@@ -1294,6 +1317,82 @@ mod tests {
     fn says_so_when_the_sets_own_table_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
         assert!(set_appearances(&DirFiles::new(temp.path())).is_err());
+    }
+
+    /* ---------- a list of appearances that came from somewhere else ---------- */
+
+    // The order is the contract, and it is the whole reason this is a function of its own.
+    // `set_items` sorts afterwards and does not care, but a set the player saved in game
+    // arrives in slot order — head, shoulder, back — and sorting it again would hand the
+    // window an outfit laid out differently from the one the game shows.
+    #[test]
+    fn answers_a_list_of_appearances_in_the_order_it_was_asked_for() {
+        let found = appearances_of(&fixture_files(), &[71009, 71001, 71007]).unwrap();
+
+        let named: Vec<(u32, u32, &str)> = found
+            .iter()
+            .map(|one| (one.modified_appearance_id, one.item_id, one.name.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                (71009, 30009, "Emberforge Greaves"),
+                (71001, 30001, "Tideglass Crown"),
+                (71007, 30007, "Emberforge Pauldrons"),
+            ]
+        );
+    }
+
+    // An id nothing can be said about keeps its place rather than being dropped. Dropping it
+    // would silently shorten the list, and a caller that asked slot by slot would then read
+    // every appearance after the gap as belonging to the slot before it.
+    #[test]
+    fn keeps_the_place_of_an_id_the_install_can_say_nothing_about() {
+        let found = appearances_of(&fixture_files(), &[71001, 71012, 71002]).unwrap();
+
+        assert_eq!(found.len(), 3);
+        // 71012's `ItemModifiedAppearance` row is one the fixture encrypts, so the chain stops
+        // at the id itself — zeroed the way a withheld row of a Blizzard set is, and still a
+        // row.
+        assert_eq!(found[1].modified_appearance_id, 71012);
+        assert_eq!(found[1].item_id, 0);
+        assert_eq!(found[1].appearance_id, 0);
+        assert_eq!(found[1].name, "");
+        assert!(!found[1].has_model);
+        assert_eq!(found[0].item_id, 30001);
+        assert_eq!(found[2].item_id, 30002);
+    }
+
+    // An id the game has never issued reaches the same end as an encrypted one: this is a list
+    // the addon read out of a client, so a set saved on a build newer than the installed one
+    // can name appearances these tables have no row for.
+    #[test]
+    fn keeps_the_place_of_an_id_the_tables_have_never_heard_of() {
+        let found = appearances_of(&fixture_files(), &[999_999]).unwrap();
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].modified_appearance_id, 999_999);
+        assert_eq!(found[0].item_id, 0);
+    }
+
+    // The same appearance twice is two rows, because the caller asked twice — an outfit
+    // wearing one look in two slots is ordinary and each slot needs its own row to draw.
+    #[test]
+    fn answers_twice_for_an_id_asked_for_twice() {
+        let found = appearances_of(&fixture_files(), &[71001, 71001]).unwrap();
+
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0], found[1]);
+    }
+
+    // Four tables, the largest of them 63 MB on a shipping build, and nothing in them can be
+    // said about a list with nothing in it.
+    #[test]
+    fn opens_no_tables_at_all_for_an_empty_list() {
+        let files = Noted::new();
+
+        assert!(appearances_of(&files, &[]).unwrap().is_empty());
+        assert!(files.asked.into_inner().is_empty());
     }
 }
 

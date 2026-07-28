@@ -50,6 +50,11 @@ fake.KNOWN_EVENTS = {
     "SCREENSHOT_FAILED",
     "SCREENSHOT_SUCCEEDED",
     "TRANSMOG_COLLECTION_SOURCE_ADDED",
+    -- Read out of the same 12.0.5.67823 client, beside TRANSMOG_DISPLAYED_OUTFIT_CHANGED and
+    -- TRANSMOG_OUTFITS_CHANGED. This is the one for the sets the player saves themselves; the
+    -- other two belong to the new Midnight outfit slots, which Chronie does not touch. See
+    -- docs/transmog-sets.md.
+    "TRANSMOG_CUSTOM_SETS_CHANGED",
     "UPDATE_INSTANCE_INFO",
     "ZONE_CHANGED_NEW_AREA",
 }
@@ -827,6 +832,22 @@ function fake.newEnv(options)
     -- change them between two syncs and watch the ledger notice.
     local equipmentSets = options.equipmentSets or {}
     local equippedItems = options.equippedItems or {}
+    -- The player's own transmog sets, already in the shape the client's three calls are
+    -- reduced to in Main.lua. Mutable for the same reason the equipment sets are: a test
+    -- changes it between two syncs and watches the snapshot notice.
+    local transmogCustomSets = options.transmogCustomSets or {}
+    -- What the desktop app has asked the game to hold on to, and what the client does about
+    -- it. `customSetWrites` is the record a test reads back: the writer's whole job is calls
+    -- into the client, and only the calls can say whether it did it.
+    local customSetRequests = options.customSetRequests or {}
+    local customSetWrites = { created = {}, modified = {} }
+    local maxCustomSets = options.maxCustomSets
+    local validCustomSetName = options.validCustomSetName
+    -- The ids the fake hands out for sets it is asked to create, so a test can pin what comes
+    -- back. `false` in this list models the client refusing to make one, which its own API
+    -- documents by answering nothing.
+    local newCustomSetIds = options.newCustomSetIds or {}
+    local created = 0
     local currencyNames = options.currencies or {}
     -- Where the character stands with each faction, by localised name, already reduced to
     -- the shape ns.factionStanding returns: `{ standing, current, max }`. A faction with no
@@ -983,6 +1004,39 @@ function fake.newEnv(options)
         equippedItems = function()
             return equippedItems
         end,
+        transmogCustomSets = function()
+            return transmogCustomSets
+        end,
+        customSetRequests = function()
+            return customSetRequests
+        end,
+        customSetClient = {
+            create = function(name, icon, list)
+                created = created + 1
+                customSetWrites.created[#customSetWrites.created + 1] =
+                    { name = name, icon = icon, list = list }
+                local id = newCustomSetIds[created]
+                if id == nil then
+                    -- Numbered from a thousand so a set the fake invented can never be mistaken
+                    -- for one a test wrote into `transmogCustomSets` by hand.
+                    return 1000 + created
+                end
+                return id or nil
+            end,
+            modify = function(setID, list)
+                customSetWrites.modified[#customSetWrites.modified + 1] =
+                    { setId = setID, list = list }
+            end,
+            maxSets = function()
+                return maxCustomSets
+            end,
+            validName = function(name)
+                if validCustomSetName == nil then
+                    return true
+                end
+                return validCustomSetName(name)
+            end,
+        },
         currencyInfo = function(currencyType)
             return currencyNames[currencyType]
         end,
@@ -1234,6 +1288,12 @@ function fake.newEnv(options)
         raidInfoRequests = function()
             return raidInfoRequests
         end,
+        ---Every set the addon asked the client to make or to save over, in the order it asked.
+        ---
+        ---The only record there is of the one thing Chronie writes into a WoW account, so it
+        ---keeps the whole call: a test that only counted them could not tell a set saved with
+        ---the right thirteen slots from one saved empty.
+        customSetWrites = customSetWrites,
     }
 end
 

@@ -39,6 +39,8 @@ import type { ReactNode } from "react";
 
 import { CustomSetList } from "./customSetList";
 import { rowsOf } from "./customSets";
+import { InGameSetList } from "./inGameSetList";
+import { setLabel as inGameSetLabel } from "./inGameSets";
 import { plural } from "./format";
 import { lookKey } from "./herself";
 import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
@@ -46,8 +48,8 @@ import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { wearable as canBeWorn } from "./modelPreview";
 import {
-  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, wearAll, wearSet,
-  wearable,
+  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, toggleAt, wearAll,
+  wearAllAt, wearSet, wearable,
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
@@ -73,6 +75,9 @@ import type {
   CustomSetsPayload,
   GalleryPayload,
   IconsPayload,
+  InGameSetAppearancesPayload,
+  InGameSetSlot,
+  InGameSetsPayload,
   MarkSubjectKind,
   Quality,
   QualitiesFile,
@@ -80,6 +85,7 @@ import type {
   TransmogMark,
   TransmogMarksPayload,
   TransmogPayload,
+  SetRequest,
   TransmogSet,
   TransmogSetItemsPayload,
   WardrobePayload,
@@ -138,6 +144,22 @@ export interface TransmogViewProps {
     remove: (id: number) => Promise<CustomSetsPayload>;
     onApply: (payload: CustomSetsPayload) => void;
     onError: (error: unknown) => string;
+    /** And the other keeping: asking the game itself to hold on to what she has on. */
+    sendToGame: (
+      name: string, icon: number | null, slots: InGameSetSlot[],
+    ) => Promise<SetRequest[]>;
+  };
+  /**
+   * The sets the player saved in the *game*, and what one turns out to be made of.
+   *
+   * The one browser on this screen nothing here can write to. An in-game set is held on
+   * Blizzard's servers and reaches the app through the addon, so the payload is a snapshot of
+   * what the last sync read — `null` until it has been read, and a reader whose characters have
+   * saved none sees an empty list rather than a missing browser.
+   */
+  inGame: {
+    payload: InGameSetsPayload | null;
+    loadAppearances: (appearanceIds: number[]) => Promise<InGameSetAppearancesPayload>;
   };
   /** Passed through too — it is the one thing here that needs a graphics card. */
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
@@ -157,19 +179,19 @@ export interface TransmogViewProps {
 }
 
 /**
- * Which of the three browsers the reader is in.
+ * Which of the four browsers the reader is in.
  *
- * The game's sets, the game's whole wardrobe by the kind of thing, and the sets they made
- * themselves. Three lists of one kind of answer — something to put on her — and the outfit
- * survives every switch between them, which is what makes assembling one out of all three the
- * ordinary thing rather than a trick.
+ * The game's sets, the game's whole wardrobe by the kind of thing, the sets they made
+ * themselves, and the ones they saved in the game long before Chronie existed. Four lists of one
+ * kind of answer — something to put on her — and the outfit survives every switch between them,
+ * which is what makes assembling one out of all four the ordinary thing rather than a trick.
  */
-type Browsing = "sets" | "items" | "yours";
+type Browsing = "sets" | "items" | "yours" | "ingame";
 
 export function TransmogView(
   {
     payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, loadGallery,
-    herself, marks, custom, createStage, createGalleryStage,
+    herself, marks, custom, inGame, createStage, createGalleryStage,
     loadQualities, loadSetQualities = loadSetStore,
   }: TransmogViewProps,
 ): ReactNode {
@@ -347,6 +369,13 @@ export function TransmogView(
             type="button" aria-pressed={browsing === "yours"}
             onClick={() => setBrowsing("yours")}
           >Yours</button>
+          {/* Last, because it is the only one of the four that is not about this machine at
+              all: these were saved in the game, by a character, and Chronie is reporting them
+              rather than offering them. */}
+          <button
+            type="button" aria-pressed={browsing === "ingame"}
+            onClick={() => setBrowsing("ingame")}
+          >Personal in-game sets</button>
         </div>
       <section className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}>
         <div className="table-head">
@@ -435,6 +464,19 @@ export function TransmogView(
         onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
         onWearAll={(set) => setOutfit((was) => wearAll(was, rowsOf(set), set.name))}
       />
+      {/* And in the tree beside the other three, for their reason: what a reader opened and
+          searched here should still be open when they come back from trying a hat. */}
+      <InGameSetList
+        hidden={browsing !== "ingame"} payload={inGame.payload}
+        loadAppearances={inGame.loadAppearances} icons={icons} wantIcons={wantIcons}
+        outfit={outfit}
+        // The place travels with the row rather than being worked out from it: an in-game set
+        // is the only kind that names the slot, and so the only one that can say which hand a
+        // one-hander is in. See `wearAllAt`.
+        onWear={(place, row) => setOutfit((was) => toggleAt(was, place, row))}
+        onWearAll={(set, pieces) =>
+          setOutfit((was) => wearAllAt(was, pieces, inGameSetLabel(set)))}
+      />
       </div>
       <OutfitPanel
         outfit={outfit} icons={icons} createStage={createStage} look={look}
@@ -448,6 +490,7 @@ export function TransmogView(
           onSave: custom.save,
           onSaved: custom.onApply,
           onError: custom.onError,
+          onSendToGame: custom.sendToGame,
         }}
         onTakeOff={(place) => setOutfit((was) => takeOff(was, place))}
         onClearAll={() => setOutfit(NOTHING_ON)}

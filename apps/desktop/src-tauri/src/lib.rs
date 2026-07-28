@@ -14,6 +14,7 @@ pub mod db2;
 pub mod gallery;
 pub mod glb;
 pub mod icons;
+pub mod ingamesets;
 pub mod items;
 pub mod logfile;
 pub mod m2;
@@ -445,6 +446,84 @@ fn delete_custom_set(
     state: State<'_, AppState>,
 ) -> Result<customsets::CustomSetsPayload, String> {
     collector::delete_custom_set(&state.database_path(), id)
+}
+
+/// The sets the player saved in the game itself, per character the addon has read one on.
+///
+/// The third kind of set on that screen, and the only one this app neither invented nor found
+/// in the game's files: Blizzard's sets are a DB2 table, the reader's own are rows this app
+/// wrote, and these were saved at a transmogrifier long before Chronie existed. Read out of the
+/// database rather than the install, so a machine without the game still lists them — see
+/// `0018_in_game_sets.sql` for why listing is as far as that goes.
+#[tauri::command]
+fn in_game_sets(state: State<'_, AppState>) -> Result<ingamesets::InGameSetsPayload, String> {
+    collector::in_game_sets(&state.database_path())
+}
+
+/// What a list of appearances actually is, for a set that names them and nothing else.
+///
+/// An in-game set is stored as `ItemModifiedAppearance` ids because that is all the game tells
+/// the addon, so opening one is this: the same four table walks a Blizzard set costs, over the
+/// ids the set names rather than the ids `TransmogSetItem` names. The answer is shaped exactly
+/// like `transmog_set_items`, which is what lets the window draw one with the code it already
+/// has for the other.
+///
+/// Asked when a reader opens a set rather than when the list is drawn, for the reason every
+/// other read of the game's tables here is deferred: a roster's worth of wardrobes is a lot of
+/// walking for rows nobody has looked at.
+#[tauri::command]
+async fn in_game_set_appearances(
+    appearance_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| {
+        let found = transmog::appearances_of(files, &appearance_ids)?;
+        let named = found.iter().filter(|row| row.item_id != 0).count();
+        Ok(serde_json::json!({
+            "readCount": named,
+            "withheldCount": found.len() - named,
+            "appearances": found,
+        }))
+    })
+    .await
+}
+
+/// Asks the game to save an outfit into the account's own transmog sets.
+///
+/// The one write Chronie makes into a WoW account, and it is deliberately two steps: the request
+/// is recorded here, and the *addon* carries it out the next time the player logs in. Nothing in
+/// this app can reach a running game — see `docs/transmog-sets.md` — so what this does is write
+/// the waiting requests into a source file of the addon's own and then wait to be told.
+///
+/// Answering with every request rather than an acknowledgement, the same rule the marks and the
+/// saved sets follow: the window draws what was stored, including the ones still waiting.
+///
+/// A game folder that cannot be written to is not a failure of the *send*. The row is already
+/// stored, every later install and every later send writes the file again, and telling somebody
+/// their outfit was not saved when it is queued would be the wrong sentence.
+#[tauri::command]
+fn send_set_to_game(
+    name: String,
+    icon: Option<i64>,
+    slots: Vec<ingamesets::Slot>,
+    state: State<'_, AppState>,
+) -> Result<Vec<ingamesets::Request>, String> {
+    let now = Utc::now().timestamp();
+    let requests = collector::request_set_in_game(&state.database_path(), &name, icon, &slots, now)?;
+    if let Ok(wow_path) = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        configured_wow_path(&settings)
+    } {
+        let waiting = collector::waiting_set_requests(&state.database_path())?;
+        let _ = write_requests(&wow_path, &waiting, now);
+    }
+    Ok(requests)
+}
+
+/// Every outfit this app has asked the game for, and what became of each.
+#[tauri::command]
+fn set_requests(state: State<'_, AppState>) -> Result<Vec<ingamesets::Request>, String> {
+    collector::set_requests(&state.database_path())
 }
 
 /// What the game says about the achievements a window is showing.
@@ -975,6 +1054,14 @@ async fn capture_image(capture_id: i64, state: State<'_, AppState>) -> Result<Va
 /// is always what Setup last said.
 const SETTINGS_MODULE: &str = "src/Settings.lua";
 
+/// The other file the app writes rather than copies: what it has asked the game to save.
+///
+/// The one thing that travels *into* a WoW account, and it travels here rather than through
+/// SavedVariables because the client rewrites those wholesale at logout — see
+/// `docs/transmog-sets.md`. Listed in `chronie.toc` like any other source file, so the client
+/// loads it and never touches it.
+const REQUESTS_MODULE: &str = "src/CustomSetRequests.lua";
+
 /// A trigger name as a Lua string literal, or nothing at all.
 ///
 /// The names come out of a settings file somebody can edit by hand, and they end up inside a
@@ -1014,7 +1101,18 @@ fn settings_module(combat_logging: bool, capture_triggers: &[String]) -> String 
 }
 
 /// Lays the shipped addon out under `destination`, configured the way `settings` says.
-fn stage_addon(destination: &Path, settings: &Settings) -> Result<(), String> {
+///
+/// Two of the files are written rather than copied. The settings module carries what the Setup
+/// screen says; the requests module carries the outfits still waiting to be saved into the
+/// game — and it has to be written here as well as when a send happens, because installing lays
+/// the whole folder down again and copying the shipped empty one over the top would lose every
+/// request that had not been carried out yet.
+fn stage_addon(
+    destination: &Path,
+    settings: &Settings,
+    requests: &[ingamesets::Request],
+    now: i64,
+) -> Result<(), String> {
     for (relative, contents) in BUNDLED_ADDON {
         let output = destination.join(relative);
         if let Some(parent) = output.parent() {
@@ -1025,12 +1123,36 @@ fn stage_addon(destination: &Path, settings: &Settings) -> Result<(), String> {
                 &output,
                 settings_module(settings.combat_logging, &settings.capture_triggers),
             )
+        } else if *relative == REQUESTS_MODULE {
+            fs::write(&output, ingamesets::requests_module(now, requests))
         } else {
             fs::write(&output, contents)
         }
         .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Writes the waiting requests into an addon folder that is already standing.
+///
+/// One file rather than the whole folder, because a send should reach the game without
+/// reinstalling an addon that is already the right version — and because a reinstall is a
+/// rename of a directory the player may be running out of at that moment.
+///
+/// A game folder with no Chronie in it is not an error. Somebody can send an outfit before they
+/// have ever installed the addon, and the install itself lays the same file down with the same
+/// requests in it, so nothing is lost by saying nothing here.
+fn write_requests(wow_path: &Path, requests: &[ingamesets::Request], now: i64) -> Result<(), String> {
+    let target = wow_path
+        .join("Interface")
+        .join("AddOns")
+        .join("chronie")
+        .join(REQUESTS_MODULE);
+    if !target.parent().is_some_and(Path::is_dir) {
+        return Ok(());
+    }
+    fs::write(&target, ingamesets::requests_module(now, requests))
+        .map_err(|error| format!("Could not write {}: {error}", target.display()))
 }
 
 /// The version in the shipped addon's .toc, which is the version any install this app
@@ -1053,7 +1175,12 @@ fn bundled_addon_version() -> String {
 /// The new copy is assembled beside the old one and moved into place in a single rename, so
 /// the game never sees a folder holding half of one version and half of another — and the old
 /// copy is only deleted once its replacement is standing.
-fn replace_addon(wow_path: &Path, settings: &Settings) -> Result<InstallResult, String> {
+fn replace_addon(
+    wow_path: &Path,
+    settings: &Settings,
+    requests: &[ingamesets::Request],
+    now: i64,
+) -> Result<InstallResult, String> {
     let addons = wow_path.join("Interface").join("AddOns");
     if !addons.is_dir() {
         return Err(format!("AddOns folder not found at {}.", addons.display()));
@@ -1062,7 +1189,7 @@ fn replace_addon(wow_path: &Path, settings: &Settings) -> Result<InstallResult, 
         .prefix(".chronie-install-")
         .tempdir_in(&addons)
         .map_err(|error| error.to_string())?;
-    stage_addon(staging.path(), settings)?;
+    stage_addon(staging.path(), settings, requests, now)?;
     let target = addons.join("chronie");
     let backup = addons.join(".chronie-backup");
     if backup.exists() {
@@ -1092,7 +1219,10 @@ fn install_bundled_addon(state: &AppState) -> Result<InstallResult, String> {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         (configured_wow_path(&settings)?, settings.clone())
     };
-    replace_addon(&wow_path, &settings)
+    // Read before the folder is torn down and laid again, so a request made a moment ago
+    // survives an install rather than being replaced by the shipped empty file.
+    let waiting = collector::waiting_set_requests(&state.database_path()).unwrap_or_default();
+    replace_addon(&wow_path, &settings, &waiting, Utc::now().timestamp())
 }
 
 #[tauri::command]
@@ -1407,6 +1537,10 @@ pub fn run() {
             set_transmog_tag,
             delete_transmog_tag,
             custom_sets,
+            in_game_sets,
+            in_game_set_appearances,
+            send_set_to_game,
+            set_requests,
             save_custom_set,
             delete_custom_set,
             character_model,
@@ -1566,7 +1700,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
-        let result = replace_addon(&retail, &Settings::default()).unwrap();
+        let result = replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
         assert_eq!(result.version, version_in_the_toc());
         let installed = addon_folder(&retail);
@@ -1582,6 +1716,57 @@ mod tests {
         assert!(lua_modules > 0, "no Lua modules landed in src/");
     }
 
+    /// An outfit somebody sent has to survive the trip into the game folder, because that file
+    /// is the only way a request ever reaches the addon.
+    ///
+    /// Installing lays the whole folder down again, so the shipped empty module would otherwise
+    /// go over the top of it and every request not yet carried out would be lost — silently,
+    /// and at exactly the moment somebody was setting Chronie up.
+    #[test]
+    fn carries_a_waiting_request_into_the_game_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let waiting = ingamesets::Request {
+            id: 4,
+            name: "Winter Look".into(),
+            icon: Some(133_600),
+            created_at: 10,
+            outcome: None,
+            applied_at: None,
+            set_id: None,
+            slots: vec![ingamesets::Slot {
+                slot: 0,
+                appearance_id: 55,
+                secondary_appearance_id: None,
+                illusion_id: None,
+            }],
+        };
+
+        replace_addon(&retail, &Settings::default(), &[waiting], 20).unwrap();
+
+        let written =
+            fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
+        assert!(written.contains(r#"["name"] = "Winter Look","#), "{written}");
+        assert!(written.contains(r#"["slot"] = 0, ["appearance"] = 55,"#), "{written}");
+        assert_ne!(written.as_bytes(), bundled("src/CustomSetRequests.lua"));
+    }
+
+    /// And an install with nothing waiting still writes a module that loads, rather than the
+    /// shipped one — which is the same file either way, but has to be written by the same code
+    /// path or the empty case is the untested one.
+    #[test]
+    fn writes_a_module_that_asks_for_nothing_when_nothing_is_waiting() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+
+        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+
+        let written =
+            fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
+        assert!(written.contains("ns.customSetRequests = {"), "{written}");
+        assert!(!written.contains(r#"["id"]"#), "{written}");
+    }
+
     /// The setting has to survive the trip into the game folder, because the addon reads it
     /// there and nowhere else.
     #[test]
@@ -1593,7 +1778,7 @@ mod tests {
             ..Settings::default()
         };
 
-        replace_addon(&retail, &settings).unwrap();
+        replace_addon(&retail, &settings, &[], 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
         assert!(
@@ -1609,7 +1794,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
-        replace_addon(&retail, &Settings::default()).unwrap();
+        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
         assert!(installed.contains("combatLogging = false"), "{installed}");
@@ -1646,7 +1831,7 @@ mod tests {
             ..Settings::default()
         };
 
-        replace_addon(&retail, &settings).unwrap();
+        replace_addon(&retail, &settings, &[], 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
         assert!(
@@ -1767,7 +1952,7 @@ mod tests {
         fs::write(&stale, b"-- a module this build no longer ships\n").unwrap();
         fs::write(installed.join("chronie.toc"), b"## Version: 0.0.1-stale\n").unwrap();
 
-        replace_addon(&retail, &Settings::default()).unwrap();
+        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
         assert!(!stale.exists(), "a file from the old copy survived the install");
         assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
@@ -1791,7 +1976,7 @@ mod tests {
         let stale = installed.join("Bindings.xml");
         fs::write(&stale, b"<Bindings><Binding name=\"CHRONIE_CAPTURE\" /></Bindings>\n").unwrap();
 
-        replace_addon(&retail, &Settings::default()).unwrap();
+        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
         assert!(!stale.exists(), "an older copy's Bindings.xml survived the install");
         assert!(installed.join("Main.lua").is_file(), "the new copy did not land");
@@ -1805,9 +1990,9 @@ mod tests {
         let retail = game_folder(root.path());
         let addons = retail.join("Interface").join("AddOns");
 
-        let first = replace_addon(&retail, &Settings::default()).unwrap();
+        let first = replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
         let after_first = tree(&addons);
-        let second = replace_addon(&retail, &Settings::default()).unwrap();
+        let second = replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
         assert_eq!(second.version, first.version);
         assert_eq!(tree(&addons), after_first);
@@ -1819,7 +2004,7 @@ mod tests {
         let bystander = root.path().join("WTF");
         fs::create_dir_all(&bystander).unwrap();
 
-        let error = replace_addon(root.path(), &Settings::default()).unwrap_err();
+        let error = replace_addon(root.path(), &Settings::default(), &[], 0).unwrap_err();
 
         assert!(error.contains("AddOns"), "unhelpful error: {error}");
         assert_eq!(tree(root.path()), Vec::<String>::new());

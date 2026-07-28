@@ -24,6 +24,9 @@ import type {
   GalleryKind,
   GalleryPayload,
   IconsPayload,
+  InGameSetAppearancesPayload,
+  InGameSetSlot,
+  InGameSetsPayload,
   InstallResult,
   ItemDetail,
   ItemAppearance,
@@ -35,6 +38,7 @@ import type {
   QuerySchema,
   Release,
   Segment,
+  SetRequest,
   Settings,
   SyncResult,
   TransmogMark,
@@ -153,6 +157,56 @@ export const desktop = {
       .filter((mark) => !(mark.kind === "custom" && mark.id === id));
     return Promise.resolve(structuredClone(mock.customSets));
   },
+  // The sets the player saved in the *game*, which the addon reports and nothing here writes.
+  // Read once with the rest of the transmog screen: this is a snapshot of what the last sync
+  // found, and it changes when the player changes it in game rather than when anything here
+  // does.
+  inGameSets: (): Promise<InGameSetsPayload> => mock
+    ? Promise.resolve(structuredClone(mock.inGameSets))
+    : invoke<InGameSetsPayload>("in_game_sets"),
+  // And what one of them is made of, which costs the game's files. An in-game set names its
+  // appearances and nothing else — see `0018_in_game_sets.sql` — so this is the hop from ids to
+  // rows, and it is why a set can be listed on a machine without the game and only opened on
+  // one with it.
+  inGameSetAppearances: (appearanceIds: number[]): Promise<InGameSetAppearancesPayload> => {
+    if (!mock) return invoke<InGameSetAppearancesPayload>("in_game_set_appearances", { appearanceIds });
+    // Keyed the way the worn sets are, so a test can say which set the window asked to open
+    // rather than only that it asked for something.
+    const key = [...appearanceIds].sort((left, right) => left - right).join(",");
+    return Promise.resolve(structuredClone(
+      mock.inGameSetAppearances[key] ?? { appearances: [], readCount: 0, withheldCount: 0 },
+    ));
+  },
+  // The one thing Chronie writes into a WoW account, and it is deliberately two steps: this
+  // records the request, and the *addon* saves the set the next time the player logs in. See
+  // `docs/transmog-sets.md` — nothing in a desktop app can reach a running game.
+  sendSetToGame: (
+    name: string, icon: number | null, slots: InGameSetSlot[],
+  ): Promise<SetRequest[]> => {
+    if (!mock) return invoke<SetRequest[]>("send_set_to_game", { name, icon, slots });
+    // The half of the backend's own refusals a test can tell apart from a working form, the
+    // same two `saveCustomSet` above models: a name is required, and an empty outfit is not
+    // an outfit.
+    const cleaned = name.trim().replace(/\s+/g, " ");
+    if (!cleaned) {
+      return Promise.reject(new Error("Give the set a name and it will be saved under it."));
+    }
+    if (!slots.length) {
+      return Promise.reject(
+        new Error("Put something on her first, and then it can be sent to the game."),
+      );
+    }
+    // Unanswered, which is what a real one is until the player has logged in — so the fixture
+    // is in the state the window actually has to draw rather than the one it ends in.
+    const id = mock.setRequests.reduce((highest, one) => Math.max(highest, one.id), 0) + 1;
+    mock.setRequests.unshift({
+      id, name: cleaned, icon, createdAt: Math.floor(Date.now() / 1000), slots,
+    });
+    return Promise.resolve(structuredClone(mock.setRequests));
+  },
+  setRequests: (): Promise<SetRequest[]> => mock
+    ? Promise.resolve(structuredClone(mock.setRequests))
+    : invoke<SetRequest[]>("set_requests"),
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.
   achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock

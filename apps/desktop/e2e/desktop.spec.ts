@@ -281,8 +281,11 @@ class TransmogView {
     await expect(this.view.getByRole("heading", { name: "Transmog", level: 1 })).toBeVisible();
   }
 
-  /** The switch above the browsers: the game's sets, its whole wardrobe, or the reader's own. */
-  async browseBy(what: "Sets" | "Items" | "Yours"): Promise<void> {
+  /**
+   * The switch above the browsers: the game's sets, its whole wardrobe, the reader's own, or
+   * the ones the player saved in the game itself.
+   */
+  async browseBy(what: "Sets" | "Items" | "Yours" | "Personal in-game sets"): Promise<void> {
     await this.view.getByRole("button", { name: what, exact: true }).click();
   }
 
@@ -666,6 +669,69 @@ class YourSets {
 }
 
 /**
+ * The fourth browser: the sets the player saved in the game itself.
+ *
+ * Grouped by character, which is the one way it is drawn differently from the three beside it —
+ * so a character is a level-3 heading and a set a level-4 one, the same shape a collection and
+ * a set have in `TransmogView`. A character who saves nothing in game is not drawn at all, so
+ * [`characters`] is what they have rather than who Chronie has read.
+ *
+ * A card starts closed and costs the game's own tables to open, so the locators read like the
+ * game's sets rather than like the reader's own: there is a button to click.
+ */
+class InGameSets {
+  readonly page: Page;
+  readonly list: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.list = page.locator("#ingame-sets");
+  }
+
+  /** The characters with something to show, in the order the backend sorted them. */
+  characters(): Locator {
+    return this.list.getByRole("heading", { level: 3 });
+  }
+
+  /** The sets on screen, by the names the game holds them under. */
+  names(): Locator {
+    return this.list.getByRole("heading", { level: 4 });
+  }
+
+  card(name: string): Locator {
+    return this.list
+      .getByRole("article")
+      .filter({ has: this.page.getByRole("heading", { name, exact: true, level: 4 }) });
+  }
+
+  /** Opens one in place, which is where the game's files are actually read. */
+  async openSet(name: string): Promise<Locator> {
+    await this.list.getByRole("button", { name, exact: true }).click();
+    const card = this.card(name);
+    await expect(card.getByRole("listitem").first()).toBeVisible();
+    return card;
+  }
+
+  /** One row per slot the player filled, which is what an opened set turned out to be. */
+  rows(name: string): Locator {
+    return this.card(name).locator(".mog-items > .mog-item");
+  }
+
+  /** The button on one row, which puts that piece on the character or takes it off again. */
+  wear(name: string, slot: string, label: string): Locator {
+    return this.card(name).getByRole("button", { name: `Wear ${slot}: ${label}` });
+  }
+
+  wearAll(name: string): Locator {
+    return this.card(name).getByRole("button", { name: `Wear all of ${name}` });
+  }
+
+  search(): Locator {
+    return this.list.getByLabel("Filter the sets you saved in game");
+  }
+}
+
+/**
  * The character, and the rail of what she has on — the half of the view that never goes away.
  *
  * Every piece is a picture over her, and the picture is the button that takes it off again.
@@ -733,6 +799,24 @@ class Outfit {
   async saveAs(name: string): Promise<void> {
     await this.name().fill(name);
     await this.keep().click();
+  }
+
+  /**
+   * The other button beside that box, which asks the *game* to keep the outfit.
+   *
+   * Beside the save rather than instead of it: they are two different keepings, and the one a
+   * reader wants may be either or both. This one is the only thing the app writes into a WoW
+   * account, and it is two steps — the request is recorded here and the addon carries it out
+   * the next time that account is logged in.
+   */
+  sendToGame(): Locator {
+    return this.panel.getByRole("button", { name: "Send to the game" });
+  }
+
+  /** Sends what she has on to the game under a name, the way a reader does. */
+  async sendAs(name: string): Promise<void> {
+    await this.name().fill(name);
+    await this.sendToGame().click();
   }
 
   /** The pane the body is drawn on, which says how much geometry it ended up holding. */
@@ -1082,6 +1166,7 @@ const test = base.extend<{
   transmog: TransmogView;
   wardrobe: Wardrobe;
   yours: YourSets;
+  inGame: InGameSets;
   outfit: Outfit;
   combat: CombatLoggingPanel;
   retention: LogRetentionPanel;
@@ -1109,6 +1194,9 @@ const test = base.extend<{
   },
   yours: async ({ page }, use) => {
     await use(new YourSets(page));
+  },
+  inGame: async ({ page }, use) => {
+    await use(new InGameSets(page));
   },
   outfit: async ({ page }, use) => {
     await use(new Outfit(page));
@@ -1802,6 +1890,64 @@ const mockDesktop: E2EMock = {
   // so a fixture holding one would be the one thing on this screen that never had to survive
   // being written. The empty state is worth opening on for its own sake as well.
   customSets: { sets: [] },
+  // And the ones the player saved in the *game*, which start at two, where the reader's own
+  // start at none — and the difference is the point. A saved set is made by the page under
+  // test; an in-game set can only ever arrive from outside it, so a fixture is the only way
+  // this browser is ever populated at all.
+  //
+  // Two characters, because the list is grouped by character and one of them would never show
+  // that. "Nerine-Ravencrest" saves nothing in game, which is the sentence the empty grouping
+  // has to be able to say: read, and found none.
+  inGameSets: {
+    characters: [
+      {
+        character: "Aster-Ravencrest",
+        sets: [
+          {
+            id: 4,
+            name: "Tideglass",
+            icon: 130001,
+            observedAt: 1_769_000_000,
+            slots: [
+              { slot: 0, appearanceId: 71001 },
+              { slot: 1, appearanceId: 71002 },
+            ],
+          },
+          // Named nothing by the client, which its own API is documented as sometimes doing,
+          // and holding nothing — which is a set the player made and has not filled yet.
+          { id: 5, name: "", icon: null, observedAt: null, slots: [] },
+        ],
+      },
+      { character: "Nerine-Ravencrest", sets: [] },
+    ],
+  },
+  // What one of those turns out to be, keyed by the appearance ids the window asks with. The
+  // set holding nothing asks with nothing, which is the empty key — and the backend's real
+  // answer to that is an empty list rather than an error.
+  inGameSetAppearances: {
+    "71001,71002": {
+      readCount: 2,
+      withheldCount: 0,
+      appearances: [
+        {
+          modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
+          displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
+          displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+        },
+        {
+          modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle", appearanceId: 80002,
+          displayType: 1, inventoryType: 3,
+          ...ANY_CLASS_ITEM,
+          displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
+        },
+      ],
+    },
+  },
+  // And the outfits sent the other way, which start at none for the reason the reader's own
+  // sets do: a request is made by the page under test and by nothing else, so a fixture
+  // holding one would be the one thing on this screen that never had to survive being sent.
+  setRequests: [],
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
   // set 205 names it and the install holds no such file, which is the case a row has to
@@ -3036,6 +3182,7 @@ test("browses the game's transmog sets and dresses the character in them", async
   transmog,
   wardrobe,
   yours,
+  inGame,
   outfit,
 }) => {
   // The longest flow in the suite, and the only one that draws: a body per outfit tried on, and
@@ -3927,6 +4074,68 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(yours.list.getByText("No sets of your own yet")).toBeVisible();
     // What she has on is untouched by the set that held it going away.
     await expect(outfit.slots()).toHaveCount(1);
+  });
+
+  /* ---------- and the fourth: the ones the player saved in the game itself ---------- */
+
+  // The only browser of the four that is about a *character*. Blizzard's sets, the whole
+  // wardrobe and the reader's own are the same for everybody logged in; these were put together
+  // at a transmogrifier by somebody, and a roster of alts is a wardrobe each.
+  await test.step("the sets saved in the game are grouped by who saved them", async () => {
+    await transmog.browseBy("Personal in-game sets");
+    await expect(inGame.characters()).toHaveText(["Aster-Ravencrest"]);
+    // Nerine has been played with the addon on and saves nothing in game, which is a heading
+    // with nothing under it — so she is not drawn, and the count above is of what is.
+    await expect(inGame.names()).toHaveText(["Tideglass", "Unnamed set"]);
+    await expect(inGame.list.getByText("2 sets shown")).toBeVisible();
+    // A set the client would not name is still a set: it is headed by the label the app gives
+    // it, and says how little is in it without being opened.
+    await expect(inGame.card("Unnamed set")).toContainText("0 pieces");
+  });
+
+  // An in-game set names appearances and nothing else, so unlike a set of the reader's own it
+  // has to be opened — the same four walks of the game's tables a Blizzard set costs. This is
+  // the step that says those ids reach real items on a real install.
+  await test.step("a set saved in the game opens on what the game says is in it", async () => {
+    await inGame.openSet("Tideglass");
+    await expect(inGame.rows("Tideglass")).toHaveCount(2);
+    await expect(inGame.rows("Tideglass"))
+      .toContainText(["Tideglass Crown", "Tideglass Mantle"]);
+    await expect(inGame.wear("Tideglass", "Head", "Tideglass Crown")).toBeVisible();
+  });
+
+  // And the acceptance: what the player wears in the game goes onto the character here, out of
+  // ids that were all Chronie's database held. The head she has on is a look out of the game's
+  // whole wardrobe, so the set taking that place is also the swap working across two browsers.
+  await test.step("the character is dressed in a set she saved in the game", async () => {
+    await inGame.wearAll("Tideglass").click();
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Tideglass Crown · Head · Tideglass",
+      "Tideglass Mantle · Shoulder · Tideglass",
+    ]);
+    await expect(outfit.summary()).toHaveText("2 of 13 slots filled");
+  });
+
+  // And the direction nothing else in this suite goes: out of the app and into the account.
+  // Every other step above reads the game; this one writes to it, and it is the only thing
+  // Chronie ever asks a WoW account to change.
+  //
+  // The sentence is the point of the step rather than a detail of it. Nothing in a desktop app
+  // can reach a running client, so the outfit is not in the game when the button comes back —
+  // it is a row waiting for the addon to find at the next login, and a line that said only
+  // "sent" would have a reader opening the game to look for something that is not there.
+  await test.step("what she has on is sent to the game, to be saved at the next login", async () => {
+    await outfit.sendAs("  Tideglass  court ");
+
+    // Named by what came back rather than by what was typed: the backend tidies the name, and
+    // a window drawing its own idea of it would promise a set under a name nobody will see.
+    await expect(outfit.panel).toContainText(
+      "Waiting for Tideglass court to be saved — it goes in next time you log that account in.",
+    );
+    // The box is emptied, because the request is made and typing over it would make a second
+    // one. What she has on is untouched — sending is a note taken, not a door closed.
+    await expect(outfit.name()).toHaveValue("");
+    await expect(outfit.slots()).toHaveCount(2);
   });
 });
 
