@@ -508,6 +508,9 @@ export const wornSets: E2EMock["wornSets"] = {
   // pauldrons off again.
   "900001,900002,900012": fixtureModel("worn-helm.glb"),
   "900001,900009,900012": fixtureModel("worn-helm.glb"),
+  // Set 202 worn whole — sandals and gloves, which is all it holds. It is here because the
+  // grid can be drawn as characters now, and every card of it asks for the set it is of.
+  "900004,900005": fixtureModel("robe.glb"),
   // And the two the other half of the browser assembles: a head that belongs to no set at
   // all, and that head with a staff — which is a look no card in the grid could reach.
   "900040": fixtureModel("worn-helm.glb"),

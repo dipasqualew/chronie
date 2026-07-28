@@ -541,7 +541,10 @@ export function TransmogView(
               onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
               onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
             />
-            <span className="count" id="transmog-count">
+            <span
+              className="count" id="transmog-count" role="status"
+              aria-label="How much of the grid is shown"
+            >
               {payload ? shownCount(drawn.length, sets.length) : ""}
             </span>
           </div>

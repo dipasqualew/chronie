@@ -138,7 +138,10 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
           <h2>Tables</h2>
           {schema
             ? schema.tables.map((table) => (
-              <details key={table.name} id={`query-table-${table.name}`} className="query-table">
+              <details
+                key={table.name} id={`query-table-${table.name}`} className="query-table"
+                aria-label={table.name}
+              >
                 {/* The summary does what a summary does — nothing but open. Everything that
                     writes into the editor is a button inside it, so a click never has to be
                     guessed at. */}
