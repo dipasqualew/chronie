@@ -459,6 +459,137 @@
   }
   tbody tr:hover .row-open { text-decoration: underline; text-underline-offset: 3px; }
 
+  /* ---------- query ---------- */
+
+  /* What is in the database down the left, what is being asked of it on the right. The list
+     is narrow because it is a reference rather than the subject: a query several lines long
+     needs the width more than a column called `duration_seconds` does. */
+  .query-body {
+    display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 16px; align-items: start;
+  }
+  /* A window too narrow for both puts the tables above the editor rather than squeezing
+     them, the same bargain the transmog view makes with its character. */
+  @media (max-width: 880px) { .query-body { grid-template-columns: 1fr; } }
+
+  .query-tables {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow); padding: 12px 14px; max-height: 72vh; overflow: auto;
+  }
+  .query-tables h2 {
+    font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-muted); margin: 0 0 8px;
+  }
+  .query-table summary {
+    cursor: pointer; padding: 3px 0; font-size: 13px; font-weight: 550;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  }
+  /* `display: flex` on a summary takes its disclosure triangle away in WebKit, so the
+     marker is put back explicitly — it is the only thing saying the row opens. */
+  .query-table summary::marker, .query-table summary::-webkit-details-marker { content: none; }
+  .query-table summary::before { content: "▸"; color: var(--text-muted); font-size: 10px; }
+  .query-table[open] summary::before { content: "▾"; }
+  .query-table summary > .muted { margin-left: auto; font-size: 11px; }
+  .query-tables ul { list-style: none; margin: 2px 0 10px; padding: 0 0 0 14px; }
+  .query-tables li {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    font-size: 12px;
+  }
+  /* A name that writes itself into the editor. Drawn as text rather than as a control: a
+     sidebar of forty buttons in boxes is a wall, and every one of these is one word. */
+  .query-tables li button {
+    border: none; background: transparent; padding: 1px 0; font: inherit;
+    color: var(--text-primary); text-align: left; border-radius: 4px;
+  }
+  .query-tables li button:hover {
+    background: transparent; color: var(--series-1);
+    text-decoration: underline; text-underline-offset: 3px;
+  }
+  .query-tables .query-seed {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    color: var(--text-muted) !important; margin-bottom: 2px;
+  }
+
+  .query-main { display: flex; flex-direction: column; gap: 12px; }
+  .query-recipes { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .query-recipes > .muted { font-size: 12px; }
+  .chip.recipe {
+    border: 1px solid var(--border); background: var(--surface-1); padding: 3px 9px;
+    font-size: 12px; cursor: pointer;
+  }
+  .chip.recipe:hover { border-color: var(--series-1); color: var(--text-primary); }
+
+  .query-editor {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px; line-height: 1.55; tab-size: 2;
+    color: var(--text-primary); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+    padding: 12px 14px; width: 100%; box-sizing: border-box; resize: vertical;
+  }
+  .query-editor:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+  .query-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .query-bar > .muted { font-size: 11px; }
+  .query-limit {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--text-secondary); font-size: 12px;
+  }
+  .query-limit select { padding: 4px 7px; font-size: 12px; }
+  .query-summary {
+    margin-left: auto; color: var(--text-muted); font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* SQLite's own words, in SQLite's own shape: the message names a column or a position in
+     the statement, and a proportional font is the wrong thing to read that in. */
+  .query-failure {
+    margin: 0; padding: 10px 12px; border-radius: 9px;
+    border: 1px solid var(--bad); color: var(--bad);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  }
+  .query-truncated { margin: 0; color: var(--text-secondary); font-size: 12.5px; }
+
+  .query-chart {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow); padding: 12px 14px 8px;
+  }
+  .query-chart > .muted { margin: 4px 0; font-size: 13px; }
+  .query-axes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .query-axes label {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--text-muted); font-size: 12px;
+  }
+  .query-axes select { padding: 4px 7px; font-size: 12px; max-width: 22ch; }
+  .query-axes > .muted { font-size: 12px; }
+
+  /* The drawing scales with the panel and keeps its proportions; every colour in it is a
+     class, because a nonce in `style-src` drops the `style` attribute a chart would
+     otherwise reach for. */
+  .chart { display: block; width: 100%; height: auto; margin-top: 8px; }
+  .chart-grid { stroke: var(--grid); stroke-width: 1; }
+  .chart-axis { stroke: var(--border); stroke-width: 1; }
+  .chart-tick { fill: var(--text-muted); font-size: 11px; }
+  .chart-axis-label { fill: var(--text-secondary); font-size: 12px; font-weight: 600; }
+  .chart-bar { fill: var(--series-1); }
+  .chart-bar:hover { fill: var(--text-primary); }
+  .chart-line {
+    fill: none; stroke: var(--series-1); stroke-width: 2;
+    stroke-linejoin: round; stroke-linecap: round;
+  }
+  .chart-dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 1.5; }
+  .chart-dot:hover { stroke: var(--text-primary); stroke-width: 2.5; }
+
+  .query-rows {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow); max-height: 60vh; overflow: auto;
+  }
+  .query-rows table { font-size: 12.5px; }
+  /* The details table sorts on a header click and this one does not, so it does not offer. */
+  .query-rows th, .query-rows tbody tr { cursor: default; }
+  .query-rows th.num { text-align: right; }
+  .query-rows th:hover { color: var(--text-secondary); }
+  .query-rows tbody tr:hover { background: var(--surface-2); }
+  .query-rows td { max-width: 46ch; overflow: hidden; text-overflow: ellipsis; }
+  .query-rows > .muted { margin: 0; padding: 14px; font-size: 13px; }
+
   /* ---------- transmog ---------- */
 
   .mog-list { padding: 0 16px 16px; }

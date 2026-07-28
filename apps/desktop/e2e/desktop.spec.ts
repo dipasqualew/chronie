@@ -5,7 +5,14 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { RECIPES } from "../src/query";
 import type { E2EMock } from "../src/types";
+
+/**
+ * A query as the mock's table of answers is keyed — whitespace collapsed, so a statement laid
+ * out over six lines in the recipe is the same key as the one the page sends back.
+ */
+const collapsed = (sql: string): string => sql.trim().replace(/\s+/g, " ");
 
 /**
  * The window addressed the way a user addresses it: by the names and roles on screen.
@@ -602,6 +609,72 @@ class CaptureSettingsPanel {
   }
 }
 
+/**
+ * The Query view: an editor, an answer, and a picture of it.
+ *
+ * Everything here is addressed the way it is announced — the editor by its label, the chart
+ * by the sentence a screen reader is given for it, the refusal by being an alert. The one
+ * exception is the rows, which are a table and are read as one.
+ */
+class QueryWorkbench {
+  readonly page: Page;
+  readonly view: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.view = page.locator("#query-view");
+  }
+
+  async open(): Promise<void> {
+    await this.page.getByRole("button", { name: "Query", exact: true }).click();
+    await expect(this.view).toBeVisible();
+  }
+
+  editor(): Locator {
+    return this.view.getByRole("textbox", { name: "SQL" });
+  }
+
+  async runIt(): Promise<void> {
+    await this.view.getByRole("button", { name: "Run" }).click();
+  }
+
+  /** The chart, which says what it is drawing in the name it is announced by. */
+  chart(): Locator {
+    return this.view.getByRole("img");
+  }
+
+  /** One of the three dropdowns over the chart: `Horizontal axis`, `Vertical axis`, `Chart shape`. */
+  choice(name: string): Locator {
+    return this.view.getByRole("combobox", { name });
+  }
+
+  /** What the run amounted to — rows, columns, milliseconds. */
+  summary(): Locator {
+    return this.view.getByRole("status");
+  }
+
+  /** Why a query was refused, in the words the database used. */
+  failure(): Locator {
+    return this.view.getByRole("alert");
+  }
+
+  rows(): Locator {
+    return this.view.locator(".query-rows tbody tr");
+  }
+
+  /** One question worth asking, offered above the editor. */
+  recipe(name: string): Locator {
+    return this.view.getByRole("button", { name });
+  }
+
+  /** A table in the list down the left, opened so what is inside it can be reached. */
+  async openTable(name: string): Promise<Locator> {
+    const listed = this.view.locator(`#query-table-${name}`);
+    await listed.locator("summary").click();
+    return listed;
+  }
+}
+
 const test = base.extend<{
   detail: SegmentDetail;
   editor: ActivityEditor;
@@ -613,6 +686,7 @@ const test = base.extend<{
   retention: LogRetentionPanel;
   captureSettings: CaptureSettingsPanel;
   shots: Screenshots;
+  workbench: QueryWorkbench;
 }>({
   detail: async ({ page }, use) => {
     await use(new SegmentDetail(page));
@@ -643,6 +717,9 @@ const test = base.extend<{
   },
   shots: async ({ page }, use) => {
     await use(new Screenshots(page));
+  },
+  workbench: async ({ page }, use) => {
+    await use(new QueryWorkbench(page));
   },
 });
 
@@ -1219,6 +1296,64 @@ const mockDesktop: E2EMock = {
     },
     unfinished: { count: 0, bytes: 0, files: [] },
     removed: [],
+  },
+  // The database as the Query view may see it, and the answers to the four questions this
+  // suite asks of it. The queries are keyed by the recipes themselves rather than by copies
+  // of their text: what the view sends is the recipe, so a recipe somebody rewords stays
+  // answered and a view that stopped sending it does not.
+  query: {
+    schema: {
+      tables: [
+        {
+          name: "characters",
+          view: false,
+          rowCount: 3,
+          columns: [
+            { name: "id", kind: "INTEGER", primaryKey: true },
+            { name: "name", kind: "TEXT", primaryKey: false },
+            { name: "class_file", kind: "TEXT", primaryKey: false },
+          ],
+        },
+        {
+          name: "segments",
+          view: false,
+          rowCount: 1204,
+          columns: [
+            { name: "id", kind: "INTEGER", primaryKey: true },
+            { name: "character_id", kind: "INTEGER", primaryKey: false },
+            { name: "instance_name", kind: "TEXT", primaryKey: false },
+            { name: "duration_seconds", kind: "INTEGER", primaryKey: false },
+          ],
+        },
+      ],
+    },
+    answers: {
+      [collapsed(RECIPES[0]?.sql ?? "")]: {
+        columns: ["character", "hours"],
+        rows: [["Aster-Vale", 41.5], ["Brin-Hearth", 12], ["Corvin-Vale", 3.2]],
+        truncated: false,
+        elapsedMs: 3,
+      },
+      [collapsed(RECIPES[1]?.sql ?? "")]: {
+        columns: ["day", "hours"],
+        rows: [
+          ["2026-07-23", 2.5], ["2026-07-24", 4], ["2026-07-25", 0.75], ["2026-07-26", 3.25],
+        ],
+        truncated: false,
+        elapsedMs: 5,
+      },
+      // What clicking a table in the list asks for. The null is the point of the row: an
+      // empty cell and a cell holding nothing look identical, and only one of them is true.
+      'SELECT * FROM "characters" LIMIT 50': {
+        columns: ["id", "name", "class_file"],
+        rows: [[1, "Aster-Vale", "MAGE"], [2, "Brin-Hearth", "PALADIN"], [3, "Corvin-Vale", null]],
+        truncated: false,
+        elapsedMs: 1,
+      },
+      // A mistyped column, refused in SQLite's own words — the one answer this feature has
+      // to get right, because it is the one every reader will meet.
+      "SELECT charater FROM segments": { error: "no such column: charater" },
+    },
   },
   chosenPath: "D:\\Games\\Example MMO",
   syncResult: { segmentCount: 3, added: 1, updated: 1 },
@@ -2738,3 +2873,70 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
 });
 
 
+/**
+ * The whole of the Query view, from opening it to being told a column does not exist.
+ *
+ * The steps are in the order somebody actually meets them, and the first one is the one the
+ * feature stands or falls on: the view opens already answered, with a picture of a real
+ * question, rather than as an empty box waiting for somebody to know SQL before it will show
+ * them anything.
+ */
+test("asks the history a question and draws the answer", async ({ workbench }) => {
+  await workbench.open();
+
+  await test.step("opens on a question already asked, and a chart of it", async () => {
+    await expect(workbench.summary()).toHaveText("3 rows · 2 columns · 3 ms");
+    // The chart says what it is drawing in the name it is announced by, which is the only
+    // thing a reader who cannot see it would be given.
+    await expect(workbench.chart())
+      .toHaveAccessibleName("hours by character, as a bar chart of 3 values");
+    await expect(workbench.rows()).toHaveCount(3);
+    await expect(workbench.rows().first()).toContainText("Aster-Vale");
+    await expect(workbench.rows().first()).toContainText("41.5");
+  });
+
+  await test.step("redraws the same answer as another shape", async () => {
+    await workbench.choice("Chart shape").selectOption("line");
+    await expect(workbench.chart())
+      .toHaveAccessibleName("hours by character, as a line chart of 3 values");
+  });
+
+  await test.step("takes another question from the ones offered", async () => {
+    await workbench.recipe("Hours per day").click();
+
+    await expect(workbench.editor()).toHaveValue(/GROUP BY s.ended_day/);
+    await expect(workbench.summary()).toHaveText("4 rows · 2 columns · 5 ms");
+    // The recipe says what to plot and how, so a question about days over time arrives as a
+    // line rather than as whatever the column order happened to suggest.
+    await expect(workbench.chart())
+      .toHaveAccessibleName("hours by day, as a line chart of 4 values");
+    await expect(workbench.rows()).toHaveCount(4);
+  });
+
+  await test.step("opens a table from the list and asks for all of it", async () => {
+    const characters = await workbench.openTable("characters");
+    await expect(characters).toContainText("class_file");
+
+    await characters.getByRole("button", { name: "SELECT * FROM characters" }).click();
+
+    await expect(workbench.editor()).toHaveValue('SELECT * FROM "characters" LIMIT 50');
+    await expect(workbench.rows()).toHaveCount(3);
+    // Nothing said what to plot, so the convention did: the first column that names things
+    // along the bottom, the first that counts them up the side.
+    await expect(workbench.chart())
+      .toHaveAccessibleName("id by name, as a bar chart of 3 values");
+    // The character with no class recorded. An empty cell and a cell holding nothing look
+    // identical on screen, and only one of them is what the database said.
+    await expect(workbench.rows().last()).toContainText("—");
+  });
+
+  await test.step("says why a query was refused, and keeps the rows that worked", async () => {
+    await workbench.editor().fill("SELECT charater FROM segments");
+    await workbench.runIt();
+
+    await expect(workbench.failure()).toHaveText("no such column: charater");
+    // The last answer is still on screen: a mistyped column is one keystroke from a working
+    // query, and taking the rows away to say so would be a punishment for a typo.
+    await expect(workbench.rows()).toHaveCount(3);
+  });
+});
