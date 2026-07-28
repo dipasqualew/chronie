@@ -1174,6 +1174,10 @@ mod tests {
         let port = station.start_on(0).unwrap().port;
 
         let asking = UdpSocket::bind("127.0.0.1:0").unwrap();
+        // Generous while an answer is expected, because a loaded runner is allowed to be slow;
+        // short below, where the assertion is that nothing comes back at all and every
+        // millisecond of the wait is spent proving a negative that a loopback datagram would
+        // have settled immediately.
         asking.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut buffer = [0_u8; 512];
         asking.send_to(PROBE, ("127.0.0.1", port)).unwrap();
@@ -1184,6 +1188,8 @@ mod tests {
         // The port it answers with is the one a transfer has to be sent to, which is not
         // necessarily the one it was asked for.
         assert_eq!(beacon.port, port);
+
+        asking.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
 
         // Something other than a probe is not an invitation to announce anything.
         asking.send_to(b"who is there?", ("127.0.0.1", port)).unwrap();

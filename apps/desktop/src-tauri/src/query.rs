@@ -116,6 +116,21 @@ const OPENERS: [&str; 4] = ["SELECT", "WITH", "VALUES", "EXPLAIN"];
 
 /// Runs one read against the history and answers with at most `limit` rows.
 pub fn run(database_path: &Path, sql: &str, limit: usize) -> Result<Answer, String> {
+    run_within(database_path, sql, limit, TIME_BUDGET)
+}
+
+/// The same read, with the clock that stops it handed in rather than assumed.
+///
+/// [`run`] passes [`TIME_BUDGET`], which is the only budget the window ever wants. A test
+/// that wants to watch a runaway query be interrupted wants it interrupted now: sitting
+/// through ten real seconds of `WITH RECURSIVE` proves nothing that the same interrupt at
+/// fifty milliseconds does not, and it did it in every CI run.
+pub fn run_within(
+    database_path: &Path,
+    sql: &str,
+    limit: usize,
+    budget: Duration,
+) -> Result<Answer, String> {
     let statement = single_statement(sql)?;
     let opener = opening_word(statement);
     if !OPENERS.contains(&opener.as_str()) {
@@ -126,11 +141,11 @@ pub fn run(database_path: &Path, sql: &str, limit: usize) -> Result<Answer, Stri
     let wanted = limit.clamp(1, MAX_ROWS);
 
     let connection = open_reading(database_path)?;
-    let deadline = Instant::now() + TIME_BUDGET;
+    let deadline = Instant::now() + budget;
     connection.progress_handler(PROGRESS_STEPS, Some(move || Instant::now() > deadline));
 
     let started = Instant::now();
-    let mut prepared = connection.prepare(statement).map_err(|error| explain(&error))?;
+    let mut prepared = connection.prepare(statement).map_err(|error| explain(&error, budget))?;
     if !prepared.readonly() {
         return Err("That statement would change the history, so Chronie did not run it.".into());
     }
@@ -149,10 +164,10 @@ pub fn run(database_path: &Path, sql: &str, limit: usize) -> Result<Answer, Stri
 
     let mut rows = Vec::new();
     let mut truncated = false;
-    let mut cursor = prepared.query([]).map_err(|error| explain(&error))?;
+    let mut cursor = prepared.query([]).map_err(|error| explain(&error, budget))?;
     // One row past the limit, so "there was more" is something that was observed rather than
     // guessed at from a full page.
-    while let Some(row) = cursor.next().map_err(|error| explain(&error))? {
+    while let Some(row) = cursor.next().map_err(|error| explain(&error, budget))? {
         if rows.len() == wanted {
             truncated = true;
             break;
@@ -386,11 +401,11 @@ fn clipped(text: &str) -> String {
 /// column: charater" says exactly what to fix — so they are passed through. The interrupt is
 /// the one that needs translating: it reads as "interrupted", which says nothing about who
 /// interrupted it or why.
-fn explain(error: &rusqlite::Error) -> String {
+fn explain(error: &rusqlite::Error, budget: Duration) -> String {
     if error.sqlite_error_code() == Some(ErrorCode::OperationInterrupted) {
         return format!(
             "That query was still running after {} seconds, so Chronie stopped it. Narrow it down — a WHERE clause, or a LIMIT.",
-            TIME_BUDGET.as_secs()
+            budget.as_secs()
         );
     }
     error.to_string()
@@ -579,11 +594,12 @@ mod tests {
         let (_held, path) = history();
         // Recursion with nothing to stop it and nothing to return: no row ever arrives, so the
         // row limit cannot end this and only the clock can.
-        let refused = run(
+        let refused = run_within(
             &path,
             "WITH RECURSIVE forever(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM forever)
              SELECT COUNT(*) FROM forever",
             10,
+            Duration::from_millis(50),
         )
         .unwrap_err();
         assert!(refused.contains("still running"), "{refused}");

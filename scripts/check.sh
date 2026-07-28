@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
-# Lint + test. The single command CI and humans both run.
+# Lint + test. The single command a human runs before committing.
+#
+# CI runs the same three scripts, one to a runner, because they need nothing from each other
+# and the wall clock of the slowest is better than the sum of all three. Here they run in
+# order, so the output reads top to bottom and the first failure is the one you see.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-eval "$(luarocks --lua-version 5.1 path --bin 2>/dev/null || true)"
-
-echo "==> luacheck"
-luacheck apps/addon/src apps/addon/Main.lua apps/addon/spec
-
-echo "==> busted"
-busted --verbose
-
-echo "==> desktop backend"
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
-
-echo "==> typecheck"
-bun run typecheck
-
-echo "==> desktop frontend"
-bun run --cwd apps/desktop test
-bun run --cwd apps/desktop test:e2e
+./scripts/check-lua.sh
+./scripts/check-rust.sh
+./scripts/check-frontend.sh

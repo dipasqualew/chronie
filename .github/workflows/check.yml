@@ -1,10 +1,23 @@
 name: check
 
-# The same gate humans run locally (./scripts/check.sh): luacheck, busted, then the
-# desktop backend and frontend suites. Runs on every push and pull request so the
-# "zero warnings, zero failures" rule is enforced, not just remembered.
+# The same gate humans run locally (./scripts/check.sh), split so that Rust — which is most
+# of the wall clock — stops holding the Lua and frontend suites behind a toolchain and a cache
+# restore they have no use for, and so that the Rust half can run on the operating system this
+# application is actually for. Each job is on the platform its suite is about: Windows for the
+# desktop backend, Linux for the two that are the same everywhere. See each for why.
+#
+# Two jobs, not three. A Free plan gets twenty concurrent jobs across the whole account, and
+# with several branches in flight at once the rolling Windows release is the job that ends up
+# waiting for a slot: it is the slowest to finish and nothing gives it priority. Lua and the
+# frontend together are still shorter than Rust alone, so folding them into one runner costs
+# this workflow nothing and hands a slot back.
+#
+# Pull requests only, plus main itself. Every branch here has a pull request open on it from
+# its first push — running on `push` as well meant two runs of everything for the same
+# commit, competing for runners and for the same Rust cache key.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # Only the newest commit on a ref is worth checking; superseded runs just queue behind it.
@@ -13,38 +26,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  # Chronie is a Windows application, so this is the job that runs where it ships. Paths, the
+  # install root, the SavedVariables folder under it and everything the collector does to a
+  # file are the half of this app an Ubuntu runner could only ever approximate, and until now
+  # the only machine that compiled them for Windows did it after the merge, on the way to a
+  # release nobody approves. It gates a pull request now, which is the point of a gate.
+  #
+  # It is also the cheaper of the two: no `apt-get` at all, because the webview here is
+  # WebView2 rather than the GTK and WebKit tree Linux has to install, and standard runners
+  # are free on a public repository whatever the operating system.
+  rust:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      # WoW runs Lua 5.1; the rocks have to be built against it to match game semantics.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libayatana-appindicator3-dev \
-            liblua5.1-0-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            lua5.1 \
-            luarocks
-
-      - name: Install luacheck and busted
-        run: |
-          sudo luarocks install luacheck
-          sudo luarocks install busted
-
       # Without this the whole dependency tree (tauri, reqwest, bundled SQLite) is
       # recompiled from scratch on every push.
+      #
+      # Restored everywhere, written only from main. A repository gets ten gigabytes of
+      # Actions cache and this archive is a couple of them, so branches saving their own
+      # copies filled the budget on their own: four debug caches holding 8.37 GB, and the
+      # release cache the rolling build depends on evicted down to a 0.71 GB stub that
+      # restored in six seconds and left `tauri build` to compile the tree from nothing. A
+      # pull request branch has no dependency tree of its own to cache anyway — main's is the
+      # same one, minus whatever that branch changed.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
           shared-key: desktop-debug
           cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: ./scripts/check-rust.sh
+        shell: bash
+
+  # These two stay on Linux, and not out of habit. The addon's Lua never runs on the host
+  # operating system at all — it runs inside the game client's own 5.1 interpreter, which is
+  # the same interpreter whatever the machine underneath is — and Playwright drives Chromium
+  # on either platform, not the WebView2 the packaged app actually shows. Moving them to
+  # Windows would buy no coverage and cost a Lua 5.1 toolchain that apt hands over in ten
+  # seconds and Windows does not.
+  lua-and-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # WoW runs Lua 5.1; the rocks have to be built against it to match game semantics.
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential liblua5.1-0-dev lua5.1 luarocks
+
+      - name: Install luacheck and busted
+        run: |
+          sudo luarocks install luacheck
+          sudo luarocks install busted
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -62,5 +98,7 @@ jobs:
       - name: Install browser test dependencies
         run: node apps/desktop/node_modules/@playwright/test/cli.js install --with-deps chromium
 
-      - name: Run checks
-        run: ./scripts/check.sh
+      # The Lua suite first: it is four seconds, and a luacheck warning is worth hearing
+      # before waiting on a browser.
+      - run: ./scripts/check-lua.sh
+      - run: ./scripts/check-frontend.sh

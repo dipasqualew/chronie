@@ -95,9 +95,20 @@ export default defineConfig({
     sourcemap: Boolean(process.env.TAURI_DEBUG),
   },
   test: {
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    // The views are components now, so the unit tests render them. jsdom is the smallest
-    // thing that can hold one; the pure modules beside them neither notice nor need it.
-    environment: "jsdom",
+    // The views are components, so the unit tests render them, and jsdom is the smallest
+    // thing that can hold one. The pure modules beside them neither notice nor need it, and
+    // standing a fresh jsdom up for each of their files was costing more than those files
+    // spent running. The extension already says which is which: a `.tsx` test renders,
+    // a `.ts` test does not.
+    projects: [
+      {
+        extends: true,
+        test: { name: "modules", include: ["src/**/*.test.ts"], environment: "node" },
+      },
+      {
+        extends: true,
+        test: { name: "views", include: ["src/**/*.test.tsx"], environment: "jsdom" },
+      },
+    ],
   },
 });
