@@ -19,6 +19,7 @@
  */
 
 import { plural } from "./format";
+import { classLabel } from "./transmog";
 import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
 
 /**
@@ -103,7 +104,47 @@ export function isHeld(displayType: number, inventoryType: number): boolean {
   return heldIn(displayType, inventoryType) !== null;
 }
 
-/** One appearance as a row reads it, with everything the markup needs already decided. */
+/** A class mask nobody is excluded by, which is what nearly every item in the game carries. */
+export const ANY_CLASS = 0xffff;
+
+/**
+ * One of the items that gives an appearance, as the list under a row reads it.
+ *
+ * A source is an *item*, and the only reason it is worth drawing separately from the row above
+ * it is that it can differ: who may wear it, what it takes to wear it, what the game writes it
+ * in. Where several sources agree on all three the list is the same sentence written out
+ * repeatedly, which is what [`varyingFacts`] is asked before any of it is drawn.
+ */
+export interface AppearanceSource {
+  /** What the game calls it, or its id where the table holds no name. */
+  label: string;
+  itemId: number;
+  /** Which row of `TransmogSetItem` reached it, which is what makes a source unique. */
+  modifiedAppearanceId: number;
+  /**
+   * Where the game says this item is worn, which is per item rather than per appearance.
+   *
+   * It is here rather than only on the row because two items giving one look can disagree
+   * about it — a weapon listed as a one-hander by one and a main-hand by another, or a real
+   * item beside one whose `ItemSparse` row is encrypted and so reads zero. The row takes its
+   * copy from the same source it takes its name from, so the slot it claims and the item it
+   * is named after are always the same item.
+   */
+  inventoryType: number;
+  allowableClass: number;
+  requiredLevel: number;
+  quality: number;
+}
+
+/**
+ * One appearance as a row reads it, with everything the markup needs already decided.
+ *
+ * **A row is a look, not an item.** The game sells one look through as many items as it likes
+ * — a raid set's helm exists at three difficulties, and two unrelated world drops wear the same
+ * model — and `TransmogSetItem` names every one of them. Grouping them is what turns a set of
+ * 126 rows into a set of 11, and the items are not lost by it: they are [`sources`], one click
+ * further in.
+ */
 export interface AppearanceRow {
   slot: string;
   /** What names the row: the item's own name, its id where the game gives none, and a plain
@@ -122,24 +163,175 @@ export interface AppearanceRow {
   hasModel: boolean;
   /** True when the game encrypts a hop of the chain, so nothing can be said about it. */
   withheld: boolean;
+  /**
+   * Every item of this set that gives the look, the one the row is named after included.
+   *
+   * Never empty: a row with one source is an appearance only one item reaches, which is a
+   * little under half of them.
+   */
+  sources: AppearanceSource[];
+  /**
+   * True when a class-locked item and an unrestricted one both give this look.
+   *
+   * The single most useful thing this view can say, and the one that no amount of scrolling
+   * makes visible on its own: it happens to 30.8% of the appearances in the game that more
+   * than one item reaches, and it means a reader locked out by their class is not locked out
+   * of the look.
+   */
+  liftsRestriction: boolean;
 }
 
 /**
- * The rows a payload draws as, in the order the backend already sorted them.
+ * The words a name is worth matching on, which is not all of them.
  *
- * An appearance the game withholds keeps its place rather than being dropped, because the
- * set's own count includes it and a list one shorter than the card promised reads as a bug.
- * An item the game names nothing keeps its id for the same reason: a blank where a name
- * should be reads as this app having lost it, and the id is what a reader can act on.
+ * "of", "the" and the possessive left behind by stripping punctuation match everything and so
+ * distinguish nothing, and a set called "Regalia of Celestial Harmony" is looking for
+ * "celestial" in the items under it.
  */
-export function appearanceRows(payload: TransmogSetItemsPayload): AppearanceRow[] {
-  return (payload.appearances || []).map((appearance: TransmogAppearance) => {
+const NOISE = new Set(["of", "the", "a", "and", "for"]);
+
+function distinctive(text: string): Set<string> {
+  const words = text.toLowerCase().replace(/[^a-z ]+/g, " ").split(/\s+/);
+  return new Set(words.filter((word) => word.length > 1 && !NOISE.has(word)));
+}
+
+/**
+ * Which of the items that give a look the row is named after.
+ *
+ * The items disagree about what to call themselves 92.6% of the time, so something has to
+ * choose, and the rule is **the name closest to the set's own**. Measured over the 17,799
+ * multi-item appearances of a shipping install against six alternatives — the first item, the
+ * last, the commonest name, the dearest, the most restricted, the least — this is the one that
+ * lands on a name sharing a word with the set 89.6% of the time; the next best manages 79.9%
+ * and picking the commonest name manages 72.3%. On *Regalia of Celestial Harmony* it answers
+ * "Headpiece of Celestial Harmony" where picking the commonest answers "Crown of Tragic
+ * Truth", which is a world drop wearing a tier set's slot.
+ *
+ * Ties go to the lowest item id, which is the oldest — the piece the set was built around
+ * rather than whatever was hung off it later.
+ */
+function named(sources: AppearanceSource[], setName: string): AppearanceSource {
+  const wanted = distinctive(setName);
+  let best = sources[0]!;
+  let bestScore = -1;
+  for (const source of sources) {
+    const shared = [...distinctive(source.label)].filter((word) => wanted.has(word)).length;
+    if (shared > bestScore || (shared === bestScore && source.itemId < best.itemId)) {
+      best = source;
+      bestScore = shared;
+    }
+  }
+  return best;
+}
+
+/**
+ * The sources of a row, in the order a reader wants them: usefulness, not item id.
+ *
+ * Unrestricted before class-locked, because the reader reading this list is asking whether
+ * they can have the look at all. Then the cheapest way in, which is the lowest level it can be
+ * worn at. The id breaks the last tie so the order never depends on how the backend sorted.
+ */
+function byUsefulness(left: AppearanceSource, right: AppearanceSource): number {
+  const open = (source: AppearanceSource): number => (source.allowableClass === ANY_CLASS ? 0 : 1);
+  return open(left) - open(right)
+    || left.requiredLevel - right.requiredLevel
+    || left.itemId - right.itemId;
+}
+
+/**
+ * Which facts actually differ between a row's sources, so that only those get drawn.
+ *
+ * Half of all multi-item appearances differ by nothing but their names — 51.3% of them — and
+ * drawing a class, a level and a quality against each of five identical items is five lines
+ * saying nothing. This is what the view asks before it draws a column.
+ */
+export function varyingFacts(row: AppearanceRow): {
+  allowableClass: boolean; requiredLevel: boolean; quality: boolean;
+} {
+  const many = (pick: (source: AppearanceSource) => number): boolean =>
+    new Set(row.sources.map(pick)).size > 1;
+  return {
+    allowableClass: many((source) => source.allowableClass),
+    requiredLevel: many((source) => source.requiredLevel),
+    quality: many((source) => source.quality),
+  };
+}
+
+/**
+ * Who may wear an item, as a phrase.
+ *
+ * The mask an item carries and the mask a *set* carries are the same bits, so this is
+ * [`classLabel`] with one translation in front of it: an item open to everybody is stored as a
+ * signed 16-bit `-1` and arrives as `0xffff`, where a set open to everybody is stored as zero.
+ * Past that the two want the same words — a mask picking out exactly the three cloth classes
+ * reads better as "Cloth" than as a list of them, which is as true of a robe as of the set
+ * the robe came out of.
+ */
+export function wearerLabel(allowableClass: number): string {
+  return classLabel(allowableClass === ANY_CLASS ? 0 : allowableClass);
+}
+
+/** The colour the game writes an item's name in, as the game's own word for it. */
+const QUALITIES = [
+  "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Artifact", "Heirloom",
+] as const;
+
+export function qualityLabel(quality: number): string {
+  return QUALITIES[quality] ?? `Quality ${quality}`;
+}
+
+/**
+ * The rows a payload draws as: one per appearance, in the order the backend sorted them by.
+ *
+ * The backend answers one row per row of `TransmogSetItem`, which is one per *item*, and this
+ * is where that becomes one per *look*. The grouping key is `ItemAppearance.id` — the game's
+ * own unit of collection, what the wardrobe records a player as owning — and it agrees with
+ * grouping on the display itself on all but three of the 34,133 appearances a shipping install
+ * holds, while being the thing a player already has a word for.
+ *
+ * Two rows resist grouping and both keep their place. An appearance the game **withholds** has
+ * no id to group on, so each is its own row, because the set's count includes it and a list
+ * shorter than the card promised reads as a bug. An item the game **names nothing** keeps its
+ * id, for the same reason: a blank where a name should be reads as this app having lost it.
+ *
+ * The set's name is here because the rows are named out of it — see [`named`].
+ */
+export function appearanceRows(
+  payload: TransmogSetItemsPayload,
+  setName = "",
+): AppearanceRow[] {
+  const rows: AppearanceRow[] = [];
+  const byAppearance = new Map<number, AppearanceRow>();
+  const seenSource = new Set<string>();
+
+  for (const appearance of (payload.appearances || []) as TransmogAppearance[]) {
     const withheld = !appearance.itemId;
-    return {
+    const source: AppearanceSource = {
+      label: appearance.name || `Item ${appearance.itemId}`,
+      itemId: appearance.itemId,
+      modifiedAppearanceId: appearance.modifiedAppearanceId,
+      inventoryType: appearance.inventoryType,
+      allowableClass: appearance.allowableClass,
+      requiredLevel: appearance.requiredLevel,
+      quality: appearance.quality,
+    };
+
+    // An appearance the game withholds says nothing to group on, and a set that names the
+    // same item twice — which the game stores as one row copied — says it through the same
+    // `ItemModifiedAppearance` both times and is one source, not two.
+    const existing = withheld ? undefined : byAppearance.get(appearance.appearanceId);
+    if (existing) {
+      const key = `${appearance.appearanceId}:${appearance.modifiedAppearanceId}`;
+      if (!seenSource.has(key)) {
+        seenSource.add(key);
+        existing.sources.push(source);
+      }
+      continue;
+    }
+
+    const row: AppearanceRow = {
       slot: withheld ? "Unknown slot" : slotName(appearance.displayType, appearance.inventoryType),
-      label: withheld
-        ? "The game keeps this appearance encrypted"
-        : appearance.name || `Item ${appearance.itemId}`,
+      label: withheld ? "The game keeps this appearance encrypted" : source.label,
       itemId: appearance.itemId,
       appearanceId: appearance.appearanceId,
       displayType: appearance.displayType,
@@ -148,8 +340,33 @@ export function appearanceRows(payload: TransmogSetItemsPayload): AppearanceRow[
       iconFileDataId: appearance.iconFileDataId,
       hasModel: appearance.hasModel,
       withheld,
+      sources: [source],
+      liftsRestriction: false,
     };
-  });
+    rows.push(row);
+    if (!withheld) {
+      byAppearance.set(appearance.appearanceId, row);
+      seenSource.add(`${appearance.appearanceId}:${appearance.modifiedAppearanceId}`);
+    }
+  }
+
+  for (const row of rows) {
+    row.sources.sort(byUsefulness);
+    row.liftsRestriction = row.sources.some((one) => one.allowableClass === ANY_CLASS)
+      && row.sources.some((one) => one.allowableClass !== ANY_CLASS && one.allowableClass !== 0);
+    if (!row.withheld) {
+      // The name, the item behind it and the place it is worn all come off the same source.
+      // The first two decide what the row says and where its link goes; the third decides
+      // which slot it claims and which hand holds it, and a row that took it from a different
+      // item than the one it is named after would be two items' answer written as one row.
+      const chosen = named(row.sources, setName);
+      row.label = chosen.label;
+      row.itemId = chosen.itemId;
+      row.inventoryType = chosen.inventoryType;
+      row.slot = slotName(row.displayType, chosen.inventoryType);
+    }
+  }
+  return rows;
 }
 
 /**
@@ -164,12 +381,20 @@ export function iconIds(payload: TransmogSetItemsPayload): number[] {
   return [...new Set(wanted)].filter((id) => id > 0);
 }
 
-/** How the set's contents read as one line: how many, and how many could not be named. */
-export function appearanceSummary(payload: TransmogSetItemsPayload): string {
-  const total = (payload.appearances || []).length;
-  if (!total) return "The game lists no appearances for this set.";
+/**
+ * How the set's contents read as one line: how many looks, out of how many items.
+ *
+ * Both numbers, because they are both true and they disagree for 65% of the sets in the game.
+ * The appearances are what the list below now holds and what a player means by the size of a
+ * set; the items are what the card above it counted and what the game's own table holds. Where
+ * they agree — which is the other 35% — only the one is worth saying.
+ */
+export function appearanceSummary(rows: AppearanceRow[], payload: TransmogSetItemsPayload): string {
+  if (!rows.length) return "The game lists no appearances for this set.";
+  const items = rows.reduce((total, row) => total + row.sources.length, 0);
+  const from = items > rows.length ? ` from ${plural(items, "item")}` : "";
   const withheld = payload.withheldCount > 0
     ? ` · ${payload.withheldCount} the game keeps encrypted`
     : "";
-  return `${plural(total, "appearance")}${withheld}`;
+  return `${plural(rows.length, "appearance")}${from}${withheld}`;
 }

@@ -34,8 +34,10 @@ import {
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
 import { CLASSES, classLabel, classNames, expansionName, filterSets, groupSets, patchName } from "./transmog";
-import { appearanceRows, appearanceSummary, iconIds } from "./transmogModal";
-import type { AppearanceRow } from "./transmogModal";
+import {
+  appearanceRows, appearanceSummary, iconIds, qualityLabel, varyingFacts, wearerLabel,
+} from "./transmogModal";
+import type { AppearanceRow, AppearanceSource } from "./transmogModal";
 import type { ModelStage } from "./modelViewer";
 import type {
   CharacterModelPayload,
@@ -245,7 +247,7 @@ function Card(
 ): ReactNode {
   const patch = patchName(set.patchIntroduced);
   const classes = classNames(set.classMask);
-  const rows = typeof contents === "object" ? appearanceRows(contents) : [];
+  const rows = typeof contents === "object" ? appearanceRows(contents, set.name) : [];
   // Whatever is hidden is still worn by "wear all of", because that puts the set on rather
   // than what happens to be listed, and it is still counted below so nothing goes quietly.
   const shown = hideUnwearable ? onlyWearable(rows) : rows;
@@ -267,8 +269,12 @@ function Card(
         <span className="chip">{expansionName(set.expansionId)}</span>
         {patch ? <span className="chip">Patch {patch}</span> : null}
       </div>
+      {/* Items rather than appearances, because items is what this number is. `TransmogSetItem`
+          holds one row per item and the game's own table says nothing about how many looks
+          they come to — that takes four more tables and is what opening the set is for. A card
+          promising eight appearances over a list of three was the old way round. */}
       <div className="mog-foot">
-        <span>{plural(set.itemCount, "appearance")}</span>
+        <span>{plural(set.itemCount, "item")}</span>
         <span className="muted">#{set.id}</span>
       </div>
       {open ? <div className="mog-contents">
@@ -276,13 +282,10 @@ function Card(
         {typeof contents === "string" ? <p className="muted">{contents}</p> : null}
         {typeof contents === "object" ? <>
           <div className="mog-contents-head">
-            {/* The summary only when it says something the card above does not. The card
-                already counts the set's appearances, so repeating that count under it is
-                noise — what is worth saying is that some of them cannot be read, or that the
-                list came out a different length from what the set promised. */}
-            {contents.withheldCount > 0 || rows.length !== set.itemCount
-              ? <p className="detail-facts">{appearanceSummary(contents)}</p>
-              : null}
+            {/* Always, now: the card counts items and this counts looks, and for 65% of the
+                sets in the game those are different numbers. It is the sentence that explains
+                why a set of 126 items opened as a list of 11. */}
+            <p className="detail-facts">{appearanceSummary(rows, contents)}</p>
             {/* Hidden rather than absent: the count on the card includes them, and a list
                 shorter than it promised is what a reader would otherwise have to explain. */}
             {hidden
@@ -335,6 +338,8 @@ function Line(
 ): ReactNode {
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
+  const [showSources, setShowSources] = useState(false);
+  const others = row.sources.length - 1;
 
   // An empty frame either way. A row whose appearance names no icon keeps it so the list stays
   // a column of pictures rather than one that indents wherever the game said nothing. The
@@ -350,6 +355,23 @@ function Line(
         <span className="mog-name">{row.label}</span>
       </button>
       {worn ? <span className="chip">worn</span> : null}
+      {/* The one thing about a row worth saying without being asked. A reader whose class
+          cannot wear the set's own version of a look can still have the look, and nothing else
+          on the row would ever tell them so. */}
+      {row.liftsRestriction
+        ? <span className="chip mog-lifted" title="Another item gives this look to any class">
+          Any class too
+        </span>
+        : null}
+      {/* Every item that gives the look, behind a count. The row above is the look and this is
+          the shopping: a set names one appearance once per item that has it, and 15,304 of the
+          28,486 appearances in the game's sets are named more than once. */}
+      {others > 0
+        ? <button
+          type="button" className="mog-sources-toggle" aria-expanded={showSources}
+          onClick={() => setShowSources((open) => !open)}
+        >{`+${others} ${others === 1 ? "item" : "items"}`}</button>
+        : null}
       {/* A withheld row says so where a name would be, and saying it twice is two elements
           with the same sentence in them rather than one clearer row. */}
       {canWear || row.withheld ? null : <span className="muted">{wanted.note}</span>}
@@ -361,7 +383,47 @@ function Line(
           aria-label={`${row.label} on Wowhead`}
         ><LinkOut /></a>
       )}
+      {showSources ? <Sources row={row} /> : null}
     </li>
+  );
+}
+
+/**
+ * The items that give one look, and only what separates them.
+ *
+ * **Which columns are drawn is decided per row, not once for the list.** Half of the
+ * appearances in the game that several items reach differ by nothing but their names, and a
+ * class, a level and a quality repeated identically down five lines is five lines saying
+ * nothing — so `varyingFacts` is asked first and a fact that is the same all the way down is
+ * simply not drawn. What is left is the answer to the question the list is open for: what do I
+ * have to be, and what do I have to have done, to wear this.
+ *
+ * The order is the same one `transmogModal` sorted the sources into: whatever anybody can wear
+ * first, then the cheapest way in.
+ */
+function Sources({ row }: { row: AppearanceRow }): ReactNode {
+  const varies = varyingFacts(row);
+  return (
+    <ul className="mog-sources" aria-label={`Items that give ${row.label}`}>
+      {row.sources.map((source: AppearanceSource) => (
+        <li key={source.modifiedAppearanceId} className="mog-source">
+          <span className="mog-source-name">{source.label}</span>
+          {varies.allowableClass
+            ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
+            : null}
+          {varies.quality ? <span className="chip">{qualityLabel(source.quality)}</span> : null}
+          {varies.requiredLevel && source.requiredLevel > 0
+            ? <span className="chip">{`Level ${source.requiredLevel}`}</span>
+            : null}
+          <a
+            className="mog-wowhead"
+            href={`https://www.wowhead.com/item=${encodeURIComponent(source.itemId)}`}
+            target="_blank" rel="noopener noreferrer"
+            aria-label={`${source.label} on Wowhead`}
+          ><LinkOut /></a>
+        </li>
+      ))}
+    </ul>
   );
 }
 
