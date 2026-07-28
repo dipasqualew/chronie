@@ -12,6 +12,7 @@ pub mod icons;
 pub mod items;
 pub mod logfile;
 pub mod m2;
+pub mod marks;
 pub mod models;
 pub mod placement;
 pub mod query;
@@ -283,6 +284,64 @@ async fn transmog_appearances(
         wardrobe::appearances(files, &display_types)
     })
     .await
+}
+
+/// Everything anybody has said about the game's wardrobe with their own hands.
+///
+/// The one thing on the transmog screen that is not read out of the installed game: a star and
+/// a set of tags, against a set or against a look. Read whole rather than per browser, because
+/// it is what one person typed rather than what Blizzard shipped — see
+/// `collector::transmog_marks`.
+#[tauri::command]
+fn transmog_marks(state: State<'_, AppState>) -> Result<marks::MarksPayload, String> {
+    collector::transmog_marks(&state.database_path())
+}
+
+/// The three ways a mark changes, each answering with every mark rather than an
+/// acknowledgement — the same rule the activity and capture edits follow, so what the browser
+/// draws is what the database holds and never what the window hoped a write did.
+#[tauri::command]
+fn set_transmog_favourite(
+    kind: String,
+    id: i64,
+    favourite: bool,
+    state: State<'_, AppState>,
+) -> Result<marks::MarksPayload, String> {
+    collector::set_transmog_favourite(
+        &state.database_path(),
+        &kind,
+        id,
+        favourite,
+        Utc::now().timestamp(),
+    )
+}
+
+#[tauri::command]
+fn set_transmog_tag(
+    kind: String,
+    id: i64,
+    key: String,
+    value: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<marks::MarksPayload, String> {
+    collector::set_transmog_tag(
+        &state.database_path(),
+        &kind,
+        id,
+        &key,
+        value.as_deref(),
+        Utc::now().timestamp(),
+    )
+}
+
+#[tauri::command]
+fn delete_transmog_tag(
+    kind: String,
+    id: i64,
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<marks::MarksPayload, String> {
+    collector::delete_transmog_tag(&state.database_path(), &kind, id, &key)
 }
 
 /// What the game says about the achievements a window is showing.
@@ -1146,6 +1205,10 @@ pub fn run() {
             transmog_sets,
             transmog_set_items,
             transmog_appearances,
+            transmog_marks,
+            set_transmog_favourite,
+            set_transmog_tag,
+            delete_transmog_tag,
             character_model,
             worn_set,
             achievement_details,

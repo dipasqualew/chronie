@@ -16,10 +16,14 @@
  * to daggers is a filter rather than a second trip to the game's storage.
  */
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { plural } from "./format";
+import { NO_MARK_FILTER, tagChoices } from "./marks";
+import type { MarkIndex } from "./marks";
+import { MarkControls, MarkFilters } from "./marksEditor";
+import type { MarkActions } from "./marksEditor";
 import { wearable as canBeWorn } from "./modelPreview";
 import { isWorn, onlyWearable } from "./outfit";
 import type { Outfit } from "./outfit";
@@ -31,7 +35,7 @@ import {
   KINDS, PAGE, answerKey, filterAppearances, kindOf, shownSummary, wardrobeRow,
 } from "./wardrobe";
 import type { Kind } from "./wardrobe";
-import type { WardrobePayload } from "./types";
+import type { TransmogMark, WardrobePayload } from "./types";
 
 export interface WardrobeListProps {
   /** Whether the reader is looking at the sets instead, which is what keeps this unread. */
@@ -45,6 +49,16 @@ export interface WardrobeListProps {
   /** Whether the rows with nowhere to go are left out, which the whole view decides. */
   hideUnwearable: boolean;
   onHideUnwearable: (hide: boolean) => void;
+  /** The three ways a mark is written, which the view above owns because it holds the payload. */
+  marks: MarkActions;
+  /**
+   * And what has been said already, indexed.
+   *
+   * Shared with the set browser rather than read again here, and that sharing is the feature:
+   * both halves key a look by its appearance id, so a piece starred inside a set is starred in
+   * this list and the other way round.
+   */
+  index: MarkIndex;
   onWear: (row: AppearanceRow) => void;
 }
 
@@ -53,13 +67,16 @@ const READING = "Reading every appearance the game has for this…";
 
 export function WardrobeList(
   {
-    hidden, load, wantIcons, icons, outfit, hideUnwearable, onHideUnwearable, onWear,
+    hidden, load, wantIcons, icons, outfit, hideUnwearable, onHideUnwearable, marks, index,
+    onWear,
   }: WardrobeListProps,
 ): ReactNode {
   const [kindKey, setKindKey] = useState(KINDS[0]!.key);
   const [search, setSearch] = useState("");
   const [klass, setKlass] = useState("");
   const [shown, setShown] = useState(PAGE);
+  /** What this list is narrowed to beyond what the game says. The sets beside it keep own. */
+  const [marked, setMarked] = useState(NO_MARK_FILTER);
 
   // What has been read, by the answer rather than by the kind: seventeen kinds of weapon are
   // one payload. Kept outside React for the reason the sets' cache is — an answer landing is
@@ -89,8 +106,20 @@ export function WardrobeList(
     if (!hidden) read(kind);
   }, [hidden, kind, read]);
 
+  // Only the tags written against a look this kind actually holds, so a reader browsing heads
+  // is not offered the one they invented for staves and then shown nothing. The whole answer
+  // rather than the filtered list, so the picker does not shrink as it is used.
+  const tags = useMemo(
+    () => (typeof answer === "object"
+      ? tagChoices(index, "appearance", answer.appearances.map((one) => one.appearanceId))
+      : []),
+    [index, answer],
+  );
+
   const looks = typeof answer === "object"
-    ? filterAppearances(answer.appearances, { kind, search, klass })
+    ? filterAppearances(answer.appearances, {
+      kind, search, klass, marks: { filter: marked, of: (id) => index.of("appearance", id) },
+    })
     : [];
   const rows = looks.map((look) => wardrobeRow(look));
   // Whatever cannot go on her is left out unless the box above says otherwise — the same
@@ -151,6 +180,11 @@ export function WardrobeList(
             />
             Hide what she cannot wear
           </label>
+          <MarkFilters
+            scope="wardrobe" favourite={marked.favourite} tag={marked.tag} choices={tags}
+            onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
+            onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
+          />
           <span className="count" id="wardrobe-count">
             {typeof answer === "object"
               ? shownSummary(drawn.length, kept.length, answer.withheldCount)
@@ -165,7 +199,8 @@ export function WardrobeList(
           {drawn.map((row) => (
             <Look
               key={row.appearanceId} row={row} worn={isWorn(outfit, row)}
-              icon={icons.get(row.iconFileDataId)} onWear={() => onWear(row)}
+              icon={icons.get(row.iconFileDataId)} marks={marks}
+              mark={index.of("appearance", row.appearanceId)} onWear={() => onWear(row)}
             />
           ))}
         </ul>
@@ -188,8 +223,15 @@ export function WardrobeList(
 
 /** One look, as something to put on: the same row a set draws, with what a set cannot say. */
 function Look(
-  { row, worn, icon, onWear }:
-  { row: AppearanceRow; worn: boolean; icon?: string; onWear: () => void },
+  { row, worn, icon, marks, mark, onWear }: {
+    row: AppearanceRow;
+    worn: boolean;
+    icon?: string;
+    marks: MarkActions;
+    /** The same mark a set's row of this look draws, because both key on the appearance. */
+    mark: TransmogMark | undefined;
+    onWear: () => void;
+  },
 ): ReactNode {
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
@@ -211,6 +253,9 @@ function Look(
         >{row.label}</span>
       </button>
       {worn ? <span className="chip">worn</span> : null}
+      <MarkControls
+        kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
+      />
       {source.allowableClass !== 0 && source.allowableClass !== ANY_CLASS
         ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
         : null}

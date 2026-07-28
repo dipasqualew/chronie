@@ -1,12 +1,15 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { REASONS } from "./modelPreview";
 import { TransmogView } from "./transmogView";
+import type { TransmogViewProps } from "./transmogView";
 import type { ModelStage } from "./modelViewer";
 import type {
-  TransmogAppearance, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance,
-  WardrobePayload, WornPiece,
+  MarkSubjectKind, TransmogAppearance, TransmogMark, TransmogMarksPayload, TransmogPayload,
+  TransmogSet, TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload, WornPiece,
 } from "./types";
 
 afterEach(cleanup);
@@ -188,10 +191,99 @@ function fakeStage() {
 const model = (body: string): string => `data:model/gltf-binary;base64,${btoa(body)}`;
 
 /**
+ * The two tables behind a mark, faked.
+ *
+ * A store rather than a stub answering fixtures, because the whole contract of marking is
+ * "write, then repaint from what was stored": every command answers with *every* mark, and the
+ * window holds what came back. A double that answered a fixed payload would let a view that
+ * never repainted pass.
+ *
+ * The rules it keeps are the ones the migration keeps and a test can tell apart from a broken
+ * one: a key already there is replaced rather than duplicated whatever its case, a value that
+ * says nothing is a label, and a subject left saying nothing has no mark at all.
+ */
+function fakeMarks(starting: TransmogMark[] = []) {
+  let marks = structuredClone(starting);
+  const answer = (): TransmogMarksPayload => ({ marks: structuredClone(marks) });
+  const edit = (
+    kind: MarkSubjectKind, id: number, apply: (mark: TransmogMark) => void,
+  ): Promise<TransmogMarksPayload> => {
+    let mark = marks.find((one) => one.kind === kind && one.id === id);
+    if (!mark) {
+      mark = { kind, id, favourite: false, tags: [] };
+      marks.push(mark);
+    }
+    apply(mark);
+    if (!mark.favourite && !mark.tags.length) marks = marks.filter((one) => one !== mark);
+    return Promise.resolve(answer());
+  };
+  const same = (left: string, right: string): boolean =>
+    left.toLowerCase() === right.trim().toLowerCase();
+  return {
+    starting: answer(),
+    stored: (): TransmogMark[] => structuredClone(marks),
+    setFavourite: vi.fn((kind: MarkSubjectKind, id: number, favourite: boolean) =>
+      edit(kind, id, (mark) => { mark.favourite = favourite; })),
+    setTag: vi.fn((kind: MarkSubjectKind, id: number, key: string, value: string | null) => {
+      const cleaned = key.trim();
+      if (!cleaned) return Promise.reject(new Error("A tag needs a name."));
+      return edit(kind, id, (mark) => {
+        const at = mark.tags.findIndex((tag) => same(tag.key, cleaned));
+        const written = { key: cleaned, value: (value ?? "").trim() || null };
+        if (at >= 0) mark.tags[at] = written;
+        else mark.tags.push(written);
+        mark.tags.sort((left, right) => left.key.localeCompare(right.key));
+      });
+    }),
+    deleteTag: vi.fn((kind: MarkSubjectKind, id: number, key: string) =>
+      edit(kind, id, (mark) => {
+        mark.tags = mark.tags.filter((tag) => !same(tag.key, key));
+      })),
+  };
+}
+
+type FakeMarks = ReturnType<typeof fakeMarks>;
+
+/**
+ * The view with somewhere for a write's answer to land, which is what `app.tsx` is.
+ *
+ * The component takes the marks as a prop and never edits them itself, so a test driving a
+ * star needs the piece above it that holds the payload. This is that piece and nothing else.
+ */
+function Marked(
+  { store, ...props }: Omit<TransmogViewProps, "marks"> & { store: FakeMarks },
+): ReactNode {
+  const [payload, setPayload] = useState<TransmogMarksPayload>(store.starting);
+  return (
+    <TransmogView
+      {...props}
+      marks={{
+        payload,
+        setFavourite: store.setFavourite,
+        setTag: store.setTag,
+        deleteTag: store.deleteTag,
+        onApply: setPayload,
+        onError: (error) => (error instanceof Error ? error.message : String(error)),
+      }}
+    />
+  );
+}
+
+/** Marks nobody can write, for the tests that are about something else entirely. */
+const UNMARKED = {
+  payload: { marks: [] },
+  setFavourite: () => Promise.resolve({ marks: [] }),
+  setTag: () => Promise.resolve({ marks: [] }),
+  deleteTag: () => Promise.resolve({ marks: [] }),
+  onApply: () => {},
+  onError: String,
+};
+
+/**
  * The view over doubles a test answers, which is the only way to drive it: nothing here talks
  * to a backend and nothing monkey patches one.
  */
-function view(options: { payload?: TransmogPayload | null } = {}) {
+function view(options: { payload?: TransmogPayload | null; marks?: FakeMarks } = {}) {
   const { stage, shown } = fakeStage();
   // Recorded rather than merely answered: "the same outfit is not read out of the game twice"
   // is a statement about what crossed the bridge, and only the request itself can say it.
@@ -205,8 +297,9 @@ function view(options: { payload?: TransmogPayload | null } = {}) {
   const loadAppearances = vi.fn((displayTypes: number[]) =>
     Promise.resolve(WARDROBE[displayTypes.join(",")]
       ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 }));
+  const marks = options.marks ?? fakeMarks();
   const rendered = render(
-    <TransmogView
+    <Marked
       payload={options.payload === undefined ? SETS : options.payload}
       status="Reading the game's transmog tables…"
       loadSet={loadSet}
@@ -214,10 +307,11 @@ function view(options: { payload?: TransmogPayload | null } = {}) {
       loadIcons={() => Promise.resolve({ icons: {} })}
       loadCharacter={loadCharacter}
       loadWorn={loadWorn}
+      store={marks}
       createStage={() => stage}
     />,
   );
-  return { rendered, loadWorn, loadCharacter, loadSet, loadAppearances, shown };
+  return { rendered, loadWorn, loadCharacter, loadSet, loadAppearances, marks, shown };
 }
 
 /** Opens a set in place, and waits for what it holds to arrive. */
@@ -483,6 +577,7 @@ describe("TransmogView", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        marks={UNMARKED}
         createStage={() => stage}
       />,
     );
@@ -503,6 +598,7 @@ describe("TransmogView", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        marks={UNMARKED}
         createStage={() => { throw new Error("This machine cannot draw 3D."); }}
       />,
     );
@@ -617,5 +713,217 @@ describe("TransmogView", () => {
     fireEvent.change(screen.getByLabelText("Filter appearances"), { target: { value: "coif" } });
     await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
     expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+});
+
+/**
+ * Marking, which is the one thing on this screen that is the reader's rather than the game's.
+ *
+ * Every one of these drives the same controls a player would and then asks the *store* what it
+ * ended up holding, because the contract is that a write goes to the backend and the screen
+ * repaints from its answer. A test that only read the screen would pass against a view that
+ * lit a star up locally and never stored it, which is exactly the bug worth catching.
+ */
+describe("what the reader says about the wardrobe", () => {
+  /** The star on a card or a row, named by what pressing it would do. */
+  const star = (within_: HTMLElement, name: string): HTMLElement =>
+    within(within_).getByRole("button", { name: `Favourite ${name}` });
+
+  /** The card a set is shown on, which is where its own star and tags live. */
+  const cardFor = (name: string): HTMLElement => {
+    const card = screen.getByRole("button", { name }).closest("article");
+    if (!card) throw new Error(`${name} has no card`);
+    return card as HTMLElement;
+  };
+
+  /** Fills in and submits the little form behind "+ tag". */
+  const tagIt = (host: HTMLElement, name: string, key: string, value = ""): void => {
+    fireEvent.click(within(host).getByRole("button", { name: `Tag ${name}` }));
+    fireEvent.change(within(host).getByLabelText(`Tag name for ${name}`), {
+      target: { value: key },
+    });
+    fireEvent.change(within(host).getByLabelText(`Tag value for ${name} (optional)`), {
+      target: { value },
+    });
+    fireEvent.click(within(host).getByRole("button", { name: "Add" }));
+  };
+
+  it("stars a set and says so on the card", async () => {
+    const { marks } = view();
+    const card = cardFor("Tideglass Regalia");
+
+    fireEvent.click(star(card, "Tideglass Regalia"));
+
+    await waitFor(() => expect(marks.stored())
+      .toEqual([{ kind: "set", id: 201, favourite: true, tags: [] }]));
+    await waitFor(() =>
+      expect(star(card, "Tideglass Regalia").getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  // Un-starring deletes the row rather than storing a `false`, which is the migration's own
+  // rule and the reason a mark saying nothing is no mark at all.
+  it("takes a star off again and leaves nothing behind", async () => {
+    const { marks } = view({ marks: fakeMarks([{ kind: "set", id: 201, favourite: true, tags: [] }]) });
+    const card = cardFor("Tideglass Regalia");
+    expect(star(card, "Tideglass Regalia").getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(star(card, "Tideglass Regalia"));
+
+    await waitFor(() => expect(marks.stored()).toEqual([]));
+  });
+
+  it("writes a tag with a value, and one without as a label", async () => {
+    const { marks } = view();
+    const card = cardFor("Tideglass Regalia");
+
+    tagIt(card, "Tideglass Regalia", "faction", "horde");
+    await waitFor(() => expect(marks.stored()[0]?.tags).toEqual([{ key: "faction", value: "horde" }]));
+
+    tagIt(card, "Tideglass Regalia", "wishlist");
+    await waitFor(() => expect(marks.stored()[0]?.tags).toEqual([
+      { key: "faction", value: "horde" },
+      { key: "wishlist", value: null },
+    ]));
+    // The label reads as the key alone; the property reads as the pair.
+    expect(within(card).getByText("faction: horde")).toBeTruthy();
+    expect(within(card).getByText("wishlist")).toBeTruthy();
+  });
+
+  it("takes a tag off from the chip it is written on", async () => {
+    const { marks } = view({
+      marks: fakeMarks([
+        { kind: "set", id: 201, favourite: false, tags: [{ key: "faction", value: "horde" }] },
+      ]),
+    });
+    const card = cardFor("Tideglass Regalia");
+
+    fireEvent.click(within(card).getByRole("button", {
+      name: "Remove the tag faction: horde from Tideglass Regalia",
+    }));
+
+    await waitFor(() => expect(marks.stored()).toEqual([]));
+  });
+
+  // What the reader typed is judged by the backend — the length limits and the cleaning are
+  // `marks.rs` — so the one thing the view owes them is the sentence saying why nothing
+  // happened, rather than a chip that appears and is gone on the next read.
+  it("says why a write was refused rather than pretending it landed", async () => {
+    const { marks } = view();
+    const card = cardFor("Tideglass Regalia");
+    marks.setTag.mockImplementationOnce(() =>
+      Promise.reject(new Error("A tag's name has to fit in 48 characters.")));
+
+    tagIt(card, "Tideglass Regalia", "a".repeat(60));
+
+    expect(await within(card).findByRole("alert"))
+      .toHaveProperty("textContent", "A tag's name has to fit in 48 characters.");
+    expect(marks.stored()).toEqual([]);
+  });
+
+  // The form is the one place a click is stopped before it reaches the bridge, and only for
+  // the case a stray Enter produces: a form nobody filled in.
+  it("does not send an empty tag at all", async () => {
+    const { marks } = view();
+    const card = cardFor("Tideglass Regalia");
+
+    tagIt(card, "Tideglass Regalia", "  ", "horde");
+
+    await waitFor(() => expect(marks.setTag).not.toHaveBeenCalled());
+  });
+
+  it("narrows the grid to the starred sets", async () => {
+    view({ marks: fakeMarks([{ kind: "set", id: 201, favourite: true, tags: [] }]) });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Favourites only" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Emberforge Plate" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy();
+  });
+
+  it("narrows the grid to one tag, and offers only the tags in use", async () => {
+    view({
+      marks: fakeMarks([
+        { kind: "set", id: 203, favourite: false, tags: [{ key: "wishlist", value: null }] },
+      ]),
+    });
+    const picker = screen.getByLabelText("Tag");
+    expect([...picker.querySelectorAll("option")].map((one) => one.textContent))
+      .toEqual(["Any tag", "wishlist"]);
+
+    fireEvent.change(picker, { target: { value: "wishlist" } });
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
+  });
+
+  // An empty dropdown offering only "Any tag" is a control that can do nothing, and that is
+  // what every install starts as.
+  it("offers no tag picker at all until a tag exists", () => {
+    view();
+    expect(screen.queryByLabelText("Tag")).toBeNull();
+  });
+
+  it("finds a set by a word the reader filed it under", async () => {
+    view({
+      marks: fakeMarks([
+        { kind: "set", id: 203, favourite: false, tags: [{ key: "faction", value: "horde" }] },
+      ]),
+    });
+
+    fireEvent.change(screen.getByLabelText("Filter transmog sets"), { target: { value: "horde" } });
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
+  });
+
+  // The whole argument for keying a mark on the appearance rather than on the item or on the
+  // set that named it: the two halves of the browser are looking at one wardrobe.
+  it("shows a look starred in a set as starred in the wardrobe beside it", async () => {
+    const already = view();
+    const card = await open("Emberforge Plate");
+    fireEvent.click(star(card, "Emberforge Helm"));
+    await waitFor(() => expect(already.marks.stored())
+      .toEqual([{ kind: "appearance", id: 3, favourite: true, tags: [] }]));
+
+    await browseItems(already);
+
+    const row = screen.getByRole("button", { name: "Wear Head: Emberforge Helm" }).closest("li");
+    expect(within(row as HTMLElement).getByRole("button", { name: "Favourite Emberforge Helm" })
+      .getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("stars a look out of the game's whole wardrobe", async () => {
+    const { marks } = await browseItems();
+    const row = (await screen.findByText("Coif of the Drowned Star")).closest("li") as HTMLElement;
+
+    fireEvent.click(star(row, "Coif of the Drowned Star"));
+
+    await waitFor(() => expect(marks.stored())
+      .toEqual([{ kind: "appearance", id: 40, favourite: true, tags: [] }]));
+  });
+
+  it("narrows a kind to the starred looks", async () => {
+    await browseItems(view({
+      marks: fakeMarks([{ kind: "appearance", id: 40, favourite: true, tags: [] }]),
+    }));
+    await screen.findByText("Emberforge Helm");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Favourites only" }));
+
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  // An appearance the game encrypts has no id to store a mark against, so a star that could
+  // only ever fail is not drawn at all.
+  it("offers nothing to mark on a look the game withholds", async () => {
+    view();
+    fireEvent.click(hideBox());
+    const card = await open("Emberforge Plate");
+    const withheld = rowFor(card, "Wear Unknown slot: The game keeps this appearance encrypted");
+
+    expect(within(withheld).queryByRole("button", { name: /^Favourite/ })).toBeNull();
+    // Its neighbour has one, so the absence is about this row and not about the set.
+    expect(star(rowFor(card, "Wear Head: Emberforge Helm"), "Emberforge Helm")).toBeTruthy();
   });
 });

@@ -7,7 +7,9 @@
  * `transmogView.tsx`, and what a reader puts on out of one is `outfit.ts`.
  */
 
-import type { Alternate, SameLookReason, TransmogSet } from "./types";
+import { markWords, survivesMarks } from "./marks";
+import type { MarkFilter } from "./marks";
+import type { Alternate, SameLookReason, TransmogMark, TransmogSet } from "./types";
 
 /**
  * The classes, in the order the game's class mask numbers them.
@@ -81,8 +83,8 @@ export function patchName(packed: number): string {
  * holds it instead. The id is in there too, which is the one thing a reader has when the game
  * withholds the name.
  */
-function searchable(set: TransmogSet): string {
-  return [set, ...(set.alternates ?? [])].flatMap((one) => [
+function searchable(set: TransmogSet, mark: TransmogMark | undefined): string {
+  const game = [set, ...(set.alternates ?? [])].flatMap((one) => [
     one.name,
     one.group,
     classLabel(one.classMask),
@@ -91,6 +93,9 @@ function searchable(set: TransmogSet): string {
     patchName(one.patchIntroduced),
     String(one.id),
   ]).join(" ").toLowerCase();
+  // And whatever the reader themselves filed it under, so "horde" or "wishlist" finds the sets
+  // they said it about without their having to go near the picker beside the box.
+  return `${game} ${markWords(mark)}`;
 }
 
 /**
@@ -151,10 +156,21 @@ export function alternateLabel(alternate: Alternate, shown: TransmogSet): string
  * exactly the appearances another one holds, and showing all of them is showing the same
  * wardrobe up to six times over. The one shown says who else wears it, and every filter here
  * reads the whole cluster — so folding a set away never makes it unfindable.
+ *
+ * The marks are the exception to that last rule, and have to be: a folded set never reaches
+ * the grid, so nobody can ever star one, so a star can only ever be against the set shown.
+ * Reading the cluster there would be reading rows that cannot exist.
  */
 export function filterSets(
   sets: TransmogSet[],
-  filters: { search: string; expansion: string; klass: string },
+  filters: {
+    search: string;
+    expansion: string;
+    klass: string;
+    /** What the reader has said about these sets, and what they have narrowed it to. Absent
+     * where no mark is in play, which is what every caller that predates them passes. */
+    marks?: { filter: MarkFilter; of: (setId: number) => TransmogMark | undefined };
+  },
 ): TransmogSet[] {
   const words = filters.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const expansion = filters.expansion === "" ? null : Number(filters.expansion);
@@ -166,8 +182,10 @@ export function filterSets(
     const wearers = everyClass(set);
     if (klass !== null
       && !wearers.some((mask) => mask === 0 || (mask & (1 << klass)) !== 0)) return false;
+    const mark = filters.marks?.of(set.id);
+    if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
     if (!words.length) return true;
-    const against = searchable(set);
+    const against = searchable(set, mark);
     return words.every((word) => against.includes(word));
   });
 }

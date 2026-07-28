@@ -34,7 +34,7 @@ import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
 import type {
-  DashboardPayload, Segment, Settings, TransmogPayload,
+  DashboardPayload, Segment, Settings, TransmogMarksPayload, TransmogPayload,
 } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
@@ -66,6 +66,9 @@ export function App({ payload, settings }: AppProps): ReactNode {
   const [editing, setEditing] = useState<number | null>(null);
   const [transmog, setTransmog] = useState<TransmogPayload | null>(null);
   const [transmogStatus, setTransmogStatus] = useState("");
+  // What the reader has said about the game's wardrobe, which is the only thing on that screen
+  // that comes out of Chronie's own database rather than out of the installed game.
+  const [marks, setMarks] = useState<TransmogMarksPayload | null>(null);
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
@@ -134,6 +137,15 @@ export function App({ payload, settings }: AppProps): ReactNode {
       .then(setTransmog)
       .catch((error: unknown) => setTransmogStatus(message(error)));
   }, [view, transmog, transmogStatus]);
+
+  // And what the reader has already said about them, read alongside rather than with them: it
+  // is Chronie's own database and answers in a millisecond, where the sets are the game's
+  // files and take a second. A failure here is left silent on purpose — the screen simply has
+  // nothing marked on it, and the first attempt to mark something says why it will not.
+  useEffect(() => {
+    if (view !== "transmog" || marks) return;
+    void desktop.transmogMarks().then(setMarks).catch(() => undefined);
+  }, [view, marks]);
 
   // Somebody may be playing while this window is open, and the collector picks up what the
   // game wrote within half a minute. Anything new means every view is out of date at once.
@@ -268,6 +280,16 @@ export function App({ payload, settings }: AppProps): ReactNode {
           loadIcons={desktop.gameIcons}
           loadCharacter={desktop.characterModel}
           loadWorn={desktop.wornSet}
+          marks={{
+            payload: marks,
+            setFavourite: desktop.setTransmogFavourite,
+            setTag: desktop.setTransmogTag,
+            deleteTag: desktop.deleteTransmogTag,
+            // Every write answers with every mark, so the browsers repaint from what was
+            // stored — the same rule the activity and capture edits follow.
+            onApply: setMarks,
+            onError: message,
+          }}
         />
       </section>
 

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { NO_MARK_FILTER, indexMarks, tokenOf } from "./marks";
+import type { MarkFilter } from "./marks";
 import {
   alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
 } from "./transmog";
@@ -368,5 +370,66 @@ describe("groupSets", () => {
 
   it("has nothing to group when nothing is left", () => {
     expect(groupSets([])).toEqual([]);
+  });
+});
+
+describe("narrowing the grid to what the reader said about it", () => {
+  const sets = [
+    set({ id: 201, name: "Tideglass Regalia" }),
+    set({ id: 202, name: "Tideglass Hide" }),
+    set({ id: 203, name: "Duskwoven Shroud" }),
+  ];
+  const marks = indexMarks({
+    marks: [
+      { kind: "set", id: 201, favourite: true, tags: [{ key: "faction", value: "horde" }] },
+      { kind: "set", id: 202, favourite: false, tags: [{ key: "wishlist", value: null }] },
+      // A look of the same number, which must not reach a grid of sets.
+      { kind: "appearance", id: 203, favourite: true, tags: [] },
+    ],
+  });
+  const marked = (filter: MarkFilter) => ({ filter, of: (id: number) => marks.of("set", id) });
+  const shown = (filter: MarkFilter): number[] => filterSets(sets, {
+    search: "", expansion: "", klass: "", marks: marked(filter),
+  }).map((one) => one.id);
+
+  it("leaves the grid alone until it is asked something", () => {
+    expect(shown(NO_MARK_FILTER)).toEqual([201, 202, 203]);
+  });
+
+  it("keeps only the starred sets", () => {
+    expect(shown({ favourite: true, tag: "" })).toEqual([201]);
+  });
+
+  it("keeps only the sets under one tag", () => {
+    expect(shown({ favourite: false, tag: tokenOf("wishlist", null) })).toEqual([202]);
+    expect(shown({ favourite: false, tag: tokenOf("faction", "horde") })).toEqual([201]);
+    expect(shown({ favourite: false, tag: tokenOf("faction", "alliance") })).toEqual([]);
+  });
+
+  // A set and a look can share a number, and only one of the two countings is a grid of sets.
+  it("does not read a look's mark as a set's", () => {
+    expect(shown({ favourite: true, tag: "" })).not.toContain(203);
+  });
+
+  // The whole argument for folding the marks into the searchable text: a reader looking at a
+  // chip saying "horde" types the word rather than hunting for the picker beside the box.
+  it("finds a set by a word the reader filed it under", () => {
+    const found = filterSets(sets, {
+      search: "horde", expansion: "", klass: "", marks: marked(NO_MARK_FILTER),
+    });
+    expect(found.map((one) => one.id)).toEqual([201]);
+  });
+
+  it("finds the starred sets by the word for them", () => {
+    const found = filterSets(sets, {
+      search: "favourite", expansion: "", klass: "", marks: marked(NO_MARK_FILTER),
+    });
+    expect(found.map((one) => one.id)).toEqual([201]);
+  });
+
+  // Every caller that predates marks passes none, and must keep getting the whole grid.
+  it("says nothing about marks when it was given none", () => {
+    expect(filterSets(sets, { search: "", expansion: "", klass: "" })).toHaveLength(3);
+    expect(filterSets(sets, { search: "horde", expansion: "", klass: "" })).toHaveLength(0);
   });
 });

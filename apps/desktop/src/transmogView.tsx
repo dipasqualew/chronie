@@ -31,10 +31,13 @@
  * failure to draw, and no other one does.
  */
 
-import { useCallback, useReducer, useRef, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { plural } from "./format";
+import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
+import { MarkControls, MarkFilters } from "./marksEditor";
+import type { MarkActions } from "./marksEditor";
 import { wearable as canBeWorn } from "./modelPreview";
 import {
   NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, wearSet, wearable,
@@ -54,6 +57,9 @@ import { WardrobeList } from "./wardrobeList";
 import type {
   CharacterModelPayload,
   IconsPayload,
+  MarkSubjectKind,
+  TransmogMark,
+  TransmogMarksPayload,
   TransmogPayload,
   TransmogSet,
   TransmogSetItemsPayload,
@@ -76,6 +82,14 @@ export interface TransmogViewProps {
   /** Passed through to the panel: the bare body, and the body wearing the whole outfit. */
   loadCharacter: () => Promise<CharacterModelPayload>;
   loadWorn: (pieces: WornPiece[]) => Promise<WornSetPayload>;
+  /**
+   * What the reader has said about the game's wardrobe, and the three ways they say more.
+   *
+   * The one thing on this screen that is not read out of the installed game — see `marks.ts`.
+   * The payload is `null` until it has been read and stays `null` if it could not be: nothing
+   * on the screen is then marked, and the first attempt to mark something says why.
+   */
+  marks: MarkActions & { payload: TransmogMarksPayload | null };
   /** Passed through too — it is the one thing here that needs a graphics card. */
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
 }
@@ -85,7 +99,8 @@ type Browsing = "sets" | "items";
 
 export function TransmogView(
   {
-    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, createStage,
+    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, marks,
+    createStage,
   }: TransmogViewProps,
 ): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
@@ -93,6 +108,8 @@ export function TransmogView(
   const [expansion, setExpansion] = useState("");
   const [klass, setKlass] = useState("");
   const [outfit, setOutfit] = useState<Outfit>(NOTHING_ON);
+  /** What the sets are narrowed to beyond what the game says. The wardrobe keeps its own. */
+  const [marked, setMarked] = useState(NO_MARK_FILTER);
   /**
    * Whether the rows nothing can be done with are left out, which they are until a reader says
    * otherwise. See [`onlyWearable`]: they are a disabled button and an apology, and a reader
@@ -174,7 +191,25 @@ export function TransmogView(
     });
   }, [read]);
 
-  const sets = payload ? filterSets(payload.sets, { search, expansion, klass }) : [];
+  // A lookup per row rather than a scan of the list, because the search box re-filters several
+  // thousand sets on every keystroke and each of them asks this once.
+  const index = useMemo(() => indexMarks(marks.payload), [marks.payload]);
+  const markOf = useCallback(
+    (kind: MarkSubjectKind, id: number): TransmogMark | undefined => index.of(kind, id),
+    [index],
+  );
+  // Only the tags actually written against a set, so the picker offers nothing that would
+  // empty the grid. Recomputed when a mark changes and not on every keystroke.
+  const setTags = useMemo(
+    () => tagChoices(index, "set", (payload?.sets ?? []).map((set) => set.id)),
+    [index, payload],
+  );
+
+  const sets = payload
+    ? filterSets(payload.sets, {
+      search, expansion, klass, marks: { filter: marked, of: (id) => index.of("set", id) },
+    })
+    : [];
   // Only offer the expansions this install actually has sets for.
   const expansions = payload
     ? [...new Set(payload.sets.map((set) => set.expansionId))].sort((a, b) => b - a)
@@ -245,6 +280,13 @@ export function TransmogView(
               />
               Hide what she cannot wear
             </label>
+            {/* Beside the game's own filters rather than somewhere of their own, because
+                "plate, Cataclysm, starred" is one question a reader asks and not two. */}
+            <MarkFilters
+              scope="transmog" favourite={marked.favourite} tag={marked.tag} choices={setTags}
+              onFavourite={(only) => setMarked((was) => ({ ...was, favourite: only }))}
+              onTag={(tag) => setMarked((was) => ({ ...was, tag }))}
+            />
             <span className="count" id="transmog-count">
               {payload ? `${plural(sets.length, "set")} shown` : ""}
             </span>
@@ -259,7 +301,7 @@ export function TransmogView(
                   <Card
                     key={set.id} set={set} open={open.has(set.id)} onToggle={() => openSet(set)}
                     contents={known.get(set.id)} icons={icons} outfit={outfit}
-                    hideUnwearable={hideUnwearable}
+                    hideUnwearable={hideUnwearable} marks={marks} markOf={markOf}
                     onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
                     onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
                   />
@@ -279,6 +321,7 @@ export function TransmogView(
       <WardrobeList
         hidden={browsing !== "items"} load={loadAppearances} wantIcons={wantIcons} icons={icons}
         outfit={outfit} hideUnwearable={hideUnwearable} onHideUnwearable={setHideUnwearable}
+        marks={marks} index={index}
         onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
       />
       </div>
@@ -300,7 +343,10 @@ export function TransmogView(
  * cannot live inside a button.
  */
 function Card(
-  { set, open, onToggle, contents, icons, outfit, hideUnwearable, onWear, onWearAll }: {
+  {
+    set, open, onToggle, contents, icons, outfit, hideUnwearable, marks, markOf, onWear,
+    onWearAll,
+  }: {
     set: TransmogSet;
     open: boolean;
     onToggle: () => void;
@@ -310,6 +356,8 @@ function Card(
     outfit: Outfit;
     /** Whether the rows with nowhere to go are left out, which the browser decides for all. */
     hideUnwearable: boolean;
+    marks: MarkActions;
+    markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
     onWear: (row: AppearanceRow) => void;
     onWearAll: (rows: AppearanceRow[]) => void;
   },
@@ -339,6 +387,13 @@ function Card(
         <span className="chip">{expansionName(set.expansionId)}</span>
         {patch ? <span className="chip">Patch {patch}</span> : null}
       </div>
+      {/* Under the game's own facts and on their own line, because they are a different kind
+          of statement: everything above is true of this build for everybody, and this is what
+          one reader said. Available with the card shut — starring a set is not a reason to
+          have to read what is in it. */}
+      <MarkControls
+        kind="set" id={set.id} mark={markOf("set", set.id)} name={name} actions={marks}
+      />
       {/* Who else wears exactly these clothes. 436 of the game's sets are another set's
           wardrobe under a different name — one per faction, one per class, or the same armour
           reissued a season later — and showing all of them is showing one set up to six times.
@@ -387,7 +442,8 @@ function Card(
             {shown.map((row, index) => (
               <Line
                 key={`${row.appearanceId}-${index}`} row={row} worn={isWorn(outfit, row)}
-                icon={icons.get(row.iconFileDataId)} onWear={() => onWear(row)}
+                icon={icons.get(row.iconFileDataId)} marks={marks}
+                mark={markOf("appearance", row.appearanceId)} onWear={() => onWear(row)}
               />
             ))}
           </ul>
@@ -415,8 +471,15 @@ function Card(
  * it is shown it says why it is not on her instead of being a button that does nothing.
  */
 function Line(
-  { row, worn, icon, onWear }:
-  { row: AppearanceRow; worn: boolean; icon?: string; onWear: () => void },
+  { row, worn, icon, marks, mark, onWear }: {
+    row: AppearanceRow;
+    worn: boolean;
+    icon?: string;
+    marks: MarkActions;
+    /** What the reader said about this *look*, which is the same mark the wardrobe draws. */
+    mark: TransmogMark | undefined;
+    onWear: () => void;
+  },
 ): ReactNode {
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
@@ -439,6 +502,12 @@ function Line(
         <span className="mog-name">{row.label}</span>
       </button>
       {worn ? <span className="chip">worn</span> : null}
+      {/* The look, not the item: a piece starred inside one set is starred wherever it turns
+          up, including in the wardrobe list beside this one, because both key on the
+          appearance. An appearance the game withholds has no id and gets no controls. */}
+      <MarkControls
+        kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
+      />
       {/* The one thing about a row worth saying without being asked. A reader whose class
           cannot wear the set's own version of a look can still have the look, and nothing else
           on the row would ever tell them so. */}

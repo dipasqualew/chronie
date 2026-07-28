@@ -552,6 +552,50 @@ export interface WardrobePayload {
   withheldCount: number;
 }
 
+/* ---------- what somebody says about the game's wardrobe ---------- */
+
+/**
+ * Which of the two things a mark can be against, as `marks.rs` spells them.
+ *
+ * A set is numbered by the game's own `TransmogSet.id` and a look by `ItemAppearance.id`, and
+ * the two countings overlap — so the kind is half of the identity and never optional. An
+ * appearance rather than an item, because everywhere else in this view a row is a look and not
+ * the item that sells it.
+ */
+export type MarkSubjectKind = "set" | "appearance";
+
+/**
+ * One thing somebody said about a set or a look.
+ *
+ * A value of `null` is a **label** — the key is the whole of what was said. That is not the
+ * same as an empty string, and the backend refuses to store one: see `marks::clean_value`.
+ */
+export interface TransmogTag {
+  key: string;
+  value: string | null;
+}
+
+/**
+ * Everything somebody has said about one subject.
+ *
+ * Only the subjects something *was* said about have one. A set nobody starred and nobody
+ * tagged has no mark at all, which is what keeps the payload the size of what a person did
+ * rather than the size of the game's wardrobe.
+ */
+export interface TransmogMark {
+  kind: MarkSubjectKind;
+  /** The game's own id for the thing, which is why nothing here is a foreign key. */
+  id: number;
+  favourite: boolean;
+  /** Sorted by key, so a row of chips does not reshuffle under an unrelated edit. */
+  tags: TransmogTag[];
+}
+
+/** Every mark in the database, which is the whole of what the window is ever given. */
+export interface TransmogMarksPayload {
+  marks: TransmogMark[];
+}
+
 /**
  * The pictures for a list of things, decoded out of the game's own textures.
  *
@@ -934,6 +978,10 @@ export interface E2EMock {
    * and joined by commas. A key absent from here is a kind the install holds nothing for,
    * which the real backend answers with an empty list rather than an error. */
   wardrobe: Record<string, WardrobePayload>;
+  /** What somebody has already said about the game's wardrobe. State rather than a fixture:
+   * starring a set in the page under test writes here and the next read shows it, which is the
+   * same "write, then repaint from storage" the real backend gives. */
+  transmogMarks: TransmogMarksPayload;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
   /** The body wearing an outfit, keyed by that outfit's display ids in ascending order and

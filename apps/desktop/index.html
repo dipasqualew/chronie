@@ -1077,6 +1077,64 @@
 
   .mog-note { text-align: center; margin: 0; }
 
+  /* ---------- what the reader says about the wardrobe ---------- */
+
+  /* The star and the tags, on a set's card and on every row of both browsers. It wraps to a
+     line of its own inside a card and sits inline on a row, which is the whole reason it is a
+     flex container of its own rather than markup dropped into two different parents. */
+  .mark {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0;
+  }
+  /* Hollow until it is pressed, and then the one colour on the screen that means "mine". The
+     glyph is drawn — see `Star` — so this is the whole of what makes it look starred. */
+  .mark-star {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; padding: 0; border-radius: 7px;
+    border: 1px solid transparent; background: none; cursor: pointer;
+    color: var(--text-secondary);
+  }
+  .mark-star:hover { color: var(--series-1); background: var(--surface-1); }
+  .mark-star[aria-pressed="true"] { color: var(--series-1); }
+  /* A tag reads as one thing with a way to remove it, so the × sits inside the chip rather
+     than beside it — a chip and a loose button would be two things to aim at. */
+  .chip.mark-tag {
+    display: inline-flex; align-items: center; gap: 4px; padding-right: 3px;
+    max-width: 100%; overflow: hidden;
+  }
+  .mark-drop {
+    flex: none; padding: 0 3px; border: 0; border-radius: 4px; background: none;
+    font: inherit; line-height: 1; color: var(--text-secondary); cursor: pointer;
+  }
+  .mark-drop:hover { color: var(--text); background: var(--surface-1); }
+  /* Quiet, and dashed the way the count of other items is: it is an invitation rather than
+     a thing the reader came to the row for. */
+  .mark-open {
+    flex: none; padding: 1px 7px; border-radius: 999px; cursor: pointer;
+    border: 1px dashed var(--border); background: none;
+    font: inherit; font-size: 11px; color: var(--text-secondary);
+  }
+  .mark-open:hover { color: var(--text); border-style: solid; }
+  .mark-open[aria-expanded="true"] { border-style: solid; color: var(--text); }
+  /* The form takes the width it is in, so a row's two boxes never squeeze the name beside
+     them into an ellipsis. */
+  .mark-form { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .mark-form input {
+    min-width: 0; padding: 3px 7px; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-family: inherit;
+  }
+  .mark-key { flex: 1 1 110px; }
+  .mark-value { flex: 2 1 150px; }
+  .mark-save {
+    flex: none; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text); font-family: inherit;
+  }
+  .mark-save:hover { border-color: var(--series-1); }
+  /* A refusal from the backend — a key that is nothing, a value longer than a chip can hold.
+     Full width, because it is a sentence and not a chip. */
+  .mark-failure { flex: 1 0 100%; font-size: 12px; color: var(--bad); }
+
   /* ---------- screenshots ---------- */
 
   /* A grid that fills whatever it is dropped into — a session card is wider than the detail

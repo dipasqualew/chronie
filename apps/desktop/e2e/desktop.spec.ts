@@ -1402,6 +1402,19 @@ const mockDesktop: E2EMock = {
       ],
     },
   },
+  // What this reader has already said about the game's wardrobe with their own hands.
+  //
+  // Deliberately not empty, and deliberately not much: one starred set and one tagged look are
+  // what a browser opening on an install that has been used for a while looks like, and they
+  // are what makes "the star survived being written" a different assertion from "the star is
+  // drawn at all". Everything else the suite needs it writes itself, through the same buttons
+  // a player would — see `bridge.ts`, where the mock keeps them the way the two tables do.
+  transmogMarks: {
+    marks: [
+      { kind: "set", id: 205, favourite: true, tags: [] },
+      { kind: "appearance", id: 80040, favourite: false, tags: [{ key: "wishlist", value: null }] },
+    ],
+  },
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
   // set 205 names it and the install holds no such file, which is the case a row has to
