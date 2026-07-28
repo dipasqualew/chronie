@@ -291,6 +291,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
           loadIcons={desktop.gameIcons}
           loadCharacter={desktop.characterModel}
           loadWorn={desktop.wornSet}
+          loadGallery={desktop.galleryModels}
           marks={{
             payload: marks,
             setFavourite: desktop.setTransmogFavourite,

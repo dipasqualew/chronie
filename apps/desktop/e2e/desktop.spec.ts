@@ -544,6 +544,39 @@ class Wardrobe {
   count(): Locator {
     return this.list.locator("#wardrobe-count");
   }
+
+  /** The switch between a list of names and a grid of the character wearing each of them. */
+  asModels(): Locator {
+    return this.list.getByRole("checkbox", { name: "Show worn" });
+  }
+
+  /** The pictures themselves, one per row, once the gallery is on. */
+  bodies(): Locator {
+    return this.list.locator(".mog-worn canvas");
+  }
+
+  /**
+   * How many of those actually have a character on them.
+   *
+   * Counted from the pixels and not from the elements, and that is the whole point of it. A
+   * canvas that was never drawn on is the same rectangle in the DOM as one that was, and the way
+   * this fails is silent: a window making a graphics context per row gets about sixteen out of a
+   * browser and then loses the ones it made first, so the grid fills in at the bottom and goes
+   * blank at the top. Reading the alpha channel is what tells those two apart.
+   */
+  async painted(): Promise<number> {
+    return this.bodies().evaluateAll((canvases) => canvases.filter((canvas) => {
+      const picture = (canvas as HTMLCanvasElement).getContext("2d");
+      if (!picture) return false;
+      const { width, height } = canvas as HTMLCanvasElement;
+      if (!width || !height) return false;
+      const { data } = picture.getImageData(0, 0, width, height);
+      // Any pixel that is not fully transparent. The stage draws on a transparent background,
+      // so "something was drawn here" is exactly "some alpha is not zero".
+      for (let at = 3; at < data.length; at += 4) if (data[at] !== 0) return true;
+      return false;
+    }).length);
+  }
 }
 
 /**
@@ -1084,6 +1117,55 @@ const WITHHELD_ITEM = { allowableClass: 0, requiredLevel: 0, quality: 0 } as con
 // The places are invented, the classes are not: a class token is the app's own vocabulary —
 // the palette in `ui.tsx` is keyed by it — so a made-up one would draw every character in the
 // colourless fallback and hide the very thing the cast is coloured for.
+/**
+ * How many looks the gallery draws at a time, mirroring `gallery.ts`.
+ *
+ * Written here rather than imported so that a change to the page size shows up as a failing
+ * count rather than as a test that quietly follows it.
+ */
+const GALLERY_PAGE = 20;
+
+/**
+ * How long a page of twenty characters is allowed to take, from the switch to the last picture.
+ *
+ * Generous on purpose. This is the browser half of the benchmark issue #129 asks for, and what a
+ * shared CI runner can be trusted to say is the order of magnitude rather than the milliseconds:
+ * the machine this was written on draws the page in about a second, and anything approaching this
+ * number is a grid that has stopped working rather than one that got slower.
+ */
+const GALLERY_PATIENCE_MS = 30_000;
+
+/**
+ * A page of chestpieces, which exists so the gallery can be driven at the size it really runs at.
+ *
+ * Distinct display ids, because the window asks for one body per display and two rows of one
+ * display are one picture — so twenty rows sharing a display would be a page of one and would
+ * prove nothing about twenty. What each of them is *wearing* is the same fixture body, which is
+ * the part of a browser benchmark that does not have to differ: three.js parses, uploads and
+ * draws each one from scratch either way.
+ *
+ * A few more than a page, so that turning the pictures on visibly shortens the list: the same
+ * kind drawn as names fits in one page of a hundred and drawn as characters does not.
+ */
+const GALLERY_LOOKS = Array.from({ length: GALLERY_PAGE + 4 }, (_, index) => ({
+  appearanceId: 81000 + index,
+  itemId: 31000 + index,
+  // Numbered so that "the twentieth row drew" is a thing an assertion can name.
+  name: `Robe of the Deep ${String(index).padStart(2, "0")}`,
+  displayType: 3,
+  inventoryType: 5,
+  classId: 4,
+  subclassId: 2,
+  allowableClass: 0xffff,
+  requiredLevel: 0,
+  quality: 3,
+  displayInfoId: 901000 + index,
+  iconFileDataId: 130003,
+  hasModel: false,
+  itemCount: 1,
+  liftsRestriction: false,
+}));
+
 const mockDesktop: E2EMock = {
   dashboard: {
     generatedAt: "2026-07-26T12:00:00Z",
@@ -1620,6 +1702,17 @@ const mockDesktop: E2EMock = {
         },
       ],
     },
+    // A page's worth of chestpieces, which is the one kind here that exists to be counted
+    // rather than read. Twenty distinct looks is what the gallery draws at a time and what
+    // `budget.rs` holds the backend to, and it is the number the browser half has to survive:
+    // a window that made a graphics context per row would get about sixteen of them and then
+    // start losing the ones it made first.
+    "3": {
+      displayTypes: [3],
+      readCount: GALLERY_LOOKS.length,
+      withheldCount: 0,
+      appearances: GALLERY_LOOKS,
+    },
   },
   // What this reader has already said about the game's wardrobe with their own hands.
   //
@@ -1739,6 +1832,13 @@ const mockDesktop: E2EMock = {
     "900014,900040": fixtureModel("worn-helm.glb"),
     // One outfit is missing on purpose and answers `null`: set 205's one wearable row names a
     // display the game keeps encrypted, so this install has nothing to put on her for it.
+    //
+    // And the page of chestpieces the gallery is measured on. A gallery row is an outfit of
+    // one, so each of them is keyed by its own display id and nothing else — the same
+    // `wornSetKey` a whole outfit gets, with one piece in it.
+    ...Object.fromEntries(
+      GALLERY_LOOKS.map((look) => [String(look.displayInfoId), fixtureModel("robe.glb")]),
+    ),
   },
   settings: {
     wowPath: "C:\\Games\\Example MMO\\_retail_",
@@ -2797,6 +2897,12 @@ test("browses the game's transmog sets and dresses the character in them", async
   yours,
   outfit,
 }) => {
+  // The longest flow in the suite, and the only one that draws: a body per outfit tried on, and
+  // then a page of twenty of them at once. A CI runner has no graphics card and renders all of
+  // that in software, which is several times what the same steps cost on a desktop — so the
+  // budget is the runner's rather than the default, and what a step here is allowed to take is
+  // stated where that step is.
+  test.slow();
   await transmog.open();
 
   await test.step("every set arrives under the collection it belongs to", async () => {
@@ -3354,6 +3460,48 @@ test("browses the game's transmog sets and dresses the character in them", async
     await wardrobe.klass().selectOption({ label: "Warrior" });
     await expect(wardrobe.names()).toHaveText(["Coif of the Drowned Star", "Emberforge Helm"]);
     await wardrobe.klass().selectOption("");
+  });
+
+  /* ---------- and the same wardrobe as pictures of the thing ---------- */
+
+  // The feature, and the benchmark, in one step — because they are the same claim. A gallery is
+  // twenty characters drawn at once, and the way it fails is not an error: a window that made a
+  // graphics context per row would get about sixteen out of the browser and then start losing
+  // the ones it made first, so the grid would fill in at the bottom and go blank at the top.
+  // Every one of the twenty carrying pixels is what says there is one context behind all of them.
+  //
+  // The backend half of this is `budget.rs`, which counts what a page of twenty costs to *build*
+  // against what the same twenty cost one at a time. This is the half no count can reach: what
+  // the window does with them after they arrive.
+  await test.step("a page of the wardrobe is drawn as twenty characters at once", async () => {
+    await wardrobe.kind().selectOption({ label: "Chest" });
+    await expect(wardrobe.names()).toHaveCount(GALLERY_LOOKS.length);
+
+    const started = Date.now();
+    await wardrobe.asModels().check();
+    await expect(wardrobe.bodies()).toHaveCount(GALLERY_PAGE);
+    await expect(wardrobe.names()).toHaveCount(GALLERY_PAGE);
+    // Every one of them, and the poll is what waits for the last: the rows paint as their
+    // models arrive rather than all at once, so a count taken too early is a race.
+    await expect.poll(() => wardrobe.painted(), { timeout: GALLERY_PATIENCE_MS })
+      .toBe(GALLERY_PAGE);
+
+    // A ceiling rather than a measurement. What it rules out is the order of magnitude — a
+    // grid that takes a minute, or one that never finishes because the seventeenth context was
+    // refused — and it is deliberately far above what the machine this runs on actually takes,
+    // because a CI runner's clock is not an instrument. `budget.rs` explains the same choice
+    // from the other side.
+    expect(Date.now() - started).toBeLessThan(GALLERY_PATIENCE_MS);
+  });
+
+  // The page shrinks to a fifth when the pictures come on, and grows back when they go off.
+  // Twenty bodies is what the backend draws in about the time one takes; a hundred is not.
+  await test.step("the page is smaller when it is drawn as characters", async () => {
+    await expect(wardrobe.count()).toHaveText(`${GALLERY_PAGE} of ${GALLERY_LOOKS.length} appearances`);
+    await wardrobe.asModels().uncheck();
+    await expect(wardrobe.bodies()).toHaveCount(0);
+    await expect(wardrobe.count()).toHaveText(`${GALLERY_LOOKS.length} appearances`);
+    await wardrobe.kind().selectOption({ label: "Head" });
   });
 
   // And back again, with both halves as they were left: the sets keep their filters, the

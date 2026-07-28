@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { REASONS } from "./modelPreview";
 import { TransmogView } from "./transmogView";
 import type { TransmogViewProps } from "./transmogView";
+import type { Focus } from "./gallery";
+import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
   CustomSet, CustomSetPiece, CustomSetsPayload, MarkSubjectKind, TransmogAppearance, TransmogMark,
@@ -192,6 +194,25 @@ function fakeStage() {
   return { stage, shown, resets };
 }
 
+/**
+ * The one graphics context a gallery is drawn through, faked.
+ *
+ * What is worth recording is which model went into which row and how it was framed: a helm
+ * framed like a whole body is the failure the focus table exists to prevent, and a canvas is a
+ * rectangle that says nothing about either.
+ */
+function fakeGalleryStage() {
+  const painted: Array<{ label: string; holds: number }> = [];
+  const stage: GalleryStage = {
+    paint: (target: HTMLCanvasElement, _glb: Uint8Array, focus: Focus) => {
+      painted.push({ label: target.getAttribute("aria-label") ?? "", holds: focus.holds });
+      return Promise.resolve();
+    },
+    dispose: () => {},
+  };
+  return { createGalleryStage: () => stage, painted };
+}
+
 /** A `.glb` in a data URL, the shape the backend hands one over in. */
 const model = (body: string): string => `data:model/gltf-binary;base64,${btoa(body)}`;
 
@@ -361,6 +382,7 @@ function view(
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
+  const { createGalleryStage, painted } = fakeGalleryStage();
   // Recorded rather than merely answered: "the same outfit is not read out of the game twice"
   // is a statement about what crossed the bridge, and only the request itself can say it.
   const loadWorn = vi.fn((_pieces: WornPiece[]) =>
@@ -373,6 +395,14 @@ function view(
   const loadAppearances = vi.fn((displayTypes: number[]) =>
     Promise.resolve(WARDROBE[displayTypes.join(",")]
       ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 }));
+  // The gallery half of the wardrobe, recorded for the same reason the outfit is: what matters
+  // about it is which page the window asked the backend for, and only the request can say.
+  const loadGallery = vi.fn((pieces: WornPiece[]) => Promise.resolve({
+    models: pieces.map((piece) => ({
+      displayInfoId: piece.displayInfoId,
+      model: model(`${piece.displayInfoId} worn`),
+    })),
+  }));
   const marks = options.marks ?? fakeMarks();
   const saved = options.saved ?? fakeCustomSets();
   const rendered = render(
@@ -384,13 +414,16 @@ function view(
       loadIcons={() => Promise.resolve({ icons: {} })}
       loadCharacter={loadCharacter}
       loadWorn={loadWorn}
+      loadGallery={loadGallery}
       store={marks}
       saved={saved}
       createStage={() => stage}
+      createGalleryStage={createGalleryStage}
     />,
   );
   return {
-    rendered, loadWorn, loadCharacter, loadSet, loadAppearances, marks, saved, shown, resets,
+    rendered, loadWorn, loadCharacter, loadSet, loadAppearances, loadGallery, marks, saved,
+    shown, resets, painted,
   };
 }
 
@@ -669,6 +702,7 @@ describe("TransmogView", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        loadGallery={() => Promise.resolve({ models: [] })}
         marks={UNMARKED}
         custom={NO_SETS}
         createStage={() => stage}
@@ -691,6 +725,7 @@ describe("TransmogView", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        loadGallery={() => Promise.resolve({ models: [] })}
         marks={UNMARKED}
         custom={NO_SETS}
         createStage={() => { throw new Error("This machine cannot draw 3D."); }}
@@ -807,6 +842,151 @@ describe("TransmogView", () => {
     fireEvent.change(screen.getByLabelText("Filter appearances"), { target: { value: "coif" } });
     await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
     expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+});
+
+/**
+ * The wardrobe drawn as pictures of the thing rather than as a list of names.
+ *
+ * What every one of these is about is that a *page* is the unit. The backend builds one body and
+ * dresses it once per row — see `gallery.rs` — so a page of twenty costs about what a row of one
+ * costs, and a window that asked a row at a time would give all of that back.
+ */
+describe("the wardrobe as models", () => {
+  afterEach(cleanup);
+
+  /** Turns the gallery on, and waits for the page it asks for to arrive. */
+  async function showWorn(already?: ReturnType<typeof view>): Promise<ReturnType<typeof view>> {
+    const shown = await browseItems(already);
+    fireEvent.click(screen.getByLabelText("Show worn"));
+    await waitFor(() => expect(shown.loadGallery).toHaveBeenCalled());
+    return shown;
+  }
+
+  // One request for the whole page, and it names every row of it. The two rows of the Head kind
+  // are both wearable, so both are on her and both are in the one call.
+  it("asks for a whole page of bodies in one request", async () => {
+    const { loadGallery } = await showWorn();
+    expect(loadGallery).toHaveBeenCalledTimes(1);
+    expect(loadGallery.mock.calls[0]?.[0].map((piece) => piece.displayInfoId))
+      .toEqual([900_040, 900_099]);
+  });
+
+  // And the page is a fifth of what the same list draws as names, because a row of names is a
+  // string and a row of models is a character read out of the game's own files.
+  it("draws fewer looks at a time than the same list of names does", async () => {
+    const { loadGallery } = await showWorn();
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-3" } });
+    await screen.findByText("Robe 000");
+
+    expect(screen.getByText("20 of 120 appearances")).toBeTruthy();
+    expect(screen.queryByText("Robe 020")).toBeNull();
+    await waitFor(() => expect(loadGallery).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ displayInfoId: 901_019 })]),
+    ));
+    expect(loadGallery.mock.calls.at(-1)?.[0]).toHaveLength(20);
+
+    // And the button under them goes on in pages of twenty rather than of a hundred.
+    fireEvent.click(screen.getByRole("button", { name: "Show 20 more of 100 appearances" }));
+    expect(await screen.findByText("Robe 020")).toBeTruthy();
+  });
+
+  // Each row is painted on the grid's one stage, framed on the part of the body its slot is on.
+  // A helm held against two metres of character is four pixels of hat, which is the whole
+  // reason there is a focus table rather than one framing for everything.
+  it("frames each look on the part of her its slot is on", async () => {
+    const { painted } = await showWorn();
+    await waitFor(() => expect(painted).toHaveLength(2));
+    expect(painted.map((one) => one.label))
+      .toEqual(["Coif of the Drowned Star, worn", "Emberforge Helm, worn"]);
+    for (const one of painted) expect(one.holds).toBeLessThan(1);
+  });
+
+  // What is already drawn is not asked for again. The two halves of the browser share looks —
+  // the same helm is under Head and inside three sets — so going away and coming back has to
+  // be free rather than another page of the game's tables.
+  it("does not ask twice for a look it already holds", async () => {
+    const { loadGallery } = await showWorn();
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-3" } });
+    await screen.findByText("Robe 000");
+    await waitFor(() => expect(loadGallery).toHaveBeenCalledTimes(2));
+
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-0" } });
+    await screen.findByText("Coif of the Drowned Star");
+    await waitFor(() => expect(screen.getAllByLabelText(/, worn$/)).toHaveLength(2));
+    expect(loadGallery).toHaveBeenCalledTimes(2);
+  });
+
+  // Turning it off puts the names back, and gives the graphics context back with them: twenty
+  // live contexts is more than a browser hands out, and the one here is held only while the
+  // reader is looking at pictures.
+  it("goes back to the icons, and gives the context back", async () => {
+    const disposals = { count: 0 };
+    const stage: GalleryStage = { paint: () => Promise.resolve(), dispose: () => { disposals.count += 1; } };
+    await browseItems(view());
+    cleanup();
+
+    render(
+      <TransmogView
+        payload={SETS}
+        status=""
+        loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
+        loadAppearances={(displayTypes) =>
+          Promise.resolve(WARDROBE[displayTypes.join(",")]
+            ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+        loadIcons={() => Promise.resolve({ icons: {} })}
+        loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
+        loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        loadGallery={(pieces) => Promise.resolve({
+          models: pieces.map((piece) => ({
+            displayInfoId: piece.displayInfoId,
+            model: model("worn"),
+          })),
+        })}
+        marks={UNMARKED}
+        custom={NO_SETS}
+        createStage={() => fakeStage().stage}
+        createGalleryStage={() => stage}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Items" }));
+    await waitFor(() => expect(screen.getByLabelText("Kind of appearance")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Show worn"));
+    await waitFor(() => expect(screen.getAllByLabelText(/, worn$/)).toHaveLength(2));
+
+    fireEvent.click(screen.getByLabelText("Show worn"));
+    await waitFor(() => expect(screen.queryByLabelText(/, worn$/)).toBeNull());
+    expect(disposals.count).toBe(1);
+  });
+
+  // A page that will not come leaves the list exactly as it was before anybody asked for
+  // pictures: the names, the slots and the icons are what the wardrobe always had.
+  it("keeps the list when a page of bodies will not come", async () => {
+    cleanup();
+    render(
+      <TransmogView
+        payload={SETS}
+        status=""
+        loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
+        loadAppearances={(displayTypes) =>
+          Promise.resolve(WARDROBE[displayTypes.join(",")]
+            ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+        loadIcons={() => Promise.resolve({ icons: {} })}
+        loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
+        loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        loadGallery={() => Promise.reject(new Error("The game's files are not readable."))}
+        marks={UNMARKED}
+        custom={NO_SETS}
+        createStage={() => fakeStage().stage}
+        createGalleryStage={() => ({ paint: () => Promise.resolve(), dispose: () => {} })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Items" }));
+    await waitFor(() => expect(screen.getByLabelText("Kind of appearance")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Show worn"));
+
+    expect(await screen.findByText("Coif of the Drowned Star")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByLabelText(/, worn$/)).toBeNull());
   });
 });
 

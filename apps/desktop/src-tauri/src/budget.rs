@@ -40,6 +40,27 @@
 //! once each. The vertex share is all of it because [`crate::glb::write`] carries a vertex
 //! only where something points at it: the same `.glb` was 10.36 MB and 253,251 vertices when
 //! the body shipped every variant of every geoset and drew a fortieth of them.
+//!
+//! # A page of the wardrobe, which is twenty of them
+//!
+//! [`crate::gallery`] draws twenty appearances at once, each on a body of its own, and it is the
+//! first thing in this app whose cost is a multiple of something a reader chose. So the second
+//! half of this module's tests is a page rather than a click, and it asserts the two properties
+//! the gallery is built on rather than a total: **the body is built once** for the whole page,
+//! and **each table is walked once**. A page of twenty walks 170 rows against a single
+//! eight-piece click's 274, which is what "walked once" buys.
+//!
+//! Two of the counters exist only because of that page. [`Work::atlases`] and [`Work::encodes`]
+//! are the `atlas.base` and `character.atlas_png` spans — 27ms and 12ms of a click on a real
+//! install, the two largest things issue #99 left behind, and the two that nothing here could
+//! put a ceiling on: neither is a file read or a table walk, so a change that did them twenty
+//! times over would have passed every test above.
+//!
+//! And there is **one clock**, in `draws_a_page_faster_than_the_same_rows_one_at_a_time`, which
+//! is not a contradiction of the paragraph at the top. It times two things on the same runner
+//! seconds apart and asserts a *ratio* between them, and a ratio is what a shared runner can
+//! still be trusted for: whatever makes the machine slow makes both sides slow. An absolute
+//! millisecond ceiling is the thing that cannot be run in CI, not a stopwatch as such.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -62,6 +83,17 @@ pub struct Work {
     /// A walk costs the whole table however few rows the caller keeps, so this counts the
     /// table and not the answer.
     pub rows: usize,
+    /// How many times a skin was resized onto a fresh 2048 × 1024 body atlas — the `atlas.base`
+    /// span, and 27ms of a click whatever the install.
+    ///
+    /// Here because it was the largest thing left in issue #99 that nothing counted. The reads
+    /// and the rows above are facts about the game's storage, and a change that stopped reading
+    /// a file twice showed up in them; a change that stopped *resizing the same two million
+    /// pixels* twenty times over showed up in neither, so a ceiling could not be put on it.
+    pub atlases: usize,
+    /// How many times one was encoded to PNG — the `character.atlas_png` span, and the other
+    /// half of the same blind spot.
+    pub encodes: usize,
 }
 
 /// A source of game files that keeps the receipts.
@@ -93,13 +125,15 @@ impl<'a> Counted<'a> {
 
     /// Zeroes everything, so the next run is counted on its own.
     ///
-    /// Rows too, which is why this and not just dropping the struct: the row counter is a
-    /// thread-local and belongs to nothing that can be dropped.
+    /// The three thread-local counters too, which is why this and not just dropping the struct:
+    /// they belong to nothing that can be dropped.
     pub fn restart(&self) {
         self.seen.borrow_mut().clear();
         self.reads.set(0);
         self.bytes.set(0);
-        ROWS.with(|rows| rows.set(0));
+        for counter in [&ROWS, &ATLASES, &ENCODES] {
+            counter.with(|count| count.set(0));
+        }
     }
 
     /// What has been counted since the last [`restart`](Counted::restart).
@@ -110,6 +144,8 @@ impl<'a> Counted<'a> {
             repeated: seen.values().map(|asked| asked - 1).sum(),
             read_bytes: self.bytes.get(),
             rows: ROWS.with(Cell::get),
+            atlases: ATLASES.with(Cell::get),
+            encodes: ENCODES.with(Cell::get),
         }
     }
 }
@@ -144,6 +180,10 @@ thread_local! {
     /// thread is a counter per run, and a test walking tables of its own cannot disturb one
     /// running beside it.
     static ROWS: Cell<usize> = const { Cell::new(0) };
+    /// Body atlases built from a skin, on the same terms.
+    static ATLASES: Cell<usize> = const { Cell::new(0) };
+    /// Body atlases encoded to PNG, on the same terms.
+    static ENCODES: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Notes that a table walk materialised `rows` of them.
@@ -155,6 +195,18 @@ thread_local! {
 /// against a real install, which is where the numbers that matter are.
 pub(crate) fn note_rows(rows: usize) {
     ROWS.with(|walked| walked.set(walked.get() + rows));
+}
+
+/// Notes that a skin was resized onto a fresh body atlas. Called from
+/// [`crate::character::Atlas::base`], on the same terms as [`note_rows`].
+pub(crate) fn note_atlas() {
+    ATLASES.with(|built| built.set(built.get() + 1));
+}
+
+/// Notes that a body atlas was encoded to PNG. Called from
+/// [`crate::character::Atlas::png`], on the same terms.
+pub(crate) fn note_encode() {
+    ENCODES.with(|encoded| encoded.set(encoded.get() + 1));
 }
 
 /* ---------- the payload ---------- */
@@ -463,6 +515,227 @@ mod tests {
                 mesh.shipped,
             );
         }
+    }
+
+    /* ---------- a page of the wardrobe ---------- */
+
+    /// The appearances a page is measured on, as `(display, display type, inventory type)`.
+    ///
+    /// Ten of the fixture's displays, chosen so that the page covers both halves of what a
+    /// wardrobe holds: four of them hang geometry off the body — a helm, two pairs of shoulders
+    /// and a weapon — and six are texture painted onto it. A page of nothing but helms would
+    /// never encode a second atlas, and a page of nothing but chestpieces would never read the
+    /// skeleton, so a page of one kind measures half the work.
+    ///
+    /// The three the fixtures deliberately break are left out and belong to other tests: 900010
+    /// names a model file the directory omits, 900011 names one that will not parse, and 900900
+    /// is a display in a section the game encrypts.
+    const WARDROBE: [(u32, u32, u32); 10] = [
+        (900_001, 0, 0),   // head
+        (900_002, 1, 0),   // shoulders
+        (900_003, 3, 0),   // chest
+        (900_004, 6, 0),   // feet
+        (900_005, 8, 0),   // hands
+        (900_006, 5, 0),   // legs
+        (900_007, 11, 13), // a two-hander
+        (900_008, 2, 0),   // shirt
+        (900_009, 1, 0),   // shoulders whose model sits in the second slot
+        (900_012, 3, 0),   // a robe
+    ];
+
+    /// How many rows a page of the wardrobe holds.
+    ///
+    /// Twenty, which is what the window draws at a time and what issue #129 asks about. The
+    /// fixtures hold ten usable displays, so the page names each of them twice.
+    ///
+    /// **That repetition understates one number and only one.** A file read for the second copy
+    /// is answered by `Remembered` and never reaches the counter, so a real page of twenty
+    /// distinct items reads more textures than this one does. Everything else is per row and
+    /// unaffected: the tables are walked once either way, and each row still dresses a body,
+    /// paints an atlas and writes a `.glb` of its own.
+    const PAGE: usize = 20;
+
+    fn page() -> Vec<worn::Piece> {
+        (0..PAGE)
+            .map(|row| {
+                let (display_info_id, display_type, inventory_type) = WARDROBE[row % WARDROBE.len()];
+                worn::Piece {
+                    display_info_id,
+                    display_type,
+                    inventory_type,
+                }
+            })
+            .collect()
+    }
+
+    /// What one page of the wardrobe cost, through the stack the app has.
+    fn page_cost(pieces: &[worn::Piece]) -> Work {
+        let files = fixture_files();
+        let counted = Counted::over(&files);
+        let remembered = Remembered::over(&counted);
+        counted.restart();
+        let answer = crate::gallery::of(&remembered, pieces).expect("the fixture page draws");
+        assert_eq!(
+            answer["models"].as_array().map(Vec::len),
+            Some(pieces.len()),
+            "a page answers for every row of itself"
+        );
+        counted.work()
+    }
+
+    /// The same appearances asked for one page at a time, which is the loop the batch replaces.
+    fn one_at_a_time(pieces: &[worn::Piece]) -> Work {
+        let files = fixture_files();
+        let counted = Counted::over(&files);
+        let remembered = Remembered::over(&counted);
+        counted.restart();
+        for piece in pieces {
+            crate::gallery::of(&remembered, std::slice::from_ref(piece)).expect("a row draws");
+        }
+        counted.work()
+    }
+
+    // The body is read, resized and composited once for the whole page rather than once per row.
+    // This is the largest single claim the gallery makes: `atlas.base` is 27ms on a real install
+    // and was the biggest thing left in issue #99, and twenty of them is most of a page.
+    #[test]
+    fn builds_one_body_for_a_whole_page() {
+        assert_eq!(page_cost(&page()).atlases, 1);
+    }
+
+    // And encodes one atlas per row that actually paints something into it, rather than one per
+    // row. Six of the ten displays paint; the other four are geometry hung off a body whose
+    // atlas is the bare one, and they share a single encode of it.
+    //
+    // Asserted against the page's own composition rather than as a bare number, because the
+    // fixture wardrobe is what decides it and a display that changed kind should move this.
+    #[test]
+    fn encodes_an_atlas_only_for_the_rows_that_paint_one() {
+        let painting = page()
+            .iter()
+            .filter(|piece| {
+                !worn::of(
+                    &fixture_files(),
+                    piece.display_info_id,
+                    piece.display_type,
+                    piece.inventory_type,
+                )
+                .expect("the fixture display resolves")
+                .textures
+                .is_empty()
+            })
+            .count();
+        assert!(painting > 0 && painting < PAGE, "the page has to hold both kinds");
+        assert_eq!(page_cost(&page()).encodes, painting + 1);
+    }
+
+    // Every table is walked once for the page, not once per row. `Db2::rows` materialises the
+    // whole table before it yields the first row, so this is the difference between walking
+    // `ItemDisplayInfoMaterialRes` — 604,000 rows on a shipping install — once and twenty times.
+    #[test]
+    fn walks_the_tables_once_for_a_whole_page() {
+        let pieces = page();
+        let batched = page_cost(&pieces);
+        let apart = one_at_a_time(&pieces);
+        assert!(
+            batched.rows * 8 < apart.rows,
+            "a page walked {} rows against {} for the same items one at a time",
+            batched.rows,
+            apart.rows,
+        );
+    }
+
+    // Each of the game's tables is opened once for the page rather than once per row. Counted
+    // with nothing above the storage, unlike every other test here, and deliberately: with
+    // `Remembered` in the way a loop reads each table once too, and what this is about is the
+    // module underneath rather than the cache over it.
+    #[test]
+    fn opens_each_table_once_for_a_whole_page() {
+        let files = fixture_files();
+        let pieces = page();
+        let (_, batched) = counting(&files, |files| crate::gallery::of(files, &pieces));
+        let (_, apart) = counting(&files, |files| {
+            for piece in &pieces {
+                crate::gallery::of(files, std::slice::from_ref(piece)).expect("a row draws");
+            }
+        });
+        assert!(
+            batched.reads * 4 < apart.reads,
+            "a page opened {} files against {} for the same rows one at a time",
+            batched.reads,
+            apart.reads,
+        );
+    }
+
+    // The ratchet, as elsewhere in this module: the work as it stands, asserted from above.
+    //
+    // The rows are worth looking at beside the click's 274: twenty rows of a wardrobe walk fewer
+    // tables' worth of rows than one eight-piece outfit does, because a walk costs the whole
+    // table and a page pays for one walk of each.
+    #[test]
+    fn draws_a_page_within_what_it_costs_today() {
+        let work = page_cost(&page());
+        assert!(work.reads <= 50, "a page reads {} files", work.reads);
+        assert!(work.rows <= 170, "a page walks {} rows", work.rows);
+        // Not zero, and for the reason `decodes_nothing_again_for_the_same_click` gives: the
+        // fixture tables name a texture the fixture directory holds no file for, and a read that
+        // found nothing is deliberately not remembered. The page names each display twice, so
+        // that absent file is looked for twice. It costs a look at the filesystem and inflates
+        // nothing.
+        assert!(
+            work.repeated <= PAGE / WARDROBE.len(),
+            "a page inflated {} files twice",
+            work.repeated,
+        );
+    }
+
+    /// How much of the time twenty rows take a batch is allowed to spend, against the same
+    /// twenty asked for one at a time.
+    ///
+    /// **A ratio, and that is the whole reason there is a clock in this file at all.** Everything
+    /// above counts, because a stopwatch on a shared runner measures the runner it got. A ratio
+    /// of two measurements taken on the same runner, seconds apart, does not: whatever makes the
+    /// machine slow makes both sides slow, and what is left is the thing being asserted. So this
+    /// is a wall-clock expectation that can be run in CI without being a flake, which the issue
+    /// asks for and which nothing here had.
+    ///
+    /// The number is generous against what the fixtures actually do — the batch runs in about a
+    /// third of the loop — because the point is to catch the sharing being undone rather than to
+    /// pin the machine down. What it rules out is somebody rebuilding the body per row, which is
+    /// the change that would take a page from half a second back to eight.
+    const SHARE_OF_THE_LOOP: f64 = 0.7;
+
+    fn taking(run: impl FnOnce()) -> std::time::Duration {
+        let started = std::time::Instant::now();
+        run();
+        started.elapsed()
+    }
+
+    // One run of each side rather than the best of several, which is the usual way to steady a
+    // wall clock. The page takes about a second here and the loop several, so best-of-three was
+    // a minute of the suite — and the headroom does the same job: the ratio the fixtures give is
+    // comfortably inside the ceiling above, and no amount of runner noise walks it across.
+    #[test]
+    fn draws_a_page_faster_than_the_same_rows_one_at_a_time() {
+        let pieces = page();
+        let files = fixture_files();
+        let remembered = Remembered::over(&files);
+        // Once through everything first, so that neither side is the one paying for whatever the
+        // operating system and the allocator were going to warm up anyway.
+        crate::gallery::of(&remembered, &pieces[..1]).expect("a row draws");
+
+        let batched =
+            taking(|| { crate::gallery::of(&remembered, &pieces).expect("the page draws"); });
+        let apart = taking(|| {
+            for piece in &pieces {
+                crate::gallery::of(&remembered, std::slice::from_ref(piece)).expect("a row draws");
+            }
+        });
+
+        assert!(
+            batched.as_secs_f64() <= apart.as_secs_f64() * SHARE_OF_THE_LOOP,
+            "a page took {batched:?} against {apart:?} for the same rows one at a time",
+        );
     }
 
     /* ---------- the counting itself ---------- */

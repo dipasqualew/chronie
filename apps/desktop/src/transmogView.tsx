@@ -57,6 +57,7 @@ import {
   appearanceRows, appearanceSummary, iconIds, itemsBehind, qualityLabel, varyingFacts, wearerLabel,
 } from "./transmogModal";
 import type { AppearanceRow, AppearanceSource } from "./transmogModal";
+import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import { LinkOut } from "./ui";
 import { WardrobeList } from "./wardrobeList";
@@ -64,6 +65,7 @@ import type {
   CharacterModelPayload,
   CustomSetPiece,
   CustomSetsPayload,
+  GalleryPayload,
   IconsPayload,
   MarkSubjectKind,
   TransmogMark,
@@ -90,6 +92,8 @@ export interface TransmogViewProps {
   /** Passed through to the panel: the bare body, and the body wearing the whole outfit. */
   loadCharacter: () => Promise<CharacterModelPayload>;
   loadWorn: (pieces: WornPiece[]) => Promise<WornSetPayload>;
+  /** And through to the item browser: a page of looks, each on a body of its own. */
+  loadGallery: (pieces: WornPiece[]) => Promise<GalleryPayload>;
   /**
    * What the reader has said about the game's wardrobe, and the three ways they say more.
    *
@@ -115,6 +119,8 @@ export interface TransmogViewProps {
   };
   /** Passed through too — it is the one thing here that needs a graphics card. */
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
+  /** And the other: the one context a whole gallery of thumbnails is drawn through. */
+  createGalleryStage?: () => GalleryStage | Promise<GalleryStage>;
 }
 
 /**
@@ -129,8 +135,8 @@ type Browsing = "sets" | "items" | "yours";
 
 export function TransmogView(
   {
-    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, marks, custom,
-    createStage,
+    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, loadGallery,
+    marks, custom, createStage, createGalleryStage,
   }: TransmogViewProps,
 ): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
@@ -358,7 +364,8 @@ export function TransmogView(
       <WardrobeList
         hidden={browsing !== "items"} load={loadAppearances} wantIcons={wantIcons} icons={icons}
         outfit={outfit} hideUnwearable={hideUnwearable} onHideUnwearable={setHideUnwearable}
-        marks={marks} index={index}
+        marks={marks} index={index} loadGallery={loadGallery}
+        createGalleryStage={createGalleryStage}
         onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
       />
       {/* Kept in the tree beside the other two, and for the stronger version of their reason:

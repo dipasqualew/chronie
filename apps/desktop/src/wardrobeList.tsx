@@ -14,17 +14,29 @@
  * icons is a second of stutter to show a reader forty screens they did not ask for. What was
  * already read stays read: the seventeen kinds of weapon are one answer, so going from staves
  * to daggers is a filter rather than a second trip to the game's storage.
+ *
+ * And then the third way of looking at it: **as pictures of the thing**. An icon is what the game
+ * puts in a bag slot and it is 64 pixels of squint; the same look shown worn is what the game's
+ * own wardrobe shows, and it is the only way to tell two brown chestpieces apart. It is off by
+ * default and the page shrinks to a fifth when it is on, because a row of names is a string and a
+ * row of models is a character read out of the game's files. `gallery.ts` decides what a page is
+ * and where a camera looks; `galleryStage.ts` draws them, all on one graphics context.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { plural } from "./format";
+import {
+  PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted,
+} from "./gallery";
+import type { Thumbnail } from "./gallery";
+import type { GalleryStage } from "./galleryStage";
 import { NO_MARK_FILTER, tagChoices } from "./marks";
 import type { MarkIndex } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
-import { wearable as canBeWorn } from "./modelPreview";
+import { REASONS, glbBytes, wearable as canBeWorn } from "./modelPreview";
 import { isWorn, onlyWearable } from "./outfit";
 import type { Outfit } from "./outfit";
 import { CLASSES } from "./transmog";
@@ -35,7 +47,7 @@ import {
   KINDS, PAGE, answerKey, filterAppearances, kindOf, shownSummary, wardrobeRow,
 } from "./wardrobe";
 import type { Kind } from "./wardrobe";
-import type { TransmogMark, WardrobePayload } from "./types";
+import type { GalleryPayload, TransmogMark, WardrobePayload, WornPiece } from "./types";
 
 export interface WardrobeListProps {
   /** Whether the reader is looking at the sets instead, which is what keeps this unread. */
@@ -60,6 +72,16 @@ export interface WardrobeListProps {
    */
   index: MarkIndex;
   onWear: (row: AppearanceRow) => void;
+  /** Asks the backend for a page of the wardrobe worn, which is what the gallery draws. */
+  loadGallery: (pieces: WornPiece[]) => Promise<GalleryPayload>;
+  /**
+   * Makes the one graphics context the whole grid is drawn through.
+   *
+   * Injected for the same reason the pane's stage is: it is the one thing here that needs a
+   * graphics card, so a test can hand over something that draws nothing and a machine that has
+   * no working 3D at all can go without.
+   */
+  createGalleryStage?: () => GalleryStage | Promise<GalleryStage>;
 }
 
 /** What the list says while the game's tables are being read for a kind. */
@@ -68,12 +90,14 @@ const READING = "Reading every appearance the game has for this…";
 export function WardrobeList(
   {
     hidden, load, wantIcons, icons, outfit, hideUnwearable, onHideUnwearable, marks, index,
-    onWear,
+    onWear, loadGallery, createGalleryStage = lazyGalleryStage,
   }: WardrobeListProps,
 ): ReactNode {
   const [kindKey, setKindKey] = useState(KINDS[0]!.key);
   const [search, setSearch] = useState("");
   const [klass, setKlass] = useState("");
+  /** Whether the looks are drawn worn rather than as their bag icons. */
+  const [asModels, setAsModels] = useState(false);
   const [shown, setShown] = useState(PAGE);
   /** What this list is narrowed to beyond what the game says. The sets beside it keep own. */
   const [marked, setMarked] = useState(NO_MARK_FILTER);
@@ -125,6 +149,7 @@ export function WardrobeList(
   // Whatever cannot go on her is left out unless the box above says otherwise — the same
   // statement about what a reader is here for that the sets are filtered by.
   const kept = hideUnwearable ? onlyWearable(rows) : rows;
+  const page = asModels ? GALLERY_PAGE : PAGE;
   const drawn = kept.slice(0, shown);
 
   // The pictures for what is actually on screen, and nothing else: a kind holds thousands of
@@ -137,10 +162,62 @@ export function WardrobeList(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waitingKey, wantIcons]);
 
+  // The bodies, by the display each is drawn from. Kept outside React for the reason the answers
+  // are — one arriving is not a redraw, the counter says one happened — and kept across a change
+  // of kind, because the same helm is under Head and inside three sets and is one picture.
+  const bodies = useRef(new Map<number, Thumbnail>()).current;
+  const wanted = asModels ? piecesOf(drawn) : [];
+  const wantedKey = wanted.map((piece) => piece.displayInfoId).join(",");
+  useEffect(() => {
+    const missing = stillWanted(wanted, bodies);
+    if (!missing.length) return;
+    for (const piece of missing) bodies.set(piece.displayInfoId, { kind: "wanted" });
+    void loadGallery(missing)
+      .then((payload) => {
+        for (const row of payload.models) {
+          bodies.set(row.displayInfoId, row.model
+            ? { kind: "model", glb: row.model }
+            : { kind: "nothing", note: REASONS.unshowable });
+        }
+      })
+      // A page that will not come leaves its rows saying so rather than waiting for ever. The
+      // icons are still there, which is what the list had before any of this.
+      .catch(() => {
+        for (const piece of missing) {
+          bodies.set(piece.displayInfoId, { kind: "nothing", note: REASONS.unshowable });
+        }
+      })
+      .finally(redraw);
+    // The display ids rather than the array, which is new on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedKey, loadGallery, bodies]);
+
+  // One graphics context for the whole grid, made the first time a picture is wanted and given
+  // back when the reader turns the gallery off. Twenty contexts is more than a browser hands
+  // out, which is a grid whose top rows go black as its bottom rows fill in.
+  const stage = useRef<GalleryStage | null>(null);
+  const starting = useRef<Promise<GalleryStage> | null>(null);
+  useEffect(() => {
+    if (asModels) return undefined;
+    stage.current?.dispose();
+    stage.current = null;
+    starting.current = null;
+    return undefined;
+  }, [asModels]);
+  const paint = useCallback(async (
+    target: HTMLCanvasElement, glb: string, displayType: number,
+  ): Promise<void> => {
+    // One stage, and one attempt to make one: twenty rows painting at once would otherwise
+    // each start a context of their own, which is the thing this exists to avoid.
+    starting.current ??= Promise.resolve(createGalleryStage());
+    stage.current = await starting.current;
+    await stage.current.paint(target, glbBytes(glb), focusOf(displayType));
+  }, [createGalleryStage]);
+
   /** Every narrowing starts the list again from the top, where the reader is looking. */
   const narrow = (change: () => void): void => {
     change();
-    setShown(PAGE);
+    setShown(page);
   };
 
   return (
@@ -180,6 +257,23 @@ export function WardrobeList(
             />
             Hide what she cannot wear
           </label>
+          {/* Beside it, because both are statements about what a reader is here for. Turning it
+              on shortens the page to a fifth: twenty bodies is what the backend draws in about
+              the time one takes, and a hundred is not. */}
+          <label className="mog-hide">
+            <input
+              type="checkbox" id="wardrobe-as-models" checked={asModels}
+              onChange={(event) => {
+                // Not through `narrow`, which puts the list back to *this* mode's page: the
+                // whole point of the switch is that the page after it is a different size, and
+                // going from names to models has to shrink the list rather than draw a hundred
+                // bodies once.
+                setAsModels(event.target.checked);
+                setShown(event.target.checked ? GALLERY_PAGE : PAGE);
+              }}
+            />
+            Show worn
+          </label>
           <MarkFilters
             scope="wardrobe" favourite={marked.favourite} tag={marked.tag} choices={tags}
             onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
@@ -192,7 +286,7 @@ export function WardrobeList(
           </span>
         </div>
       </div>
-      <div className="mog-list" id="wardrobe-list">
+      <div className="mog-list" id="wardrobe-list" data-models={asModels}>
         {answer === undefined ? <p className="muted">{READING}</p> : null}
         {typeof answer === "string" ? <p className="muted">{answer}</p> : null}
         <ul className="mog-items">
@@ -201,6 +295,7 @@ export function WardrobeList(
               key={row.appearanceId} row={row} worn={isWorn(outfit, row)}
               icon={icons.get(row.iconFileDataId)} marks={marks}
               mark={index.of("appearance", row.appearanceId)} onWear={() => onWear(row)}
+              body={asModels ? bodies.get(row.displayInfoId) : undefined} paint={paint}
             />
           ))}
         </ul>
@@ -209,8 +304,8 @@ export function WardrobeList(
         {kept.length > drawn.length
           ? <button
             type="button" className="mog-more"
-            onClick={() => setShown((was) => was + PAGE)}
-          >{`Show ${Math.min(PAGE, kept.length - drawn.length)} more of ${plural(kept.length - drawn.length, "appearance")}`}</button>
+            onClick={() => setShown((was) => was + page)}
+          >{`Show ${Math.min(page, kept.length - drawn.length)} more of ${plural(kept.length - drawn.length, "appearance")}`}</button>
           : null}
       </div>
       <div className="empty" hidden={typeof answer !== "object" || kept.length > 0}>
@@ -223,7 +318,7 @@ export function WardrobeList(
 
 /** One look, as something to put on: the same row a set draws, with what a set cannot say. */
 function Look(
-  { row, worn, icon, marks, mark, onWear }: {
+  { row, worn, icon, marks, mark, onWear, body, paint }: {
     row: AppearanceRow;
     worn: boolean;
     icon?: string;
@@ -231,6 +326,13 @@ function Look(
     /** The same mark a set's row of this look draws, because both key on the appearance. */
     mark: TransmogMark | undefined;
     onWear: () => void;
+    /**
+     * The body wearing this look, when the gallery is on and one has arrived.
+     *
+     * `undefined` is the gallery being off, and the row keeps the icon it always had.
+     */
+    body: Thumbnail | undefined;
+    paint: (target: HTMLCanvasElement, glb: string, displayType: number) => Promise<void>;
   },
 ): ReactNode {
   const wanted = canBeWorn(row);
@@ -242,7 +344,12 @@ function Look(
         type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
       >
-        <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
+        {/* The picture, which is the icon until a body arrives to take its place. A row whose
+            body has not come yet keeps the icon rather than a gap, so the list does not jump
+            about as twenty of them land. */}
+        {body?.kind === "model"
+          ? <Worn glb={body.glb} displayType={row.displayType} label={row.label} paint={paint} />
+          : <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>}
         <span className="badge">{row.slot}</span>
         {/* In the colour the game writes the name in, which is the fastest thing to read in a
             list of a thousand — and the stylesheet's job rather than an inline style, because
@@ -279,6 +386,39 @@ function Look(
   );
 }
 
+/**
+ * One row's picture of the character wearing it.
+ *
+ * A plain canvas, painted once by the grid's one stage and then left alone: what is on it after
+ * that is a bitmap, so a page of twenty costs one context and twenty images rather than twenty
+ * live scenes. Painting again for the same model would only repeat the picture already there,
+ * which is why the effect keys on the `.glb` and not on the render.
+ *
+ * A paint that fails leaves the canvas empty rather than the row broken — the name, the slot and
+ * the quality are still what the row is for, and a machine with no working 3D at all is a machine
+ * where every row of the gallery is one of these.
+ */
+function Worn(
+  { glb, displayType, label, paint }: {
+    glb: string;
+    displayType: number;
+    label: string;
+    paint: (target: HTMLCanvasElement, glb: string, displayType: number) => Promise<void>;
+  },
+): ReactNode {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const target = canvas.current;
+    if (!target) return;
+    void paint(target, glb, displayType).catch(() => undefined);
+  }, [glb, displayType, paint]);
+  return (
+    <span className="mog-icon mog-worn">
+      <canvas ref={canvas} aria-label={`${label}, worn`} />
+    </span>
+  );
+}
+
 /** The kinds in the order the picker offers them, under the headings they belong to. */
 function groups(): Array<{ name: string; kinds: Kind[] }> {
   const groups: Array<{ name: string; kinds: Kind[] }> = [];
@@ -289,6 +429,16 @@ function groups(): Array<{ name: string; kinds: Kind[] }> {
   }
   return groups;
 }
+
+/**
+ * The real stage, loaded the first time a reader asks to see one.
+ *
+ * three.js and its loader are most of this app's JavaScript, and the same import the outfit pane
+ * makes: a reader who never opens the gallery never downloads it, and one who has already opened
+ * the pane pays nothing here because the module is already in memory.
+ */
+const lazyGalleryStage = (): Promise<GalleryStage> =>
+  import("./galleryStage").then((stage) => stage.createGalleryStage());
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
