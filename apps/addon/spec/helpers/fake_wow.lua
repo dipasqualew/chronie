@@ -88,11 +88,17 @@ function fake.isKnownEvent(event)
     return knownEvents[event] == true
 end
 
----A stand-in for a FontString. Records the last text and colour it was given, and
----whether it is currently visible, which is all any assertion needs.
+---A stand-in for a FontString. Records the last text and colour it was given, the font
+---template it was built from, and whether it is currently visible, which is all any
+---assertion needs.
+---
+---The template is what tells a panel's own chrome from the rows it draws: a header is
+---built in a heading font and a row in a small one, and every one of them declares a
+---justification, so justification alone cannot separate the two.
+---@param template string? the font template the caller asked for
 ---@return table
-function fake.newFontString()
-    local fontString = { shown = true, points = {}, scripts = {} }
+function fake.newFontString(template)
+    local fontString = { shown = true, points = {}, scripts = {}, template = template }
 
     function fontString:SetText(text)
         self.text = text
@@ -248,8 +254,8 @@ function fake.newFrame(options)
         return onEvent(self, event, ...)
     end
 
-    function frame:CreateFontString()
-        local fontString = fake.newFontString()
+    function frame:CreateFontString(_, _, template)
+        local fontString = fake.newFontString(template)
         self.fontStrings[#self.fontStrings + 1] = fontString
         return fontString
     end

@@ -10,7 +10,7 @@ local _, ns = ...
 ---@field isShown fun(): boolean
 ---@field update fun(summary: SegmentSummary, view: SegmentView?) Repaint; builds the frame on
 ---first use. The view, when there is one, says which of several the panel is standing on,
----and is what the arrows in the header are drawn from.
+---and is what names the header.
 
 ---@class ResultsWindowDeps
 ---@field createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
@@ -33,9 +33,6 @@ local _, ns = ...
 ---@field tooltip table? The global GameTooltip. Given one, a faction opens the whole account's
 ---standings with it on hover; without one the panel simply has nothing to hover.
 ---@field title string|fun(summary: SegmentSummary): string?
----@field navigate fun(delta: integer)? Walk to another view: -1 towards the session total,
----+1 back through the segments already played. Given one, the header grows an arrow at each
----end; without one the panel shows whatever it is handed and nothing else.
 ---@field views fun(): SegmentView[]? Everything the panel could be pointed at, read when the
 ---picker is opened rather than held, because a segment closes while the panel is on screen.
 ---@field select fun(key: string)? Point the panel at one of them. Given both this and
@@ -62,19 +59,12 @@ local RULE_LINE = 11
 -- two read as one entry, and takes a whole line of its own so the standing fits on it.
 local BAR_HEIGHT = 11
 local BAR_INDENT = 10
--- Room for one arrow at each end of the header strip, which the title is then squeezed
--- between rather than drawn over.
-local ARROW_WIDTH = 14
 -- The right-hand column of the picker, which carries how long a segment ran and how long
 -- ago it closed. Wider than the body's values because "42m · 3h ago" is the widest thing
 -- either column ever has to hold and clipping it would defeat the point of listing it.
 local PICKER_DETAIL_WIDTH = 96
 
 local TITLE_COLOR = { 1, 0.82, 0 }
--- An arrow with nowhere left to go is dimmed rather than taken away, so the header keeps
--- the same shape at the ends of the strip as it has in the middle of it.
-local ARROW_COLOR = { 1, 0.82, 0 }
-local ARROW_SPENT_COLOR = { 0.35, 0.35, 0.38 }
 local HEADING_COLOR = { 0.93, 0.91, 0.85 }
 local LABEL_COLOR = { 0.68, 0.68, 0.7 }
 local VALUE_COLOR = { 1, 1, 1 }
@@ -138,8 +128,6 @@ function ns.newResultsWindow(deps)
     ---@type table[] Hairlines drawn between blocks of the body.
     local rules = {}
     local frame, title
-    ---@type table?, table?
-    local backArrow, forwardArrow
     ---The picker: the frame it is drawn on, the rows pooled on it, and whether it is open.
     ---Built on the first click rather than with the panel, because a player who never opens
     ---it never pays for it.
@@ -231,41 +219,18 @@ function ns.newResultsWindow(deps)
         underline:SetHeight(RULE_HEIGHT)
 
         local middle = -1 - HEADER_HEIGHT / 2
-        local arrows = 0
-
-        -- The arrows are font strings with a mouse handler on them, the same as every
-        -- clickable row in the body: the panel is text on a rectangle, and a button widget
-        -- in the header would be the only piece of client chrome anywhere on it.
-        if deps.navigate then
-            arrows = ARROW_WIDTH
-            backArrow = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            backArrow:SetPoint("LEFT", frame, "TOPLEFT", PADDING - 2, middle)
-            backArrow:SetWidth(ARROW_WIDTH)
-            backArrow:SetWordWrap(false)
-            backArrow:SetText("«")
-            backArrow:EnableMouse(true)
-            backArrow:SetScript("OnMouseUp", function()
-                deps.navigate(-1)
-            end)
-
-            forwardArrow = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            forwardArrow:SetPoint("RIGHT", frame, "TOPRIGHT",
-                -PADDING + 2 - (deps.closable and HEADER_HEIGHT or 0), middle)
-            forwardArrow:SetWidth(ARROW_WIDTH)
-            forwardArrow:SetWordWrap(false)
-            forwardArrow:SetText("»")
-            forwardArrow:EnableMouse(true)
-            forwardArrow:SetScript("OnMouseUp", function()
-                deps.navigate(1)
-            end)
-        end
 
         title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        title:SetPoint("LEFT", frame, "TOPLEFT", PADDING + arrows, middle)
+        title:SetPoint("LEFT", frame, "TOPLEFT", PADDING, middle)
         title:SetWordWrap(false)
+        -- Left, so the icon that opens the list is against the panel's own edge and the name
+        -- of the view starts where every label in the body below it starts. Centred — which
+        -- is what GameFontNormal is — the two would drift about the strip as the name under
+        -- the pointer changed length, and the one control in the header would move with them.
+        title:SetJustifyH("LEFT")
         -- Clipped rather than wrapped, and clear of the close button when there is one: a
         -- long "Character — Instance" title must not run out under it.
-        title:SetWidth(WIDTH - PADDING * 2 - arrows * 2 - (deps.closable and HEADER_HEIGHT or 0))
+        title:SetWidth(WIDTH - PADDING * 2 - (deps.closable and HEADER_HEIGHT or 0))
         title:SetText(type(deps.title) == "string" and deps.title or "Current Segment")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
         -- The title is the picker's button. A button widget would be the only piece of
@@ -515,14 +480,6 @@ function ns.newResultsWindow(deps)
             named = (pickerOpen and COLLAPSE_ICON or EXPAND_ICON) .. named
         end
         title:SetText(named)
-        if backArrow and forwardArrow then
-            local index = latestView and latestView.index or 1
-            local count = latestView and latestView.count or 1
-            local earlier = index > 1 and ARROW_COLOR or ARROW_SPENT_COLOR
-            local later = index < count and ARROW_COLOR or ARROW_SPENT_COLOR
-            backArrow:SetTextColor(earlier[1], earlier[2], earlier[3])
-            forwardArrow:SetTextColor(later[1], later[2], later[3])
-        end
         local y = -HEADER_HEIGHT - RULE_HEIGHT - PADDING
         local used = 0
         local usedBars = 0

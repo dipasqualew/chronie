@@ -13,17 +13,17 @@ local _, ns = ...
 ---the same word twice, and this is what tells them apart.
 ---@field summary SegmentSummary What to draw. A filed record is summary-shaped already,
 ---which is why one can be handed to the same panel a live tally is.
----@field index integer Where this view sits in the strip, counting from one.
----@field count integer How many views the strip holds.
 ---@field current boolean Whether this is the view the panel is standing on, so the picker
 ---can tick the one already being looked at.
 
----The strip of views the panel's arrows walk, and which one they are standing on.
+---Everything the panel can be pointed at, and which one it is standing on.
 ---
----Ordered so the aggregate sits at one end and time runs away from it: the session total
----first, then the open segment, then every segment that closed this session, newest
----first. The panel opens on the open segment, because that is what somebody glancing at a
----HUD is asking about; the arrows and the picker are what reach anything else.
+---Ordered the way the menu reads: the session total on top, set apart from the rest,
+---and then the evening itself running forwards — the oldest segment first and the one
+---being played last, because that is the order the evening happened in and the segment
+---at the bottom of the list is the one the player is in right now. The panel opens on
+---that last one, because it is what somebody glancing at a HUD is asking about; the
+---picker is what reaches anything else.
 ---
 ---Where they are left is where they stay, with one exception: a segment opening pulls the
 ---panel forward onto it, the way a damage meter jumps to the pull that just started. A
@@ -41,8 +41,7 @@ local _, ns = ...
 ---one, so the chain walks straight back through it.
 ---@class SegmentViews
 ---@field selected fun(): SegmentView What the panel should be drawing.
----@field move fun(delta: integer): SegmentView Walk the strip; clamped at both ends.
----@field list fun(): SegmentView[] The whole strip, in order, for a picker to draw. Named
+---@field list fun(): SegmentView[] The whole list, in order, for a picker to draw. Named
 ---and dated but not added up: the menu wants to say what is on offer, not compute it.
 ---@field select fun(key: string): SegmentView Stand on the view with that key. An unknown
 ---key leaves the panel where it is, which is what a stale menu row asking for a segment
@@ -197,9 +196,9 @@ end
 ---How long ago a segment ended, as it reads on the end of a title.
 ---
 ---formatAge answers "now" for anything inside the last minute, which is a fine staleness
----warning and a poor label: a segment that just closed sits one arrow away from the one
----being played, and "Deadmines · now" beside "Deadmines" is not a difference a player can
----see at a glance.
+---warning and a poor label: a segment that just closed sits one row above the one being
+---played, and "Deadmines · now" beside "Deadmines" is not a difference a player can see at
+---a glance.
 ---@param seconds number
 ---@return string
 local function ago(seconds)
@@ -229,8 +228,8 @@ end
 ---@param deps SegmentViewsDeps
 ---@return SegmentViews
 function ns.newSegmentViews(deps)
-    -- Where the arrows were left. Held as kind plus id rather than as a position, because
-    -- the strip grows underneath it: a segment closing pushes every older one along, and an
+    -- What was picked off the menu. Held as kind plus id rather than as a position, because
+    -- the list grows underneath it: a segment closing pushes every later one along, and an
     -- index would silently start pointing at a different segment than the player chose.
     local selection = { kind = "live", key = "live" }
 
@@ -267,9 +266,13 @@ function ns.newSegmentViews(deps)
         return list
     end
 
-    ---The strip, without the summaries: those are worked out for the one view that is
+    ---The list, without the summaries: those are worked out for the one view that is
     ---actually going to be drawn. Adding up a whole session on every loot line, to draw a
     ---panel showing one segment, is work nobody asked for.
+    ---
+    ---The session first, then the evening in the order it happened: `history()` hands its
+    ---records over newest first, so they are walked backwards onto the end of the list, and
+    ---the segment being played goes on last of all because it is the most recent of them.
     ---@return table[] views, SegmentRecord[] finished
     local function build()
         local finished = history()
@@ -285,17 +288,11 @@ function ns.newSegmentViews(deps)
                 label = "Session",
                 detail = counted,
             },
-            {
-                kind = "live",
-                key = "live",
-                title = deps.liveLocation() or "Current Segment",
-                label = deps.liveLocation() or "Current Segment",
-                detail = start and (lasted(now - start) .. " · playing") or "playing",
-            },
         }
         local playing = deps.character()
-        for _, record in ipairs(finished) do
-            -- An evening survives hopping alts, so the strip holds the alt's segments too —
+        for index = #finished, 1, -1 do
+            local record = finished[index]
+            -- An evening survives hopping alts, so the list holds the alt's segments too —
             -- and one of those has to say whose it was, or it reads as somewhere this
             -- character has been. Only the name, because the realm is the same evening's.
             local who = record.character ~= playing
@@ -312,10 +309,13 @@ function ns.newSegmentViews(deps)
                 record = record,
             }
         end
-        for index, view in ipairs(views) do
-            view.index = index
-            view.count = #views
-        end
+        views[#views + 1] = {
+            kind = "live",
+            key = "live",
+            title = deps.liveLocation() or "Current Segment",
+            label = deps.liveLocation() or "Current Segment",
+            detail = start and (lasted(now - start) .. " · playing") or "playing",
+        }
         return views, finished
     end
 
@@ -356,9 +356,9 @@ function ns.newSegmentViews(deps)
         lastStart = start or lastStart
     end
 
-    ---The strip and where the selection sits on it. A selection that has gone — a segment
+    ---The list and where the selection sits in it. A selection that has gone — a segment
     ---pruned out of the log, or a character switch that emptied the session — falls back to
-    ---the open segment, which is the one view that always exists.
+    ---the open segment, which is the one view that always exists and is always last.
     ---@return table[] views, integer index, SegmentRecord[] finished
     local function locate()
         follow()
@@ -369,23 +369,13 @@ function ns.newSegmentViews(deps)
             end
         end
         selection = { kind = "live", key = "live" }
-        return views, 2, finished
+        return views, #views, finished
     end
 
     return {
         selected = function()
             local views, index, finished = locate()
             return materialise(finished, views[index])
-        end,
-
-        ---@param delta integer
-        ---@return SegmentView
-        move = function(delta)
-            local views, index, finished = locate()
-            local target = math.max(math.min(index + (delta or 0), #views), 1)
-            local view = views[target]
-            selection = { kind = view.kind, key = view.key }
-            return materialise(finished, view)
         end,
 
         ---Everything on offer, for a picker to draw. Deliberately not materialised: a menu

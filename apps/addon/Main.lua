@@ -186,10 +186,10 @@ function ns.main(env)
     end
 
     -- Declared before the panel and filled in after the log and the tracker they read from,
-    -- because the panel is built first and its arrows and its picker have to reach them.
+    -- because the panel is built first and its picker has to reach them.
     ---@type SegmentViews
     local segmentViews
-    ---Draws whichever view the arrows are standing on.
+    ---Draws whichever view was picked off the panel's own list.
     local renderResults
     local resultsWindow
 
@@ -197,10 +197,6 @@ function ns.main(env)
         createFrame = env.createFrame,
         uiParent = env.uiParent,
         name = "ChronieResultsWindow",
-        navigate = function(delta)
-            segmentViews.move(delta)
-            renderResults()
-        end,
         views = function()
             return segmentViews.list()
         end,

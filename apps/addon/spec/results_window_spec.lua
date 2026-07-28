@@ -11,20 +11,17 @@ describe("ns.newResultsWindow", function()
     ---Build the window with fake frames and deps, recording what it loads and saves.
     ---`loadPoint` returns whatever the test planted, so both the default and the
     ---restored-position paths are drivable.
-    ---`options.navigate` switches the header's arrows on, the way Main.lua does when there
-    ---is a strip of views to walk; every delta they are clicked with lands in
-    ---`recorded.navigated`.
-    ---`options.views` switches the picker on the same way: it is the strip the list is drawn
+    ---`options.views` switches the picker on the way Main.lua does: it is the list drawn
     ---from, either as a plain array or as a function returning one, which is what a test that
-    ---changes the strip between two opens needs. Every key a row is clicked with lands in
-    ---`recorded.selected`, and `recorded.viewReads` counts how often the strip was read.
+    ---changes the list between two opens needs. Every key a row is clicked with lands in
+    ---`recorded.selected`, and `recorded.viewReads` counts how often the list was read.
     ---The picker needs both a list and a way to choose from it, so either half can be
     ---withheld on its own — `views = false`, or `select = false` — because the detail window
     ---is handed neither and must come out of it a panel with a plain title.
-    ---@param options table? `{ name = string?, point = { string, number, number }?, navigate = boolean?,
+    ---@param options table? `{ name = string?, point = { string, number, number }?,
     ---views = SegmentView[]|fun(): SegmentView[]|boolean?, select = boolean?,
     ---title = string|fun(summary: SegmentSummary): string? }`
-    ---@return table window, table frames, table recorded `{ saved, loadCalls, navigated, selected, tooltip }`
+    ---@return table window, table frames, table recorded `{ saved, loadCalls, selected, tooltip }`
     local function newWindow(options)
         options = options or {}
         local createFrame, frames = fake.newCreateFrame()
@@ -35,7 +32,6 @@ describe("ns.newResultsWindow", function()
             achievements = {},
             previews = {},
             collections = {},
-            navigated = {},
             selected = {},
             viewReads = 0,
             tooltip = tooltipRecorded,
@@ -50,9 +46,9 @@ describe("ns.newResultsWindow", function()
         end
         local window = ns.newResultsWindow({
             title = options.title,
-            navigate = options.navigate and function(delta)
-                recorded.navigated[#recorded.navigated + 1] = delta
-            end or nil,
+            -- The detail window is closable and the HUD is not, and the button that makes it
+            -- so is the one thing in the header the title has to keep clear of.
+            closable = options.closable,
             views = strip and function()
                 recorded.viewReads = recorded.viewReads + 1
                 if type(strip) == "function" then
@@ -139,6 +135,15 @@ describe("ns.newResultsWindow", function()
         return base
     end
 
+    ---The panel's own left margin: what the header's title is hung off, and what every
+    ---label in the body below it is hung off too.
+    local PADDING = 12
+
+    ---The font template every row of the body and every row of the list is drawn in. The
+    ---header's title is the one font string on the panel built in anything else, which is
+    ---what keeps it out of the rows below it now that it is justified like them.
+    local ROW_FONT = "GameFontHighlightSmall"
+
     ---The rendered label/value pairs, in order. The window distinguishes labels from
     ---values by justification (left vs right), and creates them label-then-value, so
     ---pairing them by their shown order reconstructs each on-screen line.
@@ -147,9 +152,10 @@ describe("ns.newResultsWindow", function()
     local function rowsOf(frame)
         local labels, values = {}, {}
         for _, fontString in ipairs(frame.fontStrings) do
-            if fontString.shown and fontString.justify == "LEFT" then
+            local row = fontString.shown and fontString.template == ROW_FONT
+            if row and fontString.justify == "LEFT" then
                 labels[#labels + 1] = fontString.text
-            elseif fontString.shown and fontString.justify == "RIGHT" then
+            elseif row and fontString.justify == "RIGHT" then
                 values[#values + 1] = fontString.text
             end
         end
@@ -211,26 +217,19 @@ describe("ns.newResultsWindow", function()
         return drawn
     end
 
-    ---The header's own font strings: the two arrows, named by the glyphs they are drawn
-    ---with, and the title. They are the only font strings the panel builds without a
-    ---justification — every row and every bar caption declares one — which is exactly what
-    ---keeps them out of `rowsOf` and `barsOf`.
+    ---The header's title, which is the whole of the header now that the arrows either side
+    ---of it are gone. It is the one font string the panel builds in a heading font, which is
+    ---what keeps it out of `rowsOf` and `barsOf` even though it is justified the same way
+    ---every label in the body is.
     ---@param frame table
-    ---@return table `{ back = table?, forward = table?, title = table }`
-    local function headerOf(frame)
-        local header = {}
+    ---@return table?
+    local function titleOf(frame)
         for _, fontString in ipairs(frame.fontStrings) do
-            if fontString.justify == nil then
-                if fontString.text == "«" then
-                    header.back = fontString
-                elseif fontString.text == "»" then
-                    header.forward = fontString
-                else
-                    header.title = fontString
-                end
+            if fontString.template ~= ROW_FONT then
+                return fontString
             end
         end
-        return header
+        return nil
     end
 
     ---The picker's own frame, once something has built it. It is a second frame parented to
@@ -268,7 +267,7 @@ describe("ns.newResultsWindow", function()
     ---whole of how a player reaches it.
     ---@param frame table the panel's own frame
     local function clickTitle(frame)
-        headerOf(frame).title:run("OnMouseUp", "LeftButton")
+        titleOf(frame):run("OnMouseUp", "LeftButton")
     end
 
     ---Where a region was last put down its frame. Points accumulate as a pooled row is
@@ -280,35 +279,34 @@ describe("ns.newResultsWindow", function()
         return region.points[#region.points][3]
     end
 
-    ---The strip as ns.newSegmentViews.list hands it over: the session first, then the segment
-    ---being played, then the ones already filed, newest first. One of them is an alt's,
-    ---because an evening survives hopping characters and the label says so when it does.
+    ---The list as ns.newSegmentViews.list hands it over: the session first, then the evening
+    ---in the order it happened — the segments already filed, oldest first, and the one being
+    ---played last. One of them is an alt's, because an evening survives hopping characters
+    ---and the label says so when it does.
     ---@param current string? the key the panel is standing on; the open segment by default
     ---@return SegmentView[]
-    local function strip(current)
-        local views = {
+    local function offered(current)
+        local listed = {
             { kind = "session", key = "session", title = "Session · 3 segments",
                 label = "Session", detail = "3 segments" },
-            { kind = "live", key = "live", title = "Westfall",
-                label = "Westfall", detail = "12m · playing" },
             { kind = "record", key = "record:a", title = "Alt — Deadmines · 20m ago",
                 label = "Alt — Deadmines", detail = "8m · 20m ago" },
+            { kind = "live", key = "live", title = "Westfall",
+                label = "Westfall", detail = "12m · playing" },
         }
-        for index, view in ipairs(views) do
-            view.index = index
-            view.count = #views
+        for _, view in ipairs(listed) do
             view.current = view.key == (current or "live")
         end
-        return views
+        return listed
     end
 
-    ---What is left of that strip once the dungeon has fallen out of the evening: the session
+    ---What is left of that list once the dungeon has fallen out of the evening: the session
     ---and nothing else, which is what the pool has to shrink back to.
     ---@return SegmentView[]
     local function sessionOnly()
         return { {
             kind = "session", key = "session", title = "Session · 1 segment",
-            label = "Session", detail = "1 segment", index = 1, count = 1, current = true,
+            label = "Session", detail = "1 segment", current = true,
         } }
     end
 
@@ -343,7 +341,8 @@ describe("ns.newResultsWindow", function()
     ---@param name string
     local function expand(frame, name)
         for _, fontString in ipairs(frame.fontStrings) do
-            if fontString.shown and (fontString.text or ""):find(name, 1, true) then
+            if fontString.shown and fontString.template == ROW_FONT
+                and (fontString.text or ""):find(name, 1, true) then
                 fontString:run("OnMouseUp", "LeftButton")
                 return
             end
@@ -358,7 +357,8 @@ describe("ns.newResultsWindow", function()
     ---@return table the font string the pointer was over
     local function pointAt(frame, name, options)
         for _, fontString in ipairs(frame.fontStrings) do
-            if fontString.shown and fontString.justify == "LEFT" and (fontString.text or ""):find(name, 1, true) then
+            if fontString.shown and fontString.template == ROW_FONT and fontString.justify == "LEFT"
+                and (fontString.text or ""):find(name, 1, true) then
                 fontString:run("OnEnter")
                 if options and options.leave then
                     fontString:run("OnLeave")
@@ -374,7 +374,8 @@ describe("ns.newResultsWindow", function()
     ---@return boolean whether the row saying `name` has a tooltip on it at all
     local function pointable(frame, name)
         for _, fontString in ipairs(frame.fontStrings) do
-            if fontString.shown and fontString.justify == "LEFT" and (fontString.text or ""):find(name, 1, true) then
+            if fontString.shown and fontString.template == ROW_FONT and fontString.justify == "LEFT"
+                and (fontString.text or ""):find(name, 1, true) then
                 return fontString.scripts.OnEnter ~= nil
             end
         end
@@ -1321,10 +1322,10 @@ describe("ns.newResultsWindow", function()
         -- Everything on screen at once, expanded, is what makes this one assertion cover the
         -- whole panel rather than the one row the bug was reported against.
         it("draws every row in characters the game's font actually has", function()
-            -- Built with the arrows and the picker on and standing on a dated view, so the
-            -- header's own strings — the two chevrons, and a title carrying a separator behind
-            -- the icon that opens the list — and every row of the list itself are swept too.
-            local window, frames = newWindow({ navigate = true, views = strip("record:a") })
+            -- Built with the picker on and standing on a dated view, so the header's own
+            -- string — a title carrying a separator behind the icon that opens the list — and
+            -- every row of the list itself are swept too.
+            local window, frames = newWindow({ views = offered("record:a") })
             window.update(summary({
                 lootValue = 1234,
                 goldDiff = -500,
@@ -1344,7 +1345,7 @@ describe("ns.newResultsWindow", function()
                 housingItems = { { id = 7, name = "Iron Sconce", warbandFirst = true } },
                 housingXP = 250,
                 housingLevelUps = { { level = 3 } },
-            }), { kind = "record", key = "record:1", title = "Deadmines · 12m ago", index = 3, count = 4 })
+            }), { kind = "record", key = "record:1", title = "Deadmines · 12m ago" })
             for _, heading in ipairs({
                 "Achievements", "Currency", "Level ups", "Mounts", "Pets", "Quests",
                 "Reputation", "Toys", "Housing items", "Housing levels", "Transmog",
@@ -1368,116 +1369,73 @@ describe("ns.newResultsWindow", function()
         end)
     end)
 
-    describe("the arrows through the session", function()
-        local GOLD = { 1, 0.82, 0 }
-        -- An arrow with nowhere left to go is dimmed rather than taken away, so the header
-        -- keeps the same shape at the ends of the strip as it has in the middle of it.
-        local SPENT = { 0.35, 0.35, 0.38 }
-
-        ---One view off the strip, as ns.newSegmentViews hands it over.
+    describe("the header the list hangs from", function()
+        ---One view off the list, as ns.newSegmentViews hands it over.
         ---@param overrides table?
         ---@return SegmentView
         local function view(overrides)
-            local base = { kind = "live", key = "live", title = "Deadmines", index = 2, count = 3 }
+            local base = { kind = "live", key = "live", title = "Deadmines" }
             for key, value in pairs(overrides or {}) do
                 base[key] = value
             end
             return base
         end
 
-        -- The panel predates having anywhere to walk to, and every other caller of it still
-        -- has nothing: without a navigate dep it shows what it is handed and nothing else.
-        it("draws no arrows at all when there is nowhere to walk to", function()
-            local window, frames = newWindow()
-
-            window.update(summary())
-
-            local header = headerOf(frames[1])
-            assert.is_nil(header.back)
-            assert.is_nil(header.forward)
-        end)
-
-        for _, case in ipairs({
-            { glyph = "«", towards = "the session total", delta = -1 },
-            { glyph = "»", towards = "the segments already played", delta = 1 },
-        }) do
-            it("walks towards " .. case.towards .. " when " .. case.glyph .. " is clicked", function()
-                local window, frames, recorded = newWindow({ navigate = true })
-                window.update(summary(), view())
-
-                local header = headerOf(frames[1])
-                local arrow = case.delta < 0 and header.back or header.forward
-                arrow:run("OnMouseUp", "LeftButton")
-
-                assert.same({ case.delta }, recorded.navigated)
-            end)
-        end
-
         -- The view's name is the only thing on screen saying which of several is being
         -- looked at, so it outranks whatever the panel was built with.
         it("says what the view it is standing on is called", function()
-            local window, frames = newWindow({ navigate = true, title = "Current Segment" })
+            local window, frames = newWindow({ title = "Current Segment" })
 
             window.update(summary(), view({ title = "Session · 3 segments" }))
 
-            assert.equal("Session · 3 segments", headerOf(frames[1]).title.text)
+            assert.equal("Session · 3 segments", titleOf(frames[1]).text)
         end)
 
         it("still says what it was built with while it is handed no view", function()
-            local window, frames = newWindow({ navigate = true, title = "Current Segment" })
+            local window, frames = newWindow({ title = "Current Segment" })
 
             window.update(summary())
 
-            assert.equal("Current Segment", headerOf(frames[1]).title.text)
+            assert.equal("Current Segment", titleOf(frames[1]).text)
         end)
 
+        -- The header used to be an arrow, the name, and another arrow, which left the name
+        -- centred between them and the only control on the strip drifting about as the name
+        -- under it changed length. With the arrows gone the name starts at the panel's own
+        -- left margin — the same one every label in the body starts at — and the icon that
+        -- opens the list is the first thing on the line rather than something to hunt for.
+        it("hangs the title off the left margin rather than centring it", function()
+            local window, frames = newWindow({ views = offered(), title = "Current Segment" })
+
+            window.update(summary())
+
+            local title = titleOf(frames[1])
+            assert.equal("LEFT", title.justify)
+            assert.equal(PADDING, title.points[1][4])
+        end)
+
+        -- There is nothing left in the header for a long name to run into, so it may have the
+        -- whole strip, less the close button on a panel that has one.
         for _, case in ipairs({
-            {
-                what = "somewhere to go in either direction",
-                view = view({ index = 2, count = 3 }), back = GOLD, forward = GOLD,
-            },
-            {
-                what = "the session total, with nothing before it",
-                view = view({ index = 1, count = 3 }), back = SPENT, forward = GOLD,
-            },
-            {
-                what = "the oldest segment, with nothing behind it",
-                view = view({ index = 3, count = 3 }), back = GOLD, forward = SPENT,
-            },
-            {
-                what = "the only view there is",
-                view = view({ index = 1, count = 1 }), back = SPENT, forward = SPENT,
-            },
+            { what = "the HUD, which has nothing beside the title", closable = false, width = 244 },
+            { what = "a window with a close button to keep clear of", closable = true, width = 220 },
         }) do
-            it("lights the arrows for " .. case.what, function()
-                local window, frames = newWindow({ navigate = true })
+            it("gives the title the width of " .. case.what, function()
+                local window, frames = newWindow({ closable = case.closable })
 
-                window.update(summary(), case.view)
+                window.update(summary())
 
-                local header = headerOf(frames[1])
-                assert.same(case.back, header.back.color)
-                assert.same(case.forward, header.forward.color)
+                assert.equal(case.width, titleOf(frames[1]).width)
             end)
         end
 
-        -- A panel handed no view at all cannot be anywhere but where it is, so neither
-        -- arrow leads anywhere and neither is lit.
-        it("dims both arrows when it is handed no view to place itself on", function()
-            local window, frames = newWindow({ navigate = true })
-
-            window.update(summary())
-
-            local header = headerOf(frames[1])
-            assert.same(SPENT, header.back.color)
-            assert.same(SPENT, header.forward.color)
-        end)
-
         -- The body is read out of the frame by justification and by texture layer, and the
-        -- arrows are new font strings on the same frame. A missing SetJustifyH on one of
-        -- them would show up as a phantom row in every other test in this file.
-        it("keeps the arrows out of the rows, the bars and the rules the body is made of", function()
+        -- title is justified exactly the way every label in the body is. Told apart by
+        -- anything less than the font it is built in, it would show up as a phantom row in
+        -- every other test in this file.
+        it("keeps the title out of the rows, the bars and the rules the body is made of", function()
             local plain, plainFrames = newWindow()
-            local arrowed, arrowedFrames = newWindow({ navigate = true })
+            local named, namedFrames = newWindow({ views = offered() })
             local drawn = summary({
                 lootValue = 1234,
                 reputationTotal = 250,
@@ -1487,13 +1445,13 @@ describe("ns.newResultsWindow", function()
             })
 
             plain.update(drawn)
-            arrowed.update(drawn, view())
+            named.update(drawn, view())
             expand(plainFrames[1], "Reputation")
-            expand(arrowedFrames[1], "Reputation")
+            expand(namedFrames[1], "Reputation")
 
-            assert.same(rowsOf(plainFrames[1]), rowsOf(arrowedFrames[1]))
-            assert.same(barsOf(plainFrames[1]), barsOf(arrowedFrames[1]))
-            assert.equal(#rulesOf(plainFrames[1]), #rulesOf(arrowedFrames[1]))
+            assert.same(rowsOf(plainFrames[1]), rowsOf(namedFrames[1]))
+            assert.same(barsOf(plainFrames[1]), barsOf(namedFrames[1]))
+            assert.equal(#rulesOf(plainFrames[1]), #rulesOf(namedFrames[1]))
         end)
     end)
 
@@ -1529,7 +1487,7 @@ describe("ns.newResultsWindow", function()
         -- does not work, and a chooser with no list has nothing to put on screen.
         for _, case in ipairs({
             { what = "neither a list nor a way to choose from it", views = false, select = false },
-            { what = "a list but no way to choose from it", views = strip(), select = false },
+            { what = "a list but no way to choose from it", views = offered(), select = false },
             { what = "a way to choose but no list to choose from", views = false, select = true },
         }) do
             it("leaves the title a title given " .. case.what, function()
@@ -1537,7 +1495,7 @@ describe("ns.newResultsWindow", function()
 
                 window.update(summary())
 
-                local title = headerOf(frames[1]).title
+                local title = titleOf(frames[1])
                 assert.equal("Current Segment", title.text)
                 assert.is_nil(title.scripts.OnMouseUp)
                 assert.equal(1, #frames)
@@ -1547,7 +1505,7 @@ describe("ns.newResultsWindow", function()
         -- A player who never opens the list never pays for it, which is the same bargain the
         -- panel itself is built on: nothing exists until something asks for it.
         it("builds the list on the first click of the title and not before", function()
-            local window, frames = newWindow({ views = strip() })
+            local window, frames = newWindow({ views = offered() })
             window.update(summary())
             assert.equal(1, #frames)
 
@@ -1558,16 +1516,20 @@ describe("ns.newResultsWindow", function()
             assert.is_true(pickerOf(frames).shown)
         end)
 
+        -- In the order they were handed over, which is the order the evening happened in:
+        -- the session on top, then the oldest segment, and the one being played at the
+        -- bottom. A menu that sorted them for itself would disagree with the module that
+        -- built the list about what "the last one" means.
         it("names the session and every segment, with what tells them apart beside it", function()
-            local window, frames = newWindow({ views = strip() })
+            local window, frames = newWindow({ views = offered() })
             window.update(summary())
 
             clickTitle(frames[1])
 
             assert.same({
                 { label = "Session", value = "3 segments" },
-                { label = "Westfall", value = "12m · playing" },
                 { label = "Alt — Deadmines", value = "8m · 20m ago" },
+                { label = "Westfall", value = "12m · playing" },
             }, rowsOf(pickerOf(frames)))
         end)
 
@@ -1576,7 +1538,7 @@ describe("ns.newResultsWindow", function()
         -- end to end. A hairline between them is what says so, and it has to sit between them
         -- rather than merely exist.
         it("rules a line between the session and the segments under it", function()
-            local window, frames = newWindow({ views = strip() })
+            local window, frames = newWindow({ views = offered() })
             window.update(summary())
 
             clickTitle(frames[1])
@@ -1592,11 +1554,11 @@ describe("ns.newResultsWindow", function()
         -- player clicking the row they are already standing on.
         for _, case in ipairs({
             { what = "the session total", key = "session", lit = 1 },
-            { what = "the segment being played", key = "live", lit = 2 },
-            { what = "a segment already filed", key = "record:a", lit = 3 },
+            { what = "a segment already filed", key = "record:a", lit = 2 },
+            { what = "the segment being played", key = "live", lit = 3 },
         }) do
             it("draws the row for " .. case.what .. " in gold while that is the view on screen", function()
-                local window, frames = newWindow({ views = strip(case.key) })
+                local window, frames = newWindow({ views = offered(case.key) })
                 window.update(summary())
 
                 clickTitle(frames[1])
@@ -1616,12 +1578,12 @@ describe("ns.newResultsWindow", function()
             { what = "the metadata beside it", column = "detail" },
         }) do
             it("stands the panel on the segment picked by " .. case.what, function()
-                local window, frames, recorded = newWindow({ views = strip() })
+                local window, frames, recorded = newWindow({ views = offered() })
                 window.update(summary())
                 clickTitle(frames[1])
                 local labels, details = columnsOf(frames)
 
-                local clicked = case.column == "label" and labels[3] or details[3]
+                local clicked = case.column == "label" and labels[2] or details[2]
                 clicked:run("OnMouseUp", "LeftButton")
 
                 assert.same({ "record:a" }, recorded.selected)
@@ -1631,7 +1593,7 @@ describe("ns.newResultsWindow", function()
         end
 
         it("closes the list again when the title is clicked a second time", function()
-            local window, frames = newWindow({ views = strip() })
+            local window, frames = newWindow({ views = offered() })
             window.update(summary())
             clickTitle(frames[1])
 
@@ -1650,14 +1612,14 @@ describe("ns.newResultsWindow", function()
             { what = "open", clicks = 1, icon = "|TInterface\\Buttons\\UI-MinusButton-Up:12:12:0:-1|t " },
         }) do
             it("marks the title with the icon for a list that is " .. case.what, function()
-                local window, frames = newWindow({ views = strip(), title = "Current Segment" })
+                local window, frames = newWindow({ views = offered(), title = "Current Segment" })
                 window.update(summary())
 
                 for _ = 1, case.clicks do
                     clickTitle(frames[1])
                 end
 
-                assert.equal(case.icon .. "Current Segment", headerOf(frames[1]).title.text)
+                assert.equal(case.icon .. "Current Segment", titleOf(frames[1]).text)
             end)
         end
 
@@ -1668,7 +1630,7 @@ describe("ns.newResultsWindow", function()
             { what = "toggled away", close = function(window) window.toggle() end },
         }) do
             it("shuts the list when the panel itself is " .. case.what, function()
-                local window, frames = newWindow({ views = strip() })
+                local window, frames = newWindow({ views = offered() })
                 window.update(summary())
                 window.show()
                 clickTitle(frames[1])
@@ -1683,7 +1645,7 @@ describe("ns.newResultsWindow", function()
         -- last look is exactly the row somebody opening this is reaching for. Keeping the first
         -- list read would offer them everything except what they came for.
         it("reads the strip fresh on every open rather than keeping the first one", function()
-            local frames, recorded = reopenOn(strip(), sessionOnly())
+            local frames, recorded = reopenOn(offered(), sessionOnly())
 
             assert.same({ { label = "Session", value = "1 segment" } }, rowsOf(pickerOf(frames)))
             -- Three clicks: open, close, open. The read happens on the way open and nowhere else.
@@ -1696,7 +1658,7 @@ describe("ns.newResultsWindow", function()
         -- row still carrying a handler for a segment it is no longer drawing is a trap waiting
         -- for the pool to hand it out again.
         it("takes the rows a shorter strip no longer needs off screen, clicks and all", function()
-            local frames = reopenOn(strip(), sessionOnly())
+            local frames = reopenOn(offered(), sessionOnly())
 
             local labels, details = columnsOf(frames)
             assert.equal(3, #labels)
@@ -1711,7 +1673,7 @@ describe("ns.newResultsWindow", function()
         -- The hairline separates the session from the segments, and a list with no segments on
         -- it has nothing to separate the session from.
         it("takes the hairline away when the session is the only thing on offer", function()
-            local frames = reopenOn(strip(), sessionOnly())
+            local frames = reopenOn(offered(), sessionOnly())
 
             assert.same({}, rulesOf(pickerOf(frames)))
         end)
@@ -1722,7 +1684,7 @@ describe("ns.newResultsWindow", function()
         -- up as a phantom row in every other test in this file.
         it("keeps the picker out of the rows, the bars and the rules the body is made of", function()
             local plain, plainFrames = newWindow()
-            local picked, pickedFrames = newWindow({ views = strip() })
+            local picked, pickedFrames = newWindow({ views = offered() })
             local drawn = summary({
                 lootValue = 1234,
                 reputationTotal = 250,
