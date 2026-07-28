@@ -11,8 +11,9 @@ afterwards, marked with the build it came from.
 four `ItemSparse` columns beside the name against the same build on 2026-07-27; the array
 columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the same build on
 2026-07-27 — the two things this file used to carry on the community's say-so; the
-customization chain below against `12.0.5.67823` on 2026-07-27; and `ComponentModelFileData`,
-`HelmetGeosetData` and the cape chain against `12.0.5.67` on 2026-07-27. Column
+customization chain below against `12.0.5.67823` on 2026-07-27; `ComponentModelFileData`,
+`HelmetGeosetData` and the cape chain against `12.0.5.67` on 2026-07-27; and the customization
+options, their swatches and the geosets those drive against `12.0.5.67` on 2026-07-28. Column
 indices and file ids are stated as *verified* only where they were read out of that
 install and cross-checked against the data they resolve to. Everything else is marked
 as coming from [WoWDBDefs](https://github.com/wowdev/WoWDBDefs) or
@@ -96,6 +97,7 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `ChrCustomizationOption` | 3384247 | fixed | yes |
 | `ChrCustomizationElement` | 3512765 | fixed | yes |
 | `ChrCustomizationMaterial` | 3459652 | fixed | yes |
+| `ChrCustomizationGeoset` | 3456171 | fixed | yes |
 | `HelmetGeosetData` | 2821752 | fixed | yes, needs `foreign_id()` |
 | `Achievement` | 1260179 | fixed | yes |
 | `Achievement_Category` | 1324299 | fixed | yes |
@@ -467,24 +469,32 @@ apart. The one thing that looks like this and is not is an app built before the 
 to read `InventoryType` at all: every weapon in the game then lands under "no place on a
 character", because nothing says which hand any of them goes in.
 
-## The character's own skin, verified
+## The character herself, verified
 
 What an item paints is above; what the body already *is* comes from somewhere else entirely.
-A character's skin is a customization the player picked, and four hops stand between the swatch
-and a picture. All of them were read off `12.0.5.67823` on 2026-07-27 with
-`examples/dump_customization`, which is what to run again after a patch:
+A character is a set of customizations the player picked, and four hops stand between a swatch
+and what it does. All of them were read off `12.0.5.67823` on 2026-07-27 with
+`examples/dump_customization`; the options, their swatches and the geosets those drive were
+read off `12.0.5.67` on 2026-07-28. That is what to run again after a patch:
 
 ```sh
 cargo run --example dump_customization -- "<install>"
 ```
 
-**Every table on this chain keeps its id beside the rows rather than in them**, so `ID` is not
-a column and everything sits one place earlier than the community's field list reads. That is
-the single thing most likely to go wrong here, and the column *count* is what says it: two in
-`ChrCustomizationMaterial` rather than three.
+**Every table on this chain keeps its id beside the rows rather than in them** *except* the two
+the reader starts at, so `ID` is not a column and everything sits one place earlier than the
+community's field list reads. That is the single thing most likely to go wrong here, and the
+column *count* is what says it: two in `ChrCustomizationMaterial` rather than three.
 
 ```
-ChrCustomizationChoice            (id inline, in column 1 — the exception)
+ChrCustomizationOption            (id inline, in column 1)
+  col0 = Name_lang                 "Skin Color", "Face Shape", "Hair Style", "Ears"…
+  col1 = ID
+  col4 = ChrModelID                ← 2 is Human Female. Every playable body is in this table.
+  col5 = OrderIndex
+     │
+     ▼
+ChrCustomizationChoice            (id inline, in column 1 — the other exception)
   col1 = ID                        85 is Human Female's first skin swatch
   col2 = ChrCustomizationOptionID  14, which ChrCustomizationOption names "Skin Color"
   col5 = OrderIndex                0, which is what makes it the default
@@ -492,17 +502,57 @@ ChrCustomizationChoice            (id inline, in column 1 — the exception)
      ▼
 ChrCustomizationElement           (id in the id list)
   col0 = ChrCustomizationChoiceID   ← an ordinary column, not the relationship block
+  col1 = RelatedChrCustomizationChoiceID   0, or a swatch that must be chosen as well
+  col2 = ChrCustomizationGeosetID     0 where the element paints instead
   col4 = ChrCustomizationMaterialID   0 where the element drives a geoset and paints nothing
-     │
-     ▼
-ChrCustomizationMaterial          (id in the id list)
-  col0 = ChrModelTextureTargetID    which layer of the atlas it belongs to
-  col1 = MaterialResourcesID
-     │
-     ▼
-TextureFileData.col2 = MaterialResourcesID
-  row.id() = FileDataID ──▶ BLP2
+     │                                        │
+     ▼                                        ▼
+ChrCustomizationGeoset            ChrCustomizationMaterial          (both id in the id list)
+  col0 = GeosetType                 col0 = ChrModelTextureTargetID   which layer of the atlas
+  col1 = GeosetID                   col1 = MaterialResourcesID
+  geoset = type × 100 + id             │
+                                       ▼
+                                  TextureFileData.col2 = MaterialResourcesID
+                                    row.id() = FileDataID ──▶ BLP2
 ```
+
+**`ChrCustomizationGeoset` is 3456171**, which is not in the table above because nothing had
+needed it: it was found by scanning FileDataIDs for a DB2 whose ids covered the values
+`ChrCustomizationElement.col2` names, and confirmed by its three columns reading as a group, a
+value in it, and a modifier of −1 throughout.
+
+**The option belongs to a body, and the swatch is the first by order index.** Both are
+one-line filters and both are quiet when wrong. `ChrCustomizationOption` describes every
+playable model at once, so a Dracthyr's face shape is a row of exactly the same shape as a
+Human's and dropping `ChrModelID` gives one geoset group two owners. The rows sit in id order
+and the ids are historical, so the first *row* of an option is not its first swatch.
+
+**An element can be conditional.** A face is authored once per skin, so choosing Human Female's
+first face names sixteen materials — one per skin swatch — and only the one whose
+`RelatedChrCustomizationChoiceID` is the chosen skin applies. Taking them all leaves whichever
+sits last, which is a face of the wrong colour on a body of the right one.
+
+What Human Female's first swatch of each option comes to, read on 12.0.5.67:
+
+| Option | Swatch 0 | Drives |
+|---|---|---|
+| 15 Face | 102 | material on target 5, per skin swatch; a bone set |
+| 14 Skin Color | 85 | materials on targets 1, 13, 14 |
+| 16 Hair Style | 132 | geoset 45 → **group 0 value 2**; materials on target 12, per hair colour |
+| 17 Hair Color | 156 | material on target 10 — the hair atlas |
+| 464 Eye Color | 4150 | material on target 25 — the eye atlas |
+| 501 Piercings | 4752 | geoset 2058 → **3500**, no piercing |
+| 510 Necklace | 4908 | geoset 2068 → **3600**, no necklace |
+| 516 Makeup | 4963 | nothing |
+| 526 Face Shape | 5059 | geoset 11350 → **3202, the head** |
+| 970 Eyebrows | 15672 | material on target 8, per hair colour |
+| 6339 Eyesight | 45090 | nothing |
+| 8523 Eye Style | 54353 | nothing |
+| 8790 Ears | 56653 | geoset 13292 → **702** |
+
+**A value of 0 is the game switching a group off**, which is what "no necklace" is — and it is
+a row to apply rather than a row to drop, because the group's own value 1 is a necklace.
+`docs/character-rendering.md` has what that costs when it is missed.
 
 **One choice paints several targets, and only one of them is the skin.** Choice 85 has three
 elements: material 823 on target 1, and 824 and 825 on targets 13 and 14. All three resolve to
@@ -532,23 +582,37 @@ On layout 104 that reads, in full:
 | 14, 15 | 20 | 1 | 27, 28 | jewelry |
 
 **The base skin is the one layer of the body atlas that is copied rather than blended**, which
-is what `skin.rs` picks it out by. Blend mode 1 is wow.export's "blit"; it is the only mode in
-`CharMaterialRenderer`'s switch that disables blending outright. Note that hair, eyes and
-jewelry are copied too — the texture type has to be checked as well, or a hairline lands across
-the body.
+is what `customization.rs` picks it out by. Blend mode 1 is wow.export's "blit"; it is the only
+mode in `CharMaterialRenderer`'s switch that disables blending outright. Note that hair, eyes
+and jewelry are copied too — the texture type has to be checked as well, or a hairline lands
+across the body.
 
-Resolved end to end, choice 85 is:
+**The three atlases that are not the body's are one picture each.** Types 6, 19 and 20 have
+buffers of their own rather than rectangles of the body's, and every layer of the three is a
+copy but one: layer 16, a blend on the eye atlas, which none of the swatches above paints. So
+each comes back as the copied layer that resolved, bound whole as the M2 texture type the
+body's own parts ask for it under. There is no compositor for them.
+
+Resolved end to end, Human Female's first swatches are:
 
 | Hop | Value |
 |---|---|
 | element 2917 → material 823 | target 1, resource 128773 → **1002483**, BLP2 1024 × 512 |
 | element 2918 → material 824 | target 13, resource 128747 → 1002457, BLP2 256 × 128 |
 | element 2919 → material 825 | target 14, resource 128760 → 1002470, BLP2 256 × 128 |
+| element 2964 → material 870 | target 5, resource 128587 → the face, per skin swatch 85 |
+| element 3277 → material 14968 | target 10 → **3582288**, BLP2 256 × 256, the hair |
+| element 18774 → material 14914 | target 25 → **3484643**, BLP2 256 × 128, the eyes |
 
 **The underwear is not part of the skin texture**, which is what it was on the races that
 predate the Shadowlands customization system. It is those two 256 × 128 pictures, blended into
 one section rectangle each. A reader that took only the base gets a nude body; one that painted
 all three over the whole buffer gets underwear for a body.
+
+**Nor is the face.** The base skin's right half already holds one, and the face swatch is a
+layer blended over it — which is why the skin resolves and looks complete while the character
+still has no head: what the head *is* comes out of the geoset half of this chain and not the
+picture half.
 
 ## Achievements
 

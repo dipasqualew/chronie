@@ -171,10 +171,15 @@ fn write_piece(
         None,
     ));
 
-    /* One primitive per part, each with the material and picture it asked for. */
+    /* One primitive per part, each with the material and picture it asked for — except the
+    parts glTF has no compositing for at all. [`Blend::Glow`] is the additive and modulating
+    family, and the format's `alphaMode` cannot say either; written out as source-over, a
+    character's eye glow stops being a glint and becomes a solid cyan slab across both eyes.
+    Leaving it out is the nearer of the two answers, and it is the whole of what it costs: what
+    these parts add to a still picture is light, and there is none here to add. */
     let mut painted: HashMap<Paint, Option<gltf_json::Index<gltf_json::Texture>>> = HashMap::new();
     let mut primitives = Vec::with_capacity(mesh.parts.len());
-    for part in &mesh.parts {
+    for part in mesh.parts.iter().filter(|part| part.blend != Blend::Glow) {
         let texture = match painted.get(&part.paint) {
             Some(known) => *known,
             None => {
@@ -221,6 +226,8 @@ fn write_piece(
                 Blend::Opaque => gltf_json::material::AlphaMode::Opaque,
                 Blend::Mask => gltf_json::material::AlphaMode::Mask,
                 Blend::Blend => gltf_json::material::AlphaMode::Blend,
+                // Filtered out above: glTF has no additive compositing to write here.
+                Blend::Glow => gltf_json::material::AlphaMode::Blend,
             }),
             double_sided: part.two_sided,
             pbr_metallic_roughness: gltf_json::material::PbrMetallicRoughness {
@@ -562,7 +569,25 @@ mod tests {
             })
             .collect();
         assert_eq!(modes, vec![("OPAQUE", false), ("MASK", true), ("BLEND", false)]);
-        assert_eq!(materials[1]["alphaCutoff"], 0.5);
+    }
+
+    // And the one it cannot carry: glTF's `alphaMode` runs to opaque, mask and source-over, and
+    // the game's additive family is none of the three. Written out as source-over, a character's
+    // eye glow — a faint cyan wisp *added* to an opaque head — becomes a solid slab across both
+    // eyes, so the part is left out of the picture instead. What it contributes is light, and a
+    // still render has none to contribute.
+    #[test]
+    fn leaves_out_a_part_glt_f_has_no_compositing_for() {
+        let mut mesh = mesh(CLOAK, CLOAK_SKIN);
+        let glow = crate::m2::Part { blend: Blend::Glow, ..mesh.parts[0].clone() };
+        mesh.parts.push(glow);
+
+        let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
+        let scene = parse(&glb).json;
+        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 3);
+        // And the three that are drawn are untouched: leaving one out is not renumbering.
+        assert_eq!(scene["materials"].as_array().unwrap().len(), 3);
+        assert_eq!(scene["materials"][1]["alphaCutoff"], 0.5);
     }
 
     // A scene of several pieces, which is what a dressed character is. Each gets a node with

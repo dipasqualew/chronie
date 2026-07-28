@@ -2340,12 +2340,15 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(outfit.note()).toHaveText("Nothing is worn. Drag to turn it.");
     await expect(outfit.canvas()).toBeVisible();
 
-    // 10 × 152: the fixture body holds nineteen geosets and a bare one draws ten of them —
-    // one per group, plus the hairstyle that shares the skin's — and every part is drawn out
-    // of the same 152 vertices the whole model shares. Which makes this the geoset selection,
-    // counted from the far end of the pipe: a variant drawn alongside its default reads as
-    // 11 × 152, and a default that went missing as 9 × 152.
-    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1520");
+    // 12 × 200: the fixture body holds twenty-five geosets and a bare one draws thirteen of
+    // them — one per group, plus the hairstyle that shares the skin's — of which twelve reach
+    // the picture, because the eye glow is composited by adding and glTF cannot write that.
+    // Every part is drawn out of the same 200 vertices the whole model shares. Which makes
+    // this the geoset selection, counted from the far end of the pipe: a variant drawn
+    // alongside its default reads as 13 × 200, and a default that went missing as 11 × 200.
+    // Two of the twelve are her head and her ears, which nothing but her own customization
+    // asks for.
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2400");
   });
 
   await test.step("the search reaches the collection as well as the set", async () => {
@@ -2447,14 +2450,14 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(outfit.summary()).toHaveText("1 of 13 slots filled");
     await expect(outfit.note()).toHaveText("Worn on the character. Drag to turn it.");
 
-    // A body, not the item: 10 × 152, the same one part per geoset group a bare character
+    // A body, not the item: 12 × 200, the same one part per geoset group a bare character
     // draws, out of the vertices the whole model shares. A robe that arrived as geometry of
     // its own would be a fraction of that.
-    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1520");
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2400");
 
     // And the armour has a colour on it. Geometry was all this ever asked for, and geometry
     // is the half that was never in doubt: a body with every texture refused draws the exact
-    // shape of the robe in flat white and answers 1520 to the line above.
+    // shape of the robe in flat white and answers 2400 to the line above.
     //
     // The refusing is the page's Content Security Policy. A `.glb` carries its pictures
     // inside itself, three.js hands each one to the browser as a `blob:` URL, and a policy
@@ -2464,7 +2467,9 @@ test("browses the game's transmog sets and dresses the character in them", async
     // Which is why this is here and not in a unit test. The atlas is right, the UVs read it,
     // the `.glb` carries it, and every one of those can be checked without a browser. The
     // only place the picture is refused is a real page under the real policy.
-    await expect(outfit.stage()).toHaveAttribute("data-pictures", "1");
+    // Two of them: the composited body atlas, and the hair's own — which is the picture that
+    // stands between a hairstyle and a white cap on her head.
+    await expect(outfit.stage()).toHaveAttribute("data-pictures", "2");
     await expect(outfit.stage()).toHaveAttribute("data-blank", "0");
   });
 
@@ -2492,10 +2497,10 @@ test("browses the game's transmog sets and dresses the character in them", async
     // hand, so it has nowhere on her to go and is left out until somebody asks for it.
     await expect(transmog.rows("Emberforge Plate")).toHaveCount(5);
 
-    // A body *and* a helm: 9 × 152 for the body — one part fewer than bare, because the helm
+    // A body *and* a helm: 11 × 200 for the body — one part fewer than bare, because the helm
     // covers the hair — plus the helm's own eight vertices. Two nodes in one scene is the
-    // shape the converter gained for that, and a loader reading only the first would say 1368.
-    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1376");
+    // shape the converter gained for that, and a loader reading only the first would say 2200.
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2208");
   });
 
   // A place holds one thing. Two sets' shoulders are two different appearances for the same
@@ -2534,7 +2539,7 @@ test("browses the game's transmog sets and dresses the character in them", async
       /Main hand.*Emberforge Blade/s,
     ]);
     await expect(outfit.summary()).toHaveText("5 of 13 slots filled");
-    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1376");
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2208");
   });
 
   // "On screen at all times" is not a figure of speech: a wardrobe of several thousand sets
@@ -2568,7 +2573,7 @@ test("browses the game's transmog sets and dresses the character in them", async
     await outfit.clear();
     await expect(outfit.slots()).toHaveCount(0);
     await expect(outfit.summary()).toHaveText("Nothing on yet. Pick an appearance from any set.");
-    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1520");
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2400");
   });
 
   // An appearance the game encrypts is one of the two there is nowhere on her to put, so the
