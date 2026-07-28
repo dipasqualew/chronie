@@ -53,27 +53,13 @@ use image::imageops::FilterType;
 use image::{ImageEncoder, Rgba, RgbaImage};
 use serde_json::Value;
 
+use crate::body::{self, Body};
 use crate::casc::GameFiles;
-use crate::customization::Customization;
+use crate::customization::{Customization, Picked};
 use crate::glb;
 use crate::icons::{data_url, pixels_of, png_of};
 use crate::m2::{self, Mesh, Model, Paint};
 use crate::worn::{ComponentTexture, Geoset, Worn};
-
-/// `humanfemale_hd.m2`, from the community listfile.
-///
-/// Note that 119563 (`humanfemale.m2`) is the *vanilla* model and not this one: retail has
-/// used the `_hd` mesh since Warlords, and the old file is still shipped.
-pub const HUMAN_FEMALE: u32 = 1_000_764;
-
-/// The composited body atlas, which is what M2 texture type 1 on a character wants.
-///
-/// 2048 × 1024 is what `ChrModelMaterial` states for `CharComponentTextureLayoutID` 104 and
-/// texture type 1, read off build 12.0.5.67 and recorded in `docs/character-rendering.md`. The
-/// atlas layout *is* the model's UV layout, so nothing about the character's texture
-/// coordinates depends on what gets composited into it.
-const ATLAS_WIDTH: u32 = 2048;
-const ATLAS_HEIGHT: u32 = 1024;
 
 /// The M2 texture type the composited atlas is bound as.
 ///
@@ -98,37 +84,6 @@ const CAPE_TEXTURE: u32 = 2;
 /// The atlas is the biggest thing the game paints anything with, so an item's own texture has
 /// no business being larger — the same bound `models` puts on a model shown alone.
 const LARGEST_TEXTURE: u32 = 2048;
-
-/// One rectangle of the atlas: where a part of the body is painted.
-struct Rect {
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-}
-
-/// Where each `ComponentSection` lands, for `CharComponentTextureLayoutID` 104.
-///
-/// Read off `CharComponentTextureSections` on build 12.0.5.67 and tabulated in
-/// `docs/character-rendering.md`, where the same numbers came back independently from
-/// wago.tools. Note the asymmetry: the body occupies only the left 1024 × 1024 of the atlas,
-/// and the right half is the face and the scalp.
-///
-/// **Section 8, the accessory, has no rectangle in this layout.** `ItemDisplayInfoMaterialRes`
-/// carries section-8 rows anyway, and on this model they have nowhere to go — which is a row
-/// to drop rather than a file to reject. Sections 9 and 10 are the scalp, and share theirs.
-const SECTIONS: [(u32, Rect); 10] = [
-    (0, Rect { x: 0, y: 0, width: 512, height: 256 }),        // arms upper
-    (1, Rect { x: 0, y: 256, width: 512, height: 256 }),      // arms lower
-    (2, Rect { x: 0, y: 512, width: 512, height: 128 }),      // hands
-    (3, Rect { x: 512, y: 0, width: 512, height: 256 }),      // torso upper
-    (4, Rect { x: 512, y: 256, width: 512, height: 128 }),    // torso lower
-    (5, Rect { x: 512, y: 384, width: 512, height: 256 }),    // legs upper
-    (6, Rect { x: 512, y: 640, width: 512, height: 256 }),    // legs lower
-    (7, Rect { x: 512, y: 896, width: 512, height: 128 }),    // feet
-    (9, Rect { x: 1024, y: 0, width: 1024, height: 1024 }),   // scalp upper
-    (10, Rect { x: 1024, y: 0, width: 1024, height: 1024 }),  // scalp lower
-];
 
 /// What an atlas holds where nothing has been composited into it.
 ///
@@ -180,10 +135,10 @@ pub struct Atlas {
 }
 
 impl Atlas {
-    /// An atlas with nothing composited into it.
-    pub fn unpainted() -> Self {
+    /// An atlas the size this body's layout states, with nothing composited into it.
+    pub fn unpainted(body: &Body) -> Self {
         Self {
-            pixels: RgbaImage::from_pixel(ATLAS_WIDTH, ATLAS_HEIGHT, Rgba(UNPAINTED)),
+            pixels: RgbaImage::from_pixel(body.atlas.0, body.atlas.1, Rgba(UNPAINTED)),
         }
     }
 
@@ -200,10 +155,11 @@ impl Atlas {
     /// Which BLP to hand it is [`crate::skin`]'s question, out of the player's own
     /// customization; this end of it only paints.
     #[tracing::instrument(name = "atlas.base", skip_all)]
-    pub fn base(&mut self, blp: &[u8]) -> Result<(), String> {
+    pub fn base(&mut self, body: &Body, blp: &[u8]) -> Result<(), String> {
         crate::budget::note_atlas();
-        let skin = pixels_of(blp, ATLAS_WIDTH)?;
-        self.pixels = image::imageops::resize(&skin, ATLAS_WIDTH, ATLAS_HEIGHT, FilterType::Triangle);
+        let skin = pixels_of(blp, body.atlas.0)?;
+        self.pixels =
+            image::imageops::resize(&skin, body.atlas.0, body.atlas.1, FilterType::Triangle);
         Ok(())
     }
 
@@ -228,9 +184,9 @@ impl Atlas {
     /// failing the whole character: a chestpiece whose lower torso is missing is still most of
     /// what the reader asked to see, and the alternative is an error where a body should be.
     #[tracing::instrument(name = "atlas.wear", skip_all, fields(textures = textures.len()))]
-    pub fn wear(&mut self, files: &dyn GameFiles, textures: &[ComponentTexture]) {
+    pub fn wear(&mut self, body: &Body, files: &dyn GameFiles, textures: &[ComponentTexture]) {
         for texture in textures {
-            let Some(rect) = rect_of(texture.section) else {
+            let Some(rect) = body.rect_of(texture.section) else {
                 continue;
             };
             let blp = match files.read(texture.file) {
@@ -238,7 +194,7 @@ impl Atlas {
                 Err(_) => continue,
             };
             let _held = tracing::info_span!("atlas.paint", fdid = texture.file).entered();
-            let Ok(decoded) = pixels_of(&blp, ATLAS_WIDTH) else {
+            let Ok(decoded) = pixels_of(&blp, body.atlas.0) else {
                 continue;
             };
             let scaled =
@@ -266,21 +222,13 @@ impl Atlas {
     }
 }
 
-/// The rectangle a section is painted into, or nothing where the layout has none for it.
-fn rect_of(section: u32) -> Option<&'static Rect> {
-    SECTIONS
-        .iter()
-        .find(|(which, _)| *which == section)
-        .map(|(_, rect)| rect)
-}
-
 /// The bare character, as a `.glb` in a data URL for the window to load.
 ///
 /// Unlike an appearance's model there is no `null` answer here. Every armour slot in the game
 /// is drawn on this one mesh, so an install that cannot produce it has nothing to fall back to
 /// and the failure is worth reporting rather than showing an empty pane over.
-pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
-    let glb = glb_of(files, None)?;
+pub fn model_of(files: &dyn GameFiles, who: &Who) -> Result<Value, String> {
+    let glb = glb_of(files, None, who)?;
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
@@ -297,13 +245,32 @@ pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
 /// outfit of no pieces at all is the same answer arrived at the other way, and is what taking
 /// everything off comes to — the bare body is [`model_of`], and the window already holds it.
 #[tracing::instrument(name = "character.worn_set", skip_all, fields(pieces = pieces.len()))]
-pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Result<Value, String> {
-    let worn = crate::worn::of_set(files, pieces)?;
+pub fn worn_set_of(
+    files: &dyn GameFiles,
+    pieces: &[crate::worn::Piece],
+    who: &Who,
+) -> Result<Value, String> {
+    let body = body::of(files, who.body)?;
+    let worn = crate::worn::of_set(files, &body, pieces)?;
     if worn.is_empty() {
         return Ok(serde_json::json!({ "model": Value::Null }));
     }
-    let glb = glb_of(files, Some(&worn))?;
+    let glb = Mannequin::standing(files, &body, &who.picked)?.wearing(Some(&worn))?;
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
+}
+
+/// Who the app is drawing: which body, and which swatch of each question about it.
+///
+/// The two travel together everywhere because neither means anything without the other — a
+/// swatch belongs to one `ChrModel`'s question and to no other body, and [`crate::body::of`]
+/// and [`crate::customization::of`] both have to be told the same one. Out of the settings
+/// file, and every field of it is the reader's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Who {
+    /// The `ChrModel` to draw, or anything this build has no mesh for — which falls back to
+    /// [`crate::body::DEFAULT`] rather than failing. See [`crate::body::of`].
+    pub body: u32,
+    pub picked: Vec<Picked>,
 }
 
 /// The `.glb` bytes themselves — which is what `dump_model` writes to a file.
@@ -313,8 +280,8 @@ pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Resu
 ///
 /// One outfit, so the body underneath it is built and thrown away. A gallery wants the body kept
 /// — see [`Mannequin`], which is what this is, held on to.
-pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
-    Mannequin::standing(files)?.wearing(worn)
+pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>, who: &Who) -> Result<Vec<u8>, String> {
+    Mannequin::standing(files, &body::of(files, who.body)?, &who.picked)?.wearing(worn)
 }
 
 /// The body every appearance in this app is shown on, with everything about it that no
@@ -336,6 +303,8 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
 /// encoded base atlas is a PNG of 2 million pixels that a gallery of helms would never look at.
 pub struct Mannequin<'a> {
     files: &'a dyn GameFiles,
+    /// Whose body it is: the mesh it was read out of, and the atlas its parts are painted in.
+    body: &'a Body,
     model: Model,
     /// The body with every geoset it holds still in it. [`dressed`] is what cuts it down, and it
     /// cuts a different way for every appearance.
@@ -354,21 +323,30 @@ pub struct Mannequin<'a> {
 
 impl<'a> Mannequin<'a> {
     /// Reads the body and everything about it that no appearance changes.
+    ///
+    /// `picked` is who she is — the reader's answers to what the character creation screen asks,
+    /// out of the settings file. It belongs here rather than in [`wearing`](Mannequin::wearing)
+    /// because none of it changes with what she has on: her skin, her face, her hair and her
+    /// head are the *body*, and that is the whole thing this type exists to build once.
     #[tracing::instrument(name = "character.mannequin", skip_all)]
-    pub fn standing(files: &'a dyn GameFiles) -> Result<Self, String> {
-        let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
+    pub fn standing(
+        files: &'a dyn GameFiles,
+        body: &'a Body,
+        picked: &[Picked],
+    ) -> Result<Self, String> {
+        let model = Model::parse(&files.read(body.model)?)?;
         let skin = model
             .skin_file_data_id()
             .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
         let whole = model.with_skin(&files.read(skin)?)?;
-        let herself = crate::customization::of(files)?;
+        let herself = crate::customization::of(files, body, picked)?;
 
-        let mut base = Atlas::unpainted();
+        let mut base = Atlas::unpainted(body);
         if let Some(herself) = herself.as_ref() {
             if herself.base != 0 {
-                base.base(&files.read(herself.base)?)?;
+                base.base(body, &files.read(herself.base)?)?;
             }
-            base.wear(files, &herself.over);
+            base.wear(body, files, &herself.over);
         }
 
         // Each decoded once here rather than per part, because several parts ask for one of them.
@@ -380,6 +358,7 @@ impl<'a> Mannequin<'a> {
 
         Ok(Self {
             files,
+            body,
             model,
             whole,
             herself,
@@ -483,7 +462,7 @@ impl<'a> Mannequin<'a> {
             };
         }
         let mut atlas = self.base.clone();
-        atlas.wear(self.files, textures);
+        atlas.wear(self.body, self.files, textures);
         atlas.png()
     }
 
@@ -636,7 +615,7 @@ fn dressed(mesh: &Mesh, worn: Option<&Worn>, herself: Option<&Customization>) ->
 /// A picture that will not decode leaves its part grey rather than failing the whole body,
 /// which is the same bargain the item models make: the shape is most of what was asked for.
 fn decode_file(files: &dyn GameFiles, fdid: u32) -> Option<Vec<u8>> {
-    files.read(fdid).and_then(|blp| png_of(&blp, ATLAS_WIDTH)).ok()
+    files.read(fdid).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
 }
 
 #[cfg(test)]
@@ -670,6 +649,11 @@ mod tests {
     const OFF_HAND: Appearance = (900_007, 15, 23);
     const SHIELD: Appearance = (900_015, 13, 14);
 
+    /// The body the fixtures describe, which is the one every test here draws on.
+    fn hers() -> Body {
+        body::of(&fixture_files(), body::DEFAULT).unwrap()
+    }
+
     fn mesh() -> Mesh {
         worn_mesh(&Worn::default())
     }
@@ -678,8 +662,9 @@ mod tests {
     /// fixture's own customization tables say she is.
     fn worn_mesh(worn: &Worn) -> Mesh {
         let files = fixture_files();
-        let herself = crate::customization::of(&files).unwrap();
-        let model = Model::parse(&files.read(HUMAN_FEMALE).unwrap()).unwrap();
+        let hers = hers();
+        let herself = crate::customization::of(&files, &hers, &[]).unwrap();
+        let model = Model::parse(&files.read(hers.model).unwrap()).unwrap();
         let skin = model.skin_file_data_id().unwrap();
         dressed(
             &model.with_skin(&files.read(skin).unwrap()).unwrap(),
@@ -707,13 +692,13 @@ mod tests {
 
     /// What the fixture's own tables say an appearance does to the body.
     fn worn_of(appearance: Appearance) -> Worn {
-        crate::worn::of_set(&fixture_files(), &[piece(appearance)]).unwrap()
+        crate::worn::of_set(&fixture_files(), &hers(), &[piece(appearance)]).unwrap()
     }
 
     /// And what they say a whole outfit does to it.
     fn outfit_of(appearances: &[Appearance]) -> Worn {
         let pieces: Vec<crate::worn::Piece> = appearances.iter().copied().map(piece).collect();
-        crate::worn::of_set(&fixture_files(), &pieces).unwrap()
+        crate::worn::of_set(&fixture_files(), &hers(), &pieces).unwrap()
     }
 
     /// The geosets a body ends up drawing, which is what the whole selection comes down to.
@@ -725,9 +710,9 @@ mod tests {
     /// each texture lands in are read without the skin underneath colouring the answer.
     fn atlas_of((display_info_id, display_type, inventory_type): Appearance) -> RgbaImage {
         let files = fixture_files();
-        let worn = crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap();
-        let mut atlas = Atlas::unpainted();
-        atlas.wear(&files, &worn.textures);
+        let worn = crate::worn::of(&files, &hers(), display_info_id, display_type, inventory_type).unwrap();
+        let mut atlas = Atlas::unpainted(&hers());
+        atlas.wear(&hers(), &files, &worn.textures);
         image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
     }
 
@@ -735,10 +720,10 @@ mod tests {
     fn body_atlas(worn: Option<Appearance>) -> RgbaImage {
         let files = fixture_files();
         let worn = worn.map(|(display_info_id, display_type, inventory_type)| {
-            crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap()
+            crate::worn::of(&files, &hers(), display_info_id, display_type, inventory_type).unwrap()
         });
 
-        let png = Mannequin::standing(&files).unwrap().atlas_png(worn.as_ref()).unwrap();
+        let png = Mannequin::standing(&files, &hers(), &[]).unwrap().atlas_png(worn.as_ref()).unwrap();
         image::load_from_memory(&png).unwrap().into_rgba8()
     }
 
@@ -748,14 +733,15 @@ mod tests {
     /// what a test wants to know is which texture landed there rather than how its edges were
     /// resolved against the neighbouring one.
     fn middle_of(atlas: &RgbaImage, section: u32) -> [u8; 4] {
-        let rect = rect_of(section).expect("the layout has a rectangle for that section");
+        let hers = hers();
+        let rect = hers.rect_of(section).expect("the layout has a rectangle for that section");
         atlas.get_pixel(rect.x + rect.width / 2, rect.y + rect.height / 4).0
     }
 
     /// The scene the window is handed for one appearance worn on the body.
     fn worn_scene(appearance: Appearance) -> Value {
         let worn = worn_of(appearance);
-        scene(&glb_of(&fixture_files(), Some(&worn)).unwrap())
+        scene(&glb_of(&fixture_files(), Some(&worn), &Who::default()).unwrap())
     }
 
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
@@ -818,6 +804,98 @@ mod tests {
         assert!(!geosets.contains(&1), "{geosets:?}");
     }
 
+    /* ---------- the other body ---------- */
+
+    /// The body beside hers, which is the whole of what a second `ChrModel` comes to here.
+    fn his() -> Body {
+        body::of(&fixture_files(), OTHER_BODY).unwrap()
+    }
+
+    /// `ChrModel` 1 — the male body, as `body::KNOWN` numbers it.
+    const OTHER_BODY: u32 = 1;
+
+    /// The mesh he is drawn from, as `drawn` reads a mesh.
+    fn his_mesh(picked: &[Picked]) -> Vec<u16> {
+        let files = fixture_files();
+        let his = his();
+        let herself = crate::customization::of(&files, &his, picked).unwrap();
+        let model = Model::parse(&files.read(his.model).unwrap()).unwrap();
+        let skin = model.skin_file_data_id().unwrap();
+        let whole = model.with_skin(&files.read(skin).unwrap()).unwrap();
+        drawn(&dressed(&whole, None, herself.as_ref()))
+    }
+
+    // A second body is a second mesh, and the parts that come out of it are his. The beard is
+    // the one worth naming: group 1 is a group the female body holds nothing in at all, so a
+    // part in it cannot have come from her mesh however the rest of this went.
+    #[test]
+    fn draws_the_body_it_was_asked_for_rather_than_the_one_it_always_drew() {
+        let his = his_mesh(&[Picked { question: 42, swatch: 421 }]);
+        assert!(his.contains(&101), "his beard: {his:?}");
+        assert!(!drawn(&mesh()).contains(&101), "the female body has no group 1 to draw");
+        // And his own hairstyle, out of a question only his body is asked.
+        assert!(his.contains(&2), "his hairstyle: {his:?}");
+    }
+
+    // His skin, which is a different picture on a differently sized buffer: the atlas is the
+    // layout's own statement and his layout is not hers. A body composited at the other body's
+    // size is every rectangle in the wrong place, and it is what the read replaced.
+    #[test]
+    fn paints_the_other_body_in_the_atlas_its_own_layout_states() {
+        let files = fixture_files();
+        let his = his();
+        let mannequin = Mannequin::standing(&files, &his, &[]).unwrap();
+        let png = mannequin.atlas_png(None).unwrap();
+        let atlas = image::load_from_memory(&png).unwrap().into_rgba8();
+
+        assert_eq!((atlas.width(), atlas.height()), his.atlas);
+        assert_ne!(his.atlas, hers().atlas, "the two layouts have to differ to prove anything");
+        // The colour his own skin swatch paints, over the whole buffer — and not hers.
+        assert_eq!(atlas.get_pixel(1, 1).0, [90, 90, 90, 255]);
+    }
+
+    // And the same appearance on him: a chestpiece paints into his rectangles, which are his
+    // layout's rather than hers.
+    #[test]
+    fn wears_an_appearance_on_the_body_it_is_being_shown_on() {
+        let files = fixture_files();
+        let his = his();
+        let worn = crate::worn::of_set(&files, &his, &[piece(CHESTPIECE)]).unwrap();
+        let mannequin = Mannequin::standing(&files, &his, &[]).unwrap();
+        let png = mannequin.atlas_png(Some(&worn)).unwrap();
+        let atlas = image::load_from_memory(&png).unwrap().into_rgba8();
+
+        let torso = his.rect_of(3).expect("his layout lays out an upper torso");
+        let painted = atlas.get_pixel(torso.x + 4, torso.y + 4).0;
+        assert_ne!(painted, [90, 90, 90, 255], "nothing was painted onto him");
+        // The male texture of the pair, which is the one `ComponentTextureFileData` keeps for
+        // his body — hers is the other colour entirely.
+        assert_eq!(painted, [180, 90, 30, 255]);
+    }
+
+    // And the same body once somebody has said who she is, which is the whole of what an answer
+    // does at this end: one group takes another of its values and nothing else about her moves.
+    // Her head is the part worth naming in that "nothing else" — it comes out of a question of
+    // its own, and an answer that reset the questions it was not about would take it with it.
+    #[test]
+    fn draws_the_hairstyle_the_reader_chose_rather_than_the_one_the_game_opens_on() {
+        let files = fixture_files();
+        let hers = hers();
+        let herself =
+            crate::customization::of(&files, &hers, &[Picked { question: 16, swatch: 133 }])
+                .unwrap();
+        let model = Model::parse(&files.read(hers.model).unwrap()).unwrap();
+        let skin = model.skin_file_data_id().unwrap();
+        let body = model.with_skin(&files.read(skin).unwrap()).unwrap();
+
+        let geosets = drawn(&dressed(&body, None, herself.as_ref()));
+
+        assert!(geosets.contains(&1), "the hairstyle she chose: {geosets:?}");
+        assert!(!geosets.contains(&2), "and not the one the game opens on: {geosets:?}");
+        assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
+        assert!(geosets.contains(&702), "she has no ears: {geosets:?}");
+    }
+
     // The last thing on that head, and the one geoset selection has nothing to say about: her
     // eye glow is *selected* — no ordinary eye colour turns group 17 off — and it is composited
     // by adding, which glTF cannot write. So the scene comes out with one primitive fewer than
@@ -828,7 +906,7 @@ mod tests {
         let body = mesh();
         assert!(drawn(&body).contains(&1701), "the glow is one of the parts a bare body draws");
 
-        let scene = scene(&glb_of(&fixture_files(), None).unwrap());
+        let scene = scene(&glb_of(&fixture_files(), None, &Who::default()).unwrap());
         assert_eq!(
             scene["meshes"][0]["primitives"].as_array().unwrap().len(),
             body.parts.len() - 1
@@ -872,10 +950,10 @@ mod tests {
     // is drawn in glTF's default colour, and on a head that reads as a mask.
     #[test]
     fn paints_the_hair_with_the_atlas_of_its_own_rather_than_leaving_it_white() {
-        let herself = crate::customization::of(&fixture_files()).unwrap().expect("a character");
+        let herself = crate::customization::of(&fixture_files(), &hers(), &[]).unwrap().expect("a character");
         assert_eq!(herself.atlases, vec![(6, 160_007), (19, 160_008)]);
 
-        let scene = scene(&glb_of(&fixture_files(), None).unwrap());
+        let scene = scene(&glb_of(&fixture_files(), None, &Who::default()).unwrap());
         let materials = scene["materials"].as_array().unwrap();
         assert!(
             materials.iter().all(|material| material["pbrMetallicRoughness"]
@@ -893,7 +971,7 @@ mod tests {
     // these dimensions, so a buffer of the wrong size is armour landing somewhere else.
     #[test]
     fn composites_an_atlas_the_size_the_layout_states() {
-        let png = Atlas::unpainted().png().unwrap();
+        let png = Atlas::unpainted(&hers()).png().unwrap();
         let decoded = image::load_from_memory(&png).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (2048, 1024));
     }
@@ -903,8 +981,8 @@ mod tests {
     // needs too.
     #[test]
     fn lays_the_base_skin_over_the_whole_atlas() {
-        let mut atlas = Atlas::unpainted();
-        atlas.base(&fixture_files().read(BASE_SKIN).unwrap()).unwrap();
+        let mut atlas = Atlas::unpainted(&hers());
+        atlas.base(&hers(), &fixture_files().read(BASE_SKIN).unwrap()).unwrap();
         let decoded = image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8();
         assert_eq!((decoded.width(), decoded.height()), (2048, 1024));
 
@@ -988,7 +1066,8 @@ mod tests {
     // item layer instead of blending it and the hole is in the skin.
     #[test]
     fn shows_the_skin_through_a_transparent_item_layer() {
-        let arms = rect_of(0).unwrap();
+        let hers = hers();
+        let arms = hers.rect_of(0).unwrap();
         let (x, y) = (arms.x + arms.width / 2, arms.y + arms.height - 8);
         let worn = body_atlas(Some(CHESTPIECE));
         let bare = body_atlas(None);
@@ -999,7 +1078,7 @@ mod tests {
     // The whole module, as the window asks for it: a body with geometry and a picture in it.
     #[test]
     fn hands_the_window_a_body_to_turn_around() {
-        let answer = model_of(&fixture_files()).unwrap();
+        let answer = model_of(&fixture_files(), &Who::default()).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -1096,7 +1175,8 @@ mod tests {
     #[test]
     fn blends_an_item_layer_rather_than_copying_it_over_the_body() {
         let atlas = atlas_of(CHESTPIECE);
-        let arms = rect_of(0).unwrap();
+        let hers = hers();
+        let arms = hers.rect_of(0).unwrap();
         // The upper-arm texture is painted for its top half and empty for its bottom one, so
         // the sleeve is there and the arm below it is still the body.
         assert_eq!(atlas.get_pixel(arms.x + arms.width / 2, arms.y + arms.height / 4).0, [90, 200, 60, 255]);
@@ -1111,7 +1191,8 @@ mod tests {
     #[test]
     fn scales_a_texture_up_with_a_linear_filter() {
         let atlas = atlas_of(CHESTPIECE);
-        let torso = rect_of(3).unwrap();
+        let hers = hers();
+        let torso = hers.rect_of(3).unwrap();
         let seam = atlas.get_pixel(torso.x + torso.width / 2, torso.y + torso.height / 2).0;
         let (top, bottom) = ([40, 160, 220, 255], [220, 60, 140, 255]);
         assert_ne!(seam, top);
@@ -1127,12 +1208,12 @@ mod tests {
     // lost with it. The boots carry one.
     #[test]
     fn drops_a_section_the_layout_has_nowhere_to_put() {
-        let boots = crate::worn::of(&fixture_files(), BOOTS.0, BOOTS.1, BOOTS.2).unwrap();
+        let boots = crate::worn::of(&fixture_files(), &hers(), BOOTS.0, BOOTS.1, BOOTS.2).unwrap();
         assert!(boots.textures.iter().any(|texture| texture.section == 8));
         let atlas = atlas_of(BOOTS);
         assert_eq!(middle_of(&atlas, 7), [20, 100, 240, 255]);
         assert_eq!(middle_of(&atlas, 6), [150, 30, 90, 255]);
-        assert!(rect_of(8).is_none());
+        assert!(hers().rect_of(8).is_none());
     }
 
     // A texture this install does not hold leaves its part of the body bare. A chestpiece with
@@ -1149,7 +1230,7 @@ mod tests {
     // picture and still the same mesh.
     #[test]
     fn hands_the_window_a_body_with_one_appearance_on_it() {
-        let answer = worn_set_of(&fixture_files(), &[piece(ROBE)]).unwrap();
+        let answer = worn_set_of(&fixture_files(), &[piece(ROBE)], &Who::default()).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -1163,12 +1244,12 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_an_appearance_it_cannot_read() {
         for display in [900_900, 404_040] {
-            let answer = worn_set_of(&fixture_files(), &[piece((display, CHESTPIECE.1, 0))]).unwrap();
+            let answer = worn_set_of(&fixture_files(), &[piece((display, CHESTPIECE.1, 0))], &Who::default()).unwrap();
             assert_eq!(answer["model"], Value::Null, "display {display}");
         }
         // And an outfit with nothing in it at all, which is what taking every piece off comes
         // to: the same `null`, and the window falls back to the bare body it already holds.
-        assert_eq!(worn_set_of(&fixture_files(), &[]).unwrap()["model"], Value::Null);
+        assert_eq!(worn_set_of(&fixture_files(), &[], &Who::default()).unwrap()["model"], Value::Null);
     }
 
     /* ---------- wearing the four slots that have geometry ---------- */
@@ -1298,8 +1379,8 @@ mod tests {
     /// question wider.
     fn outfit_atlas(appearances: &[Appearance]) -> RgbaImage {
         let files = fixture_files();
-        let mut atlas = Atlas::unpainted();
-        atlas.wear(&files, &outfit_of(appearances).textures);
+        let mut atlas = Atlas::unpainted(&hers());
+        atlas.wear(&hers(), &files, &outfit_of(appearances).textures);
         image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
     }
 
@@ -1383,8 +1464,8 @@ mod tests {
     fn paints_a_later_layer_over_an_earlier_one_in_the_same_rectangle() {
         let files = fixture_files();
         let over = |first, second| {
-            let mut atlas = Atlas::unpainted();
-            atlas.wear(&files, &[
+            let mut atlas = Atlas::unpainted(&hers());
+            atlas.wear(&hers(), &files, &[
                 ComponentTexture { section: 6, file: first },
                 ComponentTexture { section: 6, file: second },
             ]);
@@ -1422,9 +1503,9 @@ mod tests {
         let robe = worn_of(ROBE);
         let helm = worn_of(HELM);
         for (name, written) in [
-            ("character.glb", glb_of(&fixture_files(), None).unwrap()),
-            ("robe.glb", glb_of(&fixture_files(), Some(&robe)).unwrap()),
-            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm)).unwrap()),
+            ("character.glb", glb_of(&fixture_files(), None, &Who::default()).unwrap()),
+            ("robe.glb", glb_of(&fixture_files(), Some(&robe), &Who::default()).unwrap()),
+            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm), &Who::default()).unwrap()),
         ] {
             let committed = std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1443,11 +1524,15 @@ mod tests {
 
     // An install this app cannot read the body out of is worth saying so about rather than
     // showing an empty pane over: unlike an appearance with no model, there is no icon to fall
-    // back to and nothing ordinary about a game with no Human Female in it.
+    // back to and nothing ordinary about a game with no bodies in it.
+    //
+    // What it fails on now is `ChrModel` rather than the mesh, because the body is read before
+    // it is drawn — the layout, the atlas size and the rectangles all come out of the install,
+    // and a body with none of those is nothing to draw rather than a character missing a part.
     #[test]
     fn says_so_when_the_install_holds_no_character_model() {
         let temp = tempfile::tempdir().unwrap();
-        let error = glb_of(&DirFiles::new(temp.path()), None).unwrap_err();
-        assert!(error.contains("1000764"), "{error}");
+        let error = glb_of(&DirFiles::new(temp.path()), None, &Who::default()).unwrap_err();
+        assert!(error.contains("3384313.db2"), "{error}");
     }
 }

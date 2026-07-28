@@ -13,7 +13,8 @@ columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the sa
 2026-07-27 — the two things this file used to carry on the community's say-so; the
 customization chain below against `12.0.5.67823` on 2026-07-27; `ComponentModelFileData`,
 `HelmetGeosetData` and the cape chain against `12.0.5.67` on 2026-07-27; and the customization
-options, their swatches and the geosets those drive against `12.0.5.67` on 2026-07-28. Column
+options, their swatches and the geosets those drive, and what a body is — `ChrModel`,
+`CharComponentTextureSections`, `ChrModelMaterial` — against `12.0.5.67` on 2026-07-28. Column
 indices and file ids are stated as *verified* only where they were read out of that
 install and cross-checked against the data they resolve to. Everything else is marked
 as coming from [WoWDBDefs](https://github.com/wowdev/WoWDBDefs) or
@@ -131,7 +132,7 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `CharComponentTextureLayouts` | 1360262 | fixed | yes |
 | `ChrModelMaterial` | 3566562 | fixed | yes |
 | `ChrModelTextureLayer` | 3548976 | fixed | yes |
-| `ChrModel` | 3384313 | fixed | yes |
+| `ChrModel` | 3384313 | fixed | yes, **columns read** |
 | `ChrCustomizationChoice` | 3450554 | fixed | yes |
 | `ChrCustomizationOption` | 3384247 | fixed | yes |
 | `ChrCustomizationElement` | 3512765 | fixed | yes |
@@ -579,7 +580,8 @@ What an item paints is above; what the body already *is* comes from somewhere el
 A character is a set of customizations the player picked, and four hops stand between a swatch
 and what it does. All of them were read off `12.0.5.67823` on 2026-07-27 with
 `examples/dump_customization`; the options, their swatches and the geosets those drive were
-read off `12.0.5.67` on 2026-07-28. That is what to run again after a patch:
+read off `12.0.5.67` on 2026-07-28, as were every question this body can be asked and every
+swatch of each. That is what to run again after a patch:
 
 ```sh
 cargo run --example dump_customization -- "<install>"
@@ -636,7 +638,9 @@ first face names sixteen materials — one per skin swatch — and only the one 
 `RelatedChrCustomizationChoiceID` is the chosen skin applies. Taking them all leaves whichever
 sits last, which is a face of the wrong colour on a body of the right one.
 
-What Human Female's first swatch of each option comes to, read on 12.0.5.67:
+What Human Female's first swatch of each option comes to, read on 12.0.5.67 — the male body's
+questions are ids of their own and include three the female body is never asked, a moustache, a
+beard and sideburns:
 
 | Option | Swatch 0 | Drives |
 |---|---|---|
@@ -657,6 +661,81 @@ What Human Female's first swatch of each option comes to, read on 12.0.5.67:
 **A value of 0 is the game switching a group off**, which is what "no necklace" is — and it is
 a row to apply rather than a row to drop, because the group's own value 1 is a necklace.
 `docs/character-rendering.md` has what that costs when it is missed.
+
+### Which body, verified
+
+A body is a `ChrModel`, and three tables say what one *is*. All of them were read off 12.0.5.67
+on 2026-07-28 with `examples/dump_bodies`, which is what to run again after a patch:
+
+```
+ChrModel                                (id inline, in column 2)
+  col3 = Sex                             0 male, 1 female
+  col4 = DisplayID                     ──▶ CreatureDisplayInfo, and the mesh — see below
+  col5 = CharComponentTextureLayoutID    103 Human Male, 104 Human Female
+     │
+     ▼
+CharComponentTextureSections            (id beside the rows)
+  col0 = CharComponentTextureLayoutID
+  col1 = SectionType   col2 = X   col3 = Y   col4 = Width   col5 = Height
+
+ChrModelMaterial                        (id inline, in column 0)
+  col1 = CharComponentTextureLayoutID
+  col2 = TextureType                     1 is the composited body atlas
+  col3 = Width   col4 = Height
+```
+
+Layout 104's ten sections come out as exactly the table
+`docs/character-rendering.md` already carried, which is what says the columns are right; layout
+103 states the same ten and the same 2048 × 1024 atlas. `CharComponentTextureLayouts` (1360262)
+states a size per layout as well — two columns, width then height — and is not read, because
+`ChrModelMaterial` states one per *texture type* and the body's is the one that matters.
+
+**The mesh is not reachable from this repository yet.** `ChrModel.DisplayID` →
+`CreatureDisplayInfo.ModelID` → `CreatureModelData.FileDataID` is the chain, and it resolves:
+56658 → 7599 → 1000764 for the female body and 57899 → 7661 → 1011653 for the male. Neither of
+those two tables' own FileDataIDs is known here — a scan of the storage for a table holding
+1000764 found none — so the last hop was followed on [wago.tools](https://wago.tools) and the
+two answers are constants in `body::KNOWN`, each with a render behind it. Finding those two
+tables is the first thing the next race needs.
+
+### Every swatch, not only the first, verified
+
+The table above is what a body nobody has said anything about comes to. What the reader may say
+instead is the same rows without the "swatch 0" filter, and `customization::questions` is that
+read; `dump_customization --questions` prints it. On 12.0.5.67, twelve of those thirteen
+questions reach a reader:
+
+| Question | Swatches | Named |
+|---|---|---|
+| 15 Face | 45 | **0** |
+| 14 Skin Color | 23 | 1 |
+| 16 Hair Style | 34 | 34 |
+| 17 Hair Color | 58 | 15 |
+| 464 Eye Color | 42 | 5 |
+| 501 Piercings | 15 | 15 |
+| 510 Necklace | 9 | 9 |
+| 516 Makeup | 7 | 7 |
+| 526 Face Shape | 3 | 3 |
+| 970 Eyebrows | 26 | 26 |
+| 6339 Eyesight | 4 | 4 |
+| 8790 Ears | 2 | 2 |
+
+**Most swatches have no name**, which is not a gap in the read: the character creation screen
+draws a square of colour and `Name_lang` is genuinely empty. A window over this numbers them by
+their place in `OrderIndex`, and a question can be half named — Hair Color names fifteen of
+fifty-eight.
+
+**8523 Eye Style is the thirteenth and is not offered.** No element names any of its swatches,
+so nothing follows from answering it. That is the rule `questions` applies — a question none of
+whose swatches drives a geoset or a material is left out — and it is worth applying rather than
+showing a control that demonstrably changes nothing.
+
+**Not every swatch of a question does the same kinds of thing.** Skin swatch 85 has three
+elements — the skin and the two halves of the underwear — and a face authored against it; skin
+swatch 96 has one, the skin, and no element anywhere names it as a related choice. So choosing
+that one is a body with no underwear painted on and no face layer over the base skin, which is
+the game's own data rather than a hop that went missing. `dump_customization <choice>` now
+prints both directions of the relation, which is what says so.
 
 **One choice paints several targets, and only one of them is the skin.** Choice 85 has three
 elements: material 823 on target 1, and 824 and 825 on targets 13 and 14. All three resolve to

@@ -25,8 +25,22 @@
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog worn/900012/3 \
 //!     apps/desktop/fixtures/transmog/robe.glb
 //! ```
+//!
+//! Anything after the output path is **who is being drawn**: `body=<ChrModel>` for which body,
+//! and `<question>:<swatch>` a piece for the answers about it — the ids
+//! `dump_customization --questions` prints, and as many as you like. Nothing said is the body
+//! the app opens on at the swatches the game opens on, which is what the fixtures' own `.glb`s
+//! are regenerated from — so this is the way to see one answer's worth of difference, or the
+//! other body, without the app running:
+//!
+//! ```sh
+//! cargo run --example dump_model -- "/Applications/World of Warcraft" character her.glb 17:167
+//! cargo run --example dump_model -- "/Applications/World of Warcraft" character him.glb body=1
+//! ```
 
-use chronie_desktop_lib::{casc, character, models, transmog, worn};
+use chronie_desktop_lib::character::Who;
+use chronie_desktop_lib::customization::Picked;
+use chronie_desktop_lib::{body, casc, character, models, transmog, worn};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -46,9 +60,26 @@ fn main() {
 
     let what = args.next().unwrap_or_else(|| usage());
     let out = args.next().unwrap_or_else(|| usage());
+    let rest: Vec<String> = args.collect();
+    let who = Who {
+        body: rest
+            .iter()
+            .find_map(|arg| arg.strip_prefix("body=")?.parse().ok())
+            .unwrap_or(body::DEFAULT),
+        picked: rest
+            .iter()
+            .filter(|arg| !arg.starts_with("body="))
+            .map(|arg| answer(arg))
+            .collect::<Vec<Picked>>(),
+    };
+    let who = &who;
+    let hers = body::of(files.as_ref(), who.body).unwrap_or_else(|error| {
+        eprintln!("Could not read the body to draw: {error}");
+        std::process::exit(1);
+    });
 
     let written = match what.split('/').collect::<Vec<&str>>()[..] {
-        ["character"] => character::glb_of(files.as_ref(), None).map(Some),
+        ["character"] => character::glb_of(files.as_ref(), None, who).map(Some),
         // A whole set, walked out of the game's own tables exactly as the window walks it —
         // which is the only way to put the priority table and the draw order in front of real
         // data, since nothing in the test suite is allowed to read an install.
@@ -57,9 +88,9 @@ fn main() {
             worn_set(files.as_ref(), set)
                 .and_then(|pieces| {
                     println!("{} pieces", pieces.len());
-                    worn::of_set(files.as_ref(), &pieces)
+                    worn::of_set(files.as_ref(), &hers, &pieces)
                 })
-                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), who))
                 .map(Some)
         }
         ["worn", display, slot] | ["worn", display, slot, _] => {
@@ -71,13 +102,13 @@ fn main() {
                 Some(inventory_type) => inventory_type.parse().unwrap_or_else(|_| usage()),
                 None => 0,
             };
-            worn::of(files.as_ref(), display, slot, worn_in)
-                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
+            worn::of(files.as_ref(), &hers, display, slot, worn_in)
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), who))
                 .map(Some)
         }
         _ => {
             let display: u32 = what.parse().unwrap_or_else(|_| usage());
-            models::glb_of(files.as_ref(), display)
+            models::glb_of(files.as_ref(), &hers, display)
         }
     };
 
@@ -124,11 +155,20 @@ fn worn_set(files: &dyn casc::GameFiles, set_id: u32) -> Result<Vec<worn::Piece>
         .collect())
 }
 
+/// One `<question>:<swatch>`, as a reader's answer about the body.
+fn answer(arg: &str) -> Picked {
+    let (question, swatch) = arg.split_once(':').unwrap_or_else(|| usage());
+    match (question.parse(), swatch.parse()) {
+        (Ok(question), Ok(swatch)) => Picked { question, swatch },
+        _ => usage(),
+    }
+}
+
 fn usage() -> ! {
     eprintln!(
         "usage: dump_model <wow install> | --fixtures <dir>  \
          <displayInfoID> | character | worn/<displayInfoID>/<displayType> | set/<transmogSetID>  \
-         <out.glb>"
+         <out.glb>  [<question>:<swatch>...]"
     );
     std::process::exit(2)
 }

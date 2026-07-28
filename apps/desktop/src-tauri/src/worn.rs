@@ -79,6 +79,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
+use crate::body::Body;
 use crate::casc::GameFiles;
 use crate::db2::{Db2, Row};
 use crate::models::{MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
@@ -136,13 +137,12 @@ mod helmet_column {
     pub const HIDE_GEOSET_GROUP: usize = 1;
 }
 
-/// The body every appearance in this app is worn on, as the game numbers bodies.
+/// There is no class anywhere in this module, and that is a decision rather than an omission: a
+/// class-specific texture is a demon hunter's tattoos and a handful of tabards, and a wardrobe is
+/// browsed by a reader rather than by a character.
 ///
-/// Human Female, matching [`crate::character::HUMAN_FEMALE`]. There is no class: a
-/// class-specific texture is a demon hunter's tattoos and a handful of tabards, and a wardrobe
-/// is browsed by a reader rather than by a character.
-const FEMALE: u32 = 1;
-const HUMAN: u32 = 1;
+/// The *body* is [`crate::body::Body`], passed in — its race and its sex are what an item's
+/// textures and a helm's hidden groups are chosen by, and both used to be a Human Female here.
 
 /// The genders the game marks a file with when it does not belong to one body, and the class
 /// it marks one with when it fits any class. All three are "no opinion" rather than a body.
@@ -386,13 +386,12 @@ pub fn held(display_type: u32) -> bool {
 const BACK: u32 = 9;
 const HEAD: u32 = 0;
 
-/// Which of `HelmetGeosetVis`'s two elements is this app's body.
+/// `HelmetGeosetVis` is two elements, male then female — which is the community's reading and is
+/// exactly [`crate::body::Body::sex`], so the sex indexes the array directly.
 ///
-/// The community's definitions read the array as male then female, and this app draws a Human
-/// Female. On 12.0.5.67 the two elements name the same hidden groups for hair on every one of
-/// the 5,698 helms in the table — 4,576 hide it either way — so the acceptance this was
-/// written for does not turn on the choice; the rarer groups do.
-const FEMALE_VIS: usize = 1;
+/// On 12.0.5.67 the two elements name the same hidden groups for hair on every one of the 5,698
+/// helms in the table — 4,576 hide it either way — so nothing about a *hairstyle* turns on the
+/// choice; the rarer groups do.
 
 /// One piece of an outfit: which appearance, which slot it fills, and where its item is worn.
 ///
@@ -487,12 +486,14 @@ impl Worn {
 /// single appearance was worth shipping first.
 pub fn of(
     files: &dyn GameFiles,
+    body: &Body,
     display_info_id: u32,
     display_type: u32,
     inventory_type: u32,
 ) -> Result<Worn, String> {
     of_set(
         files,
+        body,
         &[Piece {
             display_info_id,
             display_type,
@@ -521,8 +522,8 @@ pub fn of(
 /// game's own answer to the second, and a reader that collapsed by slot first would quietly
 /// drop one of them.
 #[tracing::instrument(name = "worn.of_set", skip_all, fields(pieces = pieces.len()))]
-pub fn of_set(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Worn, String> {
-    Ok(each(files, &[pieces])?
+pub fn of_set(files: &dyn GameFiles, body: &Body, pieces: &[Piece]) -> Result<Worn, String> {
+    Ok(each(files, body, &[pieces])?
         .pop()
         .expect("one outfit in, one outfit out"))
 }
@@ -546,7 +547,7 @@ pub fn of_set(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Worn, String> {
 /// helms never opens `ComponentTextureFileData`, and a gallery of nothing but chestpieces never
 /// opens the two model tables.
 #[tracing::instrument(name = "worn.each", skip_all, fields(outfits = outfits.len()))]
-pub fn each(files: &dyn GameFiles, outfits: &[&[Piece]]) -> Result<Vec<Worn>, String> {
+pub fn each(files: &dyn GameFiles, body: &Body, outfits: &[&[Piece]]) -> Result<Vec<Worn>, String> {
     // Draw order before anything else, because everything below walks these lists in order and
     // the textures come out of them stacked. A stable sort, so pieces sharing a layer — the
     // shirt and the legs, the head and the feet — keep the order the set named them in.
@@ -590,7 +591,7 @@ pub fn each(files: &dyn GameFiles, outfits: &[&[Piece]]) -> Result<Vec<Worn>, St
         wanting.push(Wanted {
             hangs: hangs_in(&drawn),
             cape: cape_in(&drawn),
-            vis: helmet_vis(&drawn),
+            vis: helmet_vis(&drawn, body.sex as usize),
             paints,
             drawn,
         });
@@ -622,7 +623,11 @@ pub fn each(files: &dyn GameFiles, outfits: &[&[Piece]]) -> Result<Vec<Worn>, St
     } else {
         None
     };
-    let helmets = Helmets::read(files, wanting.iter().flat_map(|outfit| outfit.vis.iter()))?;
+    let helmets = Helmets::read(
+        files,
+        body.race,
+        wanting.iter().flat_map(|outfit| outfit.vis.iter()),
+    )?;
 
     wanting
         .iter()
@@ -637,7 +642,7 @@ pub fn each(files: &dyn GameFiles, outfits: &[&[Piece]]) -> Result<Vec<Worn>, St
                     .filter_map(|(section, material)| {
                         Some(ComponentTexture {
                             section: *section,
-                            file: named.for_this_body(*material, bodies)?,
+                            file: named.for_this_body(body, *material, bodies)?,
                         })
                     })
                     .collect()
@@ -647,7 +652,7 @@ pub fn each(files: &dyn GameFiles, outfits: &[&[Piece]]) -> Result<Vec<Worn>, St
             Ok(Worn {
                 textures: painted,
                 geosets: geosets_of(&outfit.drawn),
-                models: models_of(models.as_ref(), &outfit.hangs, textures.as_ref()),
+                models: models_of(body, models.as_ref(), &outfit.hangs, textures.as_ref()),
                 cape: outfit.cape.and_then(|resource| {
                     textures
                         .as_ref()
@@ -724,6 +729,7 @@ fn hangs_in(drawn: &[(Piece, &Row<'_>)]) -> Vec<Hung> {
 /// hangs nothing off the body, and on a real install `ModelFileData` is a row per model the
 /// client owns. So they arrive here already read, and `None` is a batch where nothing hangs.
 fn models_of(
+    body: &Body,
     models: Option<&ModelFiles>,
     hangs: &[Hung],
     textures: Option<&TextureFiles>,
@@ -734,7 +740,7 @@ fn models_of(
 
     let mut found: Vec<WornModel> = Vec::with_capacity(hangs.len());
     for hung in hangs {
-        let Some(file) = models.file(hung.model, hung.slot) else {
+        let Some(file) = models.file(body, hung.model, hung.slot) else {
             continue;
         };
         let model = WornModel {
@@ -856,7 +862,7 @@ impl ModelFiles {
     ///
     /// Silence means what it means everywhere else here: a model nothing was said about is the
     /// fallback rather than a reject, which is what a weapon and a shield are.
-    pub(crate) fn file(&self, resource: u32, slot: usize) -> Option<u32> {
+    pub(crate) fn file(&self, body: &Body, resource: u32, slot: usize) -> Option<u32> {
         let mut candidates = self.candidates.get(&resource)?.clone();
         // A file modelled for the other shoulder is not a candidate at all, whatever body it is
         // for. A file with no side — every helm, and everything untagged — is one for any.
@@ -865,7 +871,7 @@ impl ModelFiles {
             Some(side) if *side < SIDES => *side == wanted,
             _ => true,
         });
-        for_this_body(&candidates, &self.bodies)
+        for_this_body(body, &candidates, &self.bodies)
     }
 }
 
@@ -874,8 +880,13 @@ impl ModelFiles {
 /// [`crate::models`] shows one appearance's geometry without a body under it, and asks this
 /// exactly once — so it pays for the two tables rather than being handed them. Everything on a
 /// character goes through [`ModelFiles`] instead.
-pub fn model_file(files: &dyn GameFiles, resource: u32, slot: usize) -> Result<Option<u32>, String> {
-    Ok(ModelFiles::read(files)?.file(resource, slot))
+pub fn model_file(
+    files: &dyn GameFiles,
+    body: &Body,
+    resource: u32,
+    slot: usize,
+) -> Result<Option<u32>, String> {
+    Ok(ModelFiles::read(files)?.file(body, resource, slot))
 }
 
 /// `TextureFileData`, parsed: every `.blp` each material resource names, lowest first.
@@ -916,10 +927,11 @@ impl TextureFiles {
     /// The one file a resource names that was painted for the body this app draws.
     fn for_this_body(
         &self,
+        body: &Body,
         resource: u32,
         bodies: &HashMap<u32, (u32, u32, u32)>,
     ) -> Option<u32> {
-        for_this_body(self.0.get(&resource)?, bodies)
+        for_this_body(body, self.0.get(&resource)?, bodies)
     }
 }
 
@@ -952,12 +964,12 @@ fn cape_in(drawn: &[(Piece, &Row<'_>)]) -> Option<u32> {
 /// Every head the set names rather than one, and their groups together. A set holds one helm and
 /// this costs nothing to say properly; hiding is the one thing here where two pieces cannot
 /// disagree, because a group hidden by either is hidden.
-fn helmet_vis(drawn: &[(Piece, &Row<'_>)]) -> HashSet<u32> {
+fn helmet_vis(drawn: &[(Piece, &Row<'_>)], sex: usize) -> HashSet<u32> {
     drawn
         .iter()
         .filter(|(piece, _)| piece.display_type == HEAD)
         .map(|(_, display)| {
-            display.element(display_column::HELMET_GEOSET_VIS, FEMALE_VIS, MODEL_SLOT_BITS)
+            display.element(display_column::HELMET_GEOSET_VIS, sex, MODEL_SLOT_BITS)
         })
         // 210 of the game's helms say zero here, and it means an open helm that hides nothing.
         .filter(|entry| *entry != 0)
@@ -976,6 +988,7 @@ impl Helmets {
     #[tracing::instrument(name = "worn.helmets", skip_all)]
     fn read<'a>(
         files: &dyn GameFiles,
+        race: u32,
         wanted: impl Iterator<Item = &'a u32>,
     ) -> Result<Self, String> {
         let wanted: HashSet<u32> = wanted.copied().collect();
@@ -986,7 +999,9 @@ impl Helmets {
         let mut hiding: HashMap<u32, Vec<u16>> = HashMap::new();
         for row in table
             .rows()
-            .filter(|row| wanted.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == HUMAN)
+            .filter(|row| {
+                wanted.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == race
+            })
         {
             let Ok(group) = u16::try_from(row.number(helmet_column::HIDE_GEOSET_GROUP)) else {
                 continue;
@@ -1081,18 +1096,22 @@ fn bodies_in(files: &dyn GameFiles, table: u32) -> Result<HashMap<u32, (u32, u32
 ///
 /// `candidates` is in ascending order, which is what the fallback leans on: the client numbers
 /// a file's variants above the file itself.
-fn for_this_body(candidates: &[u32], bodies: &HashMap<u32, (u32, u32, u32)>) -> Option<u32> {
+fn for_this_body(
+    body: &Body,
+    candidates: &[u32],
+    bodies: &HashMap<u32, (u32, u32, u32)>,
+) -> Option<u32> {
     let mut best: Option<(u32, u32)> = None;
     for file in candidates {
         let Some((gender, class, race)) = bodies.get(file).copied() else {
             continue;
         };
         // No class at all, so a file kept for one is somebody else's.
-        let gendered = gender == FEMALE || gender == ANY_GENDER || gender == NO_GENDER;
+        let gendered = gender == body.sex || gender == ANY_GENDER || gender == NO_GENDER;
         if !gendered || class != ANY_CLASS {
             continue;
         }
-        let rank = u32::from(gender == FEMALE) * 2 + u32::from(race == HUMAN);
+        let rank = u32::from(gender == body.sex) * 2 + u32::from(race == body.race);
         if best.is_none_or(|(chosen, _)| rank > chosen) {
             best = Some((rank, *file));
         }
@@ -1200,6 +1219,12 @@ mod tests {
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
 
+    /// The body an appearance is being read for, which is what says which of a resource's
+    /// files it wears and which groups a helm takes off it.
+    fn hers() -> Body {
+        crate::body::of(&fixture_files(), crate::body::DEFAULT).unwrap()
+    }
+
     /// The fixture displays, by what the generator made each of them.
     const HELM_DISPLAY: u32 = 900001;
     const SHOULDERS: u32 = 900002;
@@ -1242,12 +1267,12 @@ mod tests {
     const AMMO: u32 = 24;
 
     fn worn(display_info_id: u32, display_type: u32) -> Worn {
-        of(&fixture_files(), display_info_id, display_type, NOT_A_WEAPON).unwrap()
+        of(&fixture_files(), &hers(), display_info_id, display_type, NOT_A_WEAPON).unwrap()
     }
 
     /// The same for a weapon, which needs the one thing its slot does not say.
     fn held(display_info_id: u32, display_type: u32, inventory_type: u32) -> Worn {
-        of(&fixture_files(), display_info_id, display_type, inventory_type).unwrap()
+        of(&fixture_files(), &hers(), display_info_id, display_type, inventory_type).unwrap()
     }
 
     /// What an item that is not held in a hand says about where it is worn, which is nothing.
@@ -1438,7 +1463,7 @@ mod tests {
     fn keeps_a_model_the_game_marks_as_belonging_to_no_gender() {
         let bodies = bodies_in(&fixture_files(), COMPONENT_MODEL_FILE_DATA).unwrap();
         assert_eq!(bodies.get(&140_002), Some(&(NO_GENDER, 0, 0)));
-        assert_eq!(for_this_body(&[140_002], &bodies), Some(140_002));
+        assert_eq!(for_this_body(&hers(), &[140_002], &bodies), Some(140_002));
     }
 
     // A slot with no attachment of its own hangs nothing, however much geometry the display
@@ -1565,7 +1590,7 @@ mod tests {
         // The helm read as though it were worn somewhere else, which is the same question
         // asked of the same row and has to come back empty.
         assert_eq!(
-            of(&fixture_files(), HELM_DISPLAY, CHEST, NOT_A_WEAPON).unwrap().hidden,
+            of(&fixture_files(), &hers(), HELM_DISPLAY, CHEST, NOT_A_WEAPON).unwrap().hidden,
             Vec::<u16>::new()
         );
     }
@@ -1573,7 +1598,7 @@ mod tests {
     #[test]
     fn says_so_when_the_chain_starts_at_a_table_that_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        let error = of(&DirFiles::new(temp.path()), CHESTPIECE, CHEST, NOT_A_WEAPON).unwrap_err();
+        let error = of(&DirFiles::new(temp.path()), &hers(), CHESTPIECE, CHEST, NOT_A_WEAPON).unwrap_err();
         assert!(error.contains("1280614.db2"), "{error}");
     }
 
@@ -1590,7 +1615,7 @@ mod tests {
                 inventory_type: NOT_A_WEAPON,
             })
             .collect();
-        of_set(&fixture_files(), &pieces).unwrap()
+        of_set(&fixture_files(), &hers(), &pieces).unwrap()
     }
 
     // The acceptance, and the one contest this app's slot table can actually stage: a robe and
@@ -1752,6 +1777,7 @@ mod tests {
         let files = Noted::new();
         of_set(
             &files,
+            &hers(),
             &[
                 Piece { display_info_id: HELM_DISPLAY, display_type: HEAD, inventory_type: 0 },
                 Piece { display_info_id: SHOULDERS, display_type: SHOULDER, inventory_type: 0 },
@@ -1790,6 +1816,7 @@ mod tests {
         let files = Noted::new();
         of_set(
             &files,
+            &hers(),
             &[Piece { display_info_id: CHESTPIECE, display_type: CHEST, inventory_type: 0 }],
         )
         .unwrap();

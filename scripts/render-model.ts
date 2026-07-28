@@ -13,6 +13,12 @@
  * # From a real install, which is the only place the game's own data can be looked at.
  * bun run render worn/712245/5 legs.png --install "/Applications/World of Warcraft"
  *
+ * # And as somebody in particular: `--body <ChrModel>` for which body, `--as <question>:<swatch>`
+ * # for the answers about it — the ids `dump_customization --questions` prints. `--as` repeats,
+ * # and both are passed straight to dump_model.
+ * bun run render character her.png --install "/Applications/World of Warcraft" --as 17:167
+ * bun run render character him.png --install "/Applications/World of Warcraft" --body 1
+ *
  * # Or a `.glb` somebody already has.
  * bun run render some-model.glb some-model.png
  * ```
@@ -72,6 +78,9 @@ interface Options {
   unlit: boolean;
   view: View;
   size: number;
+  /** Who is being drawn: `body=<ChrModel>` and `<question>:<swatch>` a piece, as dump_model
+   * takes them. Empty is the body the app opens on, at the swatches the game opens on. */
+  answers: string[];
 }
 
 const options = parse(process.argv.slice(2));
@@ -151,6 +160,7 @@ function model(options: Options): Buffer {
       ...source,
       options.what,
       out,
+      ...options.answers,
     ],
     { stdio: ["ignore", "ignore", "inherit"] },
   );
@@ -195,6 +205,7 @@ function parse(argv: string[]): Options {
     unlit: false,
     view: "default",
     size: 640,
+    answers: [],
   };
 
   for (let at = 0; at < argv.length; at += 1) {
@@ -210,6 +221,20 @@ function parse(argv: string[]): Options {
         const view = argv[(at += 1)];
         if (!VIEWS.includes(view as View)) usage();
         options.view = view as View;
+        break;
+      }
+      case "--body": {
+        const body = argv[(at += 1)];
+        if (!body || !/^\d+$/.test(body)) usage();
+        options.answers.push(`body=${body}`);
+        break;
+      }
+      case "--as": {
+        const answer = argv[(at += 1)];
+        // Checked here rather than left to the backend, because a typo would otherwise be a
+        // body that draws correctly and is not the one that was asked for.
+        if (!answer || !/^\d+:\d+$/.test(answer)) usage();
+        options.answers.push(answer);
         break;
       }
       case "--size":
@@ -232,6 +257,7 @@ function usage(): never {
   console.error(
     "usage: bun run render <model> <out.png> [--install <wow install>]\n" +
       "                     [--unlit] [--view default|front|back|left|right] [--size 640]\n" +
+      "                     [--body <ChrModel>] [--as <question>:<swatch>]...\n" +
       "\n" +
       "  <model>  a path to a .glb, or what dump_model understands: a display id,\n" +
       "           `character`, or `worn/<displayInfoID>/<displayType>`.\n" +

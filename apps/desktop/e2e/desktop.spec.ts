@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { RECIPES } from "../src/query";
-import type { E2EMock } from "../src/types";
+import type { CharacterQuestion, E2EMock } from "../src/types";
 
 /**
  * A query as the mock's table of answers is keyed — whitespace collapsed, so a statement laid
@@ -821,6 +821,16 @@ class Outfit {
   resetCamera(): Promise<void> {
     return this.panel.getByRole("button", { name: "Reset camera" }).click();
   }
+
+  /** Opens the form under her that says who she is, which reads nothing until it is opened. */
+  askWhoSheIs(): Promise<void> {
+    return this.panel.getByText("Who she is").click();
+  }
+
+  /** One question the game asks about her body, by the name the game gives it. */
+  about(question: string): Locator {
+    return this.panel.getByLabel(question);
+  }
 }
 
 /**
@@ -1204,6 +1214,27 @@ const GALLERY_LOOKS = Array.from({ length: GALLERY_PAGE + 4 }, (_, index) => ({
   itemCount: 1,
   liftsRestriction: false,
 }));
+
+/**
+ * What each body is asked, by `ChrModel`. Two bodies, and not the same questions under other
+ * names: a beard is a question no female body is ever asked, which is why picking the other
+ * body replaces the form rather than relabelling it.
+ */
+const CHARACTER_QUESTIONS: Record<number, CharacterQuestion[]> = {
+  1: [
+    { id: 11, name: "Hair Style", swatches: [{ id: 44, name: "Bald" }, { id: 45, name: "Peasant" }] },
+    { id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] },
+  ],
+  2: [
+    {
+      id: 16,
+      name: "Hair Style",
+      swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+    },
+    // Unnamed, as most of the game's own swatches are: a skin tone is a square of colour.
+    { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
+  ],
+};
 
 const mockDesktop: E2EMock = {
   dashboard: {
@@ -1845,6 +1876,17 @@ const mockDesktop: E2EMock = {
   },
   // The body every set detail falls back to when nothing is worn.
   characterModel: fixtureModel("character.glb"),
+  // And who that body is: what the game's own character creation screen asks about her, and
+  // what has been answered. The names are the fixtures' own — most of the game's real swatches
+  // have none at all, which is the case worth having in front of the window, so the skin tones
+  // here have none either.
+  characterLook: {
+    bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+    body: 2,
+    questions: CHARACTER_QUESTIONS[2]!,
+    picked: [],
+  },
+  characterQuestions: CHARACTER_QUESTIONS,
   // The bodies, keyed by the outfit each is wearing: every piece's display id, ascending and
   // comma joined, which is `wornSetKey`. Keying by the whole outfit rather than by a piece of
   // it is the point — it is what lets a step below say which outfit the window actually asked
@@ -3106,6 +3148,44 @@ test("browses the game's transmog sets and dresses the character in them", async
     await outfit.resetCamera();
     await expect(outfit.stage()).toHaveAttribute("data-camera", framed.camera);
     await expect(outfit.stage()).toHaveAttribute("data-target", framed.target);
+  });
+
+  // The body under the clothes. Everything else in this view is what she has on; this is the
+  // one control over who is wearing it, and it is read out of the installed game — the
+  // questions are the game's own character creation screen's, and most of its swatches have no
+  // name, which is why one of these two is numbered.
+  await test.step("who she is can be answered, and is kept", async () => {
+    await outfit.askWhoSheIs();
+    await expect(outfit.about("Hair Style")).toHaveValue("132");
+    await expect(outfit.about("Hair Style").locator("option")).toHaveText(["Loose", "Braided"]);
+    await expect(outfit.about("Skin Color").locator("option"))
+      .toHaveText(["Swatch 1", "Swatch 2"]);
+
+    await outfit.about("Hair Style").selectOption("133");
+
+    // Stored as it is picked rather than behind a button, so what the form shows after a
+    // repaint is what the settings file holds — the same bargain the marks make.
+    await expect(outfit.about("Hair Style")).toHaveValue("133");
+    // And she is drawn again: the body on the stage was a picture of the woman who was there
+    // before, and the window asks the backend for her afresh rather than keeping it.
+    await expect(outfit.canvas()).toBeVisible();
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1152");
+  });
+
+  // And the coarser half of it: another body entirely. The questions belong to whichever body
+  // is being drawn — a beard is one no female body is ever asked — so the form under the picker
+  // is replaced rather than relabelled.
+  await test.step("the other body can be drawn instead, and is asked its own questions", async () => {
+    await outfit.about("Body").selectOption("1");
+
+    await expect(outfit.about("Beard")).toHaveValue("70");
+    await expect(outfit.panel.getByLabel("Skin Color")).toHaveCount(0);
+    await expect(outfit.canvas()).toBeVisible();
+
+    // Back to her, and the answer given before the switch is still there: one settings file
+    // holds every body's, because no two bodies share a question.
+    await outfit.about("Body").selectOption("2");
+    await expect(outfit.about("Hair Style")).toHaveValue("133");
   });
 
   await test.step("the search reaches the collection as well as the set", async () => {

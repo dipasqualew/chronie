@@ -35,7 +35,8 @@
 use std::collections::BTreeMap;
 
 use chronie_desktop_lib::casc::{self, GameFiles};
-use chronie_desktop_lib::character::{self, HUMAN_FEMALE};
+use chronie_desktop_lib::body::{self, Body};
+use chronie_desktop_lib::character;
 use chronie_desktop_lib::icons::pixels_of;
 use chronie_desktop_lib::m2::{Model, Paint};
 use chronie_desktop_lib::worn::{self, Worn};
@@ -69,6 +70,27 @@ fn main() {
     };
     let files = files.as_ref();
 
+    // Which body, before anything else: the mesh, the atlas size and the rectangles all come
+    // out of it, and a `--body` nobody passed is the one the app opens on.
+    let rest: Vec<String> = args.collect();
+    let wanted = rest
+        .iter()
+        .position(|arg| arg == "--body")
+        .and_then(|at| rest.get(at + 1))
+        .and_then(|id| id.parse().ok())
+        .unwrap_or(body::DEFAULT);
+    let hers = match body::of(files, wanted) {
+        Ok(hers) => hers,
+        Err(error) => {
+            eprintln!("Could not read the body to draw: {error}");
+            std::process::exit(1);
+        }
+    };
+    println!("drawing on {} — ChrModel {}, layout {}\n", hers.name, hers.id, hers.layout);
+
+    let mut args = rest.iter().filter(|arg| !arg.starts_with("--")).filter(|arg| {
+        arg.parse::<u32>().is_ok()
+    });
     let appearance: Option<(u32, u32)> = match (args.next(), args.next()) {
         (Some(display), Some(slot)) => Some((
             display.parse().unwrap_or_else(|_| usage()),
@@ -78,23 +100,23 @@ fn main() {
         _ => None,
     };
 
-    body(files);
-    let worn = appearance.map(|(display, slot)| wearing(files, display, slot));
-    atlas(files, worn.as_ref());
-    handed_over(files, worn.as_ref());
+    body(files, &hers);
+    let worn = appearance.map(|(display, slot)| wearing(files, &hers, display, slot));
+    atlas(files, &hers, worn.as_ref());
+    handed_over(files, &hers, worn.as_ref());
 }
 
 /// The body model itself: the textures it declares, and what every part of it asks for.
-fn body(files: &dyn GameFiles) {
+fn body(files: &dyn GameFiles, hers: &Body) {
     println!("== the body ==\n");
-    let bytes = match files.read(HUMAN_FEMALE) {
+    let bytes = match files.read(hers.model) {
         Ok(bytes) => bytes,
         Err(error) => {
-            eprintln!("Could not read {HUMAN_FEMALE} (humanfemale_hd.m2): {error}");
+            eprintln!("Could not read {} ({}): {error}", hers.model, hers.name);
             std::process::exit(1);
         }
     };
-    println!("{HUMAN_FEMALE} (humanfemale_hd.m2): {} bytes", bytes.len());
+    println!("{} ({}): {} bytes", hers.model, hers.name, bytes.len());
 
     let model = match Model::parse(&bytes) {
         Ok(model) => model,
@@ -153,11 +175,11 @@ fn describe(paint: Paint) -> String {
 }
 
 /// The appearance: the geosets it switches on, and every texture it paints, resolved and read.
-fn wearing(files: &dyn GameFiles, display: u32, slot: u32) -> Worn {
+fn wearing(files: &dyn GameFiles, hers: &Body, display: u32, slot: u32) -> Worn {
     println!("\n== display {display}, worn in slot {slot} ==\n");
     // Nothing is worn in a hand here: what this tool prints is what a body is painted with, and
     // the inventory type only says which hand a weapon goes in.
-    let worn = match worn::of(files, display, slot, 0) {
+    let worn = match worn::of(files, hers, display, slot, 0) {
         Ok(worn) => worn,
         Err(error) => {
             eprintln!("Could not read what display {display} wears: {error}");
@@ -203,11 +225,11 @@ fn wearing(files: &dyn GameFiles, display: u32, slot: u32) -> Worn {
 ///
 /// One distinct colour is an atlas nothing was painted into — which is what a bare body is
 /// meant to look like, and is worth stating rather than leaving to the eye.
-fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) {
+fn atlas(files: &dyn GameFiles, hers: &Body, worn: Option<&Worn>) {
     println!("\n== the atlas ==\n");
-    let mut atlas = character::Atlas::unpainted();
+    let mut atlas = character::Atlas::unpainted(hers);
     if let Some(worn) = worn {
-        atlas.wear(files, &worn.textures);
+        atlas.wear(hers, files, &worn.textures);
     }
     let png = match atlas.png() {
         Ok(png) => png,
@@ -245,9 +267,10 @@ fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) {
 ///
 /// A material with no `baseColorTexture` is drawn in glTF's default colour, which is white.
 /// Every other line above explains *why*; this is the one that matches what is on screen.
-fn handed_over(files: &dyn GameFiles, worn: Option<&Worn>) {
+fn handed_over(files: &dyn GameFiles, hers: &Body, worn: Option<&Worn>) {
     println!("\n== the glb the window gets ==\n");
-    let glb = match character::glb_of(files, worn) {
+    let who = character::Who { body: hers.id, picked: Vec::new() };
+    let glb = match character::glb_of(files, worn, &who) {
         Ok(glb) => glb,
         Err(error) => {
             eprintln!("Could not write the character: {error}");
