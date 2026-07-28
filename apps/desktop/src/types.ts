@@ -697,6 +697,31 @@ export interface CharacterModelPayload {
   model: string;
 }
 
+/**
+ * One row of a gallery page: an appearance, and the body wearing it.
+ *
+ * The display id comes back with the model — unlike `WornSetPayload`, where there is no one
+ * appearance the body is the answer for — because a page is a list and the window has to line
+ * the answers back up with the rows it asked about.
+ */
+export interface GalleryModel {
+  displayInfoId: number;
+  /** `null` for a row this install can put on nobody, which keeps its icon. */
+  model: string | null;
+}
+
+/**
+ * A page of the wardrobe, every appearance on it worn on a body of its own.
+ *
+ * The plural of `WornSetPayload` and not of anything else: the game does not draw an item, it
+ * draws a character wearing the item, because most of the game's armour has no geometry of its
+ * own at all. So a gallery of twenty looks is twenty bodies, and the backend builds one body and
+ * dresses it twenty times — see `gallery.rs`, and `budget.rs` for what that costs.
+ */
+export interface GalleryPayload {
+  models: GalleryModel[];
+}
+
 /* ---------- achievements, as the game describes them ---------- */
 
 /**

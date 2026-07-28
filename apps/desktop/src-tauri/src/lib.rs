@@ -9,6 +9,7 @@ pub mod combatlog;
 pub mod customization;
 pub mod customsets;
 pub mod db2;
+pub mod gallery;
 pub mod glb;
 pub mod icons;
 pub mod items;
@@ -482,6 +483,22 @@ async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Resul
         character::worn_set_of(files, &pieces)
     })
     .await
+}
+
+/// A page of the wardrobe, every appearance on it worn on a body of its own.
+///
+/// The same three numbers per row as [`worn_set`], and a very different question: that one is
+/// one body wearing several things, and this is several bodies each wearing one. The window
+/// asks for a page at a time rather than a row at a time because the two of them cost almost the
+/// same — the body, her skin and the six tables are read once for whatever is asked for, and a
+/// row adds only its own textures and geometry. See [`gallery::of`], and `budget.rs` for what
+/// that claim is held to.
+#[tauri::command]
+async fn gallery_models(
+    pieces: Vec<worn::Piece>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| gallery::of(files, &pieces)).await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -1255,6 +1272,7 @@ pub fn run() {
             delete_custom_set,
             character_model,
             worn_set,
+            gallery_models,
             achievement_details,
             item_details,
             game_icons,

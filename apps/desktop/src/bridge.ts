@@ -18,6 +18,7 @@ import type {
   CustomSetPiece,
   CustomSetsPayload,
   DashboardPayload,
+  GalleryPayload,
   IconsPayload,
   InstallResult,
   ItemDetail,
@@ -177,6 +178,19 @@ export const desktop = {
   wornSet: (pieces: WornPiece[]): Promise<WornSetPayload> => mock
     ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null })
     : invoke<WornSetPayload>("worn_set", { pieces }),
+  // A page of the wardrobe, each look on a body of its own. A page at a time rather than a row
+  // at a time because the two cost almost the same: the body, her skin and the game's six tables
+  // are read once for whatever is asked for, and a row adds only its own textures and geometry.
+  // The stub answers each row out of the same map `wornSet` reads, because a gallery row *is* an
+  // outfit of one and gets the same key.
+  galleryModels: (pieces: WornPiece[]): Promise<GalleryPayload> => mock
+    ? Promise.resolve({
+      models: pieces.map((piece) => ({
+        displayInfoId: piece.displayInfoId,
+        model: mock.wornSets[wornSetKey([piece])] ?? null,
+      })),
+    })
+    : invoke<GalleryPayload>("gallery_models", { pieces }),
   // One question, typed by the reader, asked of their own history. The backend refuses
   // anything that is not a read and stops anything that will not finish, so what can come
   // back from here is rows or a sentence about why there are none.

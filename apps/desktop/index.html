@@ -1048,6 +1048,18 @@
     /* Icons are stored at 64 pixels and shown at half that, which bilinear scaling suits. */
     object-fit: cover;
   }
+  /* The same frame, at the size a character in it is worth looking at. A 32-pixel square is a
+     bag icon; a body wearing something needs the height, and the rows grow to match rather than
+     the picture being squeezed into the icon's place. */
+  .mog-worn { width: 84px; height: 112px; border-radius: 8px; }
+  .mog-worn canvas { display: block; width: 100%; height: 100%; }
+  /* Wider rows and a grid rather than a column: twenty bodies down one side of the panel is a
+     great deal of scrolling past a great deal of empty space beside them. */
+  #wardrobe-list[data-models="true"] .mog-items {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px;
+  }
+  #wardrobe-list[data-models="true"] .mog-item { align-items: flex-start; }
+  #wardrobe-list[data-models="true"] .mog-pick { align-items: flex-start; }
   /* The whole row is one button — picture, slot and name — because putting the piece on is
      what a reader opened the set to do. Pressed means worn. */
   .mog-pick {

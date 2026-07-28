@@ -36,6 +36,17 @@
 //! draw order and at most one geoset per group, priority resolved. So both of the functions
 //! below stayed lists — [`Atlas::wear`] paints what it is given in the order it is given, and
 //! [`dressed`] finds one owner per group because there is one to find.
+//!
+//! # The body, kept
+//!
+//! Everything above is about one outfit, and almost none of it is about the outfit. Her mesh, her
+//! skin resized onto the atlas, her face composited over that, her hair and eye atlases decoded,
+//! and the skeleton that says where a helm hangs are the same for every appearance ever shown on
+//! her — so [`Mannequin`] is all of that, built once and worn many times. [`crate::gallery`] is
+//! why: a page of the wardrobe is twenty appearances each on a body of her own, and building
+//! twenty bodies to show twenty hats is most of the cost of the feature.
+
+use std::cell::OnceCell;
 
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
@@ -160,6 +171,10 @@ pub fn bare(geoset: u16) -> bool {
 /// Every item texture lands in a rectangle of this same buffer, alpha-blended in a fixed
 /// per-slot order — so this is the seam that grows, and the model, the UVs and the viewer
 /// above it do not.
+/// Cloneable, and that is what a gallery is built on: the skin, the face and the resize that
+/// puts them on a 2048-wide buffer are the same for every appearance shown, and a clone of the
+/// result is a memcpy against the 27ms of doing it again.
+#[derive(Clone)]
 pub struct Atlas {
     pixels: RgbaImage,
 }
@@ -186,6 +201,7 @@ impl Atlas {
     /// customization; this end of it only paints.
     #[tracing::instrument(name = "atlas.base", skip_all)]
     pub fn base(&mut self, blp: &[u8]) -> Result<(), String> {
+        crate::budget::note_atlas();
         let skin = pixels_of(blp, ATLAS_WIDTH)?;
         self.pixels = image::imageops::resize(&skin, ATLAS_WIDTH, ATLAS_HEIGHT, FilterType::Triangle);
         Ok(())
@@ -236,6 +252,7 @@ impl Atlas {
     /// The atlas as PNG bytes, which is the one picture format a `.glb` carries and a browser
     /// reads.
     pub fn png(&self) -> Result<Vec<u8>, String> {
+        crate::budget::note_encode();
         let mut png = Vec::new();
         PngEncoder::new(&mut png)
             .write_image(
@@ -293,162 +310,246 @@ pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Resu
 ///
 /// `worn` is the one appearance being shown, when there is one. Nothing else about the body
 /// changes with it: the same mesh, the same UVs, the same atlas, one layer deeper.
-#[tracing::instrument(name = "character.glb", skip_all)]
+///
+/// One outfit, so the body underneath it is built and thrown away. A gallery wants the body kept
+/// — see [`Mannequin`], which is what this is, held on to.
 pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
-    let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
-    let skin = model
-        .skin_file_data_id()
-        .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
-    let herself = crate::customization::of(files)?;
-    let mesh = {
-        let _held = tracing::info_span!("character.dressed").entered();
-        dressed(&model.with_skin(&files.read(skin)?)?, worn, herself.as_ref())
-    };
-
-    let painted = {
-        let atlas = atlas(files, herself.as_ref(), worn)?;
-        let _held = tracing::info_span!("character.atlas_png").entered();
-        atlas.png()?
-    };
-    let cape = worn.and_then(|worn| worn.cape).and_then(|fdid| decode_file(files, fdid));
-    // Her hair and her eyes: atlases of their own, bound whole rather than composited. Each
-    // is decoded once here rather than per part, because several parts ask for one of them.
-    let hers: Vec<(u32, Vec<u8>)> = herself
-        .iter()
-        .flat_map(|herself| herself.atlases.iter())
-        .filter_map(|(kind, file)| decode_file(files, *file).map(|png| (*kind, png)))
-        .collect();
-    let body = |paint| match paint {
-        // The model's own textures, which on a body are the few things not customized.
-        Paint::File(fdid) => decode_file(files, fdid),
-        Paint::Supplied(BODY_TEXTURE) => Some(painted.clone()),
-        Paint::Supplied(CAPE_TEXTURE) => cape.clone(),
-        // And every other type a body declares is one of hers, or nothing on an install that
-        // could not say — which is the white cap this used to draw in every case.
-        Paint::Supplied(kind) => hers
-            .iter()
-            .find(|(which, _)| *which == kind)
-            .map(|(_, png)| png.clone()),
-    };
-
-    // Held in three lists rather than in the pieces themselves because a piece borrows both
-    // its mesh and the closure that paints it, and each of those closures owns a picture of
-    // its own — a helm's texture is not a shoulder's and neither is the atlas.
-    let hung = hung_on(files, &model, worn)?;
-    let painters: Vec<Box<dyn Fn(Paint) -> Option<Vec<u8>>>> = hung
-        .iter()
-        .map(|(_, _, texture)| {
-            let texture = texture.clone();
-            let painter: Box<dyn Fn(Paint) -> Option<Vec<u8>>> = Box::new(move |paint| match paint {
-                // An item's model wants the one picture, whatever type it asked for. Only a
-                // body declares several and has to tell them apart.
-                Paint::File(fdid) => decode_file(files, fdid),
-                Paint::Supplied(_) => texture.clone(),
-            });
-            painter
-        })
-        .collect();
-
-    let _writing = tracing::info_span!("character.assemble").entered();
-    let mut pieces = vec![glb::Piece::only(&mesh, &body)];
-    for ((piece, at, _), painter) in hung.iter().zip(painters.iter()) {
-        pieces.push(glb::Piece {
-            mesh: piece,
-            at: at.position,
-            rotation: at.rotation,
-            scale: at.scale,
-            picture: painter.as_ref(),
-        });
-    }
-    glb::write(&pieces)
+    Mannequin::standing(files)?.wearing(worn)
 }
 
-/// The geometry an appearance hangs off the body: a mesh, where it goes, and its picture.
+/// The body every appearance in this app is shown on, with everything about it that no
+/// appearance changes already done.
 ///
-/// Where it goes comes out of the body's own skeleton rather than the item — an item's model
-/// is authored around the attachment it belongs on, so a helm's vertices sit around the origin
-/// and mean nothing until the head's position is added to them.
+/// **It exists because of the gallery.** Twenty items shown one at a time is the same body twenty
+/// times over, and building one is not cheap: the skin is resized onto a 2048 × 1024 buffer, her
+/// face is composited onto that, the mesh is read out of a 12MB `.m2` and its skin profile, her
+/// hair and eye atlases are decoded, and the skeleton that says where a helm hangs is 16MB. None
+/// of that depends on what she is wearing, and all of it used to happen per render.
 ///
-/// Two absences, and they are not the same. A body with no skeleton is this app being wrong
-/// about a file every character in the game has one of, and is worth saying so about. An
-/// attachment the skeleton does not name, or a model file this install does not hold, is a
-/// piece that cannot be placed — and a pauldron drawn at the origin, which is inside her
-/// pelvis, is worse than a pauldron not drawn.
-#[allow(clippy::type_complexity)]
-#[tracing::instrument(name = "character.hung_on", skip_all)]
-fn hung_on(
-    files: &dyn GameFiles,
-    body: &Model,
-    worn: Option<&Worn>,
-) -> Result<Vec<(Mesh, m2::Attachment, Option<Vec<u8>>)>, String> {
-    let wanted = worn.map_or(&[][..], |worn| worn.models.as_slice());
-    if wanted.is_empty() {
-        // The skeleton is 16 MB on a real install, and most of a wardrobe hangs nothing.
-        return Ok(Vec::new());
-    }
-    let skeleton = body
-        .skeleton_file_data_id()
-        .ok_or("the character model names no skeleton, so nothing says where a helm goes")?;
-    let attachments = m2::attachments(&files.read(skeleton)?)?;
+/// What is left per appearance is what actually differs: which geosets survive, what it paints
+/// into a *clone* of the base atlas, the models it hangs, and writing the `.glb`. See
+/// [`wearing`](Mannequin::wearing).
+///
+/// Two of the fields are read the first time something wants them rather than when she is built,
+/// and both for the same reason: most of a wardrobe hangs nothing off the body, so the skeleton
+/// is 16MB nobody asked for — and most of a wardrobe paints nothing onto it either, so the
+/// encoded base atlas is a PNG of 2 million pixels that a gallery of helms would never look at.
+pub struct Mannequin<'a> {
+    files: &'a dyn GameFiles,
+    model: Model,
+    /// The body with every geoset it holds still in it. [`dressed`] is what cuts it down, and it
+    /// cuts a different way for every appearance.
+    whole: Mesh,
+    herself: Option<Customization>,
+    /// Her skin and her face, and nothing worn: what every appearance is painted on top of.
+    base: Atlas,
+    /// The same, encoded — for the appearances that paint nothing, which is every helm, every
+    /// weapon and every pair of shoulders in the game.
+    unpainted_png: OnceCell<Vec<u8>>,
+    /// Her hair and her eyes: atlases of their own, bound whole rather than composited.
+    hers: Vec<(u32, Vec<u8>)>,
+    /// Where things hang off her, out of a skeleton nothing but a helm or a weapon needs.
+    attachments: OnceCell<Vec<m2::Attachment>>,
+}
 
-    let mut hung = Vec::with_capacity(wanted.len());
-    for model in wanted {
-        let Some(at) = attachments
-            .iter()
-            .find(|attachment| attachment.id == model.attachment)
-            .copied()
-        else {
-            continue;
-        };
-        let Ok(bytes) = files.read(model.file) else {
-            continue;
-        };
-        let parsed = Model::parse(&bytes)?;
-        let skin = parsed
+impl<'a> Mannequin<'a> {
+    /// Reads the body and everything about it that no appearance changes.
+    #[tracing::instrument(name = "character.mannequin", skip_all)]
+    pub fn standing(files: &'a dyn GameFiles) -> Result<Self, String> {
+        let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
+        let skin = model
             .skin_file_data_id()
-            .ok_or("a worn model names no skin profile, so nothing says how to draw it")?;
-        let mesh = parsed.with_skin(&files.read(skin)?)?;
-        let texture = model.texture.and_then(|fdid| {
-            files.read(fdid).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
-        });
-        hung.push((mesh, at, texture));
-    }
-    Ok(hung)
-}
+            .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
+        let whole = model.with_skin(&files.read(skin)?)?;
+        let herself = crate::customization::of(files)?;
 
-/// The one picture the whole body is painted out of: her own skin, her face, and the
-/// appearance over both.
-///
-/// The order is the whole of the compositing rule. The skin covers all 2048 × 1024 as a
-/// straight copy, because it is the bottom of the stack and has nothing to blend against;
-/// everything above it lands in its own rectangles and blends, because it has. That is the
-/// same operation for her face as for a chestpiece's sleeves — the difference is only which
-/// rectangle and how far down the stack, which is why an item painted over the underwear
-/// covers it and nothing an item paints reaches the right half where the face is.
-///
-/// An install that cannot say which skin leaves the flat tone underneath — which is what every
-/// body in this app looked like before that chain was read, so the worst case is the picture
-/// this used to give rather than a broken one. What is *not* tolerated is a skin that resolves
-/// and will not decode: that is either a build whose columns have moved or this app being
-/// wrong about BLP, and a body quietly back to being a mannequin hides both. See
-/// [`crate::customization::of`].
-#[tracing::instrument(name = "character.atlas", skip_all)]
-fn atlas(
-    files: &dyn GameFiles,
-    herself: Option<&Customization>,
-    worn: Option<&Worn>,
-) -> Result<Atlas, String> {
-    let mut atlas = Atlas::unpainted();
-    if let Some(herself) = herself {
-        if herself.base != 0 {
-            atlas.base(&files.read(herself.base)?)?;
+        let mut base = Atlas::unpainted();
+        if let Some(herself) = herself.as_ref() {
+            if herself.base != 0 {
+                base.base(&files.read(herself.base)?)?;
+            }
+            base.wear(files, &herself.over);
         }
-        atlas.wear(files, &herself.over);
+
+        // Each decoded once here rather than per part, because several parts ask for one of them.
+        let hers: Vec<(u32, Vec<u8>)> = herself
+            .iter()
+            .flat_map(|herself| herself.atlases.iter())
+            .filter_map(|(kind, file)| decode_file(files, *file).map(|png| (*kind, png)))
+            .collect();
+
+        Ok(Self {
+            files,
+            model,
+            whole,
+            herself,
+            base,
+            unpainted_png: OnceCell::new(),
+            hers,
+            attachments: OnceCell::new(),
+        })
     }
-    if let Some(worn) = worn {
-        atlas.wear(files, &worn.textures);
+
+    /// Her, wearing one appearance or a whole outfit, as the bytes of a `.glb`.
+    ///
+    /// Everything here is what actually changes with what is worn. The one that is not obvious
+    /// is the atlas: an appearance that paints nothing gets the encoded base back rather than a
+    /// clone, a paint and a re-encode of the same two million pixels — and "paints nothing" is
+    /// every helm, weapon, shoulder and shield in the game, which is most of what a gallery of
+    /// geometry holds.
+    #[tracing::instrument(name = "character.glb", skip_all)]
+    pub fn wearing(&self, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
+        let files = self.files;
+        let mesh = {
+            let _held = tracing::info_span!("character.dressed").entered();
+            dressed(&self.whole, worn, self.herself.as_ref())
+        };
+
+        let painted = self.atlas_png(worn)?;
+        let cape = worn.and_then(|worn| worn.cape).and_then(|fdid| decode_file(files, fdid));
+        let body = |paint| match paint {
+            // The model's own textures, which on a body are the few things not customized.
+            Paint::File(fdid) => decode_file(files, fdid),
+            Paint::Supplied(BODY_TEXTURE) => Some(painted.clone()),
+            Paint::Supplied(CAPE_TEXTURE) => cape.clone(),
+            // And every other type a body declares is one of hers, or nothing on an install that
+            // could not say — which is the white cap this used to draw in every case.
+            Paint::Supplied(kind) => self
+                .hers
+                .iter()
+                .find(|(which, _)| *which == kind)
+                .map(|(_, png)| png.clone()),
+        };
+
+        // Held in three lists rather than in the pieces themselves because a piece borrows both
+        // its mesh and the closure that paints it, and each of those closures owns a picture of
+        // its own — a helm's texture is not a shoulder's and neither is the atlas.
+        let hung = self.hung_on(worn)?;
+        let painters: Vec<Box<dyn Fn(Paint) -> Option<Vec<u8>>>> = hung
+            .iter()
+            .map(|(_, _, texture)| {
+                let texture = texture.clone();
+                let painter: Box<dyn Fn(Paint) -> Option<Vec<u8>>> =
+                    Box::new(move |paint| match paint {
+                        // An item's model wants the one picture, whatever type it asked for. Only
+                        // a body declares several and has to tell them apart.
+                        Paint::File(fdid) => decode_file(files, fdid),
+                        Paint::Supplied(_) => texture.clone(),
+                    });
+                painter
+            })
+            .collect();
+
+        let _writing = tracing::info_span!("character.assemble").entered();
+        let mut pieces = vec![glb::Piece::only(&mesh, &body)];
+        for ((piece, at, _), painter) in hung.iter().zip(painters.iter()) {
+            pieces.push(glb::Piece {
+                mesh: piece,
+                at: at.position,
+                rotation: at.rotation,
+                scale: at.scale,
+                picture: painter.as_ref(),
+            });
+        }
+        glb::write(&pieces)
     }
-    Ok(atlas)
+
+    /// The one picture the whole body is painted out of, encoded.
+    ///
+    /// The order is the whole of the compositing rule, and [`standing`](Mannequin::standing) has
+    /// already done the bottom two layers of it: the skin covers all 2048 × 1024 as a straight
+    /// copy, because it is the bottom of the stack and has nothing to blend against, and her face
+    /// lands in its own rectangles over that. What is left here is the appearance, which blends
+    /// for the same reason her face does — an item painted over the underwear covers it, and
+    /// nothing an item paints reaches the right half where the face is.
+    ///
+    /// An install that cannot say which skin leaves the flat tone underneath, which is what every
+    /// body in this app looked like before that chain was read. What is *not* tolerated is a skin
+    /// that resolves and will not decode: that is either a build whose columns have moved or this
+    /// app being wrong about BLP, and a body quietly back to being a mannequin hides both. See
+    /// [`crate::customization::of`] — and note that it is [`standing`](Mannequin::standing) that
+    /// says so now, once, rather than every render.
+    #[tracing::instrument(name = "character.atlas_png", skip_all)]
+    fn atlas_png(&self, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
+        let textures = worn.map_or(&[][..], |worn| worn.textures.as_slice());
+        if textures.is_empty() {
+            return match self.unpainted_png.get() {
+                Some(png) => Ok(png.clone()),
+                None => {
+                    let png = self.base.png()?;
+                    let _ = self.unpainted_png.set(png.clone());
+                    Ok(png)
+                }
+            };
+        }
+        let mut atlas = self.base.clone();
+        atlas.wear(self.files, textures);
+        atlas.png()
+    }
+
+    /// The geometry an appearance hangs off the body: a mesh, where it goes, and its picture.
+    ///
+    /// Where it goes comes out of the body's own skeleton rather than the item — an item's model
+    /// is authored around the attachment it belongs on, so a helm's vertices sit around the
+    /// origin and mean nothing until the head's position is added to them.
+    ///
+    /// Two absences, and they are not the same. A body with no skeleton is this app being wrong
+    /// about a file every character in the game has one of, and is worth saying so about. An
+    /// attachment the skeleton does not name, or a model file this install does not hold, is a
+    /// piece that cannot be placed — and a pauldron drawn at the origin, which is inside her
+    /// pelvis, is worse than a pauldron not drawn.
+    #[allow(clippy::type_complexity)]
+    #[tracing::instrument(name = "character.hung_on", skip_all)]
+    fn hung_on(
+        &self,
+        worn: Option<&Worn>,
+    ) -> Result<Vec<(Mesh, m2::Attachment, Option<Vec<u8>>)>, String> {
+        let wanted = worn.map_or(&[][..], |worn| worn.models.as_slice());
+        if wanted.is_empty() {
+            // The skeleton is 16 MB on a real install, and most of a wardrobe hangs nothing.
+            return Ok(Vec::new());
+        }
+        let attachments = self.attachments()?;
+
+        let mut hung = Vec::with_capacity(wanted.len());
+        for model in wanted {
+            let Some(at) = attachments
+                .iter()
+                .find(|attachment| attachment.id == model.attachment)
+                .copied()
+            else {
+                continue;
+            };
+            let Ok(bytes) = self.files.read(model.file) else {
+                continue;
+            };
+            let parsed = Model::parse(&bytes)?;
+            let skin = parsed
+                .skin_file_data_id()
+                .ok_or("a worn model names no skin profile, so nothing says how to draw it")?;
+            let mesh = parsed.with_skin(&self.files.read(skin)?)?;
+            let texture = model.texture.and_then(|fdid| {
+                self.files.read(fdid).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
+            });
+            hung.push((mesh, at, texture));
+        }
+        Ok(hung)
+    }
+
+    /// Where things hang off her, read the first time one does.
+    #[tracing::instrument(name = "character.attachments", skip_all)]
+    fn attachments(&self) -> Result<&[m2::Attachment], String> {
+        if let Some(read) = self.attachments.get() {
+            return Ok(read);
+        }
+        let skeleton = self
+            .model
+            .skeleton_file_data_id()
+            .ok_or("the character model names no skeleton, so nothing says where a helm goes")?;
+        let found = m2::attachments(&self.files.read(skeleton)?)?;
+        let _ = self.attachments.set(found);
+        Ok(self.attachments.get().expect("just set"))
+    }
 }
 
 /// The mesh with only the parts a body wearing this — or nothing — draws.
@@ -637,8 +738,7 @@ mod tests {
             crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap()
         });
 
-        let herself = crate::customization::of(&files).unwrap();
-        let png = atlas(&files, herself.as_ref(), worn.as_ref()).unwrap().png().unwrap();
+        let png = Mannequin::standing(&files).unwrap().atlas_png(worn.as_ref()).unwrap();
         image::load_from_memory(&png).unwrap().into_rgba8()
     }
 

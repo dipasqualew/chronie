@@ -67,9 +67,13 @@
 //! The other thing a set changes is arithmetic rather than correctness. Twelve appearances read
 //! one at a time is twelve parses of `ItemDisplayInfoMaterialRes`, `TextureFileData`,
 //! `ComponentTextureFileData` and `ItemDisplayInfo`, and on a real install those are the
-//! expensive part by a wide margin. So [`of_set`] reads each table **once per outfit** and hands
-//! the parse down — [`TextureFiles`] and [`ModelFiles`] are what it hands down — rather than
-//! caching anything between renders.
+//! expensive part by a wide margin. So the tables are read **once for everything asked about**
+//! and the parse handed down — [`TextureFiles`] and [`ModelFiles`] are what it hands down —
+//! rather than anything being cached between renders.
+//!
+//! [`each`] is where "everything asked about" stops meaning one outfit. A gallery is twenty
+//! appearances each shown alone, with nothing to arbitrate between them and every one of those
+//! tables in common, so it goes through the same walk — and [`of_set`] is a gallery of one.
 
 use std::collections::{HashMap, HashSet};
 
@@ -503,77 +507,162 @@ pub fn of(
 /// drop one of them.
 #[tracing::instrument(name = "worn.of_set", skip_all, fields(pieces = pieces.len()))]
 pub fn of_set(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Worn, String> {
-    // Draw order before anything else, because everything below walks this list in order and
-    // the textures come out of it stacked. A stable sort, so pieces sharing a layer — the
+    Ok(each(files, &[pieces])?
+        .pop()
+        .expect("one outfit in, one outfit out"))
+}
+
+/// The same, for several outfits at once, sharing every table between them.
+///
+/// **A gallery is not one outfit.** Twenty items each shown alone on the body is twenty separate
+/// answers to "what does this put on her" — nothing is arbitrated between them, because no two of
+/// them are ever on her at the same time. What they do share is every table the answer is read
+/// out of, and that is the entire cost: `ItemDisplayInfoMaterialRes` is 604,000 rows and
+/// `TextureFileData` several hundred thousand, and [`Db2::rows`] materialises all of them before
+/// it yields the first. Asked once per outfit, a page of twenty walks those tables twenty times
+/// to keep a few dozen rows out of each.
+///
+/// So the shape is the one [`of_set`] already had for the pieces of a set, one level further out:
+/// lay every outfit's pieces flat, walk each table once over the lot, then answer each outfit from
+/// what came back. [`of_set`] is a gallery of one and goes through here too, so there is a single
+/// implementation of what an appearance does to a body rather than a fast one and a correct one.
+///
+/// The conditional reads stay conditional, and now for the whole batch: a gallery of nothing but
+/// helms never opens `ComponentTextureFileData`, and a gallery of nothing but chestpieces never
+/// opens the two model tables.
+#[tracing::instrument(name = "worn.each", skip_all, fields(outfits = outfits.len()))]
+pub fn each(files: &dyn GameFiles, outfits: &[&[Piece]]) -> Result<Vec<Worn>, String> {
+    // Draw order before anything else, because everything below walks these lists in order and
+    // the textures come out of them stacked. A stable sort, so pieces sharing a layer — the
     // shirt and the legs, the head and the feet — keep the order the set named them in.
-    let mut layered = pieces.to_vec();
-    layered.sort_by_key(|piece| layer_of(piece.display_type));
+    let layered: Vec<Vec<Piece>> = outfits
+        .iter()
+        .map(|pieces| {
+            let mut pieces = pieces.to_vec();
+            pieces.sort_by_key(|piece| layer_of(piece.display_type));
+            pieces
+        })
+        .collect();
+    let flat: Vec<Piece> = layered.iter().flatten().copied().collect();
 
     let materials = Db2::parse(files.read(ITEM_DISPLAY_INFO_MATERIAL_RES)?)?;
-    let painted = sections(&materials, &layered);
+    let painted = sections(&materials, &flat);
     drop(materials);
 
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
-    let wanted: HashSet<u32> = layered.iter().map(|piece| piece.display_info_id).collect();
+    let wanted: HashSet<u32> = flat.iter().map(|piece| piece.display_info_id).collect();
     let rows: HashMap<u32, Row<'_>> = displays
         .rows()
         .filter(|row| wanted.contains(&row.id()))
         .map(|row| (row.id(), row))
         .collect();
-    // In draw order, and only the pieces this install can say anything about. A display in a
-    // section the game encrypts drops out here and takes its geometry with it; whatever it
-    // paints was already resolved above, because the two tables fail independently.
-    let drawn: Vec<(Piece, &Row<'_>)> = layered
-        .iter()
-        .filter_map(|piece| Some((*piece, rows.get(&piece.display_info_id)?)))
-        .collect();
+
+    // What each outfit asks for, resolved as far as the two tables above can take it. The files
+    // behind the resources are looked up afterwards, because those tables are read for the whole
+    // batch or not at all.
+    let mut wanting: Vec<Wanted<'_>> = Vec::with_capacity(layered.len());
+    let mut at = 0;
+    for pieces in &layered {
+        let paints = &painted[at..at + pieces.len()];
+        at += pieces.len();
+        // In draw order, and only the pieces this install can say anything about. A display in a
+        // section the game encrypts drops out here and takes its geometry with it; whatever it
+        // paints was already resolved above, because the two tables fail independently.
+        let drawn: Vec<(Piece, &Row<'_>)> = pieces
+            .iter()
+            .filter_map(|piece| Some((*piece, rows.get(&piece.display_info_id)?)))
+            .collect();
+        wanting.push(Wanted {
+            hangs: hangs_in(&drawn),
+            cape: cape_in(&drawn),
+            vis: helmet_vis(&drawn),
+            paints,
+            drawn,
+        });
+    }
 
     // Everything an item's *own* pictures are named by, which is one question asked of
     // `TextureFileData` for three different things: the body textures, the picture on a model,
     // and the picture on a cape. A wardrobe of chestpieces needs it once and a set needs it
-    // once, rather than once per row of either.
-    let hangs = hangs_in(&drawn);
-    let cape_resource = cape_in(&drawn);
-    let textures = if painted.iter().all(Vec::is_empty)
-        && hangs.iter().all(|hung| hung.material == 0)
-        && cape_resource.is_none()
-    {
-        // Not worth opening for an outfit that names no picture of its own anywhere:
+    // once, rather than once per row of either — and a gallery once, rather than once per item.
+    let any_painted = wanting.iter().any(Wanted::paints_anything);
+    let textures = if wanting.iter().all(|outfit| {
+        !outfit.paints_anything()
+            && outfit.hangs.iter().all(|hung| hung.material == 0)
+            && outfit.cape.is_none()
+    }) {
+        // Not worth opening for a batch that names no picture of its own anywhere:
         // `TextureFileData` is a row per texture the client owns.
         None
     } else {
         Some(TextureFiles::read(files)?)
     };
-
-    let painted = if painted.iter().all(Vec::is_empty) {
-        Vec::new()
+    let bodies = if any_painted {
+        Some(bodies_in(files, COMPONENT_TEXTURE_FILE_DATA)?)
     } else {
-        let bodies = bodies_in(files, COMPONENT_TEXTURE_FILE_DATA)?;
-        let files = textures.as_ref().expect("a painted outfit opened the texture table");
-        painted
-            .iter()
-            .flatten()
-            .filter_map(|(section, material)| {
-                Some(ComponentTexture {
-                    section: *section,
-                    file: files.for_this_body(*material, &bodies)?,
-                })
-            })
-            .collect()
+        None
     };
+    let models = if wanting.iter().any(|outfit| !outfit.hangs.is_empty()) {
+        Some(ModelFiles::read(files)?)
+    } else {
+        None
+    };
+    let helmets = Helmets::read(files, wanting.iter().flat_map(|outfit| outfit.vis.iter()))?;
 
-    Ok(Worn {
-        textures: painted,
-        geosets: geosets_of(&drawn),
-        models: models_of(files, &hangs, textures.as_ref())?,
-        cape: cape_resource.and_then(|resource| {
-            textures
-                .as_ref()
-                .expect("a caped outfit opened the texture table")
-                .named(resource)
-        }),
-        hidden: hidden_of(files, &drawn)?,
-    })
+    wanting
+        .iter()
+        .map(|outfit| {
+            let painted = if outfit.paints_anything() {
+                let named = textures.as_ref().expect("a painted outfit opened the texture table");
+                let bodies = bodies.as_ref().expect("a painted outfit opened the body table");
+                outfit
+                    .paints
+                    .iter()
+                    .flatten()
+                    .filter_map(|(section, material)| {
+                        Some(ComponentTexture {
+                            section: *section,
+                            file: named.for_this_body(*material, bodies)?,
+                        })
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            Ok(Worn {
+                textures: painted,
+                geosets: geosets_of(&outfit.drawn),
+                models: models_of(models.as_ref(), &outfit.hangs, textures.as_ref()),
+                cape: outfit.cape.and_then(|resource| {
+                    textures
+                        .as_ref()
+                        .expect("a caped outfit opened the texture table")
+                        .named(resource)
+                }),
+                hidden: helmets.hiding(&outfit.vis),
+            })
+        })
+        .collect()
+}
+
+/// One outfit of a batch, as far as the two tables every outfit needs can take it.
+struct Wanted<'a> {
+    /// The pieces this install can say anything about, in draw order, with their display rows.
+    drawn: Vec<(Piece, &'a Row<'a>)>,
+    /// What each piece paints, in the order the pieces were handed over — including the empty
+    /// lists of the pieces that paint nothing, because the caller's order is the draw order.
+    paints: &'a [Vec<(u32, u32)>],
+    hangs: Vec<Hung>,
+    cape: Option<u32>,
+    /// The `HelmetGeosetVis` entries of whatever heads it names.
+    vis: HashSet<u32>,
+}
+
+impl Wanted<'_> {
+    /// Whether anything in it paints any part of the body.
+    fn paints_anything(&self) -> bool {
+        !self.paints.iter().all(Vec::is_empty)
+    }
 }
 
 /// One thing an outfit hangs off the body, before the files behind it have been looked up.
@@ -616,18 +705,17 @@ fn hangs_in(drawn: &[(Piece, &Row<'_>)]) -> Vec<Hung> {
 
 /// The `.m2`s behind those, narrowed to the copy this body and this side want.
 ///
-/// The two model tables are read once for the whole outfit or not at all: most of a wardrobe
+/// The two model tables are read once for the whole batch or not at all: most of a wardrobe
 /// hangs nothing off the body, and on a real install `ModelFileData` is a row per model the
-/// client owns.
+/// client owns. So they arrive here already read, and `None` is a batch where nothing hangs.
 fn models_of(
-    files: &dyn GameFiles,
+    models: Option<&ModelFiles>,
     hangs: &[Hung],
     textures: Option<&TextureFiles>,
-) -> Result<Vec<WornModel>, String> {
-    if hangs.is_empty() {
-        return Ok(Vec::new());
-    }
-    let models = ModelFiles::read(files)?;
+) -> Vec<WornModel> {
+    let Some(models) = models else {
+        return Vec::new();
+    };
 
     let mut found: Vec<WornModel> = Vec::with_capacity(hangs.len());
     for hung in hangs {
@@ -657,7 +745,7 @@ fn models_of(
             found.push(model);
         }
     }
-    Ok(found)
+    found
 }
 
 /// Which of the display's model slots hangs where, as `(model slot, attachment)`.
@@ -849,8 +937,8 @@ fn cape_in(drawn: &[(Piece, &Row<'_>)]) -> Option<u32> {
 /// Every head the set names rather than one, and their groups together. A set holds one helm and
 /// this costs nothing to say properly; hiding is the one thing here where two pieces cannot
 /// disagree, because a group hidden by either is hidden.
-fn hidden_of(files: &dyn GameFiles, drawn: &[(Piece, &Row<'_>)]) -> Result<Vec<u16>, String> {
-    let vis: HashSet<u32> = drawn
+fn helmet_vis(drawn: &[(Piece, &Row<'_>)]) -> HashSet<u32> {
+    drawn
         .iter()
         .filter(|(piece, _)| piece.display_type == HEAD)
         .map(|(_, display)| {
@@ -858,19 +946,53 @@ fn hidden_of(files: &dyn GameFiles, drawn: &[(Piece, &Row<'_>)]) -> Result<Vec<u
         })
         // 210 of the game's helms say zero here, and it means an open helm that hides nothing.
         .filter(|entry| *entry != 0)
-        .collect();
-    if vis.is_empty() {
-        return Ok(Vec::new());
+        .collect()
+}
+
+/// `HelmetGeosetData`, parsed: which groups each `HelmetGeosetVis` takes off this body.
+///
+/// One read for the whole batch, and none at all when nothing in it is a helm — which is most of
+/// a wardrobe. The race narrowing happens here rather than at the far end: the table lists every
+/// race the game ships under one vis id, and a reader that took them all would hide groups meant
+/// for a Draenei's horns.
+struct Helmets(HashMap<u32, Vec<u16>>);
+
+impl Helmets {
+    #[tracing::instrument(name = "worn.helmets", skip_all)]
+    fn read<'a>(
+        files: &dyn GameFiles,
+        wanted: impl Iterator<Item = &'a u32>,
+    ) -> Result<Self, String> {
+        let wanted: HashSet<u32> = wanted.copied().collect();
+        if wanted.is_empty() {
+            return Ok(Self(HashMap::new()));
+        }
+        let table = Db2::parse(files.read(HELMET_GEOSET_DATA)?)?;
+        let mut hiding: HashMap<u32, Vec<u16>> = HashMap::new();
+        for row in table
+            .rows()
+            .filter(|row| wanted.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == HUMAN)
+        {
+            let Ok(group) = u16::try_from(row.number(helmet_column::HIDE_GEOSET_GROUP)) else {
+                continue;
+            };
+            hiding.entry(row.foreign_id()).or_default().push(group);
+        }
+        Ok(Self(hiding))
     }
-    let table = Db2::parse(files.read(HELMET_GEOSET_DATA)?)?;
-    let mut groups: Vec<u16> = table
-        .rows()
-        .filter(|row| vis.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == HUMAN)
-        .filter_map(|row| u16::try_from(row.number(helmet_column::HIDE_GEOSET_GROUP)).ok())
-        .collect();
-    groups.sort_unstable();
-    groups.dedup();
-    Ok(groups)
+
+    /// The groups those vis entries hide between them, sorted and without repeats.
+    fn hiding(&self, vis: &HashSet<u32>) -> Vec<u16> {
+        let mut groups: Vec<u16> = vis
+            .iter()
+            .filter_map(|entry| self.0.get(entry))
+            .flatten()
+            .copied()
+            .collect();
+        groups.sort_unstable();
+        groups.dedup();
+        groups
+    }
 }
 
 /// The sections each piece of an outfit paints, as `(section, material resource)`.
