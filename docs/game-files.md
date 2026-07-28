@@ -469,6 +469,71 @@ apart. The one thing that looks like this and is not is an app built before the 
 to read `InventoryType` at all: every weapon in the game then lands under "no place on a
 character", because nothing says which hand any of them goes in.
 
+### Every look of a kind, verified
+
+The transmog view browses the same chain **backwards** as well: not "what is in this set" but
+"what does the game hold for a head". `wardrobe.rs` walks `ItemAppearance` outward —
+`ItemModifiedAppearance` back to the items, `ItemSparse` for the names, `ItemDisplayInfo` for
+whether there is geometry — and adds the one table the set chain never needed, `Item`, for what
+kind of thing each item is.
+
+**That extra table is the whole difference, and it is not optional.** `DisplayType` files every
+axe, sword, staff and dagger in the game under 11, and `InventoryType` separates one hand from
+two and stops; a picker built on either could not offer "staves". `Item.SubclassID` is the only
+statement anywhere in the game's files of which weapon a weapon is.
+
+Read off 12.0.5.67 on 2026-07-28 with `examples/dump_wardrobe`, which is what to run again
+after a patch:
+
+```sh
+cargo run --release --example dump_wardrobe -- "<install>"           # every kind, counted
+cargo run --release --example dump_wardrobe -- "<install>" 11 12 13 14 15
+```
+
+`ItemAppearance` holds 63,090 readable rows of 63,205 declared. What each kind of place comes
+to, once the looks no item of this install reaches are set aside:
+
+| Display type | Looks | Unreachable | Display type | Looks | Unreachable |
+|---|---|---|---|---|---|
+| 0 head | 5,111 | 591 | 8 hands | 4,194 | 359 |
+| 1 shoulder | 4,736 | 518 | 9 back | 3,742 | 1,801 |
+| 2 shirt | 169 | 16 | 10 tabard | 320 | 45 |
+| 3 chest | 5,185 | 807 | 11 held in a hand | 11,322 | 1,640 |
+| 4 waist | 4,194 | 457 | 12 ranged | 1,957 | 311 |
+| 5 legs | 4,345 | 412 | 13 shield | 1,250 | 97 |
+| 6 feet | 4,233 | 385 | 14 ammo | 20 | 21 |
+| 7 wrist | 3,603 | 332 | 15 held in off hand | 817 | 100 |
+
+"Unreachable" is an appearance no `ItemModifiedAppearance` row this install can read points at,
+which is a look the game will say *nothing* about — no item, no name, no kind. A set keeps such
+a row because the count on its card promised it; a catalogue promised nothing, so those are
+counted in the payload and left out of the list.
+
+The 15,366 things held in a hand are asked for as one answer and cut up by subclass, which is
+what the kind picker in `wardrobe.ts` is built from. On that build:
+
+| Subclass | Looks | Subclass | Looks | Subclass | Looks |
+|---|---|---|---|---|---|
+| 0 one-handed axe | 899 | 7 one-handed sword | 1,448 | 15 dagger | 1,427 |
+| 1 two-handed axe | 603 | 8 two-handed sword | 858 | 16 thrown | 119 |
+| 2 bow | 572 | 9 warglaive | 335 | 18 crossbow | 255 |
+| 3 gun | 484 | 10 staff | 1,812 | 19 wand | 529 |
+| 4 one-handed mace | 1,471 | 13 fist weapon | 649 | armour 6 shield | 1,271 |
+| 5 two-handed mace | 663 | 14 miscellaneous | 59 | armour 0 off hand | 902 |
+| 6 polearm | 855 | | | | |
+
+Three subclasses the community's definitions name are absent from that install and are not
+offered: the two exotic weapon slots, and the spear. Fishing poles are absent too — the game
+gives them no transmog appearance at all. What *is* offered beyond this table is a kind that
+filters nothing, because a hundred-odd looks belong to kinds no player has a word for
+(profession tools, ammunition, an item filed under a class nothing else uses) and a payload the
+window fetched and cannot show would be worse than an untidy list.
+
+The whole wardrobe at once is 55,198 looks and 14 MB of payload, which is why the window asks
+for one kind at a time. Each such read costs about a second, and 640 ms of that is opening the
+game's storage: the tables themselves are 8 ms for `ItemAppearance`, 17 for
+`ItemModifiedAppearance`, 17 for `Item` and 193 for `ItemSparse`.
+
 ## The character herself, verified
 
 What an item paints is above; what the body already *is* comes from somewhere else entirely.
@@ -684,6 +749,12 @@ encrypts, an `ItemAppearance` whose display info is encrypted, one with no icon 
 display whose only model sits in the second slot, an item `ItemSparse` holds a row for and no
 name in, an achievement filed under a category whose parent is encrypted, one filed under a
 category that is not in the tree at all, and one the game withholds entirely.
+
+The transmog fixtures carry `Item` as well, for the wardrobe's sake: browsing by kind reads
+that table and nothing else can say a one-handed sword from a two-handed one. They also hold
+the one hop the *backwards* walk can lose a look to, which the set chain has no equivalent of
+— appearance 80021, a head belonging to no set whose only `ItemModifiedAppearance` row sits in
+an encrypted section, so nothing at all can be said about it.
 
 The item fixtures are a second, smaller pair of the same two tables, written for the question
 `items.rs` asks rather than the one `transmog.rs` asks: what a piece of gear *is*. `Item` is
