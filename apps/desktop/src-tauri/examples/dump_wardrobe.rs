@@ -95,8 +95,9 @@ fn report(files: &dyn casc::GameFiles, display_types: &[u32], listed: bool) {
     }
     for row in rows.iter().take(A_FEW) {
         println!(
-            "  {} — item {}, {} items give it, display {}",
-            row["name"], row["itemId"], row["itemCount"], row["displayInfoId"]
+            "  {} — appearance {}, item {}, {} items give it, display {}",
+            row["name"], row["appearanceId"], row["itemId"], row["itemCount"],
+            row["displayInfoId"]
         );
     }
 }
