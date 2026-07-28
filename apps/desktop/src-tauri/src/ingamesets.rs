@@ -294,14 +294,24 @@ pub fn requests_module(issued_at: i64, requests: &[Request]) -> String {
 /// Keyed by the request id the app gave it, which is the whole point of that id: the app can
 /// then stop writing the request into the game's folder, and the window can say what happened
 /// to an outfit somebody sent a week ago.
+///
+/// **The id is read out of the record and not off the key it was filed under**, and that is not
+/// belt and braces. The addon files these as `done[id] = outcome`, so the table it writes has
+/// integer keys — and a Lua table whose integer keys run from one is a *sequence*, which the
+/// parser hands back as a JSON array with the keys gone. Trusting the key would therefore have
+/// worked for every request except the first one anybody ever sent, which is exactly the one a
+/// person would notice. The record carries its own id for this reason.
 pub fn outcomes(value: &Value) -> Vec<(i64, String, Option<i64>, Option<i64>)> {
-    let Some(done) = value.get("done").and_then(Value::as_object) else {
-        return Vec::new();
+    let done = match value.get("done") {
+        // Either shape, because which one arrives is decided by what the ids happen to be.
+        Some(Value::Object(table)) => table.values().collect::<Vec<_>>(),
+        Some(Value::Array(rows)) => rows.iter().collect::<Vec<_>>(),
+        _ => return Vec::new(),
     };
     let mut found: Vec<(i64, String, Option<i64>, Option<i64>)> = done
-        .iter()
-        .filter_map(|(key, entry)| {
-            let id = key.parse::<i64>().ok()?;
+        .into_iter()
+        .filter_map(|entry| {
+            let id = number(entry.get("id"))?;
             let outcome = entry.get("outcome").and_then(Value::as_str)?.to_string();
             Some((
                 id,
@@ -466,5 +476,162 @@ mod tests {
     fn survives_a_table_that_is_not_a_table_of_characters() {
         assert!(read(&Value::Null).is_empty());
         assert!(read(&json!([1, 2, 3])).is_empty());
+    }
+
+    /* ---------- and the one thing this app says back ---------- */
+
+    /// One request, with only what a test is about filled in.
+    fn request(name: &str, slots: Vec<Slot>) -> Request {
+        Request {
+            id: 1,
+            name: name.into(),
+            icon: Some(133_600),
+            created_at: 0,
+            outcome: None,
+            applied_at: None,
+            set_id: None,
+            slots,
+        }
+    }
+
+    fn slot(slot: i64, appearance_id: i64) -> Slot {
+        Slot {
+            slot,
+            appearance_id,
+            secondary_appearance_id: None,
+            illusion_id: None,
+        }
+    }
+
+    /// The module is Lua the game executes, so the shape it declares has to be the shape the
+    /// shipped `src/CustomSetRequests.lua` declares — a hand-installed addon gets that one and
+    /// must still load.
+    #[test]
+    fn writes_a_module_the_addon_can_load() {
+        let lua = requests_module(1_700_000_000, &[request("Winter", vec![slot(0, 55)])]);
+
+        assert!(lua.starts_with("local _, ns = ...\n"));
+        assert!(lua.contains("ns.customSetRequests = {"));
+        assert!(lua.contains("[\"issuedAt\"] = 1700000000,"));
+        assert!(lua.contains("[\"id\"] = 1,"));
+        assert!(lua.contains("[\"name\"] = \"Winter\","));
+        assert!(lua.contains("[\"icon\"] = 133600,"));
+        assert!(lua.contains("[\"slot\"] = 0, [\"appearance\"] = 55,"));
+    }
+
+    /// Asking for nothing still has to be a module that loads: it is what gets written the
+    /// moment the last request is answered, and a file that failed to parse would take the
+    /// whole addon down with it.
+    #[test]
+    fn writes_a_module_that_asks_for_nothing() {
+        let lua = requests_module(0, &[]);
+
+        assert!(lua.contains("[\"requests\"] = {"));
+        assert!(!lua.contains("[\"id\"]"));
+    }
+
+    /// The game picks its own picture from the first piece when it is not told, so an absent
+    /// icon is written as absent rather than as a nil the addon would have to read around.
+    #[test]
+    fn leaves_out_an_icon_nobody_chose() {
+        let mut asked = request("Winter", vec![slot(0, 55)]);
+        asked.icon = None;
+
+        assert!(!requests_module(0, &[asked]).contains("icon"));
+    }
+
+    #[test]
+    fn writes_the_two_things_a_slot_usually_has_not_got() {
+        let held = Slot {
+            slot: 11,
+            appearance_id: 55,
+            secondary_appearance_id: Some(66),
+            illusion_id: Some(77),
+        };
+
+        let lua = requests_module(0, &[request("Winter", vec![held])]);
+
+        assert!(lua.contains("[\"secondary\"] = 66,"));
+        assert!(lua.contains("[\"illusion\"] = 77,"));
+    }
+
+    /// A set name is a person's own words about their own clothes, so it is escaped rather
+    /// than filtered — and it ends up inside a Lua source file the game executes, where a bare
+    /// quote would end the literal and the rest of the name would be run as code.
+    #[test]
+    fn escapes_a_name_that_would_otherwise_end_the_literal() {
+        let lua = requests_module(0, &[request("say \"hi\" \\ then", vec![slot(0, 55)])]);
+
+        assert!(lua.contains(r#"["name"] = "say \"hi\" \\ then","#), "{lua}");
+    }
+
+    /// Anything below a space travels as a decimal escape rather than as a raw control byte,
+    /// including the newline that would otherwise break the line the name sits on.
+    #[test]
+    fn escapes_what_would_otherwise_break_the_line() {
+        let lua = requests_module(0, &[request("two\nlines\u{7}", vec![slot(0, 55)])]);
+
+        assert!(lua.contains(r#"["name"] = "two\nlines\7","#), "{lua}");
+        assert!(!lua.contains("two\nlines"));
+    }
+
+    #[test]
+    fn reads_back_what_the_addon_did() {
+        let found = outcomes(&json!({
+            "done": {
+                "2": { "id": 2, "outcome": "created", "at": 1_700_000_000, "setId": 9 },
+                "1": { "id": 1, "outcome": "full", "at": 1_600_000_000 },
+            }
+        }));
+
+        assert_eq!(
+            found,
+            vec![
+                (1, "full".to_string(), Some(1_600_000_000), None),
+                (2, "created".to_string(), Some(1_700_000_000), Some(9)),
+            ]
+        );
+    }
+
+    /// An entry that names no outcome says nothing about what happened, and a key that is not
+    /// a number is not a request id. Neither should be allowed to mark a request answered.
+    #[test]
+    fn refuses_an_answer_that_says_nothing() {
+        let found = outcomes(&json!({
+            "done": {
+                "1": { "id": 1, "at": 1 },
+                "3": { "outcome": "created" },
+                "2": { "id": 2, "outcome": "created" },
+            }
+        }));
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, 2);
+    }
+
+    /// The shape the parser hands back whenever the ids happen to run from one — which is the
+    /// first request anybody ever sends, and so the one case that must not be the broken one.
+    #[test]
+    fn reads_the_record_back_when_it_arrives_as_a_sequence() {
+        let found = outcomes(&json!({
+            "done": [
+                { "id": 1, "outcome": "created", "at": 20, "setId": 9 },
+                { "id": 2, "outcome": "full", "at": 21 },
+            ]
+        }));
+
+        assert_eq!(
+            found,
+            vec![
+                (1, "created".to_string(), Some(20), Some(9)),
+                (2, "full".to_string(), Some(21), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn survives_a_record_the_addon_has_never_written() {
+        assert!(outcomes(&json!({})).is_empty());
+        assert!(outcomes(&Value::Null).is_empty());
     }
 }

@@ -8789,4 +8789,130 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(brin.len(), 1);
         assert!(brin[0].slots.is_empty());
     }
+
+
+    /* ---------- and the outfits this app asks the game to save ---------- */
+
+    fn one_slot(slot: i64, appearance_id: i64) -> ingamesets::Slot {
+        ingamesets::Slot {
+            slot,
+            appearance_id,
+            secondary_appearance_id: None,
+            illusion_id: None,
+        }
+    }
+
+    #[test]
+    fn records_an_outfit_for_the_game_to_save() {
+        let (_temp, _wow, database) = in_game_sets_install("");
+        open_database(&database).unwrap();
+
+        let requests =
+            request_set_in_game(&database, "  Winter   Look ", Some(133_600), &[one_slot(0, 55)], 10)
+                .unwrap();
+
+        assert_eq!(requests.len(), 1);
+        // Cleaned the way a set saved in this app is, because both end up as a name somebody
+        // reads in a list — and one of them ends up inside a Lua file the game executes.
+        assert_eq!(requests[0].name, "Winter Look");
+        assert_eq!(requests[0].icon, Some(133_600));
+        assert_eq!(requests[0].created_at, 10);
+        assert_eq!(requests[0].slots, vec![one_slot(0, 55)]);
+        // Unanswered, which is what a request is until the player has actually logged in.
+        assert_eq!(requests[0].outcome, None);
+        assert_eq!(requests[0].applied_at, None);
+    }
+
+    /// A send with nothing on her is refused rather than stored, because a set of no clothes is
+    /// not a thing the player could have meant and the game would only be asked to hold nothing.
+    #[test]
+    fn refuses_an_outfit_with_nothing_in_it() {
+        let (_temp, _wow, database) = in_game_sets_install("");
+        open_database(&database).unwrap();
+
+        let error = request_set_in_game(&database, "Winter", None, &[], 10).unwrap_err();
+
+        assert!(error.contains("Put something on her"), "{error}");
+        assert!(set_requests(&database).unwrap().is_empty());
+    }
+
+    /// Only the unanswered ones are written into the addon's folder. A request the game has
+    /// already carried out would otherwise be carried out again on the next install, saving
+    /// over a set the player may have edited since.
+    #[test]
+    fn writes_only_the_requests_still_waiting() {
+        let (_temp, wow, database) = in_game_sets_install("");
+        open_database(&database).unwrap();
+        request_set_in_game(&database, "Winter", None, &[one_slot(0, 55)], 10).unwrap();
+        request_set_in_game(&database, "Summer", None, &[one_slot(0, 66)], 11).unwrap();
+
+        rewrite_in_game_sets(&wow, "");
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            r#"ChronieDB = { ["customSetRequests"] = { ["done"] = {
+                [1] = { ["id"] = 1, ["outcome"] = "created", ["at"] = 20, ["setId"] = 9 },
+            } } }"#,
+        )
+        .unwrap();
+        collect(&wow, &database, 30, Options::default()).unwrap();
+
+        let waiting = waiting_set_requests(&database).unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].name, "Summer");
+
+        // And the answered one carries what the addon said, under the id the app gave it.
+        let all = set_requests(&database).unwrap();
+        let winter = all.iter().find(|one| one.name == "Winter").unwrap();
+        assert_eq!(winter.outcome.as_deref(), Some("created"));
+        assert_eq!(winter.applied_at, Some(20));
+        assert_eq!(winter.set_id, Some(9));
+    }
+
+    /// The addon's record outlives the request, so it keeps reporting the same outcome at every
+    /// logout. The first answer is the one that stands — otherwise the moment it was carried
+    /// out would creep forward every time the player logged in for the rest of the year.
+    #[test]
+    fn keeps_the_first_answer_a_request_was_given() {
+        let (_temp, wow, database) = in_game_sets_install("");
+        open_database(&database).unwrap();
+        request_set_in_game(&database, "Winter", None, &[one_slot(0, 55)], 10).unwrap();
+
+        let answered = r#"ChronieDB = { ["customSetRequests"] = { ["done"] = {
+            [1] = { ["id"] = 1, ["outcome"] = "created", ["at"] = 20, ["setId"] = 9 },
+        } } }"#;
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            answered,
+        )
+        .unwrap();
+        collect(&wow, &database, 30, Options::default()).unwrap();
+        fs::write(
+            wow.join("WTF/Account/TEST/SavedVariables/chronie.lua"),
+            format!("{answered} -- touched"),
+        )
+        .unwrap();
+        collect(&wow, &database, 40, Options::default()).unwrap();
+
+        let all = set_requests(&database).unwrap();
+        assert_eq!(all[0].applied_at, Some(20));
+    }
+
+    /// Newest first, because the one somebody just sent is the one they are looking for — and
+    /// the id is what the addon keys "already done" on, so it has to be theirs alone.
+    #[test]
+    fn hands_back_every_request_newest_first() {
+        let (_temp, _wow, database) = in_game_sets_install("");
+        open_database(&database).unwrap();
+        request_set_in_game(&database, "Winter", None, &[one_slot(0, 55)], 10).unwrap();
+        request_set_in_game(&database, "Summer", None, &[one_slot(1, 66)], 11).unwrap();
+
+        let all = set_requests(&database).unwrap();
+
+        assert_eq!(
+            all.iter().map(|one| one.name.as_str()).collect::<Vec<_>>(),
+            vec!["Summer", "Winter"]
+        );
+        assert_eq!(all[0].slots, vec![one_slot(1, 66)]);
+        assert_ne!(all[0].id, all[1].id);
+    }
 }
