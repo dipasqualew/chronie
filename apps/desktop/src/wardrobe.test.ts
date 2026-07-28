@@ -280,3 +280,118 @@ describe("searching a wardrobe by what the artwork was measured to be", () => {
     expect(found("")).toEqual([11, 12]);
   });
 });
+
+describe("asking a wardrobe for one thing a look says", () => {
+  const looks = [
+    look({ appearanceId: 11, name: "Tideglass Crown" }),
+    look({ appearanceId: 12, name: "Duskwoven Hood" }),
+    // A colour in the name and another one in the artwork, which is the whole case for asking
+    // under a key rather than typing the word and taking what comes.
+    look({ appearanceId: 13, name: "Brownhide Cowl" }),
+  ];
+  const marks = indexMarks({
+    marks: [
+      {
+        kind: "appearance", id: 11, favourite: false,
+        tags: [{ key: "faction", value: "horde" }, { key: "wishlist", value: null }],
+      },
+      {
+        kind: "appearance", id: 12, favourite: false,
+        tags: [{ key: "faction", value: "alliance" }],
+      },
+    ],
+  });
+  const measured = indexQualities({
+    displayType: 0,
+    build: "12.0.5.67823",
+    sizeCuts: {},
+    appearances: [
+      { id: 11, primary: "#4a3b2c", size: "large" },
+      { id: 12, primary: "#2060e0", accent: "#f6f6f6", size: "small" },
+      { id: 13, primary: "#2060e0", size: "small" },
+    ],
+  });
+  const found = (search: string): number[] => filterAppearances(looks, {
+    kind: kindOf("armour-0"),
+    search,
+    klass: "",
+    marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("appearance", id) },
+    qualities: (id) => measured.of(id),
+  }).map((one) => one.appearanceId);
+
+  // Typing "brown" finds the look measured brown and the Brownhide Cowl beside it, and there
+  // was no way at all to say which of the two was being asked about.
+  it("tells the colour a look is from the colour its name happens to hold", () => {
+    expect(found("brown")).toEqual([11, 13]);
+    expect(found("colour:brown")).toEqual([11]);
+  });
+
+  it("finds a look by how big it was measured to be for its slot", () => {
+    expect(found("size:large")).toEqual([11]);
+  });
+
+  it("finds a look by a tag the reader wrote against it", () => {
+    expect(found("faction:horde")).toEqual([11]);
+    expect(found("faction:alliance")).toEqual([12]);
+  });
+
+  // The picker beside the box holds one tag at a time, so a bare key is how a reader asks for
+  // everything filed under one however they annotated it.
+  it("takes a bare key as any value the reader filed under it", () => {
+    expect(found("faction:")).toEqual([11, 12]);
+  });
+
+  // And a label is a key that was the whole of what the reader said, which is the example both
+  // `terms.ts` and `markFacets` give for what a bare key is *for*. It is here because the facets
+  // the game supplies drop the empty ones — a look the picker has no word for must not answer
+  // `kind:` — and a label's value is empty on purpose, so a filter that dropped those alongside
+  // them would leave a reader's own labels reachable only as a bare word.
+  it("finds a look under a label the reader wrote no value against", () => {
+    expect(found("wishlist:")).toEqual([11]);
+  });
+
+  it("asks the game's own words under a name too", () => {
+    expect(found("slot:head")).toEqual([11, 12, 13]);
+    expect(found("name:cowl")).toEqual([13]);
+  });
+
+  // Two questions at once, which is what the dropdown could never have been.
+  it("narrows on every term together", () => {
+    expect(found("colour:blue size:small")).toEqual([12, 13]);
+    expect(found("colour:blue size:large")).toEqual([]);
+  });
+
+  it("reads a word beside a term", () => {
+    expect(found("colour:blue duskwoven")).toEqual([12]);
+    expect(found("colour:blue tideglass")).toEqual([]);
+  });
+
+  // An empty list is the wardrobe saying it holds no huge anything, which is true and is what
+  // was asked — rather than the term being dropped as a typo and the list left alone.
+  it("leaves an empty list for a term nothing carries", () => {
+    expect(found("size:huge")).toEqual([]);
+    expect(found("faction:alliance colour:brown")).toEqual([]);
+  });
+
+  it("asks what a thing held is rather than what number the game files it under", () => {
+    const held = [weapon(15, { name: "Emberforge Dagger" }), weapon(10, { name: "Ashen Staff" })];
+    const asked = (search: string): string[] => filterAppearances(held, {
+      kind: kindOf("held"), search, klass: "",
+    }).map((one) => one.name);
+
+    expect(asked("kind:dagger")).toEqual(["Emberforge Dagger"]);
+    expect(asked("kind:staff")).toEqual(["Ashen Staff"]);
+  });
+
+  // A facet with nothing in it is left out rather than offered, which is what makes a bare
+  // `kind:` the reader asking which of these the picker has a word for at all.
+  it("answers a bare kind with only the looks the picker can name", () => {
+    const held = [
+      weapon(15, { name: "Emberforge Dagger" }),
+      look({ appearanceId: 2, displayType: 11, classId: 19, subclassId: 9, name: "Oddity" }),
+    ];
+    const asked = filterAppearances(held, { kind: kindOf("held"), search: "kind:", klass: "" });
+
+    expect(asked.map((one) => one.name)).toEqual(["Emberforge Dagger"]);
+  });
+});

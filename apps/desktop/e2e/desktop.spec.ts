@@ -421,6 +421,17 @@ class TransmogView {
   }
 
   /**
+   * One of those chips as the button it is, named by what clicking it would ask the grid for.
+   *
+   * By what it does rather than by what it says, because "horde" read out of a grid of cards is
+   * not a control anybody can act on — and it is what tells the two apart: a card's own chip
+   * narrows the grid, and a chip on a look inside an opened set is a word and nothing else.
+   */
+  askByTag(set: string, label: string): Locator {
+    return this.card(set).getByRole("button", { name: `Filter by ${label}`, exact: true });
+  }
+
+  /**
    * One row of an open set, found by the look it is for.
    *
    * By the star's own accessible name rather than by the row's text, because two rows can
@@ -3793,6 +3804,18 @@ test("browses the game's transmog sets and dresses the character in them", async
     await transmog.search().fill("horde");
     await expect(transmog.sets()).toHaveText(["Emberforge Plate"]);
     await transmog.search().fill("");
+  });
+
+  // And the way a reader finds any of that out without being told: the chip they are already
+  // looking at is a button, and clicking it writes the question it stands for into the box. The
+  // term left behind is the point — it is there to be added to, and it is there to be cleared.
+  await test.step("a tag clicked on a card asks the grid for it, in words", async () => {
+    await transmog.askByTag("Emberforge Plate", "faction: horde").click();
+    await expect(transmog.search()).toHaveValue("faction:horde");
+    await expect(transmog.sets()).toHaveText(["Emberforge Plate"]);
+
+    await transmog.search().fill("");
+    await expect(transmog.sets()).toHaveCount(4);
   });
 
   // Only 205 was starred, in the fixture, and nothing done since has starred a second set —

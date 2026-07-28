@@ -130,11 +130,14 @@ function searchable(set: CustomSet, mark: TransmogMark | undefined): string {
  * slots, and the store measures a look at a time.
  */
 function facetsOf(set: CustomSet, mark: TransmogMark | undefined): Facet[] {
-  return [
+  const own = [
     { key: "name", value: set.name },
     ...set.pieces.map((piece) => ({ key: "piece", value: piece.name })),
-    ...markFacets(mark),
+    // The empty ones out of these and out of the tags beside them, which keep theirs: a piece the
+    // game withheld the name of answers `piece:` with nothing, and a label's empty value is what
+    // a label is. See the same paragraph in `wardrobe.ts`.
   ].filter((facet) => facet.value !== "");
+  return [...own, ...markFacets(mark)];
 }
 
 /**

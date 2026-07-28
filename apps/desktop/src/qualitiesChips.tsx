@@ -53,10 +53,24 @@ export function Qualities(
   // them has the tooltip, which says all of it in words.
   const said = quality.size ?? colourName(quality.primary);
   const key = quality.size ? SIZE : COLOUR;
+  // **No two parts of the chip ask the same thing.** A chip with no size prints the primary
+  // colour's own name, and two colours measured apart can still be one word — there are eight
+  // names over the whole wheel. Either way a second button asking what a button beside it
+  // already asks is one thing under one name twice, which is a control to get past rather than
+  // a choice for anybody reading the row through a screen reader. The word keeps its question,
+  // being the larger target and the one with letters on it, and a square that has nothing left
+  // to ask goes back to being a picture.
+  const asked = new Set([termText(key, said)]);
+  const swatch = (colour: string): ReactNode => {
+    const term = termText(COLOUR, colourName(colour));
+    const ask = onFilter && !asked.has(term) ? onFilter : undefined;
+    asked.add(term);
+    return <Swatch colour={colour} onFilter={ask} />;
+  };
   return (
     <span className="chip quality" title={`${qualitySummary(quality)} · ${BUILT_IN}`}>
-      <Swatch colour={quality.primary} onFilter={onFilter} />
-      {quality.accent ? <Swatch colour={quality.accent} onFilter={onFilter} /> : null}
+      {swatch(quality.primary)}
+      {quality.accent ? swatch(quality.accent) : null}
       {onFilter
         ? <Pick facet={key} said={said} onFilter={onFilter} className="quality-said" />
         : <span className="quality-said">{said}</span>}

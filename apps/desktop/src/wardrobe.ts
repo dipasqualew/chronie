@@ -226,22 +226,25 @@ function searchable(
  *
  * The three the game supplies, and then the reader's own tags and whatever the artwork was
  * measured to be — so `slot:head`, `kind:dagger`, `faction:horde` and `colour:brown` are all one
- * kind of question over one list. A facet with nothing in it is left out rather than offered: a
- * look whose kind the picker has no word for would otherwise answer `kind:` with nothing, and
- * `kind:` is a reader asking which of these the picker *does* have a word for.
+ * kind of question over one list.
+ *
+ * **The empty ones are dropped out of the game's three and out of nothing else.** A look whose
+ * kind the picker has no word for must not answer `kind:`, because `kind:` is a reader asking
+ * which of these the picker *does* have a word for. A tag is the other way round: an empty value
+ * is what a label *is*, and dropping those would make `wishlist:` — the one question a label can
+ * be asked — find nothing at all.
  */
 function facetsOf(
   appearance: WardrobeAppearance,
   mark: TransmogMark | undefined,
   quality: Quality | undefined,
 ): Facet[] {
-  return [
+  const game = [
     { key: "name", value: appearance.name },
     { key: "slot", value: slotName(appearance.displayType, appearance.inventoryType) },
     { key: "kind", value: kindName(appearance) },
-    ...markFacets(mark),
-    ...qualityFacets(quality),
   ].filter((facet) => facet.value !== "");
+  return [...game, ...markFacets(mark), ...qualityFacets(quality)];
 }
 
 /** What kind of thing a look is, as the picker would have called it, or nothing it knows. */

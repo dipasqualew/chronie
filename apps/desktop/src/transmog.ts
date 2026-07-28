@@ -113,8 +113,10 @@ function searchable(
  * folded-away Mage version would hide the look from exactly the reader asking for it.
  *
  * `collection` rather than `group`, because "Tideglass Wardrobe" is what the heading over the card
- * says and a reader types the word they are looking at. Facets with nothing in them are dropped —
- * a set out of no collection answers `collection:` with nothing rather than with itself.
+ * says and a reader types the word they are looking at. The game's facets with nothing in them
+ * are dropped — a set out of no collection answers `collection:` with nothing rather than with
+ * itself — and the reader's are not, an empty value being what a label is rather than a gap in
+ * one. See the same paragraph in `wardrobe.ts`.
  */
 function facetsOf(
   set: TransmogSet, mark: TransmogMark | undefined, quality: Quality | undefined,
@@ -126,9 +128,8 @@ function facetsOf(
     ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
     { key: "expansion", value: expansionName(one.expansionId) },
     { key: "patch", value: patchName(one.patchIntroduced) },
-  ]);
-  return [...game, ...markFacets(mark), ...qualityFacets(quality)]
-    .filter((facet) => facet.value !== "");
+  ]).filter((facet) => facet.value !== "");
+  return [...game, ...markFacets(mark), ...qualityFacets(quality)];
 }
 
 /**
