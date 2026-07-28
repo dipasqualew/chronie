@@ -6,6 +6,7 @@
  * three.js half is thin on purpose, and everything decidable without a canvas is decided here.
  */
 
+import type { Focus } from "./gallery";
 import { isHeld } from "./transmogModal";
 import type { WornPiece } from "./types";
 
@@ -243,4 +244,62 @@ export function framingDistance(seen: OnScreen, fov: number, aspect: number): nu
   const wide = half * Math.max(aspect, 0.01);
   const back = Math.max((seen.up * MARGIN) / half, (seen.across * MARGIN) / wide);
   return Math.max(back + seen.deep, 0.1);
+}
+
+/** Where a model goes, where the camera goes, and how far the two may be dragged apart. */
+export interface Framing {
+  /** Where to put the model, so that the part being looked at sits on the origin. */
+  offset: [number, number, number];
+  /** How far the camera stands off it. */
+  distance: number;
+  /** How far a pan may carry the middle of the pane off what is being looked at. */
+  leash: number;
+}
+
+/**
+ * A model placed so that the part `focus` names is the middle of the pane, and a camera put
+ * where it holds that part and no more.
+ *
+ * **The offset is the whole of the fix for a helm that swung about the pane as it was turned.**
+ * A stage orbits its target and its target is the origin, so whatever is put on the origin is
+ * what a drag turns *in place* and what a scroll zooms *towards*. Centring the model's bounding
+ * box put a two-metre character's pelvis there — so a reader who came to look at a helm, zoomed
+ * in on it and dragged was orbiting a point a metre below the thing they were looking at, and
+ * the helm swept off the pane at the first degree. Framed on the head, the same drag turns the
+ * head.
+ *
+ * `focus` is `gallery.ts`'s, and deliberately the same table: the thumbnail of an appearance
+ * and the pane it opens into are two sizes of one picture, and a reader who clicked a helm
+ * because it filled its tile should not be handed a whole woman.
+ *
+ * What has to fit is the model's box clipped to a cube of the held size around that point — a
+ * slice of a body for a slot on one. A `focus` that holds the whole model clips to nothing at
+ * all and frames exactly what this file framed before there was a focus, which matters: that is
+ * the character pane, and a polearm three times a character's height is wider than it is tall.
+ */
+export function frameOn(
+  low: [number, number, number],
+  high: [number, number, number],
+  focus: Focus,
+  view: View,
+  fov: number,
+  aspect: number,
+): Framing {
+  const size = high.map((edge, axis) => edge - (low[axis] ?? 0)) as Triple;
+  const middle = high.map((edge, axis) => (edge + (low[axis] ?? 0)) / 2) as Triple;
+  // Both of `focus`'s numbers are proportions of the model's own height, which is what lets one
+  // table frame a body two metres tall and a fixture of sixty-eight units alike.
+  const height = Math.max(size[1], 1e-3);
+  const at = low[1] + focus.height * height;
+  const held = Math.max(focus.holds * height, 1e-3);
+
+  const shown = (focus.holds >= 1 ? size : size.map((edge) => Math.min(edge, held))) as Triple;
+  return {
+    offset: [-middle[0], -at, -middle[2]],
+    distance: framingDistance(onScreen(shown, view), fov, aspect),
+    // To anywhere on what is being looked at and no further. What it rules out is the drag that
+    // carries the model off the pane entirely and leaves nothing on screen to say which way it
+    // went — so it is a leash on the part in view, not on everything that arrived with it.
+    leash: Math.hypot(...shown) / 2,
+  };
 }

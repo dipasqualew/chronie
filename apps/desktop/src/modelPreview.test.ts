@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { WHOLE, focusOf } from "./gallery";
 import {
   cameraFor,
+  frameOn,
   framingDistance,
   glbBytes,
   onScreen,
@@ -258,5 +260,81 @@ describe("cameraFor", () => {
     for (const view of ["default", "front", "back", "left", "right"] as const) {
       expect(length(cameraFor(view, 7))).toBeCloseTo(7);
     }
+  });
+});
+
+describe("frameOn", () => {
+  /**
+   * The corners of a body standing on the floor, the way one arrives out of this pipeline: the
+   * feet on Y zero, the scalp at 2, and the middle of her a little off the origin in the two
+   * flat axes — which is what makes "did it centre her" a question with an answer.
+   */
+  const FEET: [number, number, number] = [0.1, 0, -0.5];
+  const SCALP: [number, number, number] = [0.5, 2, 0.7];
+
+  // The whole of issue #142. The pane orbits its target and its target is the origin, so what
+  // the offset puts there is what a drag turns and what a scroll zooms towards. A helm framed
+  // as a whole body put her pelvis there, a metre below the thing the reader had clicked, and
+  // the helm swung off the pane at the first degree of the first drag.
+  it("puts the part being looked at on the origin, whatever else arrived with it", () => {
+    const { offset } = frameOn(FEET, SCALP, focusOf(0), "default", FOV, 0.75);
+    // A head is at 0.92 of her height, so the origin lands there and not at her middle.
+    expect(offset[1]).toBeCloseTo(-1.84);
+    // And across the two flat axes she is centred, because there is no part of "left" or
+    // "in front" that a slot picks out.
+    expect(offset[0]).toBeCloseTo(-0.3);
+    expect(offset[2]).toBeCloseTo(-0.1);
+  });
+
+  // The other half of the same report. A slot's framing holds a slice of her rather than all of
+  // her, which is the difference between a helm and four pixels of hat.
+  it("stands close enough to a slot to see it, and back to see the whole body", () => {
+    const head = frameOn(FEET, SCALP, focusOf(0), "default", FOV, 0.75);
+    const feet = frameOn(FEET, SCALP, focusOf(6), "default", FOV, 0.75);
+    const all = frameOn(FEET, SCALP, WHOLE, "default", FOV, 0.75);
+
+    expect(head.distance).toBeLessThan(all.distance / 2);
+    expect(feet.distance).toBeLessThan(all.distance / 2);
+    // A cloak is most of her, so its framing is nearly the whole-body one — the table says so
+    // and the arithmetic has to carry that through rather than flatten every slot to one.
+    expect(frameOn(FEET, SCALP, focusOf(9), "default", FOV, 0.75).distance)
+      .toBeGreaterThan(head.distance * 2);
+  });
+
+  // The character pane frames whatever it is given and has no slot to point at, so this is the
+  // path everything that is not one appearance takes. It has to come out where it came out
+  // before there was a focus at all, or a body somebody was looking at moves under them.
+  it("frames the whole of a model exactly as a bare framing does", () => {
+    const size: [number, number, number] = [0.4, 2, 1.2];
+    const all = frameOn([-0.2, 0, -0.6], [0.2, 2, 0.6], WHOLE, "default", FOV, 0.75);
+
+    // Which is to say the middle of the box, exactly as subtracting its centre would give.
+    for (const [axis, where] of all.offset.entries()) expect(where).toBeCloseTo([0, -1, 0][axis]!);
+    expect(all.distance).toBeCloseTo(framingDistance(onScreen(size, "default"), FOV, 0.75));
+    expect(all.leash).toBeCloseTo(Math.hypot(...size) / 2);
+  });
+
+  // A weapon is its own mesh with no body under it, and a polearm is three times as long as it
+  // is tall. `holds: 1` means all of it, so nothing may be clipped to the height — which is the
+  // one case where framing a slice of the model would put the camera inside it.
+  it("holds all of something wider than it is tall", () => {
+    const long = frameOn([-3, -0.2, -0.2], [3, 0.2, 0.2], WHOLE, "front", FOV, 0.75);
+    expect(long.distance)
+      .toBeCloseTo(framingDistance(onScreen([6, 0.4, 0.4], "front"), FOV, 0.75));
+  });
+
+  // The leash is what stops a pan carrying the model off the pane, and it is about what is in
+  // view: a helm's is a helm's, not a whole body's.
+  it("leashes a pan to what is being looked at", () => {
+    const head = frameOn(FEET, SCALP, focusOf(0), "default", FOV, 0.75);
+    expect(head.leash).toBeLessThan(frameOn(FEET, SCALP, WHOLE, "default", FOV, 0.75).leash);
+    expect(head.leash).toBeGreaterThan(0);
+  });
+
+  // A `.glb` that parsed into a single point, which is a thing an install can produce.
+  it("keeps its distance from a model with no size at all", () => {
+    const nothing = frameOn([0, 0, 0], [0, 0, 0], focusOf(0), "default", FOV, 0.75);
+    expect(nothing.distance).toBeGreaterThan(0);
+    expect(nothing.offset.every(Number.isFinite)).toBe(true);
   });
 });

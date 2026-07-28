@@ -226,6 +226,57 @@ export class AppearancePicture {
     });
   }
 
+  /**
+   * Where the camera is, relative to the point it is looking at, in the model's own units.
+   *
+   * A canvas draws the same rectangle whichever way round the thing on it is and however far
+   * away it stands, so the readout the stage writes is the only instrument out here that can
+   * tell a helm framed on a head from a helm framed as a woman — and, after a drag, a camera
+   * that turned from one that went over the top of her.
+   */
+  async framing(): Promise<{ out: number; above: number }> {
+    const stage = this.stage();
+    const numbers = async (named: string): Promise<number[]> =>
+      ((await stage.getAttribute(`data-${named}`)) ?? "").split(",").map(Number);
+    const [camera, target] = [await numbers("camera"), await numbers("target")];
+    const off = camera.map((axis, at) => axis - (target[at] ?? 0));
+    const out = Math.hypot(...off);
+    return { out, above: out === 0 ? 0 : (off[1] ?? 0) / out };
+  }
+
+  /**
+   * Where the camera is once it has stopped moving, which is not where a drag leaves it.
+   *
+   * A drag does not end when the mouse does: the controls carry a shrinking fraction of it into
+   * every frame after, which is what makes turning a model feel like turning something with
+   * weight. Two readings that agree is the end of what three decimals can see of that.
+   */
+  async settled(): Promise<{ out: number; above: number }> {
+    let last = "";
+    await expect
+      .poll(async () => {
+        const now = (await this.stage().getAttribute("data-camera")) ?? "";
+        const still = now !== "" && now === last;
+        last = now;
+        return still;
+      }, { timeout: 15_000 })
+      .toBe(true);
+    return this.framing();
+  }
+
+  /** Drags across the middle of the picture with the left button, the way a reader turns it. */
+  async drag(across: number, down: number): Promise<void> {
+    const box = await this.picture().boundingBox();
+    if (!box) throw new Error("there is no picture on the stage to drag");
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    await this.page.mouse.move(x, y);
+    await this.page.mouse.down();
+    // In steps, because a single jump is one pointer event and the controls read movement
+    // between them — the same reason a real drag is a hundred of these.
+    await this.page.mouse.move(x + across, y + down, { steps: 8 });
+    await this.page.mouse.up();
+  }
+
   private stage(): Locator {
     return this.dialog.getByRole("figure", { name: "Where the appearance is drawn" });
   }
