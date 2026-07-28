@@ -33,12 +33,13 @@
 //! | files read | 51 | **0** |
 //! | bytes those reads decoded | 112.1 MB | **0** |
 //! | rows walked | 1,810,174 | 1,810,174 |
-//! | `.glb` | 10.36 MB, 253,251 vertices in 4 meshes | the same |
-//! | her body | ships 248,958 and draws 4,894 — 2.0% | the same |
+//! | `.glb` | 2.83 MB, 6,474 vertices in 4 meshes | the same |
+//! | her body | ships 4,894 and draws 4,894 — 100% | the same |
 //!
 //! Every walk left is one per table, and what remains is the large ones being read end to end
-//! once each. The vertex share has not moved at all: that is the `.glb` shipping a body it
-//! draws a fortieth of, and it is the piece of #99 that is still entirely ahead.
+//! once each. The vertex share is all of it because [`crate::glb::write`] carries a vertex
+//! only where something points at it: the same `.glb` was 10.36 MB and 253,251 vertices when
+//! the body shipped every variant of every geoset and drew a fortieth of them.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -163,8 +164,9 @@ pub(crate) fn note_rows(rows: usize) {
 pub struct Geometry {
     /// Vertices the file carries for this mesh.
     pub shipped: usize,
-    /// Distinct vertices some primitive's indices actually point at. On a real body this is
-    /// 1.3% of `shipped`, because hiding a geoset drops its triangles and keeps its vertices.
+    /// Distinct vertices some primitive's indices actually point at. Equal to `shipped` since
+    /// [`crate::glb::write`] stopped carrying the rest; it was 1.3% of it before, because
+    /// hiding a geoset drops its triangles and leaves its vertices behind.
     pub drawn: usize,
 }
 
@@ -193,9 +195,9 @@ pub struct Payload {
 impl Payload {
     /// The body itself, which is the first mesh a scene holds.
     ///
-    /// Worth apart from the rest because it is the one that does not change with the outfit,
-    /// and because it is where the ratio lives: a quarter of a million vertices of which a
-    /// dressed body draws 1.3%.
+    /// Worth apart from the rest because it is the largest thing in the file by far and the
+    /// one the ratio was always about: a quarter of a million vertices in the game's own mesh,
+    /// of which a dressed body draws about 2%.
     pub fn body(&self) -> Geometry {
         self.meshes.first().copied().unwrap_or_default()
     }
@@ -423,43 +425,44 @@ mod tests {
         assert!(work.rows <= 274, "a click walks {} rows", work.rows);
     }
 
-    // The invariant behind sending the body once and only the atlas per click: the vertices
-    // the body ships do not depend on what is worn. Only what hangs off her is added, and only
-    // the atlas painted onto her changes. If this ever stops holding, the plan to send the
-    // body once stops being possible, and this is where that is noticed.
+    // What the body ships now depends on what is worn, and that is the point: a body holds
+    // every variant of every geoset at once, so the file carries the vertices some primitive
+    // points at and renumbers the indices to match. Dressing her changes which those are.
+    //
+    // This is where the invariant that used to be asserted here went. It said the body ships
+    // the same vertices whatever is worn, and it was the ground under a plan to send the body
+    // once and only the atlas per click. `glb::Kept` took that plan's reason away rather than
+    // breaking it: what a click now carries is 2.8MB of which the geometry is ~0.3MB, so
+    // sending the body once would save a tenth of the payload and cost the window a cache.
     #[test]
-    fn ships_the_same_body_whatever_is_worn() {
+    fn hangs_what_she_wears_off_her_as_meshes_of_its_own() {
         let files = fixture_files();
         let bare = payload_of(&character::glb_of(&files, None).expect("the bare body draws"))
             .expect("a .glb");
         let dressed = payload_of(&click(&files)).expect("a .glb");
-        assert_eq!(
-            bare.body().shipped,
-            dressed.body().shipped,
-            "dressing her changed the body's vertex count"
-        );
         assert!(
             dressed.meshes.len() > bare.meshes.len(),
             "the fixture outfit has to hang something off her"
         );
     }
 
-    // 98% of a real body's `.glb` is vertices no index points at — 248,958 shipped and 4,894
-    // drawn — because hiding a geoset drops its triangles and keeps its vertices. The fixture
-    // body is 200 vertices where a real one is a quarter of a million, so what the suite can
-    // hold still is the share and not the size. Asserted from *below*, because this is the one
-    // number the work here is meant to push up rather than down.
+    // It used to be that 98% of a real body's `.glb` was vertices no index pointed at —
+    // 248,958 shipped and 4,894 drawn — because hiding a geoset drops its triangles and keeps
+    // its vertices. `glb::Kept` carries only the ones something draws, so the share is all of
+    // it, and every mesh in the scene rather than only the body. Asserted from *below*,
+    // because this is the one number the work here is meant to push up rather than down.
     #[test]
     fn draws_no_smaller_a_share_of_what_it_ships_than_it_used_to() {
         let (payload, _) = cost();
-        let body = payload.body();
-        assert!(body.shipped > 0, "the .glb ships no body at all");
-        assert!(
-            body.drawn_share() >= 44.0,
-            "only {:.1}% of the body's {} vertices are drawn",
-            body.drawn_share(),
-            body.shipped,
-        );
+        assert!(payload.body().shipped > 0, "the .glb ships no body at all");
+        for (which, mesh) in payload.meshes.iter().enumerate() {
+            assert!(
+                mesh.drawn_share() >= 100.0,
+                "only {:.1}% of mesh {which}'s {} vertices are drawn",
+                mesh.drawn_share(),
+                mesh.shipped,
+            );
+        }
     }
 
     /* ---------- the counting itself ---------- */
