@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { NO_MARK_FILTER, indexMarks, tokenOf } from "./marks";
+import type { MarkFilter } from "./marks";
 import {
   HELD_IN_HAND, KINDS, PAGE, answerKey, filterAppearances, isKind, kindName, kindOf,
   shownSummary, wardrobeRow,
@@ -179,5 +181,57 @@ describe("how much of a kind is drawn", () => {
 
   it("says what the game keeps encrypted rather than coming up short in silence", () => {
     expect(shownSummary(4, 4, 591)).toBe("4 appearances · 591 looks the game keeps encrypted");
+  });
+});
+
+describe("narrowing a kind to what the reader said about it", () => {
+  const looks = [
+    look({ appearanceId: 11, name: "Tideglass Crown" }),
+    look({ appearanceId: 12, name: "Duskwoven Hood" }),
+    look({ appearanceId: 13, name: "Emberplate Helm" }),
+  ];
+  const marks = indexMarks({
+    marks: [
+      { kind: "appearance", id: 11, favourite: true, tags: [{ key: "faction", value: "horde" }] },
+      { kind: "appearance", id: 12, favourite: false, tags: [{ key: "wishlist", value: null }] },
+      // A set of the same number, which is a different subject and must not reach this list.
+      { kind: "set", id: 13, favourite: true, tags: [] },
+    ],
+  });
+  const marked = (filter: MarkFilter) => ({
+    filter, of: (id: number) => marks.of("appearance", id),
+  });
+  const shown = (filter: MarkFilter): number[] => filterAppearances(looks, {
+    kind: kindOf("armour-0"), search: "", klass: "", marks: marked(filter),
+  }).map((one) => one.appearanceId);
+
+  it("leaves the list alone until it is asked something", () => {
+    expect(shown(NO_MARK_FILTER)).toEqual([11, 12, 13]);
+  });
+
+  it("keeps only the starred looks", () => {
+    expect(shown({ favourite: true, tag: "" })).toEqual([11]);
+  });
+
+  it("keeps only the looks under one tag", () => {
+    expect(shown({ favourite: false, tag: tokenOf("wishlist", null) })).toEqual([12]);
+    expect(shown({ favourite: false, tag: tokenOf("faction", "horde") })).toEqual([11]);
+  });
+
+  it("does not read a set's mark as a look's", () => {
+    expect(shown({ favourite: true, tag: "" })).not.toContain(13);
+  });
+
+  it("finds a look by a word the reader filed it under", () => {
+    const found = filterAppearances(looks, {
+      kind: kindOf("armour-0"), search: "horde", klass: "", marks: marked(NO_MARK_FILTER),
+    });
+    expect(found.map((one) => one.appearanceId)).toEqual([11]);
+  });
+
+  it("says nothing about marks when it was given none", () => {
+    expect(filterAppearances(looks, {
+      kind: kindOf("armour-0"), search: "", klass: "",
+    })).toHaveLength(3);
   });
 });

@@ -20,9 +20,11 @@
  */
 
 import { plural } from "./format";
+import { markWords, survivesMarks } from "./marks";
+import type { MarkFilter } from "./marks";
 import { ANY_CLASS, slotName } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
-import type { WardrobeAppearance } from "./types";
+import type { TransmogMark, WardrobeAppearance } from "./types";
 
 /**
  * The display types everything held in a hand is filed under, asked for as one.
@@ -196,12 +198,15 @@ export function isKind(appearance: WardrobeAppearance, kind: Kind): boolean {
  * a search that only read names would send them back to the picker for it. The id is in
  * there because it is the one thing a reader has when the game withholds the name.
  */
-function searchable(appearance: WardrobeAppearance): string {
+function searchable(appearance: WardrobeAppearance, mark: TransmogMark | undefined): string {
   return [
     appearance.name,
     slotName(appearance.displayType, appearance.inventoryType),
     kindName(appearance),
     String(appearance.itemId),
+    // And whatever the reader filed it under themselves, for the reason everything above it
+    // is here: a word they are looking at on the row is a word they will type into the box.
+    markWords(mark),
   ].join(" ").toLowerCase();
 }
 
@@ -222,7 +227,14 @@ export function kindName(appearance: WardrobeAppearance): string {
  */
 export function filterAppearances(
   appearances: WardrobeAppearance[],
-  filters: { kind: Kind; search: string; klass: string },
+  filters: {
+    kind: Kind;
+    search: string;
+    klass: string;
+    /** What the reader has said about these looks, and what they have narrowed it to. Keyed by
+     * the appearance rather than by the item, because that is what a row here is. */
+    marks?: { filter: MarkFilter; of: (appearanceId: number) => TransmogMark | undefined };
+  },
 ): WardrobeAppearance[] {
   const words = filters.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const klass = filters.klass === "" ? null : Number(filters.klass);
@@ -232,8 +244,10 @@ export function filterAppearances(
       && appearance.allowableClass !== ANY_CLASS
       && appearance.allowableClass !== 0
       && (appearance.allowableClass & (1 << klass)) === 0) return false;
+    const mark = filters.marks?.of(appearance.appearanceId);
+    if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
     if (!words.length) return true;
-    const against = searchable(appearance);
+    const against = searchable(appearance, mark);
     return words.every((word) => against.includes(word));
   });
 }

@@ -597,3 +597,24 @@ export function LinkOut(): ReactNode {
     </svg>
   );
 }
+
+/**
+ * The star that says somebody wants this one, filled or hollow.
+ *
+ * Drawn for the same reason [`LinkOut`] is: the window ships no icon font and loads nothing
+ * from the network, and U+2605 renders as anything from a glyph to a coloured emoji to a box
+ * depending on which machine the app was opened on. Eleven points of SVG is the same star
+ * everywhere, and it takes `currentColor` so the stylesheet decides what a starred one looks
+ * like rather than the character set.
+ */
+export function Star({ filled }: { filled: boolean }): ReactNode {
+  return (
+    <svg
+      viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"
+      fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4"
+      strokeLinejoin="round"
+    >
+      <path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2-.7-4.3-3.1-3 4.3-.6z" />
+    </svg>
+  );
+}

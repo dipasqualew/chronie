@@ -405,6 +405,52 @@ class TransmogView {
     return this.card(set).getByRole("button", { name: `Wear all of ${set}` });
   }
 
+  /**
+   * The star on the card itself, which is against the *set*.
+   *
+   * Named after the set, where a row's star is named after the look on it — so this reaches
+   * the card's own control and never one belonging to something inside it.
+   */
+  star(set: string): Locator {
+    return this.card(set).getByRole("button", { name: `Favourite ${set}`, exact: true });
+  }
+
+  /** What has been said about the set, as the chips read — the × beside each is not part. */
+  tags(set: string): Locator {
+    return this.card(set).locator("> .mark .mark-tag-text");
+  }
+
+  /**
+   * One row of an open set, found by the look it is for.
+   *
+   * By the star's own accessible name rather than by the row's text, because two rows can
+   * carry names one contains the other of and only the control is named exactly.
+   */
+  row(set: string, label: string): Locator {
+    return this.card(set).locator(".mog-items > .mog-item")
+      .filter({ has: this.page.getByRole("button", { name: `Favourite ${label}`, exact: true }) });
+  }
+
+  /** The star on one of those rows, which is against the *look* and not against the set. */
+  rowStar(set: string, label: string): Locator {
+    return this.row(set, label).getByRole("button", { name: `Favourite ${label}`, exact: true });
+  }
+
+  /** Whether the grid is narrowed to the starred sets. */
+  favouritesOnly(): Locator {
+    return this.browser.getByRole("checkbox", { name: "Favourites only" });
+  }
+
+  /**
+   * The picker of tags in use, which is absent entirely until one is.
+   *
+   * Exactly "Tag", because every "+ tag" button on the grid is labelled "Tag <something>"
+   * and a loose match would find whichever of them Playwright reached first.
+   */
+  tagFilter(): Locator {
+    return this.browser.getByLabel("Tag", { exact: true });
+  }
+
   search(): Locator {
     return this.browser.getByLabel("Filter transmog sets");
   }
@@ -468,6 +514,30 @@ class Wardrobe {
   /** The button on one row, which puts that look on the character or takes it off again. */
   wear(slot: string, label: string): Locator {
     return this.list.getByRole("button", { name: `Wear ${slot}: ${label}` });
+  }
+
+  /** One row, found by the look it is for — by its star's name, which is exact. */
+  row(label: string): Locator {
+    return this.list.locator(".mog-items > .mog-item")
+      .filter({ has: this.page.getByRole("button", { name: `Favourite ${label}`, exact: true }) });
+  }
+
+  /** The star on that row, which is against the look — the same one a set's row carries. */
+  star(label: string): Locator {
+    return this.row(label).getByRole("button", { name: `Favourite ${label}`, exact: true });
+  }
+
+  /** What has been said about the look, as the chips read. */
+  tags(label: string): Locator {
+    return this.row(label).locator(".mark-tag-text");
+  }
+
+  favouritesOnly(): Locator {
+    return this.list.getByRole("checkbox", { name: "Favourites only" });
+  }
+
+  tagFilter(): Locator {
+    return this.list.getByLabel("Tag", { exact: true });
   }
 
   /** How far down the kind the reader has got, and what the game would not say. */
@@ -1401,6 +1471,19 @@ const mockDesktop: E2EMock = {
         },
       ],
     },
+  },
+  // What this reader has already said about the game's wardrobe with their own hands.
+  //
+  // Deliberately not empty, and deliberately not much: one starred set and one tagged look are
+  // what a browser opening on an install that has been used for a while looks like, and they
+  // are what makes "the star survived being written" a different assertion from "the star is
+  // drawn at all". Everything else the suite needs it writes itself, through the same buttons
+  // a player would — see `bridge.ts`, where the mock keeps them the way the two tables do.
+  transmogMarks: {
+    marks: [
+      { kind: "set", id: 205, favourite: true, tags: [] },
+      { kind: "appearance", id: 80040, favourite: false, tags: [{ key: "wishlist", value: null }] },
+    ],
   },
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
@@ -3057,7 +3140,106 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(wardrobe.kind()).toHaveValue("armour-0");
     await expect(wardrobe.names()).toHaveCount(3);
   });
+
+  /* ---------- and the one thing on this screen that is the reader's ---------- */
+
+  // Everything above is read out of the installed game and is the same for anybody on this
+  // build. What follows is not: it is what this person said about it, and it comes out of
+  // Chronie's own database.
+  await test.step("what was said about a look before is on it now", async () => {
+    await expect(wardrobe.tags("Coif of the Drowned Star")).toHaveText(["wishlist"]);
+    // And nothing was said about its neighbours, which is the ordinary case.
+    await expect(wardrobe.tags("Emberforge Helm")).toHaveCount(0);
+    await expect(wardrobe.star("Emberforge Helm")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  // The whole argument for marking the *appearance* rather than the item or the set that
+  // named it: the two halves of this browser are looking at one wardrobe, so a look starred
+  // in the list is starred in the set that holds it.
+  await test.step("a look starred here is starred inside the set that holds it", async () => {
+    await wardrobe.star("Emberforge Helm").click();
+    await expect(wardrobe.star("Emberforge Helm")).toHaveAttribute("aria-pressed", "true");
+
+    await transmog.browseBy("Sets");
+    await expect(transmog.rowStar("Emberforge Plate", "Emberforge Helm"))
+      .toHaveAttribute("aria-pressed", "true");
+    // The set it sits in was not starred by starring what is in it.
+    await expect(transmog.star("Emberforge Plate")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  await test.step("a set takes a tag with a value, and one without as a label", async () => {
+    await tagIt(transmog.card("Emberforge Plate"), "Emberforge Plate", "faction", "horde");
+    await expect(transmog.tags("Emberforge Plate")).toHaveText(["faction: horde"]);
+
+    await tagIt(transmog.card("Emberforge Plate"), "Emberforge Plate", "wishlist");
+    await expect(transmog.tags("Emberforge Plate")).toHaveText(["faction: horde", "wishlist"]);
+  });
+
+  await test.step("the grid narrows to one tag, and offers only the tags in use", async () => {
+    await expect(transmog.tagFilter().getByRole("option")).toHaveText([
+      "Any tag", "faction", "faction: horde", "wishlist",
+    ]);
+
+    await transmog.tagFilter().selectOption("faction\thorde");
+    await expect(transmog.sets()).toHaveText(["Emberforge Plate"]);
+
+    await transmog.tagFilter().selectOption("");
+    await expect(transmog.sets()).toHaveCount(4);
+  });
+
+  // The word rather than the picker, which is how somebody who can see the chip narrows to
+  // it without learning where the dropdown is.
+  await test.step("the search box reads the tags too", async () => {
+    await transmog.search().fill("horde");
+    await expect(transmog.sets()).toHaveText(["Emberforge Plate"]);
+    await transmog.search().fill("");
+  });
+
+  // Only 205 was starred, in the fixture, and nothing done since has starred a second set —
+  // starring the helm above starred a look.
+  await test.step("the grid narrows to the starred sets", async () => {
+    await transmog.favouritesOnly().check();
+    await expect(transmog.sets()).toHaveText(["Duskwoven Shroud"]);
+    await expect(transmog.star("Duskwoven Shroud")).toHaveAttribute("aria-pressed", "true");
+
+    await transmog.favouritesOnly().uncheck();
+    await expect(transmog.sets()).toHaveCount(4);
+  });
+
+  await test.step("a tag comes off from the chip it is written on", async () => {
+    await transmog.card("Emberforge Plate")
+      .getByRole("button", { name: "Remove the tag wishlist from Emberforge Plate", exact: true })
+      .click();
+    await expect(transmog.tags("Emberforge Plate")).toHaveText(["faction: horde"]);
+    // And the picker forgets the choice nothing carries any more.
+    await expect(transmog.tagFilter().getByRole("option")).toHaveText([
+      "Any tag", "faction", "faction: horde",
+    ]);
+  });
+
+  await test.step("and a star comes off again, leaving the grid whole", async () => {
+    await transmog.star("Duskwoven Shroud").click();
+    await expect(transmog.star("Duskwoven Shroud")).toHaveAttribute("aria-pressed", "false");
+
+    await transmog.favouritesOnly().check();
+    await expect(transmog.sets()).toHaveCount(0);
+    await transmog.favouritesOnly().uncheck();
+  });
 });
+
+/**
+ * Writes a tag against whatever is being marked, the way a reader does: open the little form,
+ * fill it in, submit it. `host` is the card or the row it belongs to.
+ *
+ * The value is optional here because it is optional there — a tag with nothing in that box is
+ * a label, which is half of what marking is for.
+ */
+async function tagIt(host: Locator, name: string, key: string, value = ""): Promise<void> {
+  await host.getByRole("button", { name: `Tag ${name}`, exact: true }).click();
+  await host.getByLabel(`Tag name for ${name}`, { exact: true }).fill(key);
+  if (value) await host.getByLabel(`Tag value for ${name} (optional)`, { exact: true }).fill(value);
+  await host.getByRole("button", { name: "Add", exact: true }).click();
+}
 
 test("drives settings, sync, addon installation, and app update checks", async (
   { page, combat, retention, captureSettings },

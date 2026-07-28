@@ -21,11 +21,14 @@ import type {
   ItemDetail,
   ItemDetailsPayload,
   LogRetention,
+  MarkSubjectKind,
   QueryAnswer,
   QuerySchema,
   Segment,
   Settings,
   SyncResult,
+  TransmogMark,
+  TransmogMarksPayload,
   TransmogPayload,
   TransmogSetItemsPayload,
   WardrobePayload,
@@ -64,6 +67,41 @@ export const desktop = {
     ? Promise.resolve(structuredClone(mock.wardrobe[wardrobeKey(displayTypes)]
       ?? emptyWardrobe(displayTypes)))
     : invoke<WardrobePayload>("transmog_appearances", { displayTypes }),
+  // Everything anybody has said about the game's wardrobe with their own hands: a star and a
+  // set of tags, against a set or a look. Read whole, because it is the size of what one person
+  // typed rather than the size of the game — and re-read after every write below, so what the
+  // browser draws is what the database holds.
+  transmogMarks: (): Promise<TransmogMarksPayload> => mock
+    ? Promise.resolve(structuredClone(mock.transmogMarks))
+    : invoke<TransmogMarksPayload>("transmog_marks"),
+  setTransmogFavourite: (
+    kind: MarkSubjectKind, id: number, favourite: boolean,
+  ): Promise<TransmogMarksPayload> => mock
+    ? Promise.resolve(mockMark(kind, id, (mark) => { mark.favourite = favourite; }))
+    : invoke<TransmogMarksPayload>("set_transmog_favourite", { kind, id, favourite }),
+  setTransmogTag: (
+    kind: MarkSubjectKind, id: number, key: string, value: string | null,
+  ): Promise<TransmogMarksPayload> => {
+    if (!mock) return invoke<TransmogMarksPayload>("set_transmog_tag", { kind, id, key, value });
+    // The half of `marks::clean_key` and `clean_value` a test can tell apart from a working
+    // field: the whitespace made ordinary, and a value that says nothing stored as a label.
+    const cleaned = key.trim().replace(/\s+/g, " ");
+    const said = (value ?? "").trim().replace(/\s+/g, " ") || null;
+    if (!cleaned) return Promise.reject(new Error("A tag needs a name."));
+    return Promise.resolve(mockMark(kind, id, (mark) => {
+      const at = mark.tags.findIndex((tag) => sameKey(tag.key, cleaned));
+      if (at >= 0) mark.tags[at] = { key: cleaned, value: said };
+      else mark.tags.push({ key: cleaned, value: said });
+      mark.tags.sort((left, right) => left.key.localeCompare(right.key));
+    }));
+  },
+  deleteTransmogTag: (
+    kind: MarkSubjectKind, id: number, key: string,
+  ): Promise<TransmogMarksPayload> => mock
+    ? Promise.resolve(mockMark(kind, id, (mark) => {
+      mark.tags = mark.tags.filter((tag) => !sameKey(tag.key, key));
+    }))
+    : invoke<TransmogMarksPayload>("delete_transmog_tag", { kind, id, key }),
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.
   achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock
@@ -337,6 +375,37 @@ const wardrobeKey = (displayTypes: number[]): string =>
 /** A kind the mock holds nothing for, which the real backend answers with an empty list. */
 const emptyWardrobe = (displayTypes: number[]): WardrobePayload =>
   ({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 });
+
+/** Two tag keys the store would treat as one, which is `COLLATE NOCASE` in the migration. */
+const sameKey = (left: string, right: string): boolean =>
+  left.toLowerCase() === right.trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * Applies an edit to what the e2e mock holds about one subject, and hands back a fresh copy.
+ *
+ * The same "write, then repaint from storage" the real commands give, and with the store's own
+ * rule about which subjects exist at all: a mark that ends up saying nothing — unstarred and
+ * untagged — is deleted rather than kept as an empty row, because that is what the two tables
+ * do and a browser counting the marks would otherwise count subjects nobody has touched.
+ */
+function mockMark(
+  kind: MarkSubjectKind,
+  id: number,
+  apply: (mark: TransmogMark) => void,
+): TransmogMarksPayload {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const marks = mock.transmogMarks.marks;
+  let mark = marks.find((one) => one.kind === kind && one.id === id);
+  if (!mark) {
+    mark = { kind, id, favourite: false, tags: [] };
+    marks.push(mark);
+  }
+  apply(mark);
+  if (!mark.favourite && !mark.tags.length) {
+    mock.transmogMarks.marks = marks.filter((one) => one !== mark);
+  }
+  return structuredClone(mock.transmogMarks);
+}
 
 /**
  * The icons the e2e mock holds among those asked for.
