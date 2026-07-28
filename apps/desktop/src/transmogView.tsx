@@ -34,7 +34,7 @@
  * failure to draw, and no other one does.
  */
 
-import { useCallback, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { CustomSetList } from "./customSetList";
@@ -51,6 +51,8 @@ import {
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
+import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "./qualities";
+import { Qualities } from "./qualitiesChips";
 import {
   CLASSES, alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
 } from "./transmog";
@@ -72,6 +74,9 @@ import type {
   GalleryPayload,
   IconsPayload,
   MarkSubjectKind,
+  Quality,
+  QualitiesFile,
+  SetQualitiesFile,
   TransmogMark,
   TransmogMarksPayload,
   TransmogPayload,
@@ -138,6 +143,17 @@ export interface TransmogViewProps {
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
   /** And the other: the one context a whole gallery of thumbnails is drawn through. */
   createGalleryStage?: () => GalleryStage | Promise<GalleryStage>;
+  /**
+   * What the committed store measured of the game's looks — see `qualities.ts`.
+   *
+   * Two of them, because the two browsers show two different things: the wardrobe shows what
+   * each look is like, a slot's file at a time, and the sets show what a whole set is like out
+   * of one small file. Neither reaches a backend; both are files in this repository, imported
+   * on demand, and both are injected here so a test can hand over three rows instead of a few
+   * hundred kilobytes of the game's chestpieces.
+   */
+  loadQualities?: (displayType: number) => Promise<QualitiesFile | null>;
+  loadSetQualities?: () => Promise<SetQualitiesFile | null>;
 }
 
 /**
@@ -154,6 +170,7 @@ export function TransmogView(
   {
     payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, loadGallery,
     herself, marks, custom, createStage, createGalleryStage,
+    loadQualities, loadSetQualities = loadSetStore,
   }: TransmogViewProps,
 ): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
@@ -251,6 +268,20 @@ export function TransmogView(
       return next;
     });
   }, [read]);
+
+  // What the game's own artwork was measured to be, for the sets. One small file for all of
+  // them rather than a file per slot: a set's colours are the colours of the looks in it, worked
+  // out once by `dump_qualities` and written down beside them. Read when the view first draws
+  // and never again — a file in the bundle cannot change under a running window.
+  const [setQualities, setSetQualities] = useState(NO_QUALITIES);
+  useEffect(() => {
+    let stale = false;
+    void loadSetQualities()
+      .then((file) => { if (!stale) setSetQualities(indexQualities(file)); })
+      // The cards drew without it before any of this existed, and they draw without it now.
+      .catch(() => undefined);
+    return () => { stale = true; };
+  }, [loadSetQualities]);
 
   // A lookup per row rather than a scan of the list, because the search box re-filters several
   // thousand sets on every keystroke and each of them asks this once.
@@ -370,6 +401,7 @@ export function TransmogView(
                     key={set.id} set={set} open={open.has(set.id)} onToggle={() => openSet(set)}
                     contents={known.get(set.id)} icons={icons} outfit={outfit}
                     hideUnwearable={hideUnwearable} marks={marks} markOf={markOf}
+                    quality={setQualities.of(set.id)}
                     onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
                     onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
                   />
@@ -390,7 +422,7 @@ export function TransmogView(
         hidden={browsing !== "items"} load={loadAppearances} wantIcons={wantIcons} icons={icons}
         outfit={outfit} hideUnwearable={hideUnwearable} onHideUnwearable={setHideUnwearable}
         marks={marks} index={index} loadGallery={loadGallery} look={look}
-        createGalleryStage={createGalleryStage}
+        createGalleryStage={createGalleryStage} loadQualities={loadQualities}
         onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
       />
       {/* Kept in the tree beside the other two, and for the stronger version of their reason:
@@ -433,8 +465,8 @@ export function TransmogView(
  */
 function Card(
   {
-    set, open, onToggle, contents, icons, outfit, hideUnwearable, marks, markOf, onWear,
-    onWearAll,
+    set, open, onToggle, contents, icons, outfit, hideUnwearable, marks, markOf, quality,
+    onWear, onWearAll,
   }: {
     set: TransmogSet;
     open: boolean;
@@ -447,6 +479,8 @@ function Card(
     hideUnwearable: boolean;
     marks: MarkActions;
     markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
+    /** What the committed store measured the whole set to be, or nothing where it holds none. */
+    quality: Quality | undefined;
     onWear: (row: AppearanceRow) => void;
     onWearAll: (rows: AppearanceRow[]) => void;
   },
@@ -475,6 +509,11 @@ function Card(
         <span className="chip">{classLabel(set.classMask)}</span>
         <span className="chip">{expansionName(set.expansionId)}</span>
         {patch ? <span className="chip">Patch {patch}</span> : null}
+        {/* Last of the facts and dashed, because it is the one of them nobody wrote down: the
+            game states the class, the expansion and the patch, and this was measured off the
+            artwork of the looks the set holds. There is no size — a set is a body's worth of
+            clothes whatever is in it. */}
+        <Qualities quality={quality} />
       </div>
       {/* Under the game's own facts and on their own line, because they are a different kind
           of statement: everything above is true of this build for everybody, and this is what

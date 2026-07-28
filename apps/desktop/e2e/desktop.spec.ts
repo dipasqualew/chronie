@@ -3068,6 +3068,22 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(transmog.card("Duskwoven Shroud")).toContainText("Any class");
   });
 
+  // The one thing on the card that no install and no reader supplied: what the artwork was
+  // measured to be, out of the store this repository ships — see `qualities.ts`. It is here
+  // rather than in a component test because this is the only place the *built* page runs: the
+  // measurements are files bundled at build time and painted as SVG under the packaged app's
+  // Content Security Policy, and neither of those is a thing a jsdom test can be wrong about.
+  //
+  // Structural rather than a colour. The store is a measurement of a real install and gets
+  // regenerated; the claim worth making here is that a set the game has held for years arrives
+  // with a swatch that was actually painted, and says who worked it out.
+  await test.step("a card says what the artwork was measured to be", async () => {
+    const chip = transmog.card("Tideglass Regalia").locator(".chip.quality");
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAttribute("title", /nobody typed it/);
+    await expect(chip.locator("svg rect").first()).toHaveAttribute("fill", /^#[0-9a-f]{6}$/);
+  });
+
   // Coming up short is expected — the game encrypts what it has not released — so the view
   // has to say so rather than quietly show fewer sets than the game holds.
   await test.step("the sets the game keeps encrypted are accounted for", async () => {

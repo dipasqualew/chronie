@@ -170,6 +170,18 @@ impl Body {
             .find(|(which, _)| *which == section)
             .map(|(_, rect)| rect)
     }
+
+    /// How much of her that section is, in atlas pixels, or nothing where it is painted nowhere.
+    ///
+    /// The layout is the only thing in the app that knows how much of a body a part of it is,
+    /// and [`crate::qualities`] needs exactly that to say how big a piece of armour is: a
+    /// texture filling the legs is a bigger garment than one filling the hands, and the
+    /// rectangles are what says so. The two bodies state different sizes for the same section —
+    /// hers is a 2048-wide atlas and his a 1024 — which is why this is a question asked of a
+    /// body rather than a table anybody can read.
+    pub fn area_of(&self, section: u32) -> Option<u32> {
+        self.rect_of(section).map(|rect| rect.width * rect.height)
+    }
 }
 
 /// Every body a reader may be shown on, in the order they are offered.

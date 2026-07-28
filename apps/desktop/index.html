@@ -1214,6 +1214,16 @@
 
   /* ---------- what the reader says about the wardrobe ---------- */
 
+  /* What the game's artwork was measured to be, on a row beside what a reader said about it.
+     Dashed rather than filled, the way a guessed activity is: everything else on the row was
+     either typed by somebody or stated by the game, and this was worked out from pictures. */
+  .chip.quality {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px;
+    background: none; border: 1px dashed var(--border);
+  }
+  .quality-swatch { flex: none; display: block; }
+  .quality-said { white-space: nowrap; }
+
   /* The star and the tags, on a set's card and on every row of both browsers. It wraps to a
      line of its own inside a card and sits inline on a row, which is the whole reason it is a
      flex container of its own rather than markup dropped into two different parents. */

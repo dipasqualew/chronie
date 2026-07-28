@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { NO_MARK_FILTER, indexMarks, tokenOf } from "./marks";
 import type { MarkFilter } from "./marks";
+import { indexQualities } from "./qualities";
 import {
   HELD_IN_HAND, KINDS, PAGE, answerKey, filterAppearances, isKind, kindName, kindOf,
   shownSummary, wardrobeRow,
@@ -233,5 +234,49 @@ describe("narrowing a kind to what the reader said about it", () => {
     expect(filterAppearances(looks, {
       kind: kindOf("armour-0"), search: "", klass: "",
     })).toHaveLength(3);
+  });
+});
+
+describe("searching a wardrobe by what the artwork was measured to be", () => {
+  const looks = [look({ appearanceId: 11 }), look({ appearanceId: 12 })];
+  const measured = indexQualities({
+    displayType: 0,
+    build: "12.0.5.67823",
+    sizeCuts: {},
+    appearances: [
+      { id: 11, primary: "#4a3b2c", size: "large" },
+      { id: 12, primary: "#2060e0", accent: "#f6f6f6", size: "small" },
+    ],
+  });
+  const found = (search: string): number[] => filterAppearances(looks, {
+    kind: kindOf("armour-0"), search, klass: "", qualities: (id) => measured.of(id),
+  }).map((one) => one.appearanceId);
+
+  // The whole reason the colours are named at all: "brown" is in no item's name in the game,
+  // and it is how somebody looking at five thousand chestpieces asks for the brown ones.
+  it("finds a look by the colour nothing in the game calls it", () => {
+    expect(found("brown")).toEqual([11]);
+    expect(found("blue")).toEqual([12]);
+  });
+
+  it("finds a look by its accent as well as by what it mostly is", () => {
+    expect(found("white")).toEqual([12]);
+  });
+
+  it("finds a look by how big it is for its slot", () => {
+    expect(found("large")).toEqual([11]);
+  });
+
+  // Every word has to match, which is what makes two of these worth typing together.
+  it("reads the words beside the ones the game supplies", () => {
+    expect(found("something blue")).toEqual([12]);
+    expect(found("something purple")).toEqual([]);
+  });
+
+  it("leaves the list alone where nothing was measured", () => {
+    expect(filterAppearances(looks, {
+      kind: kindOf("armour-0"), search: "brown", klass: "",
+    })).toHaveLength(0);
+    expect(found("")).toEqual([11, 12]);
   });
 });

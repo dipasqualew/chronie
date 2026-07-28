@@ -16,7 +16,7 @@
 //! wrong values rather than fail, so [`sets`] checks the row count it ends up with against
 //! the count the file declares.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -470,6 +470,43 @@ pub struct TransmogSetAppearance {
     /// Whether the appearance has geometry of its own. Only heads, shoulders, weapons and
     /// shields do; the rest of a set is texture painted onto the character's body.
     pub has_model: bool,
+}
+
+/// Which looks every set in the game holds, out of one walk of each of the two tables.
+///
+/// [`set_items`] answers the same question about *one* set and answers far more about it — the
+/// items behind each look, what they are called, who may wear them — at the cost of walking five
+/// of the game's tables. Asked about all four thousand sets in turn, that is twenty thousand
+/// walks of tables with hundreds of thousands of rows in them, which is the shape of read this
+/// app avoids everywhere else and cannot afford here either.
+///
+/// So this is the narrow question on its own: set id to appearance ids, nothing else. Sorted and
+/// deduplicated, because the one caller — `examples/dump_qualities` — is writing a file that has
+/// to be the same bytes twice, and because a set naming one look through two difficulties is one
+/// look as far as what the set is *like* is concerned.
+pub fn set_appearances(files: &dyn GameFiles) -> Result<BTreeMap<u32, Vec<u32>>, String> {
+    let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
+    let appearance_of: HashMap<u32, u32> = modified
+        .rows()
+        .map(|row| (row.id(), row.number(modified_appearance_column::APPEARANCE_ID)))
+        .collect();
+
+    let items = Db2::parse(files.read(TRANSMOG_SET_ITEM)?)?;
+    let mut held: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for row in items.rows() {
+        let modified_appearance_id = row.number(set_item_column::MODIFIED_APPEARANCE_ID);
+        // A set whose rows point at modified appearances this install cannot decrypt keeps its
+        // place with however many of them it can reach, which may be none.
+        let looks = held.entry(row.number(set_item_column::SET_ID)).or_default();
+        if let Some(appearance_id) = appearance_of.get(&modified_appearance_id) {
+            looks.push(*appearance_id);
+        }
+    }
+    for looks in held.values_mut() {
+        looks.sort_unstable();
+        looks.dedup();
+    }
+    Ok(held)
 }
 
 /// What one set is made of, walked out of the game's own tables.
@@ -1224,6 +1261,39 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = set_items(&DirFiles::new(temp.path()), 201).unwrap_err();
         assert!(error.contains("1376212.db2"), "{error}");
+    }
+
+    /* ---------- every set at once ---------- */
+
+    // The narrow question the whole-game reads ask: which looks each set holds, and nothing else.
+    // Every set in the fixtures, in one answer, out of two tables rather than five.
+    #[test]
+    fn names_the_looks_of_every_set_at_once() {
+        let files = Noted::new();
+        let held = set_appearances(&files).unwrap();
+        assert_eq!(held[&201], vec![80001, 80002, 80003]);
+        // Set 900 is content the game has not shipped, and `TransmogSetItem` holds no row for it
+        // at all — so it is not in the answer. What is in the answer is what the table names.
+        assert_eq!(held.get(&900), None);
+        assert_eq!(files.asked.into_inner(), vec![ITEM_MODIFIED_APPEARANCE, TRANSMOG_SET_ITEM]);
+    }
+
+    // Sorted and deduplicated, because the one caller writes a file that has to be the same
+    // bytes twice — and because a set selling one look at two difficulties is one look.
+    #[test]
+    fn says_a_look_a_set_names_twice_once() {
+        for looks in set_appearances(&fixture_files()).unwrap().values() {
+            let mut once = looks.clone();
+            once.sort_unstable();
+            once.dedup();
+            assert_eq!(*looks, once);
+        }
+    }
+
+    #[test]
+    fn says_so_when_the_sets_own_table_is_not_there() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(set_appearances(&DirFiles::new(temp.path())).is_err());
     }
 }
 
