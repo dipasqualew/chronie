@@ -46,6 +46,9 @@ import type { MarkActions } from "./marksEditor";
 import { REASONS, glbBytes, wearable as canBeWorn } from "./modelPreview";
 import { isWorn, onlyWearable } from "./outfit";
 import type { Outfit } from "./outfit";
+import { NO_QUALITIES, indexQualities, loadQualities as loadStore } from "./qualities";
+import type { QualityIndex } from "./qualities";
+import { Qualities } from "./qualitiesChips";
 import { CLASSES } from "./transmog";
 import { LinkOut } from "./ui";
 import { ANY_CLASS, qualityLabel, wearerLabel } from "./transmogModal";
@@ -55,7 +58,7 @@ import {
 } from "./wardrobe";
 import type { Kind } from "./wardrobe";
 import type {
-  GalleryKind, GalleryPayload, TransmogMark, WardrobePayload, WornPiece,
+  GalleryKind, GalleryPayload, QualitiesFile, Quality, TransmogMark, WardrobePayload, WornPiece,
 } from "./types";
 
 export interface WardrobeListProps {
@@ -99,6 +102,14 @@ export interface WardrobeListProps {
    * no working 3D at all can go without.
    */
   createGalleryStage?: () => GalleryStage | Promise<GalleryStage>;
+  /**
+   * The committed measurements for one slot — see `qualities.ts`.
+   *
+   * Injected for the reason the stage is, and with a second reason of its own: the real one
+   * pulls in a few hundred kilobytes of JSON per slot, and a test that wanted three rows would
+   * otherwise load the whole game's chestpieces to draw them.
+   */
+  loadQualities?: (displayType: number) => Promise<QualitiesFile | null>;
 }
 
 /** What the list says while the game's tables are being read for a kind. */
@@ -108,6 +119,7 @@ export function WardrobeList(
   {
     hidden, load, wantIcons, icons, outfit, hideUnwearable, onHideUnwearable, marks, index,
     onWear, loadGallery, look, createGalleryStage = lazyGalleryStage,
+    loadQualities = loadStore,
   }: WardrobeListProps,
 ): ReactNode {
   const [kindKey, setKindKey] = useState(KINDS[0]!.key);
@@ -126,6 +138,12 @@ export function WardrobeList(
   const answers = useRef(new Map<string, WardrobePayload | string>()).current;
   const asked = useRef(new Set<string>()).current;
   const [, redraw] = useReducer((count: number) => count + 1, 0);
+
+  // What was measured of the looks in each slot, by the slot. Kept outside React the way the
+  // answers are, and keyed by the display type rather than by the answer: the seventeen kinds of
+  // weapon share one payload but are five files, because the store is written a slot at a time.
+  const measured = useRef(new Map<number, QualityIndex>()).current;
+  const wanting = useRef(new Set<number>()).current;
 
   const kind = kindOf(kindKey);
   const key = answerKey(kind);
@@ -147,6 +165,36 @@ export function WardrobeList(
     if (!hidden) read(kind);
   }, [hidden, kind, read]);
 
+  // And the same for what was measured of them, for the same reason twice over: a slot's file is
+  // a few hundred kilobytes of JavaScript, and a reader who never opens the wardrobe downloads
+  // none of it. A file that will not load leaves an empty index rather than an error — the rows
+  // are the game's and draw without it.
+  useEffect(() => {
+    if (hidden) return;
+    for (const displayType of kind.displayTypes) {
+      if (wanting.has(displayType)) continue;
+      wanting.add(displayType);
+      void loadQualities(displayType)
+        .then((file) => measured.set(displayType, indexQualities(file)))
+        .catch(() => measured.set(displayType, NO_QUALITIES))
+        .finally(redraw);
+    }
+  }, [hidden, kind, loadQualities, measured, wanting]);
+
+  /**
+   * What was measured of one look, wherever among the slot's files it landed.
+   *
+   * A search across the seventeen kinds of weapon is one payload over five files, and a look
+   * belongs to exactly one of them — so the first that holds it is the answer.
+   */
+  const qualityOf = useCallback((appearanceId: number) => {
+    for (const displayType of kind.displayTypes) {
+      const found = measured.get(displayType)?.of(appearanceId);
+      if (found) return found;
+    }
+    return undefined;
+  }, [kind, measured]);
+
   // Only the tags written against a look this kind actually holds, so a reader browsing heads
   // is not offered the one they invented for staves and then shown nothing. The whole answer
   // rather than the filtered list, so the picker does not shrink as it is used.
@@ -160,6 +208,7 @@ export function WardrobeList(
   const looks = typeof answer === "object"
     ? filterAppearances(answer.appearances, {
       kind, search, klass, marks: { filter: marked, of: (id) => index.of("appearance", id) },
+      qualities: qualityOf,
     })
     : [];
   const rows = looks.map((look) => wardrobeRow(look));
@@ -331,7 +380,8 @@ export function WardrobeList(
             <Look
               key={row.appearanceId} row={row} worn={isWorn(outfit, row)}
               icon={icons.get(row.iconFileDataId)} marks={marks}
-              mark={index.of("appearance", row.appearanceId)} onWear={() => onWear(row)}
+              mark={index.of("appearance", row.appearanceId)}
+              quality={qualityOf(row.appearanceId)} onWear={() => onWear(row)}
               body={asModels ? bodies.get(row.displayInfoId) : undefined} paint={paint}
             />
           ))}
@@ -364,13 +414,15 @@ export function WardrobeList(
  * otherwise put a piece on the character every time somebody looked at the back of a helm.
  */
 function Look(
-  { row, worn, icon, marks, mark, onWear, body, paint }: {
+  { row, worn, icon, marks, mark, quality, onWear, body, paint }: {
     row: AppearanceRow;
     worn: boolean;
     icon?: string;
     marks: MarkActions;
     /** The same mark a set's row of this look draws, because both key on the appearance. */
     mark: TransmogMark | undefined;
+    /** What the committed store measured of it, or nothing where it holds no row. */
+    quality: Quality | undefined;
     onWear: () => void;
     /**
      * The picture of this look, when the gallery is on and one has arrived.
@@ -396,6 +448,10 @@ function Look(
   );
   const said = <>
     {worn ? <span className="chip">worn</span> : null}
+    {/* Before what the reader said about it, because it is of the same kind as the game's own
+        facts beside it — measured rather than typed — and because it is what the eye is
+        actually looking for in a list of five thousand chestpieces. */}
+    <Qualities quality={quality} />
     <MarkControls
       kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
     />

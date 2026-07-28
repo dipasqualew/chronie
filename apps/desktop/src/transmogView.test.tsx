@@ -11,8 +11,9 @@ import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
   CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind, MarkSubjectKind,
-  TransmogAppearance, TransmogMark, TransmogMarksPayload, TransmogPayload, TransmogSet,
-  TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload, WornPiece,
+  QualitiesFile, SetQualitiesFile, TransmogAppearance, TransmogMark, TransmogMarksPayload,
+  TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload,
+  WornPiece,
 } from "./types";
 
 afterEach(cleanup);
@@ -426,6 +427,29 @@ const NO_SETS = {
 };
 
 /**
+ * What the committed store measured of the fixtures above — see `qualities.ts`.
+ *
+ * Handed to the view rather than left to default, though the default is only a file in this
+ * repository and would load: a test asserting on a colour has to be asserting on a colour it
+ * stated, and the real store is regenerated whenever somebody runs the tool against a newer
+ * install. The Coif is the row every assertion here is about; the Emberforge Helm is the row
+ * beside it that the store says nothing about.
+ */
+const MEASURED: Record<number, QualitiesFile> = {
+  0: {
+    displayType: 0,
+    build: "12.0.5.67823",
+    sizeCuts: { geometry: { small: 0.38, large: 0.52, rows: 2 } },
+    appearances: [{ id: 40, primary: "#4a3b2c", accent: "#2060e0", size: "large" }],
+  },
+};
+
+const SET_QUALITIES: SetQualitiesFile = {
+  build: "12.0.5.67823",
+  sets: [{ id: 201, primary: "#2060e0", accent: "#f6f6f6" }],
+};
+
+/**
  * The view over doubles a test answers, which is the only way to drive it: nothing here talks
  * to a backend and nothing monkey patches one.
  */
@@ -460,6 +484,11 @@ function view(
   }));
   const marks = options.marks ?? fakeMarks();
   const saved = options.saved ?? fakeCustomSets();
+  // Recorded as well as answered: "a slot's file is not downloaded until somebody browses that
+  // slot" is a statement about what was asked for, and only the request can say it.
+  const loadQualities = vi.fn((displayType: number) =>
+    Promise.resolve(MEASURED[displayType] ?? null));
+  const loadSetQualities = vi.fn(() => Promise.resolve(SET_QUALITIES));
   const herself = options.herself ?? fakeHerself();
   const rendered = render(
     <Marked
@@ -476,11 +505,13 @@ function view(
       saved={saved}
       createStage={() => stage}
       createGalleryStage={createGalleryStage}
+      loadQualities={loadQualities}
+      loadSetQualities={loadSetQualities}
     />,
   );
   return {
     rendered, loadWorn, loadCharacter, loadSet, loadAppearances, loadGallery, marks, saved,
-    herself, shown, resets, painted,
+    herself, shown, resets, painted, loadQualities, loadSetQualities,
   };
 }
 
@@ -818,6 +849,26 @@ describe("TransmogView", () => {
     expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
   });
 
+  /* ---------- what the artwork was measured to be ---------- */
+
+  // The colours of a whole set, out of the committed store rather than out of the install: the
+  // window has no game to read and reads a file this repository ships.
+  it("says what a set is like without asking an install anything", async () => {
+    view();
+    const card = screen.getByRole("button", { name: "Tideglass Regalia" }).closest("article")!;
+    const chip = await within(card as HTMLElement).findByTitle(/blue and white/);
+    expect(chip.textContent).toContain("blue");
+  });
+
+  // And the one thing that must be on the screen beside a reader's own stars and tags: which
+  // of the two this was. A colour nobody typed has to say so, or it reads as somebody's note.
+  it("says plainly that nobody typed the colours", async () => {
+    view();
+    const card = screen.getByRole("button", { name: "Tideglass Regalia" }).closest("article")!;
+    const chip = await within(card as HTMLElement).findByTitle(/blue and white/);
+    expect(chip.getAttribute("title")).toContain("Chronie worked this out, nobody typed it");
+  });
+
   /* ---------- browsing by item rather than by set ---------- */
 
   // The wardrobe costs the game's storage the same second the sets do, and a reader who never
@@ -837,6 +888,55 @@ describe("TransmogView", () => {
     await browseItems();
     expect(await screen.findByText("Coif of the Drowned Star")).toBeTruthy();
     expect(screen.getByText("Emberforge Helm")).toBeTruthy();
+  });
+
+  /* ---------- what the artwork was measured to be, on a wardrobe row ---------- */
+
+  // The store is a file per slot and a slot is a few hundred kilobytes, so a reader who never
+  // opens the wardrobe should download none of it — the same claim the payload above makes.
+  it("reads nothing of the store until the reader asks to see a slot", async () => {
+    const shown = view();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy());
+    expect(shown.loadQualities).not.toHaveBeenCalled();
+
+    await browseItems(shown);
+    await waitFor(() => expect(shown.loadQualities).toHaveBeenCalledWith(0));
+  });
+
+  it("says how big a look is and what colour, beside the game's own facts", async () => {
+    await browseItems();
+    const row = (await screen.findByText("Coif of the Drowned Star")).closest("li")!;
+    const chip = await within(row as HTMLElement).findByTitle(/large, brown and blue/);
+    // The word rather than the colours, because the swatches beside it are the colours.
+    expect(chip.textContent).toBe("large");
+  });
+
+  // A row the store says nothing about draws exactly as it drew before any of this existed,
+  // which is what lets a store regenerated one patch late still be worth having.
+  it("leaves a look the store does not hold exactly as it was", async () => {
+    await browseItems();
+    const row = (await screen.findByText("Emberforge Helm")).closest("li")!;
+    expect(within(row as HTMLElement).queryByTitle(/Chronie worked this out/)).toBeNull();
+  });
+
+  // The whole reason the colours are named at all. "Brown" is in no item's name in the game,
+  // and it is how somebody looking at five thousand chestpieces asks for the brown ones.
+  it("finds a look by a colour that is in nothing the game wrote down", async () => {
+    await browseItems();
+    await screen.findByText("Emberforge Helm");
+    fireEvent.change(screen.getByLabelText("Filter appearances"), { target: { value: "brown" } });
+
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+
+  it("finds a look by how big it is for its slot", async () => {
+    await browseItems();
+    await screen.findByText("Coif of the Drowned Star");
+    fireEvent.change(screen.getByLabelText("Filter appearances"), { target: { value: "large" } });
+
+    await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
+    expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
   });
 
   // The other point: what the two halves share is the character, so a reader can take a helm

@@ -641,6 +641,65 @@ export interface TransmogMarksPayload {
   marks: TransmogMark[];
 }
 
+/* ---------- what the game's own pictures say about it ---------- */
+
+/**
+ * What one look is like, as `qualities.rs` measured it and `apps/desktop/data/qualities/` holds
+ * it.
+ *
+ * **The other half of a mark, and deliberately the same shape of thing.** A mark is what one
+ * reader said; this is what the game's own textures and meshes say, measured once off a real
+ * install and committed — so a reader with no game on the machine has it, and a reader with one
+ * pays nothing for it. The window says which is which rather than mixing them, because "I called
+ * this my raid set" and "this is mostly dark red" are different kinds of claim.
+ *
+ * These arrive by `import` rather than across the command bridge, which is why nothing in
+ * `bridge.ts` mentions them: they are files in this repository, not something the backend reads
+ * out of an install at runtime.
+ */
+export interface Quality {
+  /** The `ItemAppearance.id` this was measured of — or the `TransmogSet.id`, in the sets' file. */
+  id: number;
+  /** The colour most of it is, as `#rrggbb`. */
+  primary: string;
+  /** The fullest colour that is not a shade of the primary. Absent where it is all one colour. */
+  accent?: string;
+  /**
+   * How big it is *for its slot*: one of `small`, `medium` or `large`.
+   *
+   * Relative, and only within the file it is in. There is no number of metres that makes a helm
+   * large, so the word is a third of that slot's own distribution — a small staff is not a small
+   * anything else. Absent where nothing about the appearance could be measured, and absent
+   * throughout the sets' file, a set being a body's worth of clothes whatever is in it.
+   */
+  size?: string;
+}
+
+/** One slot's file: every look filling it, and what the words in it were read against. */
+export interface QualitiesFile {
+  /** The `ItemAppearance.DisplayType` this file is of. */
+  displayType: number;
+  /** The build of the game it was measured off, as `.build.info` states it. */
+  build: string;
+  /**
+   * Where the cuts between the size words fell, per way of measuring — `geometry` for the slots
+   * that hang a mesh and `cover` for the ones that only paint her.
+   *
+   * Nothing in the window reads these. They are in the file so that a word can be audited
+   * against the measurement it came from without re-running the tool, which is the difference
+   * between a stored opinion and a stored reading.
+   */
+  sizeCuts: Record<string, { small: number; large: number; rows: number }>;
+  /** Sorted by id ascending, which is what makes the committed file diffable. */
+  appearances: Quality[];
+}
+
+/** The sets' file: what each of the game's own sets is like, as the looks in it are. */
+export interface SetQualitiesFile {
+  build: string;
+  sets: Quality[];
+}
+
 /**
  * The pictures for a list of things, decoded out of the game's own textures.
  *
