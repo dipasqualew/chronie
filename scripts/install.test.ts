@@ -19,6 +19,8 @@ const installer = read("scripts/install.ps1");
 const uninstaller = read("scripts/uninstall.ps1");
 const workflow = read(".github/workflows/dev-release.yml");
 const debugScript = read("scripts/debug-desktop.ps1");
+const localInstall = read("scripts/install-locally.ts");
+const { productName } = JSON.parse(read("apps/desktop/src-tauri/tauri.conf.json")) as { productName: string };
 
 /** The one thing `install.ps1` will accept off the release, as the suffix it matches on. */
 function selectedSuffix(): string {
@@ -51,6 +53,26 @@ describe("the published Windows build", () => {
 
     it("is named the way the installer looks for it", () => {
         expect(publishedArchiveName().endsWith(selectedSuffix())).toBe(true);
+    });
+
+    it("holds the executable under the name the installer starts", () => {
+        const launched = installer.match(/\$executable = Join-Path \$installRoot "([^"]+)"/)?.[1];
+        expect(launched).toBe(`${productName}.exe`);
+        // Which is a rename, not a copy. Cargo names the binary after the Cargo package —
+        // `chronie-desktop` — and it is tauri's bundler that renames it to `productName`,
+        // which neither the archive nor a local install goes through.
+        expect(workflow).toMatch(/\$payloadName = "\$\(\$config\.productName\)\.exe"/);
+    });
+
+    it("finds cargo's binary by asking cargo rather than guessing", () => {
+        // This is the release that did not happen: the packing step looked for `Chronie.exe`
+        // in `target/release`, where cargo had written `chronie-desktop.exe`, and threw. Both
+        // paths that copy the built binary out have to ask.
+        // Spelt as a command line in the workflow and as an argument list in TypeScript,
+        // hence matching across the quoting rather than on one phrasing of it.
+        for (const script of [workflow, localInstall]) {
+            expect(script).toMatch(/cargo["',\s[\]]*metadata/);
+        }
     });
 
     it("carries the uninstaller, because nothing else puts one on the machine", () => {

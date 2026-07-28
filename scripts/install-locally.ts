@@ -66,6 +66,26 @@ function build(bundles?: string): void {
     execFileSync("bun", [...args, "--config", UNSIGNED], { cwd: ROOT, stdio: "inherit" });
 }
 
+/**
+ * The name cargo gives the executable, which is the Cargo package's and not `productName`'s.
+ * Asked of cargo rather than read out of `Cargo.toml`, because nothing here parses TOML and
+ * `[[bin]]` could rename it again anyway.
+ */
+function cargoPackageName(): string {
+    const metadata = JSON.parse(
+        execFileSync(
+            "cargo",
+            ["metadata", "--format-version", "1", "--no-deps", "--manifest-path", join(TAURI_DIR, "Cargo.toml")],
+            { encoding: "utf8" },
+        ),
+    ) as { packages: { targets: { kind: string[]; name: string }[] }[] };
+    const binary = metadata.packages[0]?.targets.find((target) => target.kind.includes("bin"));
+    if (!binary) {
+        throw new Error("The desktop crate has no binary target.");
+    }
+    return binary.name;
+}
+
 function installOnMac(): string {
     build("app");
     const app = `${config.productName}.app`;
@@ -85,7 +105,10 @@ function installOnWindows(): string {
     // Nothing needs bundling: the payload is the one executable, and skipping NSIS skips
     // both the minute it takes and the installer nothing is allowed to run.
     build();
-    const built = join(TARGET_DIR, `release/${config.productName}.exe`);
+    // Cargo names it after the Cargo package, and it is the bundler — skipped here — that
+    // renames it to `productName`. So this reads `chronie-desktop.exe` and writes `Chronie.exe`,
+    // which is the name the shortcut, `debug-desktop.ps1` and `install.ps1` all expect.
+    const built = join(TARGET_DIR, `release/${cargoPackageName()}.exe`);
     if (!existsSync(built)) {
         throw new Error(`The build did not produce ${built}.`);
     }

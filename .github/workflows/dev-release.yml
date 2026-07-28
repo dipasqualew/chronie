@@ -116,13 +116,29 @@ jobs:
             }
           }
 
+          # Cargo names the binary after the Cargo package — `chronie-desktop` — and it is
+          # tauri's bundler, which this deliberately skips, that renames it to `productName`
+          # on the way into an installer. So the built name is asked for rather than assumed,
+          # and the copy into the archive is what does the renaming instead.
+          $metadata = cargo metadata --format-version 1 --no-deps `
+            --manifest-path apps/desktop/src-tauri/Cargo.toml | ConvertFrom-Json
+          $binary = $metadata.packages[0].targets |
+            Where-Object { $_.kind -contains "bin" } | Select-Object -First 1
+          if (-not $binary) { throw "The desktop crate has no binary target." }
+
+          $built = Join-Path $metadata.target_directory "release/$($binary.name).exe"
+          if (-not (Test-Path $built)) { throw "The build did not produce $built." }
+
           $version = "0.1.$env:GITHUB_RUN_NUMBER"
-          $executable = "apps/desktop/src-tauri/target/release/$($config.productName).exe"
-          if (-not (Test-Path $executable)) { throw "The build did not produce $executable." }
+          $payloadName = "$($config.productName).exe"
+          $staging = Join-Path $env:RUNNER_TEMP "portable"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item $built (Join-Path $staging $payloadName) -Force
+          Copy-Item "scripts/uninstall.ps1" $staging -Force
 
           $archiveName = "$($config.productName)_${version}_x64-portable.zip"
           $archive = Join-Path $env:RUNNER_TEMP $archiveName
-          Compress-Archive -Path $executable, "scripts/uninstall.ps1" -DestinationPath $archive -Force
+          Compress-Archive -Path "$staging/*" -DestinationPath $archive -Force
           "archive=$archive" >> $env:GITHUB_OUTPUT
 
       - name: Replace rolling dev release
