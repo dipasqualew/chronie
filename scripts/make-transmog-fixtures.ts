@@ -49,6 +49,9 @@ const FILE_DATA_ID = {
   chrCustomizationMaterial: 3459652,
   chrCustomizationGeoset: 3456171,
   chrModelTextureLayer: 3548976,
+  chrModel: 3384313,
+  charComponentTextureSections: 1360263,
+  chrModelMaterial: 3566562,
 } as const;
 
 /* ---------- the tables ---------- */
@@ -994,12 +997,13 @@ const textureFileData: TableSpec = {
         [0, 0, 53006], // the face that goes with the other swatch, which resolves too
         [0, 0, 53007], // her hair, which is a whole atlas rather than a rectangle of one
         [0, 0, 53008], // and her eyes, which are another
+        [0, 0, 53101], // and the other body's skin, which is a picture of its own
       ],
       idList: [
         150004, 150002, 150102, 150007, 150005, 150003, 150006,
         151001, 151002, 151003, 151004, 151005, 151006, 151007, 151008, 151009, 151010, 151011,
         151012, 151013,
-        160001, 160002, 160003, 160004, 160005, 160006, 160007, 160008,
+        160001, 160002, 160003, 160004, 160005, 160006, 160007, 160008, 160101,
       ],
     },
     {
@@ -1230,7 +1234,7 @@ const chrModelTextureLayer: TableSpec = {
       offsetBits: 22,
       sizeBits: 6,
       arrayCount: 2,
-      palette: [1, 0, 10, 0, 4, 0, 5, 0, 13, 0, 14, 0, 25, 0, 27, 0, 40, 0],
+      palette: [1, 0, 10, 0, 4, 0, 5, 0, 13, 0, 14, 0, 25, 0, 27, 0, 40, 0, 41, 0],
     },
   ],
   sections: [
@@ -1254,8 +1258,12 @@ const chrModelTextureLayer: TableSpec = {
         // Another layout's base layer, which is the one row here that would resolve and be
         // wrong: same shape, same blend mode, a target this app must never paint.
         [1, 0, 0, 1, -1, -1, [0, 0, 0], [40, 0]],
+        // And the *other body's* base layer, which is a different thing again: a layout this
+        // app does composite, when the reader is looking at that body. Its target is his and
+        // not hers, which is what keeps one body's skin off the other.
+        [1, 0, 0, 1, -1, -1, [0, 0, 0], [41, 0]],
       ],
-      idList: [29, 30, 31, 34, 39, 64, 338, 339, 900029],
+      idList: [29, 30, 31, 34, 39, 64, 338, 339, 900029, 900103],
       relationships: [
         [104, 0],
         [104, 1],
@@ -1266,6 +1274,7 @@ const chrModelTextureLayer: TableSpec = {
         [104, 6],
         [104, 7],
         [2, 8],
+        [103, 9],
       ],
     },
   ],
@@ -1348,11 +1357,18 @@ const chrCustomizationElement: TableSpec = {
         [5060, 0, 11351, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         // The ears, in a group whose values start at 2 — there is no 701 on a real body.
         [56653, 0, 13292, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        // And the other body's: his skin, painted onto a target of his own, and the two
+        // geosets no female body has anything for — a hairstyle of his and a beard.
+        [400, 0, 0, 0, 900, 0, 0, 0, 0, 0, 0, 0, 0],
+        [410, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [411, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [421, 0, 47, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       ],
       idList: [
         45, 46,
         2917, 2918, 2919, 2920, 2921, 2922,
         2964, 2965, 3277, 9002, 18774, 22918, 33059, 33060, 40000,
+        40100, 40101, 40102, 40103,
       ],
     },
     {
@@ -1380,7 +1396,7 @@ const chrCustomizationMaterial: TableSpec = {
   recordSize: 4,
   columns: [
     // TextureTargetID
-    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [1, 5, 10, 13, 14, 20, 25] },
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [1, 5, 10, 13, 14, 20, 25, 41] },
     { storage: Storage.bitpackedSigned, offsetBits: 6, sizeBits: 22 }, // MaterialResourcesID
   ],
   sections: [
@@ -1396,8 +1412,9 @@ const chrCustomizationMaterial: TableSpec = {
         [5, 53006], // 871, the face that goes with the swatch beside it
         [25, 53008], // 14914, the eyes, on an atlas of their own
         [10, 53007], // 14968, the hair, on another
+        [41, 53101], // 900, the other body's skin, on the target his own layout copies
       ],
-      idList: [823, 824, 825, 826, 827, 870, 871, 14914, 14968],
+      idList: [823, 824, 825, 826, 827, 870, 871, 14914, 14968, 900],
     },
     {
       key: 0x4f9c2e18d73b06a5n,
@@ -1424,7 +1441,7 @@ const chrCustomizationGeoset: TableSpec = {
   flags: 4,
   recordSize: 4,
   columns: [
-    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [0, 7, 21, 32, 36] }, // GeosetType
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [0, 1, 7, 21, 32, 36] }, // GeosetType
     { storage: Storage.indexed, offsetBits: 6, sizeBits: 3, palette: [0, 1, 2, 3] }, // GeosetID
     { storage: Storage.indexed, offsetBits: 9, sizeBits: 2, palette: [-1] }, // Modifier
   ],
@@ -1439,8 +1456,10 @@ const chrCustomizationGeoset: TableSpec = {
         [32, 2, -1], // 11350, the head itself
         [32, 3, -1], // 11351, the head beside it, which this app must not reach
         [7, 2, -1], // 13292, the ears — a group whose values start at 2
+        // The other body's beard: group 1, which a female body holds nothing for at all.
+        [1, 1, -1], // 47
       ],
-      idList: [45, 46, 2068, 2410, 11350, 11351, 13292],
+      idList: [45, 46, 2068, 2410, 11350, 11351, 13292, 47],
     },
   ],
 };
@@ -1497,6 +1516,19 @@ const chrCustomizationChoice: TableSpec = {
         ["", 5060, 526, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
         ["", 5059, 526, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
         ["", 56653, 8790, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        // The other body's swatches: his skin, his two hairstyles, and the facial hair a
+        // female body has no group for at all.
+        ["", 400, 40, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 401, 40, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
+        ["", 410, 41, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 411, 41, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
+        ["Shaved", 420, 42, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["Full beard", 421, 42, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
+        // The swatches of a question that does nothing. They are this body's, they read, and
+        // no element anywhere names either of them — which is what the game's own eye style
+        // and eyesight questions are, and why a window must not offer a control for them.
+        ["", 54353, 8523, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 54354, 8523, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
         // The other body's, whose option belongs to a ChrModel this app never draws.
         ["", 9001, 9000, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
       ],
@@ -1539,9 +1571,157 @@ const chrCustomizationOption: TableSpec = {
         ["Necklace", 510, 510, 80, 2, 7, 2, 0, 0, 1, 0, 1, 90001],
         ["Face Shape", 526, 526, 80, 2, 9, 2, 0, 0, 1, 0, 1, 90001],
         ["Ears", 8790, 8790, 80, 2, 13, 2, 0, 0, 1, 0, 1, 90001],
+        // The other body's questions. Same shape, another `ChrModelID`, and one of them —
+        // facial hair — is a question no female body is ever asked.
+        ["Skin Color", 40, 40, 80, 1, 2, 2, 0, 0, 1, 0, 1, 90001],
+        ["Hair Style", 41, 41, 80, 1, 3, 2, 0, 0, 1, 0, 1, 90001],
+        ["Facial Hair", 42, 42, 80, 1, 4, 2, 0, 0, 1, 0, 1, 90001],
+        // A question of hers whose swatches drive nothing. The game asks a body several of
+        // these — an eye style, an eyesight — and the rows are as readable as any above; what
+        // leaves it out of what a reader is offered is that nothing follows from either answer.
+        ["Eye Style", 8523, 8523, 80, 2, 11, 2, 0, 0, 1, 0, 1, 90001],
         // Another body's face shape. Every column of it reads, and the only thing wrong with
         // it is whose it is.
         ["Face Shape", 9000, 9000, 80, 5, 9, 2, 0, 0, 1, 0, 1, 90001],
+      ],
+    },
+  ],
+};
+
+/**
+ * `ChrModel` — every body the game can draw, and the texture layout each is composited in.
+ *
+ * Two of them here are the two the app draws, and the third is another body's: the same shape
+ * of row, a sex and a layout of its own, and nothing about it this app may reach. The id is
+ * kept **inside** the row, in column 2, which is what puts the sex at 3 and the layout at 5 —
+ * a reader that expected the id beside the rows would take the sex for a display and the
+ * layout for a flag.
+ */
+const chrModel: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrModel,
+  layoutHash: 0x71c05a3e,
+  tableHash: 0x2b8f4d16,
+  idColumn: 2,
+  flags: 0,
+  recordSize: 12,
+  columns: [
+    { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // FaceCustomizationOffset[0]
+    { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 8 }, // unused
+    { storage: Storage.bitpackedSigned, offsetBits: 40, sizeBits: 12 }, // ID
+    { storage: Storage.bitpackedSigned, offsetBits: 52, sizeBits: 3 }, // Sex
+    { storage: Storage.bitpackedSigned, offsetBits: 55, sizeBits: 18 }, // DisplayID
+    { storage: Storage.bitpackedSigned, offsetBits: 73, sizeBits: 10 }, // CharComponentTextureLayoutID
+    { storage: Storage.bitpackedSigned, offsetBits: 83, sizeBits: 4 }, // Flags
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Offset, unused, ID, Sex, DisplayID, Layout, Flags.
+      rows: [
+        [0, 0, 1, 0, 57899, 103, 2], // the male body, in a layout of its own
+        [0, 0, 2, 1, 56658, 104, 2], // the female one, which is what the app opens on
+        // A body the app has no mesh for. Everything about the row reads; what stops it being
+        // drawn is that nothing here holds a mesh for it, which is `body::of`'s fallback.
+        [0, 0, 5, 1, 51894, 105, 2],
+      ],
+    },
+  ],
+};
+
+/**
+ * `CharComponentTextureSections` — where each part of a body lands in its layout's atlas.
+ *
+ * Layout 104's ten rows are the real ones, read off 12.0.5.67 and tabulated in
+ * `docs/character-rendering.md`. Layout 103's are **half of them**, which the game's two Human
+ * layouts are not: the male body composites into the same 2048 × 1024 as the female on a
+ * shipping install. Halving it here is what makes the read a read — a reader that kept the old
+ * constants would put every one of his textures in twice the rectangle it belongs in, and on
+ * two layouts that agree nothing could tell.
+ */
+const charComponentTextureSections: TableSpec = {
+  fileDataId: FILE_DATA_ID.charComponentTextureSections,
+  layoutHash: 0x5e13a9c7,
+  tableHash: 0x9f26b408,
+  idColumn: 0,
+  flags: 4,
+  recordSize: 12,
+  columns: [
+    { storage: Storage.bitpackedSigned, offsetBits: 0, sizeBits: 10 }, // CharComponentTextureLayoutID
+    { storage: Storage.bitpackedSigned, offsetBits: 10, sizeBits: 5 }, // SectionType
+    { storage: Storage.bitpackedSigned, offsetBits: 15, sizeBits: 12 }, // X
+    { storage: Storage.bitpackedSigned, offsetBits: 27, sizeBits: 12 }, // Y
+    { storage: Storage.bitpackedSigned, offsetBits: 39, sizeBits: 12 }, // Width
+    { storage: Storage.bitpackedSigned, offsetBits: 51, sizeBits: 12 }, // Height
+    { storage: Storage.bitpackedSigned, offsetBits: 63, sizeBits: 8 }, // OverlapSectionMask
+  ],
+  sections: [
+    {
+      key: 0n,
+      // Layout, Section, X, Y, Width, Height, OverlapMask.
+      rows: [
+        [104, 0, 0, 0, 512, 256, 0], // arms upper
+        [104, 1, 0, 256, 512, 256, 0], // arms lower
+        [104, 2, 0, 512, 512, 128, 0], // hands
+        [104, 3, 512, 0, 512, 256, 0], // torso upper
+        [104, 4, 512, 256, 512, 128, 0], // torso lower
+        [104, 5, 512, 384, 512, 256, 0], // legs upper
+        [104, 6, 512, 640, 512, 256, 0], // legs lower
+        [104, 7, 512, 896, 512, 128, 0], // feet
+        [104, 9, 1024, 0, 1024, 1024, 0], // scalp upper
+        [104, 10, 1024, 0, 1024, 1024, 0], // scalp lower, which shares the rectangle above
+        // And the other body's, at half the size — see the comment above.
+        [103, 0, 0, 0, 256, 128, 0],
+        [103, 1, 0, 128, 256, 128, 0],
+        [103, 2, 0, 256, 256, 64, 0],
+        [103, 3, 256, 0, 256, 128, 0],
+        [103, 4, 256, 128, 256, 64, 0],
+        [103, 5, 256, 192, 256, 128, 0],
+        [103, 6, 256, 320, 256, 128, 0],
+        [103, 7, 256, 448, 256, 64, 0],
+        [103, 9, 512, 0, 512, 512, 0],
+        [103, 10, 512, 0, 512, 512, 0],
+      ],
+      idList: [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      ],
+    },
+  ],
+};
+
+/**
+ * `ChrModelMaterial` — how large each atlas of a layout is, texture type by texture type.
+ *
+ * The one this app sizes a buffer from is texture type 1, the composited body atlas; the rows
+ * for the hair and the eyes are here because they are what a reader taking the first row of a
+ * layout would find instead.
+ */
+const chrModelMaterial: TableSpec = {
+  fileDataId: FILE_DATA_ID.chrModelMaterial,
+  layoutHash: 0x3c7d16ba,
+  tableHash: 0x84e02f95,
+  idColumn: 0,
+  flags: 0,
+  recordSize: 8,
+  columns: [
+    { storage: Storage.bitpackedSigned, offsetBits: 0, sizeBits: 12 }, // ID
+    { storage: Storage.bitpackedSigned, offsetBits: 12, sizeBits: 10 }, // CharComponentTextureLayoutID
+    { storage: Storage.bitpackedSigned, offsetBits: 22, sizeBits: 6 }, // TextureType
+    { storage: Storage.bitpackedSigned, offsetBits: 28, sizeBits: 13 }, // Width
+    { storage: Storage.bitpackedSigned, offsetBits: 41, sizeBits: 13 }, // Height
+  ],
+  sections: [
+    {
+      key: 0n,
+      // ID, Layout, TextureType, Width, Height.
+      rows: [
+        // The hair atlas first, so that a reader taking a layout's first row rather than its
+        // body row sizes the character out of a picture of somebody's hair.
+        [1, 104, 6, 256, 256],
+        [2, 104, 1, 2048, 1024],
+        [3, 103, 6, 256, 256],
+        [4, 103, 1, 1024, 512],
+        [5, 105, 1, 2048, 1024],
       ],
     },
   ],
@@ -2293,6 +2473,52 @@ const characterModel: ModelSpec = {
 };
 
 /**
+ * The *other* body: a second mesh, with the geosets a body of the other sex has.
+ *
+ * Smaller than hers on purpose — this is not a second copy of the same character, it is the
+ * thing that says the app draws whichever body it was asked for rather than the one it always
+ * drew. Three of its parts are the point:
+ *
+ * - **Group 1, a beard.** No female body in the game holds a geoset in it at all, so a part
+ *   drawn here and nowhere else is proof that his own customization reached his own mesh.
+ * - **Group 0, a hairstyle that is not hers.** The two bodies number their hairstyles
+ *   separately, and his choices name geosets his mesh holds and hers does not.
+ * - **The chest, bare and worn**, so that an appearance can be put on him and be seen to land.
+ *
+ * Its FileDataID is the community's `humanmale_hd.m2` — see `body.rs`, which holds the two
+ * meshes and says what stands behind each of those two numbers.
+ */
+const otherCharacterModel: ModelSpec = {
+  fileDataId: 1011653,
+  skinFileDataId: 1011654,
+  skeletonFileDataId: 1011655,
+  cubes: 10,
+  textures: [
+    { kind: 1, fileDataId: 0 }, // the composited body atlas, at his layout's size
+    { kind: 6, fileDataId: 0 }, // the hair
+  ],
+  materials: [
+    [0, 0],
+    [0x04, 1],
+  ],
+  parts: [
+    { cube: 0, from: 0, count: 36, material: 0, level: 0, geoset: 0, combo: 1 },
+    // Group 1, the beard: a group a female body has nothing in.
+    { cube: 1, from: 0, count: 36, material: 0, level: 0, geoset: 101, combo: 1 },
+    // Group 0, his hairstyles, painted from the hair atlas as hers are.
+    { cube: 2, from: 0, count: 36, material: 1, level: 0, geoset: 1, combo: 0 },
+    { cube: 3, from: 0, count: 36, material: 1, level: 0, geoset: 2, combo: 0 },
+    // The head, the ears, and the groups an appearance drives.
+    { cube: 4, from: 0, count: 36, material: 0, level: 0, geoset: 3201, combo: 1 },
+    { cube: 5, from: 0, count: 36, material: 0, level: 0, geoset: 702, combo: 1 },
+    { cube: 6, from: 0, count: 36, material: 0, level: 0, geoset: 1001, combo: 1 },
+    { cube: 7, from: 0, count: 36, material: 0, level: 0, geoset: 1002, combo: 1 },
+    { cube: 8, from: 0, count: 36, material: 0, level: 0, geoset: 801, combo: 1 },
+    { cube: 9, from: 0, count: 36, material: 0, level: 0, geoset: 802, combo: 1 },
+  ],
+};
+
+/**
  * The icons `ItemAppearance` names, one per encoding the client ships.
  *
  * Which set a given one lands in is worth reading off `itemAppearance` above: sets 201 and
@@ -2360,6 +2586,9 @@ function skinTextures(): IconSpec[] {
     [160006, [60, 170, 230, 255]], // the face that goes with the other swatch of the skin
     [160007, [150, 60, 200, 255]], // target 10: her hair, which is an atlas of its own
     [160008, [60, 200, 150, 255]], // target 25: and her eyes, which are another
+    // The other body's skin, on the target his own layout copies. A colour of its own, so that
+    // a body drawn with the wrong one of the two is a body of the wrong colour.
+    [160101, [90, 90, 90, 255]],
   ];
 
   return painted.map(([fileDataId, colour]) => ({
@@ -2447,22 +2676,33 @@ emit("transmog", {
     chrCustomizationChoice,
     chrCustomizationOption,
     chrCustomizationGeoset,
+    chrModel,
+    charComponentTextureSections,
+    chrModelMaterial,
   ],
   icons,
   raw: [
     // Every model is a pair: the geometry, and the skin profile that says which of it is
     // drawn in which batch.
-    ...[...models, characterModel].flatMap((model) => [
+    ...[...models, characterModel, otherCharacterModel].flatMap((model) => [
       { fileDataId: model.fileDataId, extension: "m2", bytes: writeModel(model) },
       { fileDataId: model.skinFileDataId, extension: "skin", bytes: writeSkin(model) },
     ]),
     // The body's skeleton, which is where a retail character keeps the attachments a helm and
-    // a pair of pauldrons hang off — not in the model, whose own arrays are empty.
+    // a pair of pauldrons hang off — not in the model, whose own arrays are empty. One per
+    // body, because each mesh names its own and a helm hangs off whichever it is being drawn
+    // on.
     {
       fileDataId: 1000766,
       extension: "skel",
       bytes: writeSkeleton(ATTACHMENTS),
       note: "the body's attachments",
+    },
+    {
+      fileDataId: 1011655,
+      extension: "skel",
+      bytes: writeSkeleton(ATTACHMENTS),
+      note: "the other body's attachments",
     },
     // Icon 130007 belongs to content the game has not shipped. Its chunk is encrypted, and a
     // chunk only Blizzard holds the key to arrives as zeroes of the right length — so this is

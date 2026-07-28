@@ -10,9 +10,9 @@ import type { Focus } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
-  CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind, MarkSubjectKind, TransmogAppearance,
-  TransmogMark, TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload,
-  WardrobeAppearance, WardrobePayload, WornPiece,
+  CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind, MarkSubjectKind,
+  TransmogAppearance, TransmogMark, TransmogMarksPayload, TransmogPayload, TransmogSet,
+  TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload, WornPiece,
 } from "./types";
 
 afterEach(cleanup);
@@ -370,6 +370,52 @@ const UNMARKED = {
   onError: String,
 };
 
+/**
+ * Who she is, as a settings file that answers: the questions the game would ask about a body,
+ * and what has been said about them so far.
+ *
+ * State rather than a fixture, for the reason the marks are — answering one has to be visible
+ * to the next read, which is what the real backend's settings file does.
+ */
+function fakeHerself() {
+  let picked: CharacterPick[] = [];
+  let body = 2;
+  return {
+    load: vi.fn(() => Promise.resolve({
+      bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+      body,
+      questions: body === 2
+        ? [
+          {
+            id: 16,
+            name: "Hair Style",
+            swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+          },
+          // Unnamed, as most of the game's are: a skin tone is a square of colour.
+          { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
+        ]
+        // The other body is asked its own questions, which is what changing body means.
+        : [{ id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] }],
+      picked: [...picked],
+    })),
+    save: vi.fn((chosen: number, answers: CharacterPick[]) => {
+      body = chosen;
+      picked = answers;
+      return Promise.resolve({ body, picked: [...picked] });
+    }),
+    onError: String,
+  };
+}
+
+type FakeHerself = ReturnType<typeof fakeHerself>;
+
+/** And nobody the reader can be, for the tests that are about something else entirely. */
+const NOT_ASKED = {
+  load: () => Promise.resolve({ bodies: [], body: 0, questions: [], picked: [] }),
+  save: (body: number, picked: CharacterPick[]) => Promise.resolve({ body, picked }),
+  onError: String,
+};
+
 /** And no sets of anybody's own, for the same tests. */
 const NO_SETS = {
   payload: { sets: [] },
@@ -386,6 +432,7 @@ const NO_SETS = {
 function view(
   options: {
     payload?: TransmogPayload | null; marks?: FakeMarks; saved?: FakeCustomSets;
+    herself?: FakeHerself;
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
@@ -413,6 +460,7 @@ function view(
   }));
   const marks = options.marks ?? fakeMarks();
   const saved = options.saved ?? fakeCustomSets();
+  const herself = options.herself ?? fakeHerself();
   const rendered = render(
     <Marked
       payload={options.payload === undefined ? SETS : options.payload}
@@ -423,6 +471,7 @@ function view(
       loadCharacter={loadCharacter}
       loadWorn={loadWorn}
       loadGallery={loadGallery}
+      herself={herself}
       store={marks}
       saved={saved}
       createStage={() => stage}
@@ -431,7 +480,7 @@ function view(
   );
   return {
     rendered, loadWorn, loadCharacter, loadSet, loadAppearances, loadGallery, marks, saved,
-    shown, resets, painted,
+    herself, shown, resets, painted,
   };
 }
 
@@ -726,6 +775,7 @@ describe("TransmogView", () => {
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         loadGallery={() => Promise.resolve({ models: [] })}
+        herself={NOT_ASKED}
         marks={UNMARKED}
         custom={NO_SETS}
         createStage={() => stage}
@@ -749,6 +799,7 @@ describe("TransmogView", () => {
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         loadGallery={() => Promise.resolve({ models: [] })}
+        herself={NOT_ASKED}
         marks={UNMARKED}
         custom={NO_SETS}
         createStage={() => { throw new Error("This machine cannot draw 3D."); }}
@@ -960,6 +1011,7 @@ describe("the wardrobe as models", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        herself={NOT_ASKED}
         loadGallery={(pieces) => Promise.resolve({
           models: pieces.map((piece) => ({
             displayInfoId: piece.displayInfoId,
@@ -1107,6 +1159,7 @@ describe("the wardrobe as models", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        herself={NOT_ASKED}
         loadGallery={(pieces) => Promise.resolve({
           models: pieces.map((piece) => ({
             displayInfoId: piece.displayInfoId,
@@ -1150,6 +1203,7 @@ describe("the wardrobe as models", () => {
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        herself={NOT_ASKED}
         loadGallery={() => Promise.reject(new Error("The game's files are not readable."))}
         marks={UNMARKED}
         custom={NO_SETS}
@@ -1163,6 +1217,114 @@ describe("the wardrobe as models", () => {
 
     expect(await screen.findByText("Coif of the Drowned Star")).toBeTruthy();
     await waitFor(() => expect(screen.queryByLabelText(/, drawn$/)).toBeNull());
+  });
+});
+
+/**
+ * Who the character is, which is the one thing on this screen that changes every picture on it.
+ *
+ * The answers themselves are the backend's — it applies what the settings file holds to every
+ * body it draws, so nothing here sends them. What the view has to do is the other half: every
+ * body it is already holding is a picture of the woman who was there before, and going on
+ * showing them is the failure worth catching. So each of these answers a question about her and
+ * then asks whether the bodies were read out of the game again.
+ */
+describe("who the character is", () => {
+  afterEach(cleanup);
+
+  /** Opens the form under her and waits for the questions the game would ask. */
+  async function askable(shown: ReturnType<typeof view>): Promise<void> {
+    const details = screen.getByText("Who she is").closest("details");
+    if (!details) throw new Error("the panel has no disclosure to open");
+    // Set and then announced, which is the order a browser does it in — see the panel's own
+    // suite. The end-to-end run is where a real click on it is driven.
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    await waitFor(() => expect(shown.herself.load).toHaveBeenCalled());
+    await screen.findByRole("combobox", { name: "Hair Style" });
+  }
+
+  // The bare body first, because that is what the view opens on and it is one model for every
+  // outfit there is — which is exactly why it would otherwise outlive the woman it is of.
+  it("reads the character again once she is somebody else", async () => {
+    const shown = view();
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(1));
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Hair Style" }), {
+      target: { value: "133" },
+    });
+
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(2));
+  });
+
+  // And the dressed one, which is the cache a reader fills by trying things on: every outfit
+  // they have looked at is held under the outfit's own name, and every one of them is of her.
+  it("reads an outfit again once she is somebody else", async () => {
+    const shown = view();
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear Chest: Robe of Tides" }));
+    await waitFor(() => expect(shown.loadWorn).toHaveBeenCalledTimes(1));
+    const dressed = shown.loadWorn.mock.calls[0]?.[0];
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Hair Style" }), {
+      target: { value: "133" },
+    });
+
+    // The same outfit, asked for again — because it is the woman under it that changed.
+    await waitFor(() => expect(shown.loadWorn).toHaveBeenCalledTimes(2));
+    expect(shown.loadWorn.mock.calls[1]?.[0]).toEqual(dressed);
+  });
+
+  // The gallery is twenty bodies rather than one, and it is the cache with the most to lose —
+  // which is the reason it is emptied rather than left to be checked row by row.
+  it("reads a page of the wardrobe again once she is somebody else", async () => {
+    const shown = view();
+    await browseItems(shown);
+    fireEvent.click(screen.getByLabelText("Show worn"));
+    await waitFor(() => expect(shown.loadGallery).toHaveBeenCalledTimes(1));
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Hair Style" }), {
+      target: { value: "133" },
+    });
+
+    await waitFor(() => expect(shown.loadGallery).toHaveBeenCalledTimes(2));
+    expect(shown.loadGallery.mock.calls[1]?.[0].map((piece) => piece.displayInfoId))
+      .toEqual([900_040, 900_099]);
+  });
+
+  // The other half of it, and the coarser one: another body entirely. Every picture in the
+  // window is of one body or the other, so the same cache has to let go of all of them.
+  it("reads the character again on the other body", async () => {
+    const shown = view();
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(1));
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Body" }), { target: { value: "1" } });
+
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(2));
+    // And the form under the picker is that body's questions rather than hers relabelled.
+    expect(await screen.findByRole("combobox", { name: "Beard" })).toBeTruthy();
+  });
+
+  // And what is on her survives it. She is the body under the clothes; changing her hair is not
+  // a reason to take a reader's outfit off, and the outfit is what a set of their own is made
+  // of.
+  it("leaves the outfit on her", async () => {
+    const shown = view();
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear Chest: Robe of Tides" }));
+    await waitFor(() => expect(shown.loadWorn).toHaveBeenCalledTimes(1));
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Hair Style" }), {
+      target: { value: "133" },
+    });
+
+    await waitFor(() => expect(shown.loadWorn).toHaveBeenCalledTimes(2));
+    expect(worn()).toEqual(["Chest Robe of Tides"]);
   });
 });
 

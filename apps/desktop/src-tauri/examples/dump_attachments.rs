@@ -18,7 +18,7 @@
 //! says nothing and the thing hanging there is left where it was authored.
 
 use chronie_desktop_lib::casc;
-use chronie_desktop_lib::character::HUMAN_FEMALE;
+use chronie_desktop_lib::body;
 use chronie_desktop_lib::m2::{self, Model};
 
 /// What the community calls each of the attachments this app might hang something off.
@@ -66,10 +66,18 @@ fn main() {
         }
     };
 
-    let body = args
-        .next()
-        .and_then(|id| id.parse().ok())
-        .unwrap_or(HUMAN_FEMALE);
+    // A model FileDataID, or the body this app opens on — which is a read now rather than a
+    // constant, because there is more than one body and each has a mesh of its own.
+    let body = match args.next().and_then(|id| id.parse().ok()) {
+        Some(model) => model,
+        None => match body::of(files.as_ref(), body::DEFAULT) {
+            Ok(body) => body.model,
+            Err(error) => {
+                eprintln!("Could not read the body to hang things off: {error}");
+                std::process::exit(1);
+            }
+        },
+    };
     let read = |fdid: u32| -> std::sync::Arc<Vec<u8>> {
         files.read(fdid).unwrap_or_else(|error| {
             eprintln!("Could not read {fdid}: {error}");

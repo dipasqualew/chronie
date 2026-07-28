@@ -32,9 +32,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use chronie_desktop_lib::body::Body;
 use chronie_desktop_lib::qualities::{self, Look};
 use chronie_desktop_lib::worn::Piece;
-use chronie_desktop_lib::{casc, transmog, wardrobe};
+use chronie_desktop_lib::{body, casc, transmog, wardrobe};
 
 /// Every display type the game files an appearance under.
 const EVERY_SLOT: [u32; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
@@ -76,7 +77,17 @@ fn main() {
             }
         },
     };
-    println!("build  {build}");
+    // One body, and the one the store is written for: which textures a piece resolves to and
+    // how much of a body a section is are both answered per body, so a store measured on more
+    // than one would be two stores. See `qualities`'s own note about it.
+    let body = match body::of(files, body::DEFAULT) {
+        Ok(body) => body,
+        Err(error) => {
+            eprintln!("Could not read the body to measure against: {error}");
+            std::process::exit(1);
+        }
+    };
+    println!("build  {build}, measured on {}", body.name);
 
     if let Err(error) = std::fs::create_dir_all(&options.out) {
         eprintln!("Could not make {}: {error}", options.out.display());
@@ -87,7 +98,7 @@ fn main() {
     // was already read rather than by measuring their pieces a second time.
     let mut measured: HashMap<u32, Look> = HashMap::new();
     for slot in options.slots {
-        measured.extend(slot_file(files, slot, &build, &options.out));
+        measured.extend(slot_file(files, &body, slot, &build, &options.out));
     }
 
     if options.slots_were_asked_for {
@@ -100,6 +111,7 @@ fn main() {
 /// One slot: measured, banded, and written.
 fn slot_file(
     files: &dyn casc::GameFiles,
+    body: &Body,
     slot: u32,
     build: &str,
     out: &Path,
@@ -133,7 +145,7 @@ fn slot_file(
     let mut looks: Vec<(u32, Look)> = Vec::new();
     for batch in rows.chunks(BATCH) {
         let pieces: Vec<Piece> = batch.iter().map(|(_, piece)| *piece).collect();
-        let answers = match qualities::each(files, &pieces) {
+        let answers = match qualities::each(files, body, &pieces) {
             Ok(answers) => answers,
             Err(error) => {
                 eprintln!("display type {slot}: {error}");

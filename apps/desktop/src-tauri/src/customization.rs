@@ -84,11 +84,19 @@
 //! compositor for them at all. That one picture is the whole of the difference between a
 //! hairstyle and a white cap.
 //!
-//! One fixed body, because the app draws one Human Female and never asks the reader who she is —
-//! but every option of that body, at the swatch the game itself opens on.
+//! **Which body, and which of that body**, are both the reader's. [`crate::body`] is the first —
+//! the `ChrModel` whose questions these are and whose texture layout the layers below belong to,
+//! and both of those travel together because a body composited under another body's layout is
+//! the failure that still draws. [`questions`] is the second: what the character creation screen
+//! would ask about that body, [`Picked`] is one answer to one of them, and a question nobody has
+//! answered keeps the swatch the game itself opens on — which is what every body in this app was
+//! before there was anywhere to say otherwise.
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
+use crate::body::Body;
 use crate::casc::GameFiles;
 use crate::db2::Db2;
 use crate::models::{MATERIAL_RESOURCES_ID, TEXTURE_FILE_DATA};
@@ -109,12 +117,20 @@ const CHR_MODEL_TEXTURE_LAYER: u32 = 3548976;
 
 /// Columns of `ChrCustomizationOption`, which keeps its id **inside** the row.
 mod option_column {
+    /// `Name_lang`: "Skin Color", "Hair Style", "Ears" — what the screen calls the question.
+    pub const NAME: usize = 0;
     /// `ChrModelID`: whose body this option belongs to.
     pub const MODEL: usize = 4;
+    /// Where the question sits among this body's, in the order the screen lists them.
+    pub const ORDER: usize = 5;
 }
 
 /// Columns of `ChrCustomizationChoice`, which keeps its id inside the row as well.
 mod choice_column {
+    /// `Name_lang`, which is empty for most swatches: a skin colour is a square of colour on
+    /// the character creation screen and has nothing to be called. [`Swatch::name`] carries
+    /// whatever is there and the window numbers the rest.
+    pub const NAME: usize = 0;
     pub const OPTION: usize = 2;
     /// Which swatch this is, in the order the character creation screen lists them.
     pub const ORDER: usize = 5;
@@ -162,14 +178,6 @@ mod layer_column {
 /// How wide one element of that array is. The file records only the column's total.
 const TARGET_BITS: u32 = 32;
 
-/// The body this app draws, as `ChrModel` numbers them, and the texture layout it composites.
-///
-/// Human Female and 104, verified on 12.0.5.67 and tabulated in `docs/character-rendering.md`.
-/// The pair travels together because the options are keyed by the one and the layers by the
-/// other, and a body composited under another body's layout is the failure that still draws.
-const HUMAN_FEMALE_MODEL: u32 = 2;
-const LAYOUT: u32 = 104;
-
 /// The M2 texture type the composited body atlas is bound as, as against 6 hair, 19 eyes and
 /// 20 jewelry — which have buffers of their own and no armour on them.
 const BODY_TEXTURE: u32 = 1;
@@ -181,6 +189,55 @@ const BODY_TEXTURE: u32 = 1;
 /// layer is the skin: everything above the skin is painted *over* it and has to blend, and the
 /// skin has nothing under it to blend against.
 const BLIT: u32 = 1;
+
+/// One swatch of one question: a `ChrCustomizationChoice`, as something to offer a reader.
+///
+/// The name is what the game calls it and is usually nothing at all — hair colours and skin
+/// tones are squares of colour on the character creation screen. That is the window's problem
+/// rather than this module's: what is empty here is empty in the game's own table, and inventing
+/// a name for it would be inventing it in the one place a later build could contradict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Swatch {
+    pub id: u32,
+    pub name: String,
+}
+
+/// One thing the character creation screen asks about this body: a `ChrCustomizationOption`.
+///
+/// "Question" rather than "option" because [`std::option::Option`] is a word this module cannot
+/// spare, and because it is what the screen does with one — the answer is a [`Picked`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Question {
+    pub id: u32,
+    pub name: String,
+    /// Every swatch of it, in the order the character creation screen lists them. The first is
+    /// what a body nobody has answered for takes.
+    pub swatches: Vec<Swatch>,
+}
+
+/// One answer: which swatch of which question the reader chose.
+///
+/// Stored in the settings file and handed back down to [`of`], so it is a shape that has to
+/// survive a patch. Both halves are the game's own ids, and both are checked before anything is
+/// drawn from them — a question this body does not have, or a swatch that belongs to another
+/// question, is dropped rather than obeyed. See [`chosen_by`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Picked {
+    pub question: u32,
+    pub swatch: u32,
+}
+
+/// How many answers one body is allowed to carry.
+///
+/// A Human Female has thirteen questions and [`clean`] allows one answer to each, so this is the
+/// floor under a payload that says otherwise rather than the real number. Deliberately not
+/// thirteen: what a body may be asked is the installed game's business and not this app's, and a
+/// backend that refused a fourteenth would be the wrong end of the app to learn from a patch
+/// that added one.
+pub const ANSWER_LIMIT: usize = 64;
 
 /// Everything the character's own customization decides, before anything is worn on her.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -200,7 +257,11 @@ pub struct Customization {
     pub geosets: Vec<Geoset>,
 }
 
-/// What the character is, or nothing where this install cannot say.
+/// What the character is, given whatever the reader has answered about her.
+///
+/// `picked` is the reader's, out of the settings file, and every question it says nothing about
+/// keeps the swatch the game itself opens on — so an empty slice is the body this app drew
+/// before there was anywhere to say otherwise, and one answer changes one thing about her.
 ///
 /// `None` is an ordinary answer rather than a failure: the game encrypts what it has not
 /// shipped, and a build that renumbers the tables above resolves to nothing. The body is then
@@ -208,8 +269,12 @@ pub struct Customization {
 /// [`crate::character::Atlas::unpainted`] holds — which is what every body looked like before
 /// this chain was read, so the worst case is the old picture rather than a broken one.
 #[tracing::instrument(name = "customization.of", skip_all)]
-pub fn of(files: &dyn GameFiles) -> Result<Option<Customization>, String> {
-    let chosen = chosen_by(files)?;
+pub fn of(
+    files: &dyn GameFiles,
+    body: &Body,
+    picked: &[Picked],
+) -> Result<Option<Customization>, String> {
+    let chosen = chosen_by(files, body.id, picked)?;
     if chosen.is_empty() {
         return Ok(None);
     }
@@ -219,37 +284,45 @@ pub fn of(files: &dyn GameFiles) -> Result<Option<Customization>, String> {
         geosets: geosets_of(files, &elements)?,
         ..Default::default()
     };
-    paint(files, &elements, &mut found)?;
+    paint(files, body, &elements, &mut found)?;
     if found == Customization::default() {
         return Ok(None);
     }
     Ok(Some(found))
 }
 
-/// The swatch of every one of this body's options that the game itself opens on.
+/// The swatch of every one of this body's options that is to be applied to her.
 ///
-/// The first by `OrderIndex`, which is the order the character creation screen lists them in
-/// and not the order the rows sit in. Ties fall to the lower id so that two runs agree.
-fn chosen_by(files: &dyn GameFiles) -> Result<Vec<u32>, String> {
-    let options = Db2::parse(files.read(CHR_CUSTOMIZATION_OPTION)?)?;
-    // A set rather than a list, because what follows asks "is this one of mine" once per row of
-    // a table with hundreds of thousands of them.
-    let mine: HashSet<u32> = options
-        .rows()
-        .filter(|row| row.number(option_column::MODEL) == HUMAN_FEMALE_MODEL)
-        .map(|row| row.id())
-        .collect();
+/// The reader's answer where they gave one, and otherwise the swatch the game itself opens on —
+/// the first by `OrderIndex`, which is the order the character creation screen lists them in and
+/// not the order the rows sit in. Ties fall to the lower id so that two runs agree.
+///
+/// **An answer is checked against the table rather than believed.** It comes out of a settings
+/// file that outlives patches, and the two ways it can be wrong are worth telling apart from
+/// each other and from a swatch that is simply unusual: a question this body has not got is not
+/// this body's business, and a swatch that belongs to *another* question would otherwise put
+/// somebody else's hairstyle where an ear should be — `ChrCustomizationChoice` is one table for
+/// every playable body there is. Both are dropped quietly, and the question keeps the swatch the
+/// game opens on, because a body drawn as the game would draw it is the right answer to "this
+/// install no longer has what you chose".
+fn chosen_by(files: &dyn GameFiles, body: u32, picked: &[Picked]) -> Result<Vec<u32>, String> {
+    let mine = questions_of(files, body)?;
     if mine.is_empty() {
         return Ok(Vec::new());
     }
 
     let choices = Db2::parse(files.read(CHR_CUSTOMIZATION_CHOICE)?)?;
     let mut first: HashMap<u32, (u32, u32)> = HashMap::new();
+    // Which question each of this body's swatches belongs to, which is what an answer is checked
+    // against. Only hers: the table holds every body's, and the whole point of the check is that
+    // another body's swatch must not resolve.
+    let mut belongs: HashMap<u32, u32> = HashMap::new();
     for row in choices.rows() {
         let option = row.number(choice_column::OPTION);
-        if !mine.contains(&option) {
+        if !mine.contains_key(&option) {
             continue;
         }
+        belongs.insert(row.id(), option);
         // Held per option, so the count here is the body's options and not the table's rows.
         let swatch = (row.number(choice_column::ORDER), row.id());
         let held = first.entry(option).or_insert(swatch);
@@ -257,9 +330,156 @@ fn chosen_by(files: &dyn GameFiles) -> Result<Vec<u32>, String> {
             *held = swatch;
         }
     }
-    let mut chosen: Vec<u32> = first.into_values().map(|(_, choice)| choice).collect();
+
+    let answered: HashMap<u32, u32> = picked
+        .iter()
+        .filter(|answer| belongs.get(&answer.swatch) == Some(&answer.question))
+        .map(|answer| (answer.question, answer.swatch))
+        .collect();
+    let mut chosen: Vec<u32> = first
+        .into_iter()
+        .map(|(option, (_, opens_on))| answered.get(&option).copied().unwrap_or(opens_on))
+        .collect();
     chosen.sort_unstable();
     Ok(chosen)
+}
+
+/// Everything the character creation screen would ask about this body, and every answer to each.
+///
+/// This is the whole of what a reader may personalise, read out of the installed game rather
+/// than listed anywhere: a patch that adds a hairstyle adds a swatch here, and one that adds a
+/// question adds a question. The order is the screen's — `OrderIndex` on both tables, ties to
+/// the lower id so that two runs agree.
+///
+/// **A question none of whose swatches does anything is left out.** The game asks a body several
+/// things that a still picture cannot answer with — an eye style, an eyesight — and their
+/// choices name no geoset and no material at all. Offering them would be offering a control that
+/// demonstrably changes nothing, which is worse than not offering it: the reader would be left
+/// deciding whether the render or their eyes were at fault. A swatch that does nothing *within*
+/// a question is kept, because "none" is a real answer to "which necklace".
+#[tracing::instrument(name = "customization.questions", skip_all)]
+pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, String> {
+    let mine = questions_of(files, body)?;
+    if mine.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let choices = Db2::parse(files.read(CHR_CUSTOMIZATION_CHOICE)?)?;
+    // Keyed by question, and each list kept in the screen's order below.
+    let mut swatches: HashMap<u32, Vec<(u32, u32, String)>> = HashMap::new();
+    for row in choices.rows() {
+        let option = row.number(choice_column::OPTION);
+        if !mine.contains_key(&option) {
+            continue;
+        }
+        swatches.entry(option).or_default().push((
+            row.number(choice_column::ORDER),
+            row.id(),
+            row.text(choice_column::NAME),
+        ));
+    }
+
+    let doing = doing_something(files, &swatches)?;
+    let mut found: Vec<(u32, u32, Question)> = Vec::new();
+    for (id, (order, name)) in mine {
+        let Some(mut hers) = swatches.remove(&id) else {
+            continue;
+        };
+        if !hers.iter().any(|(_, swatch, _)| doing.contains(swatch)) {
+            continue;
+        }
+        hers.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+        found.push((
+            order,
+            id,
+            Question {
+                id,
+                name,
+                swatches: hers
+                    .into_iter()
+                    .map(|(_, id, name)| Swatch { id, name })
+                    .collect(),
+            },
+        ));
+    }
+    found.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+    Ok(found.into_iter().map(|(_, _, question)| question).collect())
+}
+
+/// Every question that belongs to the body this app draws, as `id → (order, name)`.
+///
+/// A map rather than a set because what asks this asks two things of it — whether a question is
+/// hers, and what to call it — and because `ChrCustomizationOption` describes every playable
+/// body at once. Dropping the `ChrModelID` filter is what would give group 32 two owners.
+fn questions_of(
+    files: &dyn GameFiles,
+    body: u32,
+) -> Result<HashMap<u32, (u32, String)>, String> {
+    let options = Db2::parse(files.read(CHR_CUSTOMIZATION_OPTION)?)?;
+    Ok(options
+        .rows()
+        .filter(|row| row.number(option_column::MODEL) == body)
+        .map(|row| {
+            (
+                row.id(),
+                (
+                    row.number(option_column::ORDER),
+                    row.text(option_column::NAME),
+                ),
+            )
+        })
+        .collect())
+}
+
+/// Which of those swatches do anything this app could draw: a geoset, or a picture.
+///
+/// One walk of `ChrCustomizationElement` for all of them rather than one per question — it is
+/// the largest table on the chain, and [`crate::db2::Db2::rows`] materialises every row of it
+/// before yielding the first.
+fn doing_something(
+    files: &dyn GameFiles,
+    swatches: &HashMap<u32, Vec<(u32, u32, String)>>,
+) -> Result<HashSet<u32>, String> {
+    let hers: HashSet<u32> = swatches
+        .values()
+        .flatten()
+        .map(|(_, swatch, _)| *swatch)
+        .collect();
+    let elements = Db2::parse(files.read(CHR_CUSTOMIZATION_ELEMENT)?)?;
+    Ok(elements
+        .rows()
+        .filter(|row| {
+            row.number(element_column::GEOSET) != 0 || row.number(element_column::MATERIAL) != 0
+        })
+        .map(|row| row.number(element_column::CHOICE))
+        .filter(|choice| hers.contains(choice))
+        .collect())
+}
+
+/// The answers as they will be stored, refusing what could not be applied again.
+///
+/// The rules are the shape's rather than the game's — nothing here opens the install, so a
+/// machine without the game can still save what a machine with it chose. What the *game* says
+/// about an answer is settled at the other end, in [`chosen_by`], every time a body is drawn.
+///
+/// **One answer per question**, because a second is either the window sending its state twice or
+/// two readings of what the reader chose, and a body cannot have both. The last wins, which is
+/// what a form that sends everything it holds means by sending a question twice.
+pub fn clean(picked: Vec<Picked>) -> Result<Vec<Picked>, String> {
+    if picked.len() > ANSWER_LIMIT {
+        return Err(format!("A character carries at most {ANSWER_LIMIT} choices."));
+    }
+    let mut cleaned: Vec<Picked> = Vec::with_capacity(picked.len());
+    for answer in picked {
+        if answer.question == 0 || answer.swatch == 0 {
+            return Err("That choice names no question of hers, or no swatch of it.".into());
+        }
+        match cleaned.iter_mut().find(|held| held.question == answer.question) {
+            Some(held) => held.swatch = answer.swatch,
+            None => cleaned.push(answer),
+        }
+    }
+    Ok(cleaned)
 }
 
 /// The geoset and the material of every element those choices bring with them, in table order.
@@ -321,6 +541,7 @@ fn geosets_of(files: &dyn GameFiles, elements: &[(u32, u32)]) -> Result<Vec<Geos
 /// and taking the blend mode alone would lay a hairline across the body and call it a skin.
 fn paint(
     files: &dyn GameFiles,
+    body: &Body,
     elements: &[(u32, u32)],
     into: &mut Customization,
 ) -> Result<(), String> {
@@ -349,7 +570,7 @@ fn paint(
         *file = (*file).min(row.id());
     }
 
-    for layer in layers_of(files)? {
+    for layer in layers_of(files, body.layout)? {
         let Some(file) = painted
             .get(&layer.target)
             .and_then(|resource| file_of.get(resource))
@@ -388,11 +609,11 @@ struct Layer {
 }
 
 /// Every layer of this layout, bottom first, whichever atlas it belongs to.
-fn layers_of(files: &dyn GameFiles) -> Result<Vec<Layer>, String> {
+fn layers_of(files: &dyn GameFiles, layout: u32) -> Result<Vec<Layer>, String> {
     let table = Db2::parse(files.read(CHR_MODEL_TEXTURE_LAYER)?)?;
     let mut found: Vec<(u32, Layer)> = table
         .rows()
-        .filter(|row| row.foreign_id() == LAYOUT)
+        .filter(|row| row.foreign_id() == layout)
         .map(|row| {
             (
                 row.number(layer_column::LAYER),
@@ -476,14 +697,26 @@ mod tests {
     const HAIR_TEXTURE: u32 = 6;
     const EYE_TEXTURE: u32 = 19;
 
+    /// The body the fixtures' own tables describe, which is the one this app opens on.
+    fn hers() -> crate::body::Body {
+        crate::body::of(&fixture_files(), crate::body::DEFAULT).unwrap()
+    }
+
     fn herself() -> Customization {
-        of(&fixture_files()).unwrap().expect("the fixture install can say who this body is")
+        as_answered(&[])
+    }
+
+    /// Her, with the reader having answered some of what the screen asks.
+    fn as_answered(picked: &[Picked]) -> Customization {
+        of(&fixture_files(), &hers(), picked)
+            .unwrap()
+            .expect("the fixture install can say who this body is")
     }
 
     /// The choices the app makes on this body's behalf, which is what everything else follows
     /// from — one per option, and the one the character creation screen opens on.
     fn chosen() -> Vec<u32> {
-        chosen_by(&fixture_files()).unwrap()
+        chosen_by(&fixture_files(), crate::body::DEFAULT, &[]).unwrap()
     }
 
     // The chain the module exists for, end to end: a body nobody has chosen anything for
@@ -531,7 +764,7 @@ mod tests {
     // and every one of those rows resolves.
     #[test]
     fn opens_on_the_first_swatch_of_each_option_by_order_rather_than_by_row() {
-        assert_eq!(chosen(), vec![85, 102, 132, 156, 4150, 4908, 5059, 56653]);
+        assert_eq!(chosen(), vec![85, 102, 132, 156, 4150, 4908, 5059, 54_353, 56653]);
     }
 
     // And the options are this body's. `ChrCustomizationOption` describes every playable model
@@ -593,7 +826,7 @@ mod tests {
     // them do share one, since sections 9 and 10 are the same rectangle.
     #[test]
     fn keeps_the_layers_in_the_order_the_game_paints_them() {
-        let layers = layers_of(&fixture_files()).unwrap();
+        let layers = layers_of(&fixture_files(), hers().layout).unwrap();
         let numbered: Vec<u32> = layers.iter().map(|layer| layer.target).collect();
         assert_eq!(numbered, vec![1, 10, 4, 5, 13, 14, 25, 27], "bottom layer first");
     }
@@ -605,11 +838,12 @@ mod tests {
         let table = Db2::parse(fixture_files().read(CHR_MODEL_TEXTURE_LAYER).unwrap()).unwrap();
         let elsewhere: Vec<u32> = table
             .rows()
-            .filter(|row| row.foreign_id() != LAYOUT)
+            .filter(|row| row.foreign_id() != hers().layout)
             .map(|row| row.element(layer_column::TEXTURE_TARGET, 0, TARGET_BITS))
             .collect();
         assert!(elsewhere.contains(&40), "the fixture holds another layout's base layer");
-        assert!(!layers_of(&fixture_files()).unwrap().iter().any(|layer| layer.target == 40));
+        let mine = layers_of(&fixture_files(), hers().layout).unwrap();
+        assert!(!mine.iter().any(|layer| layer.target == 40));
     }
 
     // Hair is copied too, and belongs to an atlas of its own. It is not the body's base — a
@@ -658,7 +892,220 @@ mod tests {
     #[test]
     fn says_so_when_the_chain_starts_at_a_table_that_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        let error = of(&DirFiles::new(temp.path())).unwrap_err();
+        let error = of(&DirFiles::new(temp.path()), &hers(), &[]).unwrap_err();
+        assert!(error.contains("3384247.db2"), "{error}");
+    }
+
+    /* ---------- what the reader is asked, and what their answer does ---------- */
+
+    /// The fixture's second swatch of three of her questions, each of which resolves as fully as
+    /// the first — a second skin with a face authored for it, a second hairstyle, a second head.
+    const HAIR_STYLE: u32 = 16;
+    /// The question of hers that drives nothing at all, which is the one she is not asked.
+    const INERT_QUESTION: u32 = 8523;
+    const ANOTHER_HAIRSTYLE: Picked = Picked { question: HAIR_STYLE, swatch: 133 };
+    const ANOTHER_SKIN_SWATCH: Picked = Picked { question: 14, swatch: 86 };
+    const ANOTHER_FACE_SHAPE: Picked = Picked { question: 526, swatch: 5060 };
+
+    fn asked() -> Vec<Question> {
+        questions(&fixture_files(), crate::body::DEFAULT).unwrap()
+    }
+
+    fn question(id: u32) -> Question {
+        asked().into_iter().find(|question| question.id == id).expect("a question of hers")
+    }
+
+    // What there is to personalise at all: the screen's own questions, named, each with every
+    // swatch of it. Everything below is one of these being answered.
+    #[test]
+    fn asks_what_the_character_creation_screen_asks_about_this_body() {
+        let hers = asked();
+        let named: Vec<(u32, &str)> =
+            hers.iter().map(|question| (question.id, question.name.as_str())).collect();
+        assert_eq!(
+            named,
+            vec![
+                (15, "Face"),
+                (14, "Skin Color"),
+                (HAIR_STYLE, "Hair Style"),
+                (17, "Hair Color"),
+                (464, "Eye Color"),
+                (510, "Necklace"),
+                (526, "Face Shape"),
+                (8790, "Ears"),
+            ],
+            "in the order the screen lists them, which is OrderIndex and not the row order",
+        );
+    }
+
+    // And the swatches of one, in the screen's order rather than the table's. The fixture lists
+    // the hairstyles second-swatch-first for exactly this reason.
+    #[test]
+    fn lists_the_swatches_of_a_question_in_the_order_the_screen_offers_them() {
+        let ids: Vec<u32> = question(HAIR_STYLE).swatches.iter().map(|swatch| swatch.id).collect();
+        assert_eq!(ids, vec![132, 133]);
+    }
+
+    // The one thing this app must not offer: another body's question. `ChrCustomizationOption`
+    // describes every playable model at once, and the fixture holds a second body's face shape
+    // whose every column reads.
+    #[test]
+    fn asks_nothing_that_belongs_to_another_body() {
+        assert!(!asked().iter().any(|question| question.id == 9000));
+    }
+
+    // A question whose swatches do nothing is left out. The game asks a body several things a
+    // still picture cannot answer with — an eye style, an eyesight — and a control that
+    // demonstrably changes nothing is worse than no control at all.
+    #[test]
+    fn leaves_out_a_question_none_of_whose_swatches_does_anything() {
+        assert!(!asked().iter().any(|question| question.id == INERT_QUESTION));
+        // The rows are there and readable; what leaves them out is that nothing follows from
+        // them, and a question one of whose swatches does something is kept whole.
+        let choices = Db2::parse(fixture_files().read(CHR_CUSTOMIZATION_CHOICE).unwrap()).unwrap();
+        assert!(choices
+            .rows()
+            .any(|row| row.number(choice_column::OPTION) == INERT_QUESTION));
+    }
+
+    // The point of all of it: an answer changes the body, and changes only what it is about.
+    #[test]
+    fn draws_the_swatch_the_reader_chose_rather_than_the_one_the_game_opens_on() {
+        let hers = as_answered(&[ANOTHER_HAIRSTYLE]);
+        assert!(
+            hers.geosets.contains(&Geoset { group: 0, geoset: 1 }),
+            "the hairstyle she chose: {:?}",
+            hers.geosets
+        );
+        assert!(!hers.geosets.contains(&Geoset { group: 0, geoset: 2 }), "and not the first one");
+        // Her head, her ears and her skin are not what was asked about and do not move.
+        assert_eq!(hers.base, herself().base);
+        assert!(hers.geosets.contains(&Geoset { group: 32, geoset: 3202 }));
+    }
+
+    // Several answers at once, which is what a settings file holds — and the conditional
+    // elements have to follow: a face is authored per skin, so choosing another skin has to
+    // bring the face authored for *that* skin with it.
+    #[test]
+    fn answers_every_question_the_reader_answered() {
+        let hers = as_answered(&[ANOTHER_SKIN_SWATCH, ANOTHER_FACE_SHAPE]);
+        assert_eq!(hers.base, ANOTHER_SKIN, "the skin she chose");
+        assert!(
+            hers.over.iter().any(|texture| texture.file == ANOTHER_FACE),
+            "the face authored for that skin: {:?}",
+            hers.over
+        );
+        assert!(hers.geosets.contains(&Geoset { group: 32, geoset: 3203 }), "the head she chose");
+    }
+
+    // An answer out of a settings file older than the install it is being applied to. Both ways
+    // it can be stale are quiet, and neither may resolve: a question this body has not got is
+    // nobody's, and a swatch of another question would put a hairstyle where an ear goes.
+    #[test]
+    fn ignores_an_answer_the_installed_game_does_not_bear_out() {
+        let elsewhere = Picked { question: 9000, swatch: 9001 };
+        let crossed = Picked { question: HAIR_STYLE, swatch: 5060 };
+        let absent = Picked { question: HAIR_STYLE, swatch: 40_404 };
+        for answer in [elsewhere, crossed, absent] {
+            assert_eq!(as_answered(&[answer]), herself(), "{answer:?} was obeyed");
+        }
+    }
+
+    // The rules the settings file is held to, which are about the shape and not about the game:
+    // a machine with no install still saves what a machine with one chose.
+    #[test]
+    fn keeps_one_answer_per_question() {
+        let twice = vec![ANOTHER_HAIRSTYLE, Picked { question: HAIR_STYLE, swatch: 132 }];
+        assert_eq!(clean(twice), Ok(vec![Picked { question: HAIR_STYLE, swatch: 132 }]));
+        let both = vec![ANOTHER_HAIRSTYLE, ANOTHER_SKIN_SWATCH];
+        assert_eq!(clean(both.clone()), Ok(both));
+    }
+
+    #[test]
+    fn refuses_an_answer_that_names_no_question_or_no_swatch() {
+        assert!(clean(vec![Picked { question: 0, swatch: 132 }]).is_err());
+        assert!(clean(vec![Picked { question: HAIR_STYLE, swatch: 0 }]).is_err());
+        assert_eq!(clean(Vec::new()), Ok(Vec::new()), "nobody has answered anything yet");
+    }
+
+    #[test]
+    fn refuses_more_answers_than_a_body_has_questions() {
+        let many: Vec<Picked> = (0..=ANSWER_LIMIT as u32)
+            .map(|at| Picked { question: at + 1, swatch: at + 1 })
+            .collect();
+        assert!(clean(many).is_err());
+    }
+
+    /* ---------- the other body ---------- */
+
+    /// `ChrModel` 1, the body beside hers.
+    const OTHER_BODY: u32 = 1;
+    /// His own questions, one of which no female body is ever asked.
+    const HIS_HAIR: u32 = 41;
+    const FACIAL_HAIR: u32 = 42;
+
+    fn his() -> crate::body::Body {
+        crate::body::of(&fixture_files(), OTHER_BODY).unwrap()
+    }
+
+    // Another body is asked another set of questions, out of the same table — which is the
+    // filter this whole chain turns on. Offering hers against his body would be offering
+    // swatches that resolve to nothing on him and a facial hair question she cannot have.
+    #[test]
+    fn asks_each_body_its_own_questions() {
+        let asked_of_him = questions(&fixture_files(), OTHER_BODY).unwrap();
+        let his: Vec<(u32, &str)> = asked_of_him
+            .iter()
+            .map(|question| (question.id, question.name.as_str()))
+            .collect();
+        assert_eq!(
+            his,
+            vec![(40, "Skin Color"), (HIS_HAIR, "Hair Style"), (FACIAL_HAIR, "Facial Hair")],
+        );
+        assert!(!asked().iter().any(|question| question.id == FACIAL_HAIR));
+    }
+
+    // And what those answers do lands on him: his skin is painted from a layer of his own
+    // layout, and his beard is a geoset in a group her body has nothing in.
+    #[test]
+    fn draws_the_body_it_was_asked_about() {
+        let his = of(&fixture_files(), &his(), &[Picked { question: FACIAL_HAIR, swatch: 421 }])
+            .unwrap()
+            .expect("the fixture install can say who this body is");
+        assert_eq!(his.base, 160_101, "his skin, not hers");
+        assert!(his.geosets.contains(&Geoset { group: 1, geoset: 101 }), "{:?}", his.geosets);
+    }
+
+    // An answer about him is an answer about his questions: the same rule the female body
+    // follows, on the body that proves it is not hard-coded anywhere.
+    #[test]
+    fn answers_a_question_of_the_other_bodys() {
+        let opens_on = of(&fixture_files(), &his(), &[]).unwrap().unwrap();
+        assert!(opens_on.geosets.contains(&Geoset { group: 0, geoset: 2 }));
+
+        let chosen = of(&fixture_files(), &his(), &[Picked { question: HIS_HAIR, swatch: 411 }])
+            .unwrap()
+            .unwrap();
+        assert!(chosen.geosets.contains(&Geoset { group: 0, geoset: 1 }), "{:?}", chosen.geosets);
+        assert!(!chosen.geosets.contains(&Geoset { group: 0, geoset: 2 }));
+    }
+
+    // Her answers are not his. Both bodies' answers live in one settings file, because the
+    // question ids are the game's own and no two bodies share one — so what keeps his hair off
+    // her head is the same check that drops a stale answer.
+    #[test]
+    fn ignores_the_other_bodys_answers_when_drawing_this_one() {
+        let his_hair = Picked { question: HIS_HAIR, swatch: 411 };
+        assert_eq!(as_answered(&[his_hair]), herself());
+        // And the other way round, which is the same statement from the other end.
+        let hers = of(&fixture_files(), &his(), &[ANOTHER_HAIRSTYLE]).unwrap().unwrap();
+        assert_eq!(hers, of(&fixture_files(), &his(), &[]).unwrap().unwrap());
+    }
+
+    #[test]
+    fn says_so_when_what_the_reader_may_be_asked_cannot_be_read() {
+        let temp = tempfile::tempdir().unwrap();
+        let error = questions(&DirFiles::new(temp.path()), crate::body::DEFAULT).unwrap_err();
         assert!(error.contains("3384247.db2"), "{error}");
     }
 }

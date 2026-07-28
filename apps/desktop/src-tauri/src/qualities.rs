@@ -20,6 +20,13 @@
 //! map that feeds an answer here is a [`BTreeMap`] and every tie is broken by something stated
 //! rather than by iteration order, which is why the histogram is not a `HashMap`.
 //!
+//! **It is measured on one body.** Which textures a piece of armour resolves to is a question
+//! `ComponentTextureFileData` answers per race and sex, and how much of a body a section is is
+//! the layout's answer and differs between the two — so a look measured on him and on her is two
+//! measurements. The store is one file, so it is the default body's: see [`crate::body::DEFAULT`].
+//! That is the body gear is authored to look right on and the one every reader is shown until
+//! they say otherwise.
+//!
 //! **It has to say what it measured.** A helm has geometry and a chestpiece does not, so "how
 //! big" is answered two different ways — the bounding box of a mesh, and how much of the body a
 //! set of textures actually paints. Those two numbers share no units and must never be compared,
@@ -30,8 +37,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{json, Value};
 
+use crate::body::Body;
 use crate::casc::GameFiles;
-use crate::character::body_area;
 use crate::icons::pixels_of;
 use crate::m2::{Model, Paint};
 use crate::worn::{self, Piece};
@@ -63,22 +70,22 @@ const APART: i64 = 96 * 96;
 /// its transparent texels.
 const SOLID: u8 = 128;
 
-/// What the cape counts as, in atlas pixels, when it is measured for size.
+/// How much of the body a cloak that fills its sheet counts as covering.
 ///
 /// A cloak is the one slot whose "model" is geometry the body already carries, so it paints no
-/// [`crate::worn::ComponentTexture`] and would otherwise measure as covering none of her. The
-/// sheet is a fixed shape on the body and what differs between two cloaks is how much of that
-/// sheet the texture fills, so it is given a rectangle of its own — one the size of the largest
-/// the body's layout holds — and the opaque fraction does the rest. A stated nominal rather
-/// than a rectangle read out of `CharComponentTextureSections`, which has none for it.
-const CAPE_AREA: u64 = 512 * 512;
+/// [`crate::worn::ComponentTexture`] and would otherwise measure as covering none of her. What
+/// differs between two cloaks is how much of a fixed sheet the texture fills, so the sheet is
+/// given a share of the body and the opaque fraction does the rest. A quarter is a stated
+/// nominal — `CharComponentTextureSections` holds no rectangle for a cape at all — and it is
+/// only ever compared against other cloaks, which is what makes a nominal good enough here.
+const CAPE_SHARE: f64 = 0.25;
 
 /// The sections a piece of armour paints, and what the whole of them comes to.
 ///
 /// The body from the scalp down without the scalp: 0 to 7 are the two halves of the arms, the
 /// hands, the two halves of the torso, the two halves of the legs and the feet. 8 is the
-/// accessory, which this body's layout has no rectangle for at all, and 9 and 10 are the scalp,
-/// which is under a helm — and a helm has a mesh, so it never reaches this measure.
+/// accessory, which neither Human layout has a rectangle for at all, and 9 and 10 are the
+/// scalp, which is under a helm — and a helm has a mesh, so it never reaches this measure.
 const BODY_SECTIONS: [u32; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
 
 /// A colour, as the three channels a reader sees. Alpha is not part of what a thing looks like.
@@ -132,8 +139,8 @@ pub struct Look {
 ///
 /// A batch of one, and it goes through [`each`] like any other — see there for why a batch is
 /// the unit.
-pub fn of(files: &dyn GameFiles, piece: Piece) -> Result<Option<Look>, String> {
-    Ok(each(files, &[piece])?
+pub fn of(files: &dyn GameFiles, body: &Body, piece: Piece) -> Result<Option<Look>, String> {
+    Ok(each(files, body, &[piece])?
         .pop()
         .expect("one piece in, one answer out"))
 }
@@ -154,7 +161,11 @@ pub fn of(files: &dyn GameFiles, piece: Piece) -> Result<Option<Look>, String> {
 /// encrypts the displays of content it has not shipped, and an appearance whose only texture was
 /// painted for another body resolves to nothing at all.
 #[tracing::instrument(name = "qualities.each", skip_all, fields(pieces = pieces.len()))]
-pub fn each(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Vec<Option<Look>>, String> {
+pub fn each(
+    files: &dyn GameFiles,
+    body: &Body,
+    pieces: &[Piece],
+) -> Result<Vec<Option<Look>>, String> {
     if pieces.is_empty() {
         return Ok(Vec::new());
     }
@@ -163,14 +174,14 @@ pub fn each(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Vec<Option<Look>>
     // nothing for the draw order or the priority table to settle. What the pieces share is the
     // tables underneath, which is the whole reason this is one call.
     let alone: Vec<&[Piece]> = pieces.iter().map(std::slice::from_ref).collect();
-    let worn = worn::each(files, &alone)?;
+    let worn = worn::each(files, body, &alone)?;
 
     let mut textures: HashMap<u32, Option<Painted>> = HashMap::new();
     let mut meshes: HashMap<u32, Option<Modelled>> = HashMap::new();
 
     let mut looks = Vec::with_capacity(pieces.len());
     for worn in &worn {
-        let mut gathered = Gathered::default();
+        let mut gathered = Gathered::over(body);
 
         // What it hangs off her, which is both where its size comes from and — for a helm or a
         // weapon, whose textures are the model's own — where the whole of its colour does.
@@ -203,12 +214,12 @@ pub fn each(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Vec<Option<Look>>
 
         // And what it paints onto her, which is the whole of a chestpiece and none of a sword.
         for texture in &worn.textures {
-            if let Some(area) = body_area(texture.section) {
-                gathered.paint(files, &mut textures, texture.file, Weight::Body(u64::from(area)));
+            if let Some(area) = body.area_of(texture.section) {
+                gathered.paint(files, &mut textures, texture.file, Weight::Body(f64::from(area)));
             }
         }
         if let Some(cape) = worn.cape {
-            gathered.paint(files, &mut textures, cape, Weight::Body(CAPE_AREA));
+            gathered.paint(files, &mut textures, cape, Weight::Body(gathered.whole * CAPE_SHARE));
         }
 
         looks.push(gathered.look());
@@ -230,7 +241,7 @@ enum Weight {
     Mesh(f64),
     /// It is painted into a rectangle of the body this many atlas pixels across — of which it is
     /// worth however much of that rectangle it actually fills.
-    Body(u64),
+    Body(f64),
 }
 
 /// One appearance's measurements as they are being collected, before they are a [`Look`].
@@ -244,6 +255,23 @@ struct Gathered {
     extent: f64,
     /// How much of the body its textures actually paint, in atlas pixels.
     covered: f64,
+    /// How much body there is to cover, which is this body's layout's answer and not another's:
+    /// her atlas is 2048 wide and his 1024, so the same section is four times the pixels on her.
+    whole: f64,
+}
+
+impl Gathered {
+    /// An empty collection, ready to measure something against one body.
+    fn over(body: &Body) -> Self {
+        Self {
+            whole: BODY_SECTIONS
+                .iter()
+                .filter_map(|section| body.area_of(*section))
+                .map(f64::from)
+                .sum(),
+            ..Self::default()
+        }
+    }
 }
 
 impl Gathered {
@@ -271,8 +299,8 @@ impl Gathered {
             // legging that fills its sheet says more about the appearance than a garter that
             // fills a tenth of the same sheet, which is exactly the difference between them.
             Weight::Body(area) => {
-                self.covered += held.solid * area as f64;
-                held.solid * area as f64 / body() as f64
+                self.covered += held.solid * area;
+                held.solid * area / self.whole
             }
         };
         if !share.is_finite() || share <= 0.0 {
@@ -341,21 +369,12 @@ impl Gathered {
                 of: self.extent,
             });
         }
-        let covered = self.covered / body() as f64;
-        (covered > 0.0).then_some(Size {
+        let covered = self.covered / self.whole;
+        (covered > 0.0 && covered.is_finite()).then_some(Size {
             by: By::Cover,
             of: covered,
         })
     }
-}
-
-/// How much body there is to cover, in atlas pixels — what [`BODY_SECTIONS`] comes to.
-fn body() -> u64 {
-    BODY_SECTIONS
-        .iter()
-        .filter_map(|section| body_area(*section))
-        .map(u64::from)
-        .sum()
 }
 
 /// One texture, counted: what colours are in it and how much of it is there at all.
@@ -702,6 +721,11 @@ mod tests {
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
 
+    /// The body everything here is measured on, which is the body the store is written for.
+    fn hers() -> Body {
+        crate::body::of(&fixture_files(), crate::body::DEFAULT).unwrap()
+    }
+
     /// The fixture displays, by what the generator made each of them. The slot and the place the
     /// item is worn travel with each, because a piece is all three.
     const HELM: Piece = worn(900_001, 0);
@@ -732,7 +756,7 @@ mod tests {
     const UPPER_ARMS: Colour = [90, 200, 60];
 
     fn look(piece: Piece) -> Look {
-        of(&fixture_files(), piece)
+        of(&fixture_files(), &hers(), piece)
             .unwrap()
             .expect("the fixture can be measured")
     }
@@ -798,19 +822,22 @@ mod tests {
     #[test]
     fn gives_no_size_to_a_texture_the_layout_paints_nowhere() {
         // Sections 6 and 7 of the body, and nothing for the accessory the third texture is.
-        let painted = f64::from(body_area(6).unwrap() + body_area(7).unwrap());
-        assert_eq!(
-            look(BOOTS).size.expect("the boots have a size").of,
-            painted / body() as f64,
-        );
+        let hers = hers();
+        let painted = f64::from(hers.area_of(6).unwrap() + hers.area_of(7).unwrap());
+        let whole: f64 = BODY_SECTIONS
+            .iter()
+            .filter_map(|section| hers.area_of(*section))
+            .map(f64::from)
+            .sum();
+        assert_eq!(look(BOOTS).size.expect("the boots have a size").of, painted / whole);
     }
 
     // Nothing is the ordinary answer for a display the game withholds: there is no mesh, no
     // texture and nothing to measure, and the row keeps whatever the rest of the app knows.
     #[test]
     fn says_nothing_about_a_display_it_cannot_read() {
-        assert_eq!(of(&fixture_files(), WITHHELD).unwrap(), None);
-        assert_eq!(of(&fixture_files(), worn(404_040, 3)).unwrap(), None);
+        assert_eq!(of(&fixture_files(), &hers(), WITHHELD).unwrap(), None);
+        assert_eq!(of(&fixture_files(), &hers(), worn(404_040, 3)).unwrap(), None);
     }
 
     // A batch is an optimisation and nothing else: every row of one is the answer that row would
@@ -820,10 +847,10 @@ mod tests {
         let files = fixture_files();
         let batch = [CHESTPIECE, WITHHELD, WEAPON, HELM];
         assert_eq!(
-            each(&files, &batch).unwrap(),
+            each(&files, &hers(), &batch).unwrap(),
             batch
                 .iter()
-                .map(|piece| of(&files, *piece).unwrap())
+                .map(|piece| of(&files, &hers(), *piece).unwrap())
                 .collect::<Vec<_>>(),
         );
     }
@@ -832,14 +859,14 @@ mod tests {
     // move when nothing about the game moved is a diff nobody can read.
     #[test]
     fn measures_the_same_install_the_same_way_twice() {
-        assert_eq!(each(&fixture_files(), &[CHESTPIECE, HELM, WEAPON]).unwrap(),
-                   each(&fixture_files(), &[CHESTPIECE, HELM, WEAPON]).unwrap());
+        assert_eq!(each(&fixture_files(), &hers(), &[CHESTPIECE, HELM, WEAPON]).unwrap(),
+                   each(&fixture_files(), &hers(), &[CHESTPIECE, HELM, WEAPON]).unwrap());
     }
 
     #[test]
     fn asks_the_game_nothing_for_an_empty_batch() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(each(&DirFiles::new(temp.path()), &[]).unwrap(), Vec::new());
+        assert_eq!(each(&DirFiles::new(temp.path()), &hers(), &[]).unwrap(), Vec::new());
     }
 
     // The failure worth reporting rather than answering nothing over: a run that cannot open the
@@ -847,7 +874,7 @@ mod tests {
     #[test]
     fn says_so_when_the_tables_are_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        assert!(each(&DirFiles::new(temp.path()), &[CHESTPIECE]).is_err());
+        assert!(each(&DirFiles::new(temp.path()), &hers(), &[CHESTPIECE]).is_err());
     }
 
     /* ---------- the bands ---------- */

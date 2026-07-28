@@ -43,8 +43,9 @@
 
 use serde_json::Value;
 
+use crate::body;
 use crate::casc::GameFiles;
-use crate::character::Mannequin;
+use crate::character::{Mannequin, Who};
 use crate::icons::data_url;
 use crate::worn::{self, held, Piece};
 
@@ -68,7 +69,7 @@ const HELD: &str = "held";
 /// The order is the caller's, and every row asked for gets an answer, including the ones that
 /// resolve to nothing — a page one row short is a row the window would have to hunt for.
 #[tracing::instrument(name = "gallery.of", skip_all, fields(pieces = pieces.len()))]
-pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
+pub fn of(files: &dyn GameFiles, pieces: &[Piece], who: &Who) -> Result<Value, String> {
     if pieces.is_empty() {
         return Ok(serde_json::json!({ "models": [] }));
     }
@@ -85,6 +86,12 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
 
     let mut drawn: Vec<Option<String>> = vec![None; pieces.len()];
 
+    // Whose body the page is of, read once for both halves. An item's textures and the `.m2` a
+    // helm is modelled as are both chosen by the body's own race and sex, so even the half that
+    // hangs no character off anything is answered for somebody. It is three of the smallest
+    // tables in the game against the two hundred-thousand-row ones below.
+    let body = body::of(files, who.body)?;
+
     // A page with nothing on it that goes on a body never reaches this branch, and that is the
     // point of the split: the character and the six tables behind her are the whole cost of a
     // gallery, and a reader browsing the seventeen kinds of weapon should not pay for a body
@@ -97,9 +104,9 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
             .iter()
             .map(|row| std::slice::from_ref(&pieces[*row]))
             .collect();
-        let worn = worn::each(files, &alone)?;
+        let worn = worn::each(files, &body, &alone)?;
 
-        let mannequin = Mannequin::standing(files)?;
+        let mannequin = Mannequin::standing(files, &body, &who.picked)?;
         for (row, worn) in dressed.iter().zip(worn.iter()) {
             if worn.is_empty() {
                 continue;
@@ -116,7 +123,7 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
             .iter()
             .map(|row| pieces[*row].display_info_id)
             .collect();
-        for (row, alone) in carried.iter().zip(crate::models::each(files, &displays)?) {
+        for (row, alone) in carried.iter().zip(crate::models::each(files, &body, &displays)?) {
             drawn[*row] = alone.map(|bytes| data_url("model/gltf-binary", &bytes));
         }
     }
@@ -193,7 +200,7 @@ mod tests {
 
     /// The rows of a page, as `(display id, whether it came back with a model)`.
     fn page(pieces: &[Piece]) -> Vec<(u64, bool)> {
-        rows(&of(&fixture_files(), pieces).unwrap())
+        rows(&of(&fixture_files(), pieces, &Who::default()).unwrap())
     }
 
     fn rows(answer: &Value) -> Vec<(u64, bool)> {
@@ -214,7 +221,7 @@ mod tests {
 
     /// What each row of a page says it is, which is what the window frames by.
     fn kinds(pieces: &[Piece]) -> Vec<&'static str> {
-        of(&fixture_files(), pieces).unwrap()["models"]
+        of(&fixture_files(), pieces, &Who::default()).unwrap()["models"]
             .as_array()
             .expect("a page answers with an array")
             .iter()
@@ -259,25 +266,36 @@ mod tests {
     #[test]
     fn draws_a_weapon_as_the_model_the_display_names() {
         let files = fixture_files();
-        let alone = crate::models::glb_of(&files, WEAPON.display_info_id)
+        let hers = body::of(&files, body::DEFAULT).unwrap();
+        let alone = crate::models::glb_of(&files, &hers, WEAPON.display_info_id)
             .unwrap()
             .expect("the fixture weapon has a model");
         assert_eq!(
-            of(&files, &[WEAPON]).unwrap()["models"][0]["model"],
+            of(&files, &[WEAPON], &Who::default()).unwrap()["models"][0]["model"],
             Value::String(data_url("model/gltf-binary", &alone)),
         );
     }
 
+    /// The mesh the body this app opens on is drawn from, which is the file those two tests are
+    /// about. Read rather than named, because which mesh a body is is `body.rs`'s answer now.
+    fn her_mesh() -> u32 {
+        body::of(&fixture_files(), body::DEFAULT).unwrap().model
+    }
+
     // And the saving that pays for it: a page with nothing on it that goes on a body never reads
-    // the body. She is the single most expensive thing a gallery touches — the mesh, the skin
+    // her mesh. She is the single most expensive thing a gallery touches — the mesh, the skin
     // resized onto a 2048x1024 atlas, the face composited over it and a 16MB skeleton — and a
     // reader browsing the seventeen kinds of weapon would otherwise pay for her on every page.
+    //
+    // What *is* read either way is the three small tables saying what a body is: which of a
+    // weapon's models is the one for this body is decided by its own race and sex, the same way
+    // an item's textures are.
     #[test]
     fn reads_no_body_for_a_page_of_nothing_but_weapons() {
         let files = Noted::new();
-        of(&files, &[WEAPON, WEAPON]).expect("a page of weapons draws");
+        of(&files, &[WEAPON, WEAPON], &Who::default()).expect("a page of weapons draws");
         assert!(
-            !files.asked.borrow().contains(&crate::character::HUMAN_FEMALE),
+            !files.asked.borrow().contains(&her_mesh()),
             "a page of weapons read the character anyway",
         );
     }
@@ -287,8 +305,8 @@ mod tests {
     #[test]
     fn reads_the_body_for_a_page_holding_one_piece_of_armour() {
         let files = Noted::new();
-        of(&files, &[WEAPON, CHESTPIECE]).expect("a mixed page draws");
-        assert!(files.asked.borrow().contains(&crate::character::HUMAN_FEMALE));
+        of(&files, &[WEAPON, CHESTPIECE], &Who::default()).expect("a mixed page draws");
+        assert!(files.asked.borrow().contains(&her_mesh()));
     }
 
     // The order is the caller's and not the draw order the pieces would have gone on a body in.
@@ -319,7 +337,7 @@ mod tests {
     #[test]
     fn asks_the_game_nothing_for_an_empty_page() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(of(&DirFiles::new(temp.path()), &[]).unwrap()["models"], serde_json::json!([]));
+        assert_eq!(of(&DirFiles::new(temp.path()), &[], &Who::default()).unwrap()["models"], serde_json::json!([]));
     }
 
     // Each row is the appearance on its own, and the way to see that is to put two on a page that
@@ -331,12 +349,12 @@ mod tests {
         let files = fixture_files();
         let robe = armour(900_012, 3);
         let legs = armour(900_004, 5);
-        let apart = of(&files, &[robe, legs]).unwrap();
+        let apart = of(&files, &[robe, legs], &Who::default()).unwrap();
 
         // What each looks like when it is the only thing asked for, which is what a page row has
         // to be — down to the bytes, because a body is deterministic given what is on it.
         for (which, piece) in [robe, legs].into_iter().enumerate() {
-            let alone = of(&files, &[piece]).unwrap();
+            let alone = of(&files, &[piece], &Who::default()).unwrap();
             assert_eq!(apart["models"][which]["model"], alone["models"][0]["model"]);
         }
     }
@@ -346,6 +364,6 @@ mod tests {
     #[test]
     fn says_so_when_the_body_cannot_be_read() {
         let temp = tempfile::tempdir().unwrap();
-        assert!(of(&DirFiles::new(temp.path()), &[HELM]).is_err());
+        assert!(of(&DirFiles::new(temp.path()), &[HELM], &Who::default()).is_err());
     }
 }

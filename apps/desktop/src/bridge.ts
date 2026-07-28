@@ -13,7 +13,10 @@ import type {
   CaptureImagePayload,
   CaptureQuality,
   CaptureThumbnailsPayload,
+  CharacterLookPayload,
+  CharacterChosen,
   CharacterModelPayload,
+  CharacterPick,
   CombatLogStatus,
   CustomSetPiece,
   CustomSetsPayload,
@@ -181,6 +184,39 @@ export const desktop = {
   characterModel: (): Promise<CharacterModelPayload> => mock
     ? Promise.resolve({ model: mock.characterModel })
     : invoke<CharacterModelPayload>("character_model"),
+  // Who that body is: everything the game's own character creation screen asks about her, and
+  // what this reader has answered. Asked for only when somebody opens the panel that shows it —
+  // it walks five of the game's tables, and every body drawn above already has the answers
+  // applied whether or not anybody ever looks at them.
+  characterLook: (): Promise<CharacterLookPayload> => mock
+    ? Promise.resolve(structuredClone(mock.characterLook))
+    : invoke<CharacterLookPayload>("character_look"),
+  // And says who she is from now on, answering with what was stored. Nothing is drawn by this:
+  // the window redraws her by asking for the bodies again, which is the errand it already runs
+  // whenever what she is wearing changes.
+  saveCharacterLook: (body: number, picked: CharacterPick[]): Promise<CharacterChosen> => {
+    if (!mock) return invoke<CharacterChosen>("save_character_look", { body, picked });
+    // The half of `body::known` and `customization::clean` a test can tell apart from a working
+    // form: a body has to be one on offer, and a question takes one answer, the last winning.
+    if (!mock.characterLook.bodies.some((one) => one.id === body)) {
+      return Promise.reject(new Error("There is no body of that kind to draw her on."));
+    }
+    const cleaned: CharacterPick[] = [];
+    for (const answer of picked) {
+      if (!answer.question || !answer.swatch) {
+        return Promise.reject(new Error("That choice names no question of hers, or no swatch of it."));
+      }
+      const held = cleaned.find((one) => one.question === answer.question);
+      if (held) held.swatch = answer.swatch;
+      else cleaned.push({ ...answer });
+    }
+    mock.characterLook.body = body;
+    mock.characterLook.picked = cleaned;
+    // The questions the *other* body is asked, because that is what changing body means: the
+    // real backend re-reads them out of the game for whichever body is now being drawn.
+    mock.characterLook.questions = mock.characterQuestions[body] ?? [];
+    return Promise.resolve({ body, picked: structuredClone(cleaned) });
+  },
   // The same body wearing a set of clothes, which is how every slot is shown. A list rather
   // than one appearance because two of the three subsystems behind character rendering exist
   // to arbitrate between pieces — which of two owns a contested geoset group, and which of two

@@ -181,6 +181,20 @@ fn main() {
         );
     }
 
+    // The body an appearance is being read *for*: which of a resource's textures is the one to
+    // use depends on it, and this tool checks what the app makes of a row rather than the row.
+    let body = match chronie_desktop_lib::body::of(
+        files.as_ref(),
+        chronie_desktop_lib::body::DEFAULT,
+    ) {
+        Ok(body) => body,
+        Err(error) => {
+            eprintln!("Could not read the body to dress: {error}");
+            std::process::exit(1);
+        }
+    };
+    let body = &body;
+
     let named = match names(files.as_ref(), &wanted) {
         Ok(named) => named,
         Err(error) => {
@@ -239,7 +253,7 @@ fn main() {
             // And what the app itself makes of the row, which is the other half of the check:
             // the column can only be right if what comes out of it is geosets the body holds.
             // Nothing is worn in a hand here: the columns this tool is about are armour's.
-            match worn::of(files.as_ref(), display_info_id, display_type, NOT_A_WEAPON) {
+            match worn::of(files.as_ref(), body, display_info_id, display_type, NOT_A_WEAPON) {
                 Ok(worn) => {
                     let switched: Vec<String> = worn
                         .geosets

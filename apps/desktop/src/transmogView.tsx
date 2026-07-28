@@ -40,6 +40,7 @@ import type { ReactNode } from "react";
 import { CustomSetList } from "./customSetList";
 import { rowsOf } from "./customSets";
 import { plural } from "./format";
+import { lookKey } from "./herself";
 import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
@@ -62,7 +63,10 @@ import type { ModelStage } from "./modelViewer";
 import { LinkOut } from "./ui";
 import { WardrobeList } from "./wardrobeList";
 import type {
+  CharacterChosen,
+  CharacterLookPayload,
   CharacterModelPayload,
+  CharacterPick,
   CustomSetPiece,
   CustomSetsPayload,
   GalleryPayload,
@@ -94,6 +98,19 @@ export interface TransmogViewProps {
   loadWorn: (pieces: WornPiece[]) => Promise<WornSetPayload>;
   /** And through to the item browser: a page of looks, each on a body of its own. */
   loadGallery: (pieces: WornPiece[]) => Promise<GalleryPayload>;
+  /**
+   * Who that body is, and how somebody says otherwise.
+   *
+   * The one thing on this screen that changes every picture on it at once. The backend applies
+   * what is stored to every body it draws whether or not this is ever asked for, so what the
+   * view does with an answer is throw away the pictures of the woman who is no longer there —
+   * see `look` below, which both panes hold their caches against.
+   */
+  herself: {
+    load: () => Promise<CharacterLookPayload>;
+    save: (body: number, picked: CharacterPick[]) => Promise<CharacterChosen>;
+    onError: (error: unknown) => string;
+  };
   /**
    * What the reader has said about the game's wardrobe, and the three ways they say more.
    *
@@ -136,10 +153,18 @@ type Browsing = "sets" | "items" | "yours";
 export function TransmogView(
   {
     payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, loadGallery,
-    marks, custom, createStage, createGalleryStage,
+    herself, marks, custom, createStage, createGalleryStage,
   }: TransmogViewProps,
 ): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
+  /**
+   * Who she is, as a string that changes when she does, and nothing else about her.
+   *
+   * It opens empty rather than reading the settings file, and that is not a stale value: which
+   * answers the bodies are drawn with is the backend's throughout, and this only has to be
+   * *different* from what it was when somebody changes one. See `herself.ts`.
+   */
+  const [look, setLook] = useState("");
   const [search, setSearch] = useState("");
   const [expansion, setExpansion] = useState("");
   const [klass, setKlass] = useState("");
@@ -364,7 +389,7 @@ export function TransmogView(
       <WardrobeList
         hidden={browsing !== "items"} load={loadAppearances} wantIcons={wantIcons} icons={icons}
         outfit={outfit} hideUnwearable={hideUnwearable} onHideUnwearable={setHideUnwearable}
-        marks={marks} index={index} loadGallery={loadGallery}
+        marks={marks} index={index} loadGallery={loadGallery} look={look}
         createGalleryStage={createGalleryStage}
         onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
       />
@@ -380,8 +405,12 @@ export function TransmogView(
       />
       </div>
       <OutfitPanel
-        outfit={outfit} icons={icons} createStage={createStage}
+        outfit={outfit} icons={icons} createStage={createStage} look={look}
         loadCharacter={loadCharacter} loadWorn={loadWorn}
+        herself={{
+          ...herself,
+          onChanged: (chosen) => setLook(lookKey(chosen.body, chosen.picked)),
+        }}
         save={{
           sets: custom.payload?.sets ?? [],
           onSave: custom.save,

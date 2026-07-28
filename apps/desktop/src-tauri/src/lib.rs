@@ -1,6 +1,7 @@
 mod activity;
 pub mod achievements;
 pub mod appearances;
+pub mod body;
 pub mod budget;
 pub mod captures;
 pub mod casc;
@@ -65,6 +66,11 @@ fn default_capture_triggers() -> Vec<String> {
     vec!["accountFirstAchievement".to_string()]
 }
 
+/// The body a settings file that says nothing is drawn on.
+fn body_default() -> u32 {
+    body::DEFAULT
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
@@ -99,6 +105,26 @@ struct Settings {
     /// still photographs its account firsts; an explicit `[]` is respected and means off.
     #[serde(default = "default_capture_triggers")]
     capture_triggers: Vec<String>,
+    /// Who the character every appearance is shown on is: one answer to each of the questions
+    /// the game's own character creation screen asks about her body. Empty on a fresh install
+    /// and on every settings file that predates this, which is the body the app drew before
+    /// there was anywhere to say otherwise — the swatch the game itself opens on, each time.
+    ///
+    /// Kept here rather than in the database because it is a preference and not a record: there
+    /// is one of it, it is what this reader wants to look at, and a machine that has never been
+    /// sent a database still has one.
+    ///
+    /// Every body's answers at once, rather than the current body's: the questions are the
+    /// game's own ids and no two bodies share one, so switching to the other body and back
+    /// finds the answers still there. [`customization::of`] is what narrows them to the body
+    /// being drawn, every time it draws one.
+    #[serde(default)]
+    character_look: Vec<customization::Picked>,
+    /// Which body those answers are about: a `ChrModel`, and one this build has a mesh for. A
+    /// settings file that predates this — or one naming a body a later Chronie dropped — gets
+    /// [`body::DEFAULT`], which is the Human Female every reader has been shown until now.
+    #[serde(default = "body_default")]
+    character_body: u32,
 }
 
 impl Default for Settings {
@@ -111,6 +137,8 @@ impl Default for Settings {
             keep_original_screenshots: false,
             capture_quality: captures::Quality::default(),
             capture_triggers: default_capture_triggers(),
+            character_look: Vec::new(),
+            character_body: body::DEFAULT,
         }
     }
 }
@@ -485,12 +513,70 @@ async fn game_icons(
 /// One fixed model for the whole app — a Human Female, because gear is authored to look right
 /// on human proportions — so this is asked for once and shown for every set opened after.
 ///
-/// No base skin is passed, because which texture a character's skin is comes out of four
-/// customization tables whose column positions have not been read off an install. See
-/// `character::Atlas::base`, which is the one place that changes when they have been.
+/// Which Human Female is the reader's, out of [`character_look`]. It is read here rather than
+/// sent by the window because it is the same answer for every one of the three commands that
+/// draw her, and because a window that had to remember to pass it could forget in one of them —
+/// which would be a wardrobe of strangers.
 #[tauri::command]
 async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
-    read_game_files(&state, character::model_of).await
+    let who = character_look_of(&state)?;
+    read_game_files(&state, move |files| character::model_of(files, &who)).await
+}
+
+/// What the reader may be asked about her, and what they have answered so far.
+///
+/// Both halves at once because neither is any use alone: a list of swatches with nothing marked
+/// is a form that cannot say what it is showing, and a set of ids with no names behind them is
+/// what the settings file already holds. See [`customization::questions`] — a question is read
+/// out of the installed game, so a patch that adds a hairstyle adds it here with no code.
+#[tauri::command]
+async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
+    let who = character_look_of(&state)?;
+    let body = who.body;
+    let questions =
+        read_game_files(&state, move |files| customization::questions(files, body)).await?;
+    Ok(serde_json::json!({
+        "bodies": body::playable(),
+        "body": who.body,
+        "questions": questions,
+        "picked": who.picked,
+    }))
+}
+
+/// Says who she is from now on, and answers with what was stored.
+///
+/// Nothing is read out of the game here and nothing is drawn: the window redraws her by asking
+/// for the bodies again, which is the same errand it runs whenever what she is wearing changes.
+/// What the *game* says about an answer is checked every time a body is drawn rather than here,
+/// because an install can change under a settings file — see [`customization::of`].
+#[tauri::command]
+fn save_character_look(
+    body: u32,
+    picked: Vec<customization::Picked>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let body = body::known(body)?;
+    let cleaned = customization::clean(picked)?;
+    let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+    settings.character_body = body;
+    settings.character_look = cleaned.clone();
+    state.save(&settings)?;
+    Ok(serde_json::json!({ "body": body, "picked": cleaned }))
+}
+
+/// The answers the settings file holds, copied out from under the lock.
+///
+/// A copy rather than a borrow because every caller hands it to a worker thread that outlives
+/// the command — the same bargain [`read_game_files`] makes about the path.
+fn character_look_of(state: &State<'_, AppState>) -> Result<character::Who, String> {
+    state
+        .settings
+        .lock()
+        .map(|settings| character::Who {
+            body: settings.character_body,
+            picked: settings.character_look.clone(),
+        })
+        .map_err(|_| "Settings lock failed.".to_string())
 }
 
 /// The same character wearing a set of clothes, as a `.glb` in a data URL, or `null`.
@@ -512,8 +598,9 @@ async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
 /// about, and leaves the window showing the icons.
 #[tauri::command]
 async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Result<Value, String> {
+    let who = character_look_of(&state)?;
     read_game_files(&state, move |files| {
-        character::worn_set_of(files, &pieces)
+        character::worn_set_of(files, &pieces, &who)
     })
     .await
 }
@@ -531,7 +618,8 @@ async fn gallery_models(
     pieces: Vec<worn::Piece>,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    read_game_files(&state, move |files| gallery::of(files, &pieces)).await
+    let who = character_look_of(&state)?;
+    read_game_files(&state, move |files| gallery::of(files, &pieces, &who)).await
 }
 
 /// The look a list of items carries, as the three numbers a render is asked for by.
@@ -1322,6 +1410,8 @@ pub fn run() {
             save_custom_set,
             delete_custom_set,
             character_model,
+            character_look,
+            save_character_look,
             worn_set,
             gallery_models,
             item_appearances,
@@ -1638,6 +1728,33 @@ mod tests {
         let read: Settings = serde_json::from_str(&written).unwrap();
         assert_eq!(read.capture_quality, captures::Quality::Original);
         assert!(read.keep_original_screenshots);
+    }
+
+    /// Who the character is crosses that file too, and it is the one setting the reader never
+    /// sees the storage of: a body drawn from an install nobody has answered anything about is
+    /// exactly the body this app drew before there was anywhere to answer, so a field that
+    /// stopped being written would look like nothing at all until somebody noticed her hair.
+    #[test]
+    fn round_trips_who_the_character_is_through_the_file() {
+        let settings = Settings {
+            character_look: vec![customization::Picked { question: 16, swatch: 133 }],
+            ..Settings::default()
+        };
+
+        let written = serde_json::to_string(&settings).unwrap();
+
+        assert!(written.contains(r#""characterLook":[{"question":16,"swatch":133}]"#), "{written}");
+        let read: Settings = serde_json::from_str(&written).unwrap();
+        assert_eq!(read.character_look, settings.character_look);
+    }
+
+    /// And a settings file older than the field is a reader who has said nothing about her,
+    /// which is what every install starts as rather than a file to refuse.
+    #[test]
+    fn reads_a_settings_file_that_predates_the_character_as_nobody_having_said() {
+        let settings: Settings = serde_json::from_str(r#"{"wowPath": "/games/wow"}"#).unwrap();
+
+        assert_eq!(settings.character_look, Vec::new());
     }
 
     #[test]

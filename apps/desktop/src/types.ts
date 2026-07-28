@@ -697,6 +697,64 @@ export interface CharacterModelPayload {
   model: string;
 }
 
+/** One swatch of one question about her: a `customization::Swatch`.
+ *
+ * The name is the game's own and is empty for most of them — a skin tone is a square of colour
+ * on the character creation screen and has nothing to be called. `herself.ts` is what numbers
+ * those; nothing invents a name in the payload, where a later build could contradict it.
+ */
+export interface CharacterSwatch {
+  id: number;
+  name: string;
+}
+
+/** One thing the game's own character creation screen asks about her: a `customization::Question`. */
+export interface CharacterQuestion {
+  id: number;
+  name: string;
+  /** Every answer to it, in the order the screen offers them. The first is what an unanswered
+   * question takes, which is what every body in this app was before any of this. */
+  swatches: CharacterSwatch[];
+}
+
+/** One answer, as it is stored and sent: a `customization::Picked`. */
+export interface CharacterPick {
+  question: number;
+  swatch: number;
+}
+
+/** What was stored when the reader said who she is: the body, and the answers about it. */
+export interface CharacterChosen {
+  body: number;
+  picked: CharacterPick[];
+}
+
+/** One body an appearance can be shown on: a `body::Named`, which is a `ChrModel` and a name. */
+export interface CharacterBody {
+  id: number;
+  name: string;
+}
+
+/**
+ * Who she could be and who she is, which is one payload because none of it is any use alone.
+ *
+ * The bodies are what this build has a mesh for; the questions are the ones the installed game
+ * asks about **the body currently chosen**, so a patch that adds a hairstyle adds a swatch here
+ * with no code anywhere — and picking the other body is a different list of questions entirely.
+ * What has been picked is out of the settings file, and is what the backend applies to every
+ * body it draws whether or not this payload was ever asked for. A question missing from `picked`
+ * keeps the swatch the game itself opens on.
+ */
+export interface CharacterLookPayload {
+  bodies: CharacterBody[];
+  /** The `ChrModel` being drawn, which the questions below belong to. */
+  body: number;
+  questions: CharacterQuestion[];
+  /** Every body's answers, not only this one's — the question ids are the game's own and no
+   * two bodies share one, so switching bodies and back finds the answers still there. */
+  picked: CharacterPick[];
+}
+
 /**
  * What a gallery row turned out to be a picture of. Mirrors the two words `gallery.rs` sends.
  *
@@ -1112,6 +1170,15 @@ export interface E2EMock {
   customSets: CustomSetsPayload;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
+  /** What the reader may be asked about her, and what they have answered. State rather than a
+   * fixture, for the reason the marks are: answering one in the page under test writes here and
+   * the next read shows it, which is the "write, then repaint from storage" the backend gives.
+   * The bodies do not change with it — the mock has one picture of her and no game to redraw
+   * from — so what a test can see is that the window asked for them again. */
+  characterLook: CharacterLookPayload;
+  /** What each body is asked, keyed by `ChrModel`: picking the other body is a different list
+   * of questions entirely, which the real backend re-reads out of the game. */
+  characterQuestions: Record<number, CharacterQuestion[]>;
   /** The body wearing an outfit, keyed by that outfit's display ids in ascending order and
    * joined by commas — see `wornSetKey`. A key absent from here is a set this install can put
    * on nobody, which the real backend answers with `null`. Keying by the pieces rather than by
