@@ -26,6 +26,8 @@ import { desktop, message } from "./bridge";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
 import { QueryView } from "./queryView";
+import { AppearanceModal } from "./appearanceModal";
+import type { AppearanceModalState } from "./appearanceModal";
 import { SegmentModal } from "./segmentModal";
 import type { SegmentModalState } from "./segmentModal";
 import { buildSessions } from "./sessions";
@@ -67,6 +69,9 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // screen that can do anything about it rather than on an empty timeline.
   const [view, setView] = useState<View>(settings.wowPath ? "timeline" : "settings");
   const [showing, setShowing] = useState<SegmentModalState | null>(null);
+  // The one transmog source a reader has clicked through to a picture of, which is nothing
+  // until they do: the tables behind it are the game's largest and are opened on that click.
+  const [drawing, setDrawing] = useState<AppearanceModalState | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [transmog, setTransmog] = useState<TransmogPayload | null>(null);
   const [transmogStatus, setTransmogStatus] = useState("");
@@ -378,6 +383,16 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         })}
         onClose={() => setShowing(null)}
         onEditActivities={setEditing}
+        onShowAppearance={setDrawing}
+      />
+
+      {/* Over the segment rather than instead of it: the reader is looking at one row of a
+          list they are part way through, and closing the picture puts them back on it. */}
+      <AppearanceModal
+        showing={drawing}
+        onClose={() => setDrawing(null)}
+        loadAppearance={desktop.itemAppearances}
+        loadGallery={desktop.galleryModels}
       />
 
       <ActivityEditor

@@ -1,5 +1,6 @@
 mod activity;
 pub mod achievements;
+pub mod appearances;
 pub mod budget;
 pub mod captures;
 pub mod casc;
@@ -530,6 +531,24 @@ async fn gallery_models(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     read_game_files(&state, move |files| gallery::of(files, &pieces)).await
+}
+
+/// The look a list of items carries, as the three numbers a render is asked for by.
+///
+/// The hop a segment needs and nothing else does. Every other view that draws an appearance
+/// walked out of `ItemAppearance` to reach its rows and already holds these; a segment holds
+/// item ids, because an item id is what the addon can catch at the moment the game says a
+/// transmog source was learned. See [`appearances::of_items`].
+///
+/// Asked when a reader clicks a row rather than when the segment is drawn — a modal listing
+/// thirty sources would otherwise walk three of the game's tables to fill in pictures nobody
+/// asked to see.
+#[tauri::command]
+async fn item_appearances(
+    item_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| appearances::of_items(files, &item_ids)).await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -1304,6 +1323,7 @@ pub fn run() {
             character_model,
             worn_set,
             gallery_models,
+            item_appearances,
             achievement_details,
             item_details,
             game_icons,

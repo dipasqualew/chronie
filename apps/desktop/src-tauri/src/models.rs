@@ -18,6 +18,7 @@
 //! is how every trap in [`crate::m2`] was found and is what to reach for when the next one is.
 
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
@@ -56,94 +57,144 @@ const LARGEST_TEXTURE: u32 = 2048;
 /// has not shipped. What does fail is a model that is there and cannot be read, because that is
 /// this app being wrong about the format rather than the install being short of a file.
 pub fn glb_of(files: &dyn GameFiles, display_info_id: u32) -> Result<Option<Vec<u8>>, String> {
-    let Some((slot, model_resource, material_resource)) = resources(files, display_info_id)?
-    else {
-        return Ok(None);
-    };
-
-    // The same question `worn` asks of a helm about to go on a head, and the same answer: a
-    // model resource names a file per body, or a pair of files one per shoulder, and this app
-    // draws one body and one shoulder at a time. The slot is which shoulder.
-    let Some(model_file) = crate::worn::model_file(files, model_resource, slot)? else {
-        return Ok(None);
-    };
-    let Ok(bytes) = files.read(model_file) else {
-        return Ok(None);
-    };
-
-    let model = Model::parse(&bytes)?;
-    let skin = model
-        .skin_file_data_id()
-        .ok_or("the model names no skin profile, so nothing says how to draw it")?;
-    let mesh = model.with_skin(&files.read(skin)?)?;
-
-    // The one texture the item itself supplies, resolved the first time a part asks for it
-    // and not before: `TextureFileData` is a table with a row per texture the client owns,
-    // and a model that paints itself entirely out of its own `TXID` never needs it opened.
-    let supplied: RefCell<Option<Option<u32>>> = RefCell::new(None);
-    let picture = |paint| {
-        let texture = match paint {
-            Paint::File(fdid) => Some(fdid),
-            // Whichever type asked: an item's model wants one texture and the appearance's
-            // material is it. Only a character declares several and has to tell them apart.
-            Paint::Supplied(_) => *supplied.borrow_mut().get_or_insert_with(|| match material_resource {
-                0 => None,
-                resource => file_named(files, TEXTURE_FILE_DATA, MATERIAL_RESOURCES_ID, resource)
-                    .ok()
-                    .flatten(),
-            }),
-        }?;
-        // A texture that will not decode leaves its part grey rather than failing the model:
-        // the shape of a helm is most of what a reader opened it for.
-        files.read(texture).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
-    };
-    Ok(Some(glb::write(&[glb::Piece::only(&mesh, &picture)])?))
+    Ok(each(files, &[display_info_id])?
+        .pop()
+        .expect("one display in, one answer out"))
 }
 
-/// What a display says it is drawn with: a model slot, its resource, and the material that
-/// paints it.
+/// The same, for several appearances at once, sharing every table between them.
+///
+/// The shape [`crate::worn::each`] already has for the pieces of an outfit, and here for the
+/// same reason: [`crate::db2::Db2::rows`] materialises a whole table before it yields the first
+/// row, so a walk costs the entire table however few rows the caller keeps. `ItemDisplayInfo`,
+/// `ModelFileData` and `ComponentModelFileData` are each hundreds of thousands of rows, and a
+/// gallery page of twenty staves asked one at a time walks all three twenty times over to pull
+/// one row out of each.
+///
+/// So the three tables are read once for the lot and the answers come out of what they said.
+/// [`glb_of`] is a batch of one and goes through here too, so there is one implementation of
+/// what an appearance's geometry is rather than a fast one and a correct one.
+///
+/// `None` for a row is ordinary: the appearance may have no model at all — which is every piece
+/// of armour between the shoulders and the boots — or this install may not hold the file it
+/// names, or the game may be withholding it outright.
+#[tracing::instrument(name = "models.each", skip_all, fields(displays = wanted.len()))]
+pub fn each(files: &dyn GameFiles, wanted: &[u32]) -> Result<Vec<Option<Vec<u8>>>, String> {
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let named = resources(files, wanted)?;
+    // Nothing further needs opening for a batch whose every row turned out to have no geometry,
+    // and the two tables below are the expensive ones.
+    if named.iter().all(Option::is_none) {
+        return Ok(wanted.iter().map(|_| None).collect());
+    }
+    let model_files = crate::worn::ModelFiles::read(files)?;
+
+    // `TextureFileData` is read the first time a part actually asks for a supplied picture, and
+    // not before: a model that paints itself entirely out of its own `TXID` never needs it, and
+    // it is several hundred thousand rows.
+    let textures: RefCell<Option<crate::worn::TextureFiles>> = RefCell::new(None);
+
+    named
+        .into_iter()
+        .map(|named| {
+            let Some((slot, model_resource, material_resource)) = named else {
+                return Ok(None);
+            };
+
+            // The same question `worn` asks of a helm about to go on a head, and the same
+            // answer: a model resource names a file per body, or a pair of files one per
+            // shoulder, and this app draws one body and one shoulder at a time. The slot is
+            // which shoulder.
+            let Some(model_file) = model_files.file(model_resource, slot) else {
+                return Ok(None);
+            };
+            let Ok(bytes) = files.read(model_file) else {
+                return Ok(None);
+            };
+
+            let model = Model::parse(&bytes)?;
+            let skin = model
+                .skin_file_data_id()
+                .ok_or("the model names no skin profile, so nothing says how to draw it")?;
+            let mesh = model.with_skin(&files.read(skin)?)?;
+
+            let supplied: RefCell<Option<Option<u32>>> = RefCell::new(None);
+            let picture = |paint| {
+                let texture = match paint {
+                    Paint::File(fdid) => Some(fdid),
+                    // Whichever type asked: an item's model wants one texture and the
+                    // appearance's material is it. Only a character declares several and has to
+                    // tell them apart.
+                    Paint::Supplied(_) => {
+                        *supplied.borrow_mut().get_or_insert_with(|| match material_resource {
+                            0 => None,
+                            resource => {
+                                let mut held = textures.borrow_mut();
+                                let table = match held.as_ref() {
+                                    Some(table) => table,
+                                    None => match crate::worn::TextureFiles::read(files) {
+                                        Ok(read) => held.insert(read),
+                                        Err(_) => return None,
+                                    },
+                                };
+                                table.named(resource)
+                            }
+                        })
+                    }
+                }?;
+                // A texture that will not decode leaves its part grey rather than failing the
+                // model: the shape of a helm is most of what a reader opened it for.
+                files.read(texture).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
+            };
+            Ok(Some(glb::write(&[glb::Piece::only(&mesh, &picture)])?))
+        })
+        .collect()
+}
+
+/// What each display says it is drawn with: a model slot, its resource, and the material that
+/// paints it — in the order asked, and `None` for a display with no geometry.
 ///
 /// Both arrays are of two. This shows the first slot that holds anything, which for a helm or
 /// a weapon is the whole of it — and for a pair of shoulders is one pad. Showing both is what
 /// [`crate::character`] does now, because both is only meaningful once there is a body with a
 /// shoulder on either side of it to hang them from.
+///
+/// One walk of the table for the whole batch. The lookup is a map rather than a `find` per
+/// display for the reason [`each`] gives: the walk is the cost, and it is the same walk whether
+/// one display is wanted out of it or twenty.
 fn resources(
     files: &dyn GameFiles,
-    display_info_id: u32,
-) -> Result<Option<(usize, u32, u32)>, String> {
+    wanted: &[u32],
+) -> Result<Vec<Option<(usize, u32, u32)>>, String> {
+    let asked: HashSet<u32> = wanted.iter().copied().collect();
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
-    let Some(display) = displays.rows().find(|row| row.id() == display_info_id) else {
-        return Ok(None);
-    };
-    Ok((0..MODEL_SLOTS)
-        .map(|slot| {
-            (
-                slot,
-                display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
-                display.element(display_column::MATERIAL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
-            )
-        })
-        .find(|(_, model, _)| *model != 0))
-}
-
-/// The FileDataID of the one file in `table` that is the given resource.
-///
-/// A resource can name more than one file — a texture and its second usage sit under the same
-/// id — and the client numbers a file's variants above the file itself, so the lowest id is
-/// the one to draw. That rule is enough for a *texture*: `worn` is where the one that names a
-/// file per body lives, because the table that says which body is which is a different one.
-pub(crate) fn file_named(
-    files: &dyn GameFiles,
-    table: u32,
-    column: usize,
-    resource: u32,
-) -> Result<Option<u32>, String> {
-    let table = Db2::parse(files.read(table)?)?;
-    Ok(table
+    let drawn_with: HashMap<u32, (usize, u32, u32)> = displays
         .rows()
-        .filter(|row| row.number(column) == resource)
-        .map(|row| row.id())
-        .min())
+        .filter(|row| asked.contains(&row.id()))
+        .filter_map(|display| {
+            let found = (0..MODEL_SLOTS)
+                .map(|slot| {
+                    (
+                        slot,
+                        display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
+                        display.element(
+                            display_column::MATERIAL_RESOURCES_ID,
+                            slot,
+                            MODEL_SLOT_BITS,
+                        ),
+                    )
+                })
+                .find(|(_, model, _)| *model != 0)?;
+            Some((display.id(), found))
+        })
+        .collect();
+    Ok(wanted
+        .iter()
+        .map(|display_info_id| drawn_with.get(display_info_id).copied())
+        .collect())
 }
 
 #[cfg(test)]

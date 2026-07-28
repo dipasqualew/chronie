@@ -550,13 +550,15 @@ class Wardrobe {
     return this.list.getByRole("checkbox", { name: "Show worn" });
   }
 
-  /** The pictures themselves, one per row, once the gallery is on. */
+  /** The pictures themselves, one per tile, once the gallery is on. */
   bodies(): Locator {
-    return this.list.locator(".mog-worn canvas");
+    return this.list.locator(".mog-shot canvas");
   }
 
   /**
    * How many of those actually have a character on them.
+   *
+   * @see pixelsOf for reading one of them rather than counting all of them.
    *
    * Counted from the pixels and not from the elements, and that is the whole point of it. A
    * canvas that was never drawn on is the same rectangle in the DOM as one that was, and the way
@@ -577,6 +579,18 @@ class Wardrobe {
       return false;
     }).length);
   }
+}
+
+/**
+ * What is actually on one canvas, as something two readings can be compared by.
+ *
+ * A picture that turned and a picture that did not are the same element with the same
+ * attributes and the same size, so the only way to tell them apart from outside is to look at
+ * the pixels. `toDataURL` is the whole canvas as one string, which is exactly the comparison
+ * wanted here — not what it looks like, only whether it changed.
+ */
+async function pixelsOf(canvas: Locator): Promise<string> {
+  return canvas.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
 }
 
 /**
@@ -1797,6 +1811,12 @@ const mockDesktop: E2EMock = {
   // and the two pieces the equipment set swapped. 4200 is deliberately absent: the cloak the
   // set gave up is an item this install cannot describe, and the row still has to draw with
   // the name the addon caught.
+  // The look each of those items carries, for the rows a reader can click through to a picture
+  // of. Only the transmog source has one: it is the only row in the fixture that offers the
+  // button, and an item with no entry here is what the real backend leaves out of its answer.
+  itemAppearances: {
+    101: { appearanceId: 80012, displayInfoId: 900012, displayType: 3, inventoryType: 3 },
+  },
   itemDetails: {
     // The transmog source, which the addon recorded as a number and nothing else: this is the
     // whole of what the reader ends up seeing about it.
@@ -2457,6 +2477,33 @@ test("digs from a session down into a single segment and back out again", async 
     // attribute rather than a style because the packaged window's policy drops inline styles.
     await expect(detail.linkTo("Wanderer's Mantle")).toHaveAttribute("data-quality", "3");
     await expect(detail.itemIcons().first()).toBeVisible();
+  });
+
+  // And the way through from the number to a picture of it. The row says what the piece is
+  // called and what kind of thing it is; what it *looks* like is three of the game's tables
+  // away, and none of them is opened until this button is pressed — which is the whole reason
+  // it is a button rather than a picture on every row.
+  await test.step("a transmog source opens into a picture of itself", async () => {
+    await detail.transmogs().getByRole("button", { name: /^Show .* drawn$/ }).click();
+    const drawn = page.locator("#appearance-detail");
+    await expect(drawn).toBeVisible();
+    await expect(drawn.getByRole("heading", { name: "Wanderer's Mantle" })).toBeVisible();
+
+    // What the pane is holding, which is what the outfit pane's own steps read and for the same
+    // reason: a canvas that never drew is the same rectangle as one that did. The pixels cannot
+    // be read here — a live pane keeps no drawing buffer to read back — so the vertex count the
+    // stage writes out is the instrument.
+    await expect(drawn.locator("canvas")).toBeVisible();
+    await expect.poll(
+      () => drawn.locator(".appearance-stage").getAttribute("data-vertices"),
+      { timeout: GALLERY_PATIENCE_MS },
+    ).toBe("1152");
+
+    // Closing it puts the reader back on the segment they were part way through rather than
+    // on the timeline — it is over the modal, not instead of it.
+    await drawn.getByRole("button", { name: "Close" }).click();
+    await expect(drawn).toBeHidden();
+    await expect(detail.transmogs()).toContainText("Wanderer's Mantle");
   });
 
   // "+4" and "+25" say what the run paid out and nothing about what that came to. The
@@ -3546,6 +3593,34 @@ test("browses the game's transmog sets and dresses the character in them", async
     // because a CI runner's clock is not an instrument. `budget.rs` explains the same choice
     // from the other side.
     expect(Date.now() - started).toBeLessThan(GALLERY_PATIENCE_MS);
+  });
+
+  // Turning one of them, which is the reason a tile is worth its size. The picture is redrawn
+  // through the same one off-screen context every other tile is drawn through — so what this
+  // rules out is a window that reached for a live pane per tile the moment one had to move,
+  // which is the sixteen-context wall again by another route.
+  //
+  // The pixels are what say it happened. A canvas draws the same rectangle whichever way round
+  // the thing on it is, and the DOM says nothing at all about an angle.
+  await test.step("a picture can be turned where it sits", async () => {
+    const picture = wardrobe.bodies().first();
+    const before = await pixelsOf(picture);
+    const box = await picture.boundingBox();
+    if (!box) throw new Error("the first tile has no box to drag across");
+
+    // Across half the tile, which is half a turn: enough that no framing or lighting accident
+    // could leave the picture looking the way it did.
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    await expect.poll(async () => await pixelsOf(picture) !== before, {
+      timeout: GALLERY_PATIENCE_MS,
+    }).toBe(true);
+    // And the rest of the grid is untouched: one tile turned, not the page redrawn.
+    await expect.poll(() => wardrobe.painted(), { timeout: GALLERY_PATIENCE_MS })
+      .toBe(GALLERY_PAGE);
   });
 
   // The page shrinks to a fifth when the pictures come on, and grows back when they go off.

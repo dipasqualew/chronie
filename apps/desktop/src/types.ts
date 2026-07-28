@@ -698,15 +698,30 @@ export interface CharacterModelPayload {
 }
 
 /**
- * One row of a gallery page: an appearance, and the body wearing it.
+ * What a gallery row turned out to be a picture of. Mirrors the two words `gallery.rs` sends.
+ *
+ * `worn` is a whole character with the appearance somewhere on her, which is the only way to
+ * draw armour: a chestpiece is paint on a body and there is no chestpiece. `held` is the item's
+ * own mesh with no body at all, which is what a weapon, a shield and an off-hand are.
+ */
+export type GalleryKind = "worn" | "held";
+
+/**
+ * One row of a gallery page: an appearance, and the picture it can be shown as.
  *
  * The display id comes back with the model — unlike `WornSetPayload`, where there is no one
  * appearance the body is the answer for — because a page is a list and the window has to line
  * the answers back up with the rows it asked about.
+ *
+ * The kind comes back with it because the two are framed differently: a body is two metres of
+ * character and the camera is pointed at the part of her the slot is on, and a held model is
+ * the object with nothing else in the picture. The backend decides it, and the window reads it
+ * rather than re-deriving it from the display type — one answer instead of two that can drift.
  */
 export interface GalleryModel {
   displayInfoId: number;
-  /** `null` for a row this install can put on nobody, which keeps its icon. */
+  kind: GalleryKind;
+  /** `null` for a row this install can draw nothing for, which keeps its icon. */
   model: string | null;
 }
 
@@ -789,6 +804,32 @@ export interface ItemDetail {
 export interface ItemDetailsPayload {
   /** Keyed by the id the segment named, and holding only what this install can describe. */
   items: Record<string, ItemDetail>;
+}
+
+/**
+ * The look one item carries, as the numbers something has to have to be drawn.
+ *
+ * A segment holds item ids and nothing else — that is what the addon can catch at the moment
+ * the game says a transmog source was learned — and every view that draws an appearance needs
+ * the three below. `appearances.rs` is the hop between, and it is not made until a reader asks
+ * to see one: the tables behind it are hundreds of thousands of rows.
+ *
+ * The three that matter are the same three `WornPiece` is made of, and the appearance id comes
+ * with them because it is what the rest of the app keys a mark on.
+ */
+export interface ItemAppearance {
+  appearanceId: number;
+  displayInfoId: number;
+  displayType: number;
+  inventoryType: number;
+}
+
+export interface ItemAppearancesPayload {
+  /**
+   * Keyed by the item id asked about. An item that resolves to no look is absent rather than
+   * present and empty, the same as everywhere else on this bridge.
+   */
+  appearances: Record<string, ItemAppearance>;
 }
 
 /**
@@ -1086,6 +1127,10 @@ export interface E2EMock {
   /** What the game says about each item the segments name, keyed by id, and absent for the
    * ones an install cannot describe — the same bargain the achievements above make. */
   itemDetails: Record<number, ItemDetail>;
+  /** The look each of those items carries, keyed by item id, for the rows a reader can click
+   * through to a picture of. Absent for an item that resolves to no appearance, which is what
+   * the real backend leaves out of its answer. */
+  itemAppearances: Record<number, ItemAppearance>;
   /** The screenshots Chronie holds, keyed by capture row id: the thumbnail a grid draws and
    * the full-size picture opening one asks for. An id absent from here is a capture with no
    * image, which is what the real backend answers nothing for. */
