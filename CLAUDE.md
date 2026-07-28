@@ -52,42 +52,12 @@ them to understand a bug is the point of being allowed in there; committing one
 as a fixture is not — cut a synthetic file down to the shape that matters
 instead.
 
-## Every change gets a worktree of its own
-
-The repository's own checkout is not a working directory either. Somebody else —
-another agent, a human in an editor — may be part way through a change in it,
-with files saved and nothing committed, and there is no way to tell by looking.
-Switching branches under them fails or drags their work onto the new branch, and
-a `git add -A` commits it as if it were yours. So every change starts with a
-checkout that belongs to it alone, branched off `origin/main`:
-
-```sh
-git fetch origin main
-git worktree add .claude/worktrees/some-change -b some-change origin/main
-cd .claude/worktrees/some-change
-bun install
-```
-
-`bun install` there is seconds, because the packages come from bun's cache, but
-Rust is not: point `CARGO_TARGET_DIR` at the main checkout's target directory and
-the backend builds incrementally instead of compiling tauri from nothing.
-
-```sh
-CARGO_TARGET_DIR=../../../apps/desktop/src-tauri/target ./scripts/check.sh
-```
-
-Remove the worktree once its pull request is merged, so the tree does not fill up
-with checkouts nobody is working in:
-
-```sh
-git worktree remove .claude/worktrees/some-change
-```
-
 ## All work happens on a pull request
 
-`main` is not a working branch. Push the worktree's branch and open a pull
-request against `main` as the first thing you do after that first push — not as a
-last step once the work is already finished:
+`main` is not a working branch. Every change starts on a branch of its own, cut
+from `origin/main`. Push it and open a pull request against `main` as the first
+thing you do after that first push — not as a last step once the work is already
+finished:
 
 ```sh
 git push -u origin some-change
