@@ -1,5 +1,6 @@
 mod activity;
 pub mod achievements;
+pub mod budget;
 pub mod captures;
 pub mod casc;
 pub mod character;

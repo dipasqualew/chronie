@@ -35,7 +35,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chronie_desktop_lib::{casc, character, transmog, worn};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use chronie_desktop_lib::{budget, casc, character, transmog, worn};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -86,8 +88,13 @@ fn main() {
         let files = held.as_ref().or(opened_here.as_ref()).expect("one of the two");
 
         let opened = started.elapsed();
-        let drawn = match draw(files.as_ref(), &what) {
-            Ok(bytes) => bytes,
+        // Counted as well as timed, because the numbers `budget.rs` ratchets in CI are counts
+        // and this is the only place they can be read off a real install. The counting is a
+        // hash map insert per read; the reading back of the `.glb` happens after the clock has
+        // been stopped.
+        let (drawn, work) = budget::counting(files.as_ref(), |files| draw(files, &what));
+        let drawn = match drawn {
+            Ok(payload) => payload,
             Err(error) => {
                 eprintln!("Could not draw {what}: {error}");
                 std::process::exit(1);
@@ -97,12 +104,14 @@ fn main() {
 
         println!(
             "\n=== run {run}/{runs}  {what}  {whole:?} total, {opened:?} of it opening CASC, \
-             {drawn} bytes of glb data url"
+             {} bytes of glb data url",
+            drawn.url_bytes
         );
         let totals = totals.lock().unwrap();
         report(&totals.self_time, whole);
         by_file(&totals.by_file);
         drop(totals);
+        counted(&work, &drawn.payload);
     }
 
     if let Some(provider) = provider {
@@ -111,12 +120,20 @@ fn main() {
     }
 }
 
+/// What one click ended up sending to the window.
+struct Drawn {
+    /// The data URL's own length, which is the `.glb` base64-encoded and so a third larger
+    /// again — and is what actually crosses into the browser.
+    url_bytes: usize,
+    payload: budget::Payload,
+}
+
 /// The work one click makes, which is the two commands the window sends between them.
 ///
 /// A reader opening a set gets `transmog_set_items` and then `worn_set`, and the second is the
 /// one that draws — but both read the game's tables and both are inside the wait, so both are
 /// inside the span.
-fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<usize, String> {
+fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<Drawn, String> {
     let _held = span!(tracing::Level::INFO, "apply_transmog").entered();
     let pieces = match what.split('/').collect::<Vec<&str>>()[..] {
         ["set", set] => set_pieces(files, set.parse().map_err(|_| "not a set id")?)?,
@@ -128,8 +145,41 @@ fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<usize, String> {
         ["character"] => Vec::new(),
         _ => return Err(format!("`{what}` is not something to draw")),
     };
-    let payload = character::worn_set_of(files, &pieces)?;
-    Ok(payload["model"].as_str().map_or(0, str::len))
+    let answer = character::worn_set_of(files, &pieces)?;
+    let url = answer["model"].as_str().unwrap_or_default();
+    let glb = STANDARD
+        .decode(url.trim_start_matches("data:model/gltf-binary;base64,"))
+        .map_err(|error| format!("what was drawn is not a data URL: {error}"))?;
+    Ok(Drawn {
+        url_bytes: url.len(),
+        payload: budget::payload_of(&glb)?,
+    })
+}
+
+/// What the run was counted doing, which is the half of this report CI can also assert on.
+///
+/// The table above is a clock, and a clock on a shared runner measures the runner. These are
+/// the same facts as counts — files asked for, files asked for twice, rows walked, and how
+/// much of the geometry anything draws — and they are what `budget.rs` holds still. Printed
+/// here because the fixture body is 152 vertices and only an install has megabytes.
+fn counted(work: &budget::Work, payload: &budget::Payload) {
+    println!(
+        "\nreads {} ({} of them repeats, {:.1} MB decoded), rows walked {}",
+        work.reads,
+        work.repeated,
+        work.read_bytes as f64 / 1_048_576.0,
+        work.rows,
+    );
+    let body = payload.body();
+    println!(
+        "glb {:.2} MB, {} vertices in {} meshes; her body ships {} and draws {} ({:.1}%)",
+        payload.bytes as f64 / 1_048_576.0,
+        payload.shipped(),
+        payload.meshes.len(),
+        body.shipped,
+        body.drawn,
+        body.drawn_share(),
+    );
 }
 
 /// The pieces of one set, the way `dump_model` reads them and the window sends them.
