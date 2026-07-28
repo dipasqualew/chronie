@@ -175,6 +175,36 @@ function ns.newCustomSetWriter(deps)
         return { id = request.id, at = at, outcome = "created", setId = setId, name = name }
     end
 
+    ---Drops the record of requests the app has stopped asking for.
+    ---
+    ---This is what keeps SavedVariables from growing by one row for every outfit a player ever
+    ---sends. It is safe for one reason and only that reason: **the app keeps writing a request
+    ---into this file until it has read what became of it**, so a request that has disappeared
+    ---from the file is one the app has already been told about and will never ask for again.
+    ---Forgetting it here cannot therefore make it happen twice.
+    ---
+    ---The order the two halves run in matters. This runs *after* the loop below, so an entry
+    ---written a moment ago for a request still in the file survives to be reported at logout.
+    ---@param done table<integer, CustomSetOutcome>
+    ---@param requests CustomSetRequest[]
+    ---@return table<integer, CustomSetOutcome>
+    local function forget(done, requests)
+        local asked = {}
+        for _, request in ipairs(requests) do
+            local id = type(request) == "table" and tonumber(request.id)
+            if id then
+                asked[id] = true
+            end
+        end
+        local kept = {}
+        for id, outcome in pairs(done) do
+            if asked[id] then
+                kept[id] = outcome
+            end
+        end
+        return kept
+    end
+
     ---Applies every request the app has made that has not been applied already.
     ---
     ---Keyed on the request's own id rather than on anything about the set, which is what makes
@@ -207,7 +237,7 @@ function ns.newCustomSetWriter(deps)
                 end
             end
         end
-        store.done = done
+        store.done = forget(done, requests)
         return outcomes
     end
 

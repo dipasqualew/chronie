@@ -350,6 +350,49 @@ describe("ns.newCustomSetWriter", function()
         end)
     end)
 
+    describe("a record of a request the app has stopped asking for", function()
+        -- The one thing that keeps SavedVariables from growing by a row for every outfit a
+        -- player ever sends. Safe only because the app keeps writing a request into the file
+        -- until it has read what became of it, so a request that has gone from the file is one
+        -- the app already knows about and will never ask for again.
+        it("is forgotten, because the app has already been told what became of it", function()
+            local writer, _, store = newWriter({
+                requests = { request({ id = 2 }) },
+                store = { done = { [1] = { id = 1, at = 1, outcome = "created", name = "Old" } } },
+            })
+
+            writer.run()
+
+            assert.is_nil(store.done[1])
+            assert.equal("created", store.done[2].outcome)
+        end)
+
+        -- The forgetting runs after the applying, not before it: an entry written a moment ago
+        -- for a request still in the file has to survive to be reported at the next logout,
+        -- and a prune that ran first would drop the answer before anybody read it.
+        it("keeps the answer to a request that is still being asked", function()
+            local writer, _, store = newWriter({ requests = { request({ id = 3 }) } })
+
+            writer.run()
+            writer.run()
+
+            assert.equal("created", store.done[3].outcome)
+        end)
+
+        -- A file the app has emptied — every request answered — leaves nothing behind at all,
+        -- which is the state a player who sent one outfit a year ago should end up in.
+        it("leaves nothing behind once the app is asking for nothing", function()
+            local writer, _, store = newWriter({
+                requests = {},
+                store = { done = { [1] = { id = 1, at = 1, outcome = "created", name = "Old" } } },
+            })
+
+            writer.run()
+
+            assert.same({}, store.done)
+        end)
+    end)
+
     describe("a wardrobe with no room left", function()
         -- The cap is the account's, and a set that would not fit is the one case where
         -- there is something the player can actually do about it — so it is reported rather
