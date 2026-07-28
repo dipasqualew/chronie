@@ -75,6 +75,14 @@ export interface WardrobeListProps {
   /** Asks the backend for a page of the wardrobe worn, which is what the gallery draws. */
   loadGallery: (pieces: WornPiece[]) => Promise<GalleryPayload>;
   /**
+   * Who the bodies in that gallery are, as a string that changes when she does — `herself.ts`.
+   *
+   * Every thumbnail is a picture of her wearing one thing, so answering a question about her
+   * body makes all of them pictures of somebody else. This is the only use for it here: the
+   * page is asked for again, and the backend applies the answers it holds.
+   */
+  look: string;
+  /**
    * Makes the one graphics context the whole grid is drawn through.
    *
    * Injected for the same reason the pane's stage is: it is the one thing here that needs a
@@ -90,7 +98,7 @@ const READING = "Reading every appearance the game has for this…";
 export function WardrobeList(
   {
     hidden, load, wantIcons, icons, outfit, hideUnwearable, onHideUnwearable, marks, index,
-    onWear, loadGallery, createGalleryStage = lazyGalleryStage,
+    onWear, loadGallery, look, createGalleryStage = lazyGalleryStage,
   }: WardrobeListProps,
 ): ReactNode {
   const [kindKey, setKindKey] = useState(KINDS[0]!.key);
@@ -166,6 +174,15 @@ export function WardrobeList(
   // are — one arriving is not a redraw, the counter says one happened — and kept across a change
   // of kind, because the same helm is under Head and inside three sets and is one picture.
   const bodies = useRef(new Map<number, Thumbnail>()).current;
+  // Of whichever woman they were drawn of. Written during the render rather than in an effect
+  // of its own, so that the request below is made once, for the page as it now is: an effect
+  // that emptied the map afterwards would leave this one having already decided nothing was
+  // missing.
+  const drawnOf = useRef(look);
+  if (drawnOf.current !== look) {
+    drawnOf.current = look;
+    bodies.clear();
+  }
   const wanted = asModels ? piecesOf(drawn) : [];
   const wantedKey = wanted.map((piece) => piece.displayInfoId).join(",");
   useEffect(() => {
@@ -190,7 +207,7 @@ export function WardrobeList(
       .finally(redraw);
     // The display ids rather than the array, which is new on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantedKey, loadGallery, bodies]);
+  }, [wantedKey, look, loadGallery, bodies]);
 
   // One graphics context for the whole grid, made the first time a picture is wanted and given
   // back when the reader turns the gallery off. Twenty contexts is more than a browser hands

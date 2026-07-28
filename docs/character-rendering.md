@@ -11,7 +11,8 @@ character's body. There is no mesh to show in isolation.
 **Provenance.** Constants marked *verified* were read from build `12.0.5.67` on
 2026-07-26; the attachments, the geoset groups the body actually holds, and the cape on
 2026-07-27; the hands, the shield, and the bone chains that place them on 2026-07-27 as
-well; that the bind pose leaves her eyes shut on 2026-07-28. The rest is from [wowdev.wiki](https://wowdev.wiki) and
+well; that the bind pose leaves her eyes shut, and every question this body can be asked, on
+2026-07-28. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
 ## One item, and then a set of them
@@ -70,6 +71,25 @@ a queue.
 
 Human Female. Gear is authored to look right on human proportions, and Dracthyr, Worgen
 and Mechagnome carry extra geoset groups and limb handling worth avoiding.
+
+**Which** Human Female is the reader's. Every question the game's own character creation screen
+asks about this body is read out of the install and offered — see
+[game-files.md](game-files.md#every-swatch-not-only-the-first-verified) for what those are on
+12.0.5.67 — and the answers are kept in the app's settings file, one swatch per question, as
+`customization::Picked`. A question nobody has answered keeps the swatch the game itself opens
+on, so a fresh install draws exactly the body this app drew before any of it existed. Everything
+below this line is the same whichever swatches are chosen: the atlas, the sections, the layers
+and the geoset rules do not know who she is.
+
+Two things about an answer are checked rather than believed, because the settings file outlives
+an install: a question this `ChrModel` has not got, and a swatch that belongs to another
+question. `ChrCustomizationChoice` is one table for every playable body in the game, so an
+unchecked answer resolves to somebody else's hairstyle. Both are dropped and the question falls
+back to the swatch the game opens on.
+
+The body itself is still fixed. Another race or the male model is not one more column: the
+composite layout is 104's, the section rectangles below are 104's, and the 2048 × 1024 atlas is
+what `ChrModelMaterial` states for it — all three are constants here rather than reads.
 
 | What | Value | Status |
 |---|---|---|

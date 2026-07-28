@@ -579,7 +579,8 @@ What an item paints is above; what the body already *is* comes from somewhere el
 A character is a set of customizations the player picked, and four hops stand between a swatch
 and what it does. All of them were read off `12.0.5.67823` on 2026-07-27 with
 `examples/dump_customization`; the options, their swatches and the geosets those drive were
-read off `12.0.5.67` on 2026-07-28. That is what to run again after a patch:
+read off `12.0.5.67` on 2026-07-28, as were every question this body can be asked and every
+swatch of each. That is what to run again after a patch:
 
 ```sh
 cargo run --example dump_customization -- "<install>"
@@ -657,6 +658,45 @@ What Human Female's first swatch of each option comes to, read on 12.0.5.67:
 **A value of 0 is the game switching a group off**, which is what "no necklace" is — and it is
 a row to apply rather than a row to drop, because the group's own value 1 is a necklace.
 `docs/character-rendering.md` has what that costs when it is missed.
+
+### Every swatch, not only the first, verified
+
+The table above is what a body nobody has said anything about comes to. What the reader may say
+instead is the same rows without the "swatch 0" filter, and `customization::questions` is that
+read; `dump_customization --questions` prints it. On 12.0.5.67, twelve of those thirteen
+questions reach a reader:
+
+| Question | Swatches | Named |
+|---|---|---|
+| 15 Face | 45 | **0** |
+| 14 Skin Color | 23 | 1 |
+| 16 Hair Style | 34 | 34 |
+| 17 Hair Color | 58 | 15 |
+| 464 Eye Color | 42 | 5 |
+| 501 Piercings | 15 | 15 |
+| 510 Necklace | 9 | 9 |
+| 516 Makeup | 7 | 7 |
+| 526 Face Shape | 3 | 3 |
+| 970 Eyebrows | 26 | 26 |
+| 6339 Eyesight | 4 | 4 |
+| 8790 Ears | 2 | 2 |
+
+**Most swatches have no name**, which is not a gap in the read: the character creation screen
+draws a square of colour and `Name_lang` is genuinely empty. A window over this numbers them by
+their place in `OrderIndex`, and a question can be half named — Hair Color names fifteen of
+fifty-eight.
+
+**8523 Eye Style is the thirteenth and is not offered.** No element names any of its swatches,
+so nothing follows from answering it. That is the rule `questions` applies — a question none of
+whose swatches drives a geoset or a material is left out — and it is worth applying rather than
+showing a control that demonstrably changes nothing.
+
+**Not every swatch of a question does the same kinds of thing.** Skin swatch 85 has three
+elements — the skin and the two halves of the underwear — and a face authored against it; skin
+swatch 96 has one, the skin, and no element anywhere names it as a related choice. So choosing
+that one is a body with no underwear painted on and no face layer over the base skin, which is
+the game's own data rather than a hop that went missing. `dump_customization <choice>` now
+prints both directions of the relation, which is what says so.
 
 **One choice paints several targets, and only one of them is the skin.** Choice 85 has three
 elements: material 823 on target 1, and 824 and 825 on targets 13 and 14. All three resolve to

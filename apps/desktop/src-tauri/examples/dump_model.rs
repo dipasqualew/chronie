@@ -25,7 +25,17 @@
 //! cargo run --example dump_model -- --fixtures apps/desktop/fixtures/transmog worn/900012/3 \
 //!     apps/desktop/fixtures/transmog/robe.glb
 //! ```
+//!
+//! Anything after the output path is **who she is**: `<question>:<swatch>` a piece, the ids
+//! `dump_customization --questions` prints, and as many as you like. Nothing said is the body
+//! the game itself opens on, which is what the fixtures' own `.glb`s are regenerated from — so
+//! this is the way to see one answer's worth of difference without the app running:
+//!
+//! ```sh
+//! cargo run --example dump_model -- "/Applications/World of Warcraft" character her.glb 17:167
+//! ```
 
+use chronie_desktop_lib::customization::Picked;
 use chronie_desktop_lib::{casc, character, models, transmog, worn};
 
 fn main() {
@@ -46,9 +56,11 @@ fn main() {
 
     let what = args.next().unwrap_or_else(|| usage());
     let out = args.next().unwrap_or_else(|| usage());
+    let picked: Vec<Picked> = args.map(|arg| answer(&arg)).collect();
+    let picked = picked.as_slice();
 
     let written = match what.split('/').collect::<Vec<&str>>()[..] {
-        ["character"] => character::glb_of(files.as_ref(), None, &[]).map(Some),
+        ["character"] => character::glb_of(files.as_ref(), None, picked).map(Some),
         // A whole set, walked out of the game's own tables exactly as the window walks it —
         // which is the only way to put the priority table and the draw order in front of real
         // data, since nothing in the test suite is allowed to read an install.
@@ -59,7 +71,7 @@ fn main() {
                     println!("{} pieces", pieces.len());
                     worn::of_set(files.as_ref(), &pieces)
                 })
-                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), &[]))
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), picked))
                 .map(Some)
         }
         ["worn", display, slot] | ["worn", display, slot, _] => {
@@ -72,7 +84,7 @@ fn main() {
                 None => 0,
             };
             worn::of(files.as_ref(), display, slot, worn_in)
-                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), &[]))
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), picked))
                 .map(Some)
         }
         _ => {
@@ -124,11 +136,20 @@ fn worn_set(files: &dyn casc::GameFiles, set_id: u32) -> Result<Vec<worn::Piece>
         .collect())
 }
 
+/// One `<question>:<swatch>`, as a reader's answer about the body.
+fn answer(arg: &str) -> Picked {
+    let (question, swatch) = arg.split_once(':').unwrap_or_else(|| usage());
+    match (question.parse(), swatch.parse()) {
+        (Ok(question), Ok(swatch)) => Picked { question, swatch },
+        _ => usage(),
+    }
+}
+
 fn usage() -> ! {
     eprintln!(
         "usage: dump_model <wow install> | --fixtures <dir>  \
          <displayInfoID> | character | worn/<displayInfoID>/<displayType> | set/<transmogSetID>  \
-         <out.glb>"
+         <out.glb>  [<question>:<swatch>...]"
     );
     std::process::exit(2)
 }

@@ -18,6 +18,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { piecesFrom, setNamed } from "./customSets";
+import { Herself } from "./herselfPanel";
+import type { HerselfProps } from "./herselfPanel";
 import { glbBytes, REASONS, wornSetKey } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
 import { outfitSummary, piecesOf, placeName, wornPieces } from "./outfit";
@@ -53,6 +55,17 @@ export interface OutfitPanelProps {
   loadWorn: (pieces: WornPiece[]) => Promise<WornSetPayload>;
   /** The pictures the worn list draws, out of the cache the browser beside it fills. */
   icons: Map<number, string>;
+  /** The form under her that says who she is, and the reader's answers as they stand. */
+  herself: HerselfProps;
+  /**
+   * Her, as a string that changes when she does — see `herself.ts`.
+   *
+   * Every body below is cached under it, because every body below *is* of her: change her hair
+   * and the character in a robe is a different picture of a different woman. The panel does not
+   * read it beyond that, and never sends it: which answers apply is the backend's, out of the
+   * settings file, for all three of the commands that draw her.
+   */
+  look: string;
   /**
    * Makes the 3D pane. Passed in because it is the one thing here that needs a graphics card:
    * a machine without working 3D throws, and the reader is told so rather than shown nothing.
@@ -68,7 +81,7 @@ interface PaneState {
 
 export function OutfitPanel(
   {
-    outfit, save, onTakeOff, onClearAll, loadCharacter, loadWorn, icons,
+    outfit, save, onTakeOff, onClearAll, loadCharacter, loadWorn, icons, herself, look,
     createStage = lazyStage,
   }: OutfitPanelProps,
 ): ReactNode {
@@ -79,9 +92,10 @@ export function OutfitPanel(
   // putting it back therefore costs one read rather than two. `null` is an answer: this
   // install has nothing to put on her for that outfit, and asking again would say the same.
   const bodies = useRef(new Map<string, string | null>()).current;
-  // The bare body, asked for once and kept for as long as the app runs. It is one model for
-  // every outfit there is, and the read behind it is the game's own storage.
-  const character = useRef<Promise<CharacterModelPayload> | null>(null);
+  // The bare body, asked for once per woman and kept for as long as the app runs. It is one
+  // model for every outfit there is, and the read behind it is the game's own storage — but it
+  // is a model *of somebody*, so it is held under the same key the dressed bodies are.
+  const character = useRef(new Map<string, Promise<CharacterModelPayload>>()).current;
   // One stage for as long as the view is mounted. Each one is a graphics context of its own,
   // and a browser will only hand out so many before it starts taking them back.
   const stage = useRef<ModelStage | null>(null);
@@ -93,7 +107,11 @@ export function OutfitPanel(
   const [pane, setPane] = useState<PaneState>({ state: "loading", note: "" });
 
   const pieces = piecesOf(outfit);
-  const key = wornSetKey(pieces);
+  // The outfit *and* who is wearing it, because both decide the picture. Answering a question
+  // about her body makes every cached body a picture of somebody else, and this is where they
+  // stop being answers: a key nothing asks for again is a body that is read out of the game
+  // afresh, which is the whole of the invalidation.
+  const key = `${look}|${wornSetKey(pieces)}`;
 
   /** Draws a `.glb` on the stage, making one the first time anything needs it. */
   const onStage = useCallback(async (
@@ -132,14 +150,21 @@ export function OutfitPanel(
 
     if (!pieces.length) {
       setPane({ state: "loading", note: "Reading the character model…" });
-      character.current ??= loadCharacter();
-      void character.current
+      let bare = character.get(key);
+      if (!bare) {
+        bare = loadCharacter();
+        character.set(key, bare);
+      }
+      void bare
         .then((body) => {
           if (mine !== asked.current) return;
           return onStage(body.model, mine, REASONS.bare, blank);
         })
         .catch((error: unknown) => {
-          character.current = null;
+          // Forgotten rather than remembered as a failure: an install being read while it is
+          // patched can refuse one moment and answer the next, and this is the one model with
+          // no icons to fall back on.
+          character.delete(key);
           if (mine === asked.current) blank(error);
         });
       return;
@@ -162,11 +187,12 @@ export function OutfitPanel(
         if (mine === asked.current) put(answer.model);
       })
       .catch(blank);
-  }, [bodies, loadCharacter, loadWorn, onStage]);
+  }, [bodies, character, loadCharacter, loadWorn, onStage]);
 
   // Redrawn every time the outfit changes — including for the empty one the view opens on,
-  // which is the bare character. Keyed on the outfit's name rather than on the object, so an
-  // outfit reassembled piece by piece into the same thing is not read out of the game twice.
+  // which is the bare character — and every time *she* does. Keyed on the outfit's name rather
+  // than on the object, so an outfit reassembled piece by piece into the same thing is not read
+  // out of the game twice.
   useEffect(() => {
     dress(pieces, key);
     // `pieces` is what `key` names, and the key is the identity that matters: two lists holding
@@ -202,6 +228,10 @@ export function OutfitPanel(
           : null}
         <p className="mog-note muted" role="status" id="outfit-note">{pane.note}</p>
       </div>
+      {/* Under the picture and above the clothes, which is the order the two questions come in:
+          this is the body, and everything below it is what goes on the body. Shut, because a
+          reader is here to try things on and the answers already apply to every body drawn. */}
+      <Herself {...herself} />
       <div className="outfit-head">
         <h3>Worn</h3>
         <span className="muted" id="outfit-summary">{outfitSummary(outfit)}</span>

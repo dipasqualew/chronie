@@ -292,6 +292,11 @@ export function App({ payload, settings }: AppProps): ReactNode {
           loadCharacter={desktop.characterModel}
           loadWorn={desktop.wornSet}
           loadGallery={desktop.galleryModels}
+          herself={{
+            load: desktop.characterLook,
+            save: desktop.saveCharacterLook,
+            onError: message,
+          }}
           marks={{
             payload: marks,
             setFavourite: desktop.setTransmogFavourite,

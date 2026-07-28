@@ -11,10 +11,17 @@
 //! ```sh
 //! cargo run --example dump_customization -- "/Applications/World of Warcraft"
 //! cargo run --example dump_customization -- "/Applications/World of Warcraft" 86 87
+//! cargo run --example dump_customization -- "/Applications/World of Warcraft" --questions
 //! ```
 //!
 //! Pass `--fixtures <dir>` instead to read a directory of `<fdid>.db2` files. With no choice
 //! ids it prints the one the app draws.
+//!
+//! `--questions` prints the other half: everything the reader may be asked about this body and
+//! every swatch of each, through [`chronie_desktop_lib::customization::questions`] itself rather
+//! than through a second reading of the same tables. That is what says whether a build still
+//! answers the way `docs/game-files.md` records — thirteen questions whose names read as a
+//! Human's, most of whose swatches have no name at all.
 //!
 //! What right looks like, and each of these rules out something the others do not:
 //!
@@ -56,6 +63,7 @@ const BLIT: u32 = 1;
 
 /// Columns, as this run is what settles them. `skin.rs` carries the same four.
 const ELEMENT_CHOICE: usize = 0;
+const ELEMENT_RELATED: usize = 1;
 const ELEMENT_MATERIAL: usize = 4;
 const MATERIAL_TARGET: usize = 0;
 const MATERIAL_RESOURCE: usize = 1;
@@ -104,13 +112,48 @@ fn main() {
     };
     let files = files.as_ref();
 
-    let wanted: Vec<u32> = args.filter_map(|arg| arg.parse().ok()).collect();
+    let rest: Vec<String> = args.collect();
+    if rest.iter().any(|arg| arg == "--questions") {
+        questions(files);
+        return;
+    }
+
+    let wanted: Vec<u32> = rest.iter().filter_map(|arg| arg.parse().ok()).collect();
     let wanted = if wanted.is_empty() { vec![DEFAULT_SKIN] } else { wanted };
 
     shapes(files);
     let target = layers(files);
     for choice in wanted {
         follow(files, choice, target);
+    }
+}
+
+/// Everything a reader may be asked about this body, and every answer to each.
+///
+/// Through the app's own reader, so what this prints is what the window offers: a question left
+/// out here is one whose swatches drive nothing, and a swatch with no name beside it is one the
+/// game itself does not name — the character creation screen draws those as squares of colour,
+/// and a window over this has to number them.
+fn questions(files: &dyn casc::GameFiles) {
+    let asked = match chronie_desktop_lib::customization::questions(files) {
+        Ok(asked) => asked,
+        Err(error) => {
+            println!("what she may be asked could not be read: {error}");
+            return;
+        }
+    };
+    println!("{} questions about this body:", asked.len());
+    for question in &asked {
+        let named = question.swatches.iter().filter(|swatch| !swatch.name.is_empty()).count();
+        println!(
+            "\n  {:<6} {:?} — {} swatches, {named} of them named",
+            question.id,
+            question.name,
+            question.swatches.len(),
+        );
+        for swatch in &question.swatches {
+            println!("    {:<8} {:?}", swatch.id, swatch.name);
+        }
     }
 }
 
@@ -205,6 +248,23 @@ fn follow(files: &dyn casc::GameFiles, choice: u32, base_target: u32) {
         .filter(|row| row.number(ELEMENT_CHOICE) == choice)
         .map(|row| (row.id(), row.number(ELEMENT_MATERIAL)))
         .collect();
+    // And what some *other* swatch does only when this one is chosen too, which is where a
+    // character's face is and is the answer to "why did that layer stop being painted": an
+    // element is authored per skin, so a layer can belong to a choice and reach only one.
+    let conditional: Vec<(u32, u32, u32)> = elements
+        .rows()
+        .filter(|row| row.number(ELEMENT_RELATED) == choice)
+        .map(|row| {
+            (
+                row.id(),
+                row.number(ELEMENT_CHOICE),
+                row.number(ELEMENT_MATERIAL),
+            )
+        })
+        .collect();
+    for (element, from, material) in &conditional {
+        println!("  element {element:<8} of choice {from:<8} applies only with this one, material {material}");
+    }
     if materials.is_empty() {
         println!("  no element belongs to this choice");
         return;

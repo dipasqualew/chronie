@@ -782,6 +782,16 @@ class Outfit {
   resetCamera(): Promise<void> {
     return this.panel.getByRole("button", { name: "Reset camera" }).click();
   }
+
+  /** Opens the form under her that says who she is, which reads nothing until it is opened. */
+  askWhoSheIs(): Promise<void> {
+    return this.panel.getByText("Who she is").click();
+  }
+
+  /** One question the game asks about her body, by the name the game gives it. */
+  about(question: string): Locator {
+    return this.panel.getByLabel(question);
+  }
 }
 
 /**
@@ -1800,6 +1810,21 @@ const mockDesktop: E2EMock = {
   },
   // The body every set detail falls back to when nothing is worn.
   characterModel: fixtureModel("character.glb"),
+  // And who that body is: what the game's own character creation screen asks about her, and
+  // what has been answered. The names are the fixtures' own — most of the game's real swatches
+  // have none at all, which is the case worth having in front of the window, so the skin tones
+  // here have none either.
+  characterLook: {
+    questions: [
+      {
+        id: 16,
+        name: "Hair Style",
+        swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+      },
+      { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
+    ],
+    picked: [],
+  },
   // The bodies, keyed by the outfit each is wearing: every piece's display id, ascending and
   // comma joined, which is `wornSetKey`. Keying by the whole outfit rather than by a piece of
   // it is the point — it is what lets a step below say which outfit the window actually asked
@@ -3007,6 +3032,28 @@ test("browses the game's transmog sets and dresses the character in them", async
     await outfit.resetCamera();
     await expect(outfit.stage()).toHaveAttribute("data-camera", framed.camera);
     await expect(outfit.stage()).toHaveAttribute("data-target", framed.target);
+  });
+
+  // The body under the clothes. Everything else in this view is what she has on; this is the
+  // one control over who is wearing it, and it is read out of the installed game — the
+  // questions are the game's own character creation screen's, and most of its swatches have no
+  // name, which is why one of these two is numbered.
+  await test.step("who she is can be answered, and is kept", async () => {
+    await outfit.askWhoSheIs();
+    await expect(outfit.about("Hair Style")).toHaveValue("132");
+    await expect(outfit.about("Hair Style").locator("option")).toHaveText(["Loose", "Braided"]);
+    await expect(outfit.about("Skin Color").locator("option"))
+      .toHaveText(["Swatch 1", "Swatch 2"]);
+
+    await outfit.about("Hair Style").selectOption("133");
+
+    // Stored as it is picked rather than behind a button, so what the form shows after a
+    // repaint is what the settings file holds — the same bargain the marks make.
+    await expect(outfit.about("Hair Style")).toHaveValue("133");
+    // And she is drawn again: the body on the stage was a picture of the woman who was there
+    // before, and the window asks the backend for her afresh rather than keeping it.
+    await expect(outfit.canvas()).toBeVisible();
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "1152");
   });
 
   await test.step("the search reaches the collection as well as the set", async () => {
