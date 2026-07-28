@@ -597,6 +597,80 @@ export interface CustomSetsPayload {
   sets: CustomSet[];
 }
 
+/* ---------- the sets the player saved in the game itself ---------- */
+
+/**
+ * One appearance in a set the player saved in game, as `ingamesets::Slot` reads it.
+ *
+ * `slot` is the client's own `TransmogSlot`: 0 head, 1 shoulder, 2 back, 3 chest, 4 body,
+ * 5 tabard, 6 wrist, 7 hand, 8 waist, 9 legs, 10 feet, 11 main hand, 12 off hand. It is the one
+ * number in the whole chain that says which *hand* a one-hander is held in, which is why it
+ * survives all the way here rather than being turned into a place on the way.
+ *
+ * `appearanceId` is an `ItemModifiedAppearance` id — the same number a `CustomSetPiece` carries
+ * as `appearanceId`, and the same number a `TransmogAppearance` carries as
+ * `modifiedAppearanceId`. That one shared number is what lets all three be drawn by one lot of
+ * code.
+ */
+export interface InGameSetSlot {
+  slot: number;
+  appearanceId: number;
+  /** The two things a slot usually has not got. Absent rather than zero — see the migration. */
+  secondaryAppearanceId?: number | null;
+  illusionId?: number | null;
+}
+
+/**
+ * One set the player saved in the game, as `ingamesets::InGameSet` stores it.
+ *
+ * Unlike a `CustomSet`, which arrives whole: this names its appearances and nothing else,
+ * because names and pictures and display ids are the *game's* to say and re-recording them
+ * here would be caching the game's files in a database. So a set can be listed without the
+ * game installed and only opened with it — see `0018_in_game_sets.sql`.
+ */
+export interface InGameSet {
+  /** The client's own id, which survives a rename and is what an edit names the set by. */
+  id: number;
+  /** Empty when the client would not say — which its own API is documented as sometimes doing. */
+  name: string;
+  /** The picture the game shows it under, as a FileDataID, where it names one. */
+  icon?: number | null;
+  /** When the addon last saw this character's wardrobe *differ*, rather than when it looked. */
+  observedAt?: number | null;
+  slots: InGameSetSlot[];
+}
+
+/** What one character was last seen to have saved in game. */
+export interface CharacterInGameSets {
+  /** `Name-Realm`, as everything else keyed by a character in this app is. */
+  character: string;
+  sets: InGameSet[];
+}
+
+/**
+ * Every character's in-game sets.
+ *
+ * Keyed by character even though the game holds the sets against the *account*, because whether
+ * Chronie has ever looked is a fact about a character: an alt nobody has played since the addon
+ * was installed has no entry, and that is the truth rather than an empty wardrobe.
+ */
+export interface InGameSetsPayload {
+  characters: CharacterInGameSets[];
+}
+
+/**
+ * What an in-game set is made of, once the game's files have been asked.
+ *
+ * The same shape as `TransmogSetItemsPayload` minus the set id, and deliberately: it is built by
+ * the same four table walks over the same kind of ids, so the window opens one with the code it
+ * already had for the other.
+ */
+export interface InGameSetAppearancesPayload {
+  appearances: TransmogAppearance[];
+  readCount: number;
+  withheldCount: number;
+}
+
 /* ---------- what somebody says about the game's wardrobe ---------- */
 
 /**
@@ -1227,6 +1301,14 @@ export interface E2EMock {
    * reason the marks are: saving one in the page under test writes here and the browser beside
    * it then holds it, which is the same "write, then repaint from storage" the backend gives. */
   customSets: CustomSetsPayload;
+  /** The sets the player saved in the game. A fixture rather than state: nothing in the app
+   * changes these directly — an edit becomes a request the addon carries out at next login,
+   * so what the window draws is always what the last sync read. */
+  inGameSets: InGameSetsPayload;
+  /** What one of those is made of once the game's files have been asked, keyed by its
+   * appearance ids ascending and joined by commas — the same keying the worn sets use, and for
+   * the same reason: it says which set the window actually asked to open. */
+  inGameSetAppearances: Record<string, InGameSetAppearancesPayload>;
   /** The bare character body, which every set detail opens on. */
   characterModel: string;
   /** What the reader may be asked about her, and what they have answered. State rather than a

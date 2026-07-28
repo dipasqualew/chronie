@@ -24,6 +24,8 @@ import type {
   GalleryKind,
   GalleryPayload,
   IconsPayload,
+  InGameSetAppearancesPayload,
+  InGameSetsPayload,
   InstallResult,
   ItemDetail,
   ItemAppearance,
@@ -152,6 +154,26 @@ export const desktop = {
     mock.transmogMarks.marks = mock.transmogMarks.marks
       .filter((mark) => !(mark.kind === "custom" && mark.id === id));
     return Promise.resolve(structuredClone(mock.customSets));
+  },
+  // The sets the player saved in the *game*, which the addon reports and nothing here writes.
+  // Read once with the rest of the transmog screen: this is a snapshot of what the last sync
+  // found, and it changes when the player changes it in game rather than when anything here
+  // does.
+  inGameSets: (): Promise<InGameSetsPayload> => mock
+    ? Promise.resolve(structuredClone(mock.inGameSets))
+    : invoke<InGameSetsPayload>("in_game_sets"),
+  // And what one of them is made of, which costs the game's files. An in-game set names its
+  // appearances and nothing else — see `0018_in_game_sets.sql` — so this is the hop from ids to
+  // rows, and it is why a set can be listed on a machine without the game and only opened on
+  // one with it.
+  inGameSetAppearances: (appearanceIds: number[]): Promise<InGameSetAppearancesPayload> => {
+    if (!mock) return invoke<InGameSetAppearancesPayload>("in_game_set_appearances", { appearanceIds });
+    // Keyed the way the worn sets are, so a test can say which set the window asked to open
+    // rather than only that it asked for something.
+    const key = [...appearanceIds].sort((left, right) => left - right).join(",");
+    return Promise.resolve(structuredClone(
+      mock.inGameSetAppearances[key] ?? { appearances: [], readCount: 0, withheldCount: 0 },
+    ));
   },
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.

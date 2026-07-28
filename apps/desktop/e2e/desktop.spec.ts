@@ -1802,6 +1802,60 @@ const mockDesktop: E2EMock = {
   // so a fixture holding one would be the one thing on this screen that never had to survive
   // being written. The empty state is worth opening on for its own sake as well.
   customSets: { sets: [] },
+  // And the ones the player saved in the *game*, which start at two, where the reader's own
+  // start at none — and the difference is the point. A saved set is made by the page under
+  // test; an in-game set can only ever arrive from outside it, so a fixture is the only way
+  // this browser is ever populated at all.
+  //
+  // Two characters, because the list is grouped by character and one of them would never show
+  // that. "Nerine-Ravencrest" saves nothing in game, which is the sentence the empty grouping
+  // has to be able to say: read, and found none.
+  inGameSets: {
+    characters: [
+      {
+        character: "Aster-Ravencrest",
+        sets: [
+          {
+            id: 4,
+            name: "Tideglass",
+            icon: 130001,
+            observedAt: 1_769_000_000,
+            slots: [
+              { slot: 0, appearanceId: 71001 },
+              { slot: 1, appearanceId: 71002 },
+            ],
+          },
+          // Named nothing by the client, which its own API is documented as sometimes doing,
+          // and holding nothing — which is a set the player made and has not filled yet.
+          { id: 5, name: "", icon: null, observedAt: null, slots: [] },
+        ],
+      },
+      { character: "Nerine-Ravencrest", sets: [] },
+    ],
+  },
+  // What one of those turns out to be, keyed by the appearance ids the window asks with. The
+  // set holding nothing asks with nothing, which is the empty key — and the backend's real
+  // answer to that is an empty list rather than an error.
+  inGameSetAppearances: {
+    "71001,71002": {
+      readCount: 2,
+      withheldCount: 0,
+      appearances: [
+        {
+          modifiedAppearanceId: 71001, itemId: 30001, name: "Tideglass Crown", appearanceId: 80001,
+          displayType: 0, inventoryType: 1,
+          ...ANY_CLASS_ITEM,
+          displayInfoId: 900001, iconFileDataId: 130001, hasModel: true,
+        },
+        {
+          modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle", appearanceId: 80002,
+          displayType: 1, inventoryType: 3,
+          ...ANY_CLASS_ITEM,
+          displayInfoId: 900002, iconFileDataId: 130002, hasModel: true,
+        },
+      ],
+    },
+  },
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
   // set 205 names it and the install holds no such file, which is the case a row has to
