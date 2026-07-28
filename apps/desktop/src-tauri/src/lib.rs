@@ -1716,6 +1716,57 @@ mod tests {
         assert!(lua_modules > 0, "no Lua modules landed in src/");
     }
 
+    /// An outfit somebody sent has to survive the trip into the game folder, because that file
+    /// is the only way a request ever reaches the addon.
+    ///
+    /// Installing lays the whole folder down again, so the shipped empty module would otherwise
+    /// go over the top of it and every request not yet carried out would be lost — silently,
+    /// and at exactly the moment somebody was setting Chronie up.
+    #[test]
+    fn carries_a_waiting_request_into_the_game_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let waiting = ingamesets::Request {
+            id: 4,
+            name: "Winter Look".into(),
+            icon: Some(133_600),
+            created_at: 10,
+            outcome: None,
+            applied_at: None,
+            set_id: None,
+            slots: vec![ingamesets::Slot {
+                slot: 0,
+                appearance_id: 55,
+                secondary_appearance_id: None,
+                illusion_id: None,
+            }],
+        };
+
+        replace_addon(&retail, &Settings::default(), &[waiting], 20).unwrap();
+
+        let written =
+            fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
+        assert!(written.contains(r#"["name"] = "Winter Look","#), "{written}");
+        assert!(written.contains(r#"["slot"] = 0, ["appearance"] = 55,"#), "{written}");
+        assert_ne!(written.as_bytes(), bundled("src/CustomSetRequests.lua"));
+    }
+
+    /// And an install with nothing waiting still writes a module that loads, rather than the
+    /// shipped one — which is the same file either way, but has to be written by the same code
+    /// path or the empty case is the untested one.
+    #[test]
+    fn writes_a_module_that_asks_for_nothing_when_nothing_is_waiting() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+
+        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+
+        let written =
+            fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
+        assert!(written.contains("ns.customSetRequests = {"), "{written}");
+        assert!(!written.contains(r#"["id"]"#), "{written}");
+    }
+
     /// The setting has to survive the trip into the game folder, because the addon reads it
     /// there and nowhere else.
     #[test]
