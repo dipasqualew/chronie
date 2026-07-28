@@ -33,8 +33,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Keyed on the release profile because the backend tests and the bundle below share
-      # it, so the dependency tree is compiled once here and reused across pushes.
+      # The one cache that decides how long a release takes, and for a while the one the
+      # `check` workflow kept evicting: with debug caches from every branch filling the
+      # repository's ten gigabytes, this was restoring nothing and `tauri build` compiled 635
+      # crates from scratch every time. `check` only writes from main now, which leaves room
+      # for this.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
@@ -67,19 +70,21 @@ jobs:
           $config | ConvertTo-Json -Depth 20 | Set-Content $path
           "signed=$($signed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
-      # The frontend suites are not run again here. jsdom and headless Chromium behave the
-      # same on either operating system, so a second pass on Windows costs the release forty
-      # seconds and tells nobody anything `check` did not already say on the push to main
-      # that started this run.
+      # This job builds and publishes; it does not test. `check` has already run every suite
+      # on the push to main that started this run, and what used to sit here was costing
+      # eleven minutes to repeat it.
       #
-      # The backend is a different matter — paths, the WoW install root and the
-      # SavedVariables folder under it are the half of this app that only Windows exercises,
-      # and this is the only runner that ever does. Release profile on purpose: `tauri build`
-      # below compiles the same dependency tree, and a debug run here would build every crate
-      # a second time for nothing.
-      - name: Test backend
-        run: cargo test --release --manifest-path apps/desktop/src-tauri/Cargo.toml
-
+      # `cargo test --release` used to be defended on the grounds that `tauri build` compiles
+      # the same dependency tree, so the tests came for free. That stopped being true when
+      # the OpenTelemetry dev-dependencies landed: `cargo test` resolves features across
+      # dev-dependencies and `tauri build` does not, so `serde`, `syn`, `tracing`, `url` and
+      # everything downstream of them — which is nearly the whole tree, tauri included — got
+      # a different fingerprint and were compiled twice. 10m44s, then 5m11s, on one runner.
+      #
+      # What went with it is the only Windows coverage this repository had: paths, the
+      # install root, and the SavedVariables folder under it. That is a real gap, but it was
+      # never a gate — it ran after the merge, on the way to a release nobody had to approve.
+      # Somewhere it would gate something is `check`, on the pull request.
       - name: Build signed Windows installer
         working-directory: apps/desktop
         run: bun run tauri build
