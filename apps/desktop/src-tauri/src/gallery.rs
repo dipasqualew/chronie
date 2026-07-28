@@ -40,6 +40,7 @@ use serde_json::Value;
 
 use crate::casc::GameFiles;
 use crate::character::Mannequin;
+use crate::customization::Picked;
 use crate::icons::data_url;
 use crate::worn::{self, Piece};
 
@@ -52,7 +53,7 @@ use crate::worn::{self, Piece};
 /// The order is the caller's, and every row asked for gets an answer, including the ones that
 /// resolve to nothing — a page one row short is a row the window would have to hunt for.
 #[tracing::instrument(name = "gallery.of", skip_all, fields(pieces = pieces.len()))]
-pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
+pub fn of(files: &dyn GameFiles, pieces: &[Piece], picked: &[Picked]) -> Result<Value, String> {
     if pieces.is_empty() {
         return Ok(serde_json::json!({ "models": [] }));
     }
@@ -63,7 +64,7 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece]) -> Result<Value, String> {
     let alone: Vec<&[Piece]> = pieces.iter().map(std::slice::from_ref).collect();
     let worn = worn::each(files, &alone)?;
 
-    let mannequin = Mannequin::standing(files)?;
+    let mannequin = Mannequin::standing(files, picked)?;
     let models: Vec<Value> = pieces
         .iter()
         .zip(worn.iter())
@@ -111,7 +112,7 @@ mod tests {
 
     /// The rows of a page, as `(display id, whether it came back with a body)`.
     fn page(pieces: &[Piece]) -> Vec<(u64, bool)> {
-        rows(&of(&fixture_files(), pieces).unwrap())
+        rows(&of(&fixture_files(), pieces, &[]).unwrap())
     }
 
     fn rows(answer: &Value) -> Vec<(u64, bool)> {
@@ -167,7 +168,7 @@ mod tests {
     #[test]
     fn asks_the_game_nothing_for_an_empty_page() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(of(&DirFiles::new(temp.path()), &[]).unwrap()["models"], serde_json::json!([]));
+        assert_eq!(of(&DirFiles::new(temp.path()), &[], &[]).unwrap()["models"], serde_json::json!([]));
     }
 
     // Each row is the appearance on its own, and the way to see that is to put two on a page that
@@ -179,12 +180,12 @@ mod tests {
         let files = fixture_files();
         let robe = armour(900_012, 3);
         let legs = armour(900_004, 5);
-        let apart = of(&files, &[robe, legs]).unwrap();
+        let apart = of(&files, &[robe, legs], &[]).unwrap();
 
         // What each looks like when it is the only thing asked for, which is what a page row has
         // to be — down to the bytes, because a body is deterministic given what is on it.
         for (which, piece) in [robe, legs].into_iter().enumerate() {
-            let alone = of(&files, &[piece]).unwrap();
+            let alone = of(&files, &[piece], &[]).unwrap();
             assert_eq!(apart["models"][which]["model"], alone["models"][0]["model"]);
         }
     }
@@ -194,6 +195,6 @@ mod tests {
     #[test]
     fn says_so_when_the_body_cannot_be_read() {
         let temp = tempfile::tempdir().unwrap();
-        assert!(of(&DirFiles::new(temp.path()), &[HELM]).is_err());
+        assert!(of(&DirFiles::new(temp.path()), &[HELM], &[]).is_err());
     }
 }

@@ -156,7 +156,7 @@ fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<Drawn, String> {
         ["character"] => Vec::new(),
         _ => return Err(format!("`{what}` is not something to draw")),
     };
-    let answer = character::worn_set_of(files, &pieces)?;
+    let answer = character::worn_set_of(files, &pieces, &[])?;
     let url = answer["model"].as_str().unwrap_or_default();
     let glb = STANDARD
         .decode(url.trim_start_matches("data:model/gltf-binary;base64,"))

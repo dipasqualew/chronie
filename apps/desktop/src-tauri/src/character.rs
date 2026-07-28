@@ -54,7 +54,7 @@ use image::{ImageEncoder, Rgba, RgbaImage};
 use serde_json::Value;
 
 use crate::casc::GameFiles;
-use crate::customization::Customization;
+use crate::customization::{Customization, Picked};
 use crate::glb;
 use crate::icons::{data_url, pixels_of, png_of};
 use crate::m2::{self, Mesh, Model, Paint};
@@ -279,8 +279,8 @@ fn rect_of(section: u32) -> Option<&'static Rect> {
 /// Unlike an appearance's model there is no `null` answer here. Every armour slot in the game
 /// is drawn on this one mesh, so an install that cannot produce it has nothing to fall back to
 /// and the failure is worth reporting rather than showing an empty pane over.
-pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
-    let glb = glb_of(files, None)?;
+pub fn model_of(files: &dyn GameFiles, picked: &[Picked]) -> Result<Value, String> {
+    let glb = glb_of(files, None, picked)?;
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
@@ -297,12 +297,16 @@ pub fn model_of(files: &dyn GameFiles) -> Result<Value, String> {
 /// outfit of no pieces at all is the same answer arrived at the other way, and is what taking
 /// everything off comes to — the bare body is [`model_of`], and the window already holds it.
 #[tracing::instrument(name = "character.worn_set", skip_all, fields(pieces = pieces.len()))]
-pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Result<Value, String> {
+pub fn worn_set_of(
+    files: &dyn GameFiles,
+    pieces: &[crate::worn::Piece],
+    picked: &[Picked],
+) -> Result<Value, String> {
     let worn = crate::worn::of_set(files, pieces)?;
     if worn.is_empty() {
         return Ok(serde_json::json!({ "model": Value::Null }));
     }
-    let glb = glb_of(files, Some(&worn))?;
+    let glb = glb_of(files, Some(&worn), picked)?;
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
@@ -313,8 +317,12 @@ pub fn worn_set_of(files: &dyn GameFiles, pieces: &[crate::worn::Piece]) -> Resu
 ///
 /// One outfit, so the body underneath it is built and thrown away. A gallery wants the body kept
 /// — see [`Mannequin`], which is what this is, held on to.
-pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, String> {
-    Mannequin::standing(files)?.wearing(worn)
+pub fn glb_of(
+    files: &dyn GameFiles,
+    worn: Option<&Worn>,
+    picked: &[Picked],
+) -> Result<Vec<u8>, String> {
+    Mannequin::standing(files, picked)?.wearing(worn)
 }
 
 /// The body every appearance in this app is shown on, with everything about it that no
@@ -354,14 +362,19 @@ pub struct Mannequin<'a> {
 
 impl<'a> Mannequin<'a> {
     /// Reads the body and everything about it that no appearance changes.
+    ///
+    /// `picked` is who she is — the reader's answers to what the character creation screen asks,
+    /// out of the settings file. It belongs here rather than in [`wearing`](Mannequin::wearing)
+    /// because none of it changes with what she has on: her skin, her face, her hair and her
+    /// head are the *body*, and that is the whole thing this type exists to build once.
     #[tracing::instrument(name = "character.mannequin", skip_all)]
-    pub fn standing(files: &'a dyn GameFiles) -> Result<Self, String> {
+    pub fn standing(files: &'a dyn GameFiles, picked: &[Picked]) -> Result<Self, String> {
         let model = Model::parse(&files.read(HUMAN_FEMALE)?)?;
         let skin = model
             .skin_file_data_id()
             .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
         let whole = model.with_skin(&files.read(skin)?)?;
-        let herself = crate::customization::of(files)?;
+        let herself = crate::customization::of(files, picked)?;
 
         let mut base = Atlas::unpainted();
         if let Some(herself) = herself.as_ref() {
@@ -678,7 +691,7 @@ mod tests {
     /// fixture's own customization tables say she is.
     fn worn_mesh(worn: &Worn) -> Mesh {
         let files = fixture_files();
-        let herself = crate::customization::of(&files).unwrap();
+        let herself = crate::customization::of(&files, &[]).unwrap();
         let model = Model::parse(&files.read(HUMAN_FEMALE).unwrap()).unwrap();
         let skin = model.skin_file_data_id().unwrap();
         dressed(
@@ -738,7 +751,7 @@ mod tests {
             crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap()
         });
 
-        let png = Mannequin::standing(&files).unwrap().atlas_png(worn.as_ref()).unwrap();
+        let png = Mannequin::standing(&files, &[]).unwrap().atlas_png(worn.as_ref()).unwrap();
         image::load_from_memory(&png).unwrap().into_rgba8()
     }
 
@@ -755,7 +768,7 @@ mod tests {
     /// The scene the window is handed for one appearance worn on the body.
     fn worn_scene(appearance: Appearance) -> Value {
         let worn = worn_of(appearance);
-        scene(&glb_of(&fixture_files(), Some(&worn)).unwrap())
+        scene(&glb_of(&fixture_files(), Some(&worn), &[]).unwrap())
     }
 
     /// The JSON half of a `.glb`, which is where everything worth asserting on lives.
@@ -828,7 +841,7 @@ mod tests {
         let body = mesh();
         assert!(drawn(&body).contains(&1701), "the glow is one of the parts a bare body draws");
 
-        let scene = scene(&glb_of(&fixture_files(), None).unwrap());
+        let scene = scene(&glb_of(&fixture_files(), None, &[]).unwrap());
         assert_eq!(
             scene["meshes"][0]["primitives"].as_array().unwrap().len(),
             body.parts.len() - 1
@@ -872,10 +885,10 @@ mod tests {
     // is drawn in glTF's default colour, and on a head that reads as a mask.
     #[test]
     fn paints_the_hair_with_the_atlas_of_its_own_rather_than_leaving_it_white() {
-        let herself = crate::customization::of(&fixture_files()).unwrap().expect("a character");
+        let herself = crate::customization::of(&fixture_files(), &[]).unwrap().expect("a character");
         assert_eq!(herself.atlases, vec![(6, 160_007), (19, 160_008)]);
 
-        let scene = scene(&glb_of(&fixture_files(), None).unwrap());
+        let scene = scene(&glb_of(&fixture_files(), None, &[]).unwrap());
         let materials = scene["materials"].as_array().unwrap();
         assert!(
             materials.iter().all(|material| material["pbrMetallicRoughness"]
@@ -999,7 +1012,7 @@ mod tests {
     // The whole module, as the window asks for it: a body with geometry and a picture in it.
     #[test]
     fn hands_the_window_a_body_to_turn_around() {
-        let answer = model_of(&fixture_files()).unwrap();
+        let answer = model_of(&fixture_files(), &[]).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -1149,7 +1162,7 @@ mod tests {
     // picture and still the same mesh.
     #[test]
     fn hands_the_window_a_body_with_one_appearance_on_it() {
-        let answer = worn_set_of(&fixture_files(), &[piece(ROBE)]).unwrap();
+        let answer = worn_set_of(&fixture_files(), &[piece(ROBE)], &[]).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
         let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -1163,12 +1176,12 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_an_appearance_it_cannot_read() {
         for display in [900_900, 404_040] {
-            let answer = worn_set_of(&fixture_files(), &[piece((display, CHESTPIECE.1, 0))]).unwrap();
+            let answer = worn_set_of(&fixture_files(), &[piece((display, CHESTPIECE.1, 0))], &[]).unwrap();
             assert_eq!(answer["model"], Value::Null, "display {display}");
         }
         // And an outfit with nothing in it at all, which is what taking every piece off comes
         // to: the same `null`, and the window falls back to the bare body it already holds.
-        assert_eq!(worn_set_of(&fixture_files(), &[]).unwrap()["model"], Value::Null);
+        assert_eq!(worn_set_of(&fixture_files(), &[], &[]).unwrap()["model"], Value::Null);
     }
 
     /* ---------- wearing the four slots that have geometry ---------- */
@@ -1422,9 +1435,9 @@ mod tests {
         let robe = worn_of(ROBE);
         let helm = worn_of(HELM);
         for (name, written) in [
-            ("character.glb", glb_of(&fixture_files(), None).unwrap()),
-            ("robe.glb", glb_of(&fixture_files(), Some(&robe)).unwrap()),
-            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm)).unwrap()),
+            ("character.glb", glb_of(&fixture_files(), None, &[]).unwrap()),
+            ("robe.glb", glb_of(&fixture_files(), Some(&robe), &[]).unwrap()),
+            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm), &[]).unwrap()),
         ] {
             let committed = std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1447,7 +1460,7 @@ mod tests {
     #[test]
     fn says_so_when_the_install_holds_no_character_model() {
         let temp = tempfile::tempdir().unwrap();
-        let error = glb_of(&DirFiles::new(temp.path()), None).unwrap_err();
+        let error = glb_of(&DirFiles::new(temp.path()), None, &[]).unwrap_err();
         assert!(error.contains("1000764"), "{error}");
     }
 }

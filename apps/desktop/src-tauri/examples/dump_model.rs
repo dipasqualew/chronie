@@ -48,7 +48,7 @@ fn main() {
     let out = args.next().unwrap_or_else(|| usage());
 
     let written = match what.split('/').collect::<Vec<&str>>()[..] {
-        ["character"] => character::glb_of(files.as_ref(), None).map(Some),
+        ["character"] => character::glb_of(files.as_ref(), None, &[]).map(Some),
         // A whole set, walked out of the game's own tables exactly as the window walks it —
         // which is the only way to put the priority table and the draw order in front of real
         // data, since nothing in the test suite is allowed to read an install.
@@ -59,7 +59,7 @@ fn main() {
                     println!("{} pieces", pieces.len());
                     worn::of_set(files.as_ref(), &pieces)
                 })
-                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), &[]))
                 .map(Some)
         }
         ["worn", display, slot] | ["worn", display, slot, _] => {
@@ -72,7 +72,7 @@ fn main() {
                 None => 0,
             };
             worn::of(files.as_ref(), display, slot, worn_in)
-                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn)))
+                .and_then(|worn| character::glb_of(files.as_ref(), Some(&worn), &[]))
                 .map(Some)
         }
         _ => {

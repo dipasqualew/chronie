@@ -1497,6 +1497,11 @@ const chrCustomizationChoice: TableSpec = {
         ["", 5060, 526, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
         ["", 5059, 526, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
         ["", 56653, 8790, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        // The swatches of a question that does nothing. They are this body's, they read, and
+        // no element anywhere names either of them — which is what the game's own eye style
+        // and eyesight questions are, and why a window must not offer a control for them.
+        ["", 54353, 8523, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 54354, 8523, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
         // The other body's, whose option belongs to a ChrModel this app never draws.
         ["", 9001, 9000, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
       ],
@@ -1539,6 +1544,10 @@ const chrCustomizationOption: TableSpec = {
         ["Necklace", 510, 510, 80, 2, 7, 2, 0, 0, 1, 0, 1, 90001],
         ["Face Shape", 526, 526, 80, 2, 9, 2, 0, 0, 1, 0, 1, 90001],
         ["Ears", 8790, 8790, 80, 2, 13, 2, 0, 0, 1, 0, 1, 90001],
+        // A question of hers whose swatches drive nothing. The game asks a body several of
+        // these — an eye style, an eyesight — and the rows are as readable as any above; what
+        // leaves it out of what a reader is offered is that nothing follows from either answer.
+        ["Eye Style", 8523, 8523, 80, 2, 11, 2, 0, 0, 1, 0, 1, 90001],
         // Another body's face shape. Every column of it reads, and the only thing wrong with
         // it is whose it is.
         ["Face Shape", 9000, 9000, 80, 5, 9, 2, 0, 0, 1, 0, 1, 90001],

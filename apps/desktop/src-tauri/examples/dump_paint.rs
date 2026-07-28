@@ -247,7 +247,7 @@ fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) {
 /// Every other line above explains *why*; this is the one that matches what is on screen.
 fn handed_over(files: &dyn GameFiles, worn: Option<&Worn>) {
     println!("\n== the glb the window gets ==\n");
-    let glb = match character::glb_of(files, worn) {
+    let glb = match character::glb_of(files, worn, &[]) {
         Ok(glb) => glb,
         Err(error) => {
             eprintln!("Could not write the character: {error}");
