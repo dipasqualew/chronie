@@ -16,11 +16,18 @@
  * to daggers is a filter rather than a second trip to the game's storage.
  *
  * And then the third way of looking at it: **as pictures of the thing**. An icon is what the game
- * puts in a bag slot and it is 64 pixels of squint; the same look shown worn is what the game's
+ * puts in a bag slot and it is 64 pixels of squint; the same look shown drawn is what the game's
  * own wardrobe shows, and it is the only way to tell two brown chestpieces apart. It is off by
  * default and the page shrinks to a fifth when it is on, because a row of names is a string and a
- * row of models is a character read out of the game's files. `gallery.ts` decides what a page is
+ * row of models is geometry read out of the game's files. `gallery.ts` decides what a page is
  * and where a camera looks; `galleryStage.ts` draws them, all on one graphics context.
+ *
+ * Turned on, the list stops being a list. A row becomes a tile with the picture across the whole
+ * of it and the name, the marks and the rest underneath — because the picture is what the reader
+ * turned this on to look at, and a hundred pixels of it beside a column of text is not looking.
+ * The tile is also **turnable**: dragging across the picture orbits it, through the same one
+ * off-screen context every other tile is drawn through and with nothing running between drags.
+ * `galleryStage.ts` is where that claim is kept.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -28,9 +35,9 @@ import type { ReactNode } from "react";
 
 import { plural } from "./format";
 import {
-  PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted,
+  PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted, turnedBy,
 } from "./gallery";
-import type { Thumbnail } from "./gallery";
+import type { Focus, Thumbnail } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import { NO_MARK_FILTER, tagChoices } from "./marks";
 import type { MarkIndex } from "./marks";
@@ -47,7 +54,9 @@ import {
   KINDS, PAGE, answerKey, filterAppearances, kindOf, shownSummary, wardrobeRow,
 } from "./wardrobe";
 import type { Kind } from "./wardrobe";
-import type { GalleryPayload, TransmogMark, WardrobePayload, WornPiece } from "./types";
+import type {
+  GalleryKind, GalleryPayload, TransmogMark, WardrobePayload, WornPiece,
+} from "./types";
 
 export interface WardrobeListProps {
   /** Whether the reader is looking at the sets instead, which is what keeps this unread. */
@@ -193,7 +202,7 @@ export function WardrobeList(
       .then((payload) => {
         for (const row of payload.models) {
           bodies.set(row.displayInfoId, row.model
-            ? { kind: "model", glb: row.model }
+            ? { kind: "model", glb: row.model, shows: row.kind }
             : { kind: "nothing", note: REASONS.unshowable });
         }
       })
@@ -212,23 +221,34 @@ export function WardrobeList(
   // One graphics context for the whole grid, made the first time a picture is wanted and given
   // back when the reader turns the gallery off. Twenty contexts is more than a browser hands
   // out, which is a grid whose top rows go black as its bottom rows fill in.
-  const stage = useRef<GalleryStage | null>(null);
+  //
+  // **The promise is what is held on to, not the stage.** Making one is asynchronous — the
+  // module it comes out of is imported on demand — so there is a window between "a tile asked
+  // for a picture" and "there is a renderer", and a reader can turn the gallery off inside it.
+  // Disposing whatever had finished being made by then would let a context started in that
+  // window escape with nothing left pointing at it, which is a leak that never shows up as a
+  // leak: the browser just hands out one fewer next time. Awaiting it here disposes the one
+  // that was on its way as surely as the one that had arrived.
   const starting = useRef<Promise<GalleryStage> | null>(null);
   useEffect(() => {
-    if (asModels) return undefined;
-    stage.current?.dispose();
-    stage.current = null;
-    starting.current = null;
-    return undefined;
+    if (!asModels) return undefined;
+    // Fires when the gallery is turned off, and when the view goes away with it left on.
+    return () => {
+      const pending = starting.current;
+      starting.current = null;
+      // A stage that could not be made at all — a machine with no working 3D — is nothing to
+      // give back, and the tiles have already shown what that means.
+      if (pending) void pending.then((made) => made.dispose()).catch(() => undefined);
+    };
   }, [asModels]);
   const paint = useCallback(async (
-    target: HTMLCanvasElement, glb: string, displayType: number,
+    target: HTMLCanvasElement, bytes: Uint8Array, focus: Focus, turn: number,
   ): Promise<void> => {
     // One stage, and one attempt to make one: twenty rows painting at once would otherwise
     // each start a context of their own, which is the thing this exists to avoid.
     starting.current ??= Promise.resolve(createGalleryStage());
-    stage.current = await starting.current;
-    await stage.current.paint(target, glbBytes(glb), focusOf(displayType));
+    const made = await starting.current;
+    await made.paint(target, bytes, focus, turn);
   }, [createGalleryStage]);
 
   /** Every narrowing starts the list again from the top, where the reader is looking. */
@@ -333,7 +353,16 @@ export function WardrobeList(
   );
 }
 
-/** One look, as something to put on: the same row a set draws, with what a set cannot say. */
+/**
+ * One look, as something to put on: the same row a set draws, with what a set cannot say.
+ *
+ * Two shapes, and the switch between them is `body` having arrived. **As a row**, the picture is
+ * a 32-pixel icon and the whole row is one button, because the row is a line of text and putting
+ * the piece on is what a reader opened the list to do. **As a tile**, the picture is the width of
+ * the tile and everything else is underneath it — and the picture is no longer part of the
+ * button, because it has become something to drag. A click that turned out to be a drag would
+ * otherwise put a piece on the character every time somebody looked at the back of a helm.
+ */
 function Look(
   { row, worn, icon, marks, mark, onWear, body, paint }: {
     row: AppearanceRow;
@@ -344,94 +373,185 @@ function Look(
     mark: TransmogMark | undefined;
     onWear: () => void;
     /**
-     * The body wearing this look, when the gallery is on and one has arrived.
+     * The picture of this look, when the gallery is on and one has arrived.
      *
      * `undefined` is the gallery being off, and the row keeps the icon it always had.
      */
     body: Thumbnail | undefined;
-    paint: (target: HTMLCanvasElement, glb: string, displayType: number) => Promise<void>;
+    paint: Paint;
   },
 ): ReactNode {
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
   const source = row.sources[0]!;
+  const shown = body?.kind === "model" ? body : null;
+  /* In the colour the game writes the name in, which is the fastest thing to read in a list of
+     a thousand — and the stylesheet's job rather than an inline style, because the packaged
+     app's CSP drops those. The same arrangement `GameItem` uses. */
+  const name = (
+    <span
+      className="mog-name" data-quality={String(source.quality)}
+      title={`${row.label} · ${qualityLabel(source.quality)}`}
+    >{row.label}</span>
+  );
+  const said = <>
+    {worn ? <span className="chip">worn</span> : null}
+    <MarkControls
+      kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
+    />
+    {source.allowableClass !== 0 && source.allowableClass !== ANY_CLASS
+      ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
+      : null}
+    {row.liftsRestriction
+      ? <span className="chip mog-lifted" title="Another item gives this look to any class">
+        Any class too
+      </span>
+      : null}
+    {/* How many items sell the look. A count and not a way in: a set can afford to name the
+        items behind each of its dozen looks, and a slot holding five thousand cannot. */}
+    {source.itemCount > 1
+      ? <span className="chip muted">{`${source.itemCount} items`}</span>
+      : null}
+    {canWear ? null : <span className="muted">{wanted.note}</span>}
+    <a
+      className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
+      target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
+      aria-label={`${row.label} on Wowhead`}
+    ><LinkOut /></a>
+  </>;
+
+  if (shown) {
+    return (
+      <li className="mog-item mog-tile" data-worn={worn}>
+        <Turnable
+          glb={shown.glb} shows={shown.shows} displayType={row.displayType}
+          label={row.label} paint={paint}
+        />
+        <button
+          type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
+          aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
+        >
+          <span className="badge">{row.slot}</span>
+          {name}
+        </button>
+        <div className="mog-said">{said}</div>
+      </li>
+    );
+  }
+
   return (
     <li className="mog-item" data-worn={worn}>
+      {/* The whole row is one button — picture, slot and name — because putting the piece on is
+          what a reader opened the list to do. */}
       <button
         type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
         aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
       >
-        {/* The picture, which is the icon until a body arrives to take its place. A row whose
-            body has not come yet keeps the icon rather than a gap, so the list does not jump
-            about as twenty of them land. */}
-        {body?.kind === "model"
-          ? <Worn glb={body.glb} displayType={row.displayType} label={row.label} paint={paint} />
-          : <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>}
+        <span className="mog-icon">{icon ? <img src={icon} alt="" /> : null}</span>
         <span className="badge">{row.slot}</span>
-        {/* In the colour the game writes the name in, which is the fastest thing to read in a
-            list of a thousand — and the stylesheet's job rather than an inline style, because
-            the packaged app's CSP drops those. The same arrangement `GameItem` uses. */}
-        <span
-          className="mog-name" data-quality={String(source.quality)}
-          title={`${row.label} · ${qualityLabel(source.quality)}`}
-        >{row.label}</span>
+        {name}
       </button>
-      {worn ? <span className="chip">worn</span> : null}
-      <MarkControls
-        kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
-      />
-      {source.allowableClass !== 0 && source.allowableClass !== ANY_CLASS
-        ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
-        : null}
-      {row.liftsRestriction
-        ? <span className="chip mog-lifted" title="Another item gives this look to any class">
-          Any class too
-        </span>
-        : null}
-      {/* How many items sell the look. A count and not a way in: a set can afford to name the
-          items behind each of its dozen looks, and a slot holding five thousand cannot. */}
-      {source.itemCount > 1
-        ? <span className="chip muted">{`${source.itemCount} items`}</span>
-        : null}
-      {canWear ? null : <span className="muted">{wanted.note}</span>}
-      <a
-        className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
-        target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
-        aria-label={`${row.label} on Wowhead`}
-      ><LinkOut /></a>
+      {said}
     </li>
   );
 }
 
+/** What a tile does to get itself drawn, which is the one thing here that needs a graphics card. */
+type Paint = (
+  target: HTMLCanvasElement, bytes: Uint8Array, focus: Focus, turn: number,
+) => Promise<void>;
+
 /**
- * One row's picture of the character wearing it.
+ * One tile's picture, turnable.
  *
- * A plain canvas, painted once by the grid's one stage and then left alone: what is on it after
- * that is a bitmap, so a page of twenty costs one context and twenty images rather than twenty
- * live scenes. Painting again for the same model would only repeat the picture already there,
- * which is why the effect keys on the `.glb` and not on the render.
+ * A plain canvas painted by the grid's one stage: what is on it between drags is a bitmap, so a
+ * page of twenty costs one context and twenty images rather than twenty live scenes. There is no
+ * animation loop here and no `requestAnimationFrame` — a tile nobody is touching does no work at
+ * all, which is the property that makes twenty of them affordable.
  *
- * A paint that fails leaves the canvas empty rather than the row broken — the name, the slot and
- * the quality are still what the row is for, and a machine with no working 3D at all is a machine
- * where every row of the gallery is one of these.
+ * **A drag is a queue of one.** Pointer moves arrive faster than a render finishes, so the angle
+ * the reader has asked for is written into `wanted` and a single pump drains it. Whatever
+ * arrived while a paint was in flight collapses to the last of them, which is the only one worth
+ * drawing — the alternative is a queue of stale angles the picture works through after the hand
+ * has stopped.
+ *
+ * The bytes are decoded once and kept, because the stage recognises the model it is already
+ * holding by the identity of the array it was handed. A fresh `glbBytes` per frame would parse a
+ * megabyte of `.glb` and re-upload its textures thirty times a second, which is the thing this
+ * whole arrangement exists to avoid.
+ *
+ * A paint that fails leaves whatever was on the canvas rather than breaking the row — the name,
+ * the slot and the quality are still what the row is for, and a machine with no working 3D at
+ * all is a machine where every tile of the gallery is an empty one of these.
  */
-function Worn(
-  { glb, displayType, label, paint }: {
+function Turnable(
+  { glb, shows, displayType, label, paint }: {
     glb: string;
+    shows: GalleryKind;
     displayType: number;
     label: string;
-    paint: (target: HTMLCanvasElement, glb: string, displayType: number) => Promise<void>;
+    paint: Paint;
   },
 ): ReactNode {
   const canvas = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const target = canvas.current;
-    if (!target) return;
-    void paint(target, glb, displayType).catch(() => undefined);
-  }, [glb, displayType, paint]);
+  const bytes = useMemo(() => glbBytes(glb), [glb]);
+  const focus = useMemo(() => focusOf(displayType, shows), [displayType, shows]);
+
+  /** Where the reader has turned this tile to, which outlives any one paint. */
+  const turn = useRef(0);
+  /** The angle asked for and not yet drawn, and whether the pump is already draining it. */
+  const wanted = useRef<number | null>(null);
+  const painting = useRef(false);
+
+  const ask = useCallback((at: number): void => {
+    wanted.current = at;
+    if (painting.current) return;
+    painting.current = true;
+    void (async () => {
+      try {
+        while (wanted.current !== null) {
+          const next = wanted.current;
+          wanted.current = null;
+          const target = canvas.current;
+          if (!target) break;
+          await paint(target, bytes, focus, next);
+        }
+      } catch {
+        // Leaves the picture that was there. See the note above.
+      } finally {
+        painting.current = false;
+      }
+    })();
+  }, [bytes, focus, paint]);
+
+  // The first paint, and any later one caused by the model itself changing. Not by the angle:
+  // the angle lives in a ref precisely so that turning a tile is not a React render.
+  useEffect(() => ask(turn.current), [ask]);
+
+  /** The drag in progress: which pointer, where it went down, and the angle it started from. */
+  const drag = useRef<{ pointer: number; from: number; at: number } | null>(null);
+
   return (
-    <span className="mog-icon mog-worn">
-      <canvas ref={canvas} aria-label={`${label}, worn`} />
+    <span className="mog-shot">
+      <canvas
+        ref={canvas} aria-label={`${label}, drawn`}
+        onPointerDown={(event) => {
+          // Captured, so a drag that leaves the tile keeps turning it rather than stopping at
+          // the edge — twenty tiles side by side means most drags cross one.
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current = { pointer: event.pointerId, from: event.clientX, at: turn.current };
+        }}
+        onPointerMove={(event) => {
+          const started = drag.current;
+          if (!started || started.pointer !== event.pointerId) return;
+          turn.current = turnedBy(
+            started.at, event.clientX - started.from, event.currentTarget.clientWidth,
+          );
+          ask(turn.current);
+        }}
+        onPointerUp={() => { drag.current = null; }}
+        onPointerCancel={() => { drag.current = null; }}
+      />
     </span>
   );
 }

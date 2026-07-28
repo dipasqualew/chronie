@@ -26,6 +26,8 @@ import { desktop, message } from "./bridge";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
 import { QueryView } from "./queryView";
+import { AppearanceModal } from "./appearanceModal";
+import type { AppearanceModalState } from "./appearanceModal";
 import { SegmentModal } from "./segmentModal";
 import type { SegmentModalState } from "./segmentModal";
 import { buildSessions } from "./sessions";
@@ -33,8 +35,10 @@ import { Settings as SettingsView } from "./settings";
 import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
+import { VersionTag } from "./versionTag";
 import type {
-  CustomSetsPayload, DashboardPayload, Segment, Settings, TransmogMarksPayload, TransmogPayload,
+  CustomSetsPayload, DashboardPayload, Release, Segment, Settings, TransmogMarksPayload,
+  TransmogPayload,
 } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
@@ -55,14 +59,19 @@ const DASHBOARD_POLL_MS = 30_000;
 export interface AppProps {
   payload: DashboardPayload;
   settings: Settings;
+  /** Which build is running, or nothing when the backend would not say. */
+  release: Release | null;
 }
 
-export function App({ payload, settings }: AppProps): ReactNode {
+export function App({ payload, settings, release }: AppProps): ReactNode {
   const [segments, setSegments] = useState<Segment[]>(payload.segments || []);
   // Nothing can be collected until the game folder is known, so a first run opens on the one
   // screen that can do anything about it rather than on an empty timeline.
   const [view, setView] = useState<View>(settings.wowPath ? "timeline" : "settings");
   const [showing, setShowing] = useState<SegmentModalState | null>(null);
+  // The one transmog source a reader has clicked through to a picture of, which is nothing
+  // until they do: the tables behind it are the game's largest and are opened on that click.
+  const [drawing, setDrawing] = useState<AppearanceModalState | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [transmog, setTransmog] = useState<TransmogPayload | null>(null);
   const [transmogStatus, setTransmogStatus] = useState("");
@@ -231,6 +240,7 @@ export function App({ payload, settings }: AppProps): ReactNode {
     <div className="wrap">
       <nav className="appbar" aria-label="Application">
         <span className="brand">Chronie</span>
+        <VersionTag release={release} />
         {VIEWS.map((name) => (
           <button
             key={name} id={`${name}-tab`} type="button"
@@ -378,6 +388,16 @@ export function App({ payload, settings }: AppProps): ReactNode {
         })}
         onClose={() => setShowing(null)}
         onEditActivities={setEditing}
+        onShowAppearance={setDrawing}
+      />
+
+      {/* Over the segment rather than instead of it: the reader is looking at one row of a
+          list they are part way through, and closing the picture puts them back on it. */}
+      <AppearanceModal
+        showing={drawing}
+        onClose={() => setDrawing(null)}
+        loadAppearance={desktop.itemAppearances}
+        loadGallery={desktop.galleryModels}
       />
 
       <ActivityEditor

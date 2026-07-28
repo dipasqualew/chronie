@@ -1,5 +1,5 @@
 /**
- * The character, wearing what the reader has assembled, and the list of what that is.
+ * The character, wearing what the reader has assembled, and the rail of what that is.
  *
  * This is the half of the transmog view that never goes away. The sets are browsed beside it
  * and clicking an appearance changes what she has on; the body stays where it is and redraws.
@@ -22,7 +22,7 @@ import { Herself } from "./herselfPanel";
 import type { HerselfProps } from "./herselfPanel";
 import { glbBytes, REASONS, wornSetKey } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
-import { outfitSummary, piecesOf, placeName, wornPieces } from "./outfit";
+import { outfitSummary, piecesOf, wornPieces, wornTip } from "./outfit";
 import type { Outfit } from "./outfit";
 import type {
   CharacterModelPayload, CustomSet, CustomSetPiece, CustomSetsPayload, WornPiece, WornSetPayload,
@@ -53,7 +53,7 @@ export interface OutfitPanelProps {
   loadCharacter: () => Promise<CharacterModelPayload>;
   /** Asks for that body wearing the whole outfit. Passed in so the panel is drivable alone. */
   loadWorn: (pieces: WornPiece[]) => Promise<WornSetPayload>;
-  /** The pictures the worn list draws, out of the cache the browser beside it fills. */
+  /** The pictures the worn rail draws, out of the cache the browser beside it fills. */
   icons: Map<number, string>;
   /** The form under her that says who she is, and the reader's answers as they stand. */
   herself: HerselfProps;
@@ -212,20 +212,53 @@ export function OutfitPanel(
   return (
     <aside className="outfit" id="outfit">
       {/* The stage keeps its height whatever the pane is showing, so a body arriving does not
-          make the list under it jump. */}
+          make the line under it jump. */}
       <div className="outfit-preview" data-state={pane.state}>
-        <div className="outfit-stage" ref={stagePane} />
-        {/* Over the corner of the stage, because it belongs to the picture rather than to the
-            list of clothes under it — and only while there is a picture: a pane showing a
-            sentence because this machine cannot draw 3D has no camera to put back. */}
-        {pane.state === "shown"
-          ? (
-            <button
-              type="button" className="outfit-reset"
-              onClick={() => stage.current?.resetCamera()}
-            >Reset camera</button>
-          )
-          : null}
+        <div className="outfit-body">
+          <div className="outfit-stage" ref={stagePane} />
+          {/* What she has on, **down her side rather than under her**. A row apiece in the
+              panel's own column was the version this replaced, and it took the character's
+              height away exactly as she was being dressed: every piece put on made the picture
+              of her wearing it smaller, and a whole body's worth left the smallest picture of
+              all. Out of the flow, so the twelfth piece costs the stage nothing.
+
+              Pictures only, because a picture is what a reader recognises a hat by. The name,
+              the place and the set it came from are all on the tip — [`wornTip`] — which is
+              what a wardrobe of icons has always kept them on. */}
+          <ul className="outfit-worn" id="outfit-list">
+            {worn.map((piece) => (
+              <li className="outfit-slot" key={piece.place}>
+                {/* The tile is the button: taking it off again is the only thing left to do to
+                    a piece already on her, so there is nothing for a separate control to be
+                    told apart from. The cross the tile grows under the pointer is what says
+                    so before the click. */}
+                <button
+                  type="button" className="outfit-off"
+                  aria-label={`Take off ${piece.row.label}`}
+                  data-tip={wornTip(piece)}
+                  onClick={() => onTakeOff(piece.place)}
+                >
+                  <span className="mog-icon">
+                    {icons.get(piece.row.iconFileDataId)
+                      ? <img src={icons.get(piece.row.iconFileDataId)} alt="" />
+                      : null}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {/* Over the corner of the stage, because it belongs to the picture rather than to
+              the panel under it — and only while there is a picture: a pane showing a
+              sentence because this machine cannot draw 3D has no camera to put back. */}
+          {pane.state === "shown"
+            ? (
+              <button
+                type="button" className="outfit-reset"
+                onClick={() => stage.current?.resetCamera()}
+              >Reset camera</button>
+            )
+            : null}
+        </div>
         <p className="mog-note muted" role="status" id="outfit-note">{pane.note}</p>
       </div>
       {/* Under the picture and above the clothes, which is the order the two questions come in:
@@ -240,35 +273,9 @@ export function OutfitPanel(
           : null}
       </div>
       {/* Only once there is something to save. A form that could do nothing but refuse is worse
-          than no form, and "nothing on yet" is already said by the line under the list. */}
+          than no form, and "nothing on yet" is already said by the line under it. */}
       {worn.length ? <SaveAsSet outfit={outfit} save={save} /> : null}
-      <ul className="outfit-list" id="outfit-list">
-        {worn.map((piece) => (
-          <li className="outfit-slot" key={piece.place}>
-            <span className="mog-icon">
-              {icons.get(piece.row.iconFileDataId)
-                ? <img src={icons.get(piece.row.iconFileDataId)} alt="" />
-                : null}
-            </span>
-            <span className="outfit-where badge">{placeName(piece.place, piece.row)}</span>
-            <span className="outfit-what">
-              {/* The panel is narrow and item names are not, so the name is clipped and the
-                  whole of it is on the row for anyone who wants it. */}
-              <span className="outfit-item" title={piece.row.label}>{piece.row.label}</span>
-              {/* Absent rather than empty for a look picked out of the game at large: there
-                  is no set behind one, and a blank line under every second piece would be a
-                  gap a reader has to work out the meaning of. */}
-              {piece.from ? <span className="muted">{piece.from}</span> : null}
-            </span>
-            <button
-              type="button" className="outfit-off"
-              aria-label={`Take off ${piece.row.label}`}
-              onClick={() => onTakeOff(piece.place)}
-            >Remove</button>
-          </li>
-        ))}
-      </ul>
-      {/* Kept in the tree rather than swapped for the list, so the two cannot both be absent
+      {/* Kept in the tree rather than swapped for the rail, so the two cannot both be absent
           and the reader is never looking at a panel that says nothing at all. */}
       <p className="muted outfit-empty" hidden={worn.length > 0}>
         Every appearance you pick goes on her and stays on while you look for the next one.

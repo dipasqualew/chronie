@@ -1,5 +1,6 @@
 mod activity;
 pub mod achievements;
+pub mod appearances;
 pub mod body;
 pub mod budget;
 pub mod captures;
@@ -212,6 +213,37 @@ struct InstallResult {
 struct AppUpdateResult {
     updated: bool,
     version: String,
+}
+
+/// The rolling release every build is published under, which the updater already points at.
+///
+/// One channel, because there is only one: `dev-release.yml` force-moves the `dev` tag to
+/// whatever last landed on main and replaces that release's assets. When there is ever a
+/// stable channel beside it, this is the thing that stops being a constant.
+const RELEASE_CHANNEL: &str = "dev";
+
+/// Which build of Chronie this is: the channel it was published under and the commit behind it.
+///
+/// There is no version number worth showing — `tauri.conf.json` carries a `0.1.<run number>` that
+/// exists so the updater can compare two builds, and it says nothing to a person about what is in
+/// front of them. The commit does, and it is also the only one of the two that can be looked up
+/// afterwards, which is why both halves end up as links on screen. The whole forty characters
+/// travel; how much of them a reader is shown is the window's business.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Release {
+    channel: &'static str,
+    commit: &'static str,
+}
+
+/// Answers with the release this binary was built as. Baked in at compile time by build.rs,
+/// because a running app has no repository under it to ask.
+#[tauri::command]
+fn release() -> Release {
+    Release {
+        channel: RELEASE_CHANNEL,
+        commit: env!("CHRONIE_COMMIT"),
+    }
 }
 
 fn load_settings(path: &Path) -> Settings {
@@ -587,6 +619,24 @@ async fn gallery_models(
 ) -> Result<Value, String> {
     let who = character_look_of(&state)?;
     read_game_files(&state, move |files| gallery::of(files, &pieces, &who)).await
+}
+
+/// The look a list of items carries, as the three numbers a render is asked for by.
+///
+/// The hop a segment needs and nothing else does. Every other view that draws an appearance
+/// walked out of `ItemAppearance` to reach its rows and already holds these; a segment holds
+/// item ids, because an item id is what the addon can catch at the moment the game says a
+/// transmog source was learned. See [`appearances::of_items`].
+///
+/// Asked when a reader clicks a row rather than when the segment is drawn — a modal listing
+/// thirty sources would otherwise walk three of the game's tables to fill in pictures nobody
+/// asked to see.
+#[tauri::command]
+async fn item_appearances(
+    item_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    read_game_files(&state, move |files| appearances::of_items(files, &item_ids)).await
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -1363,10 +1413,12 @@ pub fn run() {
             save_character_look,
             worn_set,
             gallery_models,
+            item_appearances,
             achievement_details,
             item_details,
             game_icons,
             settings,
+            release,
             choose_wow_path,
             save_wow_path,
             sync_now,
@@ -1489,6 +1541,23 @@ mod tests {
             assert!(!relative.starts_with("spec/"), "{relative} is not part of the addon");
             assert!(!contents.is_empty(), "{relative} was embedded empty");
         }
+    }
+
+    /// build.rs is the only thing that can know the commit, and nothing else in the build would
+    /// notice if it started reporting a branch name, a `git` error message, or the merge commit
+    /// of a pull request. The window turns whatever arrives into a link to GitHub, so the shape
+    /// is the whole of what makes that link work: forty hex characters, or nothing at all.
+    #[test]
+    fn reports_the_commit_it_was_built_from() {
+        let release = release();
+
+        assert_eq!(release.channel, "dev");
+        let commit = release.commit;
+        assert!(
+            commit.is_empty()
+                || (commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit())),
+            "CHRONIE_COMMIT should be a full commit sha or nothing, and was {commit:?}",
+        );
     }
 
     #[test]

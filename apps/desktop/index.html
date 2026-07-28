@@ -141,8 +141,21 @@
 
   /* ---------- app bar ---------- */
 
-  .appbar { display: flex; align-items: center; gap: 6px; margin-bottom: 22px; }
-  .appbar .brand { font-weight: 700; margin-right: auto; letter-spacing: -0.01em; }
+  /* Wrapping, because the bar now carries the build as well as a tab for every view, and the
+     two together clear the narrowest window the app allows by about thirty pixels. That is
+     close enough that a longer channel name or a larger system font would not, and a tab
+     pushed off the right-hand edge is a view with no way into it. */
+  .appbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 6px; margin-bottom: 22px; }
+  .appbar .brand { font-weight: 700; letter-spacing: -0.01em; }
+  /* The build, beside the name it belongs to, and it is the version that holds the tabs off to
+     the right — so a build with no commit to show does not drag the whole bar back with it. */
+  .appbar .version {
+    margin-right: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .appbar .version a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+  .appbar .version a:hover { color: var(--text-primary); }
   .appbar button { border-radius: 999px; padding: 6px 14px; }
 
   header.view-head { margin-bottom: 18px; }
@@ -696,12 +709,16 @@
     .outfit { position: static; height: auto; overflow: visible; }
     .outfit-preview { min-height: 60vh; }
   }
-  /* The stage takes every pixel the panel is not using for the list, and the list scrolls
-     inside the panel rather than pushing the character off the top of it. */
+  /* The stage takes every pixel the panel is not using for the name box and the line under it,
+     and nothing that grows as she is dressed is allowed into this column — see `.outfit-worn`.
+     Two rows: the character, and whatever the pane has to say about her. */
   .outfit-preview {
     display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; gap: 6px;
-    flex: 1 1 auto; min-height: 320px; position: relative;
+    flex: 1 1 auto; min-height: 320px;
   }
+  /* The character and everything drawn over her: the rail of what she has on, and the way back
+     to where the camera started. Both are out of the flow, so neither costs her any height. */
+  .outfit-body { position: relative; justify-self: stretch; width: 100%; height: 100%; min-height: 0; }
   /* Out of the flow rather than in a row of its own, so that offering the way back does not
      cost the character the height the button takes. */
   .outfit-reset {
@@ -741,23 +758,35 @@
     background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
     padding: 3px 8px; cursor: pointer;
   }
-  .outfit-list {
-    list-style: none; margin: 0; padding: 0; display: grid; gap: 3px;
-    flex: 0 1 auto; overflow-y: auto; align-content: start;
+  /* What she has on, down her left. A column of named rows under the stage grew by a row for
+     every piece and took that height out of the character, which is backwards: dressing her is
+     the errand, and it was making the picture of her worse the further it got. So the pieces
+     are over her instead — head downwards in the order the body reads — and a second column of
+     them starts beside the first rather than the rail ever running off the bottom.
+
+     The rail itself does not take the pointer: a drag that starts in the gap between two tiles
+     is a drag on the character behind them, and only the tiles themselves are clicks. */
+  .outfit-worn {
+    position: absolute; inset: 0 auto 0 0; margin: 0; padding: 6px; list-style: none;
+    display: flex; flex-flow: column wrap; align-content: flex-start; gap: 4px;
+    pointer-events: none;
   }
-  .outfit-slot {
-    display: flex; align-items: center; gap: 8px;
-    padding: 5px 6px; border-radius: 8px; background: var(--surface-2);
-  }
-  .outfit-where { flex: none; min-width: 74px; text-align: center; }
-  .outfit-what { display: grid; min-width: 0; line-height: 1.3; }
-  .outfit-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .outfit-what .muted { font-size: 11.5px; }
+  .outfit-slot { pointer-events: auto; }
+  /* The tile is the control, and the cross under the pointer is what says so. Solid behind the
+     picture because it is over a lit 3D scene rather than the panel, and an icon with the
+     character's shoulder showing through it is not an icon. */
   .outfit-off {
-    margin-left: auto; flex: none; border: 0; background: none; padding: 2px 4px;
-    color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+    display: block; position: relative; margin: 0; padding: 0; border: 0;
+    background: none; cursor: pointer;
   }
-  .outfit-off:hover { color: var(--series-1); text-decoration: underline; }
+  .outfit-off .mog-icon { display: block; background: var(--surface-1); }
+  .outfit-off:hover .mog-icon, .outfit-off:focus-visible .mog-icon { border-color: var(--bad); }
+  .outfit-off::after {
+    content: "×"; position: absolute; top: -5px; right: -5px; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--bad); color: var(--surface-0);
+    font-size: 12px; line-height: 15px; text-align: center; opacity: 0;
+  }
+  .outfit-off:hover::after, .outfit-off:focus-visible::after { opacity: 1; }
   .outfit-empty { margin: 0; font-size: 12px; }
   /* The name box that turns what she has on into a set of the reader's own. One row, because
      it is one field and one button; the sentence it answers with wraps under both. */
@@ -909,6 +938,25 @@
 
   #segment-detail { width: min(680px, 94vw); max-height: 86vh; }
   #segment-detail[open] { display: flex; flex-direction: column; }
+  /* Small, because it holds one thing: a picture of one appearance, over the segment the
+     reader is part way through rather than instead of it. */
+  #appearance-detail { width: min(380px, 92vw); }
+  #appearance-detail[open] { display: flex; flex-direction: column; }
+  #appearance-detail .detail-head button { margin-left: auto; }
+  /* The pane the model is drawn in. A fixed shape rather than a fixed height, so a standing
+     character and a sword laid across the frame both have room. */
+  .appearance-stage {
+    width: 100%; aspect-ratio: 3 / 4; background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    /* Turning it is a drag, and the browser reads the same gesture as a scroll otherwise. */
+    touch-action: none; cursor: grab;
+  }
+  .appearance-stage[data-state="empty"] { cursor: default; }
+  .appearance-stage canvas { display: block; }
+  .appearance-hint { margin: 0; padding: 9px 16px; font-size: 12px; text-align: center; }
+  /* Beside the time on a transmog row, and quiet: the row is a name and a link out, and this
+     is a third errand that most readers will not be on. */
+  .appearance-show { padding: 2px 8px; font-size: 11.5px; line-height: 1.5; }
   .detail-head {
     display: flex; align-items: center; gap: 12px;
     padding: 13px 16px; border-bottom: 1px solid var(--border); flex: none;
@@ -1064,18 +1112,44 @@
     /* Icons are stored at 64 pixels and shown at half that, which bilinear scaling suits. */
     object-fit: cover;
   }
-  /* The same frame, at the size a character in it is worth looking at. A 32-pixel square is a
-     bag icon; a body wearing something needs the height, and the rows grow to match rather than
-     the picture being squeezed into the icon's place. */
-  .mog-worn { width: 84px; height: 112px; border-radius: 8px; }
-  .mog-worn canvas { display: block; width: 100%; height: 100%; }
-  /* Wider rows and a grid rather than a column: twenty bodies down one side of the panel is a
-     great deal of scrolling past a great deal of empty space beside them. */
+  /* A tile, which is what a row becomes once there is a picture in it worth looking at.
+     Three-ish across a panel rather than five, because the reader turned this on to see the
+     thing: at 240px a chestpiece was a hundred pixels of woman beside a column of text, and the
+     text is not what they asked for. `auto-fill` rather than a fixed count so a narrow window
+     drops to two and then to one instead of shaving every tile. */
   #wardrobe-list[data-models="true"] .mog-items {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 10px; align-items: start;
   }
-  #wardrobe-list[data-models="true"] .mog-item { align-items: flex-start; }
-  #wardrobe-list[data-models="true"] .mog-pick { align-items: flex-start; }
+  /* Down the tile rather than across it: picture, then name, then everything else. */
+  .mog-tile {
+    flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 6px; padding: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+  }
+  /* The picture, the full width of the tile it is in. A ratio rather than a height so the
+     picture grows with the column instead of leaving a band of background under a tile
+     somebody widened.
+
+     **Square, because the stage draws a square.** `galleryStage.ts` renders into a 256×256
+     buffer and copies it over whole, so a frame of any other shape stretches what is in it —
+     which at 84×112 was a character a third too tall and small enough not to be obvious, and
+     at tile size is a character a third too tall. `contain` is the belt to that braces: the
+     ratio here and the stage's are stated in two files, and if they ever disagree again the
+     picture letterboxes rather than distorting. */
+  .mog-shot {
+    display: block; width: 100%; aspect-ratio: 1; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
+    /* Dragging it turns it, so the pointer says so — and the browser is told not to read the
+       same gesture as a scroll, which on a trackpad it otherwise will. */
+    cursor: grab; touch-action: none;
+  }
+  .mog-shot:active { cursor: grabbing; }
+  .mog-shot canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+  /* The caption. The name is the button, so it keeps the row's underline-on-hover, and the
+     chips and marks sit under it rather than pushing it about. */
+  .mog-tile .mog-pick { flex: none; align-items: center; }
+  .mog-tile .badge { min-width: 0; }
+  .mog-said { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 26px; }
   /* The whole row is one button — picture, slot and name — because putting the piece on is
      what a reader opened the set to do. Pressed means worn. */
   .mog-pick {

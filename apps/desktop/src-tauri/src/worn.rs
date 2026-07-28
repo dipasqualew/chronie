@@ -367,6 +367,21 @@ pub fn held_in(inventory_type: u32) -> Option<u32> {
         .map(|(_, attachment)| *attachment)
 }
 
+/// Whether a slot is something carried rather than something put on.
+///
+/// The eleven armour slots are head through tabard and are exactly the ones [`SLOT_LAYER`]
+/// tabulates, because a slot that paints the body is a slot that has somewhere in the stack to
+/// paint it; everything the game numbers above them is a weapon, a shield, an off-hand or a
+/// thing held in one. So the length of that table *is* the boundary, and keeping the question
+/// here rather than writing `> 10` somewhere else is what stops the two drifting apart.
+///
+/// What turns on it is what a picture of the appearance ought to be. Armour has no geometry to
+/// show — a chestpiece is paint on a body — so the only honest picture is a character wearing
+/// it. A sword is a mesh, and a reader who asked to see a sword wants the sword.
+pub fn held(display_type: u32) -> bool {
+    display_type as usize >= SLOT_LAYER.len()
+}
+
 /// The slot a cape is worn in, and the slot a helm is.
 const BACK: u32 = 9;
 const HEAD: u32 = 0;
@@ -789,7 +804,7 @@ fn hangs_from(display: &Row<'_>, display_type: u32, inventory_type: u32) -> Vec<
 /// One read for a whole outfit. A set with a helm and a pair of shoulders asks this three
 /// questions, and on a real install each of the two tables behind it is a row per model the
 /// client owns.
-struct ModelFiles {
+pub(crate) struct ModelFiles {
     /// Every file each resource names, lowest first — which is the order the fallback leans on:
     /// the client numbers a model's coarser levels of detail above the model itself.
     candidates: HashMap<u32, Vec<u32>>,
@@ -799,7 +814,7 @@ struct ModelFiles {
 
 impl ModelFiles {
     #[tracing::instrument(name = "worn.model_files", skip_all)]
-    fn read(files: &dyn GameFiles) -> Result<Self, String> {
+    pub(crate) fn read(files: &dyn GameFiles) -> Result<Self, String> {
         let table = Db2::parse(files.read(MODEL_FILE_DATA)?)?;
         let mut candidates: HashMap<u32, Vec<u32>> = HashMap::new();
         for row in table.rows() {
@@ -847,7 +862,7 @@ impl ModelFiles {
     ///
     /// Silence means what it means everywhere else here: a model nothing was said about is the
     /// fallback rather than a reject, which is what a weapon and a shield are.
-    fn file(&self, body: &Body, resource: u32, slot: usize) -> Option<u32> {
+    pub(crate) fn file(&self, body: &Body, resource: u32, slot: usize) -> Option<u32> {
         let mut candidates = self.candidates.get(&resource)?.clone();
         // A file modelled for the other shoulder is not a candidate at all, whatever body it is
         // for. A file with no side — every helm, and everything untagged — is one for any.
@@ -879,11 +894,11 @@ pub fn model_file(
 /// One read for a whole outfit, and it answers the three different questions an outfit asks of
 /// this one table — the pictures painted onto the body, the picture on a model that hangs off
 /// it, and the picture on a cape.
-struct TextureFiles(HashMap<u32, Vec<u32>>);
+pub(crate) struct TextureFiles(HashMap<u32, Vec<u32>>);
 
 impl TextureFiles {
     #[tracing::instrument(name = "worn.texture_files", skip_all)]
-    fn read(files: &dyn GameFiles) -> Result<Self, String> {
+    pub(crate) fn read(files: &dyn GameFiles) -> Result<Self, String> {
         let table = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
         let mut named: HashMap<u32, Vec<u32>> = HashMap::new();
         for row in table.rows() {
@@ -905,7 +920,7 @@ impl TextureFiles {
     /// is the one to draw. That is enough for an item's *own* picture, which is what a model and
     /// a cape want; a body texture is the next function, because the table saying which body a
     /// file was painted for is a different one.
-    fn named(&self, resource: u32) -> Option<u32> {
+    pub(crate) fn named(&self, resource: u32) -> Option<u32> {
         self.0.get(&resource)?.first().copied()
     }
 

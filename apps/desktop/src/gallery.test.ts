@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PAGE, focusOf, piecesOf, stillWanted, type Thumbnail } from "./gallery";
+import { PAGE, focusOf, piecesOf, stillWanted, turnedBy, type Thumbnail } from "./gallery";
 import type { AppearanceRow } from "./transmogModal";
 import type { WornPiece } from "./types";
 
@@ -70,7 +70,7 @@ describe("stillWanted", () => {
   // with nothing: an appearance this install can put on nobody answers `null` once, and asking
   // again on every repaint is the whole of a page's cost spent to be told the same thing.
   it.each<[string, Thumbnail]>([
-    ["one already drawn", { kind: "model", glb: "data:model/gltf-binary;base64,AA" }],
+    ["one already drawn", { kind: "model", glb: "data:model/gltf-binary;base64,AA", shows: "worn" }],
     ["one already sent for", { kind: "wanted" }],
     ["one that came back with nothing", { kind: "nothing", note: "no place on her" }],
   ])("leaves out %s", (_, thumbnail) => {
@@ -121,6 +121,59 @@ describe("focusOf", () => {
     ["something the game numbers past every slot", 99],
   ])("frames %s as the whole body", (_, displayType) => {
     expect(focusOf(displayType)).toEqual({ height: 0.5, holds: 1 });
+  });
+
+  // What came back decides, not the slot. A held row is the item's own mesh with no body under
+  // it, so there is no part of a character to point a camera at — and the slot's own framing
+  // would crop a sword to the third of it a chest would have occupied.
+  it("holds all of a picture the backend drew without a body", () => {
+    expect(focusOf(3, "held")).toEqual({ height: 0.5, holds: 1 });
+    expect(focusOf(0, "held")).toEqual({ height: 0.5, holds: 1 });
+  });
+
+  // And the other way round: a slot's framing is what a body gets, which is the default and is
+  // what every caller that says nothing means.
+  it("frames a body by its slot", () => {
+    expect(focusOf(0, "worn")).toEqual(focusOf(0));
+    expect(focusOf(0, "worn").holds).toBeLessThan(1);
+  });
+});
+
+describe("turnedBy", () => {
+  // The rate the whole gesture is: dragging the width of the picture turns the model once
+  // round, so a reader who wants the back of a helm drags half a tile and gets exactly that.
+  it("turns a full circle across the width of the picture", () => {
+    expect(turnedBy(0, 300, 300)).toBeCloseTo(Math.PI * 2);
+    expect(turnedBy(0, 150, 300)).toBeCloseTo(Math.PI);
+  });
+
+  // Measured against the width rather than in pixels, so a tile the reader has made bigger
+  // turns at the same speed under the hand instead of proportionally slower.
+  it("turns the same amount for the same fraction of any width", () => {
+    expect(turnedBy(0, 50, 100)).toBeCloseTo(turnedBy(0, 200, 400));
+  });
+
+  // From where the drag started rather than from zero, which is what lets a reader let go,
+  // take hold again and carry on round instead of snapping back to the front.
+  it("carries on from the angle it started at", () => {
+    expect(turnedBy(Math.PI, 150, 300)).toBeCloseTo(Math.PI * 2);
+  });
+
+  // Both ways, because a reader who has gone too far turns back.
+  it("turns the other way for a drag the other way", () => {
+    expect(turnedBy(0, -150, 300)).toBeCloseTo(-Math.PI);
+  });
+
+  // Unclamped: a third turn is a reader who meant it, and a ceiling at one would stop the model
+  // dead under a hand that was still moving.
+  it("keeps turning past a full circle", () => {
+    expect(turnedBy(0, 900, 300)).toBeCloseTo(Math.PI * 6);
+  });
+
+  // A canvas that has not been laid out yet has no width, and a division by it is every
+  // subsequent angle being `NaN` — which is a picture that goes blank and never comes back.
+  it.each([0, -1])("leaves the angle alone for a picture %s wide", (across) => {
+    expect(turnedBy(1.5, 200, across)).toBe(1.5);
   });
 });
 

@@ -14,7 +14,7 @@
 
 import { wearable } from "./modelPreview";
 import type { AppearanceRow } from "./transmogModal";
-import type { WornPiece } from "./types";
+import type { GalleryKind, WornPiece } from "./types";
 
 /**
  * How many looks are drawn as models at a time.
@@ -29,7 +29,8 @@ export const PAGE = 20;
 /** What a row of a gallery is waiting for, or has. */
 export type Thumbnail =
   | { kind: "wanted" }
-  | { kind: "model"; glb: string }
+  /** `shows` is the backend's word for what the `.glb` holds — a whole body, or the item. */
+  | { kind: "model"; glb: string; shows: GalleryKind }
   | { kind: "nothing"; note: string };
 
 /**
@@ -114,13 +115,35 @@ const FOCUS: Record<number, Focus> = {
 };
 
 /**
- * The framing for one slot, and the whole body for anything else.
+ * The framing for one slot on a body, or the whole of whatever arrived.
  *
- * A weapon falls through to the whole body on purpose: it hangs off a hand, and where that hand
- * is depends on whether she is holding a dagger or a polearm three times her height. Nothing
- * short of measuring the model that arrived can frame that, and the stage frames what it is
- * given rather than guessing here.
+ * `shows` is what the backend drew, and `"held"` short-circuits the table: a weapon, a shield
+ * and an off-hand come back as the item's own mesh with no body under it, so there is no "part
+ * of her the slot is on" to point at — the object *is* the picture, and holding all of it is
+ * the only framing that means anything. The stage measures what it was given, which is what
+ * lets one answer here frame a dagger and a polearm three times a character's height alike.
  */
-export function focusOf(displayType: number): Focus {
+export function focusOf(displayType: number, shows: GalleryKind = "worn"): Focus {
+  if (shows === "held") return WHOLE;
   return FOCUS[displayType] ?? WHOLE;
+}
+
+/** A whole turn, which is what dragging the full width of a picture is worth. */
+const FULL_TURN = Math.PI * 2;
+
+/**
+ * Where a drag has turned a thumbnail to: the angle it started at, plus what the pointer moved.
+ *
+ * A full turn across the width of the picture. That rate is the one thing here worth choosing
+ * rather than inheriting: slower and a reader cannot get round to the back of a helm without
+ * letting go and starting again, faster and the model spins past the side they were aiming for.
+ * The width rather than a fixed number of pixels, so a tile the reader has made larger turns at
+ * the same speed under the hand rather than four times as fast.
+ *
+ * Unbounded on purpose — dragging on round the third time is a reader who meant to, and a
+ * clamp at a full turn would stop the model dead under a hand that was still moving.
+ */
+export function turnedBy(from: number, moved: number, across: number): number {
+  if (across <= 0) return from;
+  return from + (moved / across) * FULL_TURN;
 }

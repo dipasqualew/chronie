@@ -10,10 +10,9 @@ import type { Focus } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
-  CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, MarkSubjectKind,
-  TransmogAppearance, TransmogMark,
-  TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance,
-  WardrobePayload, WornPiece,
+  CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind, MarkSubjectKind,
+  TransmogAppearance, TransmogMark, TransmogMarksPayload, TransmogPayload, TransmogSet,
+  TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload, WornPiece,
 } from "./types";
 
 afterEach(cleanup);
@@ -198,15 +197,22 @@ function fakeStage() {
 /**
  * The one graphics context a gallery is drawn through, faked.
  *
- * What is worth recording is which model went into which row and how it was framed: a helm
- * framed like a whole body is the failure the focus table exists to prevent, and a canvas is a
- * rectangle that says nothing about either.
+ * What is worth recording is which model went into which row, how it was framed and which way
+ * round it was put: a helm framed like a whole body is the failure the focus table exists to
+ * prevent, and a canvas is a rectangle that says nothing about any of it.
+ *
+ * The bytes are kept too, by identity. The real stage recognises the model it is already holding
+ * by the array it was handed and skips the parse — so a window that decoded the `.glb` afresh
+ * for every frame of a drag would re-parse a megabyte thirty times a second and still draw the
+ * right picture. Nothing but the identity of these can tell those two apart.
  */
 function fakeGalleryStage() {
-  const painted: Array<{ label: string; holds: number }> = [];
+  const painted: Array<{ label: string; holds: number; turn: number; glb: Uint8Array }> = [];
   const stage: GalleryStage = {
-    paint: (target: HTMLCanvasElement, _glb: Uint8Array, focus: Focus) => {
-      painted.push({ label: target.getAttribute("aria-label") ?? "", holds: focus.holds });
+    paint: (target: HTMLCanvasElement, glb: Uint8Array, focus: Focus, turn = 0) => {
+      painted.push({
+        label: target.getAttribute("aria-label") ?? "", holds: focus.holds, turn, glb,
+      });
       return Promise.resolve();
     },
     dispose: () => {},
@@ -448,6 +454,7 @@ function view(
   const loadGallery = vi.fn((pieces: WornPiece[]) => Promise.resolve({
     models: pieces.map((piece) => ({
       displayInfoId: piece.displayInfoId,
+      kind: (piece.displayType >= 11 ? "held" : "worn") as GalleryKind,
       model: model(`${piece.displayInfoId} worn`),
     })),
   }));
@@ -499,12 +506,27 @@ async function browseItems(
   return shown;
 }
 
-/** What the outfit list says is on, by slot and item. */
+/**
+ * What the rail beside the character says is on, by slot and item.
+ *
+ * The rail is pictures, so what it says is on its tips: the item in bold and the place it
+ * occupies — with the set it came out of after that — on the line under. This reads them back
+ * out in the order a row used to print them.
+ */
 function worn(): string[] {
+  return wornTips().map((tip) => `${tip.place} ${tip.item}`);
+}
+
+/** The same tips, taken apart: what each piece is, where it is, and where it came from. */
+function wornTips(): { item: string; place: string; from: string }[] {
   const list = document.querySelector("#outfit-list");
   if (!list) return [];
-  return [...list.querySelectorAll(".outfit-slot")].map((slot) =>
-    `${slot.querySelector(".outfit-where")?.textContent} ${slot.querySelector(".outfit-item")?.textContent}`);
+  return [...list.querySelectorAll<HTMLElement>(".outfit-slot [data-tip]")].map((tile) => {
+    const tip = document.createElement("div");
+    tip.innerHTML = tile.dataset.tip ?? "";
+    const [place, from] = (tip.querySelector(".tip-line")?.textContent ?? "").split(" · ");
+    return { item: tip.querySelector("b")?.textContent ?? "", place: place ?? "", from: from ?? "" };
+  });
 }
 
 describe("TransmogView", () => {
@@ -843,7 +865,7 @@ describe("TransmogView", () => {
     ]);
     // And says nothing about a set, because there is no set behind it — the line under the
     // name is where a set's name goes and inventing one would be a line saying nothing.
-    expect(document.querySelector("#outfit-list .outfit-what .muted")).toBeNull();
+    expect(wornTips()).toEqual([{ item: "Coif of the Drowned Star", place: "Head", from: "" }]);
   });
 
   // The reason the browser reads the item's own subclass at all: the game files a staff and a
@@ -950,7 +972,7 @@ describe("the wardrobe as models", () => {
     const { painted } = await showWorn();
     await waitFor(() => expect(painted).toHaveLength(2));
     expect(painted.map((one) => one.label))
-      .toEqual(["Coif of the Drowned Star, worn", "Emberforge Helm, worn"]);
+      .toEqual(["Coif of the Drowned Star, drawn", "Emberforge Helm, drawn"]);
     for (const one of painted) expect(one.holds).toBeLessThan(1);
   });
 
@@ -965,7 +987,7 @@ describe("the wardrobe as models", () => {
 
     fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-0" } });
     await screen.findByText("Coif of the Drowned Star");
-    await waitFor(() => expect(screen.getAllByLabelText(/, worn$/)).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByLabelText(/, drawn$/)).toHaveLength(2));
     expect(loadGallery).toHaveBeenCalledTimes(2);
   });
 
@@ -993,6 +1015,7 @@ describe("the wardrobe as models", () => {
         loadGallery={(pieces) => Promise.resolve({
           models: pieces.map((piece) => ({
             displayInfoId: piece.displayInfoId,
+            kind: "worn" as GalleryKind,
             model: model("worn"),
           })),
         })}
@@ -1005,11 +1028,164 @@ describe("the wardrobe as models", () => {
     fireEvent.click(screen.getByRole("button", { name: "Items" }));
     await waitFor(() => expect(screen.getByLabelText("Kind of appearance")).toBeTruthy());
     fireEvent.click(screen.getByLabelText("Show worn"));
-    await waitFor(() => expect(screen.getAllByLabelText(/, worn$/)).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByLabelText(/, drawn$/)).toHaveLength(2));
 
     fireEvent.click(screen.getByLabelText("Show worn"));
-    await waitFor(() => expect(screen.queryByLabelText(/, worn$/)).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText(/, drawn$/)).toBeNull());
     expect(disposals.count).toBe(1);
+  });
+
+  // Dragging across a picture turns it. The angle is what the stage is told, and it is the only
+  // thing about a turned model a test can see — a canvas draws the same rectangle whichever way
+  // round the thing on it is.
+  it("turns a picture when the reader drags across it", async () => {
+    const { painted } = await showWorn();
+    await waitFor(() => expect(painted.length).toBeGreaterThanOrEqual(2));
+    const picture = screen.getAllByLabelText(/, drawn$/)[0]!;
+    // Laid out, because the turn is a fraction of the picture's width and jsdom measures
+    // everything as zero unless it is told otherwise.
+    Object.defineProperty(picture, "clientWidth", { value: 200, configurable: true });
+    picture.setPointerCapture = () => {};
+
+    expect(painted.at(-1)?.turn).toBe(0);
+    fireEvent.pointerDown(picture, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(picture, { pointerId: 1, clientX: 200 });
+
+    await waitFor(() => expect(painted.at(-1)?.turn).toBeCloseTo(Math.PI));
+    expect(painted.at(-1)?.label).toBe("Coif of the Drowned Star, drawn");
+  });
+
+  // And it keeps turning from where it was let go, rather than snapping back to the front: a
+  // reader gets round to the back of a helm in as many drags as they like.
+  it("carries a second drag on from where the first ended", async () => {
+    const { painted } = await showWorn();
+    await waitFor(() => expect(painted.length).toBeGreaterThanOrEqual(2));
+    const picture = screen.getAllByLabelText(/, drawn$/)[0]!;
+    Object.defineProperty(picture, "clientWidth", { value: 200, configurable: true });
+    picture.setPointerCapture = () => {};
+
+    fireEvent.pointerDown(picture, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(picture, { pointerId: 1, clientX: 200 });
+    await waitFor(() => expect(painted.at(-1)?.turn).toBeCloseTo(Math.PI));
+    fireEvent.pointerUp(picture, { pointerId: 1 });
+
+    fireEvent.pointerDown(picture, { pointerId: 2, clientX: 0 });
+    fireEvent.pointerMove(picture, { pointerId: 2, clientX: 100 });
+    await waitFor(() => expect(painted.at(-1)?.turn).toBeCloseTo(Math.PI * 2));
+  });
+
+  // Every frame of a drag hands the stage the *same* array, which is how the stage knows it is
+  // already holding that model and can skip the parse. Decoding the `.glb` afresh each time
+  // would draw exactly the same picture while parsing a megabyte and re-uploading its textures
+  // for every frame — the difference between turning a thumbnail and turning a live pane, and
+  // invisible in anything but this.
+  it("hands the stage the same bytes for every frame of a drag", async () => {
+    const { painted } = await showWorn();
+    const mine = "Coif of the Drowned Star, drawn";
+    await waitFor(() => expect(painted.some((one) => one.label === mine)).toBe(true));
+    const picture = screen.getAllByLabelText(/, drawn$/)[0]!;
+    Object.defineProperty(picture, "clientWidth", { value: 200, configurable: true });
+    picture.setPointerCapture = () => {};
+    const first = painted.find((one) => one.label === mine)!.glb;
+
+    for (const clientX of [110, 140, 180]) {
+      fireEvent.pointerDown(picture, { pointerId: 1, clientX: 100 });
+      fireEvent.pointerMove(picture, { pointerId: 1, clientX });
+      await waitFor(() => expect(painted.at(-1)?.turn).not.toBe(0));
+    }
+
+    const turned = painted.filter((one) => one.label === mine);
+    expect(turned.length).toBeGreaterThan(1);
+    for (const one of turned) expect(one.glb).toBe(first);
+  });
+
+  // Dragging a picture must not put the piece on the character. The picture is outside the
+  // button once the gallery is on, and this is that arrangement asserted from the outside: the
+  // thing a reader grabs is not the thing a reader clicks.
+  it("does not wear a piece when its picture is dragged", async () => {
+    await showWorn();
+    await waitFor(() => expect(screen.getAllByLabelText(/, drawn$/)).toHaveLength(2));
+    const picture = screen.getAllByLabelText(/, drawn$/)[0]!;
+    Object.defineProperty(picture, "clientWidth", { value: 200, configurable: true });
+    picture.setPointerCapture = () => {};
+
+    fireEvent.pointerDown(picture, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(picture, { pointerId: 1, clientX: 200 });
+    fireEvent.pointerUp(picture, { pointerId: 1 });
+    fireEvent.click(picture);
+
+    const wear = screen.getByRole("button", { name: "Wear Head: Coif of the Drowned Star" });
+    expect(wear.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  // A weapon is drawn as itself rather than on a body, so there is no part of a character to
+  // point a camera at and the whole of what arrived is the picture. The backend says which it
+  // sent and the window frames by that, rather than deciding a second time from the slot.
+  it("holds all of a picture the backend drew without a body", async () => {
+    const { painted } = await showWorn();
+    await waitFor(() => expect(painted.length).toBeGreaterThanOrEqual(2));
+    painted.length = 0;
+
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "held" } });
+    await waitFor(() => expect(painted.length).toBeGreaterThan(0));
+    for (const one of painted) expect(one.holds).toBe(1);
+  });
+
+  // The same, for a reader who turns it off again before the first picture has been drawn.
+  //
+  // Making a stage is asynchronous — the module it comes out of is imported on demand — so
+  // there is a window between a tile asking for a picture and there being a renderer at all,
+  // and it is wide enough to click through. A window that disposed only what had finished
+  // being made would let a context started inside that window escape with nothing pointing at
+  // it, and the failure is invisible: the browser simply hands out one fewer next time, and
+  // the grid starts going black at the top some pages later.
+  it("gives back a context that was still being made when the gallery went off", async () => {
+    const disposals = { count: 0 };
+    // Never settles on its own, which is the window held open: the reader gets to the switch
+    // before the renderer exists.
+    let arrive = (_: GalleryStage) => {};
+    const coming = new Promise<GalleryStage>((resolve) => { arrive = resolve; });
+    await browseItems(view());
+    cleanup();
+
+    render(
+      <TransmogView
+        payload={SETS}
+        status=""
+        loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
+        loadAppearances={(displayTypes) =>
+          Promise.resolve(WARDROBE[displayTypes.join(",")]
+            ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+        loadIcons={() => Promise.resolve({ icons: {} })}
+        loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
+        loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
+        herself={NOT_ASKED}
+        loadGallery={(pieces) => Promise.resolve({
+          models: pieces.map((piece) => ({
+            displayInfoId: piece.displayInfoId,
+            kind: "worn" as GalleryKind,
+            model: model("worn"),
+          })),
+        })}
+        marks={UNMARKED}
+        custom={NO_SETS}
+        createStage={() => fakeStage().stage}
+        createGalleryStage={() => coming}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Items" }));
+    await waitFor(() => expect(screen.getByLabelText("Kind of appearance")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Show worn"));
+    // The tiles are on screen and have asked for their pictures; nothing has been drawn.
+    await waitFor(() => expect(screen.getAllByLabelText(/, drawn$/)).toHaveLength(2));
+
+    fireEvent.click(screen.getByLabelText("Show worn"));
+    await waitFor(() => expect(screen.queryByLabelText(/, drawn$/)).toBeNull());
+    expect(disposals.count).toBe(0);
+
+    // And now it finishes being made, into a window that no longer wants it.
+    arrive({ paint: () => Promise.resolve(), dispose: () => { disposals.count += 1; } });
+    await waitFor(() => expect(disposals.count).toBe(1));
   });
 
   // A page that will not come leaves the list exactly as it was before anybody asked for
@@ -1040,7 +1216,7 @@ describe("the wardrobe as models", () => {
     fireEvent.click(screen.getByLabelText("Show worn"));
 
     expect(await screen.findByText("Coif of the Drowned Star")).toBeTruthy();
-    await waitFor(() => expect(screen.queryByLabelText(/, worn$/)).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText(/, drawn$/)).toBeNull());
   });
 });
 
