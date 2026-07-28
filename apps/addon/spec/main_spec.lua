@@ -1067,6 +1067,22 @@ describe("addon integration", function()
 
             assert.equal("Main.lua", lua[#lua])
         end)
+
+        it("lists source modules alphabetically before Main.lua", function()
+            local actual = {}
+            for _, path in ipairs(loader.tocFiles()) do
+                if path:match("^src/.*%.lua$") then
+                    actual[#actual + 1] = path
+                end
+            end
+            local sorted = {}
+            for index, path in ipairs(actual) do
+                sorted[index] = path
+            end
+            table.sort(sorted)
+
+            assert.same(sorted, actual)
+        end)
     end)
 
     -- Chronie binds no keys, and that is an assertion rather than an omission. The
