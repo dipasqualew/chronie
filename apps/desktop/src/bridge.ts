@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { wornSetKey } from "./modelPreview";
+import { wearable as canBeWorn, wornSetKey } from "./modelPreview";
+import { appearanceRows } from "./transmogModal";
 
 import type {
   AchievementDetail,
@@ -38,6 +39,7 @@ import type {
   QuerySchema,
   Release,
   Segment,
+  SetGalleryPayload,
   SetRequest,
   Settings,
   SyncResult,
@@ -294,6 +296,21 @@ export const desktop = {
       })),
     })
     : invoke<GalleryPayload>("gallery_models", { pieces }),
+  // And a page of the *set* grid, each card worn whole. Ids rather than pieces, because a card
+  // is a name and a count until somebody opens it: what the set is wearing is read by the
+  // backend for the whole page rather than by the window opening a dozen sets to draw one.
+  //
+  // The stub answers each card out of the same map `wornSet` reads, keyed by what the set is
+  // wearing — because that is exactly what a card's picture is, and a fixture that answered
+  // some other body would let a card showing the wrong clothes pass.
+  gallerySets: (setIds: number[]): Promise<SetGalleryPayload> => mock
+    ? Promise.resolve({
+      models: setIds.map((setId) => ({
+        setId,
+        model: mock.wornSets[wornSetKey(mockSetPieces(setId))] ?? null,
+      })),
+    })
+    : invoke<SetGalleryPayload>("gallery_sets", { setIds }),
   // One question, typed by the reader, asked of their own history. The backend refuses
   // anything that is not a read and stops anything that will not finish, so what can come
   // back from here is rows or a sentence about why there are none.
@@ -531,6 +548,41 @@ function mockReceive(advance: (status: WifiReceiveStatus) => void): WifiReceiveS
 /** A set the e2e mock says nothing about, which the real backend would answer for. */
 const emptySet = (setId: number): TransmogSetItemsPayload =>
   ({ setId, appearances: [], readCount: 0, withheldCount: 0 });
+
+/**
+ * What the e2e mock's version of one set is wearing, by the backend's own two rules.
+ *
+ * Worked out here rather than answered from a fixture of its own, because the fixture that
+ * matters is already there: `wornSets` is what the character looks like in a given set of
+ * clothes, and a card's picture is a character in the clothes of one set. Keying into it means
+ * a card and the panel beside it cannot disagree about what wearing a set looks like.
+ *
+ * The rules are `transmog::set_pieces`'s: a row with nowhere on her to go is dropped — see
+ * `canBeWorn`, which is the same reading the rows themselves are drawn from — and a piece the
+ * set names twice is worn once. Nothing collapses two pieces contesting one slot, because
+ * neither does the backend: a robe and a pair of legs are both what the set says, and the
+ * game's own priority table is what settles them.
+ */
+function mockSetPieces(setId: number): WornPiece[] {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const held = mock.transmogItems[setId];
+  if (!held) return [];
+  const worn: WornPiece[] = [];
+  for (const row of appearanceRows(held, "")) {
+    if (canBeWorn(row).kind !== "worn") continue;
+    const piece = {
+      displayInfoId: row.displayInfoId,
+      displayType: row.displayType,
+      inventoryType: row.inventoryType,
+    };
+    const already = worn.some((one) =>
+      one.displayInfoId === piece.displayInfoId
+      && one.displayType === piece.displayType
+      && one.inventoryType === piece.inventoryType);
+    if (!already) worn.push(piece);
+  }
+  return worn;
+}
 
 /** How the e2e mock's wardrobe is keyed: the display types, ascending, joined by commas. */
 const wardrobeKey = (displayTypes: number[]): string =>

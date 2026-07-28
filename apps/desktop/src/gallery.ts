@@ -26,6 +26,21 @@ import type { GalleryKind, WornPiece } from "./types";
  */
 export const PAGE = 20;
 
+/**
+ * How many *sets* are drawn as characters at a time.
+ *
+ * Half of [`PAGE`], and the arithmetic behind the halving is the only thing here worth stating.
+ * A row of the wardrobe is one appearance on a body; a card of the set grid is a dozen, and
+ * every one of them paints into her atlas and may hang geometry off her. The backend shares the
+ * body itself between all of them either way — that is what `gallery.rs` is for — so what a card
+ * costs over a row is the pieces, and a card is about ten times a row's worth of them.
+ *
+ * Twelve rather than two, because the sharing is most of it and because a grid of two cards is
+ * not a grid. It is the number that keeps a page of sets in the same order of magnitude as a
+ * page of the wardrobe, which is what the reader has already been shown is bearable.
+ */
+export const SET_PAGE = 12;
+
 /** What a row of a gallery is waiting for, or has. */
 export type Thumbnail =
   | { kind: "wanted" }
@@ -70,6 +85,21 @@ export function stillWanted(
 }
 
 /**
+ * The same, for a page of the set grid: which of these cards has no picture and none on its way.
+ *
+ * By set rather than by display, because a set *is* the picture — two sets holding the same
+ * clothes are still two cards, and the backend answers per set id. The grid never draws a card
+ * twice on one page, so this is only ever subtracting what an earlier page already fetched;
+ * that it does so at all is what makes scrolling back up free.
+ */
+export function stillWantedSets(
+  setIds: number[],
+  have: ReadonlyMap<number, Thumbnail>,
+): number[] {
+  return [...new Set(setIds)].filter((setId) => !have.has(setId));
+}
+
+/**
  * Where a camera has to look to show one slot on a whole body.
  *
  * A gallery row is a hundred and fifty pixels tall and a character is about two metres of it, so
@@ -94,7 +124,15 @@ export interface Focus {
   holds: number;
 }
 
-const WHOLE: Focus = { height: 0.5, holds: 1 };
+/**
+ * All of whatever arrived, from its middle — which is the framing a set card takes.
+ *
+ * A set is a body's worth of clothes and there is no part of her it is about: the boots are as
+ * much of the answer as the helm, and zooming to any of them would be showing a fraction of the
+ * thing the card is for. This is also what a weapon and a shield get, for the opposite reason —
+ * the object arrives with no body under it and the object is the whole picture.
+ */
+export const WHOLE: Focus = { height: 0.5, holds: 1 };
 
 /**
  * Per `DisplayType`, which is how `ItemAppearance` numbers a slot — 0 head through 10 tabard,

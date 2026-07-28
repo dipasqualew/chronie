@@ -318,6 +318,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           loadCharacter={desktop.characterModel}
           loadWorn={desktop.wornSet}
           loadGallery={desktop.galleryModels}
+          loadSetGallery={desktop.gallerySets}
           herself={{
             load: desktop.characterLook,
             save: desktop.saveCharacterLook,

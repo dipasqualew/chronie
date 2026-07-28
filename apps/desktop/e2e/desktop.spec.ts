@@ -376,6 +376,51 @@ class TransmogView {
     return this.browser.getByRole("checkbox", { name: "Hide what she cannot wear" });
   }
 
+  /** The switch between a grid of names and a grid of the character wearing each set. */
+  asModels(): Locator {
+    return this.browser.getByRole("checkbox", { name: "Show each set worn" });
+  }
+
+  /**
+   * The pictures themselves, one per card, once the sets are drawn worn.
+   *
+   * A canvas carries the set's own name, so the accessibility tree is what finds them — which
+   * is more than the wardrobe's tiles can say for themselves, because a card in this grid is a
+   * named thing and a row of the wardrobe is a look.
+   */
+  bodies(): Locator {
+    return this.browser.locator(".mog-shot canvas");
+  }
+
+  /** The picture on one card, by the set it is of. */
+  body(name: string): Locator {
+    return this.card(name).getByLabel(`${name}, drawn`);
+  }
+
+  /**
+   * How many of those actually have a character on them.
+   *
+   * Counted from the pixels rather than from the elements, for the reason `Wardrobe.painted`
+   * gives: a canvas that was never drawn on is the same rectangle in the DOM as one that was,
+   * and a window handing out a graphics context per card fails silently.
+   */
+  async painted(): Promise<number> {
+    return this.bodies().evaluateAll((canvases) => canvases.filter((canvas) => {
+      const picture = (canvas as HTMLCanvasElement).getContext("2d");
+      if (!picture) return false;
+      const { width, height } = canvas as HTMLCanvasElement;
+      if (!width || !height) return false;
+      const { data } = picture.getImageData(0, 0, width, height);
+      for (let at = 3; at < data.length; at += 4) if (data[at] !== 0) return true;
+      return false;
+    }).length);
+  }
+
+  /** How far down the grid the reader has got, and how much of it a filter left. */
+  count(): Locator {
+    return this.browser.locator("#transmog-count");
+  }
+
   /**
    * The frame every row keeps for its picture, and the pictures that have arrived in them.
    *
@@ -2098,6 +2143,9 @@ const mockDesktop: E2EMock = {
     // pauldrons off again.
     "900001,900002,900012": fixtureModel("worn-helm.glb"),
     "900001,900009,900012": fixtureModel("worn-helm.glb"),
+    // Set 202 worn whole — sandals and gloves, which is all it holds. It is here because the
+    // grid can be drawn as characters now, and every card of it asks for the set it is of.
+    "900004,900005": fixtureModel("robe.glb"),
     // And the two the other half of the browser assembles: a head that belongs to no set at
     // all, and that head with a staff — which is a look no card in the grid could reach.
     "900040": fixtureModel("worn-helm.glb"),
@@ -3300,6 +3348,56 @@ test("browses the game's transmog sets and dresses the character in them", async
     await transmog.search().fill("deepglass");
     await expect(transmog.sets()).toHaveText(["Tideglass Hide"]);
     await transmog.search().fill("");
+    await expect(transmog.sets()).toHaveCount(4);
+  });
+
+  // What a card cannot say in words. A set is a set of clothes and the grid is names, counts
+  // and chips — so this is the switch that draws each card as the character wearing that set,
+  // out of one request for the whole page.
+  //
+  // The backend half is `budget.rs`, which counts what a page of sets costs to build against
+  // the same sets one at a time. This is the half no count can reach: what the window does with
+  // them once they arrive, and whether one graphics context is behind all of them.
+  await test.step("every card can be drawn as the character wearing that set", async () => {
+    await transmog.asModels().check();
+    // Three of the four cards. Set 205's one wearable row names a display the game keeps
+    // encrypted, so this install has nothing to put on her for it — and that card stays the
+    // card it always was rather than becoming an empty frame with an apology in it.
+    await expect(transmog.bodies()).toHaveCount(3);
+    await expect(transmog.body("Emberforge Plate")).toBeVisible();
+    await expect(transmog.card("Duskwoven Shroud").locator(".mog-shot")).toHaveCount(0);
+    await expect(transmog.card("Duskwoven Shroud")).toContainText("2 items");
+    await expect.poll(() => transmog.painted(), { timeout: GALLERY_PATIENCE_MS }).toBe(3);
+  });
+
+  // Turning one, which is what the picture is worth its size for — and the same drag has to
+  // *not* open the set, because the picture sits outside the button that does. A click that
+  // turned out to be a drag would otherwise unfold a set every time somebody looked at a back.
+  await test.step("a card can be turned round without opening the set", async () => {
+    const picture = transmog.body("Emberforge Plate");
+    const before = await pixelsOf(picture);
+    const box = await picture.boundingBox();
+    if (!box) throw new Error("the card has no picture to drag across");
+
+    await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    await expect.poll(async () => await pixelsOf(picture) !== before, {
+      timeout: GALLERY_PATIENCE_MS,
+    }).toBe(true);
+    await expect(transmog.rows("Emberforge Plate")).toHaveCount(0);
+    // And the rest of the grid is untouched: one card turned, not the page redrawn.
+    await expect.poll(() => transmog.painted(), { timeout: GALLERY_PATIENCE_MS }).toBe(3);
+  });
+
+  // And off again, leaving the grid exactly as it was: the pictures are a way of looking at the
+  // sets rather than a mode the browser gets stuck in.
+  await test.step("and the grid goes back to the cards it was", async () => {
+    await expect(transmog.count()).toHaveText("4 sets shown");
+    await transmog.asModels().uncheck();
+    await expect(transmog.bodies()).toHaveCount(0);
     await expect(transmog.sets()).toHaveCount(4);
   });
 

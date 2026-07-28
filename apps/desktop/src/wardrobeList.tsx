@@ -32,7 +32,8 @@
  * turned this on to look at, and a hundred pixels of it beside a column of text is not looking.
  * The tile is also **turnable**: dragging across the picture orbits it, through the same one
  * off-screen context every other tile is drawn through and with nothing running between drags.
- * `galleryStage.ts` is where that claim is kept.
+ * `galleryTile.tsx` is that tile and that context, shared with the set grid beside this list,
+ * and `galleryStage.ts` is where the claim about the context is kept.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -40,15 +41,17 @@ import type { ReactNode } from "react";
 
 import { plural } from "./format";
 import {
-  PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted, turnedBy,
+  PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted,
 } from "./gallery";
-import type { Focus, Thumbnail } from "./gallery";
+import type { Thumbnail } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
+import { Turnable, lazyGalleryStage, useGalleryPaint } from "./galleryTile";
+import type { Paint } from "./galleryTile";
 import { NO_MARK_FILTER, tagChoices } from "./marks";
 import type { MarkIndex } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
-import { REASONS, glbBytes, wearable as canBeWorn } from "./modelPreview";
+import { REASONS, wearable as canBeWorn } from "./modelPreview";
 import { isWorn, onlyWearable } from "./outfit";
 import type { Outfit } from "./outfit";
 import { NO_QUALITIES, indexQualities, loadQualities as loadStore } from "./qualities";
@@ -64,7 +67,7 @@ import {
 } from "./wardrobe";
 import type { Kind } from "./wardrobe";
 import type {
-  GalleryKind, GalleryPayload, QualitiesFile, Quality, TransmogMark, WardrobePayload, WornPiece,
+  GalleryPayload, QualitiesFile, Quality, TransmogMark, WardrobePayload, WornPiece,
 } from "./types";
 
 export interface WardrobeListProps {
@@ -273,38 +276,10 @@ export function WardrobeList(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedKey, look, loadGallery, bodies]);
 
-  // One graphics context for the whole grid, made the first time a picture is wanted and given
-  // back when the reader turns the gallery off. Twenty contexts is more than a browser hands
-  // out, which is a grid whose top rows go black as its bottom rows fill in.
-  //
-  // **The promise is what is held on to, not the stage.** Making one is asynchronous — the
-  // module it comes out of is imported on demand — so there is a window between "a tile asked
-  // for a picture" and "there is a renderer", and a reader can turn the gallery off inside it.
-  // Disposing whatever had finished being made by then would let a context started in that
-  // window escape with nothing left pointing at it, which is a leak that never shows up as a
-  // leak: the browser just hands out one fewer next time. Awaiting it here disposes the one
-  // that was on its way as surely as the one that had arrived.
-  const starting = useRef<Promise<GalleryStage> | null>(null);
-  useEffect(() => {
-    if (!asModels) return undefined;
-    // Fires when the gallery is turned off, and when the view goes away with it left on.
-    return () => {
-      const pending = starting.current;
-      starting.current = null;
-      // A stage that could not be made at all — a machine with no working 3D — is nothing to
-      // give back, and the tiles have already shown what that means.
-      if (pending) void pending.then((made) => made.dispose()).catch(() => undefined);
-    };
-  }, [asModels]);
-  const paint = useCallback(async (
-    target: HTMLCanvasElement, bytes: Uint8Array, focus: Focus, turn: number,
-  ): Promise<void> => {
-    // One stage, and one attempt to make one: twenty rows painting at once would otherwise
-    // each start a context of their own, which is the thing this exists to avoid.
-    starting.current ??= Promise.resolve(createGalleryStage());
-    const made = await starting.current;
-    await made.paint(target, bytes, focus, turn);
-  }, [createGalleryStage]);
+  // One graphics context for the whole grid, held only while the reader is looking at pictures
+  // — see `galleryTile.tsx`, which is where that lifetime is kept and which the set grid beside
+  // this one shares.
+  const paint = useGalleryPaint(asModels, createGalleryStage);
 
   /** Every narrowing starts the list again from the top, where the reader is looking. */
   const narrow = (change: () => void): void => {
@@ -497,7 +472,7 @@ function Look(
     return (
       <li className="mog-item mog-tile" data-worn={worn}>
         <Turnable
-          glb={shown.glb} shows={shown.shows} displayType={row.displayType}
+          glb={shown.glb} focus={focusOf(row.displayType, shown.shows)}
           label={row.label} paint={paint}
         />
         <button
@@ -529,106 +504,6 @@ function Look(
   );
 }
 
-/** What a tile does to get itself drawn, which is the one thing here that needs a graphics card. */
-type Paint = (
-  target: HTMLCanvasElement, bytes: Uint8Array, focus: Focus, turn: number,
-) => Promise<void>;
-
-/**
- * One tile's picture, turnable.
- *
- * A plain canvas painted by the grid's one stage: what is on it between drags is a bitmap, so a
- * page of twenty costs one context and twenty images rather than twenty live scenes. There is no
- * animation loop here and no `requestAnimationFrame` — a tile nobody is touching does no work at
- * all, which is the property that makes twenty of them affordable.
- *
- * **A drag is a queue of one.** Pointer moves arrive faster than a render finishes, so the angle
- * the reader has asked for is written into `wanted` and a single pump drains it. Whatever
- * arrived while a paint was in flight collapses to the last of them, which is the only one worth
- * drawing — the alternative is a queue of stale angles the picture works through after the hand
- * has stopped.
- *
- * The bytes are decoded once and kept, because the stage recognises the model it is already
- * holding by the identity of the array it was handed. A fresh `glbBytes` per frame would parse a
- * megabyte of `.glb` and re-upload its textures thirty times a second, which is the thing this
- * whole arrangement exists to avoid.
- *
- * A paint that fails leaves whatever was on the canvas rather than breaking the row — the name,
- * the slot and the quality are still what the row is for, and a machine with no working 3D at
- * all is a machine where every tile of the gallery is an empty one of these.
- */
-function Turnable(
-  { glb, shows, displayType, label, paint }: {
-    glb: string;
-    shows: GalleryKind;
-    displayType: number;
-    label: string;
-    paint: Paint;
-  },
-): ReactNode {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const bytes = useMemo(() => glbBytes(glb), [glb]);
-  const focus = useMemo(() => focusOf(displayType, shows), [displayType, shows]);
-
-  /** Where the reader has turned this tile to, which outlives any one paint. */
-  const turn = useRef(0);
-  /** The angle asked for and not yet drawn, and whether the pump is already draining it. */
-  const wanted = useRef<number | null>(null);
-  const painting = useRef(false);
-
-  const ask = useCallback((at: number): void => {
-    wanted.current = at;
-    if (painting.current) return;
-    painting.current = true;
-    void (async () => {
-      try {
-        while (wanted.current !== null) {
-          const next = wanted.current;
-          wanted.current = null;
-          const target = canvas.current;
-          if (!target) break;
-          await paint(target, bytes, focus, next);
-        }
-      } catch {
-        // Leaves the picture that was there. See the note above.
-      } finally {
-        painting.current = false;
-      }
-    })();
-  }, [bytes, focus, paint]);
-
-  // The first paint, and any later one caused by the model itself changing. Not by the angle:
-  // the angle lives in a ref precisely so that turning a tile is not a React render.
-  useEffect(() => ask(turn.current), [ask]);
-
-  /** The drag in progress: which pointer, where it went down, and the angle it started from. */
-  const drag = useRef<{ pointer: number; from: number; at: number } | null>(null);
-
-  return (
-    <span className="mog-shot">
-      <canvas
-        ref={canvas} aria-label={`${label}, drawn`}
-        onPointerDown={(event) => {
-          // Captured, so a drag that leaves the tile keeps turning it rather than stopping at
-          // the edge — twenty tiles side by side means most drags cross one.
-          event.currentTarget.setPointerCapture(event.pointerId);
-          drag.current = { pointer: event.pointerId, from: event.clientX, at: turn.current };
-        }}
-        onPointerMove={(event) => {
-          const started = drag.current;
-          if (!started || started.pointer !== event.pointerId) return;
-          turn.current = turnedBy(
-            started.at, event.clientX - started.from, event.currentTarget.clientWidth,
-          );
-          ask(turn.current);
-        }}
-        onPointerUp={() => { drag.current = null; }}
-        onPointerCancel={() => { drag.current = null; }}
-      />
-    </span>
-  );
-}
-
 /** The kinds in the order the picker offers them, under the headings they belong to. */
 function groups(): Array<{ name: string; kinds: Kind[] }> {
   const groups: Array<{ name: string; kinds: Kind[] }> = [];
@@ -639,16 +514,6 @@ function groups(): Array<{ name: string; kinds: Kind[] }> {
   }
   return groups;
 }
-
-/**
- * The real stage, loaded the first time a reader asks to see one.
- *
- * three.js and its loader are most of this app's JavaScript, and the same import the outfit pane
- * makes: a reader who never opens the gallery never downloads it, and one who has already opened
- * the pane pays nothing here because the module is already in memory.
- */
-const lazyGalleryStage = (): Promise<GalleryStage> =>
-  import("./galleryStage").then((stage) => stage.createGalleryStage());
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
