@@ -70,7 +70,7 @@ fn main() {
         .next()
         .and_then(|id| id.parse().ok())
         .unwrap_or(HUMAN_FEMALE);
-    let read = |fdid: u32| -> Vec<u8> {
+    let read = |fdid: u32| -> std::sync::Arc<Vec<u8>> {
         files.read(fdid).unwrap_or_else(|error| {
             eprintln!("Could not read {fdid}: {error}");
             std::process::exit(1);

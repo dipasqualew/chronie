@@ -15,6 +15,7 @@
 //! rather than in a block of their own. [`Db2::parse_with_text_columns`] reads those.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// How a column was stored. The numbering is the file's, not ours.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -123,7 +124,11 @@ struct Section {
 
 /// A parsed DB2 table.
 pub struct Db2 {
-    data: Vec<u8>,
+    /// The file itself, shared with whatever else is reading it: a table is parsed straight
+    /// out of the bytes the storage handed over, and those bytes may be the ones
+    /// [`crate::casc::Remembered`] is keeping so that the next click does not inflate them
+    /// again.
+    data: Arc<Vec<u8>>,
     record_size: usize,
     /// Which column holds the row id, when it is stored inside the row.
     id_column: usize,
@@ -166,7 +171,7 @@ struct RawSection {
 
 impl Db2 {
     /// Parses a DB2 file of fixed-size records, which is every table but one.
-    pub fn parse(data: Vec<u8>) -> Result<Self, String> {
+    pub fn parse(data: Arc<Vec<u8>>) -> Result<Self, String> {
         Self::parse_with_text_columns(data, &[])
     }
 
@@ -182,7 +187,10 @@ impl Db2 {
     ///
     /// Naming them for a table of fixed-size records changes nothing.
     #[tracing::instrument(name = "db2.parse", skip_all, fields(bytes = data.len()))]
-    pub fn parse_with_text_columns(data: Vec<u8>, text_columns: &[usize]) -> Result<Self, String> {
+    pub fn parse_with_text_columns(
+        data: Arc<Vec<u8>>,
+        text_columns: &[usize],
+    ) -> Result<Self, String> {
         if data.len() < 204 || &data[0..4] != b"WDC5" {
             return Err("Not a WDC5 table; this build of the game is not supported.".into());
         }
@@ -1081,13 +1089,13 @@ mod tests {
 
     #[test]
     fn refuses_a_file_that_is_not_a_wdc5_table() {
-        let mut bytes = fixture_files().read(TRANSMOG_SET).unwrap();
+        let mut bytes = fixture_files().read(TRANSMOG_SET).unwrap().to_vec();
         bytes[0..4].copy_from_slice(b"WDC4");
-        let error = Db2::parse(bytes).err().expect("a WDC4 table is refused");
+        let error = Db2::parse(Arc::new(bytes)).err().expect("a WDC4 table is refused");
         assert!(error.contains("WDC5"), "{error}");
 
-        assert!(Db2::parse(Vec::new()).is_err());
-        assert!(Db2::parse(b"WDC5".to_vec()).is_err());
+        assert!(Db2::parse(Arc::new(Vec::new())).is_err());
+        assert!(Db2::parse(Arc::new(b"WDC5".to_vec())).is_err());
     }
 
     // Every prefix of a real table, so a file cut off anywhere is a message rather than a
@@ -1466,7 +1474,8 @@ mod tests {
         ] {
             let whole = fixture_files().read(fdid).unwrap();
             for length in 0..whole.len() {
-                let Ok(table) = Db2::parse_with_text_columns(whole[..length].to_vec(), &sparse::TEXT)
+                let Ok(table) =
+                    Db2::parse_with_text_columns(Arc::new(whole[..length].to_vec()), &sparse::TEXT)
                 else {
                     continue;
                 };
@@ -1482,10 +1491,11 @@ mod tests {
                     }
                 }
             }
-            assert!(
-                Db2::parse_with_text_columns(whole[..whole.len() / 2].to_vec(), &sparse::TEXT)
-                    .is_err()
-            );
+            assert!(Db2::parse_with_text_columns(
+                Arc::new(whole[..whole.len() / 2].to_vec()),
+                &sparse::TEXT
+            )
+            .is_err());
         }
     }
 }

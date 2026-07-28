@@ -77,7 +77,14 @@ fn main() {
         None => subscriber.set_default(),
     };
 
+    // The stack the app has: the storage at the bottom, the counter over it so that a read is
+    // counted where it actually costs something, and what has already been decoded over that.
+    // Held across runs unless `--reopen`, which throws away the memory along with the handle —
+    // the two go together, because what was remembered is a fact about a build.
     let held = (!reopen).then(|| open(&install, &root));
+    let held_counted = held.as_ref().map(|files| budget::Counted::over(files.as_ref()));
+    let held_cache = held_counted.as_ref().map(casc::Remembered::over);
+
     for run in 1..=runs {
         totals.lock().unwrap().clear();
         let started = Instant::now();
@@ -85,15 +92,18 @@ fn main() {
         // Under `--reopen` the open is inside the timed region on purpose: that is what a
         // reader waited for when the window opened the storage afresh for every command.
         let opened_here = held.is_none().then(|| open(&install, &root));
-        let files = held.as_ref().or(opened_here.as_ref()).expect("one of the two");
+        let counted_here = opened_here.as_ref().map(|files| budget::Counted::over(files.as_ref()));
+        let cache_here = counted_here.as_ref().map(casc::Remembered::over);
+        let counted = held_counted.as_ref().or(counted_here.as_ref()).expect("one of the two");
+        let files = held_cache.as_ref().or(cache_here.as_ref()).expect("one of the two");
 
         let opened = started.elapsed();
         // Counted as well as timed, because the numbers `budget.rs` ratchets in CI are counts
         // and this is the only place they can be read off a real install. The counting is a
         // hash map insert per read; the reading back of the `.glb` happens after the clock has
         // been stopped.
-        let (drawn, work) = budget::counting(files.as_ref(), |files| draw(files, &what));
-        let drawn = match drawn {
+        counted.restart();
+        let drawn = match draw(files, &what) {
             Ok(payload) => payload,
             Err(error) => {
                 eprintln!("Could not draw {what}: {error}");
@@ -101,6 +111,7 @@ fn main() {
             }
         };
         let whole = started.elapsed();
+        let work = counted.work();
 
         println!(
             "\n=== run {run}/{runs}  {what}  {whole:?} total, {opened:?} of it opening CASC, \
@@ -111,7 +122,7 @@ fn main() {
         report(&totals.self_time, whole);
         by_file(&totals.by_file);
         drop(totals);
-        counted(&work, &drawn.payload);
+        report_counts(&work, &drawn.payload, files.weight());
     }
 
     if let Some(provider) = provider {
@@ -162,13 +173,15 @@ fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<Drawn, String> {
 /// the same facts as counts — files asked for, files asked for twice, rows walked, and how
 /// much of the geometry anything draws — and they are what `budget.rs` holds still. Printed
 /// here because the fixture body is 152 vertices and only an install has megabytes.
-fn counted(work: &budget::Work, payload: &budget::Payload) {
+fn report_counts(work: &budget::Work, payload: &budget::Payload, remembered: usize) {
     println!(
-        "\nreads {} ({} of them repeats, {:.1} MB decoded), rows walked {}",
+        "\nreads {} ({} of them repeats, {:.1} MB decoded), rows walked {}, \
+         {:.1} MB of decoded files held",
         work.reads,
         work.repeated,
         work.read_bytes as f64 / 1_048_576.0,
         work.rows,
+        remembered as f64 / 1_048_576.0,
     );
     let body = payload.body();
     println!(

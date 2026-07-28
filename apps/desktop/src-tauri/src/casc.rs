@@ -24,7 +24,20 @@ use flate2::read::ZlibDecoder;
 /// directory. Everything above this trait is indifferent to which it got.
 pub trait GameFiles {
     /// Reads the file the client knows as `fdid`, decoded and ready to parse.
-    fn read(&self, fdid: u32) -> Result<Vec<u8>, String>;
+    ///
+    /// Shared rather than owned, because [`Remembered`] hands the same bytes to everything
+    /// that asks for a file it has already decoded — and the largest of those is `ItemSparse`,
+    /// which is 63MB. Nothing above notices: a `&Arc<Vec<u8>>` is still a `&[u8]` wherever one
+    /// is wanted, and the only caller that ever wrote to the bytes it got back is a test.
+    fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String>;
+}
+
+/// A borrowed storage is a storage. Which is what lets one be stacked under something that
+/// owns what it wraps — a [`Remembered`] over files somebody else is holding.
+impl<T: GameFiles + ?Sized> GameFiles for &T {
+    fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String> {
+        (**self).read(fdid)
+    }
 }
 
 /// Game files as a directory of `<fdid>.<ext>`, which is how the tests supply them.
@@ -48,12 +61,12 @@ impl DirFiles {
 }
 
 impl GameFiles for DirFiles {
-    fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+    fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String> {
         let mut error = String::new();
         for extension in FIXTURE_EXTENSIONS {
             let path = self.dir.join(format!("{fdid}.{extension}"));
             match std::fs::read(&path) {
-                Ok(bytes) => return Ok(bytes),
+                Ok(bytes) => return Ok(Arc::new(bytes)),
                 // Only one of the names can be the one that was meant, and nothing here
                 // knows which, so the first is what a failure is reported against.
                 Err(problem) if error.is_empty() => {
@@ -267,7 +280,7 @@ impl CascFiles {
 
 impl GameFiles for CascFiles {
     #[tracing::instrument(name = "casc.read", skip_all, fields(fdid = fdid))]
-    fn read(&self, fdid: u32) -> Result<Vec<u8>, String> {
+    fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String> {
         let variants = self.root.variants(fdid);
         if variants.is_empty() {
             return Err(format!("The build has no file {fdid}."));
@@ -280,7 +293,7 @@ impl GameFiles for CascFiles {
                 continue;
             };
             match self.fetch(&ekey) {
-                Ok(bytes) => return Ok(bytes),
+                Ok(bytes) => return Ok(Arc::new(bytes)),
                 Err(error) => last = error,
             }
         }
@@ -555,16 +568,141 @@ impl<T> Cached<T> {
 /// `weigh_casc` example prints. That is the whole reason the index, the encoding file and the
 /// root are stored the way they are; held in the shapes they were first written in, this was
 /// 1.4GB and holding one would not have been an option.
-pub type OpenStorage = Cached<CascFiles>;
+///
+/// The files that came out of it are kept too — see [`Remembered`], which is the other half of
+/// not doing the same work twice.
+pub type OpenStorage = Cached<Remembered<CascFiles>>;
 
-impl Cached<CascFiles> {
+impl Cached<Remembered<CascFiles>> {
     /// The storage under `install`, which is the folder holding `Data/`.
     ///
     /// Reopened when the launcher has moved the install onto another build, because a handle
     /// is a snapshot of one: root and encoding name the files that build had, and a game
     /// patched while the app sat in the tray would otherwise keep answering about the old one.
-    pub fn files(&self, install: &Path) -> Result<Arc<CascFiles>, String> {
-        self.get(install, CascFiles::is_current, CascFiles::open)
+    /// What was remembered goes with it, for the same reason and by the same act — the bytes
+    /// behind a FileDataID are a fact about a build.
+    pub fn files(&self, install: &Path) -> Result<Arc<Remembered<CascFiles>>, String> {
+        self.get(
+            install,
+            |held, install| held.storage().is_current(install),
+            |install| CascFiles::open(install).map(Remembered::over),
+        )
+    }
+}
+
+/* ---------- what was already decoded ---------- */
+
+/// How much a [`Remembered`] will hold before it starts letting go, in bytes.
+///
+/// 128MB, because of what a click actually reads. Fifty-one files come out of the storage for
+/// one outfit and they are 117MB decoded, but the shape of that is ten files and a long tail:
+/// `ItemSparse` is 63MB of it, the skeleton 16, `humanfemale_hd.m2` 12, and the seven tables
+/// after them 19 between them — 110MB that every click reads and none of which changes. The
+/// forty-one files behind those are the outfit's own textures and models, a megabyte at the
+/// top and mostly far less, and they are the ones that differ per click.
+///
+/// So this is sized to hold the ten and let the tail churn. Larger buys nothing: a wardrobe
+/// has 55,000 appearances and no budget holds their textures. Smaller starts evicting the
+/// ten, and the ten are the whole point.
+const REMEMBERED_BUDGET: usize = 128 * 1024 * 1024;
+
+/// A storage that keeps what it has already decoded, up to a budget.
+///
+/// Every click re-read the same tables: 190ms of a 450ms click was BLTE-inflating files that
+/// had been inflated for the click before. `ItemSparse` alone is 75ms of it. Nothing about
+/// them changes while the game stays on a build, so the second click can have the first
+/// click's bytes.
+///
+/// **Bounded, because the tail is unbounded.** The tables are a fixed set; the textures are
+/// not — a reader browsing a wardrobe walks through tens of thousands of appearances, each
+/// with pictures of its own, and a cache that kept them all would be a leak with a slow fuse.
+/// So there is a budget and the least recently used goes first, which given the shape of what
+/// is read keeps the tables and lets the pictures pass through. See [`REMEMBERED_BUDGET`].
+///
+/// **Handing out `Arc`s rather than copies** is the other half of it: the point of not
+/// inflating `ItemSparse` again is lost if answering from memory copies 63MB instead.
+pub struct Remembered<T> {
+    storage: T,
+    held: Mutex<Held>,
+}
+
+/// The bytes kept, and enough bookkeeping to know which to drop first.
+#[derive(Default)]
+struct Held {
+    /// The bytes themselves, and the tick each was last handed out on.
+    files: HashMap<u32, (Arc<Vec<u8>>, u64)>,
+    bytes: usize,
+    /// A clock that only counts reads, which is all "least recently used" needs to mean here.
+    tick: u64,
+}
+
+impl<T: GameFiles> Remembered<T> {
+    pub fn over(storage: T) -> Self {
+        Self {
+            storage,
+            held: Mutex::new(Held::default()),
+        }
+    }
+
+    /// What is underneath, for the questions only it can answer.
+    pub fn storage(&self) -> &T {
+        &self.storage
+    }
+
+    /// How many bytes of decoded files are being held.
+    pub fn weight(&self) -> usize {
+        self.held.lock().unwrap_or_else(|held| held.into_inner()).bytes
+    }
+}
+
+impl<T: GameFiles> GameFiles for Remembered<T> {
+    fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String> {
+        {
+            let mut held = self.held.lock().unwrap_or_else(|held| held.into_inner());
+            held.tick += 1;
+            let tick = held.tick;
+            if let Some((bytes, last)) = held.files.get_mut(&fdid) {
+                *last = tick;
+                return Ok(Arc::clone(bytes));
+            }
+        }
+        // The lock is not held across the read. Two callers wanting the same uncached file
+        // both inflate it and the second's copy replaces the first's — which costs one
+        // duplicated read and never a wrong answer, and is the trade against every read of
+        // every other file queueing behind the 63MB one.
+        let bytes = self.storage.read(fdid)?;
+
+        let mut held = self.held.lock().unwrap_or_else(|held| held.into_inner());
+        // A file too big to share the budget with anything is handed back without being kept:
+        // remembering it would evict everything else to hold one thing.
+        if bytes.len() <= REMEMBERED_BUDGET {
+            held.tick += 1;
+            let tick = held.tick;
+            if let Some((old, _)) = held.files.insert(fdid, (Arc::clone(&bytes), tick)) {
+                held.bytes -= old.len();
+            }
+            held.bytes += bytes.len();
+            held.evict_down_to(REMEMBERED_BUDGET);
+        }
+        Ok(bytes)
+    }
+}
+
+impl Held {
+    /// Drops the least recently read files until the budget is met again.
+    ///
+    /// A scan per eviction rather than a queue: what is held is tens of files, not thousands —
+    /// the budget is what makes sure of that — and a linear pass over tens of entries is
+    /// nothing against the megabytes being dropped.
+    fn evict_down_to(&mut self, budget: usize) {
+        while self.bytes > budget {
+            let Some((&oldest, _)) = self.files.iter().min_by_key(|(_, (_, last))| *last) else {
+                return;
+            };
+            if let Some((bytes, _)) = self.files.remove(&oldest) {
+                self.bytes -= bytes.len();
+            }
+        }
     }
 }
 
@@ -1386,6 +1524,127 @@ mod tests {
         assert!(cached.get(here, still_current, |_| Err("no Data folder".into())).is_err());
         let opens = std::cell::Cell::new(0);
         assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
+    }
+
+    /* ---------- what was already decoded ---------- */
+
+    /// A storage of files that are as large as they are numbered, which counts what it was
+    /// asked for — so a test can say "that came out of memory" by the count alone, and can ask
+    /// for a file of a chosen size without inventing one.
+    struct Numbered {
+        reads: Mutex<Vec<u32>>,
+    }
+
+    impl Numbered {
+        fn new() -> Self {
+            Self {
+                reads: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn reads(&self) -> Vec<u32> {
+            self.reads.lock().unwrap().clone()
+        }
+    }
+
+    impl GameFiles for Numbered {
+        fn read(&self, fdid: u32) -> Result<Arc<Vec<u8>>, String> {
+            self.reads.lock().unwrap().push(fdid);
+            if fdid == 0 {
+                return Err("no such file".into());
+            }
+            Ok(Arc::new(vec![0u8; fdid as usize]))
+        }
+    }
+
+    #[test]
+    fn decodes_a_file_once_and_hands_the_same_bytes_back_after() {
+        let files = Numbered::new();
+        let remembered = Remembered::over(&files);
+        let first = remembered.read(64).unwrap();
+        let second = remembered.read(64).unwrap();
+        assert_eq!(files.reads(), vec![64], "the second read reached the storage");
+        // The same allocation, not a copy of it — which is the whole point for a 63MB table.
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn keeps_each_file_apart_from_the_others() {
+        let files = Numbered::new();
+        let remembered = Remembered::over(&files);
+        assert_eq!(remembered.read(16).unwrap().len(), 16);
+        assert_eq!(remembered.read(32).unwrap().len(), 32);
+        assert_eq!(remembered.read(16).unwrap().len(), 16);
+        assert_eq!(files.reads(), vec![16, 32]);
+        assert_eq!(remembered.weight(), 48);
+    }
+
+    // A read that found nothing is not an answer worth keeping: an install being patched under
+    // the app can fail a read and succeed at the same one a moment later.
+    #[test]
+    fn remembers_nothing_about_a_file_it_could_not_read() {
+        let files = Numbered::new();
+        let remembered = Remembered::over(&files);
+        assert!(remembered.read(0).is_err());
+        assert!(remembered.read(0).is_err());
+        assert_eq!(files.reads(), vec![0, 0]);
+        assert_eq!(remembered.weight(), 0);
+    }
+
+    // The bound is the whole reason this is safe to leave running: a reader browsing a wardrobe
+    // walks tens of thousands of appearances, each with pictures of its own.
+    #[test]
+    fn lets_go_of_the_least_recently_read_once_it_is_full() {
+        let files = Numbered::new();
+        let remembered = Remembered::over(&files);
+        // Two thirds of the budget each, so the second cannot join the first.
+        let big = (REMEMBERED_BUDGET / 3 * 2) as u32;
+        remembered.read(big).unwrap();
+        remembered.read(big + 1).unwrap();
+        assert!(remembered.weight() <= REMEMBERED_BUDGET, "held past the budget");
+
+        remembered.read(big).unwrap();
+        assert_eq!(
+            files.reads(),
+            vec![big, big + 1, big],
+            "the older file was expected to have been let go of"
+        );
+    }
+
+    // Being read again is what keeps a file: the tables a click reads every time are what the
+    // budget is meant to end up holding, whatever passes through around them.
+    #[test]
+    fn keeps_what_is_read_over_and_over_rather_than_what_arrived_last() {
+        let files = Numbered::new();
+        let remembered = Remembered::over(&files);
+        let half = (REMEMBERED_BUDGET / 2) as u32;
+        // Just under half the budget, so exactly one picture fits beside it and each new
+        // picture has to displace something.
+        let table = half - 8;
+        remembered.read(table).unwrap();
+        for picture in 0..4 {
+            remembered.read(half + picture).unwrap();
+            remembered.read(table).unwrap();
+        }
+        assert_eq!(
+            files.reads().iter().filter(|fdid| **fdid == table).count(),
+            1,
+            "the table was let go of and read again"
+        );
+    }
+
+    // One file larger than the whole budget would evict everything else to hold itself, and
+    // then be evicted by the next thing read. Handed back, not kept.
+    #[test]
+    fn refuses_to_hold_a_file_bigger_than_the_budget() {
+        let files = Numbered::new();
+        let remembered = Remembered::over(&files);
+        remembered.read(16).unwrap();
+        let huge = (REMEMBERED_BUDGET + 1) as u32;
+        assert_eq!(remembered.read(huge).unwrap().len(), huge as usize);
+        assert_eq!(remembered.weight(), 16, "the oversized file was kept anyway");
+        assert_eq!(remembered.read(16).unwrap().len(), 16);
+        assert_eq!(files.reads(), vec![16, huge], "the small file was evicted for it");
     }
 
     /* ---------- encoding ---------- */
