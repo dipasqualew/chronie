@@ -173,18 +173,22 @@ function rowFor(card: HTMLElement, name: string): HTMLElement {
 
 /**
  * A stage that records what it was handed, which is the only thing worth asserting about the
- * 3D pane here: whether a body reached it, and how many times.
+ * 3D pane here: whether a body reached it, how many times, and whether the button over its
+ * corner reached the camera. Where the camera actually ends up is three.js's, and the browser
+ * suite is what drives that.
  */
 function fakeStage() {
   const shown: number[] = [];
+  const resets = { count: 0 };
   const stage: ModelStage = {
     show: (bytes: Uint8Array) => {
       shown.push(bytes.byteLength);
       return Promise.resolve();
     },
+    resetCamera: () => { resets.count += 1; },
     dispose: () => {},
   } as ModelStage;
-  return { stage, shown };
+  return { stage, shown, resets };
 }
 
 /** A `.glb` in a data URL, the shape the backend hands one over in. */
@@ -284,7 +288,7 @@ const UNMARKED = {
  * to a backend and nothing monkey patches one.
  */
 function view(options: { payload?: TransmogPayload | null; marks?: FakeMarks } = {}) {
-  const { stage, shown } = fakeStage();
+  const { stage, shown, resets } = fakeStage();
   // Recorded rather than merely answered: "the same outfit is not read out of the game twice"
   // is a statement about what crossed the bridge, and only the request itself can say it.
   const loadWorn = vi.fn((_pieces: WornPiece[]) =>
@@ -311,7 +315,7 @@ function view(options: { payload?: TransmogPayload | null; marks?: FakeMarks } =
       createStage={() => stage}
     />,
   );
-  return { rendered, loadWorn, loadCharacter, loadSet, loadAppearances, marks, shown };
+  return { rendered, loadWorn, loadCharacter, loadSet, loadAppearances, marks, shown, resets };
 }
 
 /** Opens a set in place, and waits for what it holds to arrive. */
@@ -359,6 +363,18 @@ describe("TransmogView", () => {
     expect(loadWorn).not.toHaveBeenCalled();
     expect(document.querySelector("#outfit-summary")?.textContent)
       .toBe("Nothing on yet. Pick an appearance from any set.");
+  });
+
+  // The way back from a drag that went too far. It is only offered over a stage with
+  // something on it: a pane showing a sentence because the machine has no 3D has no camera
+  // to put back, and a button there would be one that does nothing.
+  it("offers the camera back only once there is something to look at", async () => {
+    const { shown, resets } = view();
+    expect(screen.queryByRole("button", { name: "Reset camera" })).toBeNull();
+
+    await waitFor(() => expect(shown).toHaveLength(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Reset camera" }));
+    expect(resets.count).toBe(1);
   });
 
   it("opens a set in place and lists what the game says it is made of", async () => {
