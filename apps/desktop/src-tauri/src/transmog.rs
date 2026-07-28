@@ -144,6 +144,37 @@ pub mod display_column {
 pub const MODEL_SLOTS: usize = 2;
 pub const MODEL_SLOT_BITS: u32 = 32;
 
+/// Why two sets that look identical are two sets at all.
+///
+/// Read off the sets themselves rather than guessed. Of the 329 clusters a shipping install
+/// holds, 78 are the two factions buying one wardrobe under two names, 61 are one look sold to
+/// several classes, and 180 are a season's set reissued under a new name a patch later.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SameLook {
+    /// Flag bits 2 and 3, which the game sets on one set of a pair and never on both: 435
+    /// sets carry one and 438 the other across the whole table.
+    Faction,
+    /// The same armour drawn for several classes, which the game files as several sets.
+    Class,
+    /// The same look released again, usually a season later and usually renamed.
+    Reissue,
+}
+
+/// A set that is another set's look, named so the one shown can say who else wears it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Alternate {
+    pub id: u32,
+    pub name: String,
+    pub group: String,
+    pub class_mask: u32,
+    pub expansion_id: u32,
+    pub patch_introduced: u32,
+    /// What makes it a separate set despite being the same clothes.
+    pub reason: SameLook,
+}
+
 /// One transmog set, as the window shows it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -166,6 +197,22 @@ pub struct TransmogSet {
     pub patch_introduced: u32,
     /// How many appearances make the set up.
     pub item_count: u32,
+    /// The other sets holding exactly this set's appearances, where this is the one shown.
+    ///
+    /// Empty for all but 329 of the game's sets, and left out of the payload when it is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub alternates: Vec<Alternate>,
+    /// The set this one is shown under, when it is not the one shown. Zero otherwise.
+    ///
+    /// 436 sets of a shipping install carry one. They are still in the payload — the counts
+    /// are about what the game holds, not about what is drawn — and the window leaves them
+    /// out of the grid while still searching their names.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub same_look_as: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// Everything the transmog view needs, in one payload.
@@ -179,11 +226,18 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
 
     // `TransmogSetItem` keys each appearance to its set through the game's relationship
     // column, which the reader exposes as the row's own id — one row per appearance, so
-    // counting rows per set is all the view wants from it.
+    // counting rows per set is all the grid wants from it. What each row *reaches* is the
+    // other thing, and it is what says two sets are the same clothes: see [`same_looks`].
     let items = Db2::parse(files.read(TRANSMOG_SET_ITEM)?)?;
     let mut item_counts: HashMap<u32, u32> = HashMap::new();
+    let mut named_by_set: HashMap<u32, Vec<u32>> = HashMap::new();
     for row in items.rows() {
-        *item_counts.entry(row.number(set_item_column::SET_ID)).or_default() += 1;
+        let set_id = row.number(set_item_column::SET_ID);
+        *item_counts.entry(set_id).or_default() += 1;
+        named_by_set
+            .entry(set_id)
+            .or_default()
+            .push(row.number(set_item_column::MODIFIED_APPEARANCE_ID));
     }
 
     let table = Db2::parse(files.read(TRANSMOG_SET)?)?;
@@ -204,6 +258,8 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
                 ui_order: row.number(set_column::UI_ORDER),
                 patch_introduced: row.number(set_column::PATCH_INTRODUCED),
                 item_count: item_counts.get(&id).copied().unwrap_or(0),
+                alternates: Vec::new(),
+                same_look_as: 0,
             }
         })
         .collect();
@@ -217,6 +273,8 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
             .then(left.id.cmp(&right.id))
     });
 
+    same_looks(files, &named_by_set, &mut sets)?;
+
     // Blizzard encrypts the sets belonging to content it has not shipped, so an install is
     // expected to come up a little short. Saying by how much beats silently showing fewer
     // sets than the game has.
@@ -227,6 +285,146 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
         "declaredCount": declared,
         "withheldCount": declared.saturating_sub(sets.len()),
     }))
+}
+
+/// The two flag bits that say which faction a set was sold to.
+///
+/// Read off a shipping install: 435 sets carry bit 2, 438 carry bit 3, and **not one carries
+/// both** — which is what makes a pair of sets differing only in these two a faction pair
+/// rather than a coincidence.
+const FACTION_FLAGS: u32 = 0b1100;
+
+/// Marks the sets that are another set's clothes, and says which set that is.
+///
+/// **Exactly identical, and nothing looser.** A shipping install holds 4,727 sets with
+/// readable contents and 4,291 distinct looks between them, folded into 329 clusters that
+/// account for 765 sets. What justifies exact matching is the shape of what is left over: of
+/// every pair of sets sharing any appearance at all, 610 are identical and only **four** land
+/// between nine tenths and identical, thirty above three quarters, thirteen above a half.
+/// There is no fuzzy middle to model, so there is no threshold anybody would have to defend —
+/// and a threshold, once introduced, eventually swallows two sets that are genuinely different.
+///
+/// The look is the set of `ItemAppearance` ids the set names, which is the game's own unit of
+/// collection. Reaching them costs one more table than the grid already reads —
+/// `ItemModifiedAppearance`, eleven milliseconds against the six hundred that opening the
+/// game's storage costs — and grouping on the appearances rather than on the items is what
+/// catches the 323 clusters that use different items to sell the same clothes.
+///
+/// The set shown is the earliest: the lowest patch that says anything, then the game's own
+/// ordering, then the id. A season's set is shown as the season it came out in, with its
+/// reissues folded under it.
+///
+/// A set whose appearances this install cannot read at all is left alone. Two of those would
+/// share an empty look, and "these encrypted sets are the same encrypted set" is not something
+/// anybody can know.
+fn same_looks(
+    files: &dyn GameFiles,
+    named_by_set: &HashMap<u32, Vec<u32>>,
+    sets: &mut [TransmogSet],
+) -> Result<(), String> {
+    let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
+    let appearance_of: HashMap<u32, u32> = modified
+        .rows()
+        .map(|row| (row.id(), row.number(modified_appearance_column::APPEARANCE_ID)))
+        .collect();
+
+    let mut by_look: HashMap<Vec<u32>, Vec<u32>> = HashMap::new();
+    for set in sets.iter() {
+        let mut look: Vec<u32> = named_by_set
+            .get(&set.id)
+            .into_iter()
+            .flatten()
+            .filter_map(|named| appearance_of.get(named).copied())
+            .filter(|appearance| *appearance != 0)
+            .collect();
+        if look.is_empty() {
+            continue;
+        }
+        look.sort_unstable();
+        look.dedup();
+        by_look.entry(look).or_default().push(set.id);
+    }
+
+    // Which set is shown, and which are folded under it, keyed so the walk below is a lookup
+    // rather than a second search. The sets are already in the order the grid draws them,
+    // which is not the order that decides this, so the choice is made on the facts.
+    let facts: HashMap<u32, &TransmogSet> = sets.iter().map(|set| (set.id, set)).collect();
+    let mut shown_by_folded: HashMap<u32, u32> = HashMap::new();
+    let mut folded_by_shown: HashMap<u32, Vec<u32>> = HashMap::new();
+    for ids in by_look.into_values() {
+        if ids.len() < 2 {
+            continue;
+        }
+        let Some(shown) = ids
+            .iter()
+            .copied()
+            .min_by_key(|id| {
+                let set = facts[id];
+                // A patch of zero is the table declining to say rather than the dawn of time,
+                // so it sorts last and lets the ordering and the id decide.
+                let patch = if set.patch_introduced == 0 { u32::MAX } else { set.patch_introduced };
+                (patch, set.ui_order, *id)
+            })
+        else {
+            continue;
+        };
+        for id in ids {
+            if id == shown {
+                continue;
+            }
+            shown_by_folded.insert(id, shown);
+            folded_by_shown.entry(shown).or_default().push(id);
+        }
+    }
+
+    let alternates: HashMap<u32, Vec<Alternate>> = folded_by_shown
+        .into_iter()
+        .map(|(shown, mut folded)| {
+            let under = facts[&shown];
+            folded.sort_unstable_by_key(|id| {
+                let set = facts[id];
+                (set.expansion_id, set.ui_order, *id)
+            });
+            let named = folded
+                .into_iter()
+                .map(|id| {
+                    let set = facts[&id];
+                    Alternate {
+                        id,
+                        name: set.name.clone(),
+                        group: set.group.clone(),
+                        class_mask: set.class_mask,
+                        expansion_id: set.expansion_id,
+                        patch_introduced: set.patch_introduced,
+                        reason: why(under, set),
+                    }
+                })
+                .collect();
+            (shown, named)
+        })
+        .collect();
+
+    for set in sets.iter_mut() {
+        set.same_look_as = shown_by_folded.get(&set.id).copied().unwrap_or(0);
+        set.alternates = alternates.get(&set.id).cloned().unwrap_or_default();
+    }
+    Ok(())
+}
+
+/// What makes two sets of identical clothes two sets, read off the sets themselves.
+///
+/// The order matters: a faction pair is usually also a pair of separate names, and a class
+/// variant usually also sits in a different collection, so the most specific answer the two
+/// sets can support is the one worth giving.
+fn why(shown: &TransmogSet, folded: &TransmogSet) -> SameLook {
+    let factions = (shown.flags & FACTION_FLAGS, folded.flags & FACTION_FLAGS);
+    if factions.0 != factions.1 && factions.0 != 0 && factions.1 != 0 {
+        SameLook::Faction
+    } else if shown.class_mask != folded.class_mask {
+        SameLook::Class
+    } else {
+        SameLook::Reissue
+    }
 }
 
 /// One appearance out of a set, followed as far as the game's tables go.
@@ -631,6 +829,128 @@ mod tests {
         assert_eq!(payload["withheldCount"], 2);
         assert!(!column(&payload, "id").contains(&json!(900)));
         assert!(!column(&payload, "name").contains(&json!("Unreleased Alpha")));
+    }
+
+    /* ---------- sets that are the same clothes ---------- */
+
+    // Sets 208 and 209 name the same two appearances and differ in one bit of one column, which
+    // is how the game files a wardrobe sold to both factions. They are one set as far as a
+    // reader is concerned, and 208 is the one shown because it orders first.
+    #[test]
+    fn folds_a_set_under_the_one_holding_the_same_appearances() {
+        let sets = read_sets(&payload());
+        let shown = sets.iter().find(|set| set["id"] == 208).expect("set 208");
+        let folded = sets.iter().find(|set| set["id"] == 209).expect("set 209");
+
+        assert_eq!(shown["sameLookAs"], Value::Null);
+        assert_eq!(
+            shown["alternates"],
+            json!([{
+                "id": 209,
+                "name": "Stormbreaker's Battleplate",
+                "group": "Emberforge Armory",
+                "classMask": 0x0023,
+                "expansionId": 4,
+                "patchIntroduced": 100_300,
+                "reason": "faction",
+            }])
+        );
+
+        // And the folded one says which set it is shown under, so the window can leave it out
+        // of the grid without having to work out why on its own.
+        assert_eq!(folded["sameLookAs"], 208);
+        assert_eq!(folded["alternates"], Value::Null);
+    }
+
+    // The two fields cost nothing on the sets that have neither, which is all but a few hundred
+    // of the game's — an empty list and a zero repeated 4,475 times is payload nobody reads.
+    #[test]
+    fn says_nothing_about_a_set_that_is_nobody_elses_clothes() {
+        for set in read_sets(&payload()) {
+            if [208, 209].contains(&set["id"].as_u64().unwrap_or(0)) {
+                continue;
+            }
+            assert_eq!(set["alternates"], Value::Null, "{}", set["id"]);
+            assert_eq!(set["sameLookAs"], Value::Null, "{}", set["id"]);
+        }
+    }
+
+    // Sets 201 and 202 hold different appearances and are not each other's clothes, however
+    // alike the rest of their columns are — which is what stops the fold being "sets that
+    // look related".
+    #[test]
+    fn leaves_two_sets_of_different_appearances_alone() {
+        let sets = read_sets(&payload());
+        for id in [201, 202, 203, 204, 205, 206, 207] {
+            let set = sets.iter().find(|set| set["id"] == id).expect("the set");
+            assert_eq!(set["sameLookAs"], Value::Null, "set {id}");
+        }
+    }
+
+    // The invariant the window rests its whole grid on, and the one way this feature could lose
+    // a look outright: a set carrying `sameLookAs` is dropped from the grid unconditionally, so
+    // if it pointed at a set that was absent — or at one that did not name it back — that
+    // wardrobe would be gone, unsearchable, with nothing downstream able to notice. The two
+    // fields are written from one pass and this is what says they agree.
+    #[test]
+    fn every_folded_set_points_at_a_shown_set_that_names_it_back() {
+        let payload = payload();
+        let sets = read_sets(&payload);
+        let mut folded = 0;
+        for set in &sets {
+            let Some(under) = set["sameLookAs"].as_u64() else {
+                continue;
+            };
+            folded += 1;
+            let shown = sets
+                .iter()
+                .find(|other| other["id"].as_u64() == Some(under))
+                .unwrap_or_else(|| panic!("set {} is shown under absent set {under}", set["id"]));
+            // The set shown is never itself folded, or the grid would drop them both.
+            assert_eq!(shown["sameLookAs"], Value::Null, "{under} is folded too");
+            let names_back = shown["alternates"]
+                .as_array()
+                .map(|alternates| {
+                    alternates.iter().any(|one| one["id"] == set["id"])
+                })
+                .unwrap_or(false);
+            assert!(names_back, "set {under} does not name {}", set["id"]);
+        }
+        assert!(folded > 0, "the fixture holds a fold to check");
+    }
+
+    // Set 900's appearances are encrypted, so nothing can be said about what it holds. Two such
+    // sets would share an empty look, and "these two sets nobody can read are the same set" is
+    // not a thing this install knows.
+    #[test]
+    fn does_not_fold_the_sets_it_can_read_nothing_out_of() {
+        let payload = payload();
+        assert!(!read_sets(&payload).iter().any(|set| set["id"] == 900));
+        let empty = sets(&fixture_files()).unwrap();
+        assert_eq!(empty["withheldCount"], 2);
+    }
+
+    // The reason is read off the sets rather than guessed, and the most specific one the pair
+    // supports is the one worth giving: a faction pair is usually also two names, and a class
+    // variant usually also two collections.
+    #[test]
+    fn says_why_two_sets_of_the_same_clothes_are_two_sets() {
+        let base = TransmogSet {
+            id: 1, name: String::new(), group: String::new(), group_id: 0, class_mask: 0x23,
+            expansion_id: 4, parent_id: 0, flags: 0, ui_order: 0, patch_introduced: 0,
+            item_count: 0, alternates: Vec::new(), same_look_as: 0,
+        };
+        let with = |flags: u32, class_mask: u32| TransmogSet { flags, class_mask, ..base.clone() };
+
+        // One faction bit each, which the install never sets together.
+        assert_eq!(why(&with(0b0100, 0x23), &with(0b1000, 0x23)), SameLook::Faction);
+        // A faction bit on one and none on the other is not a pair.
+        assert_eq!(why(&with(0b0100, 0x23), &with(0, 0x23)), SameLook::Reissue);
+        assert_eq!(why(&with(0b0100, 0x23), &with(0, 0x1044)), SameLook::Class);
+        // The same clothes drawn for different classes, which the game files as two sets.
+        assert_eq!(why(&with(0, 0x23), &with(0, 0x1044)), SameLook::Class);
+        // And everything else: one look released twice, usually renamed a season later.
+        assert_eq!(why(&with(0, 0x23), &with(0, 0x23)), SameLook::Reissue);
     }
 
     #[test]

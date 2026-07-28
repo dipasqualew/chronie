@@ -134,6 +134,16 @@ export interface AppearanceSource {
   allowableClass: number;
   requiredLevel: number;
   quality: number;
+  /**
+   * How many of the set's items this line stands for, which is one for nearly all of them.
+   *
+   * A set can hold two items a reader cannot tell apart — same name, same class, same level,
+   * same quality, different ids — because the game sold the look twice and `ItemSparse` says
+   * the same thing about both. 13.5% of the rows that several items reach hold such a pair,
+   * and drawing them as two lines is the same sentence written twice. They are one line, and
+   * this is what says the count above still adds up.
+   */
+  itemCount: number;
 }
 
 /**
@@ -239,6 +249,55 @@ function byUsefulness(left: AppearanceSource, right: AppearanceSource): number {
 }
 
 /**
+ * Folds together the sources a reader could not tell apart, keeping the order they arrived in.
+ *
+ * Two items of one set can agree on their name, who may wear them, what they take and what
+ * they are worth, and differ only in an id — the game sold one look twice and `ItemSparse`
+ * says the same thing about both. That is 13.5% of the rows several items reach, and 7.6% of
+ * every line such a row would draw. Drawing both is the same sentence twice.
+ *
+ * The line keeps the lowest item id, because that is the oldest and the one a link out is best
+ * pointed at, and counts what it stands for so the number on the row above still adds up.
+ */
+function fold(sources: AppearanceSource[]): AppearanceSource[] {
+  const folded: AppearanceSource[] = [];
+  const seen = new Map<string, AppearanceSource>();
+  for (const source of sources) {
+    const key = [
+      source.label, source.allowableClass, source.requiredLevel, source.quality,
+    ].join(" ");
+    const already = seen.get(key);
+    if (already) {
+      already.itemCount += 1;
+      // The id and the place come off the same item, here as everywhere else on this chain.
+      // The key holds everything a line draws and `inventoryType` is not drawn, so two
+      // fold-mates can disagree about it — a weapon one row calls a one-hander and another
+      // calls a main hand — and taking the lower id without its own answer would give the
+      // row one item's slot under another item's id.
+      if (source.itemId < already.itemId) {
+        already.itemId = source.itemId;
+        already.inventoryType = source.inventoryType;
+      }
+      continue;
+    }
+    seen.set(key, source);
+    folded.push(source);
+  }
+  return folded;
+}
+
+/**
+ * How many of the set's items give this look, which is not how many lines it draws.
+ *
+ * The lines are what a reader can tell apart and this is what the game holds, and they differ
+ * wherever a set sold one look twice under one name. The row says this number, because it is
+ * the honest answer to "how many items is this", and the lines under it account for it.
+ */
+export function itemsBehind(row: AppearanceRow): number {
+  return row.sources.reduce((total, source) => total + source.itemCount, 0);
+}
+
+/**
  * Which facts actually differ between a row's sources, so that only those get drawn.
  *
  * Half of all multi-item appearances differ by nothing but their names — 51.3% of them — and
@@ -314,6 +373,7 @@ export function appearanceRows(
       allowableClass: appearance.allowableClass,
       requiredLevel: appearance.requiredLevel,
       quality: appearance.quality,
+      itemCount: 1,
     };
 
     // An appearance the game withholds says nothing to group on, and a set that names the
@@ -351,7 +411,7 @@ export function appearanceRows(
   }
 
   for (const row of rows) {
-    row.sources.sort(byUsefulness);
+    row.sources = fold(row.sources.sort(byUsefulness));
     row.liftsRestriction = row.sources.some((one) => one.allowableClass === ANY_CLASS)
       && row.sources.some((one) => one.allowableClass !== ANY_CLASS && one.allowableClass !== 0);
     if (!row.withheld) {
@@ -391,7 +451,7 @@ export function iconIds(payload: TransmogSetItemsPayload): number[] {
  */
 export function appearanceSummary(rows: AppearanceRow[], payload: TransmogSetItemsPayload): string {
   if (!rows.length) return "The game lists no appearances for this set.";
-  const items = rows.reduce((total, row) => total + row.sources.length, 0);
+  const items = rows.reduce((total, row) => total + itemsBehind(row), 0);
   const from = items > rows.length ? ` from ${plural(items, "item")}` : "";
   const withheld = payload.withheldCount > 0
     ? ` · ${payload.withheldCount} the game keeps encrypted`

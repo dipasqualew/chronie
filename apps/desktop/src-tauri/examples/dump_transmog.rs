@@ -61,4 +61,34 @@ fn main() {
     if sets.len() > 30 {
         println!("  … and {} more", sets.len() - 30);
     }
+
+    // The sets that are another set's clothes, which the grid folds away.
+    let folded = sets.iter().filter(|set| set["sameLookAs"].is_u64()).count();
+    let shown: Vec<&serde_json::Value> = sets
+        .iter()
+        .filter(|set| set["alternates"].is_array())
+        .collect();
+    println!(
+        "\n{} sets are another set's clothes, folded under {} shown ones",
+        folded,
+        shown.len()
+    );
+    for set in shown.iter().take(6) {
+        println!(
+            "  {:<44} {}",
+            set["name"].as_str().unwrap_or(""),
+            set["alternates"]
+                .as_array()
+                .map(|alternates| alternates
+                    .iter()
+                    .map(|one| format!(
+                        "{} ({})",
+                        one["name"].as_str().unwrap_or(""),
+                        one["reason"].as_str().unwrap_or("")
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(" · "))
+                .unwrap_or_default(),
+        );
+    }
 }

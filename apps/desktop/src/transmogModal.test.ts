@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AppearanceRow } from "./transmogModal";
 import {
-  ANY_CLASS, appearanceRows, appearanceSummary, heldIn, iconIds, isHeld, qualityLabel, slotName,
-  varyingFacts, wearerLabel,
+  ANY_CLASS, appearanceRows, appearanceSummary, heldIn, iconIds, isHeld, itemsBehind, qualityLabel,
+  slotName, varyingFacts, wearerLabel,
 } from "./transmogModal";
 import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
 
@@ -128,7 +128,7 @@ describe("heldIn", () => {
     ["a weapon the game withholds", 11, 0, null],
     ["a helm", 0, 1, null],
     ["a chestpiece", 3, 5, null],
-  ])("puts %s in the %s hand", (_what, displayType, inventoryType, expected) => {
+  ])("says which hand holds %s", (_what, displayType, inventoryType, expected) => {
     expect(heldIn(displayType, inventoryType)).toBe(expected);
     expect(isHeld(displayType, inventoryType)).toBe(expected !== null);
   });
@@ -163,6 +163,7 @@ describe("appearanceRows", () => {
               allowableClass: ANY_CLASS,
               requiredLevel: 0,
               quality: 4,
+              itemCount: 1,
             },
           ],
           liftsRestriction: false,
@@ -216,9 +217,15 @@ describe("appearanceRows", () => {
   // again later belongs where it was first seen rather than at the bottom.
   it("keeps the rows in the order the backend sorted them into", () => {
     const rows = appearanceRows(payload([
-      appearance({ modifiedAppearanceId: 71005, itemId: 30005, appearanceId: 80005, displayType: 5 }),
+      appearance({
+        modifiedAppearanceId: 71005, itemId: 30005, appearanceId: 80005, displayType: 5,
+        name: "Tideglass Leggings",
+      }),
       appearance({ modifiedAppearanceId: 71000, itemId: 30000, appearanceId: 80000 }),
-      appearance({ modifiedAppearanceId: 71015, itemId: 30015, appearanceId: 80005, displayType: 5 }),
+      appearance({
+        modifiedAppearanceId: 71015, itemId: 30015, appearanceId: 80005, displayType: 5,
+        name: "Leggings of the Tide",
+      }),
     ]));
 
     expect(rows.map((row) => row.appearanceId)).toEqual([80005, 80000]);
@@ -255,6 +262,7 @@ describe("appearanceRows", () => {
               allowableClass: 0,
               requiredLevel: 0,
               quality: 0,
+              itemCount: 1,
             },
           ],
           liftsRestriction: false,
@@ -401,10 +409,12 @@ describe("appearanceRows source order", () => {
       [30021, 30020],
     ],
     [
-      "the oldest item where nothing else separates them",
+      // Two items anybody can wear at the same level, differing only in what the game calls
+      // them — which is enough to keep them two lines, and leaves the id holding the order.
+      "the oldest item where nothing but the name separates them",
       [
-        { itemId: 30030 },
-        { itemId: 30020 },
+        { itemId: 30030, name: "Cowl of the Tempest" },
+        { itemId: 30020, name: "Tideglass Cowl" },
       ],
       [30020, 30030],
     ],
@@ -418,6 +428,79 @@ describe("appearanceRows source order", () => {
     ],
   ])("lists %s", (_what, items, expected) => {
     expect(lookRow(items).sources.map((source) => source.itemId)).toEqual(expected);
+  });
+});
+
+describe("appearanceRows folding", () => {
+  // A set can hold two items a reader cannot tell apart — the game sold one look twice and
+  // `ItemSparse` says the same thing about both — and drawing them as two lines is the same
+  // sentence written out twice under a row that already said the look was reachable.
+  it("draws one line for two items nothing a reader can see separates", () => {
+    const row = lookRow([
+      { itemId: 30040, name: "Stormforged Helm" },
+      { itemId: 30020, name: "Stormforged Helm" },
+    ]);
+
+    expect(row.sources).toHaveLength(1);
+    // The oldest of the two, which is both the piece the set was built around and the better
+    // thing to point a link out at.
+    expect(row.sources[0]).toMatchObject({ itemId: 30020, itemCount: 2 });
+    expect(itemsBehind(row)).toBe(2);
+  });
+
+  // Folding happens after the sort and must leave it alone, or the list stops answering the
+  // question it is ordered by: the cheapest way in first, and what a class is locked to last.
+  it("folds without disturbing the order the sources were sorted into", () => {
+    const row = lookRow([
+      { itemId: 30050, name: "Stormforged Helm", allowableClass: 0b1, requiredLevel: 60 },
+      { itemId: 30051, name: "Helm of the Tempest", requiredLevel: 45 },
+      { itemId: 30052, name: "Stormforged Greathelm", requiredLevel: 60 },
+      { itemId: 30053, name: "Helm of the Tempest", requiredLevel: 45 },
+      { itemId: 30054, name: "Stormforged Helm", allowableClass: 0b1, requiredLevel: 60 },
+    ]);
+
+    expect(row.sources.map((source) => [source.label, source.itemId, source.itemCount]))
+      .toEqual([
+        ["Helm of the Tempest", 30051, 2],
+        ["Stormforged Greathelm", 30052, 1],
+        ["Stormforged Helm", 30050, 2],
+      ]);
+    expect(itemsBehind(row)).toBe(5);
+  });
+
+  // Any one of the four is a difference a reader can see on the line, and a line that stood
+  // for two items differing in one of them would be the app answering a question wrongly.
+  it.each<[string, Partial<TransmogAppearance>]>([
+    ["what the game calls them", { name: "Crown of Tragic Truth" }],
+    ["who may wear them", { allowableClass: 0b1 }],
+    ["what it takes to wear them", { requiredLevel: 45 }],
+    ["what the game writes them in", { quality: 3 }],
+  ])("keeps two items apart where they differ in %s", (_what, second) => {
+    const row = lookRow([{ itemId: 30020 }, { itemId: 30021, ...second }]);
+
+    expect(row.sources).toHaveLength(2);
+    expect(row.sources.map((source) => source.itemCount)).toEqual([1, 1]);
+    expect(itemsBehind(row)).toBe(2);
+  });
+
+  // Two items the game names nothing are each labelled by their own id, so they read as two
+  // different things and stay two lines — which is right, because the ids are all a reader
+  // has to go on and they are the one thing that does differ.
+  it("keeps two items the game names nothing apart by their ids", () => {
+    const row = lookRow([
+      { itemId: 30011, name: "" },
+      { itemId: 30012, name: "" },
+    ]);
+
+    expect(row.sources.map((source) => source.label)).toEqual(["Item 30011", "Item 30012"]);
+    expect(itemsBehind(row)).toBe(2);
+  });
+
+  // A look only one item reaches is the ordinary case — a little under half of them — and
+  // nothing about folding should make its count anything but one.
+  it("counts one item behind a look only one item reaches", () => {
+    expect(itemsBehind(lookRow([{}]))).toBe(1);
+    expect(lookRow([{}]).sources.map((source) => source.itemCount)).toEqual([1]);
   });
 });
 
@@ -480,6 +563,31 @@ describe("varyingFacts", () => {
     expect(varyingFacts(lookRow([{}])))
       .toEqual({ allowableClass: false, requiredLevel: false, quality: false });
   });
+
+  // Folding only ever merges items that already agreed about all three facts, so the columns
+  // cannot change under it: a difference worth drawing survives the fold that happened beside
+  // it, and a row folded down to a single line has nothing left to disagree with.
+  it.each<[string, Array<Partial<TransmogAppearance>>, Record<string, boolean>]>([
+    [
+      "two items that fold into one line",
+      [
+        { itemId: 30020, name: "Stormforged Helm", requiredLevel: 60 },
+        { itemId: 30021, name: "Stormforged Helm", requiredLevel: 60 },
+      ],
+      { allowableClass: false, requiredLevel: false, quality: false },
+    ],
+    [
+      "a folded pair beside an item that can be worn sooner",
+      [
+        { itemId: 30020, name: "Stormforged Helm", requiredLevel: 60 },
+        { itemId: 30021, name: "Stormforged Helm", requiredLevel: 60 },
+        { itemId: 30022, name: "Helm of the Tempest", requiredLevel: 45 },
+      ],
+      { allowableClass: false, requiredLevel: true, quality: false },
+    ],
+  ])("draws a column for %s", (_what, items, expected) => {
+    expect(varyingFacts(lookRow(items))).toEqual(expected);
+  });
 });
 
 describe("appearanceSummary", () => {
@@ -521,6 +629,22 @@ describe("appearanceSummary", () => {
     ],
   ])("reads a set of %s", (_what, given, expected) => {
     expect(appearanceSummary(appearanceRows(given), given)).toBe(expected);
+  });
+
+  // The number is the game's rather than the list's. A set that sold one look twice under one
+  // name draws fewer lines than it holds items, and this sentence is the one that has to agree
+  // with the count on the card above — which is rows of `TransmogSetItem` and knows nothing
+  // about which of them a reader could tell apart.
+  it("counts the items the game holds rather than the lines the list draws", () => {
+    const given = oneLook([
+      { itemId: 30020, name: "Stormforged Helm" },
+      { itemId: 30021, name: "Stormforged Helm" },
+      { itemId: 30022, name: "Helm of the Tempest" },
+    ]);
+    const rows = appearanceRows(given);
+
+    expect(rows[0]!.sources).toHaveLength(2);
+    expect(appearanceSummary(rows, given)).toBe("1 appearance from 3 items");
   });
 
   // A set with nothing under it is the one case the count is not worth printing at all.

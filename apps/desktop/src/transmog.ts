@@ -7,7 +7,7 @@
  * `transmogView.tsx`, and what a reader puts on out of one is `outfit.ts`.
  */
 
-import type { TransmogSet } from "./types";
+import type { Alternate, SameLookReason, TransmogSet } from "./types";
 
 /**
  * The classes, in the order the game's class mask numbers them.
@@ -82,15 +82,46 @@ export function patchName(packed: number): string {
  * withholds the name.
  */
 function searchable(set: TransmogSet): string {
-  return [
-    set.name,
-    set.group,
-    classLabel(set.classMask),
-    ...classNames(set.classMask),
-    expansionName(set.expansionId),
-    patchName(set.patchIntroduced),
-    String(set.id),
-  ].join(" ").toLowerCase();
+  return [set, ...(set.alternates ?? [])].flatMap((one) => [
+    one.name,
+    one.group,
+    classLabel(one.classMask),
+    ...classNames(one.classMask),
+    expansionName(one.expansionId),
+    patchName(one.patchIntroduced),
+    String(one.id),
+  ]).join(" ").toLowerCase();
+}
+
+/**
+ * What a folded set brings with it, which the card it folded into has to answer for.
+ *
+ * A set shown in place of two others is standing in for their names, their classes and their
+ * expansions as well as its own, and a filter that only read its own would hide the look from
+ * exactly the reader looking for it — someone typing "Warmongering", or narrowing to the class
+ * whose version of the armour got folded away. So every filter reads the whole cluster.
+ */
+function everyClass(set: TransmogSet): number[] {
+  return [set.classMask, ...(set.alternates ?? []).map((one) => one.classMask)];
+}
+
+function everyExpansion(set: TransmogSet): number[] {
+  return [set.expansionId, ...(set.alternates ?? []).map((one) => one.expansionId)];
+}
+
+/** How a card says why the set it stands in for is a separate set. */
+const REASONS: Record<SameLookReason, string> = {
+  faction: "the other faction's",
+  class: "another class's",
+  reissue: "released again as",
+};
+
+/** One line naming a set folded into this one, and what makes it its own set. */
+export function alternateLabel(alternate: Alternate): string {
+  const where = alternate.classMask === 0 || alternate.classMask === ALL_CLASSES
+    ? expansionName(alternate.expansionId)
+    : classLabel(alternate.classMask);
+  return `${REASONS[alternate.reason]} ${alternate.name} · ${where}`;
 }
 
 /**
@@ -99,6 +130,11 @@ function searchable(set: TransmogSet): string {
  * The search is every word rather than the whole phrase, so "plate cata" finds what neither
  * word finds on its own — which is how a reader narrows a wardrobe of several thousand sets
  * without learning what order the metadata happens to be written in.
+ *
+ * **A set that is another set's clothes never reaches the grid.** 436 of the game's sets hold
+ * exactly the appearances another one holds, and showing all of them is showing the same
+ * wardrobe up to six times over. The one shown says who else wears it, and every filter here
+ * reads the whole cluster — so folding a set away never makes it unfindable.
  */
 export function filterSets(
   sets: TransmogSet[],
@@ -108,9 +144,12 @@ export function filterSets(
   const expansion = filters.expansion === "" ? null : Number(filters.expansion);
   const klass = filters.klass === "" ? null : Number(filters.klass);
   return sets.filter((set) => {
-    if (expansion !== null && set.expansionId !== expansion) return false;
+    if (set.sameLookAs) return false;
+    if (expansion !== null && !everyExpansion(set).includes(expansion)) return false;
     // A set with no class of its own is for everyone, so it survives a class filter.
-    if (klass !== null && set.classMask !== 0 && (set.classMask & (1 << klass)) === 0) return false;
+    const wearers = everyClass(set);
+    if (klass !== null
+      && !wearers.some((mask) => mask === 0 || (mask & (1 << klass)) !== 0)) return false;
     if (!words.length) return true;
     const against = searchable(set);
     return words.every((word) => against.includes(word));

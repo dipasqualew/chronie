@@ -1049,8 +1049,8 @@ const mockDesktop: E2EMock = {
   // The same invented sets the backend fixtures hold, so the two halves of the transmog
   // view are exercised against one story rather than two.
   transmog: {
-    readCount: 4,
-    declaredCount: 6,
+    readCount: 5,
+    declaredCount: 7,
     withheldCount: 2,
     sets: [
       {
@@ -1072,6 +1072,20 @@ const mockDesktop: E2EMock = {
         id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe", groupId: 1,
         classMask: 0x0e08, expansionId: 3, parentId: 201, flags: 1, uiOrder: 10,
         patchIntroduced: 100200, itemCount: 2,
+        // The other faction bought exactly these clothes under another name, so 210 is shown
+        // in its place and 202 says which card carries it. 436 of a shipping install's sets
+        // are somebody else's wardrobe like this.
+        alternates: [{
+          id: 210, name: "Deepglass Hide", group: "Deepglass Wardrobe", classMask: 0x0e08,
+          expansionId: 3, patchIntroduced: 100200, reason: "faction" as const,
+        }],
+      },
+      // And the other end of that pair, still in the payload — the counts above are about what
+      // the game holds — and left out of the grid by the window rather than by the backend.
+      {
+        id: 210, name: "Deepglass Hide", group: "Deepglass Wardrobe", groupId: 4,
+        classMask: 0x0e08, expansionId: 3, parentId: 0, flags: 8, uiOrder: 15,
+        patchIntroduced: 100200, itemCount: 2, sameLookAs: 202,
       },
     ],
   },
@@ -2403,7 +2417,30 @@ test("browses the game's transmog sets and dresses the character in them", async
   // Coming up short is expected — the game encrypts what it has not released — so the view
   // has to say so rather than quietly show fewer sets than the game holds.
   await test.step("the sets the game keeps encrypted are accounted for", async () => {
-    await expect(transmog.view.getByText("2 sets the game keeps encrypted")).toBeVisible();
+    await expect(transmog.view.getByText(/2 sets the game keeps encrypted/)).toBeVisible();
+  });
+
+  // A set that is another set's clothes is shown once, under the set that carries it, and the
+  // one shown says so. Otherwise a reader browsing the game's several thousand sets meets the
+  // same wardrobe up to six times over.
+  await test.step("a set holding another's appearances is shown once, and named", async () => {
+    await expect(transmog.sets()).not.toContainText(["Deepglass Hide"]);
+    await expect(transmog.card("Tideglass Hide"))
+      .toContainText("the other faction's Deepglass Hide");
+    // And the grid says why it is shorter than the count above it.
+    await expect(
+      transmog.view.getByText(/1 set shown under another holding the same appearances/),
+    ).toBeVisible();
+  });
+
+  // The whole risk of folding a set away: a reader who types its name has to find it. The
+  // filters read the cluster rather than the card, so the set folded away is still reachable
+  // by every route it had before — its name, its collection, and its class.
+  await test.step("a folded set is still found by its own name", async () => {
+    await transmog.search().fill("deepglass");
+    await expect(transmog.sets()).toHaveText(["Tideglass Hide"]);
+    await transmog.search().fill("");
+    await expect(transmog.sets()).toHaveCount(4);
   });
 
   // The character is there before a single set has been touched, which is the shape of this

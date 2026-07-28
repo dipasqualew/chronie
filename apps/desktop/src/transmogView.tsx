@@ -33,9 +33,11 @@ import {
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
-import { CLASSES, classLabel, classNames, expansionName, filterSets, groupSets, patchName } from "./transmog";
 import {
-  appearanceRows, appearanceSummary, iconIds, qualityLabel, varyingFacts, wearerLabel,
+  CLASSES, alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
+} from "./transmog";
+import {
+  appearanceRows, appearanceSummary, iconIds, itemsBehind, qualityLabel, varyingFacts, wearerLabel,
 } from "./transmogModal";
 import type { AppearanceRow, AppearanceSource } from "./transmogModal";
 import type { ModelStage } from "./modelViewer";
@@ -143,13 +145,20 @@ export function TransmogView(
   const withheld = payload && payload.withheldCount > 0
     ? ` · ${plural(payload.withheldCount, "set")} the game keeps encrypted`
     : "";
+  // The grid is shorter than the game's own count and says why. 436 sets of a shipping
+  // install hold exactly another set's appearances, and a reader counting cards against the
+  // number above would otherwise be missing several hundred with no explanation.
+  const foldedCount = payload ? payload.sets.filter((set) => set.sameLookAs).length : 0;
+  const folded = foldedCount > 0
+    ? ` · ${plural(foldedCount, "set")} shown under another holding the same appearances`
+    : "";
 
   return <>
     <header className="view-head">
       <h1>Transmog</h1>
       <div className="sub" id="transmog-meta">
         {payload
-          ? `${plural(payload.sets.length, "set")} from the installed game${withheld}`
+          ? `${plural(payload.sets.length, "set")} from the installed game${withheld}${folded}`
           : status}
       </div>
     </header>
@@ -253,6 +262,7 @@ function Card(
   const shown = hideUnwearable ? onlyWearable(rows) : rows;
   const hidden = rows.length - shown.length;
   const name = set.name || "Unnamed set";
+  const alternates = set.alternates ?? [];
 
   return (
     <article
@@ -269,6 +279,18 @@ function Card(
         <span className="chip">{expansionName(set.expansionId)}</span>
         {patch ? <span className="chip">Patch {patch}</span> : null}
       </div>
+      {/* Who else wears exactly these clothes. 436 of the game's sets are another set's
+          wardrobe under a different name — one per faction, one per class, or the same armour
+          reissued a season later — and showing all of them is showing one set up to six times.
+          They are named here instead, because the name is the part a reader was looking for
+          and the only part that was ever different. */}
+      {alternates.length
+        ? <ul className="mog-alternates" aria-label={`Sets holding the same appearances as ${name}`}>
+          {alternates.map((alternate) => (
+            <li key={alternate.id}>{alternateLabel(alternate)}</li>
+          ))}
+        </ul>
+        : null}
       {/* Items rather than appearances, because items is what this number is. `TransmogSetItem`
           holds one row per item and the game's own table says nothing about how many looks
           they come to — that takes four more tables and is what opening the set is for. A card
@@ -339,7 +361,9 @@ function Line(
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
   const [showSources, setShowSources] = useState(false);
-  const others = row.sources.length - 1;
+  // Items, not lines: a row saying "+2 items" over a list of one is what folding two
+  // indistinguishable items into one line would otherwise produce.
+  const others = itemsBehind(row) - 1;
 
   // An empty frame either way. A row whose appearance names no icon keeps it so the list stays
   // a column of pictures rather than one that indents wherever the game said nothing. The
@@ -411,6 +435,8 @@ function Sources({ row }: { row: AppearanceRow }): ReactNode {
       {row.sources.map((source: AppearanceSource) => (
         <li key={source.modifiedAppearanceId} className="mog-source">
           <span className="mog-source-name">{source.label}</span>
+          {/* One line standing for several items the game says nothing different about. */}
+          {source.itemCount > 1 ? <span className="chip">{`\u00d7${source.itemCount}`}</span> : null}
           {varies.allowableClass
             ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
             : null}
