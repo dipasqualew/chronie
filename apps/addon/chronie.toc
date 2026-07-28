@@ -19,6 +19,7 @@ src/AccountIdentity.lua
 src/AccountTooltip.lua
 src/CaptureBurst.lua
 src/CaptureTriggers.lua
+src/CharacterLook.lua
 src/ClassDisplay.lua
 src/CombatLogging.lua
 src/CurrencyItems.lua

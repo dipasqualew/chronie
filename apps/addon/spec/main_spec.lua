@@ -3950,6 +3950,106 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("who the character is", function()
+        ---One category of the barber's screen, in the shape the client hands it back.
+        ---@param options table[] `{ { id, at, choices } }`
+        ---@return table
+        local function offered(options)
+            local out = {}
+            for index, one in ipairs(options) do
+                local choices = {}
+                for place, choice in ipairs(one.choices) do
+                    choices[place] = { id = choice, name = "" }
+                end
+                out[index] = { id = one.id, currentChoiceIndex = one.at, choices = choices }
+            end
+            return { { name = "Body", id = 1, options = out } }
+        end
+
+        -- The half of a look that is readable wherever the character is standing, and the half
+        -- the app cannot draw anybody without: a race and a sex are what say which of the
+        -- game's fifty-one bodies this person is.
+        it("files the race on the way into the world, wherever they are standing", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                race = 2,
+                sex = 2,
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local filed = recorded.db.characterLook["Thrall-Ragnaros"]
+            assert.equal(2, filed.race)
+            assert.equal(2, filed.sex)
+            assert.is_nil(filed.choices)
+            assert.equal(1700000000, filed.at)
+        end)
+
+        -- And the other half, which the game will only give up in one place. This is the whole
+        -- reason the barbershop events are subscribed to at all.
+        it("files what they are made of once they sit down in front of a barber", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                race = 2,
+                sex = 2,
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.setCustomizations(offered({
+                { id = 14, at = 2, choices = { 100, 101 } },
+                { id = 16, at = 1, choices = { 200, 201 } },
+            }))
+            recorded.clock.set(1700000500)
+            recorded.frame:fire("BARBER_SHOP_OPEN")
+
+            local filed = recorded.db.characterLook["Thrall-Ragnaros"]
+            assert.same({ { option = 14, choice = 101 }, { option = 16, choice = 200 } }, filed.choices)
+            assert.equal(1700000500, filed.at)
+        end)
+
+        -- Standing up again is not becoming a stranger. The client stops answering the moment
+        -- the screen closes, and a look that took that silence for an answer would throw away
+        -- the only reading it will get until the next haircut.
+        it("keeps what it read after the character walks away from the chair", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                race = 2,
+                sex = 2,
+                customizations = offered({ { id = 14, at = 2, choices = { 100, 101 } } }),
+            })
+            recorded.frame:fire("BARBER_SHOP_OPEN")
+
+            recorded.setCustomizations(nil)
+            recorded.clock.set(1700000500)
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local filed = recorded.db.characterLook["Thrall-Ragnaros"]
+            assert.same({ { option = 14, choice = 101 } }, filed.choices)
+            assert.equal(1700000000, filed.at)
+        end)
+
+        -- A race and a hairstyle belong to the one person wearing them, unlike the wardrobe
+        -- above, which belongs to the account. Filed under one key an alt would be drawn as
+        -- whoever logged out last.
+        it("keeps each character's own look apart in the saved file", function()
+            local db = {}
+            local _, thrall = boot({ playerName = "Thrall", realmName = "Ragnaros", db = db, race = 2 })
+            thrall.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local _, jaina = boot({ playerName = "Jaina", realmName = "Ragnaros", db = db, race = 1 })
+            jaina.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(2, db.characterLook["Thrall-Ragnaros"].race)
+            assert.equal(1, db.characterLook["Jaina-Ragnaros"].race)
+        end)
+    end)
+
     describe("an outfit the app asked the game to hold", function()
         -- The one thing Chronie does that changes something in a WoW account rather than
         -- writing something down about it, so the test looks at both halves of that: the

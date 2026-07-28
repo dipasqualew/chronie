@@ -37,6 +37,10 @@ local addonName, ns = ...
 ---@field equipmentSets fun(): table<integer, EquipsetState> Every equipment set the character has.
 ---@field equippedItems fun(): table<integer, EquippedItem> What the character is wearing, by slot.
 ---@field transmogCustomSets fun(): CustomSetState[] Every transmog set the player saved in game.
+---@field playerRace fun(): integer? The client's raceID for the player, out of UnitRace.
+---@field playerSex fun(): integer? UnitSex("player"): 1 nobody, 2 male, 3 female.
+---@field playerCustomizations fun(): table? Every option the character was made of, as the
+---barber's screen enumerates them — and nothing at all anywhere else. See ns.newCharacterLook.
 ---@field customSetRequests fun(): CustomSetRequest[] What the app left in the addon's own folder.
 ---@field customSetClient CustomSetClient The four calls that change the player's own wardrobe.
 ---@field activeQuestIDs fun(): integer[]
@@ -311,6 +315,45 @@ function ns.main(env)
     ---show. Nothing in game needs telling — the player is looking at their own wardrobe.
     local function syncCustomSets()
         customSetSnapshot.sync(env.now())
+    end
+
+    ---Where one character's last-seen appearance is kept.
+    ---
+    ---Keyed by character because this is the one thing in the file that genuinely is a
+    ---character's own rather than the account's: the sets above belong to the account and are
+    ---keyed only so that "has Chronie looked" stays a fact about a character, while a race and
+    ---a hairstyle belong to the one person wearing them.
+    local function characterLookStore()
+        env.db.characterLook = env.db.characterLook or {}
+        local character = currentCharacter()
+        env.db.characterLook[character] = env.db.characterLook[character] or {}
+        return env.db.characterLook[character]
+    end
+
+    local characterLook = ns.newCharacterLook({
+        readRace = env.playerRace,
+        readSex = env.playerSex,
+        readChoices = env.playerCustomizations,
+        -- The same proxy the two above use, and for the same reason: the character is not known
+        -- until login and this is built before it.
+        store = setmetatable({}, {
+            __index = function(_, key)
+                return characterLookStore()[key]
+            end,
+            __newindex = function(_, key, value)
+                characterLookStore()[key] = value
+            end,
+        }),
+        now = env.now,
+    })
+
+    ---Files who the character is, so the app can draw the reader's own alts rather than a
+    ---stranger.
+    ---
+    ---Reports nothing and is watched by nobody, the same as the wardrobe snapshot: this is for
+    ---the app to read out of SavedVariables, and the player is already looking at themselves.
+    local function syncCharacterLook()
+        characterLook.sync(env.now())
     end
 
     ---Where the record of what the app has already asked for is kept.
@@ -883,6 +926,10 @@ function ns.main(env)
         -- load screen rather than one moment that may be too early. The event above keeps it
         -- current in between, so this is only ever catching up on what happened out of sight.
         syncCustomSets()
+        -- Beside it, and reading the half of a look that is readable anywhere: the race and the
+        -- sex, which are what say which body the app draws this character on. The other half
+        -- needs the barber's chair and is picked up by the events below.
+        syncCharacterLook()
         -- After the read and never before it: the writer decides create-or-replace by looking
         -- at what the account already has, and a stale list would make a second copy of a set
         -- the player already owns.
@@ -897,6 +944,14 @@ function ns.main(env)
     -- inside syncSegment covers the ones it was not: a set saved on another character, or
     -- before the addon was ever installed.
     dispatcher.on("TRANSMOG_CUSTOM_SETS_CHANGED", syncCustomSets)
+
+    -- The barber's chair, which is the only place in the game a character will say what they
+    -- are made of. Both moments are worth a look: the screen opening is when the client will
+    -- answer for a character who has never been read, and an appearance being applied is the
+    -- one moment the answer changes. Everywhere else the read comes back empty and the last
+    -- one stands — see ns.newCharacterLook.
+    dispatcher.on("BARBER_SHOP_OPEN", syncCharacterLook)
+    dispatcher.on("BARBER_SHOP_APPEARANCE_APPLIED", syncCharacterLook)
 
     -- What is between the player and the world. Events fire happily during a load screen
     -- and a cinematic, and the picture that comes back from either is worth nothing, so an
@@ -1447,6 +1502,42 @@ if CreateFrame then
                     sets[#sets + 1] = { id = setID, name = name, icon = icon, slots = slots }
                 end
                 return sets
+            end,
+            ---Which race the player is, as the client numbers races.
+            ---
+            ---The third return and not the first: the first is the localised name, which is a
+            ---different string on a German client and is not something to key a body on.
+            playerRace = function()
+                return select(3, UnitRace("player"))
+            end,
+            ---And which sex, in the client's own numbering rather than the tables': `UnitSex`
+            ---answers 1 for a unit that has none, 2 male and 3 female, while every DB2 column
+            ---with an opinion writes 0 male and 1 female. The client's number is what gets
+            ---written down, because translating it here would be this addon claiming to know
+            ---what a table it never opens says — the app does that translation, next to the
+            ---table it does it for.
+            playerSex = function()
+                return UnitSex("player")
+            end,
+            ---Every option the character was made of, as the barber's own screen enumerates
+            ---them: categories, each holding options, each naming which of its choices is the
+            ---one on the character.
+            ---
+            ---**This answers nothing anywhere except the barber's chair**, which is not a
+            ---limitation of this function but of the game — read off the 12.0.5 client's own
+            ---`C_BarberShop` function table, where `GetAvailableCustomizations` is the only
+            ---call that will enumerate a character's own customization at all. So the addon
+            ---takes it when it is offered and keeps the last answer the rest of the time.
+            ---
+            ---Guarded on the namespace, which is how everything else in here treats a client
+            ---API: a build without it reports nothing rather than raising, and nothing is
+            ---already the ordinary answer.
+            playerCustomizations = function()
+                local barber = C_BarberShop
+                if not (barber and barber.GetAvailableCustomizations) then
+                    return nil
+                end
+                return barber.GetAvailableCustomizations()
             end,
             ---What the desktop app has asked the game to hold on to.
             ---

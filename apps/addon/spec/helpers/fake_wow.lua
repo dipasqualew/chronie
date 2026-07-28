@@ -18,6 +18,12 @@ fake.KNOWN_EVENTS = {
     "ACCOUNT_MONEY",
     "ACHIEVEMENT_EARNED",
     "BAG_UPDATE_DELAYED",
+    -- Read out of the 12.0.5.67823 client's own event table, where the seven BARBER_SHOP_*
+    -- events sit together. These are the two a look is worth taking at: the screen coming up,
+    -- which is the first moment the client will enumerate a character at all, and an appearance
+    -- being applied, which is the one moment the answer changes. See ns.newCharacterLook.
+    "BARBER_SHOP_APPEARANCE_APPLIED",
+    "BARBER_SHOP_OPEN",
     "BOSS_KILL",
     "CHALLENGE_MODE_COMPLETED",
     "CHALLENGE_MODE_RESET",
@@ -790,7 +796,9 @@ end
 ---  `factions` maps a localised faction name to `{ standing, current, max }`.
 ---  `trackedCurrencies` is a list of item ids to pre-seed into the tracked-currency store.
 ---  `map` is `{ uiMapID, x, y }`, where the character is standing; `false` for nowhere.
----  `playerGUID` is the client's unique id for the logged-in character.
+---  `playerGUID` is the client's unique id for the logged-in character; `race` and `sex` are
+---  what UnitRace and UnitSex say about them, and `customizations` is what a barber's screen
+---  would enumerate — nil, as the real client answers everywhere else. See setCustomizations.
 ---  `cvars` maps a client setting to its value; `protectedCVars` names the ones this client
 ---  refuses to let an addon write, mapping each to "raise" or to any truthy value for a write
 ---  that is silently dropped. `combatLogging` is whether the client starts out logging.
@@ -842,6 +850,9 @@ function fake.newEnv(options)
     -- reduced to in Main.lua. Mutable for the same reason the equipment sets are: a test
     -- changes it between two syncs and watches the snapshot notice.
     local transmogCustomSets = options.transmogCustomSets or {}
+    -- What the barber's screen would enumerate about this character, and nil when they are not
+    -- sitting in front of one — which is where a character is every moment but a handful.
+    local playerCustomizations = options.customizations
     -- What the desktop app has asked the game to hold on to, and what the client does about
     -- it. `customSetWrites` is the record a test reads back: the writer's whole job is calls
     -- into the client, and only the calls can say whether it did it.
@@ -1012,6 +1023,18 @@ function fake.newEnv(options)
         end,
         transmogCustomSets = function()
             return transmogCustomSets
+        end,
+        playerRace = function()
+            return options.race
+        end,
+        playerSex = function()
+            return options.sex
+        end,
+        -- Nil unless a test says otherwise, which is what the real client answers everywhere
+        -- except the barber's chair — so the default here is the ordinary case rather than a
+        -- convenience, and a test that wants the answers has to put the character in the chair.
+        playerCustomizations = function()
+            return playerCustomizations
         end,
         customSetRequests = function()
             return customSetRequests
@@ -1193,6 +1216,13 @@ function fake.newEnv(options)
         worldBossCalls = worldBossCalls,
         encounterCalls = encounterCalls,
         journal = journalRecorded,
+        ---Sit the character down in front of a barber, or stand them up again. Only there will
+        ---the client enumerate what a character is made of, so this is the whole difference
+        ---between a look that can carry answers and one that carries a race and nothing else.
+        ---@param value table? Categories as C_BarberShop.GetAvailableCustomizations gives them.
+        setCustomizations = function(value)
+            playerCustomizations = value
+        end,
         ---Drive the wallet the addon reads through env.getMoney.
         ---@param value integer
         setMoney = function(value)

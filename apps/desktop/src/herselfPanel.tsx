@@ -31,6 +31,12 @@
  * no name at all. A row of 58 unnamed buttons would be a worse version of what a select already
  * does well, and the character is redrawn on every change anyway — which makes the picture
  * beside the form the preview.
+ *
+ * And then the one control that is not the reader inventing somebody: **the people they actually
+ * play**, read out of the game by the addon and offered above the body. Picking one is a body and
+ * a dozen answers in a single change — "show me this hat on my warrior" instead of twenty selects
+ * that approximate her. It sits first because it fills in everything below it, and it is absent
+ * entirely on an install the addon has never run on, where there would be nobody to offer.
  */
 
 import "./herselfPanel.css";
@@ -38,7 +44,7 @@ import "./herselfPanel.css";
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 
-import { answerOf, NOBODY_ASKED, swatchLabel, withAnswer } from "./herself";
+import { answerOf, NOBODY_ASKED, shownAs, swatchLabel, withAnswer, withCharacter } from "./herself";
 import type { CharacterChosen, CharacterLookPayload, CharacterPick } from "./types";
 
 export interface HerselfProps {
@@ -84,6 +90,19 @@ export function Herself({ load, save, onChanged, onError }: HerselfProps): React
   };
 
   /**
+   * Becomes one of the reader's own characters, which is a body and its answers in one change.
+   *
+   * The same errand every other control on this panel runs — [`store`] saves and repaints — so a
+   * character whose body is not the one on the stage reloads the form under it exactly as picking
+   * that body by hand would.
+   */
+  const become = (named: string): void => {
+    const character = payload.characters.find((one) => one.character === named);
+    if (!character) return;
+    store(character.body, withCharacter(payload, character));
+  };
+
+  /**
    * Stores who she is and reports it, then repaints the form from what came back.
    *
    * A body change comes back with the other body's questions, because the backend re-reads them
@@ -124,7 +143,28 @@ export function Herself({ load, save, onChanged, onError }: HerselfProps): React
         ? <p className="muted">The installed game says nothing about how this body is put together.</p>
         : null}
       <div className="herself-form">
-        {/* The body first, because everything under it belongs to whichever one this is. */}
+        {/* The reader's own people, above the body because picking one fills the body in too.
+            Absent where there are none rather than shown empty: an install the addon has never
+            run on has nobody to offer, and an empty select would read as a roster of nobody. */}
+        {payload.characters.length
+          ? (
+            <label className="herself-field" htmlFor="herself-character">
+              <span>Who you play</span>
+              <select
+                id="herself-character" value={shownAs(payload.body, payload.picked, payload.characters)}
+                onChange={(event) => become(event.target.value)}
+              >
+                {/* What the select says when she is nobody in particular, which is every reader
+                    who has arranged a body by hand and the state this panel opens in. */}
+                <option value="">Someone else</option>
+                {payload.characters.map((one) => (
+                  <option key={one.character} value={one.character}>{one.character}</option>
+                ))}
+              </select>
+            </label>
+          )
+          : null}
+        {/* The body next, because everything under it belongs to whichever one this is. */}
         {payload.bodies.length > 1
           ? (
             <label className="herself-field" htmlFor="herself-body">

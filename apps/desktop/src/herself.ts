@@ -24,7 +24,9 @@
  *   [`withAnswer`] keeps them.
  */
 
-import type { CharacterLookPayload, CharacterPick, CharacterQuestion } from "./types";
+import type {
+  CharacterLookPayload, CharacterPick, CharacterQuestion, PlayedCharacter,
+} from "./types";
 
 /** Nobody has been asked anything yet, which is the payload's own empty state. */
 export const NOBODY_ASKED: CharacterLookPayload = {
@@ -32,6 +34,7 @@ export const NOBODY_ASKED: CharacterLookPayload = {
   body: 0,
   questions: [],
   picked: [],
+  characters: [],
 };
 
 /**
@@ -85,6 +88,60 @@ export function withAnswer(
     })),
     ...elsewhere,
   ];
+}
+
+/**
+ * The answers with one of the reader's own characters put on, ready to be sent.
+ *
+ * The same shape [`withAnswer`] has and for the same reason — the settings file holds every
+ * body's answers and a form that sent only what it can see would forget the rest — but arrived at
+ * from the other end. A character's answers are about *their* body, and the questions in them are
+ * ids no other body shares, so putting one on is their answers plus everything already stored
+ * that they say nothing about.
+ *
+ * **The character wins where the two overlap**, which is what picking one off the list means: a
+ * reader who had already been arranging that body by hand and then asked for their warrior is
+ * asking to look like their warrior. Everything they arranged about every *other* body is
+ * untouched, so switching back to it still finds it.
+ *
+ * A character with no answers at all — the ordinary case, since the game only says what somebody
+ * is made of at a barber's — leaves the stored answers exactly as they were. What changes for
+ * them is the body, which the caller sends alongside this.
+ */
+export function withCharacter(
+  payload: CharacterLookPayload, character: PlayedCharacter,
+): CharacterPick[] {
+  const theirs = character.picked.map((answer) => answer.question);
+  return [
+    ...character.picked,
+    ...payload.picked.filter((answer) => !theirs.includes(answer.question)),
+  ];
+}
+
+/**
+ * Which of the reader's characters the form is currently showing, or `""` for none of them.
+ *
+ * So that the shortcut is a control that says something true rather than a button that fires and
+ * forgets. It reads as "this is who she is now" and goes back to nothing the moment a swatch is
+ * changed by hand, which is exactly what has happened.
+ *
+ * A character matches when the body is theirs and every answer of theirs is the answer in force.
+ * Not the other way round: the settings file also holds answers about every other body the reader
+ * has ever touched, and holding those against a character would mean nobody ever matched after
+ * the first time somebody looked at a second body.
+ *
+ * Two characters can therefore match at once — two alts of one race whom nobody has had a haircut
+ * on are the same body and the same nothing, and there is no third thing to tell them apart by.
+ * The first is named, because a select has to show one and either is true.
+ */
+export function shownAs(
+  body: number, picked: CharacterPick[], characters: PlayedCharacter[],
+): string {
+  const found = characters.find((character) => character.body === body
+    && character.picked.every((theirs) => picked.some(
+      (answer) => answer.question === theirs.question && answer.swatch === theirs.swatch,
+    )));
+  return found?.character ?? "";
 }
 
 /**

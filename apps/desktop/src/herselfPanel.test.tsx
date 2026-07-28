@@ -30,6 +30,7 @@ const ASKED: CharacterLookPayload = {
   body: 2,
   questions: HERS,
   picked: [],
+  characters: [],
 };
 
 /**
@@ -195,5 +196,96 @@ describe("Herself", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toContain("names no question"));
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  /* ---------- and the people the reader actually plays ---------- */
+
+  /** A roster as the addon reads one: somebody who has been to a barber, and somebody who has
+   * not — which is most of a roster, and arrives as a body and nothing else. */
+  const ROSTER = [
+    { character: "Aster-Vale", body: 2, picked: [{ question: 16, swatch: 133 }] },
+    { character: "Brin-Ravencrest", body: 1, picked: [] },
+  ];
+
+  /** The panel over a settings file that also knows who the reader plays. */
+  function withRoster(overrides: Partial<HerselfProps> = {}) {
+    let picked: CharacterPick[] = [];
+    let body = ASKED.body;
+    return panel({
+      load: () => Promise.resolve({
+        ...ASKED,
+        body,
+        questions: body === ASKED.body ? HERS : HIS,
+        picked: [...picked],
+        characters: ROSTER,
+      }),
+      save: vi.fn((chosen: number, answers: CharacterPick[]): Promise<CharacterChosen> => {
+        body = chosen;
+        picked = answers;
+        return Promise.resolve({ body, picked: [...picked] });
+      }),
+      ...overrides,
+    });
+  }
+
+  it("offers the reader's own characters above the body", async () => {
+    withRoster();
+
+    open();
+
+    await waitFor(() => expect(field("Who you play")).toBeTruthy());
+    const named = [...field("Who you play").options].map((option) => option.textContent);
+    expect(named).toEqual(["Someone else", "Aster-Vale", "Brin-Ravencrest"]);
+  });
+
+  // The whole point of the control: one change instead of twenty selects. The body and every
+  // answer arrive together, because a body and its answers are one statement about one person.
+  it("stores the body and the answers of a character picked off the list", async () => {
+    const { save } = withRoster();
+    open();
+    await waitFor(() => expect(field("Who you play")).toBeTruthy());
+
+    fireEvent.change(field("Who you play"), { target: { value: "Aster-Vale" } });
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith(2, [{ question: 16, swatch: 133 }]));
+    expect(field("Hair Style").value).toBe("133");
+  });
+
+  // A character on the other body is the body picker changing too, which means the form under
+  // it is replaced rather than reinterpreted — a beard is a question no female body is asked.
+  it("reloads the form when the character picked is of another body", async () => {
+    withRoster();
+    open();
+    await waitFor(() => expect(field("Hair Style")).toBeTruthy());
+
+    fireEvent.change(field("Who you play"), { target: { value: "Brin-Ravencrest" } });
+
+    await waitFor(() => expect(field("Beard")).toBeTruthy());
+    expect(field("Who you play").value).toBe("Brin-Ravencrest");
+  });
+
+  // The control says who she is rather than remembering a click, so changing a swatch by hand
+  // stops her being that person — which is exactly what has happened.
+  it("names nobody again once an answer of theirs is changed by hand", async () => {
+    withRoster();
+    open();
+    await waitFor(() => expect(field("Who you play")).toBeTruthy());
+    fireEvent.change(field("Who you play"), { target: { value: "Aster-Vale" } });
+    await waitFor(() => expect(field("Who you play").value).toBe("Aster-Vale"));
+
+    fireEvent.change(field("Hair Style"), { target: { value: "132" } });
+
+    await waitFor(() => expect(field("Who you play").value).toBe(""));
+  });
+
+  // An install the addon has never run on has nobody to offer, and an empty select would read
+  // as a roster of nobody rather than as a question that was never asked.
+  it("offers nothing at all where the reader plays nobody this install can draw", async () => {
+    panel();
+
+    open();
+
+    await waitFor(() => expect(field("Hair Style")).toBeTruthy());
+    expect(screen.queryByRole("combobox", { name: "Who you play" })).toBeNull();
   });
 });

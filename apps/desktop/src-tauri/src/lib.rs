@@ -17,6 +17,7 @@ pub mod icons;
 pub mod ingamesets;
 pub mod items;
 pub mod logfile;
+pub mod look;
 pub mod m2;
 pub mod marks;
 pub mod models;
@@ -602,18 +603,30 @@ async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
     read_game_files(&state, move |files| character::model_of(files, &who)).await
 }
 
-/// What the reader may be asked about her, and what they have answered so far.
+/// What the reader may be asked about her, what they have answered so far, and who they play.
 ///
-/// Both halves at once because neither is any use alone: a list of swatches with nothing marked
-/// is a form that cannot say what it is showing, and a set of ids with no names behind them is
-/// what the settings file already holds. See [`customization::questions`] — a question is read
+/// The first two halves at once because neither is any use alone: a list of swatches with nothing
+/// marked is a form that cannot say what it is showing, and a set of ids with no names behind them
+/// is what the settings file already holds. See [`customization::questions`] — a question is read
 /// out of the installed game, so a patch that adds a hairstyle adds it here with no code.
+///
+/// The third is the roster, and it travels with them for the same reason: it is a shortcut *into*
+/// this form — pick a character and every control below fills in — so a window that had to ask for
+/// it separately would be making two round trips to draw one panel. It is re-read whenever the
+/// body changes, which costs a query against a table with one row per character.
 #[tauri::command]
 async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
     let who = character_look_of(&state)?;
     let body = who.body;
-    let (bodies, questions) = read_game_files(&state, move |files| {
-        Ok((body::playable(files)?, customization::questions(files, body)?))
+    // Out of the database, where it is stored as the addon read it: a race and a sex, which mean
+    // nothing until the installed game says which body they come to.
+    let looks = collector::character_looks(&state.database_path())?;
+    let (bodies, questions, characters) = read_game_files(&state, move |files| {
+        Ok((
+            body::playable(files)?,
+            customization::questions(files, body)?,
+            look::resolve(files, &looks)?,
+        ))
     })
     .await?;
     Ok(serde_json::json!({
@@ -621,6 +634,7 @@ async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
         "body": who.body,
         "questions": questions,
         "picked": who.picked,
+        "characters": characters,
     }))
 }
 
