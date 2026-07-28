@@ -52,9 +52,35 @@ export class Timeline {
     return session.getByRole("list", { name: "What was done" }).getByRole("button");
   }
 
-  /** The running numbers, folded to one mark per kind, with the figures in the hover. */
+  /**
+   * The quieter half of a card: the small change of an evening beside its running numbers.
+   *
+   * One strip rather than two, because a quest handed in and a faction ground are equally not
+   * the news — so this is where both are asked for. Private: a spec asks for one or the other
+   * by what it is, and the strip they share is only how this file finds them.
+   */
+  private quiet(within: Locator): Locator {
+    return within.getByRole("group", { name: "The quieter marks" });
+  }
+
+  /**
+   * The running numbers in it, folded to one mark per kind with the figures in the hover.
+   *
+   * The pictures alone, which is still only the numbers: a mark that stands for something that
+   * happened is pressable and is therefore a button, and `mark` is how those are asked for.
+   */
   tallies(session: Locator): Locator {
-    return session.getByRole("group", { name: "Running totals" }).getByRole("img");
+    return this.quiet(session).getByRole("img");
+  }
+
+  /**
+   * One of the marks that stand for something that happened, by the sentence it gave up.
+   *
+   * By the whole of that sentence, because a mark carries none of it on the card: the words a
+   * chip would have worn are its hover and its name and nowhere else.
+   */
+  mark(within: Locator, saying: string | RegExp): Locator {
+    return this.quiet(within).getByLabel(saying);
   }
 
   /**

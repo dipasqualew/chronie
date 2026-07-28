@@ -274,16 +274,18 @@ describe("highlights", () => {
     const [session] = buildSessions([
       segment({
         achievements: [
-          { id: 1, name: "Just Me", accountFirst: false },
-          { id: 2, name: "Warband First", accountFirst: true },
-          { id: 3, name: "Also Just Me", accountFirst: false },
+          { id: 1, name: "Warband First", accountFirst: true },
+          { id: 2, name: "Another First", accountFirst: true },
+          { id: 3, name: "A Third First", accountFirst: true },
         ],
       }),
     ]);
 
     const earned = session.highlights.filter((entry) => entry.kind === "achievement");
     expect(earned).toHaveLength(1);
-    expect(earned[0]).toMatchObject({ label: "3 achievements", detail: "1 account first", count: 3 });
+    expect(earned[0]).toMatchObject({ label: "3 achievements", detail: "account firsts", count: 3 });
+    expect(earned[0].items.map((item) => item.label))
+      .toEqual(["Warband First", "Another First", "A Third First"]);
   });
 
   it("names the one thing rather than counting it, when there is only one", () => {
@@ -294,20 +296,59 @@ describe("highlights", () => {
     expect(session.highlights[0]).toMatchObject({ label: "Into the Light", detail: "account first" });
   });
 
-  // An account first is the rare one, so it leads the list a summary comes apart into: the
-  // reader opening twelve achievements wants the notable one at the top of them.
-  it("puts an account first ahead of a character first inside the summary", () => {
-    const [session] = buildSessions([
-      segment({
-        achievements: [
-          { id: 1, name: "Just Me", accountFirst: false },
-          { id: 2, name: "Warband First", accountFirst: true },
-        ],
-      }),
-    ]);
+  /**
+   * An account first is the warband earning something for the first time; a character first is
+   * one of its characters catching up with something the warband already had. Only the first is
+   * news, and one summary counting both made an evening of catching up read as an evening of
+   * rare ones — "3 achievements" for one thing worth telling somebody about.
+   */
+  describe("the two sorts of achievement", () => {
+    const mixed = (): Segment => segment({
+      achievements: [
+        { id: 1, name: "Just Me", accountFirst: false },
+        { id: 2, name: "Warband First", accountFirst: true },
+        { id: 3, name: "Also Just Me", accountFirst: false },
+      ],
+    });
 
-    expect(session.highlights[0].items.map((item) => item.label)).toEqual(["Warband First", "Just Me"]);
-    expect(session.highlights[0].items[0].detail).toBe("account first");
+    // The rare one keeps its words and its place at the front; the catching up is a mark.
+    it("counts them apart, and leads with the rarer of the two", () => {
+      const [session] = buildSessions([mixed()]);
+
+      expect(kinds(session)).toEqual(["achievement", "achievementCharacter"]);
+    });
+
+    it.each([
+      ["the one worth telling somebody about", "achievement",
+        { label: "Warband First", detail: "account first", count: 1 }],
+      ["the two that only caught this character up", "achievementCharacter",
+        { label: "2 achievements", detail: "character firsts", count: 2 }],
+    ] as const)("words %s on its own", (_case, kind, expected) => {
+      const [session] = buildSessions([mixed()]);
+
+      expect(session.highlights.find((entry) => entry.kind === kind)).toMatchObject(expected);
+    });
+
+    it("keeps every one it counted, each saying which sort it was", () => {
+      const [session] = buildSessions([mixed()]);
+
+      const marked = session.highlights.find((entry) => entry.kind === "achievementCharacter");
+      expect(marked?.items.map((item) => item.label)).toEqual(["Just Me", "Also Just Me"]);
+      expect(marked?.items.map((item) => item.detail)).toEqual(["character first", "character first"]);
+    });
+
+    // A summary of a sort that did not happen is not an empty summary, it is no summary: a
+    // mark reading "0 achievements" is a mark saying nothing happened.
+    it.each([
+      ["an evening of nothing but account firsts", true, "achievementCharacter"],
+      ["an evening of nothing but catching up", false, "achievement"],
+    ] as const)("says nothing of the other sort after %s", (_case, accountFirst, absent) => {
+      const [session] = buildSessions([
+        segment({ achievements: [{ id: 1, name: "Into the Light", accountFirst }] }),
+      ]);
+
+      expect(kinds(session)).not.toContain(absent);
+    });
   });
 
   // Three level ups in an evening is one story — "I got to 12" — not three chips fighting
@@ -378,28 +419,82 @@ describe("highlights", () => {
     expect(session.highlights[0].items.map((item) => item.label)).toEqual(["Mount 11", "Mount 12"]);
   });
 
-  it("counts new appearances apart from the variants of things already owned", () => {
-    const [session] = buildSessions([
-      segment({
-        transmogs: [
-          { id: 1, newAppearance: true },
-          { id: 2, newAppearance: true },
-          { id: 3, newAppearance: false },
-        ],
-      }),
-    ]);
+  /**
+   * A brand new appearance is the collection growing; a variant is another colour of something
+   * already owned. One summary counting both said "5 new appearances" for an evening that added
+   * one — so they are counted apart, and the variants, a wardrobe tidied rather than grown, are
+   * the quiet half.
+   */
+  describe("the two sorts of transmog", () => {
+    const both = (): Segment => segment({
+      transmogs: [
+        { id: 1, name: "Wanderer's Mantle", newAppearance: true },
+        { id: 2, name: "Tideglass Cowl", newAppearance: true },
+        { id: 3, name: "Storm Cloak", newAppearance: false },
+      ],
+    });
 
-    const transmog = session.highlights.find((entry) => entry.kind === "transmog");
-    expect(transmog?.label).toBe("2 new appearances");
-    expect(transmog?.detail).toBe("+1 variant");
-  });
+    it("counts new appearances apart from the variants of things already owned", () => {
+      const [session] = buildSessions([both()]);
 
-  it("still reports a session that only turned up variants", () => {
-    const [session] = buildSessions([segment({ transmogs: [{ id: 3, newAppearance: false }] })]);
+      expect(kinds(session)).toEqual(["transmog", "transmogVariant"]);
+    });
 
-    expect(session.highlights.find((entry) => entry.kind === "transmog")).toMatchObject({
-      label: "New transmog source",
-      detail: "1 variant",
+    // The new ones count rather than name: the number is the whole of what a collection
+    // growing means, and the addon catches an id far more often than it catches a name.
+    it.each([
+      ["what the collection gained", "transmog",
+        { label: "2 new appearances", detail: "", count: 2 }],
+      ["what it merely recoloured", "transmogVariant",
+        { label: "Storm Cloak", detail: "variant of one owned", count: 1 }],
+    ] as const)("words %s on its own", (_case, kind, expected) => {
+      const [session] = buildSessions([both()]);
+
+      expect(session.highlights.find((entry) => entry.kind === kind)).toMatchObject(expected);
+    });
+
+    it("keeps every piece it counted, with the item behind it", () => {
+      const [session] = buildSessions([both()]);
+
+      const fresh = session.highlights.find((entry) => entry.kind === "transmog");
+      expect(fresh?.items.map((item) => item.label)).toEqual(["Wanderer's Mantle", "Tideglass Cowl"]);
+      expect(fresh?.items.map((item) => item.itemId)).toEqual([1, 2]);
+    });
+
+    // A mark's words are its hover, and there is room there for the piece itself — where
+    // "1 variant" would be a hover worth nothing at all.
+    it("still reports a session that only turned up variants, by naming the piece", () => {
+      const [session] = buildSessions([
+        segment({ transmogs: [{ id: 3, name: "Storm Cloak", newAppearance: false }] }),
+      ]);
+
+      expect(kinds(session)).toEqual(["transmogVariant"]);
+      expect(session.highlights[0]).toMatchObject({
+        label: "Storm Cloak",
+        detail: "variant of one owned",
+      });
+    });
+
+    // Several of them have no one piece to name, so the count is what is left to say — and
+    // saying "variant of one owned" three times over would be saying it once too often.
+    it("counts several variants instead of naming any of them", () => {
+      const [session] = buildSessions([
+        segment({
+          transmogs: [
+            { id: 3, name: "Storm Cloak", newAppearance: false },
+            { id: 4, name: "Bramble Wrap", newAppearance: false },
+          ],
+        }),
+      ]);
+
+      expect(session.highlights[0]).toMatchObject({ label: "2 variants", detail: "", count: 2 });
+    });
+
+    // A source the client said nothing either way about is not a new appearance and not a
+    // variant; counting it as either would be inventing the half of the record that is missing.
+    it("puts a source the client said nothing about in neither", () => {
+      expect(kinds(buildSessions([segment({ transmogs: [{ id: 3, name: "Storm Cloak" }] })])[0]))
+        .toEqual([]);
     });
   });
 
@@ -521,5 +616,39 @@ describe("highlights", () => {
 
     expect(session.highlights.every((entry) => entry.icon && entry.family)).toBe(true);
     expect(session.highlights.map((entry) => entry.family)).toEqual(["milestone", "tally"]);
+  });
+
+  /**
+   * Which milestones are marked to be drawn as their icon alone. The flag is the whole of what
+   * the view is told, so the rule about which things are not news lives here rather than in a
+   * list of kinds kept beside the component — and they stay milestones either way, because a
+   * quest handed in did happen and belongs on the card.
+   */
+  describe("the quiet milestones", () => {
+    const summaryOf = (overrides: Partial<Segment>) => highlights([segment(overrides)])[0]!;
+
+    it.each([
+      ["a character catching up on one the warband already had",
+        { achievements: [{ id: 1, name: "Into the Light", accountFirst: false }] }],
+      ["another colour of a piece already owned",
+        { transmogs: [{ id: 3, name: "Storm Cloak", newAppearance: false }] }],
+      ["a quest handed in", { quests: [{ id: 81 }] }],
+      ["a set of gear saved",
+        { equipsetChanges: [{ setId: 3, name: "Raid", kind: "created" as const, items: [] }] }],
+    ])("has nothing to say out loud about %s", (_case, overrides) => {
+      expect(summaryOf(overrides)).toMatchObject({ quiet: true, family: "milestone" });
+    });
+
+    // The other side of the same rule: the things somebody would actually mention keep both
+    // their words and their place up among the chips.
+    it.each([
+      ["the warband's first", { achievements: [{ id: 1, name: "Into the Light", accountFirst: true }] }],
+      ["an appearance nobody owned",
+        { transmogs: [{ id: 1, name: "Wanderer's Mantle", newAppearance: true }] }],
+      ["a mount", { mounts: [{ id: 11, name: "Clockwork Glider" }] }],
+      ["a level", { levelUps: [{ level: 12 }] }],
+    ])("leaves %s its words", (_case, overrides) => {
+      expect(summaryOf(overrides).quiet).toBeFalsy();
+    });
   });
 });

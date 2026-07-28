@@ -113,10 +113,15 @@ export const dashboard: E2EMock["dashboard"] = {
       currencyTotal: 2,
       reputationTotal: 50,
       housingXP: 0,
-      // A second source in the same evening, so the transmog summary counts two and unfolds
-      // into them — and one this install can say nothing about, which is what the name the
-      // addon caught at the time is the fallback for.
-      transmogs: [{ id: 4200, name: "Storm Cloak", at: EVENING + 2200, newAppearance: false }],
+      // Two more sources in the same evening, one of each sort, and neither of them a piece
+      // this install can describe — which is what the name the addon caught at the time is the
+      // fallback for. The new one is what keeps the evening's "2 new appearances" standing for
+      // two once the two sorts are counted apart, so the summary still unfolds into pieces; and
+      // it is the piece only the addon ever named, drawn beside one the game names itself.
+      transmogs: [
+        { id: 4200, name: "Storm Cloak", at: EVENING + 2200, newAppearance: false },
+        { id: 4300, name: "Bramble Wrap", at: EVENING + 2400, newAppearance: true },
+      ],
       // The other half of the story: gains the client said nothing else about. An
       // item-based currency counted before its first change has no holding to report, and
       // a faction read off a chat line on a character that has never met it has no
@@ -224,6 +229,10 @@ export const dashboard: E2EMock["dashboard"] = {
         // One the install can say nothing about, which is what an achievement earned on a
         // build newer than the one on disk looks like: the addon's own name and no more.
         { id: 77, name: "Quiet Ascent", at: EVENING + 1450, accountFirst: true },
+        // A second character first, so the two sorts of achievement do not each stand for one
+        // thing apiece: the quiet mark counts two and is therefore a mark that unfolds, which
+        // is what the roster's and the timeline's "a summary of several comes apart" steps ask.
+        { id: 10, name: "Tideglass Delver", at: EVENING + 1420, accountFirst: false },
       ],
       levelUps: [{ level: 12, at: EVENING + 1500 }],
       mounts: [{ id: 11, name: "Clockwork Glider", at: EVENING + 1600 }],

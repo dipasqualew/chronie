@@ -117,25 +117,29 @@ button.hl:hover { border-color: var(--series-1); background: var(--series-1-soft
 .hl-levelUp { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--surface-1)); }
 .hl-mount { border-color: #b373ff; background: color-mix(in srgb, #b373ff 14%, var(--surface-1)); }
 
-/* The running numbers are one mark apiece, and the numbers themselves live in the hover.
-   A night that touched five factions used to end in five lines of name and number under a
-   card whose job is to say what happened; this is that strip reduced to what it is worth
-   at a glance, which is "there was gold, there was reputation". */
+/* The quiet half of a card: the small change of an evening — a quest, a saved set, a colour
+   of a tabard already owned — and the running numbers, one mark apiece with the words in the
+   hover. A night that touched five factions used to end in five lines of name and number
+   under a card whose job is to say what happened; this is that strip reduced to what it is
+   worth at a glance, which is "there was gold, there was reputation". */
 .tally-row {
   display: flex; flex-wrap: wrap; gap: 6px;
   margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border);
 }
-.tally {
+/* A chip that has given its words to the hover is drawn as the marks beside it are, so the
+   strip reads as one row of marks rather than as two kinds of thing that happen to share a
+   line. `button.hl` above is what puts the pointer back on the ones that go somewhere. */
+.tally, .hl-quiet {
   display: inline-grid; place-items: center;
-  width: 24px; height: 24px; border-radius: 7px;
+  width: 24px; height: 24px; padding: 0; border-radius: 7px;
   border: 1px solid var(--border); background: var(--surface-2);
   font-size: 12px; line-height: 1; cursor: default;
 }
 .tally:hover, .tally:focus-visible { border-color: var(--series-1); background: var(--series-1-soft); }
 
-/* A chip that has given its words to the hover keeps its icon centred rather than sitting
-   where the label used to start, or a row of them comes out visibly ragged. */
-.hl-quiet { padding: 4px 8px; }
+/* A segment row is a summary of a summary, and the rule that separates an evening's small
+   change from its news is more furniture than a row that size can carry. */
+.seg-summary .tally-row { margin-top: 4px; padding-top: 0; border-top: none; }
 
 /* A segment carries its own character's class colour, quietly: a rail down the left edge
    and a wash that has faded out by a third of the way across. Quietly is the point — the

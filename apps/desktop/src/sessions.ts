@@ -193,7 +193,8 @@ export function activitiesIn(segments: Segment[]): SessionActivity[] {
 
 export type HighlightKind =
   | "achievement" | "levelUp" | "mount" | "toy" | "pet" | "transmog"
-  | "housingLevel" | "housingItem" | "quest" | "equipset"
+  | "housingLevel" | "housingItem"
+  | "achievementCharacter" | "transmogVariant" | "quest" | "equipset"
   | "gold" | "currency" | "reputation" | "housingXP";
 
 /**
@@ -234,6 +235,8 @@ interface HighlightStyle {
   rank: number;
   family: HighlightFamily;
   icon: string;
+  /** Drawn as its icon alone, down among the running numbers rather than up with the chips. */
+  quiet?: boolean;
 }
 
 /** What the builders below push: everything but the styling, which is filled in from `KINDS`. */
@@ -273,6 +276,13 @@ export interface Highlight extends HighlightStyle {
  * `milestone` entries are the things a player would tell someone about — a mount, an
  * achievement, a level — and get a chip each. `tally` entries are the running numbers that
  * give those things context, and share a single quiet strip. Rank orders within a family.
+ *
+ * A `quiet` milestone is a thing that happened and is nevertheless not news: this character
+ * finally earning an achievement the warband already had, a fourth colour of a tabard already
+ * owned, a quest handed in, a set of gear saved. Each is worth a mark on the card — somebody
+ * who reshuffled their raid set on Tuesday can find the evening again — and none is worth a
+ * chip's width of words beside a mount and an account first. So they are drawn where the
+ * running numbers are drawn, as their icon and nothing else, and the words move into the hover.
  */
 const KINDS: Record<HighlightKind, HighlightStyle> = {
   achievement: { rank: 1, family: "milestone", icon: "🏆" },
@@ -283,12 +293,14 @@ const KINDS: Record<HighlightKind, HighlightStyle> = {
   transmog: { rank: 6, family: "milestone", icon: "👘" },
   housingLevel: { rank: 7, family: "milestone", icon: "🏡" },
   housingItem: { rank: 8, family: "milestone", icon: "🪑" },
-  quest: { rank: 9, family: "milestone", icon: "📜" },
-  equipset: { rank: 10, family: "milestone", icon: "🎽" },
-  gold: { rank: 11, family: "tally", icon: "💰" },
-  currency: { rank: 12, family: "tally", icon: "🪙" },
-  reputation: { rank: 13, family: "tally", icon: "🎖️" },
-  housingXP: { rank: 14, family: "tally", icon: "✨" },
+  achievementCharacter: { rank: 9, family: "milestone", icon: "🏆", quiet: true },
+  transmogVariant: { rank: 10, family: "milestone", icon: "👘", quiet: true },
+  quest: { rank: 11, family: "milestone", icon: "📜", quiet: true },
+  equipset: { rank: 12, family: "milestone", icon: "🎽", quiet: true },
+  gold: { rank: 13, family: "tally", icon: "💰" },
+  currency: { rank: 14, family: "tally", icon: "🪙" },
+  reputation: { rank: 15, family: "tally", icon: "🎖️" },
+  housingXP: { rank: 16, family: "tally", icon: "✨" },
 };
 
 /**
@@ -364,24 +376,28 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     segmentId: segment.segmentId,
   });
 
+  // An account first is the warband earning something for the first time; a character first is
+  // one of its characters catching up with something the warband already had. Only the first is
+  // news, and folding the two together made an evening of catching up look like an evening of
+  // rare ones — so they are two summaries, and the quieter of them is drawn as a mark.
   const achievements = from("achievements");
-  if (achievements.length) {
-    const first = achievements.filter(({ event }) => event.accountFirst);
-    // An account first is rarer than a character first, so it leads the list the summary
-    // unfolds into — the reader opening twelve achievements wants the notable one on top.
-    const items = [...first, ...achievements.filter(({ event }) => !event.accountFirst)]
-      .map((sourced) => entry(sourced, sourced.event.name || `Achievement ${sourced.event.id}`,
-        sourced.event.accountFirst ? "account first" : "character first"));
+  const earned = (
+    kind: HighlightKind, found: Array<Sourced<EventOf<"achievements">>>, said: string,
+  ): void => {
+    if (!found.length) return;
+    const items = found.map((sourced) => entry(sourced,
+      sourced.event.name || `Achievement ${sourced.event.id}`, said));
     out.push({
-      kind: "achievement",
+      kind,
       label: counted(items, "achievements"),
-      detail: items.length === 1
-        ? items[0].detail
-        : (first.length ? `${first.length} account first` : "character firsts"),
-      weight: first.length * 100 + items.length,
+      detail: items.length === 1 ? said : `${said}s`,
+      weight: items.length,
       items,
     });
-  }
+  };
+  earned("achievement", achievements.filter(({ event }) => event.accountFirst), "account first");
+  earned("achievementCharacter", achievements.filter(({ event }) => !event.accountFirst),
+    "character first");
 
   const levelUps = from("levelUps");
   if (levelUps.length) {
@@ -431,26 +447,38 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     out.push({ kind: "pet", label: counted(items, "pets"), weight: items.length, items });
   }
 
+  // A brand new appearance is the collection growing; a variant is another colour of something
+  // already owned. One chip counting both said "5 new appearances" for an evening that added
+  // one, so they are counted apart — and the variants, being a wardrobe tidied rather than a
+  // wardrobe grown, are drawn as a mark.
   const transmogs = from("transmogs");
-  const fresh = transmogs.filter(({ event }) => event.newAppearance === true);
-  const variants = transmogs.filter(({ event }) => event.newAppearance === false);
-  if (fresh.length || variants.length) {
-    // A brand new appearance is the collection growing; a variant is a colour of something
-    // already owned. Leading with whichever actually happened keeps the chip honest, and
-    // the list holds both, because "which of these were new" is the question it answers.
-    const items = [...fresh, ...variants].map((sourced) =>
-      entry(sourced, sourced.event.name || `Item ${sourced.event.id}`,
-        sourced.event.newAppearance ? "new appearance" : "variant of one owned",
-        sourced.event.id));
+  const pieces = (said: string, was: boolean): HighlightEntry[] =>
+    transmogs.filter(({ event }) => event.newAppearance === was).map((sourced) =>
+      entry(sourced, sourced.event.name || `Item ${sourced.event.id}`, said, sourced.event.id));
+
+  // The new ones count rather than name, because the number is the whole of what a collection
+  // growing means — and because the addon catches an id far more often than it catches a
+  // name, so a chip naming the one piece would as often as not read "Item 101".
+  const fresh = pieces("new appearance", true);
+  if (fresh.length) {
     out.push({
       kind: "transmog",
-      label: fresh.length ? `${fresh.length} new appearance${fresh.length === 1 ? "" : "s"}` : "New transmog source",
-      detail: fresh.length && variants.length
-        ? `+${variants.length} variant${variants.length === 1 ? "" : "s"}`
-        : (fresh.length ? "" : `${variants.length} variant${variants.length === 1 ? "" : "s"}`),
-      count: (fresh.length ? fresh : variants).length,
-      weight: fresh.length * 10 + variants.length,
-      items,
+      label: `${fresh.length} new appearance${fresh.length === 1 ? "" : "s"}`,
+      weight: fresh.length,
+      items: fresh,
+    });
+  }
+
+  // The variants are a mark with their words in the hover, so a single one names the piece it
+  // was: there is room for it there, and "1 variant" would be a hover worth nothing.
+  const variants = pieces("variant of one owned", false);
+  if (variants.length) {
+    out.push({
+      kind: "transmogVariant",
+      label: counted(variants, "variants"),
+      detail: variants.length === 1 ? variants[0]!.detail : "",
+      weight: variants.length,
+      items: variants,
     });
   }
 

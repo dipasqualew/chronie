@@ -119,17 +119,6 @@ interface ChipProps {
   onOpenSegment?: (segmentId: number) => void;
 }
 
-/**
- * The kinds drawn as their icon and nothing else, with the words moved into the hover.
- *
- * Saving a set of gear is housekeeping. It is worth a mark on the card — somebody who
- * reshuffled their raid set on Tuesday can find the evening again — and it is not worth the
- * width of "Raid · 2 slots, +16 item levels" beside a mount and an account first. So the chip
- * shrinks to its icon and the sentence goes into the tooltip, where the reader who cares can
- * still reach it and the reader who does not never has to read past it.
- */
-const ICON_ONLY: ReadonlySet<string> = new Set(["equipset"]);
-
 /** The whole of what a chip says, for the tooltip and the accessible name of an icon. */
 const chipText = (entry: Highlight): string =>
   [entry.label, entry.detail].filter(Boolean).join(" · ");
@@ -141,11 +130,15 @@ const chipText = (entry: Highlight): string =>
  * because that is the only place left to go. One that stands for twelve unfolds into the
  * twelve instead — the count is what a session card is for, and the names are what the reader
  * came back for.
+ *
+ * A quiet kind keeps all of that and gives up its words: the chip shrinks to its icon and the
+ * sentence goes into the tooltip, where the reader who cares can still reach it and the reader
+ * who does not never has to read past it. Which kinds those are is `KINDS`' business.
  */
 export function HighlightChip(
   { entry, scope, expanded, interactive, onUnfold, onOpenSegment }: ChipProps,
 ): ReactNode {
-  const quiet = ICON_ONLY.has(entry.kind);
+  const quiet = !!entry.quiet;
   const text = chipText(entry);
   // A chip with no words on it still has to be reachable and still has to say what it is, so
   // the sentence it dropped becomes both its tooltip and the name a screen reader reads.
@@ -347,10 +340,16 @@ export function shownHighlights(
 }
 
 /**
- * Draws a set of highlights: the milestones as summary chips, the totals as a quiet strip
- * beneath, and — where the reader has asked for one — the things behind a summary.
+ * Draws a set of highlights: the loud milestones as summary chips, everything quieter as a
+ * strip of marks beneath them, and — where the reader has asked for one — the things behind a
+ * summary.
  *
- * There is no cap, because there is nothing left to cap: a summary per kind is nine chips at
+ * The strip is one row rather than two because the things in it are one kind of thing to a
+ * reader: the small change, the housekeeping and the running numbers, none of which is why
+ * anybody came back to the card. A quest handed in and a faction ground are equally not the
+ * news, and putting them on separate lines would say they were different sorts of not-news.
+ *
+ * There is no cap, because there is nothing left to cap: a summary per kind is eight chips at
  * the very most, however long the evening was.
  *
  * `milestones={false}` is for the detail modal, which lists every one of them in full a few
@@ -363,14 +362,21 @@ export function HighlightList(
   }: HighlightListProps,
 ): ReactNode {
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
+  const chips = milestones.filter((entry) => !entry.quiet);
+  const marks = milestones.filter((entry) => entry.quiet);
   const tallies = withTallies ? tallyBadges(entries) : [];
   const unfolded = interactive
     ? milestones.find((entry) => entry.kind === expanded && entry.segmentId == null)
     : undefined;
+  // Drawn under whichever row it was opened from, so the list a reader asked for arrives where
+  // they were looking rather than above the row they had just pressed.
+  const panel = unfolded
+    ? <HighlightPanel entry={unfolded} scope={scope} items={items} onOpenSegment={onOpenSegment} />
+    : null;
   return <>
-    {milestones.length
+    {chips.length
       ? <div className="hl-row">
-        {milestones.map((entry) => (
+        {chips.map((entry) => (
           <HighlightChip
             key={entry.kind} entry={entry} scope={scope} expanded={expanded}
             interactive={interactive} onUnfold={onUnfold} onOpenSegment={onOpenSegment}
@@ -378,18 +384,21 @@ export function HighlightList(
         ))}
       </div>
       : null}
-    {unfolded
-      ? <HighlightPanel
-        entry={unfolded} scope={scope} items={items} onOpenSegment={onOpenSegment}
-      />
-      : null}
-    {tallies.length
-      // Named for the same reason the cast is: a row of marks each announcing a number of its
+    {unfolded?.quiet ? null : panel}
+    {marks.length || tallies.length
+      // Named for the same reason the cast is: a row of marks each announcing something of its
       // own is a set of unrelated figures until something says what they are a set of.
-      ? <div className="tally-row" role="group" aria-label="Running totals">
+      ? <div className="tally-row" role="group" aria-label="The quieter marks">
+        {marks.map((entry) => (
+          <HighlightChip
+            key={entry.kind} entry={entry} scope={scope} expanded={expanded}
+            interactive={interactive} onUnfold={onUnfold} onOpenSegment={onOpenSegment}
+          />
+        ))}
         {tallies.map((badge) => <TallyMark key={badge.kind} badge={badge} />)}
       </div>
       : null}
+    {unfolded?.quiet ? panel : null}
   </>;
 }
 

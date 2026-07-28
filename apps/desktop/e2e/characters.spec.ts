@@ -114,8 +114,11 @@ test("gives every character a page of their own", async ({ page }) => {
     await detail.close();
   });
 
-  // The summary strip is the session card's, which means the chips behave the way they do
-  // there: a summary standing for several things unfolds, and each of them is a way back.
+  // The summary strip is the session card's, which means it behaves the way it does there: a
+  // summary standing for several things unfolds, and each of them is a way back. The one asked
+  // for here is a quiet mark — two achievements that only caught this character up — which is
+  // the harder half of the bargain: it carries no words on the pane at all, so the name it is
+  // asked for is the only thing standing between it and being unreachable.
   await test.step("a summary of several unfolds into them, and they lead back to the segment", async () => {
     await roster.pick("Aster-Vale");
     const achievements = roster.chip(/2 achievements/);
