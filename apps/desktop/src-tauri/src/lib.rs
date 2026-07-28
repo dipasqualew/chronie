@@ -17,6 +17,7 @@ pub mod placement;
 pub mod query;
 pub mod retention;
 pub mod transmog;
+pub mod wardrobe;
 pub mod wifi;
 pub mod worn;
 

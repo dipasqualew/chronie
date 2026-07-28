@@ -34,6 +34,7 @@ const FILE_DATA_ID = {
   transmogSetGroup: 1576116,
   itemModifiedAppearance: 982457,
   itemAppearance: 982462,
+  item: 841626,
   itemDisplayInfo: 1266429,
   itemDisplayInfoMaterialRes: 1280614,
   itemSparse: 1572924,
@@ -277,6 +278,11 @@ const itemModifiedAppearance: TableSpec = {
       rows: [
         [71012, 30012, 0, 80012, 1, 1],
         [71900, 30900, 0, 80900, 0, 1],
+        // The one hop of the chain the wardrobe list can lose a look to: appearance 80021 is
+        // readable and belongs to no set, and the only row saying which item gives it is in
+        // here. Nothing can be said about it — not the item, not the name, not the kind — so
+        // a list of every head in the game counts it and leaves it out.
+        [71024, 30024, 0, 80021, 0, 1],
       ],
     },
   ],
@@ -338,10 +344,13 @@ const itemAppearance: TableSpec = {
         [3, 900003, 130003],
         [0, 900001, 130001],
         [3, 900003, 130003],
+        // A head belonging to no set, whose only way to an item is encrypted — see the
+        // section at the end of `ItemModifiedAppearance`.
+        [0, 900002, 130001],
       ],
       idList: [
         80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013,
-        80014, 80015, 80016, 80017, 80018, 80019, 80020,
+        80014, 80015, 80016, 80017, 80018, 80019, 80020, 80021,
       ],
     },
     {
@@ -351,6 +360,100 @@ const itemAppearance: TableSpec = {
         [0, 900001, 130010],
       ],
       idList: [80012, 80900],
+    },
+  ],
+};
+
+/** The two classes of thing the wardrobe names by hand, as the game files them. */
+const ARMOR = 4;
+const WEAPON = 2;
+
+/**
+ * `Item` — what kind of thing each item is, which is the one thing `ItemSparse` will not say.
+ *
+ * The wardrobe browses by *kind*, and a kind below the armour slots is a question only this
+ * table answers: `ItemAppearance.DisplayType` files a dagger, a staff and a one-handed axe
+ * under 11 alike, and `InventoryType` separates one hand from two and stops there. The
+ * subclass is what says which weapon it is.
+ *
+ * Two megabytes on a shipping install against `ItemSparse`'s sixty-three, and stored almost
+ * entirely as palettes for the reason a table of two hundred thousand items with twenty
+ * classes between them would be — which is what the columns below mirror, along with the ids
+ * being kept in a list beside the rows. Its own copy of `InventoryType` is here in its place
+ * and read by nobody: the wardrobe takes that from `ItemSparse` like the rest of the chain,
+ * so that where an item is worn and what it is called are one item's answer and not two.
+ */
+const item: TableSpec = {
+  fileDataId: FILE_DATA_ID.item,
+  layoutHash: 0x4f8b21c6,
+  tableHash: 0x50238ec2,
+  idColumn: 0,
+  // Bit 2: the ids are in a list of their own.
+  flags: 4,
+  recordSize: 8,
+  columns: [
+    { storage: Storage.indexed, offsetBits: 0, sizeBits: 5, palette: [ARMOR, WEAPON, 15] }, // ClassID
+    {
+      storage: Storage.indexed, offsetBits: 5, sizeBits: 5,
+      palette: [0, 1, 2, 3, 4, 6, 7, 8],
+    }, // SubclassID
+    { storage: Storage.bitpacked, offsetBits: 10, sizeBits: 4 }, // Material
+    {
+      storage: Storage.indexed, offsetBits: 14, sizeBits: 6,
+      palette: [1, 3, 4, 5, 7, 8, 10, 13, 14, 17, 23],
+    }, // InventoryType
+    { storage: Storage.indexed, offsetBits: 20, sizeBits: 4, palette: [0, 1, 3] }, // SheatheType
+    { storage: Storage.indexed, offsetBits: 24, sizeBits: 5, palette: [255] }, // SoundOverrideSubclassID
+    { storage: Storage.bitpackedSigned, offsetBits: 29, sizeBits: 24 }, // IconFileDataID
+    { storage: Storage.indexed, offsetBits: 53, sizeBits: 5, palette: [0, 9, 11] }, // ItemGroupSoundsID
+    { storage: Storage.bitpacked, offsetBits: 58, sizeBits: 3 }, // unread, from here down
+    { storage: Storage.bitpacked, offsetBits: 61, sizeBits: 3 },
+  ],
+  sections: [
+    {
+      key: 0n,
+      // ClassID, SubclassID, Material, InventoryType, SheatheType, SoundOverride, Icon,
+      // GroupSounds, and the two nothing reads.
+      rows: [
+        [ARMOR, 1, 7, 1, 0, 255, 130001, 11, 0, 0], // Tideglass Crown
+        [ARMOR, 1, 7, 3, 0, 255, 130002, 11, 0, 0], // Tideglass Mantle
+        [ARMOR, 1, 7, 5, 0, 255, 130003, 11, 0, 0], // Tideglass Robe
+        [ARMOR, 1, 7, 8, 0, 255, 130004, 11, 0, 0], // Tideglass Sandals
+        [ARMOR, 1, 7, 10, 0, 255, 130005, 11, 0, 0], // Tideglass Gloves
+        [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Emberforge Helm
+        [ARMOR, 4, 6, 3, 0, 255, 130002, 11, 0, 0], // Emberforge Pauldrons
+        [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Emberforge Breastplate
+        [ARMOR, 4, 6, 7, 0, 255, 130006, 11, 0, 0], // Emberforge Greaves
+        // The weapon rack, and the whole reason this table is read at all: a one-handed
+        // sword and a two-handed one are one display type and two subclasses, and the shield
+        // and the censer beside them are not weapons in the game's own filing at all.
+        [WEAPON, 7, 1, 13, 1, 255, 130007, 9, 0, 0], // Emberforge Blade
+        [WEAPON, 8, 1, 17, 1, 255, 130007, 9, 0, 0], // Emberforge Greatsword
+        [ARMOR, 6, 6, 14, 1, 255, 130007, 9, 0, 0], // Emberforge Aegis
+        [ARMOR, 0, 0, 23, 1, 255, 130007, 9, 0, 0], // Emberforge Censer
+        [ARMOR, 0, 7, 4, 0, 255, 130001, 11, 0, 0], // the shirt nothing names
+        [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Stormforged Helm
+        [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Stormforged Greathelm
+        [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Helm of the Tempest
+        [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Stormforged Breastplate
+        [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Breastplate of the Tempest
+        [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Stormbreaker's Helm
+        [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Stormbreaker's Breastplate
+      ],
+      idList: [
+        30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015,
+        30016, 30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
+      ],
+    },
+    {
+      // Encrypted, exactly as `ItemSparse` encrypts the same items: an appearance whose item
+      // this install cannot read is one the wardrobe can say no kind for either.
+      key: 0x7c3e0a45b9d612f8n,
+      rows: [
+        [ARMOR, 1, 7, 1, 0, 255, 130001, 11, 0, 0],
+        [ARMOR, 1, 7, 3, 0, 255, 130002, 11, 0, 0],
+      ],
+      idList: [30011, 30012],
     },
   ],
 };
@@ -635,7 +738,7 @@ const ANY_CLASS = 0xffff;
  * reader walked it rather than trusting an offset — see the two rows below whose names are of
  * different lengths.
  */
-function item(
+function sparseRow(
   name: string,
   description: string,
   {
@@ -706,49 +809,49 @@ const itemSparse: TableSpec = {
     {
       key: 0n,
       rows: [
-        item("Tideglass Crown", "", { quality: 4, inventoryType: 1 }),
-        item("Tideglass Mantle", "", { quality: 4, inventoryType: 3 }),
+        sparseRow("Tideglass Crown", "", { quality: 4, inventoryType: 1 }),
+        sparseRow("Tideglass Mantle", "", { quality: 4, inventoryType: 3 }),
         // The one item with a description, so that two rows of the same shape are still
         // different lengths and the offset map is doing something.
-        item("Tideglass Robe", "Woven from the glass the tide leaves behind.", {
+        sparseRow("Tideglass Robe", "Woven from the glass the tide leaves behind.", {
           quality: 4, inventoryType: 5,
         }),
-        item("Tideglass Sandals", "", { quality: 3, inventoryType: 8 }),
-        item("Tideglass Gloves", "", { quality: 3, inventoryType: 10 }),
-        item("Emberforge Helm", "", { quality: 4, inventoryType: 1 }),
-        item("Emberforge Pauldrons", "", { quality: 4, inventoryType: 3 }),
-        item("Emberforge Breastplate", "", { quality: 5, inventoryType: 5 }),
-        item("Emberforge Greaves", "", { quality: 4, inventoryType: 7 }),
+        sparseRow("Tideglass Sandals", "", { quality: 3, inventoryType: 8 }),
+        sparseRow("Tideglass Gloves", "", { quality: 3, inventoryType: 10 }),
+        sparseRow("Emberforge Helm", "", { quality: 4, inventoryType: 1 }),
+        sparseRow("Emberforge Pauldrons", "", { quality: 4, inventoryType: 3 }),
+        sparseRow("Emberforge Breastplate", "", { quality: 5, inventoryType: 5 }),
+        sparseRow("Emberforge Greaves", "", { quality: 4, inventoryType: 7 }),
         // The weapon rack, and the whole reason this column is read: four appearances the
         // game files under three display types and would otherwise say nothing else about.
         // 13 is a one-hander, 17 a two-hander, 14 a shield and 23 a thing held in the other
         // hand — which is four different places on a body.
-        item("Emberforge Blade", "", { quality: 5, inventoryType: 13 }),
-        item("Emberforge Greatsword", "", { quality: 5, inventoryType: 17 }),
-        item("Emberforge Aegis", "", { quality: 5, inventoryType: 14 }),
-        item("Emberforge Censer", "", { quality: 5, inventoryType: 23 }),
+        sparseRow("Emberforge Blade", "", { quality: 5, inventoryType: 13 }),
+        sparseRow("Emberforge Greatsword", "", { quality: 5, inventoryType: 17 }),
+        sparseRow("Emberforge Aegis", "", { quality: 5, inventoryType: 14 }),
+        sparseRow("Emberforge Censer", "", { quality: 5, inventoryType: 23 }),
         // An item the game holds a row for and no name in it, which is what a reader has to
         // fall back from rather than draw as a blank.
-        item("", "", { quality: 1, inventoryType: 4 }),
+        sparseRow("", "", { quality: 1, inventoryType: 4 }),
         // Set 207's wardrobe: two looks sold six ways, which is the ordinary shape of a set
         // in the shipping game and the reason the detail view groups by appearance at all.
         // The head is the interesting one — the set's own version is Warrior-only and two
         // other items give the same look to anybody, at a lower price the second time.
-        item("Stormforged Helm", "", {
+        sparseRow("Stormforged Helm", "", {
           quality: 4, inventoryType: 1, requiredLevel: 60, allowableClass: 0b1,
         }),
-        item("Stormforged Greathelm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
-        item("Helm of the Tempest", "", { quality: 3, inventoryType: 1, requiredLevel: 45 }),
-        item("Stormforged Breastplate", "", {
+        sparseRow("Stormforged Greathelm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
+        sparseRow("Helm of the Tempest", "", { quality: 3, inventoryType: 1, requiredLevel: 45 }),
+        sparseRow("Stormforged Breastplate", "", {
           quality: 4, inventoryType: 5, requiredLevel: 60, allowableClass: 0b1,
         }),
-        item("Breastplate of the Tempest", "", {
+        sparseRow("Breastplate of the Tempest", "", {
           quality: 4, inventoryType: 5, requiredLevel: 60,
         }),
         // What sets 208 and 209 are both made of: one wardrobe, sold to each faction under a
         // name of its own.
-        item("Stormbreaker's Helm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
-        item("Stormbreaker's Breastplate", "", {
+        sparseRow("Stormbreaker's Helm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
+        sparseRow("Stormbreaker's Breastplate", "", {
           quality: 4, inventoryType: 5, requiredLevel: 60,
         }),
       ],
@@ -762,9 +865,9 @@ const itemSparse: TableSpec = {
       // neither can 30011, whose appearance the readable tables do describe.
       key: 0x4e91d2c73b05a86fn,
       rows: [
-        item("Duskwoven Cowl", "", { quality: 4, inventoryType: 1 }),
-        item("Duskwoven Wraps", "", { quality: 4, inventoryType: 9 }),
-        item("Unreleased Trinket", "", { quality: 5, inventoryType: 12 }),
+        sparseRow("Duskwoven Cowl", "", { quality: 4, inventoryType: 1 }),
+        sparseRow("Duskwoven Wraps", "", { quality: 4, inventoryType: 9 }),
+        sparseRow("Unreleased Trinket", "", { quality: 5, inventoryType: 12 }),
       ],
       idList: [30011, 30012, 30900],
     },
@@ -2329,6 +2432,7 @@ emit("transmog", {
     transmogSetItem,
     itemModifiedAppearance,
     itemAppearance,
+    item,
     itemDisplayInfo,
     itemDisplayInfoMaterialRes,
     itemSparse,
