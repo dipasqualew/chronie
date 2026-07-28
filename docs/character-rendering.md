@@ -73,12 +73,18 @@ and Mechagnome carry extra geoset groups and limb handling worth avoiding.
 
 | What | Value | Status |
 |---|---|---|
-| `ChrModel.ID` | 2 | community |
+| `ChrModel.ID` | 2 | community, **used** |
 | `CharComponentTextureLayoutID` | **104** | **verified** |
 | Model FileDataID | 1000764 (`humanfemale_hd.m2`) | community, **rendered** |
 | Composite atlas size | **2048 × 1024** | **verified** |
 
 `humanfemale.m2` (119563) is the *vanilla* model. Retail uses the `_hd` one.
+
+**`ChrModel.ID` 2 is now load-bearing rather than decorative.** `ChrCustomizationOption`
+describes every playable body at once and it is the only column that says which rows are this
+one's — so a wrong id here is no longer a body that still draws, it is another race's head. It
+is still the community's number, and what stands behind it is that filtering on it yields
+thirteen options whose names read as a Human's and whose geosets land on this body's parts.
 
 **The two community values have now been rendered, which is not the same as read.** Nothing
 here has opened `ChrModel` — but 1000764 parses as a Human Female body, and a leg appearance
@@ -90,8 +96,10 @@ survive geoset selection, and which of the layout's rectangles those parts' UVs 
 
 The atlas size comes from `ChrModelMaterial` where the layout is 104 and
 `TextureType == 1`; observed on this build as `[layout 104, texType 1, 2048, 1024]`.
-Types 6 (hair, 256×256), 19 (eyes, 256×128) and 20 (jewelry, 512×512) exist and are not
-needed for armour.
+Types 6 (hair, 256×256), 19 (eyes, 256×128) and 20 (jewelry, 512×512) exist and carry no
+armour — but the body's own parts ask for them, so each is bound whole from the picture the
+character's customization names rather than composited. Nothing is sized against this table:
+those atlases are one file each, at whatever size that file is.
 
 ## The composite layout, verified
 
@@ -125,10 +133,10 @@ agree exactly.
 
 1. Allocate `2048 × 1024` RGBA.
 2. Blit the base skin BLP over the whole buffer, then blend the rest of what the character's
-   own customization paints — her underwear — into the section rectangles it names. Which
-   pictures those are is
-   [game-files.md](game-files.md#the-characters-own-skin-verified); `skin.rs` is the reading
-   and `Atlas::base` is the blit.
+   own customization paints — her face into the right half, her underwear into two rectangles
+   of the left — into the section rectangles each names. Which pictures those are is
+   [game-files.md](game-files.md#the-character-herself-verified); `customization.rs` is the
+   reading and `Atlas::base` is the blit.
 3. For each item, **lowest `SLOT_LAYER` first**, and for each `ComponentSection` it supplies
    (via `ItemDisplayInfoMaterialRes`, joined by `foreign_id()`): resolve the material to the
    one file painted for *this* body, decode its BLP, scale to fill the section rectangle
@@ -141,7 +149,14 @@ Step 3's first hop is a trap of its own: a material resource names a file per bo
 `ComponentTextureFileData` says which is which. It is written down in
 [game-files.md](game-files.md#componenttexturefiledata), because it is a table rather than a
 rendering decision. `character::atlas` is all three steps, out of `Atlas::base` and
-`Atlas::wear`; `skin.rs` and `worn.rs` are the reading behind steps 2 and 3.
+`Atlas::wear`; `customization.rs` and `worn.rs` are the reading behind steps 2 and 3.
+
+**The other three atlases are one picture each and are not composited at all.** Types 6, 19 and
+20 — hair, eyes and jewellery — have buffers of their own rather than rectangles of the body's,
+and the character's own customization names one copied layer for each of the first two. They
+bind straight as those M2 texture types. A part handed nothing for one of them is drawn in
+glTF's default colour, and on a hairstyle that is a white cap over the whole head; it is what
+issue #103 was mostly looking at.
 
 Three things to get right, the last two from wow.export:
 
@@ -254,19 +269,44 @@ for each group awarded:
     show  group*100 + the winner's resolved value
 ```
 
-The first two lines are `character::bare`, which is `geoset == 0 || geoset % 100 == 1`: value
+Lines two and three are `character::bare`, which is `geoset == 0 || geoset % 100 == 1`: value
 1 is every group's "nothing here" — bare arms, bare legs, bare feet, no helm, no cape, no
 belt — and geoset 0 is the skin, the one id with no group of its own. The file holds every
 variant of every group at once, so drawing them all is what puts two pairs of legs in the
 same trousers. All three ways of getting this wrong show up as geometry rather than as an
 error: too much and limbs double and z-fight, too little and they go missing.
 
-One more rule, which is this repository's rather than the game's: **a group is only taken over
-when the body actually holds the geoset the value resolves to.** Otherwise the default stays.
-That is the floor under everything above — of the three ways to get geosets wrong, hiding a
-group and then showing nothing in it is the one that takes a limb with it, and this turns it
-into a body that looks unchanged. It is what kept a wrong column from ever looking like
-anything, which is a mixed blessing: it also kept it from being noticed.
+**"Show the default customization geosets" is a line of its own and there is no rule that
+substitutes for it**, which was the whole of issue #103. Value 1 is a convention the armour
+groups keep and the groups a customization owns do not:
+
+| Group | What value 1 is | What the character's own choice is |
+|---|---|---|
+| 0 hair | hairstyle 1 | *Hair Style* — the first swatch is geoset **2** |
+| 7 ears | **there is no 701** | *Ears* — **702** |
+| 32 head | a scrap at the top of the neck | *Face Shape* — **3202**, the whole head |
+| 35 piercings | a piercing | *Piercings* — **3500**, none |
+| 36 necklace | a necklace | *Necklace* — **3600**, none |
+
+So a body assembled out of every group's first value wears a hairstyle floating over a stump,
+with no ears and jewellery nobody chose. Which is exactly what it looked like: the atlas was
+right, the face was painted into the right half of it the whole time, and there was no head to
+read it. `customization.rs` is where those five come from, and
+[game-files.md](game-files.md#the-character-herself-verified) is the chain.
+
+**A customization geoset takes its group over whether or not the body holds it; an item's does
+not.** The rule for an item is this repository's rather than the game's: *a group is only taken
+over when the body actually holds the geoset the value resolves to*, otherwise the default
+stays. That is the floor under everything above — of the three ways to get geosets wrong,
+hiding a group and then showing nothing in it is the one that takes a limb with it, and this
+turns it into a body that looks unchanged. It is what kept a wrong column from ever looking
+like anything, which is a mixed blessing: it also kept it from being noticed.
+
+A customization gets no such floor, and must not: its values come out of the game's own answer
+to "what is this character", and a value the body has nothing for is the game saying the group
+is **off**. `3600` is that — no necklace — and giving it the item floor puts the necklace back
+on. The two rules are opposite for a reason, and swapping them costs a limb in one direction
+and a piece of jewellery in the other.
 
 The table itself is at
 [GeosRenderPrep](https://wowdev.wiki/DB/ItemDisplayInfo/GeosRenderPrep) and, more
@@ -292,21 +332,31 @@ is what the rules above are being applied *to*, and two lines of it are load-bea
 | 12 | 1202–1204 | 1 | tabard |
 | 13 | 1301–1303 | 1 | robe |
 | **15** | **1502–1510** | **2** | **cloaks** |
-| 17 | 1701–1705 | a file of its own | eye glow |
+| **17** | **1701–1705** | **a file of its own** | **eye glow — blend mode 7, and so never drawn** |
 | 18 | 1801–1804 | 1 | belt |
 | 20 | 2001–2008 | 1 | feet |
 | 22 | 2201–2202 | 1 | torso |
-| 32, 33, 35, 36, 51 | 32xx, 3301, 35xx, 36xx, 51xx | 1, 6, 19, files | face, eyes, and the rest of a modern head |
+| **32** | **3201–3204** | **1 and 6** | **the head. `3201` is a scrap; the head is 3202–3204** |
+| 33 | 3301 | 19 | the eyeball |
+| 35, 36 | 3501–3514, 3601–3608 | files | piercings and necklaces |
+| 51 | 5101–5103 | a file of its own | the last of a modern head |
 
 **Hair is group 0, and geoset 0 is the body.** They are in the same hundred, which matters
-exactly once — when a helm hides "group 0" and the rule is "hide the whole hundred". Hide geoset
-0 with it and the character goes with her hairstyle. `character::dressed` excepts it, and it is
-the one exception in that function.
+twice: when a helm hides "group 0" and the rule is "hide the whole hundred", and when the
+character's own hairstyle takes group 0 over and the rule is "show only the value she chose".
+Hide or hide-by-omission geoset 0 either way and the character goes with her hairstyle.
+`character::dressed` excepts it in both places, and it is the one exception in that function.
 
 Note also that several groups have no `…01`: there is no 701, no 801, no 1501. A bare body
 therefore draws *nothing* from those groups rather than a default, and the bare arms and bare
 back are part of geoset 0. `bare()` handles this without knowing about it — a group with no
 value 1 simply contributes no part.
+
+**Group 17 is selected and never drawn**, which is the one place those two come apart. No
+ordinary eye colour switches the glow off — only the handful of glowing swatches touch group
+17 at all — so `1701` survives every rule above and is a part of the mesh `character::dressed`
+hands on. What stops it is `glb::write`: its blend mode is one glTF cannot express, and the
+alternative to leaving it out is a solid cyan slab across her eyes. See the M2 section below.
 
 ### What a helm hides, verified
 
@@ -498,7 +548,16 @@ If `textures[j].type == 0` the texture is a file (`TXID[j]`); otherwise the call
 it. **Type 1 is the composited body atlas** — that is where the work above gets bound.
 
 Materials: flag `0x04` means two-sided (disable backface culling). Blend mode 0 is opaque,
-1 is alpha-test at 0.5, 2 is alpha blend; treat anything else as blend.
+1 is alpha-test at 0.5, 2 is alpha blend.
+
+**Mode 3 and up is a family a still picture cannot draw**, and reading it as alpha blend is not
+a near miss. Add, modulate, mod2x and the two that add through an inverted alpha all depend on
+what is *behind* them rather than only on their own alpha, and glTF's `alphaMode` runs to
+opaque, mask and source-over and stops. The body's eye glow is mode 7: a faint cyan wisp added
+over an opaque head, which is a glint nobody would name — and alpha-blended it is a solid cyan
+slab across both eyes. `m2.rs` keeps them as `Blend::Glow` and `glb::write` leaves those parts
+out of the scene, because what they contribute to a still render is light and there is none
+here to contribute.
 
 ## The trap between a correct `.glb` and a picture
 

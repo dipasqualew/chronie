@@ -151,6 +151,16 @@ pub enum Blend {
     /// Alpha tested at 0.5: the cutouts in a plume or a tabard fringe.
     Mask,
     Blend,
+    /// The additive and modulating family — mode 3 upward: add, modulate, mod2x, and the two
+    /// that add through an inverted alpha. What they have in common is that the result depends
+    /// on what is *behind* them rather than only on their own alpha, and glTF has no way to say
+    /// so: its `alphaMode` runs to opaque, mask and source-over and stops.
+    ///
+    /// Reading them as source-over is not a near miss. A character's eye glow is one of these,
+    /// painted with a faint cyan wisp over an opaque head — added, it is a glint nobody would
+    /// name, and alpha-blended it is a solid cyan slab across both eyes. That was the last of
+    /// what issue #103 called creepy after the head itself arrived.
+    Glow,
 }
 
 /// One draw of the model: a run of triangles sharing a texture and a material.
@@ -375,7 +385,8 @@ impl Model {
                 blend: match blending {
                     0 => Blend::Opaque,
                     1 => Blend::Mask,
-                    _ => Blend::Blend,
+                    2 => Blend::Blend,
+                    _ => Blend::Glow,
                 },
                 two_sided: flags & 0x04 != 0,
             });
@@ -864,7 +875,7 @@ mod tests {
         let body = mesh(CHARACTER, CHARACTER_SKIN);
         let types: Vec<Paint> = body.parts.iter().map(|part| part.paint).collect();
         // Every part but the hair is the composited body atlas, which is type 1.
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 21);
+        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 22);
         assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 2);
         // And the cape, which is the third: a body wears one item picture out of its own
         // geometry, and it is neither the atlas nor the hair.
@@ -881,7 +892,7 @@ mod tests {
             geosets,
             vec![
                 0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 1, 2, 1001, 1002, 1301, 1302,
-                501, 502, 1502, 3201, 3202, 3203, 702, 3601, 2101,
+                501, 502, 1502, 3201, 3202, 3203, 702, 3601, 1701, 2101,
             ]
         );
         // An item is drawn whole, and says so by belonging to no geoset.
@@ -902,6 +913,21 @@ mod tests {
             blends,
             vec![(Blend::Opaque, false), (Blend::Mask, true), (Blend::Blend, false)]
         );
+    }
+
+    // And the fourth answer, which is every mode past source-over at once. The body's eye glow
+    // is the game's mode 7 — added through an inverted alpha — and reading it as a plain blend
+    // is what puts a cyan slab across a character's eyes. The modes differ from one another;
+    // what they have in common is that glTF can write none of them, which is the distinction
+    // this has to keep.
+    #[test]
+    fn tells_the_blend_it_can_draw_from_the_family_it_cannot() {
+        let body = mesh(CHARACTER, CHARACTER_SKIN);
+        let glow = body.parts.iter().find(|part| part.geoset == 1701).expect("the eye glow");
+        assert_eq!(glow.blend, Blend::Glow);
+        assert!(glow.two_sided, "a glow is a sheet, and a sheet is drawn from both sides");
+        // And nothing else on the body is one: everything a reader can see is drawable.
+        assert_eq!(body.parts.iter().filter(|part| part.blend == Blend::Glow).count(), 1);
     }
 
     // Layers past the first are overlays a shader composites onto the base one. Kept, they

@@ -1235,9 +1235,9 @@ const chrCustomizationGeoset: TableSpec = {
         [0, 1, -1], // 46, the style beside it
         [36, 0, -1], // 2068, no necklace at all
         [21, 1, -1], // 2410, the skull the skin choice drives, which is on either way
-        [7, 2, -1], // 13292, the ears — a group whose values start at 2
         [32, 2, -1], // 11350, the head itself
         [32, 3, -1], // 11351, the head beside it, which this app must not reach
+        [7, 2, -1], // 13292, the ears — a group whose values start at 2
       ],
       idList: [45, 46, 2068, 2410, 11350, 11351, 13292],
     },
@@ -2007,14 +2007,14 @@ const models: ModelSpec[] = [
  *   rule the armour groups do. They are the reason a body can be assembled correctly out of
  *   items and still have nothing above the neck.
  *
- * Nothing here is copied from the game. It is twenty-four cubes with the game's own numbering
+ * Nothing here is copied from the game. It is twenty-five cubes with the game's own numbering
  * on them.
  */
 const characterModel: ModelSpec = {
   fileDataId: 1000764,
   skinFileDataId: 1000765,
   skeletonFileDataId: 1000766,
-  cubes: 24,
+  cubes: 25,
   // Written backwards into the combo list, so combo 2 reaches the skin, combo 1 the hair and
   // combo 0 the cape.
   textures: [
@@ -2025,6 +2025,10 @@ const characterModel: ModelSpec = {
   materials: [
     [0, 0], // the body: opaque
     [0x04, 1], // the hair and the cloak: alpha tested and two-sided, which is what a sheet is
+    // And the eye glow, which is the one thing on a body glTF has no compositing for: the
+    // game's mode 7 adds through an inverted alpha, and the format's `alphaMode` cannot say
+    // so. Written out as source-over it stops being a glint and becomes a slab.
+    [0x14, 7],
   ],
   parts: [
     // The skin, which is the one geoset with no group of its own — and the one a helm that
@@ -2080,6 +2084,10 @@ const characterModel: ModelSpec = {
     // Group 36, the necklace — a group whose default swatch is *no necklace*, and which the
     // value-1 rule therefore hangs jewellery on that the character never chose.
     { cube: 23, from: 0, count: 36, material: 0, level: 0, geoset: 3601, combo: 2 },
+    // Group 17, the eye glow. Every eye colour but the glowing ones leaves it where a bare
+    // body has it, so it *is* drawn — and it is composited by adding, which is why a still
+    // picture leaves it out rather than painting it over her eyes.
+    { cube: 24, from: 0, count: 36, material: 2, level: 0, geoset: 1701, combo: 2 },
   ],
 };
 

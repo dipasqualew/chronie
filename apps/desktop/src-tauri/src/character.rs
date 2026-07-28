@@ -17,9 +17,14 @@
 //!   than a spare cube nobody looks at.
 //! - **Every geoset is in the file at once.** A body holds bare arms *and* the sleeves a
 //!   chestpiece switches on, bare feet *and* boots. Drawing them all is what doubled geometry
-//!   and z-fighting look like from the outside, so [`bare`] picks one variant per group.
+//!   and z-fighting look like from the outside, so one variant per group is picked — by
+//!   [`crate::customization`] where the character has an opinion, and by [`bare`] where she has
+//!   none. Her head is one of the former, and it is the part of a body that no rule about
+//!   armour can reach: group 32 has no "nothing here" value to fall back on.
 //! - **The skin comes from the caller.** The body's texture is M2 type 1, the composited
-//!   2048 × 1024 atlas this module builds, rather than a file the model names.
+//!   2048 × 1024 atlas this module builds, rather than a file the model names. So do her hair
+//!   and her eyes, which are types 6 and 19 and atlases of their own — a part handed nothing
+//!   for one of those is drawn in flat white, which on a hairstyle reads as a bald cap.
 //!
 //! And then the point of all of it: **a set of clothes, worn.** What an item does to a body is
 //! two things and no more — it paints textures into rectangles of that atlas, and it switches
@@ -38,6 +43,7 @@ use image::{ImageEncoder, Rgba, RgbaImage};
 use serde_json::Value;
 
 use crate::casc::GameFiles;
+use crate::customization::Customization;
 use crate::glb;
 use crate::icons::{data_url, pixels_of, png_of};
 use crate::m2::{self, Mesh, Model, Paint};
@@ -61,9 +67,10 @@ const ATLAS_HEIGHT: u32 = 1024;
 /// The M2 texture type the composited atlas is bound as.
 ///
 /// The other types a body asks for — 6 hair, 19 eyes, 20 jewelry — have atlases of their own
-/// and are not what armour is painted into. A part that wants one of those is drawn untextured
-/// rather than painted with this, which is the difference between hair that is grey and hair
-/// with somebody's kneecap on it.
+/// and are not what armour is painted into. A part that wants one of those is painted with the
+/// picture [`crate::customization`] found for that type instead, which is a different picture
+/// and not this one: painting hair with the body's atlas would put somebody's kneecap on the
+/// reader's head, and painting it with nothing at all leaves a white cap where a hairstyle is.
 const BODY_TEXTURE: u32 = 1;
 
 /// The one exception to that, and the only slot whose geometry is the body's own: **type 2 is
@@ -117,7 +124,8 @@ const SECTIONS: [(u32, Rect); 10] = [
 /// A flat tone rather than transparency or magenta: the point of this view is the shape of a
 /// body, and a body with see-through patches reads as broken geometry rather than as a missing
 /// texture. [`Atlas::base`] covers every pixel of it on an install this app can read a skin
-/// out of, so what is left of this is the install that cannot — see [`crate::skin::of`].
+/// out of, so what is left of this is the install that cannot — see
+/// [`crate::customization::of`].
 const UNPAINTED: [u8; 4] = [0xc8, 0xa2, 0x8c, 0xff];
 
 /// Whether a geoset is drawn on a body with nothing on it.
@@ -128,14 +136,20 @@ const UNPAINTED: [u8; 4] = [0xc8, 0xa2, 0x8c, 0xff];
 /// own. Everything else in the file is a variant that some item switches on in place of the
 /// default, and the file holds all of them at once.
 ///
-/// So this is the whole of "hide everything, then show geoset 0 and the defaults" from
+/// So this is "hide everything, then show geoset 0 and the defaults" from
 /// `docs/character-rendering.md`, and getting it wrong has three faces, all of them geometry
 /// rather than an error: draw too much and limbs double and z-fight, draw too little and they
 /// go missing.
 ///
-/// When an item is composited onto the body — the next step, not this one — it hides its
-/// groups' whole hundred and shows the one value it drives instead. That replaces the default
-/// this picks; it does not fight with it.
+/// **It is the floor and not the answer.** Value 1 is a convention the armour groups keep and
+/// the groups a *customization* owns do not: group 32's value 1 is a scrap at the top of the
+/// neck rather than a head, group 7 has no value 1 at all, and group 36's is a necklace where
+/// the character chose none. Every one of those is settled by [`crate::customization`] before
+/// this is consulted, and what is left for this are the groups nobody has an opinion about.
+///
+/// When an item is composited onto the body — the step after that one — it hides its groups'
+/// whole hundred and shows the one value it drives instead. That replaces whatever was there;
+/// it does not fight with it.
 pub fn bare(geoset: u16) -> bool {
     geoset == 0 || geoset % 100 == 1
 }
@@ -279,17 +293,29 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Vec<u8>, Str
     let skin = model
         .skin_file_data_id()
         .ok_or("the character model names no skin profile, so nothing says how to draw it")?;
-    let mesh = dressed(&model.with_skin(&files.read(skin)?)?, worn);
+    let herself = crate::customization::of(files)?;
+    let mesh = dressed(&model.with_skin(&files.read(skin)?)?, worn, herself.as_ref());
 
-    let painted = atlas(files, worn)?.png()?;
+    let painted = atlas(files, herself.as_ref(), worn)?.png()?;
     let cape = worn.and_then(|worn| worn.cape).and_then(|fdid| decode_file(files, fdid));
+    // Her hair and her eyes: atlases of their own, bound whole rather than composited. Each
+    // is decoded once here rather than per part, because several parts ask for one of them.
+    let hers: Vec<(u32, Vec<u8>)> = herself
+        .iter()
+        .flat_map(|herself| herself.atlases.iter())
+        .filter_map(|(kind, file)| decode_file(files, *file).map(|png| (*kind, png)))
+        .collect();
     let body = |paint| match paint {
         // The model's own textures, which on a body are the few things not customized.
         Paint::File(fdid) => decode_file(files, fdid),
         Paint::Supplied(BODY_TEXTURE) => Some(painted.clone()),
         Paint::Supplied(CAPE_TEXTURE) => cape.clone(),
-        // Hair, eyes and jewelry: real texture types this composites nothing for.
-        Paint::Supplied(_) => None,
+        // And every other type a body declares is one of hers, or nothing on an install that
+        // could not say — which is the white cap this used to draw in every case.
+        Paint::Supplied(kind) => hers
+            .iter()
+            .find(|(which, _)| *which == kind)
+            .map(|(_, png)| png.clone()),
     };
 
     // Held in three lists rather than in the pieces themselves because a piece borrows both
@@ -375,25 +401,33 @@ fn hung_on(
     Ok(hung)
 }
 
-/// The one picture the whole body is painted out of: her own skin, and the appearance over it.
+/// The one picture the whole body is painted out of: her own skin, her face, and the
+/// appearance over both.
 ///
 /// The order is the whole of the compositing rule. The skin covers all 2048 × 1024 as a
 /// straight copy, because it is the bottom of the stack and has nothing to blend against;
 /// everything above it lands in its own rectangles and blends, because it has. That is the
-/// same operation for the two halves of her underwear as for a chestpiece's sleeves — the
-/// underwear is only lower down the stack, which is why an item painted over it covers it.
+/// same operation for her face as for a chestpiece's sleeves — the difference is only which
+/// rectangle and how far down the stack, which is why an item painted over the underwear
+/// covers it and nothing an item paints reaches the right half where the face is.
 ///
 /// An install that cannot say which skin leaves the flat tone underneath — which is what every
 /// body in this app looked like before that chain was read, so the worst case is the picture
 /// this used to give rather than a broken one. What is *not* tolerated is a skin that resolves
 /// and will not decode: that is either a build whose columns have moved or this app being
 /// wrong about BLP, and a body quietly back to being a mannequin hides both. See
-/// [`crate::skin::of`].
-fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
+/// [`crate::customization::of`].
+fn atlas(
+    files: &dyn GameFiles,
+    herself: Option<&Customization>,
+    worn: Option<&Worn>,
+) -> Result<Atlas, String> {
     let mut atlas = Atlas::unpainted();
-    if let Some(skin) = crate::skin::of(files)? {
-        atlas.base(&files.read(skin.base)?)?;
-        atlas.wear(files, &skin.over);
+    if let Some(herself) = herself {
+        if herself.base != 0 {
+            atlas.base(&files.read(herself.base)?)?;
+        }
+        atlas.wear(files, &herself.over);
     }
     if let Some(worn) = worn {
         atlas.wear(files, &worn.textures);
@@ -403,9 +437,19 @@ fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
 
 /// The mesh with only the parts a body wearing this — or nothing — draws.
 ///
-/// Per `docs/character-rendering.md`: hide everything, show the skin and the defaults, then
-/// for each group the appearance drives, hide that group's whole hundred and show the one
-/// value it names. [`bare`] is the first two lines of that; this is the third.
+/// Per `docs/character-rendering.md`: hide everything, show the skin, then the character's own
+/// customization geosets, then for each group the appearance drives hide that group's whole
+/// hundred and show the one value it names. [`bare`] is the floor under all of it, `herself` is
+/// the second line, and `worn` is the third.
+///
+/// **The three lines are not the same rule, and the middle one is the head.** An appearance's
+/// geosets are read out of a column that has never been checked against an install, so they get
+/// a floor: a value this body has nothing for leaves the group alone. A *customization's* are
+/// read out of the game's own answer to "what is this character", and a value the body has
+/// nothing for is the game saying the group is **off** — which is what "no necklace" is, and
+/// what stops the same rule that loses the head from hanging jewellery on her. Give the
+/// customization the appearance's floor and group 36 keeps its bare default; give the
+/// appearance the customization's certainty and a wrong column costs a limb.
 ///
 /// **A group is only taken over when the body actually holds the geoset it asks for.** That is
 /// a deliberate floor rather than an optimisation: the column those values come out of has not
@@ -428,20 +472,32 @@ fn atlas(files: &dyn GameFiles, worn: Option<&Worn>) -> Result<Atlas, String> {
 /// The trap is that hair is **group 0**, and geoset 0 is the body itself. Read off 12.0.5.67:
 /// `humanfemale_hd` carries hairstyles as geosets 1 to 33, and the skin as 0 — so hiding "the
 /// whole hundred" of group 0 without excepting the one id that has no group takes the character
-/// with the hair. That is the difference between a helmed woman and an empty pane.
+/// with the hair. She is also the one thing here with a hairstyle *chosen* for her, so group 0
+/// has an owner on every body and the exception has to come first rather than last.
 ///
 /// The vertices are left whole rather than compacted down to the ones the surviving parts
 /// use. They are shared by every part, a body has tens of thousands of them, and the indices
 /// would all have to be renumbered to save loading the ones the hidden geosets pointed at.
-fn dressed(mesh: &Mesh, worn: Option<&Worn>) -> Mesh {
+fn dressed(mesh: &Mesh, worn: Option<&Worn>, herself: Option<&Customization>) -> Mesh {
     let geosets = worn.map_or(&[][..], |worn| worn.geosets.as_slice());
     let hidden = worn.map_or(&[][..], |worn| worn.hidden.as_slice());
+    let hers = herself.map_or(&[][..], |herself| herself.geosets.as_slice());
     let taken: Vec<&Geoset> = geosets
         .iter()
         .filter(|worn| mesh.parts.iter().any(|part| part.geoset == worn.geoset))
         .collect();
-    let shown = |geoset: u16| match taken.iter().find(|worn| worn.group == geoset / 100) {
-        Some(worn) => geoset == worn.geoset,
+    let owner = |group: u16| {
+        taken
+            .iter()
+            .copied()
+            .find(|worn| worn.group == group)
+            .or_else(|| hers.iter().find(|hers| hers.group == group))
+    };
+    // Geoset 0 is the skin, and the one id that belongs to no group — least of all group 0's
+    // hairstyles, which is the hundred it shares.
+    let shown = |geoset: u16| match owner(geoset / 100) {
+        _ if geoset == 0 => true,
+        Some(owner) => geoset == owner.geoset,
         None => bare(geoset),
     };
     let covered = |geoset: u16| geoset != 0 && hidden.contains(&(geoset / 100));
@@ -499,12 +555,18 @@ mod tests {
         worn_mesh(&Worn::default())
     }
 
-    /// The body as it is drawn with a given appearance on it.
+    /// The body as it is drawn with a given appearance on it, and as the character the
+    /// fixture's own customization tables say she is.
     fn worn_mesh(worn: &Worn) -> Mesh {
         let files = fixture_files();
+        let herself = crate::customization::of(&files).unwrap();
         let model = Model::parse(&files.read(HUMAN_FEMALE).unwrap()).unwrap();
         let skin = model.skin_file_data_id().unwrap();
-        dressed(&model.with_skin(&files.read(skin).unwrap()).unwrap(), Some(worn))
+        dressed(
+            &model.with_skin(&files.read(skin).unwrap()).unwrap(),
+            Some(worn),
+            herself.as_ref(),
+        )
     }
 
     /// The body as it is drawn with a given set of geosets switched on and nothing else.
@@ -557,7 +619,8 @@ mod tests {
             crate::worn::of(&files, display_info_id, display_type, inventory_type).unwrap()
         });
 
-        let png = atlas(&files, worn.as_ref()).unwrap().png().unwrap();
+        let herself = crate::customization::of(&files).unwrap();
+        let png = atlas(&files, herself.as_ref(), worn.as_ref()).unwrap().png().unwrap();
         image::load_from_memory(&png).unwrap().into_rgba8()
     }
 
@@ -606,7 +669,7 @@ mod tests {
     fn draws_each_part_of_the_body_once() {
         let body = mesh();
         let geosets = drawn(&body);
-        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 1, 1001, 1301, 501, 3201, 3601, 2101]);
+        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 2, 1001, 1301, 501, 3202, 702, 1701, 2101]);
 
         // One group, one part — for every group but the hair's, which is group 0 and which
         // the skin shares because the skin is the one geoset with no group of its own.
@@ -637,6 +700,23 @@ mod tests {
         assert!(!geosets.contains(&1), "{geosets:?}");
     }
 
+    // The last thing on that head, and the one geoset selection has nothing to say about: her
+    // eye glow is *selected* — no ordinary eye colour turns group 17 off — and it is composited
+    // by adding, which glTF cannot write. So the scene comes out with one primitive fewer than
+    // the body draws parts, and that difference is the whole of it. Painted as a plain blend
+    // instead, the glow is a solid slab across both eyes.
+    #[test]
+    fn selects_the_eye_glow_and_leaves_it_out_of_the_picture() {
+        let body = mesh();
+        assert!(drawn(&body).contains(&1701), "the glow is one of the parts a bare body draws");
+
+        let scene = scene(&glb_of(&fixture_files(), None).unwrap());
+        assert_eq!(
+            scene["meshes"][0]["primitives"].as_array().unwrap().len(),
+            body.parts.len() - 1
+        );
+    }
+
     // The `level` trap, on the one model where it is not academic. The fixture's skull sits
     // past the first 64k of the index list *and* is one of the parts a bare body draws — so a
     // reader that ignored the level would not draw something spare, it would draw the head
@@ -650,11 +730,12 @@ mod tests {
         assert!(skull.indices.iter().all(|index| (80..88).contains(index)), "{:?}", &skull.indices[..6]);
     }
 
-    // The atlas is bound as texture type 1 and nothing else. Hair is type 6 and has an atlas
-    // of its own, and painting it with the body's would put somebody's kneecap on the reader's
-    // head — which is geometry that looks right and a picture that is nonsense.
+    // A body asks for its pictures by type, and the types are different pictures. Type 1 is the
+    // composited atlas; type 6 is the hair, which has an atlas of its own — painting it with the
+    // body's would put somebody's kneecap on the reader's head, which is geometry that looks
+    // right and a picture that is nonsense. Each is asked for once however many parts share it.
     #[test]
-    fn paints_the_body_with_the_atlas_and_leaves_the_hair_alone() {
+    fn asks_for_each_of_the_bodys_pictures_once_and_by_type() {
         let asked = std::cell::RefCell::new(Vec::new());
         let mesh = mesh();
         glb::write(&[glb::Piece::only(&mesh, &|paint| {
@@ -665,8 +746,28 @@ mod tests {
             }
         })])
         .unwrap();
-        // Once each, however many parts share them: the body's six parts ask for one atlas.
         assert_eq!(asked.into_inner(), vec![Paint::Supplied(1), Paint::Supplied(6)]);
+    }
+
+    // And the hair is handed a picture rather than nothing, which is the whole of the difference
+    // between a hairstyle and a white cap: a part whose material carries no `baseColorTexture`
+    // is drawn in glTF's default colour, and on a head that reads as a mask.
+    #[test]
+    fn paints_the_hair_with_the_atlas_of_its_own_rather_than_leaving_it_white() {
+        let herself = crate::customization::of(&fixture_files()).unwrap().expect("a character");
+        assert_eq!(herself.atlases, vec![(6, 160_007), (19, 160_008)]);
+
+        let scene = scene(&glb_of(&fixture_files(), None).unwrap());
+        let materials = scene["materials"].as_array().unwrap();
+        assert!(
+            materials.iter().all(|material| material["pbrMetallicRoughness"]
+                .get("baseColorTexture")
+                .is_some()),
+            "{materials:?}"
+        );
+        // The body's own atlas and the hair's, and no third picture: the eyes' atlas is hers
+        // too and nothing on this body asks for that type.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
     }
 
     // The atlas is the size the game states for layout 104, and it is a picture rather than a
@@ -703,16 +804,27 @@ mod tests {
     }
 
     // The point of the whole chain: a bare body opens with skin on it rather than as a
-    // mannequin in one flat tone. Every part of the atlas, because a skin covers all of it —
-    // including the right half the body's own UVs never read.
+    // mannequin in one flat tone. The left half is the body, and it is skin all the way down.
     #[test]
     fn opens_the_bare_body_with_skin_on_it() {
         let atlas = body_atlas(None);
-        for (quadrant, (x, y)) in [(256, 128), (1792, 128), (256, 896), (1792, 896)].iter().enumerate() {
-            let pixel = atlas.get_pixel(*x, *y).0;
+        for (quadrant, (x, y)) in [(0, (256, 128)), (2, (256, 896))] {
+            let pixel = atlas.get_pixel(x, y).0;
             assert_ne!(pixel, UNPAINTED, "the body is still the unpainted tone at {x},{y}");
             assert_eq!([pixel[0], pixel[1], pixel[2]], QUADRANTS[quadrant], "at {x},{y}");
         }
+    }
+
+    // And the right half is her face — the one rectangle of the atlas the body's own UVs never
+    // read and the head's do. It is a layer over the skin like any other, which is why an atlas
+    // that resolved everything but this one row is a body with a blank where a face goes.
+    #[test]
+    fn paints_her_face_into_the_half_of_the_atlas_the_head_reads() {
+        let atlas = body_atlas(None);
+        assert_eq!(middle_of(&atlas, 10), [230, 170, 60, 255], "the face");
+        assert_eq!(middle_of(&atlas, 9), middle_of(&atlas, 10), "which the scalp shares");
+        // And nowhere else: sections 9 and 10 are one rectangle, and it is not the torso's.
+        assert_ne!(middle_of(&atlas, 3), middle_of(&atlas, 10));
     }
 
     // The rest of what the same choice paints, which is why a bare body is not a nude one: the
@@ -777,9 +889,8 @@ mod tests {
 
         assert_eq!(scene["asset"]["version"], "2.0");
         assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 12);
-        // One picture: the atlas. The hair asks for a type this composites nothing for, and a
-        // part with no picture keeps its geometry.
-        assert_eq!(scene["images"].as_array().unwrap().len(), 1);
+        // Two pictures: the composited atlas, and the hair's, which is an atlas of its own.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
         assert_eq!(scene["images"][0]["mimeType"], "image/png");
     }
 
@@ -794,18 +905,18 @@ mod tests {
         // Sleeves in place of bare arms, a chest in place of the bare torso.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(CHESTPIECE))),
-            vec![0, 802, 1101, 2001, 2701, 1, 1002, 1301, 501, 3201, 3601, 2101]
+            vec![0, 802, 1101, 2001, 2701, 2, 1002, 1301, 501, 3202, 702, 1701, 2101]
         );
         // The boot itself and the booted feet: two groups from one item, and the feet group is
         // the one whose zero means booted rather than bare.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(BOOTS))),
-            vec![0, 801, 1101, 2002, 2701, 1, 1001, 1301, 502, 3201, 3601, 2101]
+            vec![0, 801, 1101, 2002, 2701, 2, 1001, 1301, 502, 3202, 702, 1701, 2101]
         );
         // The robe leaves the chest bare and hangs a skirt over the legs instead.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(ROBE))),
-            vec![0, 802, 1101, 2001, 2701, 1, 1001, 1302, 501, 3201, 3601, 2101]
+            vec![0, 802, 1101, 2001, 2701, 2, 1001, 1302, 501, 3202, 702, 1701, 2101]
         );
     }
 
@@ -926,7 +1037,7 @@ mod tests {
         use base64::{engine::general_purpose::STANDARD, Engine};
         let scene = scene(&STANDARD.decode(encoded).unwrap());
         assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 12);
-        assert_eq!(scene["images"].as_array().unwrap().len(), 1);
+        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
     }
 
     // An appearance this install can say nothing about answers with nothing, the same way one
@@ -976,8 +1087,8 @@ mod tests {
         assert_ne!(nodes[1]["mesh"], nodes[2]["mesh"]);
 
         // Each with a picture of its own, which is the other half of two pads rather than one:
-        // the body's atlas, and then one texture per pad.
-        assert_eq!(scene["images"].as_array().unwrap().len(), 3);
+        // the body's two, and then one texture per pad.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 4);
     }
 
     // A cape is the odd one: geometry the body already carries, and all the appearance brings
@@ -988,9 +1099,9 @@ mod tests {
         let scene = worn_scene(CAPE);
         assert_eq!(scene["nodes"].as_array().unwrap().len(), 1);
         assert!(drawn(&worn_mesh(&worn_of(CAPE))).contains(&1502));
-        // The atlas and the cloak's own picture. A cape whose texture went unresolved is a
-        // black sheet rather than an error, which is why the count is what this reads.
-        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
+        // The body's two, and the cloak's own picture. A cape whose texture went unresolved is
+        // a black sheet rather than an error, which is why the count is what this reads.
+        assert_eq!(scene["images"].as_array().unwrap().len(), 3);
     }
 
     // The other half of the acceptance, and the trap under it. A helm hides hair, and hair is
@@ -1000,16 +1111,16 @@ mod tests {
     #[test]
     fn a_helm_that_hides_hair_hides_it_and_leaves_the_body_on() {
         let bare = drawn(&mesh());
-        assert!(bare.contains(&1), "a bare body wears the first hairstyle");
+        assert!(bare.contains(&2), "a bare body wears the hairstyle she was given");
 
         let helmed = drawn(&worn_mesh(&worn_of(HELM)));
-        assert!(!helmed.contains(&1), "the helm covers the hair");
+        assert!(!helmed.contains(&2), "the helm covers the hair");
         assert!(helmed.contains(&0), "and not the body it is attached to");
         // The whole hundred, not only the one variant a bare body happened to draw.
-        assert!(!helmed.contains(&2));
+        assert!(!helmed.contains(&1));
         // And nothing else: the helm's own group swaps as any item's does, and every other
         // group is where a bare body left it.
-        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 3201, 3601, 2101]);
+        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 3202, 702, 1701, 2101]);
     }
 
     // Taking it off puts the hair back, which is the same sentence read the other way: the
@@ -1017,7 +1128,7 @@ mod tests {
     #[test]
     fn taking_the_helm_off_puts_the_hair_back() {
         assert_eq!(drawn(&worn_mesh(&Worn::default())), drawn(&mesh()));
-        assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&1), true);
+        assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&2), true);
     }
 
     // The acceptance for a weapon: it is in her hand rather than in mid-air, and *which* hand
@@ -1057,7 +1168,7 @@ mod tests {
     fn a_weapon_changes_nothing_about_the_body_it_is_held_by() {
         assert_eq!(drawn(&worn_mesh(&worn_of(ONE_HANDER))), drawn(&mesh()));
         let scene = worn_scene(ONE_HANDER);
-        assert_eq!(scene["images"].as_array().unwrap().len(), 2);
+        assert_eq!(scene["images"].as_array().unwrap().len(), 3);
     }
 
     /* ---------- wearing the whole set ---------- */
@@ -1092,8 +1203,9 @@ mod tests {
                 1002, // the chestpiece
                 1301, // the robe group, which is the one two pieces asked for
                 501,  // no boot
-                3201, // the head
-                3601, // the necklace
+                3202, // the head her own face shape names
+                702,  // and the ears, in a group nothing else fills
+                1701, // the eye glow, which is selected here and drawn nowhere
                 2101, // the skull
             ]
         );
