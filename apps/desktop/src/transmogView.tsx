@@ -375,8 +375,11 @@ function Line(
       {/* A withheld row says so where a name would be, and saying it twice is two elements
           with the same sentence in them rather than one clearer row. */}
       {canWear || row.withheld ? null : <span className="muted">{wanted.note}</span>}
-      {/* Nothing to look up for an appearance the game withholds: it has no item behind it. */}
-      {row.withheld ? null : (
+      {/* The corner leaves for Wowhead only when there is one item to leave for. An
+          appearance the game withholds has none, and a look several items give has no single
+          one — "which of these did you mean" is a real question, and the answer is the list
+          the count opens, where every item has a corner of its own. */}
+      {row.withheld || others > 0 ? null : (
         <a
           className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
           target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
