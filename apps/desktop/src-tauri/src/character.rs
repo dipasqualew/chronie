@@ -266,6 +266,17 @@ impl Atlas {
     }
 }
 
+/// How much of the body a section covers, in atlas pixels, or nothing where the layout has no
+/// rectangle for it.
+///
+/// The layout is the only place in the app that knows how much of a character a part of her is,
+/// and [`crate::qualities`] needs exactly that to say how big a piece of armour is: a texture
+/// filling the legs is a bigger garment than one filling the hands, and the rectangles are what
+/// says so. Exported rather than duplicated, so a change to the layout moves both.
+pub fn body_area(section: u32) -> Option<u32> {
+    rect_of(section).map(|rect| rect.width * rect.height)
+}
+
 /// The rectangle a section is painted into, or nothing where the layout has none for it.
 fn rect_of(section: u32) -> Option<&'static Rect> {
     SECTIONS

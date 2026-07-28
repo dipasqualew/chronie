@@ -19,6 +19,7 @@ pub mod m2;
 pub mod marks;
 pub mod models;
 pub mod placement;
+pub mod qualities;
 pub mod query;
 pub mod retention;
 pub mod transmog;
