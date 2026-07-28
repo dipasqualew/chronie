@@ -4921,6 +4921,41 @@ mod tests {
     const DAY_SECONDS: i64 = 86_400;
 
     #[test]
+    fn migration_files_are_timestamped() {
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut names = fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.ends_with(".sql"))
+            .collect::<Vec<_>>();
+        names.sort();
+
+        assert!(!names.is_empty());
+        for name in names {
+            let (timestamp, description) = name
+                .split_once('_')
+                .unwrap_or_else(|| panic!("{name} has no timestamp separator"));
+            assert_eq!(timestamp.len(), 13, "{name} does not use YYYYMMDDThhmm");
+            assert_eq!(
+                timestamp.as_bytes()[8],
+                b'T',
+                "{name} does not use YYYYMMDDThhmm"
+            );
+            assert!(
+                timestamp
+                    .bytes()
+                    .enumerate()
+                    .all(|(index, byte)| index == 8 || byte.is_ascii_digit()),
+                "{name} does not use YYYYMMDDThhmm"
+            );
+            assert!(
+                description.len() > ".sql".len() && description.ends_with(".sql"),
+                "{name} has no description"
+            );
+        }
+    }
+
+    #[test]
     fn reads_nested_saved_variables_without_game_runtime() {
         let parsed = read_saved_variable(
             r#"Other = { 1 }
