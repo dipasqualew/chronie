@@ -14,9 +14,17 @@ describe("ns.newResultsWindow", function()
     ---`options.navigate` switches the header's arrows on, the way Main.lua does when there
     ---is a strip of views to walk; every delta they are clicked with lands in
     ---`recorded.navigated`.
+    ---`options.views` switches the picker on the same way: it is the strip the list is drawn
+    ---from, either as a plain array or as a function returning one, which is what a test that
+    ---changes the strip between two opens needs. Every key a row is clicked with lands in
+    ---`recorded.selected`, and `recorded.viewReads` counts how often the strip was read.
+    ---The picker needs both a list and a way to choose from it, so either half can be
+    ---withheld on its own — `views = false`, or `select = false` — because the detail window
+    ---is handed neither and must come out of it a panel with a plain title.
     ---@param options table? `{ name = string?, point = { string, number, number }?, navigate = boolean?,
+    ---views = SegmentView[]|fun(): SegmentView[]|boolean?, select = boolean?,
     ---title = string|fun(summary: SegmentSummary): string? }`
-    ---@return table window, table frames, table recorded `{ saved, loadCalls, navigated, tooltip }`
+    ---@return table window, table frames, table recorded `{ saved, loadCalls, navigated, selected, tooltip }`
     local function newWindow(options)
         options = options or {}
         local createFrame, frames = fake.newCreateFrame()
@@ -28,12 +36,32 @@ describe("ns.newResultsWindow", function()
             previews = {},
             collections = {},
             navigated = {},
+            selected = {},
+            viewReads = 0,
             tooltip = tooltipRecorded,
         }
+        local strip = options.views
+        -- Wired independently of the strip, so "a list nobody can choose from" and "a chooser
+        -- with no list" are both reachable; a case says `select = false` to withhold it, and
+        -- `select = true` to have it without a strip.
+        local chooser = options.select
+        if chooser == nil then
+            chooser = strip ~= nil
+        end
         local window = ns.newResultsWindow({
             title = options.title,
             navigate = options.navigate and function(delta)
                 recorded.navigated[#recorded.navigated + 1] = delta
+            end or nil,
+            views = strip and function()
+                recorded.viewReads = recorded.viewReads + 1
+                if type(strip) == "function" then
+                    return strip()
+                end
+                return strip
+            end or nil,
+            select = chooser and function(key)
+                recorded.selected[#recorded.selected + 1] = key
             end or nil,
             createFrame = createFrame,
             uiParent = { name = "UIParent" },
@@ -203,6 +231,85 @@ describe("ns.newResultsWindow", function()
             end
         end
         return header
+    end
+
+    ---The picker's own frame, once something has built it. It is a second frame parented to
+    ---the panel, and that is what finds it: the panel builds a close button of its own when it
+    ---is closable, so counting frames would not survive the detail window's shape.
+    ---@param frames table[]
+    ---@return table?
+    local function pickerOf(frames)
+        for _, frame in ipairs(frames) do
+            if frame.frameType == "Frame" and frame.parent == frames[1] then
+                return frame
+            end
+        end
+        return nil
+    end
+
+    ---The picker's two columns, in the order they were drawn — rows taken off screen included,
+    ---so a test can prove a leftover one was hidden rather than only that it is not in the
+    ---list any more. Both halves of a row are clickable, so both have to be reachable.
+    ---@param frames table[]
+    ---@return table[] labels, table[] details
+    local function columnsOf(frames)
+        local labels, details = {}, {}
+        for _, fontString in ipairs(pickerOf(frames).fontStrings) do
+            if fontString.justify == "LEFT" then
+                labels[#labels + 1] = fontString
+            elseif fontString.justify == "RIGHT" then
+                details[#details + 1] = fontString
+            end
+        end
+        return labels, details
+    end
+
+    ---Opens the list, or shuts it again. The title is the picker's button, so this is the
+    ---whole of how a player reaches it.
+    ---@param frame table the panel's own frame
+    local function clickTitle(frame)
+        headerOf(frame).title:run("OnMouseUp", "LeftButton")
+    end
+
+    ---Where a region was last put down its frame. Points accumulate as a pooled row is
+    ---redrawn, so the last one is where it actually ended up. The panel is laid out
+    ---downwards, which makes further down the frame a smaller number.
+    ---@param region table
+    ---@return number
+    local function topOf(region)
+        return region.points[#region.points][3]
+    end
+
+    ---The strip as ns.newSegmentViews.list hands it over: the session first, then the segment
+    ---being played, then the ones already filed, newest first. One of them is an alt's,
+    ---because an evening survives hopping characters and the label says so when it does.
+    ---@param current string? the key the panel is standing on; the open segment by default
+    ---@return SegmentView[]
+    local function strip(current)
+        local views = {
+            { kind = "session", key = "session", title = "Session · 3 segments",
+                label = "Session", detail = "3 segments" },
+            { kind = "live", key = "live", title = "Westfall",
+                label = "Westfall", detail = "12m · playing" },
+            { kind = "record", key = "record:a", title = "Alt — Deadmines · 20m ago",
+                label = "Alt — Deadmines", detail = "8m · 20m ago" },
+        }
+        for index, view in ipairs(views) do
+            view.index = index
+            view.count = #views
+            view.current = view.key == (current or "live")
+        end
+        return views
+    end
+
+    ---What is left of that strip once the dungeon has fallen out of the evening: the session
+    ---and nothing else, which is what the pool has to shrink back to.
+    ---@return SegmentView[]
+    local function sessionOnly()
+        return { {
+            kind = "session", key = "session", title = "Session · 1 segment",
+            label = "Session", detail = "1 segment", index = 1, count = 1, current = true,
+        } }
     end
 
     ---@param lines table[]
@@ -1214,9 +1321,10 @@ describe("ns.newResultsWindow", function()
         -- Everything on screen at once, expanded, is what makes this one assertion cover the
         -- whole panel rather than the one row the bug was reported against.
         it("draws every row in characters the game's font actually has", function()
-            -- Built with the arrows on and standing on a dated view, so the header's own
-            -- strings — the two chevrons and a title carrying a separator — are swept too.
-            local window, frames = newWindow({ navigate = true })
+            -- Built with the arrows and the picker on and standing on a dated view, so the
+            -- header's own strings — the two chevrons, and a title carrying a separator behind
+            -- the icon that opens the list — and every row of the list itself are swept too.
+            local window, frames = newWindow({ navigate = true, views = strip("record:a") })
             window.update(summary({
                 lootValue = 1234,
                 goldDiff = -500,
@@ -1245,11 +1353,16 @@ describe("ns.newResultsWindow", function()
             end
             -- Reviewing one marks it, which is the state the missing glyph appeared in.
             clickContaining(frames[1], "Named item 19019")
+            -- And the list open behind it, which is a second frame full of names the addon
+            -- built rather than took off the client.
+            clickTitle(frames[1])
 
-            for _, fontString in ipairs(frames[1].fontStrings) do
-                if fontString.shown then
-                    assert.is_nil(undrawable(fontString.text),
-                        "undrawable character in " .. tostring(fontString.text))
+            for _, drawn in ipairs({ frames[1], pickerOf(frames) }) do
+                for _, fontString in ipairs(drawn.fontStrings) do
+                    if fontString.shown then
+                        assert.is_nil(undrawable(fontString.text),
+                            "undrawable character in " .. tostring(fontString.text))
+                    end
                 end
             end
         end)
@@ -1381,6 +1494,252 @@ describe("ns.newResultsWindow", function()
             assert.same(rowsOf(plainFrames[1]), rowsOf(arrowedFrames[1]))
             assert.same(barsOf(plainFrames[1]), barsOf(arrowedFrames[1]))
             assert.equal(#rulesOf(plainFrames[1]), #rulesOf(arrowedFrames[1]))
+        end)
+    end)
+
+    describe("the picker the title opens", function()
+        local GOLD = { 1, 0.82, 0 }
+        -- The colour every heading in the body is drawn in: bright enough to read as a thing
+        -- that can be clicked, plain enough that the gold row is the one the eye lands on.
+        local PLAIN = { 0.93, 0.91, 0.85 }
+
+        ---Opens the list, shuts it, and opens it again on a strip that has changed underneath —
+        ---which is what a segment falling out of the evening does while the panel is on screen.
+        ---@param first SegmentView[]
+        ---@param second SegmentView[]
+        ---@return table frames, table recorded
+        local function reopenOn(first, second)
+            local listed = first
+            local window, frames, recorded = newWindow({
+                views = function()
+                    return listed
+                end,
+            })
+            window.update(summary())
+            clickTitle(frames[1])
+            clickTitle(frames[1])
+            listed = second
+            clickTitle(frames[1])
+            return frames, recorded
+        end
+
+        -- The panel predates having more than one view and the detail window still has exactly
+        -- one, so the picker is something the HUD gets and the other callers do not. Both
+        -- halves are needed for it to be anything: a list nobody can choose from is a menu that
+        -- does not work, and a chooser with no list has nothing to put on screen.
+        for _, case in ipairs({
+            { what = "neither a list nor a way to choose from it", views = false, select = false },
+            { what = "a list but no way to choose from it", views = strip(), select = false },
+            { what = "a way to choose but no list to choose from", views = false, select = true },
+        }) do
+            it("leaves the title a title given " .. case.what, function()
+                local window, frames = newWindow({ views = case.views, select = case.select })
+
+                window.update(summary())
+
+                local title = headerOf(frames[1]).title
+                assert.equal("Current Segment", title.text)
+                assert.is_nil(title.scripts.OnMouseUp)
+                assert.equal(1, #frames)
+            end)
+        end
+
+        -- A player who never opens the list never pays for it, which is the same bargain the
+        -- panel itself is built on: nothing exists until something asks for it.
+        it("builds the list on the first click of the title and not before", function()
+            local window, frames = newWindow({ views = strip() })
+            window.update(summary())
+            assert.equal(1, #frames)
+
+            clickTitle(frames[1])
+
+            assert.equal(2, #frames)
+            assert.equal(frames[1], pickerOf(frames).parent)
+            assert.is_true(pickerOf(frames).shown)
+        end)
+
+        it("names the session and every segment, with what tells them apart beside it", function()
+            local window, frames = newWindow({ views = strip() })
+            window.update(summary())
+
+            clickTitle(frames[1])
+
+            assert.same({
+                { label = "Session", value = "3 segments" },
+                { label = "Westfall", value = "12m · playing" },
+                { label = "Alt — Deadmines", value = "8m · 20m ago" },
+            }, rowsOf(pickerOf(frames)))
+        end)
+
+        -- The whole point of the issue this was built for: the session total is one choice and
+        -- the individual segments are another list, rather than the two being one strip walked
+        -- end to end. A hairline between them is what says so, and it has to sit between them
+        -- rather than merely exist.
+        it("rules a line between the session and the segments under it", function()
+            local window, frames = newWindow({ views = strip() })
+            window.update(summary())
+
+            clickTitle(frames[1])
+
+            local rules = rulesOf(pickerOf(frames))
+            local labels = columnsOf(frames)
+            assert.equal(1, #rules)
+            assert.is_true(topOf(labels[1]) > topOf(rules[1]))
+            assert.is_true(topOf(rules[1]) > topOf(labels[2]))
+        end)
+
+        -- A menu that named the same three things whatever was on screen would leave the
+        -- player clicking the row they are already standing on.
+        for _, case in ipairs({
+            { what = "the session total", key = "session", lit = 1 },
+            { what = "the segment being played", key = "live", lit = 2 },
+            { what = "a segment already filed", key = "record:a", lit = 3 },
+        }) do
+            it("draws the row for " .. case.what .. " in gold while that is the view on screen", function()
+                local window, frames = newWindow({ views = strip(case.key) })
+                window.update(summary())
+
+                clickTitle(frames[1])
+
+                local labels = columnsOf(frames)
+                for index, label in ipairs(labels) do
+                    assert.same(index == case.lit and GOLD or PLAIN, label.color)
+                end
+            end)
+        end
+
+        -- Both halves of a row, because a row is one thing to a player and two font strings to
+        -- the panel, and a list where the metadata was dead to the touch would be a list where
+        -- half of every row does nothing.
+        for _, case in ipairs({
+            { what = "its name", column = "label" },
+            { what = "the metadata beside it", column = "detail" },
+        }) do
+            it("stands the panel on the segment picked by " .. case.what, function()
+                local window, frames, recorded = newWindow({ views = strip() })
+                window.update(summary())
+                clickTitle(frames[1])
+                local labels, details = columnsOf(frames)
+
+                local clicked = case.column == "label" and labels[3] or details[3]
+                clicked:run("OnMouseUp", "LeftButton")
+
+                assert.same({ "record:a" }, recorded.selected)
+                -- And the list closes behind the choice: it has been made.
+                assert.is_false(pickerOf(frames).shown)
+            end)
+        end
+
+        it("closes the list again when the title is clicked a second time", function()
+            local window, frames = newWindow({ views = strip() })
+            window.update(summary())
+            clickTitle(frames[1])
+
+            clickTitle(frames[1])
+
+            assert.is_false(pickerOf(frames).shown)
+            -- And no second frame for it: the list is built once and redrawn afterwards.
+            assert.equal(2, #frames)
+        end)
+
+        -- The title is the picker's button, and a button has to say which way it goes. It
+        -- carries the same disclosure icon every openable block in the body does — a texture
+        -- escape rather than a character, because the client's font has no triangle in it.
+        for _, case in ipairs({
+            { what = "closed", clicks = 0, icon = "|TInterface\\Buttons\\UI-PlusButton-Up:12:12:0:-1|t " },
+            { what = "open", clicks = 1, icon = "|TInterface\\Buttons\\UI-MinusButton-Up:12:12:0:-1|t " },
+        }) do
+            it("marks the title with the icon for a list that is " .. case.what, function()
+                local window, frames = newWindow({ views = strip(), title = "Current Segment" })
+                window.update(summary())
+
+                for _ = 1, case.clicks do
+                    clickTitle(frames[1])
+                end
+
+                assert.equal(case.icon .. "Current Segment", headerOf(frames[1]).title.text)
+            end)
+        end
+
+        -- A menu left open behind a hidden HUD is a menu that reappears over whatever the
+        -- player opened the panel for next.
+        for _, case in ipairs({
+            { what = "hidden", close = function(window) window.hide() end },
+            { what = "toggled away", close = function(window) window.toggle() end },
+        }) do
+            it("shuts the list when the panel itself is " .. case.what, function()
+                local window, frames = newWindow({ views = strip() })
+                window.update(summary())
+                window.show()
+                clickTitle(frames[1])
+
+                case.close(window)
+
+                assert.is_false(pickerOf(frames).shown)
+            end)
+        end
+
+        -- The strip grows while the panel is on screen, and a segment that closed since the
+        -- last look is exactly the row somebody opening this is reaching for. Keeping the first
+        -- list read would offer them everything except what they came for.
+        it("reads the strip fresh on every open rather than keeping the first one", function()
+            local frames, recorded = reopenOn(strip(), sessionOnly())
+
+            assert.same({ { label = "Session", value = "1 segment" } }, rowsOf(pickerOf(frames)))
+            -- Three clicks: open, close, open. The read happens on the way open and nowhere else.
+            assert.equal(2, recorded.viewReads)
+        end)
+
+        -- And it shrinks too, once the silence in front of the last dungeon is long enough.
+        -- Rows are pooled, so the ones a shorter list no longer needs have to come off screen
+        -- and take their clicks with them. A hidden font string cannot be clicked today, but a
+        -- row still carrying a handler for a segment it is no longer drawing is a trap waiting
+        -- for the pool to hand it out again.
+        it("takes the rows a shorter strip no longer needs off screen, clicks and all", function()
+            local frames = reopenOn(strip(), sessionOnly())
+
+            local labels, details = columnsOf(frames)
+            assert.equal(3, #labels)
+            for index = 2, 3 do
+                for _, region in ipairs({ labels[index], details[index] }) do
+                    assert.is_false(region.shown)
+                    assert.is_nil(region.scripts.OnMouseUp)
+                end
+            end
+        end)
+
+        -- The hairline separates the session from the segments, and a list with no segments on
+        -- it has nothing to separate the session from.
+        it("takes the hairline away when the session is the only thing on offer", function()
+            local frames = reopenOn(strip(), sessionOnly())
+
+            assert.same({}, rulesOf(pickerOf(frames)))
+        end)
+
+        -- The body is read out of the panel's own frame by justification and by texture layer,
+        -- and the picker is a second frame full of font strings justified exactly the same way
+        -- with a hairline drawn on the same layer. Drawn onto the panel instead, it would show
+        -- up as a phantom row in every other test in this file.
+        it("keeps the picker out of the rows, the bars and the rules the body is made of", function()
+            local plain, plainFrames = newWindow()
+            local picked, pickedFrames = newWindow({ views = strip() })
+            local drawn = summary({
+                lootValue = 1234,
+                reputationTotal = 250,
+                reputation = {
+                    { faction = "Argent Dawn", amount = 250, standing = "Honored", current = 1, max = 2 },
+                },
+            })
+
+            plain.update(drawn)
+            picked.update(drawn)
+            clickTitle(pickedFrames[1])
+            expand(plainFrames[1], "Reputation")
+            expand(pickedFrames[1], "Reputation")
+
+            assert.same(rowsOf(plainFrames[1]), rowsOf(pickedFrames[1]))
+            assert.same(barsOf(plainFrames[1]), barsOf(pickedFrames[1]))
+            assert.equal(#rulesOf(plainFrames[1]), #rulesOf(pickedFrames[1]))
         end)
     end)
 

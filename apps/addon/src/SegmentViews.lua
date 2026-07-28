@@ -6,18 +6,31 @@ local _, ns = ...
 ---@field kind string "session", "live" or "record".
 ---@field key string Identity of the view, stable while it is reachable.
 ---@field title string What the panel's header says while this view is on screen.
+---@field label string What the picker calls it: the place, with an alt's name in front of
+---it when the segment was theirs, or "Session".
+---@field detail string The metadata beside that label — how long a segment ran and how long
+---ago it closed, or how many segments the evening holds. Two runs of the same dungeon are
+---the same word twice, and this is what tells them apart.
 ---@field summary SegmentSummary What to draw. A filed record is summary-shaped already,
 ---which is why one can be handed to the same panel a live tally is.
 ---@field index integer Where this view sits in the strip, counting from one.
 ---@field count integer How many views the strip holds.
+---@field current boolean Whether this is the view the panel is standing on, so the picker
+---can tick the one already being looked at.
 
 ---The strip of views the panel's arrows walk, and which one they are standing on.
 ---
 ---Ordered so the aggregate sits at one end and time runs away from it: the session total
 ---first, then the open segment, then every segment that closed this session, newest
 ---first. The panel opens on the open segment, because that is what somebody glancing at a
----HUD is asking about; the arrows are what reach anything else, and where they are left is
----where they stay — a player who parked the panel on the session total meant to.
+---HUD is asking about; the arrows and the picker are what reach anything else.
+---
+---Where they are left is where they stay, with one exception: a segment opening pulls the
+---panel forward onto it, the way a damage meter jumps to the pull that just started. A
+---player parked on a segment that finished twenty minutes ago is looking at history, and
+---history is not what a HUD is for once something new is happening. The session total is
+---the exception to the exception — parking there is a deliberate "show me the evening", and
+---the evening is still the evening after a loading screen.
 ---
 ---"This session" is the same evening the desktop app draws: the segment being played, and
 ---every earlier one that chains back to it across a gap of no more than five minutes,
@@ -29,6 +42,11 @@ local _, ns = ...
 ---@class SegmentViews
 ---@field selected fun(): SegmentView What the panel should be drawing.
 ---@field move fun(delta: integer): SegmentView Walk the strip; clamped at both ends.
+---@field list fun(): SegmentView[] The whole strip, in order, for a picker to draw. Named
+---and dated but not added up: the menu wants to say what is on offer, not compute it.
+---@field select fun(key: string): SegmentView Stand on the view with that key. An unknown
+---key leaves the panel where it is, which is what a stale menu row asking for a segment
+---that has since been pruned should do.
 
 ---@class SegmentViewsDeps
 ---@field liveSummary fun(): SegmentSummary The running tally of the open segment.
@@ -189,6 +207,25 @@ local function ago(seconds)
     return age == "now" and "just now" or age
 end
 
+---How long a segment ran, as it reads in the picker beside how long ago it closed.
+---
+---Rounded down to one unit, the same as `formatAge` and for the same reason: this is a
+---label on a menu row rather than a stopwatch, and "42m" is all anybody needs to tell one
+---evening's Deadmines run from the other. Anything under a minute is "<1m" instead of "0m",
+---because a zone walked straight through is a real thing to see on the list.
+---@param seconds number?
+---@return string
+local function lasted(seconds)
+    seconds = math.max(math.floor(seconds or 0), 0)
+    if seconds < 60 then
+        return "<1m"
+    end
+    if seconds < 3600 then
+        return string.format("%dm", math.floor(seconds / 60))
+    end
+    return string.format("%dh", math.floor(seconds / 3600))
+end
+
 ---@param deps SegmentViewsDeps
 ---@return SegmentViews
 function ns.newSegmentViews(deps)
@@ -237,19 +274,25 @@ function ns.newSegmentViews(deps)
     local function build()
         local finished = history()
         local segments = #finished + 1
+        local now = deps.now()
+        local start = deps.liveStart()
+        local counted = segments .. (segments == 1 and " segment" or " segments")
         local views = {
             {
                 kind = "session",
                 key = "session",
-                title = "Session · " .. segments .. (segments == 1 and " segment" or " segments"),
+                title = "Session · " .. counted,
+                label = "Session",
+                detail = counted,
             },
             {
                 kind = "live",
                 key = "live",
                 title = deps.liveLocation() or "Current Segment",
+                label = deps.liveLocation() or "Current Segment",
+                detail = start and (lasted(now - start) .. " · playing") or "playing",
             },
         }
-        local now = deps.now()
         local playing = deps.character()
         for _, record in ipairs(finished) do
             -- An evening survives hopping alts, so the strip holds the alt's segments too —
@@ -258,11 +301,14 @@ function ns.newSegmentViews(deps)
             local who = record.character ~= playing
                 and (tostring(record.character or ""):match("^([^-]+)") or record.character)
                 or nil
+            local ended = record.endedAt or now
+            local label = (who and who .. " — " or "") .. (record.instance or "Unknown")
             views[#views + 1] = {
                 kind = "record",
                 key = "record:" .. tostring(record.id),
-                title = (who and who .. " — " or "")
-                    .. (record.instance or "Unknown") .. " · " .. ago(now - (record.endedAt or now)),
+                title = label .. " · " .. ago(now - ended),
+                label = label,
+                detail = lasted(ended - (record.startedAt or ended)) .. " · " .. ago(now - ended),
                 record = record,
             }
         end
@@ -295,11 +341,27 @@ function ns.newSegmentViews(deps)
         return view
     end
 
+    ---Pulls the panel onto the segment that just opened.
+    ---
+    ---Compared against the last start actually seen rather than the last one looked for, so
+    ---the gap between one segment closing and the next opening — a loading screen, where
+    ---there is no open segment at all — is not mistaken for a change of its own. The first
+    ---look only remembers: there is nothing to have moved on from yet.
+    local lastStart
+    local function follow()
+        local start = deps.liveStart()
+        if start and lastStart and start ~= lastStart and selection.kind ~= "session" then
+            selection = { kind = "live", key = "live" }
+        end
+        lastStart = start or lastStart
+    end
+
     ---The strip and where the selection sits on it. A selection that has gone — a segment
     ---pruned out of the log, or a character switch that emptied the session — falls back to
     ---the open segment, which is the one view that always exists.
     ---@return table[] views, integer index, SegmentRecord[] finished
     local function locate()
+        follow()
         local views, finished = build()
         for index, view in ipairs(views) do
             if view.key == selection.key then
@@ -322,6 +384,33 @@ function ns.newSegmentViews(deps)
             local views, index, finished = locate()
             local target = math.max(math.min(index + (delta or 0), #views), 1)
             local view = views[target]
+            selection = { kind = view.kind, key = view.key }
+            return materialise(finished, view)
+        end,
+
+        ---Everything on offer, for a picker to draw. Deliberately not materialised: a menu
+        ---of five segments would otherwise add the whole evening up five times over to
+        ---print five names.
+        ---@return SegmentView[]
+        list = function()
+            local views, index = locate()
+            for position, view in ipairs(views) do
+                view.record = nil
+                view.current = position == index
+            end
+            return views
+        end,
+
+        ---@param key string
+        ---@return SegmentView
+        select = function(key)
+            local views, index, finished = locate()
+            for position, view in ipairs(views) do
+                if view.key == key then
+                    index = position
+                end
+            end
+            local view = views[index]
             selection = { kind = view.kind, key = view.key }
             return materialise(finished, view)
         end,
