@@ -2607,6 +2607,34 @@ describe("addon integration", function()
             assert.same({ { id = 789, name = "Katy's Stampwhistle", at = 1000 } }, summary.toys)
         end)
 
+        it("records a pet as a species first when the account now holds just one", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "none",
+                pets = { ["BattlePet-0-1"] = { id = 456, name = "Darkmoon Rabbit", owned = 1 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("NEW_PET_ADDED", "BattlePet-0-1")
+
+            assert.is_true(app.tally.summary().pets[1].speciesFirst)
+        end)
+
+        it("records another of a species already held as not a species first", function()
+            local app, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "none",
+                pets = { ["BattlePet-0-2"] = { id = 456, name = "Darkmoon Rabbit", owned = 3 } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            recorded.frame:fire("NEW_PET_ADDED", "BattlePet-0-2")
+
+            assert.is_false(app.tally.summary().pets[1].speciesFirst)
+        end)
+
         it("records a housing item as a warband first when the warband owns just one", function()
             local app, recorded = boot({
                 playerName = "Thrall",

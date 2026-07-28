@@ -18,7 +18,9 @@ import type { CaptureAlbum } from "./captures";
 import { clock, dayLabel, duration, plural } from "./format";
 import type { ItemBook } from "./items";
 import type { Session } from "./sessions";
-import { CharacterCircle, HighlightList, SegmentButton, classProps, shownHighlights } from "./ui";
+import {
+  ActivityRoll, CharacterCircle, HighlightList, SegmentButton, classProps, shownHighlights,
+} from "./ui";
 import type { OpenSegment } from "./ui";
 
 export interface TimelineProps {
@@ -157,12 +159,18 @@ function SessionCard(
             </span>
           </div>
         </header>
+        {/* What was done, above what it yielded. An evening is remembered as "a couple of
+            keys and a raid night" long before it is remembered as twelve achievements, so
+            the activities lead the card and everything else is what they earned. */}
+        <ActivityRoll activities={session.activities} onOpenSegment={onOpenSegment} />
         {shownHighlights(session.highlights).length
           ? <HighlightList
             entries={session.highlights} scope={session.id} expanded={unfolded} items={items}
             onUnfold={onUnfold} onOpenSegment={onOpenSegment}
           />
-          : <p className="session-quiet">A quiet session — nothing new to show for it.</p>}
+          : session.activities.length
+            ? null
+            : <p className="session-quiet">A quiet session — nothing new to show for it.</p>}
         {/* The evening's pictures, above the segments that produced them: a photograph is
             what somebody came back to this card for, and the segments are the ledger. */}
         <CaptureFold

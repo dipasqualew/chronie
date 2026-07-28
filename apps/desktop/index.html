@@ -193,6 +193,36 @@
   .session-elapsed { font-size: 11.5px; color: var(--text-muted); }
   .session-quiet { color: var(--text-muted); font-size: 13px; margin: 0; }
 
+  /* ---------- what was done ---------- */
+
+  /* The activities lead the card, so they are the one thing on it drawn as rows rather than
+     as chips: a row can carry a level, a dungeon and a verdict without any of the three
+     having to be abbreviated away, and four keys in an evening read as four keys.
+
+     They wear the class colour the way a segment row does — a rail and a wash that has faded
+     before the time on the right — because an evening across three characters is exactly
+     when "who did this one" is worth answering without reading a word. */
+  .act-roll { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 3px; }
+  .act {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px;
+    align-items: baseline; width: 100%; text-align: left; padding: 7px 10px 7px 13px;
+    border: none; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer;
+    --class-wash: linear-gradient(to right,
+      color-mix(in srgb, var(--class-color) 20%, transparent), transparent 46%);
+    background: var(--class-wash);
+    box-shadow: inset 3px 0 0 var(--class-color), inset 4px 0 0 var(--border);
+  }
+  .act:hover { background: var(--class-wash), var(--surface-2); }
+  /* A guess Chronie was unsure about, marked the way an activity chip marks one: dashed,
+     so "Chronie thinks" and "I said so" can be told apart without hovering either. */
+  .act.guess { outline: 1px dashed var(--border); outline-offset: -1px; }
+  .act-icon { font-size: 14px; line-height: 1; }
+  .act-body { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .act-name { font-weight: 570; }
+  .act-detail { color: var(--text-secondary); font-size: 12px; }
+  .act-who { color: var(--text-secondary); font-size: 12px; }
+  .act-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
   .circle {
     width: 28px; height: 28px; border-radius: 50%;
     display: inline-grid; place-items: center;
@@ -248,13 +278,26 @@
   .hl-levelUp { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--surface-1)); }
   .hl-mount { border-color: #b373ff; background: color-mix(in srgb, #b373ff 14%, var(--surface-1)); }
 
+  /* The running numbers are one mark apiece, and the numbers themselves live in the hover.
+     A night that touched five factions used to end in five lines of name and number under a
+     card whose job is to say what happened; this is that strip reduced to what it is worth
+     at a glance, which is "there was gold, there was reputation". */
   .tally-row {
-    display: flex; flex-wrap: wrap; gap: 4px 18px;
+    display: flex; flex-wrap: wrap; gap: 6px;
     margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border);
   }
-  .tally { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--text-secondary); }
-  .tally-icon { font-size: 12px; }
-  .tally-value { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-primary); }
+  .tally {
+    display: inline-grid; place-items: center;
+    width: 24px; height: 24px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    font-size: 12px; line-height: 1; cursor: default;
+  }
+  .tally:hover, .tally:focus-visible { border-color: var(--series-1); background: var(--series-1-soft); }
+  #tooltip .tip-line { display: block; font-variant-numeric: tabular-nums; }
+
+  /* A chip that has given its words to the hover keeps its icon centred rather than sitting
+     where the label used to start, or a row of them comes out visibly ragged. */
+  .hl-quiet { padding: 4px 8px; }
 
   .session-toggle {
     margin-top: 10px; padding: 3px 0; border: none; background: transparent;

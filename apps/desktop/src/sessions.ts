@@ -14,7 +14,7 @@
 
 import { equipsetDetail, equipsetTitle } from "./equipsets";
 import { eventsOf } from "./types";
-import type { EventListKey, EventOf, Segment } from "./types";
+import type { Activity, EventListKey, EventOf, Segment } from "./types";
 
 /** The gap that ends a play session. Five minutes is long enough to cover a loading screen. */
 export const SESSION_GAP_SECONDS = 300;
@@ -30,6 +30,27 @@ export interface SessionCharacter {
   places: string[];
 }
 
+/**
+ * One activity, and enough of the segment it belongs to for a card to draw it without going
+ * back to the segments.
+ *
+ * An activity is the answer to "what did I do", which is the question the timeline is asked
+ * more than any other. A segment is where it was recorded — one stretch, one place, one
+ * character — and it is also where the reader is sent when they click, so the id travels with
+ * it rather than being looked up again.
+ */
+export interface SessionActivity {
+  activity: Activity;
+  segmentId: number;
+  character: string;
+  classFile?: string | null;
+  /** Where it happened, which is what a Mythic+ chip cannot always say for itself. */
+  instance: string;
+  /** When the segment it was recorded in began; what the list is ordered by. */
+  at: number;
+  seconds: number;
+}
+
 export interface Session {
   id: string;
   startedAt: number;
@@ -41,6 +62,8 @@ export interface Session {
   spanSeconds: number;
   segments: Segment[];
   characters: SessionCharacter[];
+  /** What was done, in the order it was done, across every segment of the evening. */
+  activities: SessionActivity[];
   totals: {
     lootValue: number;
     goldDiff: number;
@@ -101,6 +124,7 @@ function summarise(segments: Segment[]): Session {
     spanSeconds: Math.max(endedAt - startedAt, 0),
     segments,
     characters: charactersIn(segments),
+    activities: activitiesIn(segments),
     totals: {
       lootValue: sum(segments, "lootValue"),
       goldDiff: sum(segments, "goldDiff"),
@@ -143,12 +167,34 @@ export function charactersIn(segments: Segment[]): SessionCharacter[] {
   return [...byName.values()].sort((left, right) => right.seconds - left.seconds);
 }
 
+/**
+ * Everything that was done across the given segments, in the order it was done.
+ *
+ * Deliberately not folded, counted or deduplicated the way the milestones below are. Four
+ * keys in an evening is four runs and reads as four runs — the whole point of the list is
+ * that each one has its own level, its own dungeon and its own way back to the segment it
+ * happened in, and a chip saying "4 Mythic+ runs" would throw away all three.
+ */
+export function activitiesIn(segments: Segment[]): SessionActivity[] {
+  return [...segments]
+    .sort((left, right) => (left.startedAt || 0) - (right.startedAt || 0))
+    .flatMap((segment) => (segment.activities || []).map((activity) => ({
+      activity,
+      segmentId: segment.segmentId,
+      character: segment.character,
+      classFile: segment.classFile,
+      instance: segment.instance,
+      at: segment.startedAt,
+      seconds: segment.seconds,
+    })));
+}
+
 /* ---------- what mattered ---------- */
 
 export type HighlightKind =
   | "achievement" | "levelUp" | "mount" | "toy" | "pet" | "transmog"
   | "housingLevel" | "housingItem" | "quest" | "equipset"
-  | "gold" | "loot" | "currency" | "reputation" | "housingXP";
+  | "gold" | "currency" | "reputation" | "housingXP";
 
 /**
  * `milestone` entries are the things a player would tell someone about; `tally` entries are
@@ -240,10 +286,9 @@ const KINDS: Record<HighlightKind, HighlightStyle> = {
   quest: { rank: 9, family: "milestone", icon: "📜" },
   equipset: { rank: 10, family: "milestone", icon: "🎽" },
   gold: { rank: 11, family: "tally", icon: "💰" },
-  loot: { rank: 12, family: "tally", icon: "🎒" },
-  currency: { rank: 13, family: "tally", icon: "🪙" },
-  reputation: { rank: 14, family: "tally", icon: "🎖️" },
-  housingXP: { rank: 15, family: "tally", icon: "✨" },
+  currency: { rank: 12, family: "tally", icon: "🪙" },
+  reputation: { rank: 13, family: "tally", icon: "🎖️" },
+  housingXP: { rank: 14, family: "tally", icon: "✨" },
 };
 
 /**
@@ -363,7 +408,7 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     });
   }
 
-  const collection = (key: "mounts" | "toys" | "pets", kind: HighlightKind, noun: string, plural: string): void => {
+  const collection = (key: "mounts" | "toys", kind: HighlightKind, noun: string, plural: string): void => {
     const found = from(key);
     if (!found.length) return;
     const items = found.map((sourced) =>
@@ -372,7 +417,19 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   };
   collection("mounts", "mount", "Mount", "mounts");
   collection("toys", "toy", "Toy", "toys");
-  collection("pets", "pet", "Pet", "pets");
+
+  // A pet gets its own paragraph because it is the one collectible the game lets a player
+  // own several of. Twenty of the same rabbit is a collection that has not grown at all, and
+  // an evening of pet battling reported as "12 pets" says the opposite of what happened. So
+  // only the catches the client called the first of their species count. One it said nothing
+  // about is kept: a catch from before the addon asked is not a duplicate, it is unknown, and
+  // dropping it would hide a pet that may well have been new.
+  const pets = from("pets").filter(({ event }) => event.speciesFirst !== false);
+  if (pets.length) {
+    const items = pets.map((sourced) =>
+      entry(sourced, sourced.event.name || `Pet ${sourced.event.id}`));
+    out.push({ kind: "pet", label: counted(items, "pets"), weight: items.length, items });
+  }
 
   const transmogs = from("transmogs");
   const fresh = transmogs.filter(({ event }) => event.newAppearance === true);
@@ -465,18 +522,20 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   return out;
 }
 
-/** The running numbers that give the milestones context; they stand for themselves. */
+/**
+ * The running numbers that give the milestones context; they stand for themselves.
+ *
+ * What the segment's loot was worth is deliberately not among them. It is a vendor price for
+ * things mostly sold or disenchanted rather than kept, it moves with nothing a player would
+ * recognise as a decision, and on a card it was one more number beside the gold it does not
+ * even agree with. The wallet is the number that means something and it is still here.
+ */
 function tallies(segments: Segment[]): HighlightSeed[] {
   const out: HighlightSeed[] = [];
 
   const goldDiff = sum(segments, "goldDiff");
   if (goldDiff !== 0) {
     out.push({ kind: "gold", label: "Gold", value: goldDiff, weight: Math.abs(goldDiff) });
-  }
-
-  const lootValue = sum(segments, "lootValue");
-  if (lootValue > 0) {
-    out.push({ kind: "loot", label: "Looted", value: lootValue, weight: lootValue });
   }
 
   // Currencies and reputations are named things earned repeatedly across an evening; each

@@ -30,6 +30,20 @@ export interface CollectibleEvent {
   guid?: string | null;
 }
 
+/**
+ * A battle pet caught, and whether the collection actually grew.
+ *
+ * The one collectible the game lets a player own several of: a mount is collected or not, but
+ * the same rabbit can be caught twenty times. Only the client can tell the two apart and only
+ * at the moment of the catch, so the addon reads its owned count there and sends the answer.
+ *
+ * Absent, not false, on a catch recorded before the addon asked. "Another of one owned" and
+ * "nobody said" are different things to a view deciding whether the pet is worth a line.
+ */
+export interface PetEvent extends CollectibleEvent {
+  speciesFirst?: boolean | null;
+}
+
 export interface TransmogEvent {
   id: number;
   name?: string | null;
@@ -265,7 +279,7 @@ export interface Segment {
   achievements?: AchievementEvent[];
   levelUps?: LevelUpEvent[];
   mounts?: CollectibleEvent[];
-  pets?: CollectibleEvent[];
+  pets?: PetEvent[];
   quests?: QuestEvent[];
   toys?: CollectibleEvent[];
   housingItems?: HousingItemEvent[];

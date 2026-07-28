@@ -16,11 +16,11 @@ import type { ReactNode } from "react";
 
 import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities";
 import type { PartialActivity } from "./activities";
-import { clock, duration, escapeHtml, gold, initials, plural, signed, signedGold } from "./format";
+import { clock, duration, escapeHtml, initials, plural, signed, signedGold } from "./format";
 import { GameItem } from "./item";
 import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
-import type { Highlight, SessionCharacter } from "./sessions";
+import type { Highlight, HighlightKind, SessionActivity, SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
 
 /**
@@ -85,7 +85,6 @@ export function CharacterCircle({ character }: { character: SessionCharacter }):
     `${duration(character.seconds)} played`,
     plural(character.segmentCount, "segment"),
   ];
-  if (character.lootValue) parts.push(`${gold(character.lootValue)} looted`);
   if (character.goldDiff) parts.push(`${signedGold(character.goldDiff)} in the wallet`);
   const places = (character.places || []).slice(0, 4).join(", ");
   const tip = `<b>${escapeHtml(character.name)}</b>${parts.map(escapeHtml).join(" · ")}` +
@@ -105,7 +104,6 @@ export function CharacterCircle({ character }: { character: SessionCharacter }):
 export function highlightValue(entry: Highlight): string {
   const value = entry.value ?? 0;
   if (entry.kind === "gold") return signedGold(value);
-  if (entry.kind === "loot") return gold(value);
   return signed(value);
 }
 
@@ -120,6 +118,21 @@ interface ChipProps {
 }
 
 /**
+ * The kinds drawn as their icon and nothing else, with the words moved into the hover.
+ *
+ * Saving a set of gear is housekeeping. It is worth a mark on the card — somebody who
+ * reshuffled their raid set on Tuesday can find the evening again — and it is not worth the
+ * width of "Raid · 2 slots, +16 item levels" beside a mount and an account first. So the chip
+ * shrinks to its icon and the sentence goes into the tooltip, where the reader who cares can
+ * still reach it and the reader who does not never has to read past it.
+ */
+const ICON_ONLY: ReadonlySet<string> = new Set(["equipset"]);
+
+/** The whole of what a chip says, for the tooltip and the accessible name of an icon. */
+const chipText = (entry: Highlight): string =>
+  [entry.label, entry.detail].filter(Boolean).join(" · ");
+
+/**
  * One thing worth remembering, or one summary of several.
  *
  * A summary that stands for a single thing takes you straight to the segment it happened in,
@@ -130,26 +143,36 @@ interface ChipProps {
 export function HighlightChip(
   { entry, scope, expanded, interactive, onUnfold, onOpenSegment }: ChipProps,
 ): ReactNode {
-  const body = <>
-    <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
-    <span className="hl-label">{entry.label}</span>
-    {entry.detail ? <span className="detail">{entry.detail}</span> : null}
-  </>;
-  if (!interactive) return <span className={`hl hl-${entry.kind}`}>{body}</span>;
+  const quiet = ICON_ONLY.has(entry.kind);
+  const text = chipText(entry);
+  // A chip with no words on it still has to be reachable and still has to say what it is, so
+  // the sentence it dropped becomes both its tooltip and the name a screen reader reads.
+  const named = quiet
+    ? { "aria-label": text, "data-tip": escapeHtml(text) }
+    : {};
+  const body = quiet
+    ? <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
+    : <>
+      <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
+      <span className="hl-label">{entry.label}</span>
+      {entry.detail ? <span className="detail">{entry.detail}</span> : null}
+    </>;
+  const style = `hl hl-${entry.kind}${quiet ? " hl-quiet" : ""}`;
+  if (!interactive) return <span className={style} {...named}>{body}</span>;
   if (entry.segmentId != null) {
     const segmentId = entry.segmentId;
     return (
-      <button type="button" className={`hl hl-${entry.kind}`}
+      <button type="button" className={style} {...named}
         onClick={() => onOpenSegment?.(segmentId)}>{body}</button>
     );
   }
   const open = expanded === entry.kind;
   return (
     <button
-      type="button" className={`hl hl-${entry.kind}${open ? " open" : ""}`}
+      type="button" className={`${style}${open ? " open" : ""}`} {...named}
       aria-expanded={open} aria-controls={panelId(scope, entry.kind)}
       onClick={() => onUnfold?.(entry.kind)}
-    >{body}<span className="hl-caret" aria-hidden="true">{open ? "▾" : "▸"}</span></button>
+    >{body}{quiet ? null : <span className="hl-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>}</button>
   );
 }
 
@@ -212,17 +235,72 @@ export function HighlightPanel(
   );
 }
 
-/** A running total, drawn quieter than a milestone because it is context, not news. */
-export function TallyItem({ entry }: { entry: Highlight }): ReactNode {
-  const tone = entry.kind === "gold" && (entry.value ?? 0) < 0
-    ? " loss"
-    : (entry.kind === "gold" ? " gold" : "");
+/* ---------- the running numbers ---------- */
+
+/** What a badge of running numbers calls itself, however many things it stands for. */
+const TALLY_NAMES: Partial<Record<HighlightKind, string>> = {
+  gold: "Gold",
+  currency: "Currency",
+  reputation: "Reputation",
+  housingXP: "Housing XP",
+};
+
+/** Every tally of one kind, folded into the single mark that stands for all of them. */
+export interface TallyBadge {
+  kind: HighlightKind;
+  icon: string;
+  /** What the badge is of: "Gold", "Currency", "Reputation". */
+  title: string;
+  /** One line per thing counted, already worded: "Glass Token +4". */
+  lines: string[];
+}
+
+/**
+ * The evening's running numbers, folded to one badge per kind.
+ *
+ * These are context, not news, and they used to be written out in full: every currency and
+ * every faction its own line of name and number, under a card whose job is to say what
+ * happened. A night that touched five factions therefore ended in five lines of small print
+ * nobody reads, sitting where the two things that actually happened should have been.
+ *
+ * So each kind collapses to its icon. A reader who wants the numbers hovers one and gets all
+ * of them at once — which is also the only shape in which "Glass Token +4, Warband Chit +100"
+ * reads as one fact about the evening rather than two competing lines.
+ */
+export function tallyBadges(entries: Highlight[]): TallyBadge[] {
+  const byKind = new Map<HighlightKind, TallyBadge>();
+  for (const entry of entries) {
+    if (entry.family !== "tally") continue;
+    const badge = byKind.get(entry.kind) ?? {
+      kind: entry.kind,
+      icon: entry.icon,
+      title: TALLY_NAMES[entry.kind] ?? entry.label,
+      lines: [],
+    };
+    // Gold names itself, so "Gold +3g 29s" under a heading reading "Gold" would say it
+    // twice; a currency does not, and its name is the whole point of the line.
+    badge.lines.push(entry.label === badge.title
+      ? highlightValue(entry)
+      : `${entry.label} ${highlightValue(entry)}`);
+    byKind.set(entry.kind, badge);
+  }
+  return [...byKind.values()];
+}
+
+/**
+ * One kind of running total, as an icon carrying its numbers in the hover.
+ *
+ * Focusable and named for the same reason the character circle is: this is the only place the
+ * card says what the evening earned, and it must not be reachable by pointer alone.
+ */
+export function TallyMark({ badge }: { badge: TallyBadge }): ReactNode {
+  const tip = `<b>${escapeHtml(badge.title)}</b>` +
+    badge.lines.map((line) => `<span class="tip-line">${escapeHtml(line)}</span>`).join("");
   return (
-    <span className="tally">
-      <span className="tally-icon" aria-hidden="true">{entry.icon}</span>
-      <span className="tally-label">{entry.label}</span>
-      <span className={`tally-value${tone}`}>{highlightValue(entry)}</span>
-    </span>
+    <span
+      className={`tally tally-${badge.kind}`} role="img" tabIndex={0}
+      aria-label={`${badge.title}: ${badge.lines.join(", ")}`} data-tip={tip}
+    >{badge.icon}</span>
   );
 }
 
@@ -283,7 +361,7 @@ export function HighlightList(
   }: HighlightListProps,
 ): ReactNode {
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
-  const tallies = withTallies ? entries.filter((entry) => entry.family === "tally") : [];
+  const tallies = withTallies ? tallyBadges(entries) : [];
   const unfolded = interactive
     ? milestones.find((entry) => entry.kind === expanded && entry.segmentId == null)
     : undefined;
@@ -305,7 +383,7 @@ export function HighlightList(
       : null}
     {tallies.length
       ? <div className="tally-row">
-        {tallies.map((entry) => <TallyItem key={`${entry.kind}-${entry.label}`} entry={entry} />)}
+        {tallies.map((badge) => <TallyMark key={badge.kind} badge={badge} />)}
       </div>
       : null}
   </>;
@@ -361,6 +439,12 @@ export function StandingBar(
 
 /* ---------- activities ---------- */
 
+/** Where an activity came from, in the words a hover uses to say so. */
+const provenance = (activity: PartialActivity): string =>
+  (activity.source === "manual"
+    ? "You set this activity"
+    : `Guessed by Chronie · confidence ${Math.round((activity.confidence ?? 1) * 100)}%`);
+
 /**
  * A guess the backend was unsure about is drawn with a dashed border and says so in its
  * tooltip, so the eye can tell "Chronie thinks" apart from "I said so" at a glance.
@@ -368,11 +452,8 @@ export function StandingBar(
 export function ActivityChip({ activity }: { activity: PartialActivity }): ReactNode {
   const detail = activitySummary(activity);
   const guess = isUncertain(activity);
-  const title = activity.source === "manual"
-    ? "You set this activity"
-    : `Guessed by Chronie · confidence ${Math.round((activity.confidence ?? 1) * 100)}%`;
   return (
-    <span className={`chip activity${guess ? " guess" : ""}`} title={title}>
+    <span className={`chip activity${guess ? " guess" : ""}`} title={provenance(activity)}>
       {`${activityIcon(activity.kind)} ${activityLabel(activity.kind)}`}
       {detail ? <> <span className="detail">{detail}</span></> : null}
     </span>
@@ -384,6 +465,60 @@ export const activityText = (activities?: PartialActivity[]): string =>
     const detail = activitySummary(activity);
     return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
   }).join(", ");
+
+/**
+ * The evening's activities, listed out in the order they happened.
+ *
+ * This is the one thing on a session card that is a list before anybody asks for one, and it
+ * is the exception the rest of the page is designed around. Everything else a card says — a
+ * dozen achievements, four factions, a wallet — is a count or a total, because the reader
+ * wants to know what kind of evening it was before they want the particulars. An activity is
+ * already the answer to that question: "a +14 and a heroic night" is what somebody would say
+ * if you asked them how Tuesday went, and folding four keys into "4 Mythic+ runs" throws away
+ * the four levels and the four dungeons that are the entire content of the sentence.
+ *
+ * Each row is the way back into the segment it was recorded in, which is where the rest of it
+ * lives — the fight-by-fight, the loot, the pictures — and where it can be corrected.
+ */
+export function ActivityRoll(
+  { activities, onOpenSegment }: {
+    activities: SessionActivity[];
+    onOpenSegment: (segmentId: number) => void;
+  },
+): ReactNode {
+  if (!activities.length) return null;
+  return (
+    <ol className="act-roll">
+      {activities.map((entry, index) => {
+        const detail = activitySummary(entry.activity);
+        const label = activityLabel(entry.activity.kind);
+        const said = [label, detail].filter(Boolean).join(" · ");
+        return (
+          <li key={`${entry.segmentId}-${entry.activity.id ?? index}`}>
+            <button
+              type="button"
+              className={`act${isUncertain(entry.activity) ? " guess" : ""}`}
+              {...classProps(entry.classFile)}
+              // Named by what it did and who did it, rather than by the segment it opens:
+              // the row is read as a thing that happened, and the segment is where it goes.
+              aria-label={`Open the segment ${said} was recorded in, ${entry.character} at ${clock(entry.at)}`}
+              data-tip={escapeHtml(provenance(entry.activity))}
+              onClick={() => onOpenSegment(entry.segmentId)}
+            >
+              <span className="act-icon" aria-hidden="true">{activityIcon(entry.activity.kind)}</span>
+              <span className="act-body">
+                <span className="act-name">{label}</span>
+                {detail ? <span className="act-detail">{detail}</span> : null}
+              </span>
+              <span className="act-who">{entry.character}</span>
+              <span className="act-time">{clock(entry.at)}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 /* ---------- a segment, as one row ---------- */
 
