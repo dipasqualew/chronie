@@ -120,6 +120,13 @@ struct AppState {
     station: wifi::Station,
     /// What this machine calls itself, which is how it is named on the other one's screen.
     device: String,
+    /// The game's own storage, held open between commands rather than opened per command.
+    ///
+    /// Opening it is a quarter of a second and a couple of hundred megabytes, and one click
+    /// on a set asks for the game's files twice, so opening per command was most of what a
+    /// reader waited for. Shared for the same reason the caches below are: the read happens
+    /// on a worker thread that outlives the command that started it.
+    storage: Arc<casc::OpenStorage>,
     /// The icons decoded so far. Shared rather than owned, because reading the game's files
     /// happens on a worker thread that outlives the command that started it.
     icons: Arc<IconCache>,
@@ -363,9 +370,12 @@ async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Resul
 ///
 /// This reads the game's storage rather than anything the addon collected, so it needs the
 /// install itself and not just its `WTF` folder — `resolve_wow_path` lands on `_retail_`,
-/// and `Data/` is its sibling. Getting at it means inflating a couple of hundred megabytes,
-/// which on the main thread would freeze the window for as long as it took; the views that
-/// ask for this are opened by a click that should stay responsive.
+/// and `Data/` is its sibling.
+///
+/// Off the main thread because the first read of a session still opens the storage, which
+/// means inflating a couple of hundred megabytes and would freeze the window for as long as
+/// it took. Every read after that is handed the handle the first one left behind — see
+/// [`casc::OpenStorage`] — which is what took a click from over a second to under half of one.
 async fn read_game_files<T, F>(state: &State<'_, AppState>, read: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -375,11 +385,12 @@ where
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings)?
     };
+    let storage = Arc::clone(&state.storage);
     tauri::async_runtime::spawn_blocking(move || {
         let install = retail
             .parent()
             .ok_or("The game folder has no parent to look for Data in.")?;
-        read(&casc::CascFiles::open(install)?)
+        read(storage.files(install)?.as_ref())
     })
     .await
     .map_err(|error| format!("Reading the game's files did not finish: {error}"))?
@@ -1082,6 +1093,7 @@ pub fn run() {
                 device,
                 database,
                 data_dir,
+                storage: Arc::default(),
                 icons: Arc::default(),
                 achievements: Arc::default(),
                 items: Arc::default(),

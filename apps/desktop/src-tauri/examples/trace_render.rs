@@ -6,13 +6,16 @@
 //! any of them could be all of it.
 //!
 //! It runs the same calls the window's `worn_set` command runs, against a real install, and
-//! reports the spans underneath them. The default report is a self-time breakdown on stdout —
+//! reports the spans underneath them, with the storage held open across runs the way the app
+//! holds it. `--reopen` opens it per run instead, which is what the app used to do and is what
+//! the first click of a session still pays. The default report is a self-time breakdown on stdout —
 //! how long each kind of work took with its children subtracted, which is the only column that
 //! adds up to the total. Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same spans also go to a
 //! collector, so a run can be looked at as a flame graph rather than a table.
 //!
 //! ```sh
 //! cargo run --release --example trace_render -- "/Applications/World of Warcraft" set/5570
+//! cargo run --release --example trace_render -- "/App.../World of Warcraft" set/5570 --reopen
 //! cargo run --release --example trace_render -- --fixtures apps/desktop/fixtures/transmog \
 //!     worn/900012/3 --runs 5
 //! OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 cargo run --release \
@@ -46,10 +49,14 @@ use tracing_subscriber::Layer;
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<String>>();
     let runs = take_number(&mut args, "--runs").unwrap_or(3);
-    // The counterfactual: what a run costs when the storage is already open. Nothing in the
-    // app does this today — `read_game_files` opens CASC per command — which is exactly why
-    // it is worth being able to measure.
-    let reuse = take_flag(&mut args, "--reuse");
+    // Holding the storage open across runs is what the app does — `read_game_files` is handed
+    // the handle the last command left behind — so it is the default here too. `--reopen` is
+    // the counterfactual it replaced, kept because "what did that buy" is worth being able to
+    // ask again, and because the first run of a session still pays it.
+    let reopen = take_flag(&mut args, "--reopen");
+    // `--reuse` was what asking for the held-open storage used to be called, back when the app
+    // did not do it. It is the default now, so the flag is accepted and means nothing.
+    take_flag(&mut args, "--reuse");
     let mut args = args.into_iter();
 
     let first = args.next().unwrap_or_else(|| usage());
@@ -68,14 +75,13 @@ fn main() {
         None => subscriber.set_default(),
     };
 
-    let held = reuse.then(|| open(&install, &root));
+    let held = (!reopen).then(|| open(&install, &root));
     for run in 1..=runs {
         totals.lock().unwrap().clear();
         let started = Instant::now();
 
-        // Opening the storage is inside the timed region on purpose when it is not reused: the
-        // window's `read_game_files` opens it afresh for every command, so whatever it costs is
-        // part of what a reader waits for.
+        // Under `--reopen` the open is inside the timed region on purpose: that is what a
+        // reader waited for when the window opened the storage afresh for every command.
         let opened_here = held.is_none().then(|| open(&install, &root));
         let files = held.as_ref().or(opened_here.as_ref()).expect("one of the two");
 
@@ -350,7 +356,7 @@ fn take_number(args: &mut Vec<String>, flag: &str) -> Option<usize> {
 fn usage() -> ! {
     eprintln!(
         "usage: trace_render <wow install> | --fixtures <dir>  \
-         set/<id> | worn/<display>/<slot> | character  [--runs N] [--reuse]"
+         set/<id> | worn/<display>/<slot> | character  [--runs N] [--reopen]"
     );
     std::process::exit(2)
 }
