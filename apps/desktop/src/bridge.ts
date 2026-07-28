@@ -15,6 +15,8 @@ import type {
   CaptureThumbnailsPayload,
   CharacterModelPayload,
   CombatLogStatus,
+  CustomSetPiece,
+  CustomSetsPayload,
   DashboardPayload,
   IconsPayload,
   InstallResult,
@@ -102,6 +104,47 @@ export const desktop = {
       mark.tags = mark.tags.filter((tag) => !sameKey(tag.key, key));
     }))
     : invoke<TransmogMarksPayload>("delete_transmog_tag", { kind, id, key }),
+  // The sets the reader put together on the character themselves. Read whole and re-read after
+  // every write, for the reason the marks are: tens of sets somebody saved by hand, against the
+  // several thousand the game ships, and what the browser draws should be what was stored.
+  customSets: (): Promise<CustomSetsPayload> => mock
+    ? Promise.resolve(structuredClone(mock.customSets))
+    : invoke<CustomSetsPayload>("custom_sets"),
+  saveCustomSet: (name: string, pieces: CustomSetPiece[]): Promise<CustomSetsPayload> => {
+    if (!mock) return invoke<CustomSetsPayload>("save_custom_set", { name, pieces });
+    // The half of `customsets::clean_name` and `clean_pieces` a test can tell apart from a
+    // working form: a name is tidied and required, and an empty outfit is not a set.
+    const cleaned = name.trim().replace(/\s+/g, " ");
+    if (!cleaned) {
+      return Promise.reject(new Error("Give the set a name and it will be saved under it."));
+    }
+    if (!pieces.length) {
+      return Promise.reject(
+        new Error("Put something on her first, and then it can be saved as a set."),
+      );
+    }
+    const sets = mock.customSets.sets;
+    const at = sets.findIndex((set) => sameKey(set.name, cleaned));
+    const now = Math.floor(Date.now() / 1000);
+    // Saving over a set by name, which is the backend's own `ON CONFLICT(name)`: the same set
+    // keeps its id — and so keeps whatever was said about it — and takes the new clothes.
+    if (at >= 0) sets[at] = { ...sets[at]!, name: cleaned, updatedAt: now, pieces };
+    else {
+      const id = sets.reduce((highest, set) => Math.max(highest, set.id), 0) + 1;
+      sets.push({ id, name: cleaned, createdAt: now, updatedAt: now, pieces });
+    }
+    sets.sort((left, right) => left.name.localeCompare(right.name));
+    return Promise.resolve(structuredClone(mock.customSets));
+  },
+  deleteCustomSet: (id: number): Promise<CustomSetsPayload> => {
+    if (!mock) return invoke<CustomSetsPayload>("delete_custom_set", { id });
+    mock.customSets.sets = mock.customSets.sets.filter((set) => set.id !== id);
+    // And everything said about it, which the backend deletes in the same breath: the ids are
+    // Chronie's own, so a mark left behind is one the next set saved could find itself wearing.
+    mock.transmogMarks.marks = mock.transmogMarks.marks
+      .filter((mark) => !(mark.kind === "custom" && mark.id === id));
+    return Promise.resolve(structuredClone(mock.customSets));
+  },
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.
   achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock

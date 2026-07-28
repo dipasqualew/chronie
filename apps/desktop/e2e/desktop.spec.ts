@@ -281,8 +281,8 @@ class TransmogView {
     await expect(this.view.getByRole("heading", { name: "Transmog", level: 1 })).toBeVisible();
   }
 
-  /** The switch above both browsers: the game's sets, or the game's whole wardrobe. */
-  async browseBy(what: "Sets" | "Items"): Promise<void> {
+  /** The switch above the browsers: the game's sets, its whole wardrobe, or the reader's own. */
+  async browseBy(what: "Sets" | "Items" | "Yours"): Promise<void> {
     await this.view.getByRole("button", { name: what, exact: true }).click();
   }
 
@@ -547,6 +547,78 @@ class Wardrobe {
 }
 
 /**
+ * The third browser: the sets the reader saved off the character.
+ *
+ * A grid of cards like the game's own sets, so the locators read like `TransmogView`'s — but a
+ * saved set has no button to open it, because there is nothing behind the click: the pieces
+ * arrived with the card. So a card is found by its heading rather than by the button that
+ * opens one.
+ */
+class YourSets {
+  readonly page: Page;
+  readonly list: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.list = page.locator("#custom-sets");
+  }
+
+  /** The saved sets on screen, by the names the reader gave them. */
+  names(): Locator {
+    return this.list.getByRole("heading", { level: 4 });
+  }
+
+  /** The card one of them is drawn on, found by its own heading. */
+  card(name: string): Locator {
+    return this.list
+      .getByRole("article")
+      .filter({ has: this.page.getByRole("heading", { name, exact: true, level: 4 }) });
+  }
+
+  /** One row of a saved set, found by what its button would do. */
+  wear(name: string, slot: string, label: string): Locator {
+    return this.card(name).getByRole("button", { name: `Wear ${slot}: ${label}` });
+  }
+
+  wearAll(name: string): Locator {
+    return this.card(name).getByRole("button", { name: `Wear all of ${name}` });
+  }
+
+  /** The star on the card, which is against the set the reader made. */
+  star(name: string): Locator {
+    return this.card(name).getByRole("button", { name: `Favourite ${name}`, exact: true });
+  }
+
+  /** What has been said about it, as the chips read. */
+  tags(name: string): Locator {
+    return this.card(name).locator("> .mark .mark-tag-text");
+  }
+
+  /**
+   * Throws one away, which takes two clicks: the first asks and the second does it.
+   *
+   * Both are named after the set, so the confirmation cannot be reached by accident — and the
+   * assertion that the first click did *not* delete anything is left to the test.
+   */
+  async delete(name: string): Promise<void> {
+    await this.card(name).getByRole("button", { name: `Delete ${name}`, exact: true }).click();
+    await this.card(name).getByRole("button", { name: `Delete ${name}`, exact: true }).click();
+  }
+
+  search(): Locator {
+    return this.list.getByLabel("Filter your sets");
+  }
+
+  favouritesOnly(): Locator {
+    return this.list.getByRole("checkbox", { name: "Favourites only" });
+  }
+
+  tagFilter(): Locator {
+    return this.list.getByLabel("Tag", { exact: true });
+  }
+}
+
+/**
  * The character, and the list of what she has on — the half of the view that never goes away.
  *
  * Every piece is a list item naming the place, the item and the set it came out of, and the
@@ -588,6 +660,27 @@ class Outfit {
 
   clear(): Promise<void> {
     return this.panel.getByRole("button", { name: "Take it all off" }).click();
+  }
+
+  /** The box that turns what she has on into a set of the reader's own. */
+  name(): Locator {
+    return this.panel.getByLabel("Name for this set");
+  }
+
+  /**
+   * The button beside it, which says which of the two things it is about to do.
+   *
+   * Matched loosely on purpose: "Save as a set" and "Replace Horde look" are the same control
+   * and a test that had to know which is showing could not ask what it says.
+   */
+  keep(): Locator {
+    return this.panel.getByRole("button", { name: /^(Save as a set|Replace )/ });
+  }
+
+  /** Saves what she has on under a name, the way a reader does. */
+  async saveAs(name: string): Promise<void> {
+    await this.name().fill(name);
+    await this.keep().click();
   }
 
   /** The pane the body is drawn on, which says how much geometry it ended up holding. */
@@ -885,6 +978,7 @@ const test = base.extend<{
   roster: Roster;
   transmog: TransmogView;
   wardrobe: Wardrobe;
+  yours: YourSets;
   outfit: Outfit;
   combat: CombatLoggingPanel;
   retention: LogRetentionPanel;
@@ -909,6 +1003,9 @@ const test = base.extend<{
   },
   wardrobe: async ({ page }, use) => {
     await use(new Wardrobe(page));
+  },
+  yours: async ({ page }, use) => {
+    await use(new YourSets(page));
   },
   outfit: async ({ page }, use) => {
     await use(new Outfit(page));
@@ -1516,6 +1613,11 @@ const mockDesktop: E2EMock = {
       { kind: "appearance", id: 80040, favourite: false, tags: [{ key: "wishlist", value: null }] },
     ],
   },
+  // And the sets they put together themselves, which start at none — deliberately, where the
+  // marks above start at two. A saved set is made by the page under test and by nothing else,
+  // so a fixture holding one would be the one thing on this screen that never had to survive
+  // being written. The empty state is worth opening on for its own sake as well.
+  customSets: { sets: [] },
   // The pictures those appearances name, decoded — eight-pixel PNGs standing in for the
   // textures the backend pulls out of the game's own storage. 130008 is missing on purpose:
   // set 205 names it and the install holds no such file, which is the case a row has to
@@ -2671,6 +2773,7 @@ test("browses the game's transmog sets and dresses the character in them", async
   page,
   transmog,
   wardrobe,
+  yours,
   outfit,
 }) => {
   await transmog.open();
@@ -3284,6 +3387,109 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(transmog.sets()).toHaveCount(0);
     await transmog.favouritesOnly().uncheck();
   });
+
+  /* ---------- and the sets the reader makes out of all of it ---------- */
+
+  // The point of the whole arrangement above. The outfit on her now is a helm out of the
+  // game's wardrobe and a staff out of it, and until this it lasted exactly as long as the
+  // window did.
+  await test.step("what she has on is saved as a set of the reader's own", async () => {
+    await transmog.browseBy("Yours");
+    await expect(yours.list.getByText("No sets of your own yet")).toBeVisible();
+
+    await outfit.saveAs("  Deeps  run ");
+
+    // Tidied by the backend and named by what came back, rather than by what was typed.
+    await expect(yours.names()).toHaveText(["Deeps run"]);
+    await expect(yours.card("Deeps run")).toContainText("2 pieces");
+    // Saving is a note taken, not a door closed: she is still wearing it.
+    await expect(outfit.slots()).toHaveCount(2);
+  });
+
+  await test.step("a saved set lists the looks it was made of", async () => {
+    await expect(yours.card("Deeps run").getByRole("listitem")).toHaveCount(2);
+    await expect(yours.wear("Deeps run", "Head", "Coif of the Drowned Star")).toBeVisible();
+    await expect(yours.wear("Deeps run", "Two-hand", "Staff of the Quiet Tide")).toBeVisible();
+  });
+
+  // The whole round trip, and the only claim worth making about a saved set: it goes back on,
+  // out of the database, exactly as it went in.
+  await test.step("the character is dressed in a saved set again from nothing", async () => {
+    await outfit.clear();
+    await expect(outfit.slots()).toHaveCount(0);
+
+    await yours.wearAll("Deeps run").click();
+
+    await expect(outfit.slots()).toHaveText([
+      /Head.*Coif of the Drowned Star.*Deeps run/s,
+      /Main hand.*Staff of the Quiet Tide.*Deeps run/s,
+    ]);
+    // The same body the two looks asked for when they were picked out of the game itself: the
+    // outfit is keyed by its display ids, so a body arriving at all says the saved set asked
+    // for the same one, and nothing was lost on the way through Chronie's own storage.
+    await expect(outfit.stage()).toHaveAttribute("data-vertices", "2208");
+  });
+
+  await test.step("one piece of a saved set goes on without the rest of it", async () => {
+    await outfit.clear();
+    await yours.wear("Deeps run", "Head", "Coif of the Drowned Star").click();
+    await expect(outfit.slots()).toHaveCount(1);
+  });
+
+  // Names are unique without regard to case, so a name already used saves over that set —
+  // and the button says which of the two it is about to do before it is clicked.
+  await test.step("typing a name already used offers to replace that set", async () => {
+    await outfit.name().fill("deeps RUN");
+    await expect(outfit.keep()).toHaveText("Replace Deeps run");
+
+    await outfit.keep().click();
+
+    // One set still, holding the one piece she has on now.
+    await expect(yours.names()).toHaveText(["deeps RUN"]);
+    await expect(yours.card("deeps RUN").getByRole("listitem")).toHaveCount(1);
+  });
+
+  // The issue's other half: a set of the reader's own takes any mark a Blizzard set takes,
+  // because it is a third kind of subject rather than a second feature.
+  await test.step("a saved set is starred and tagged like one the game ships", async () => {
+    await yours.star("deeps RUN").click();
+    await expect(yours.star("deeps RUN")).toHaveAttribute("aria-pressed", "true");
+
+    await tagIt(yours.card("deeps RUN"), "deeps RUN", "for", "the alt");
+    await expect(yours.tags("deeps RUN")).toHaveText(["for: the alt"]);
+
+    await yours.tagFilter().selectOption("for\tthe alt");
+    await expect(yours.names()).toHaveText(["deeps RUN"]);
+    await yours.tagFilter().selectOption("");
+  });
+
+  // Which of their own sets has the staff in it is a question neither browser beside this one
+  // could answer, because neither of them is about what the reader put together.
+  await test.step("a saved set is found by what is in it", async () => {
+    await yours.search().fill("coif");
+    await expect(yours.names()).toHaveText(["deeps RUN"]);
+
+    await yours.search().fill("aegis");
+    await expect(yours.names()).toHaveCount(0);
+    await expect(yours.list.getByText("Nothing matches")).toBeVisible();
+    await yours.search().fill("");
+  });
+
+  await test.step("and a saved set is thrown away, after being asked twice", async () => {
+    await yours.card("deeps RUN")
+      .getByRole("button", { name: "Delete deeps RUN", exact: true }).click();
+    // The first click only asks: the set is still there, with a way back out of it.
+    await expect(yours.names()).toHaveText(["deeps RUN"]);
+    await yours.card("deeps RUN").getByRole("button", { name: "Keep it", exact: true }).click();
+    await expect(yours.names()).toHaveText(["deeps RUN"]);
+
+    await yours.delete("deeps RUN");
+
+    await expect(yours.names()).toHaveCount(0);
+    await expect(yours.list.getByText("No sets of your own yet")).toBeVisible();
+    // What she has on is untouched by the set that held it going away.
+    await expect(outfit.slots()).toHaveCount(1);
+  });
 });
 
 /**
@@ -3601,3 +3807,4 @@ test("asks the history a question and draws the answer", async ({ workbench }) =
     await expect(workbench.rows()).toHaveCount(3);
   });
 });
+

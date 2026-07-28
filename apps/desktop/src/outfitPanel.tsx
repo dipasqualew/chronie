@@ -17,14 +17,33 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { piecesFrom, setNamed } from "./customSets";
 import { glbBytes, REASONS, wornSetKey } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
 import { outfitSummary, piecesOf, placeName, wornPieces } from "./outfit";
 import type { Outfit } from "./outfit";
-import type { CharacterModelPayload, WornPiece, WornSetPayload } from "./types";
+import type {
+  CharacterModelPayload, CustomSet, CustomSetPiece, CustomSetsPayload, WornPiece, WornSetPayload,
+} from "./types";
+
+/**
+ * Saving what she has on under a name, as the panel needs it.
+ *
+ * The sets already saved are here only so the button can say which of the two things it is
+ * about to do — see [`SaveAsSet`]. Everything else is the same shape the marks use: the write
+ * answers with all of them, and what came back is what the view then holds.
+ */
+export interface SaveActions {
+  sets: CustomSet[];
+  onSave: (name: string, pieces: CustomSetPiece[]) => Promise<CustomSetsPayload>;
+  onSaved: (payload: CustomSetsPayload) => void;
+  onError: (error: unknown) => string;
+}
 
 export interface OutfitPanelProps {
   outfit: Outfit;
+  /** How the outfit on her becomes a set of the reader's own. */
+  save: SaveActions;
   /** Takes one piece off. The panel knows the place and nothing about what put it there. */
   onTakeOff: (place: string) => void;
   onClearAll: () => void;
@@ -49,7 +68,8 @@ interface PaneState {
 
 export function OutfitPanel(
   {
-    outfit, onTakeOff, onClearAll, loadCharacter, loadWorn, icons, createStage = lazyStage,
+    outfit, save, onTakeOff, onClearAll, loadCharacter, loadWorn, icons,
+    createStage = lazyStage,
   }: OutfitPanelProps,
 ): ReactNode {
   const stagePane = useRef<HTMLDivElement>(null);
@@ -189,6 +209,9 @@ export function OutfitPanel(
           ? <button type="button" className="outfit-clear" onClick={onClearAll}>Take it all off</button>
           : null}
       </div>
+      {/* Only once there is something to save. A form that could do nothing but refuse is worse
+          than no form, and "nothing on yet" is already said by the line under the list. */}
+      {worn.length ? <SaveAsSet outfit={outfit} save={save} /> : null}
       <ul className="outfit-list" id="outfit-list">
         {worn.map((piece) => (
           <li className="outfit-slot" key={piece.place}>
@@ -221,6 +244,67 @@ export function OutfitPanel(
         Every appearance you pick goes on her and stays on while you look for the next one.
       </p>
     </aside>
+  );
+}
+
+/**
+ * The name box under the character, which is the whole of how a set of one's own is made.
+ *
+ * Here rather than anywhere else because this is where the outfit is: a set is what she has on
+ * at the moment somebody decides it is worth keeping, and every other arrangement — a dialog, a
+ * page of its own, a list to pick pieces into — asks the reader to build the thing twice.
+ *
+ * **The button says which of the two things it will do.** Names are unique without regard to
+ * case, so typing the name of a set that already exists saves over it — which is exactly what
+ * somebody who swapped one piece and saved again meant, and exactly what somebody who forgot
+ * they had used the name did not. Saying "Replace Horde look" before the click is the whole
+ * difference between those two readers.
+ *
+ * What is *not* here is any clearing of the character afterwards. Saving is a note taken, not a
+ * door closed: the reader is still dressing her, and having their work taken away as a reward
+ * for keeping it would be an odd thing for an app to do.
+ */
+function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): ReactNode {
+  const [name, setName] = useState("");
+  const [failure, setFailure] = useState("");
+  const [saved, setSaved] = useState("");
+  const replacing = setNamed(save.sets, name);
+
+  return (
+    <form
+      className="outfit-save"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setFailure("");
+        setSaved("");
+        // The backend cleans and refuses; this only avoids sending a form nobody filled in,
+        // which would otherwise answer "Give the set a name" for a stray Enter.
+        if (!name.trim()) return;
+        void save.onSave(name, piecesFrom(outfit))
+          .then((payload) => {
+            save.onSaved(payload);
+            setSaved(`Saved as ${name.trim().replace(/\s+/g, " ")}. It is under "Yours".`);
+            setName("");
+          })
+          .catch((error: unknown) => setFailure(save.onError(error)));
+      }}
+    >
+      <input
+        className="outfit-name" type="text" id="outfit-name" value={name}
+        aria-label="Name for this set" placeholder="Name this outfit"
+        onChange={(event) => {
+          setName(event.target.value);
+          setSaved("");
+        }}
+      />
+      <button type="submit" className="outfit-keep">
+        {replacing ? `Replace ${replacing.name}` : "Save as a set"}
+      </button>
+      {/* A live region rather than a chip that appears: the reader's eye is on the character
+          and the list, and the one thing worth interrupting them for is where the set went. */}
+      {saved ? <span className="muted" role="status">{saved}</span> : null}
+      {failure ? <span className="mark-failure" role="alert">{failure}</span> : null}
+    </form>
   );
 }
 
