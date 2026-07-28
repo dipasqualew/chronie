@@ -23,8 +23,29 @@ open PowerShell and run:
 irm https://raw.githubusercontent.com/dipasqualew/chronie/main/scripts/install.ps1 | iex
 ```
 
-The installer is per-user and does not require administrator access. Chronie starts
-with Windows and stays in the system tray when its window is closed.
+That unpacks the newest build into `%LOCALAPPDATA%\Chronie`, puts Chronie in the
+Start menu and adds it to Apps & Features. It is per-user throughout and asks for
+no administrator access. Chronie starts with Windows and stays in the system tray
+when its window is closed.
+
+Run the same line again to update — it replaces the files and leaves the recorded
+history alone. To remove it, use Apps & Features, or run its uninstaller directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Chronie\uninstall.ps1"
+```
+
+That takes the application, the shortcut and the autostart entry. Your recorded
+history is under `%APPDATA%\dev.chronie.wow` and is left behind on purpose; delete
+that folder yourself if you want it gone.
+
+There is no `-setup.exe` to download, and that is deliberate. Windows Defender
+recognises the NSIS stub that self-extracting installers are built from — not
+anything in Chronie — and refuses to run an unsigned one, so the installer this
+used to publish was blocked both on the releases page and at launch
+([#135](https://github.com/dipasqualew/chronie/issues/135)). Only a code-signing
+certificate fixes that, and there is not one. A zip needs no stub, so
+`install.ps1` does the installing itself.
 
 Open **Setup**, choose either the World of Warcraft folder or its `_retail_`
 folder, then select **Install or update addon**. That button downloads the public
@@ -90,7 +111,8 @@ bun run dev
 ```
 
 To run this checkout as an installed application rather than under `bun run dev` —
-the `.app` in `/Applications` on macOS, the per-user NSIS installer on Windows:
+the `.app` in `/Applications` on macOS, the executable in `%LOCALAPPDATA%\Chronie`
+on Windows, replacing whatever the one-liner above put there:
 
 ```sh
 bun run install-locally
@@ -158,8 +180,11 @@ Successive builds replace its assets instead of creating a long list of releases
 Each build gets an increasing `0.1.<run number>` version, allowing Tauri to detect
 it as newer.
 
-The workflow always publishes a Windows installer. To additionally publish signed
-automatic-update artifacts, authenticate GitHub CLI with `gh auth login`, then run:
+The workflow always publishes `Chronie_<version>_x64-portable.zip`, which is the
+executable and `scripts/uninstall.ps1` and nothing else; `install.ps1` unpacks it.
+
+To additionally publish signed automatic-update artifacts, authenticate GitHub CLI
+with `gh auth login`, then run:
 
 ```powershell
 .\scripts\setup-signing.ps1
@@ -171,6 +196,12 @@ That creates an ignored local signing key and configures
 
 The private key must never be committed. Stable releases can later use normal
 version tags while the rolling `dev` release remains available for prototyping.
+
+Automatic updating will not work until Chronie has a code-signing certificate,
+whatever that key says. Tauri's updater on Windows downloads the NSIS installer
+and runs it, and that is the artifact Windows Defender refuses — the same wall
+[#135](https://github.com/dipasqualew/chronie/issues/135) hit. Until then, updating
+is running the `install.ps1` one-liner again.
 
 ## Reference
 

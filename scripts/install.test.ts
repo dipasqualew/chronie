@@ -79,7 +79,12 @@ describe("install.ps1", () => {
 
     it("registers an uninstall entry that points at the uninstaller it shipped", () => {
         expect(installer).toContain(String.raw`HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Chronie`);
-        expect(installer).toMatch(/UninstallString\s*=[^\n]*uninstall\.ps1/);
+        // Through the variable rather than at a literal path, because that is how the script
+        // says it: what matters is that the entry Windows offers runs the file the archive
+        // carried, and not, say, an `uninstall.exe` no longer being installed.
+        const uninstallString = installer.match(/UninstallString\s*=[^\n]*?(\$\w+)`"/)?.[1];
+        expect(uninstallString).toBeTruthy();
+        expect(installer).toMatch(new RegExp(`\\${uninstallString} = [^\\n]*"uninstall\\.ps1"`));
     });
 });
 
