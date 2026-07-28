@@ -730,6 +730,11 @@
   .outfit-reset:hover { color: var(--text-primary); border-color: var(--series-1); }
   .outfit-stage { width: 100%; height: 100%; min-height: 0; }
   .outfit-stage canvas { display: block; width: 100%; height: 100%; }
+  /* Two states and not three. `loading` is a stage nothing has ever been drawn on and `empty`
+     is one whose model will not come, and both of those are blank rectangles worth hiding.
+     `redrawing` is neither: it is the body already on the stage, still on it while the next
+     one is read out of the game — and naming it here is exactly the white flash this rule used
+     to produce, once per piece put on. Leave it out. */
   .outfit-preview[data-state="empty"] .outfit-stage,
   .outfit-preview[data-state="loading"] .outfit-stage { visibility: hidden; }
   /* Who she is: shut by default, because the panel is about what she has on and this is about

@@ -10,10 +10,10 @@ import type { Focus } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
-  CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind, MarkSubjectKind,
-  QualitiesFile, SetQualitiesFile, TransmogAppearance, TransmogMark, TransmogMarksPayload,
-  TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance, WardrobePayload,
-  WornPiece,
+  CharacterModelPayload, CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind,
+  MarkSubjectKind, QualitiesFile, SetQualitiesFile, TransmogAppearance, TransmogMark,
+  TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload, WardrobeAppearance,
+  WardrobePayload, WornPiece, WornSetPayload,
 } from "./types";
 
 afterEach(cleanup);
@@ -223,6 +223,44 @@ function fakeGalleryStage() {
 
 /** A `.glb` in a data URL, the shape the backend hands one over in. */
 const model = (body: string): string => `data:model/gltf-binary;base64,${btoa(body)}`;
+
+/**
+ * The two reads that draw her, held open until the test lets one answer.
+ *
+ * What the pane does *between* asking the game for a body and being handed one is the only
+ * thing several of these tests are about, and a double that answers straight away has been
+ * through that moment before anything can look at it. Each call parks instead, and the test
+ * says when it is over — so "the body already drawn is still on the stage" is an assertion
+ * made at a moment that exists rather than a race with a resolved promise.
+ *
+ * The queues are kept apart because the two reads are asked for under different conditions:
+ * a dressed body arrives when a piece goes on, and the bare one when everything comes off or
+ * when she becomes somebody else, and a test usually holds one open while letting the other
+ * through.
+ */
+function heldBodies() {
+  const dressed: Array<(glb: string) => void> = [];
+  const bare: Array<(glb: string) => void> = [];
+  const park = <T,>(queue: Array<(glb: string) => void>): Promise<T> =>
+    new Promise<T>((resolve) => {
+      queue.push((body: string) => resolve({ model: model(body) } as T));
+    });
+  const answer = (queue: Array<(glb: string) => void>, body: string): void => {
+    const waiting = queue.shift();
+    if (!waiting) throw new Error(`nothing is waiting for ${body}`);
+    waiting(body);
+  };
+  return {
+    loadWorn: vi.fn((_pieces: WornPiece[]): Promise<WornSetPayload> => park(dressed)),
+    loadCharacter: vi.fn((): Promise<CharacterModelPayload> => park(bare)),
+    /** Hands over the dressed body the pane is waiting on, oldest read first. */
+    answerWorn: (body = "a dressed body"): void => answer(dressed, body),
+    /** The same for the bare one, which is what an outfit with nothing in it comes to. */
+    answerBare: (body = "a bare body"): void => answer(bare, body),
+  };
+}
+
+type HeldBodies = ReturnType<typeof heldBodies>;
 
 /**
  * The two tables behind a mark, faked.
@@ -473,15 +511,20 @@ function view(
   options: {
     payload?: TransmogPayload | null; marks?: FakeMarks; saved?: FakeCustomSets;
     herself?: FakeHerself;
+    /** Reads the test answers by hand, for the moments that only exist while one is in flight. */
+    bodies?: HeldBodies;
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
   const { createGalleryStage, painted } = fakeGalleryStage();
   // Recorded rather than merely answered: "the same outfit is not read out of the game twice"
   // is a statement about what crossed the bridge, and only the request itself can say it.
-  const loadWorn = vi.fn((_pieces: WornPiece[]) =>
-    Promise.resolve({ model: model("a dressed body") }));
-  const loadCharacter = vi.fn(() => Promise.resolve({ model: model("a bare body") }));
+  const loadWorn = options.bodies?.loadWorn
+    ?? vi.fn((_pieces: WornPiece[]): Promise<WornSetPayload> =>
+      Promise.resolve({ model: model("a dressed body") }));
+  const loadCharacter = options.bodies?.loadCharacter
+    ?? vi.fn((): Promise<CharacterModelPayload> =>
+      Promise.resolve({ model: model("a bare body") }));
   const loadSet = vi.fn((setId: number) =>
     Promise.resolve(CONTENTS[setId] ?? { setId, appearances: [], readCount: 0, withheldCount: 0 }));
   // The wardrobe half of the browser, which is not read at all until a reader asks for it —
@@ -564,6 +607,15 @@ function worn(): string[] {
   return wornTips().map((tip) => `${tip.place} ${tip.item}`);
 }
 
+/**
+ * What the pane around the character says it is doing, which the stylesheet reads and nothing
+ * else does. `index.html` hides the stage for two of the values and leaves it alone for the
+ * rest, so this string is the whole of whether the reader is looking at a body or at nothing.
+ */
+function paneState(): string {
+  return document.querySelector<HTMLElement>(".outfit-preview")?.dataset.state ?? "";
+}
+
 /** The same tips, taken apart: what each piece is, where it is, and where it came from. */
 function wornTips(): { item: string; place: string; from: string }[] {
   const list = document.querySelector("#outfit-list");
@@ -602,6 +654,69 @@ describe("TransmogView", () => {
 
     await waitFor(() => expect(shown).toHaveLength(1));
     fireEvent.click(await screen.findByRole("button", { name: "Reset camera" }));
+    expect(resets.count).toBe(1);
+  });
+
+  /* ---------- what is on the stage while the next body is being read ---------- */
+
+  // The regression. Every piece put on is a second or two of the game's own storage, and the
+  // pane used to answer that second by hiding the woman who was already standing there — so a
+  // reader trying five hats saw five white rectangles rather than five hats. She stays.
+  it("keeps the body already drawn on the stage while the next one is read", async () => {
+    const bodies = heldBodies();
+    const { loadCharacter, loadWorn, shown } = view({ bodies });
+    // The bare body first: there has to be something on the stage before there is anything to
+    // keep on it, and that is what the view opens on.
+    await waitFor(() => expect(loadCharacter).toHaveBeenCalledTimes(1));
+    bodies.answerBare();
+    await waitFor(() => expect(shown).toHaveLength(1));
+
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear Head: Crown of Tides" }));
+    await waitFor(() => expect(loadWorn).toHaveBeenCalledTimes(1));
+
+    // The dressed body is still in flight, and this is the moment the bug lives in. The
+    // stylesheet hides the stage for exactly two of these values —
+    // `.outfit-preview[data-state="empty"] .outfit-stage,
+    // .outfit-preview[data-state="loading"] .outfit-stage { visibility: hidden; }` in
+    // `index.html` — so the pane saying either of them here *is* the white flash.
+    expect(paneState()).toBe("redrawing");
+    // And nothing new has reached the stage, which is what makes the picture still on it the
+    // one that was there before the click.
+    expect(shown).toHaveLength(1);
+
+    bodies.answerWorn();
+    await waitFor(() => expect(shown).toHaveLength(2));
+    expect(paneState()).toBe("shown");
+  });
+
+  // The other side of it, and the one state that is blank on purpose: nothing has ever been
+  // drawn here, so there is nothing to keep and an empty canvas must not be dressed up as a
+  // picture of anybody.
+  it("has nothing to keep on the stage before the first body has ever arrived", async () => {
+    const bodies = heldBodies();
+    const { loadCharacter, shown } = view({ bodies });
+
+    await waitFor(() => expect(loadCharacter).toHaveBeenCalledTimes(1));
+    expect(shown).toEqual([]);
+    expect(paneState()).toBe("loading");
+  });
+
+  // The button belongs to the picture rather than to the pane, so it goes where the picture
+  // goes: a body that is being redrawn is still a body somebody can have dragged too far.
+  it("still offers the camera back while the next body is being read", async () => {
+    const bodies = heldBodies();
+    const { loadCharacter, loadWorn, resets, shown } = view({ bodies });
+    await waitFor(() => expect(loadCharacter).toHaveBeenCalledTimes(1));
+    bodies.answerBare();
+    await waitFor(() => expect(shown).toHaveLength(1));
+    await screen.findByRole("button", { name: "Reset camera" });
+
+    const card = await open("Tideglass Regalia");
+    fireEvent.click(within(card).getByRole("button", { name: "Wear Head: Crown of Tides" }));
+    await waitFor(() => expect(loadWorn).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset camera" }));
     expect(resets.count).toBe(1);
   });
 
@@ -1446,6 +1561,33 @@ describe("who the character is", () => {
 
     await waitFor(() => expect(shown.loadWorn).toHaveBeenCalledTimes(2));
     expect(worn()).toEqual(["Chest Robe of Tides"]);
+  });
+
+  // And she stays on the stage while the woman she has just become is read out of the game.
+  // Answering a question about her hair throws away every body the window holds, which is the
+  // right thing to do with them and no reason at all to take the picture down in the meantime:
+  // the reader is comparing two hairstyles and would be comparing one of them with a blank.
+  it("keeps her on the stage while the body she is now is read", async () => {
+    const bodies = heldBodies();
+    const shown = view({ bodies });
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(1));
+    bodies.answerBare();
+    await waitFor(() => expect(shown.shown).toHaveLength(1));
+    await askable(shown);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Hair Style" }), {
+      target: { value: "133" },
+    });
+    await waitFor(() => expect(shown.loadCharacter).toHaveBeenCalledTimes(2));
+
+    // The braided one is still being read, and the loose one is what is on the stage until it
+    // arrives — see the stylesheet's hide rule, which names neither this state nor "shown".
+    expect(paneState()).toBe("redrawing");
+    expect(shown.shown).toHaveLength(1);
+
+    bodies.answerBare("a bare body, braided");
+    await waitFor(() => expect(shown.shown).toHaveLength(2));
+    expect(paneState()).toBe("shown");
   });
 });
 

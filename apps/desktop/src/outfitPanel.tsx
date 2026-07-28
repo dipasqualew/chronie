@@ -86,11 +86,35 @@ export interface OutfitPanelProps {
   createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
 }
 
-/** What the pane is showing, which is what its `data-state` says and what the note reads. */
+/**
+ * What the pane is showing, which is what its `data-state` says and what the note reads.
+ *
+ * `redrawing` is the one that is not about this read at all but about the last one: a body is
+ * on the stage and the next one is being read out of the game. It exists because the stylesheet
+ * hides the stage for `loading` and `empty`, and going to `loading` for a read that has a
+ * perfectly good body already drawn is the white flash the reader used to get once per piece
+ * put on. The two are told apart by whether anything has ever reached the stage, and nothing
+ * else: an empty canvas must not be dressed up as a picture of anybody.
+ */
 interface PaneState {
-  state: "loading" | "shown" | "empty";
+  state: "loading" | "redrawing" | "shown" | "empty";
   note: string;
 }
+
+/** Whether the pane has a body on it that is worth keeping there while the next one is read. */
+const drawn = (was: PaneState): boolean => was.state === "shown" || was.state === "redrawing";
+
+/**
+ * What to say while a body is being read: the note, over whatever the stage is already holding.
+ *
+ * A function of the state it replaces, because the question "is there a picture up" is one only
+ * the pane's own last answer can settle — the stage is a ref and a canvas says nothing about
+ * whether anything parsed into it.
+ */
+const reading = (note: string) => (was: PaneState): PaneState => ({
+  state: drawn(was) ? "redrawing" : "loading",
+  note,
+});
 
 export function OutfitPanel(
   {
@@ -162,7 +186,7 @@ export function OutfitPanel(
       setPane({ state: "empty", note: message(error) });
 
     if (!pieces.length) {
-      setPane({ state: "loading", note: "Reading the character model…" });
+      setPane(reading("Reading the character model…"));
       let bare = character.get(key);
       if (!bare) {
         bare = loadCharacter();
@@ -193,7 +217,7 @@ export function OutfitPanel(
     const cached = bodies.get(key);
     if (cached !== undefined) return put(cached);
 
-    setPane({ state: "loading", note: "Putting it on the character…" });
+    setPane(reading("Putting it on the character…"));
     void loadWorn(pieces)
       .then((answer) => {
         bodies.set(key, answer.model);
@@ -262,8 +286,10 @@ export function OutfitPanel(
           </ul>
           {/* Over the corner of the stage, because it belongs to the picture rather than to
               the panel under it — and only while there is a picture: a pane showing a
-              sentence because this machine cannot draw 3D has no camera to put back. */}
-          {pane.state === "shown"
+              sentence because this machine cannot draw 3D has no camera to put back. A body
+              being redrawn is still a body somebody can have dragged too far, so the way back
+              goes where the picture goes rather than away for the length of every read. */}
+          {drawn(pane)
             ? (
               <button
                 type="button" className="outfit-reset"

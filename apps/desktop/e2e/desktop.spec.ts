@@ -911,6 +911,34 @@ class Outfit {
     return this.panel.getByText("Who she is").click();
   }
 
+  /**
+   * Starts writing down every state the pane passes through, and hands back what it has so far.
+   *
+   * The one thing about a redraw that cannot be caught by looking afterwards. A body arriving
+   * is a fraction of a second, so "the picture stayed up while the next one was read" is a
+   * claim about states nothing polling would ever be standing in front of — and the failure it
+   * rules out is exactly one of those: a pane that goes blank for that fraction and comes back
+   * with the new body is indistinguishable, once it has come back, from one that never went.
+   *
+   * So the states are recorded as they happen and read at leisure. The stylesheet hides the
+   * stage for `loading` and `empty`, so either of those appearing in the record of a redraw is
+   * the white flash, whatever the pane looks like by the time anybody asks.
+   */
+  async watchPane(): Promise<void> {
+    await this.panel.locator(".outfit-preview").evaluate((pane) => {
+      const seen: string[] = [pane.dataset.state ?? ""];
+      (window as unknown as { paneStates: string[] }).paneStates = seen;
+      new MutationObserver(() => seen.push(pane.dataset.state ?? ""))
+        .observe(pane, { attributes: true, attributeFilter: ["data-state"] });
+    });
+  }
+
+  /** Every state the pane has been in since [`watchPane`], oldest first. */
+  paneStates(): Promise<string[]> {
+    return this.page.evaluate(() =>
+      (window as unknown as { paneStates?: string[] }).paneStates ?? []);
+  }
+
   /** One question the game asks about her body, by the name the game gives it. */
   about(question: string): Locator {
     return this.panel.getByLabel(question);
@@ -3324,6 +3352,7 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(outfit.about("Skin Color").locator("option"))
       .toHaveText(["Swatch 1", "Swatch 2"]);
 
+    await outfit.watchPane();
     await outfit.about("Hair Style").selectOption("133");
 
     // Stored as it is picked rather than behind a button, so what the form shows after a
@@ -3333,6 +3362,15 @@ test("browses the game's transmog sets and dresses the character in them", async
     // before, and the window asks the backend for her afresh rather than keeping it.
     await expect(outfit.canvas()).toBeVisible();
     await expect(outfit.stage()).toHaveAttribute("data-vertices", "1152");
+
+    // And the loose-haired body stayed up the whole time the braided one was being read. The
+    // record is what makes that assertable at all — by the time anything can be looked at, a
+    // pane that flashed white and a pane that never did are the same pane. Polling for
+    // `redrawing` is what waits for the redraw to have happened; the states around it are what
+    // says the reader was never shown a blank rectangle to get there.
+    await expect.poll(() => outfit.paneStates()).toContain("redrawing");
+    expect(await outfit.paneStates()).not.toContain("loading");
+    expect(await outfit.paneStates()).not.toContain("empty");
   });
 
   // And the coarser half of it: another body entirely. The questions belong to whichever body
