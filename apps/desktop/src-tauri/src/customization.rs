@@ -87,7 +87,7 @@
 //! One fixed body, because the app draws one Human Female and never asks the reader who she is —
 //! but every option of that body, at the swatch the game itself opens on.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
@@ -232,7 +232,9 @@ pub fn of(files: &dyn GameFiles) -> Result<Option<Customization>, String> {
 /// and not the order the rows sit in. Ties fall to the lower id so that two runs agree.
 fn chosen_by(files: &dyn GameFiles) -> Result<Vec<u32>, String> {
     let options = Db2::parse(files.read(CHR_CUSTOMIZATION_OPTION)?)?;
-    let mine: Vec<u32> = options
+    // A set rather than a list, because what follows asks "is this one of mine" once per row of
+    // a table with hundreds of thousands of them.
+    let mine: HashSet<u32> = options
         .rows()
         .filter(|row| row.number(option_column::MODEL) == HUMAN_FEMALE_MODEL)
         .map(|row| row.id())
@@ -248,6 +250,7 @@ fn chosen_by(files: &dyn GameFiles) -> Result<Vec<u32>, String> {
         if !mine.contains(&option) {
             continue;
         }
+        // Held per option, so the count here is the body's options and not the table's rows.
         let swatch = (row.number(choice_column::ORDER), row.id());
         let held = first.entry(option).or_insert(swatch);
         if swatch < *held {
@@ -266,6 +269,7 @@ fn chosen_by(files: &dyn GameFiles) -> Result<Vec<u32>, String> {
 /// hairstyle is authored once per hair colour. Dropping the condition takes every one of them
 /// and leaves whichever sits last.
 fn elements_of(files: &dyn GameFiles, chosen: &[u32]) -> Result<Vec<(u32, u32)>, String> {
+    let chosen: HashSet<u32> = chosen.iter().copied().collect();
     let elements = Db2::parse(files.read(CHR_CUSTOMIZATION_ELEMENT)?)?;
     Ok(elements
         .rows()
@@ -290,7 +294,7 @@ fn elements_of(files: &dyn GameFiles, chosen: &[u32]) -> Result<Vec<(u32, u32)>,
 /// switched off has to take its bare default with it, or a character wears the jewellery she
 /// declined.
 fn geosets_of(files: &dyn GameFiles, elements: &[(u32, u32)]) -> Result<Vec<Geoset>, String> {
-    let wanted: Vec<u32> = elements
+    let wanted: HashSet<u32> = elements
         .iter()
         .map(|(geoset, _)| *geoset)
         .filter(|geoset| *geoset != 0)
@@ -325,20 +329,32 @@ fn paint(
         return Ok(());
     }
 
-    let textures = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
     // A material resource can name more than one file. Unlike the body textures armour is
     // painted with, a character's need no help telling them apart — the choice they came from
     // belongs to one body already — so the lowest wins and two runs of this agree.
-    let file_of = |resource: u32| {
-        textures
-            .rows()
-            .filter(|row| row.number(MATERIAL_RESOURCES_ID) == resource)
-            .map(|row| row.id())
-            .min()
-    };
+    //
+    // One pass for every resource that will be asked about, rather than a walk per layer:
+    // `TextureFileData` is 3MB and `Db2::rows` materialises every row of it before yielding the
+    // first, and a layout has a dozen layers. Only the resources the chosen elements actually
+    // paint with are kept, which is a handful of the table's rows.
+    let wanted: HashSet<u32> = painted.values().copied().collect();
+    let textures = Db2::parse(files.read(TEXTURE_FILE_DATA)?)?;
+    let mut file_of: HashMap<u32, u32> = HashMap::new();
+    for row in textures.rows() {
+        let resource = row.number(MATERIAL_RESOURCES_ID);
+        if !wanted.contains(&resource) {
+            continue;
+        }
+        let file = file_of.entry(resource).or_insert_with(|| row.id());
+        *file = (*file).min(row.id());
+    }
 
     for layer in layers_of(files)? {
-        let Some(file) = painted.get(&layer.target).copied().and_then(file_of) else {
+        let Some(file) = painted
+            .get(&layer.target)
+            .and_then(|resource| file_of.get(resource))
+            .copied()
+        else {
             continue;
         };
         match (layer.texture_type == BODY_TEXTURE, layer.copied) {
@@ -399,7 +415,7 @@ fn layers_of(files: &dyn GameFiles) -> Result<Vec<Layer>, String> {
 /// all — hence the zero check, because material 0 is not a material and looking it up finds
 /// whatever row sits first.
 fn painted_by(files: &dyn GameFiles, elements: &[(u32, u32)]) -> Result<HashMap<u32, u32>, String> {
-    let wanted: Vec<u32> = elements
+    let wanted: HashSet<u32> = elements
         .iter()
         .map(|(_, material)| *material)
         .filter(|material| *material != 0)
