@@ -22,6 +22,7 @@ import "./appearanceModal.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { focusOf } from "./gallery";
 import { REASONS, glbBytes } from "./modelPreview";
 import type { ModelStage } from "./modelViewer";
 import type { GalleryPayload, ItemAppearancesPayload } from "./types";
@@ -109,8 +110,9 @@ export function AppearanceModal(
         displayType: look.displayType,
         inventoryType: look.inventoryType,
       }]);
-      const glb = page.models[0]?.model;
-      if (!glb) {
+      const drawn = page.models[0];
+      const glb = drawn?.model;
+      if (!drawn || !glb) {
         if (mine === asked.current) setSaid({ state: "empty", note: REASONS.unshowable });
         return;
       }
@@ -119,7 +121,11 @@ export function AppearanceModal(
       // renderer and the second would be left running with nothing pointing at it.
       starting.current ??= Promise.resolve(createStage(container));
       stage.current = await starting.current;
-      await stage.current.show(glbBytes(glb));
+      // Framed on the part of her the slot is on, out of the same table the thumbnails use.
+      // What comes back for a chestpiece is a whole two-metre character with the appearance
+      // painted somewhere on her, so a pane that framed all of it showed the reader a woman
+      // when they had asked about a helm — and orbited her pelvis while they tried to turn it.
+      await stage.current.show(glbBytes(glb), focusOf(look.displayType, drawn.kind));
       if (mine === asked.current) setSaid({ state: "shown", note: "" });
     } catch (error: unknown) {
       // A machine with no working 3D — a remote desktop, a virtual machine, a driver the

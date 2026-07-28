@@ -32,7 +32,8 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-import { cameraFor, framingDistance, onScreen, type View } from "./modelPreview";
+import { WHOLE, type Focus } from "./gallery";
+import { cameraFor, frameOn, type View } from "./modelPreview";
 
 /** How wide a view the camera takes, in degrees. Narrow enough that a helm keeps its shape
  * rather than bulging the way a wide angle makes close things bulge. */
@@ -43,8 +44,15 @@ const triple = (point: Vector3): string =>
   [point.x, point.y, point.z].map((axis) => axis.toFixed(3)).join(",");
 
 export interface ModelStage {
-  /** Puts a model on the stage, replacing whatever was there. */
-  show(glb: Uint8Array): Promise<void>;
+  /**
+   * Puts a model on the stage, replacing whatever was there.
+   *
+   * `focus` says which part of it the pane is about — `gallery.ts`'s table, the same one the
+   * thumbnails are framed with. Nothing said means all of it, which is what a character wearing
+   * an outfit is: there is no part of her the pane is about, and the boots are as much of the
+   * answer as the helm.
+   */
+  show(glb: Uint8Array, focus?: Focus): Promise<void>;
   /**
    * Puts the camera back where framing whatever is on the stage now would have left it.
    *
@@ -140,12 +148,20 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   controls.enablePan = true;
   controls.minDistance = 0.2;
   controls.maxDistance = 40;
+  // A turn stays a turn: the camera is kept sixty degrees short of straight overhead and of
+  // straight underneath, which are the two places an orbit stops being one. At the pole the
+  // controls pin the angle and the remaining drag turns into a spin about the middle of the
+  // pane — the model whirls, the vertical drag does nothing, and the way back is not obvious
+  // from anything on screen. Neither view is one anybody came for: this pane shows clothes on a
+  // person, and there is nothing to learn about a robe from directly above her scalp.
+  controls.minPolarAngle = Math.PI / 6;
+  controls.maxPolarAngle = Math.PI - Math.PI / 6;
 
   let model: Group | null = null;
   let running = true;
-  // Whether anything has ever been framed on this stage, which is what decides whether the
-  // next model moves the camera. See `frameModel`.
-  let framed = false;
+  // What the camera was last framed on, which is what decides whether the next model moves it.
+  // See `frameModel`.
+  let framed: string | null = null;
 
   const resize = (): void => {
     const width = Math.max(container.clientWidth, 1);
@@ -220,40 +236,45 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   }
 
   /**
-   * Centres the model on the origin, works out where a camera holding all of it would sit,
-   * and puts the camera there — the first time only.
+   * Puts the part of the model the pane is about on the origin, works out where a camera
+   * holding that part would sit, and puts the camera there — when the part has changed.
    *
-   * **Every model after the first leaves the camera exactly where the reader left it.** A
-   * stage outlives the models on it: the outfit pane keeps one for as long as the wardrobe is
-   * open and draws a new body for every piece put on or taken off. Framing each of them was
-   * throwing away the reader's view once per click, so somebody comparing two helms on a face
-   * they had zoomed in on had to zoom in again for the second one, and again after changing
-   * their mind. What is on the stage is one character in different clothes, so the camera that
-   * suited the last of them suits this one.
+   * **A model framed the same way as the last one leaves the camera exactly where the reader
+   * left it.** A stage outlives the models on it: the outfit pane keeps one for as long as the
+   * wardrobe is open and draws a new body for every piece put on or taken off. Framing each of
+   * them was throwing away the reader's view once per click, so somebody comparing two helms on
+   * a face they had zoomed in on had to zoom in again for the second one, and again after
+   * changing their mind. What is on the stage is one character in different clothes, so the
+   * camera that suited the last of them suits this one.
    *
-   * The framing is still worked out, because it is what "Reset camera" goes back to, and that
-   * has to be this model's framing rather than the one the pane opened on. `position0` and
-   * `target0` are set instead of `saveState`, which would save wherever the camera is now —
+   * The focus is what says whether that argument applies. Two helms are framed on a head and
+   * the reader keeps their view; a helm and then a pair of boots are two different parts of a
+   * body, and holding the head still while the reader asks about the feet shows them an empty
+   * pane. So the camera moves exactly when what the pane is about moves — which is never, for
+   * the character pane, because every outfit on her is the whole of her.
+   *
+   * The framing is still worked out either way, because it is what "Reset camera" goes back to,
+   * and that has to be this model's framing rather than the one the pane opened on. `position0`
+   * and `target0` are set instead of `saveState`, which would save wherever the camera is now —
    * the difference between a reset that frames the body and a reset that hands back a drag.
    */
-  function frameModel(loaded: Group): void {
+  function frameModel(loaded: Group, focus: Focus): void {
     const box = new Box3().setFromObject(loaded);
-    const centre = box.getCenter(new Vector3());
-    const size = box.getSize(new Vector3());
-    loaded.position.sub(centre);
+    const { offset, distance, leash } = frameOn(
+      [box.min.x, box.min.y, box.min.z],
+      [box.max.x, box.max.y, box.max.z],
+      focus, view, FIELD_OF_VIEW, camera.aspect,
+    );
+    loaded.position.set(...offset);
 
-    const seen = onScreen([size.x, size.y, size.z], view);
-    const place = cameraFor(view, framingDistance(seen, FIELD_OF_VIEW, camera.aspect));
-    // How far off the middle of the model the middle of the pane may be dragged: to anywhere
-    // on the model and no further. Zoomed into a helm that reaches the boots, which is the
-    // whole errand; what it rules out is the drag that carries the model off the pane
-    // entirely and leaves nothing on screen to say which way it went.
-    controls.maxTargetRadius = size.length() / 2;
+    const place = cameraFor(view, distance);
+    controls.maxTargetRadius = leash;
     controls.position0.set(...place);
     controls.target0.set(0, 0, 0);
 
-    if (!framed) {
-      framed = true;
+    const on = `${focus.height},${focus.holds}`;
+    if (framed !== on) {
+      framed = on;
       camera.position.set(...place);
       controls.target.set(0, 0, 0);
     }
@@ -316,7 +337,7 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   }
 
   return {
-    show(glb: Uint8Array): Promise<void> {
+    show(glb: Uint8Array, focus: Focus = WHOLE): Promise<void> {
       return new Promise((resolve, reject) => {
         // A copy, because the loader takes ownership of the buffer it parses and the caller's
         // array may be a view into a longer one.
@@ -325,7 +346,7 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
           if (model) discard(model);
           model = loaded.scene;
           if (unlit) flatten(model);
-          frameModel(model);
+          frameModel(model, focus);
           scene.add(model);
           announce(model);
           resolve();
