@@ -3790,6 +3790,97 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("an outfit the app asked the game to hold", function()
+        -- The one thing Chronie does that changes something in a WoW account rather than
+        -- writing something down about it, so the test looks at both halves of that: the
+        -- call the client actually received, and the player being told it happened.
+        it("saves it on the way into the world, and says so by name", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                customSetRequests = {
+                    {
+                        id = 7,
+                        name = "Winter Look",
+                        icon = 626185,
+                        slots = { { slot = 0, appearance = 100 }, { slot = 12, appearance = 900 } },
+                    },
+                },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local created = recorded.customSetWrites.created
+            assert.equal(1, #created)
+            assert.equal("Winter Look", created[1].name)
+            assert.equal(626185, created[1].icon)
+            assert.equal(13, #created[1].list)
+            assert.equal(100, created[1].list[1].appearanceID)
+            assert.equal(900, created[1].list[13].appearanceID)
+            assert.is_truthy(recorded.lines[1]:find("Saved Winter Look to your transmog sets.", 1, true))
+        end)
+
+        -- The app keeps writing the same file until it has been told the request landed, so
+        -- every load screen for the rest of the session reads a request that is already
+        -- carried out. Doing it again would save the outfit over the player's wardrobe once
+        -- per zoning, and pile up duplicates of it besides.
+        it("does not save it a second time on the next load screen", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                customSetRequests = {
+                    { id = 7, name = "Winter Look", slots = { { slot = 0, appearance = 100 } } },
+                },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(1, #recorded.customSetWrites.created)
+            assert.same({}, recorded.customSetWrites.modified)
+            assert.equal(1, #recorded.lines)
+        end)
+
+        -- Account-wide, because the thing it is a record of is: a custom set belongs to the
+        -- account, so a request carried out on one character has been carried out for all of
+        -- them. Kept per character, the player would find the same outfit saved over their
+        -- wardrobe again every time they logged a new alt in.
+        it("is not carried out again by the next character to log in", function()
+            local db = {}
+            local requests = {
+                { id = 7, name = "Winter Look", slots = { { slot = 0, appearance = 100 } } },
+            }
+            local _, thrall = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                db = db,
+                customSetRequests = requests,
+            })
+            thrall.frame:fire("PLAYER_ENTERING_WORLD")
+
+            local _, jaina = boot({
+                playerName = "Jaina",
+                realmName = "Ragnaros",
+                db = db,
+                customSetRequests = requests,
+            })
+            jaina.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.equal(1, #thrall.customSetWrites.created)
+            assert.same({}, jaina.customSetWrites.created)
+        end)
+
+        -- A hand-installed copy carries the shipped-empty module, which asks for nothing.
+        it("stays quiet when the app has asked for nothing", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.same({}, recorded.customSetWrites.created)
+            assert.same({}, recorded.lines)
+        end)
+    end)
+
     describe("the /chronie segments slash command", function()
         it("opens from the minimap button", function()
             local app, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
