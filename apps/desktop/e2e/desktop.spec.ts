@@ -652,11 +652,11 @@ class YourSets {
 }
 
 /**
- * The character, and the list of what she has on — the half of the view that never goes away.
+ * The character, and the rail of what she has on — the half of the view that never goes away.
  *
- * Every piece is a list item naming the place, the item and the set it came out of, and the
- * button beside it says what taking it off would take off. Nothing here needs a set to be
- * open, which is the point.
+ * Every piece is a picture over her, and the picture is the button that takes it off again.
+ * What it is, where it is and which set it came out of are on its tip, which is what [`worn`]
+ * reads. Nothing here needs a set to be open, which is the point.
  */
 class Outfit {
   readonly page: Page;
@@ -667,24 +667,29 @@ class Outfit {
     this.panel = page.locator("#outfit");
   }
 
-  /** One row per place on the body that has something in it, head downwards. */
+  /** One tile per place on the body that has something in it, head downwards. */
   slots(): Locator {
     return this.panel.locator(".outfit-slot");
   }
 
-  /** How much is on, as the line above the list reads it. */
+  /** How much is on, as the line under the character reads it. */
   summary(): Locator {
     return this.panel.locator("#outfit-summary");
   }
 
   /**
-   * The line under each item's name saying which set it came out of.
+   * What she has on, as each tile's tip reads it: the item, its place, and the set it came
+   * out of — the last of the three absent for a look that came out of none.
    *
-   * Only on the pieces that came out of one: a look picked out of the game's whole wardrobe
-   * has no set behind it, and the line is absent rather than empty.
+   * The rail is pictures, so this is where the names are. Read through `expect.poll`, because
+   * a piece going on is a round trip through the backend and the tips arrive with it.
    */
-  provenance(): Locator {
-    return this.panel.locator(".outfit-what .muted");
+  worn(): Promise<string[]> {
+    return this.slots().evaluateAll((tiles) => tiles.map((tile) => {
+      const tip = document.createElement("div");
+      tip.innerHTML = tile.querySelector<HTMLElement>("[data-tip]")?.dataset.tip ?? "";
+      return [...tip.children].map((part) => part.textContent).join(" · ");
+    }));
   }
 
   takeOff(label: string): Promise<void> {
@@ -752,6 +757,11 @@ class Outfit {
    * into every frame after, which is what makes turning a model feel like turning something
    * with weight. So a reading taken straight after one is of something still in flight, and
    * two such readings are never the same number twice. This waits for two that are.
+   *
+   * Two that are is not the end of the remainder, only the end of what three decimals can
+   * see: the controls stop reporting movement while a thousandth of the drag is still owed,
+   * and go on spending it after that. [`movedFrom`] is how a later reading is compared to
+   * this one for that reason.
    */
   async settled(): Promise<string> {
     let last = "";
@@ -764,6 +774,21 @@ class Outfit {
       }, { timeout: 15_000 })
       .toBe(true);
     return last;
+  }
+
+  /**
+   * How far the camera has moved from a reading taken earlier, in the model's own units.
+   *
+   * Distance rather than string equality, because the last digit of the readout belongs to
+   * the drag's remainder rather than to anything the app decided — see [`settled`]. What the
+   * comparisons using this rule out is a camera that was *framed* again, and a framing moves
+   * it the better part of thirty units.
+   */
+  async movedFrom(camera: string): Promise<number> {
+    const numbers = (reading: string): number[] => reading.split(",").map(Number);
+    const [now, before] = [numbers((await this.stage().getAttribute("data-camera")) ?? ""),
+      numbers(camera)];
+    return Math.hypot(...now.map((axis, at) => axis - (before[at] ?? 0)));
   }
 
   /** Drags across the middle of the canvas with one button held, the way a reader does. */
@@ -3151,7 +3176,8 @@ test("browses the game's transmog sets and dresses the character in them", async
     // reader aims at — and which used to be the link out, so that the one part of the row
     // anybody would click was the one part that did not dress her.
     await transmog.name("Tideglass Regalia", "Tideglass Robe").click();
-    await expect(outfit.slots()).toHaveText([/Chest.*Tideglass Robe.*Tideglass Regalia/s]);
+    await expect.poll(() => outfit.worn())
+      .toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
     await expect(outfit.summary()).toHaveText("1 of 13 slots filled");
     await expect(outfit.note())
       .toHaveText("Worn on the character. Drag to turn it, right-drag to move it.");
@@ -3188,7 +3214,8 @@ test("browses the game's transmog sets and dresses the character in them", async
     // their own, which the step above followed.
     await transmog.link("Tideglass Regalia", "Tideglass Mantle").click();
     await expect.poll(() => openedUrls(page)).toContain("https://www.wowhead.com/item=30002");
-    await expect(outfit.slots()).toHaveText([/Chest.*Tideglass Robe.*Tideglass Regalia/s]);
+    await expect.poll(() => outfit.worn())
+      .toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
   });
 
   // And the acceptance for the redesign itself: a piece out of one set and a piece out of
@@ -3197,9 +3224,9 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("pieces from two different sets go on at the same time", async () => {
     await transmog.openSet("Emberforge Plate");
     await transmog.wear("Emberforge Plate", "Head", "Emberforge Helm").click();
-    await expect(outfit.slots()).toHaveText([
-      /Head.*Emberforge Helm.*Emberforge Plate/s,
-      /Chest.*Tideglass Robe.*Tideglass Regalia/s,
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Emberforge Helm · Head · Emberforge Plate",
+      "Tideglass Robe · Chest · Tideglass Regalia",
     ]);
     await expect(transmog.rows("Tideglass Regalia")).toHaveCount(3);
     // Five of that set's six: the sixth is filed under a weapon slot with nothing saying a
@@ -3235,10 +3262,10 @@ test("browses the game's transmog sets and dresses the character in them", async
     await transmog.wear("Emberforge Plate", "Head", "Emberforge Helm").click();
     await expect.poll(() => outfit.stage().getAttribute("data-vertices")).not.toBe(drawn);
 
-    // And the reader's own view of her still in force, to the digit. Framing every model put
-    // the camera back where `framed` is at this point, once per click, whatever the reader had
-    // been looking at instead.
-    await expect(outfit.stage()).toHaveAttribute("data-camera", moved);
+    // And the reader's own view of her still in force. Framing every model put the camera back
+    // where `framed` is at this point — a good thirty units away — once per click, whatever
+    // the reader had been looking at instead.
+    expect(await outfit.movedFrom(moved)).toBeLessThan(0.05);
 
     // The button is what puts it back, and it frames the body that is on the stage now rather
     // than the one the pane opened on — face to face with her again, pointed at her middle.
@@ -3259,15 +3286,15 @@ test("browses the game's transmog sets and dresses the character in them", async
     await transmog.wear("Tideglass Regalia", "Shoulder", "Tideglass Mantle").click();
     await expect(outfit.slots()).toHaveCount(3);
     await transmog.wear("Emberforge Plate", "Shoulder", "Emberforge Pauldrons").click();
-    await expect(outfit.slots()).toHaveText([
-      /Head.*Emberforge Helm/s,
-      /Shoulder.*Emberforge Pauldrons.*Emberforge Plate/s,
-      /Chest.*Tideglass Robe/s,
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Emberforge Helm · Head · Emberforge Plate",
+      "Emberforge Pauldrons · Shoulder · Emberforge Plate",
+      "Tideglass Robe · Chest · Tideglass Regalia",
     ]);
   });
 
   // And clicking the row that put a piece on takes it off again, which is how one comes off
-  // without going over to the list beside the character.
+  // without going over to the rail beside the character.
   await test.step("clicking the same row again takes that piece off", async () => {
     await transmog.wear("Emberforge Plate", "Shoulder", "Emberforge Pauldrons").click();
     await expect(outfit.slots()).toHaveCount(2);
@@ -3280,12 +3307,12 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("a whole set goes on in one go", async () => {
     await transmog.wearAll("Emberforge Plate").click();
     // Five of its six rows: the sixth is an item the game withholds, so nothing says a hand.
-    await expect(outfit.slots()).toHaveText([
-      /Head.*Emberforge Helm/s,
-      /Shoulder.*Emberforge Pauldrons/s,
-      /Chest.*Emberforge Breastplate/s,
-      /Legs.*Emberforge Greaves/s,
-      /Main hand.*Emberforge Blade/s,
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Emberforge Helm · Head · Emberforge Plate",
+      "Emberforge Pauldrons · Shoulder · Emberforge Plate",
+      "Emberforge Breastplate · Chest · Emberforge Plate",
+      "Emberforge Greaves · Legs · Emberforge Plate",
+      "Emberforge Blade · Main hand · Emberforge Plate",
     ]);
     await expect(outfit.summary()).toHaveText("5 of 13 slots filled");
     await expect(outfit.stage()).toHaveAttribute("data-vertices", "976");
@@ -3408,9 +3435,10 @@ test("browses the game's transmog sets and dresses the character in them", async
   });
 
   // And what the switch does not do: she keeps what she has on. The helm went on out of a
-  // set and the list says so too — one look, however it was reached.
-  await test.step("what she has on survives the switch, and the list knows it", async () => {
-    await expect(outfit.slots()).toHaveText([/Head.*Emberforge Helm.*Emberforge Plate/s]);
+  // set and the rail says so too — one look, however it was reached.
+  await test.step("what she has on survives the switch, and the rail knows it", async () => {
+    await expect.poll(() => outfit.worn())
+      .toEqual(["Emberforge Helm · Head · Emberforge Plate"]);
     await expect(wardrobe.wear("Head", "Emberforge Helm")).toHaveAttribute("aria-pressed", "true");
     await expect(wardrobe.wear("Head", "Coif of the Drowned Star"))
       .toHaveAttribute("aria-pressed", "false");
@@ -3418,10 +3446,9 @@ test("browses the game's transmog sets and dresses the character in them", async
 
   await test.step("a look out of the wardrobe goes on her, and names no set", async () => {
     await wardrobe.wear("Head", "Coif of the Drowned Star").click();
-    await expect(outfit.slots()).toHaveText([/Head.*Coif of the Drowned Star/s]);
-    // Nothing came out of a set, so nothing claims one: the line where a set's name goes is
-    // absent rather than blank.
-    await expect(outfit.provenance()).toHaveCount(0);
+    // Nothing came out of a set, so nothing claims one: the tip ends at the place it fills
+    // rather than naming a set that does not exist.
+    await expect.poll(() => outfit.worn()).toEqual(["Coif of the Drowned Star · Head"]);
     await expect(outfit.stage()).toHaveAttribute("data-vertices", "976");
   });
 
@@ -3444,9 +3471,9 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("a look out of one kind and a look out of another go on at once", async () => {
     await wardrobe.kind().selectOption({ label: "Staff" });
     await wardrobe.wear("Two-hand", "Staff of the Quiet Tide").click();
-    await expect(outfit.slots()).toHaveText([
-      /Head.*Coif of the Drowned Star/s,
-      /Main hand.*Staff of the Quiet Tide/s,
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Coif of the Drowned Star · Head",
+      "Staff of the Quiet Tide · Main hand",
     ]);
   });
 
@@ -3633,9 +3660,9 @@ test("browses the game's transmog sets and dresses the character in them", async
 
     await yours.wearAll("Deeps run").click();
 
-    await expect(outfit.slots()).toHaveText([
-      /Head.*Coif of the Drowned Star.*Deeps run/s,
-      /Main hand.*Staff of the Quiet Tide.*Deeps run/s,
+    await expect.poll(() => outfit.worn()).toEqual([
+      "Coif of the Drowned Star · Head · Deeps run",
+      "Staff of the Quiet Tide · Main hand · Deeps run",
     ]);
     // The same body the two looks asked for when they were picked out of the game itself: the
     // outfit is keyed by its display ids, so a body arriving at all says the saved set asked

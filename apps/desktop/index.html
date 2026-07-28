@@ -696,12 +696,16 @@
     .outfit { position: static; height: auto; overflow: visible; }
     .outfit-preview { min-height: 60vh; }
   }
-  /* The stage takes every pixel the panel is not using for the list, and the list scrolls
-     inside the panel rather than pushing the character off the top of it. */
+  /* The stage takes every pixel the panel is not using for the name box and the line under it,
+     and nothing that grows as she is dressed is allowed into this column — see `.outfit-worn`.
+     Two rows: the character, and whatever the pane has to say about her. */
   .outfit-preview {
     display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; gap: 6px;
-    flex: 1 1 auto; min-height: 320px; position: relative;
+    flex: 1 1 auto; min-height: 320px;
   }
+  /* The character and everything drawn over her: the rail of what she has on, and the way back
+     to where the camera started. Both are out of the flow, so neither costs her any height. */
+  .outfit-body { position: relative; justify-self: stretch; width: 100%; height: 100%; min-height: 0; }
   /* Out of the flow rather than in a row of its own, so that offering the way back does not
      cost the character the height the button takes. */
   .outfit-reset {
@@ -725,23 +729,35 @@
     background: var(--surface-2); color: inherit; font: inherit; font-size: 12px;
     padding: 3px 8px; cursor: pointer;
   }
-  .outfit-list {
-    list-style: none; margin: 0; padding: 0; display: grid; gap: 3px;
-    flex: 0 1 auto; overflow-y: auto; align-content: start;
+  /* What she has on, down her left. A column of named rows under the stage grew by a row for
+     every piece and took that height out of the character, which is backwards: dressing her is
+     the errand, and it was making the picture of her worse the further it got. So the pieces
+     are over her instead — head downwards in the order the body reads — and a second column of
+     them starts beside the first rather than the rail ever running off the bottom.
+
+     The rail itself does not take the pointer: a drag that starts in the gap between two tiles
+     is a drag on the character behind them, and only the tiles themselves are clicks. */
+  .outfit-worn {
+    position: absolute; inset: 0 auto 0 0; margin: 0; padding: 6px; list-style: none;
+    display: flex; flex-flow: column wrap; align-content: flex-start; gap: 4px;
+    pointer-events: none;
   }
-  .outfit-slot {
-    display: flex; align-items: center; gap: 8px;
-    padding: 5px 6px; border-radius: 8px; background: var(--surface-2);
-  }
-  .outfit-where { flex: none; min-width: 74px; text-align: center; }
-  .outfit-what { display: grid; min-width: 0; line-height: 1.3; }
-  .outfit-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .outfit-what .muted { font-size: 11.5px; }
+  .outfit-slot { pointer-events: auto; }
+  /* The tile is the control, and the cross under the pointer is what says so. Solid behind the
+     picture because it is over a lit 3D scene rather than the panel, and an icon with the
+     character's shoulder showing through it is not an icon. */
   .outfit-off {
-    margin-left: auto; flex: none; border: 0; background: none; padding: 2px 4px;
-    color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+    display: block; position: relative; margin: 0; padding: 0; border: 0;
+    background: none; cursor: pointer;
   }
-  .outfit-off:hover { color: var(--series-1); text-decoration: underline; }
+  .outfit-off .mog-icon { display: block; background: var(--surface-1); }
+  .outfit-off:hover .mog-icon, .outfit-off:focus-visible .mog-icon { border-color: var(--bad); }
+  .outfit-off::after {
+    content: "×"; position: absolute; top: -5px; right: -5px; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--bad); color: var(--surface-0);
+    font-size: 12px; line-height: 15px; text-align: center; opacity: 0;
+  }
+  .outfit-off:hover::after, .outfit-off:focus-visible::after { opacity: 1; }
   .outfit-empty { margin: 0; font-size: 12px; }
   /* The name box that turns what she has on into a set of the reader's own. One row, because
      it is one field and one button; the sentence it answers with wraps under both. */

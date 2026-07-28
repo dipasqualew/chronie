@@ -4,7 +4,7 @@
  *
  * Two halves that do not move. On the left the sets, filtered by name and by everything else
  * the game says about them, each one opening in place to show what it is made of. On the right
- * the character, dressed in whatever has been clicked, and the list of what that is. Neither
+ * the character, dressed in whatever has been clicked, and the rail of what that is. Neither
  * covers the other, which is the point: an outfit is assembled out of several sets — a helm
  * from one and a robe from another — and a dialog that had to be closed to reach the second
  * set made that the hard way round.
