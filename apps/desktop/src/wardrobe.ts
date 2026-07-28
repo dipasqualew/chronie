@@ -78,11 +78,12 @@ const WEAPONS: Array<[number, string]> = [
 /**
  * Every kind a reader can browse, in the order the picker offers them.
  *
- * The last group is the two the game calls armour and nobody thinks of as armour — a shield
- * and the tome, orb or lantern held in the other hand — and the catch-all under them. That
- * catch-all is not tidiness: an install holds a hundred-odd looks belonging to kinds no
- * player has a word for, profession tools among them, and without a choice that filters
- * nothing they would be in a payload the window fetched and could not show.
+ * The weapons lead with a choice that filters nothing, and that is not tidiness: an install
+ * holds a hundred-odd looks belonging to kinds no player has a word for — profession tools,
+ * ammunition, an item filed under a class nothing else uses — and without it they would sit in
+ * a payload the window fetched and could not show. The last group is the two the game calls
+ * armour and nobody thinks of as armour: a shield, and the tome, orb or lantern held in the
+ * other hand.
  */
 export const KINDS: Kind[] = [
   ...ARMOUR.map(([displayType, label]): Kind => ({
@@ -91,6 +92,12 @@ export const KINDS: Kind[] = [
     group: "Worn on the body",
     displayTypes: [displayType],
   })),
+  {
+    key: "held",
+    label: "Anything held",
+    group: "Held in a hand",
+    displayTypes: HELD_IN_HAND,
+  },
   ...WEAPONS.map(([subclassId, label]): Kind => ({
     key: `weapon-${subclassId}`,
     label,
@@ -114,12 +121,6 @@ export const KINDS: Kind[] = [
     displayTypes: HELD_IN_HAND,
     classId: ARMOUR_CLASS,
     subclassId: 0,
-  },
-  {
-    key: "held",
-    label: "Anything held",
-    group: "Held and not a weapon",
-    displayTypes: HELD_IN_HAND,
   },
 ];
 
