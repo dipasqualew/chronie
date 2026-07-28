@@ -186,6 +186,37 @@ struct AppUpdateResult {
     version: String,
 }
 
+/// The rolling release every build is published under, which the updater already points at.
+///
+/// One channel, because there is only one: `dev-release.yml` force-moves the `dev` tag to
+/// whatever last landed on main and replaces that release's assets. When there is ever a
+/// stable channel beside it, this is the thing that stops being a constant.
+const RELEASE_CHANNEL: &str = "dev";
+
+/// Which build of Chronie this is: the channel it was published under and the commit behind it.
+///
+/// There is no version number worth showing — `tauri.conf.json` carries a `0.1.<run number>` that
+/// exists so the updater can compare two builds, and it says nothing to a person about what is in
+/// front of them. The commit does, and it is also the only one of the two that can be looked up
+/// afterwards, which is why both halves end up as links on screen. The whole forty characters
+/// travel; how much of them a reader is shown is the window's business.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Release {
+    channel: &'static str,
+    commit: &'static str,
+}
+
+/// Answers with the release this binary was built as. Baked in at compile time by build.rs,
+/// because a running app has no repository under it to ask.
+#[tauri::command]
+fn release() -> Release {
+    Release {
+        channel: RELEASE_CHANNEL,
+        commit: env!("CHRONIE_COMMIT"),
+    }
+}
+
 fn load_settings(path: &Path) -> Settings {
     fs::read_to_string(path)
         .ok()
@@ -1277,6 +1308,7 @@ pub fn run() {
             item_details,
             game_icons,
             settings,
+            release,
             choose_wow_path,
             save_wow_path,
             sync_now,
@@ -1399,6 +1431,23 @@ mod tests {
             assert!(!relative.starts_with("spec/"), "{relative} is not part of the addon");
             assert!(!contents.is_empty(), "{relative} was embedded empty");
         }
+    }
+
+    /// build.rs is the only thing that can know the commit, and nothing else in the build would
+    /// notice if it started reporting a branch name, a `git` error message, or the merge commit
+    /// of a pull request. The window turns whatever arrives into a link to GitHub, so the shape
+    /// is the whole of what makes that link work: forty hex characters, or nothing at all.
+    #[test]
+    fn reports_the_commit_it_was_built_from() {
+        let release = release();
+
+        assert_eq!(release.channel, "dev");
+        let commit = release.commit;
+        assert!(
+            commit.is_empty()
+                || (commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit())),
+            "CHRONIE_COMMIT should be a full commit sha or nothing, and was {commit:?}",
+        );
     }
 
     #[test]

@@ -1974,6 +1974,7 @@ const mockDesktop: E2EMock = {
   syncResult: { segmentCount: 3, added: 1, updated: 1 },
   installResult: { version: "0.8.0-dev" },
   appUpdate: { updated: false, version: "0.1.0" },
+  release: { channel: "dev", commit: "95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c" },
   openedUrls: [],
   // One other Chronie on the network waiting for a database, and one sender knocking at this
   // one the moment it starts waiting. Both halves of a transfer are on this page, which is
@@ -2201,6 +2202,32 @@ test("runs under the content policy the packaged window runs under", async ({ pa
     expect(granted(packaged), `${directive} in tauri.conf.json`).toContain("blob:");
     expect(granted(csp), `${directive} as served`).toContain("blob:");
   }
+});
+
+/**
+ * The build, in the corner of every screen, and both halves of it going somewhere.
+ *
+ * A version is only worth showing if it can be followed: the reader writing down what went
+ * wrong needs the commit, and the reader wondering whether their installer is the current one
+ * needs the release. Neither is reachable from a string of hex on its own, so the test that
+ * matters is not that the label is drawn — it is that clicking it leaves the window.
+ */
+test("says which build it is and links both halves of it to GitHub", async ({ page }) => {
+  const version = page.locator("#app-version");
+  await expect(version).toHaveText("dev#95b5e08");
+
+  await version.getByRole("link", { name: "Commit 95b5e08 on GitHub" }).click();
+  await version.getByRole("link", { name: "The dev release on GitHub" }).click();
+
+  await expect.poll(() => openedUrls(page)).toEqual([
+    // The whole sha, which is the only form GitHub resolves — the seven on screen are for
+    // reading, and a link built out of them would be a link to nothing.
+    "https://github.com/dipasqualew/chronie/commit/95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c",
+    "https://github.com/dipasqualew/chronie/releases/tag/dev",
+  ]);
+  // Handed out, not followed. The window is still the window.
+  expect(page.url()).toContain("127.0.0.1:4399");
+  await expect(page.getByRole("heading", { name: "Timeline" })).toBeVisible();
 });
 
 test("stitches segments into play sessions and leads with what happened", async ({ page }) => {

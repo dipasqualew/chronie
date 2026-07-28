@@ -1,8 +1,63 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
     embed_addon();
+    embed_commit();
     tauri_build::build()
+}
+
+/// Writes the commit this build came out of into `CHRONIE_COMMIT`, for the window to show.
+///
+/// There is no version number worth showing yet — every build is the rolling `dev` release and
+/// the only thing that tells two of them apart is the commit they were cut from. So that is what
+/// the app reports, and the one place it can be known is here: by the time the binary is running
+/// there is no repository under it to ask.
+///
+/// `GITHUB_SHA` first, because on a pull request the checkout's own `HEAD` is a merge commit that
+/// exists nowhere but that runner, and a link to it would be a link to nothing. Then git, which
+/// is what a build on somebody's own machine has. Then nothing, which is honest: a build from a
+/// source tarball has no commit, and the window says so rather than inventing one.
+fn embed_commit() {
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    let commit = env::var("GITHUB_SHA")
+        .ok()
+        .filter(|sha| !sha.trim().is_empty())
+        .or_else(head_commit)
+        .unwrap_or_default();
+    println!("cargo:rustc-env=CHRONIE_COMMIT={}", commit.trim());
+}
+
+/// The commit checked out beside this build script, and the files that would change it.
+///
+/// The paths come from git rather than from `.git/…` spelled out here, because this repository is
+/// worked in through worktrees: in one of those `.git` is a file, `HEAD` lives under
+/// `.git/worktrees/<name>/`, and a hard-coded path would watch the wrong branch entirely. Only
+/// paths that exist are declared — a branch whose ref has been packed away has no file of its
+/// own, and naming a missing one would re-run this on every single build.
+fn head_commit() -> Option<String> {
+    let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+    let git = |arguments: &[&str]| -> Option<String> {
+        let output = Command::new("git")
+            .current_dir(&root)
+            .args(arguments)
+            .output()
+            .ok()?;
+        let text = String::from_utf8(output.stdout).ok()?.trim().to_string();
+        (output.status.success() && !text.is_empty()).then_some(text)
+    };
+
+    let commit = git(&["rev-parse", "HEAD"])?;
+    let mut watched = vec![git(&["rev-parse", "--git-path", "HEAD"])];
+    if let Some(reference) = git(&["symbolic-ref", "--quiet", "HEAD"]) {
+        watched.push(git(&["rev-parse", "--git-path", &reference]));
+    }
+    for path in watched.into_iter().flatten() {
+        let path = root.join(path);
+        if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+    Some(commit)
 }
 
 /// Writes the source of `BUNDLED_ADDON`: the addon this build ships, file by file.
