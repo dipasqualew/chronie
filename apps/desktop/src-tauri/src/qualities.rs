@@ -608,6 +608,38 @@ pub fn stored(display_type: u32, build: &str, looks: &[(u32, Look)]) -> Value {
     })
 }
 
+/// The file as it is committed: a header a reader can take in, and one row to a line.
+///
+/// Not `to_string_pretty`, and the reason is the diff. A slot is five thousand rows and the
+/// pretty printer spends six lines on each of them, which is half a megabyte of file where a
+/// tenth of that says the same thing — and, worse, a change to one appearance shows up as a
+/// change to a paragraph. One row to a line is what makes the store reviewable: a regenerated
+/// file after a patch is a handful of changed lines, each of which is one look.
+///
+/// The layout is this shape's rather than a general one: the top level is an object whose values
+/// are either a list of rows or a small thing that fits on a line, and both are written the way
+/// somebody reading the file would want them.
+pub fn text(file: &Value) -> String {
+    let mut out = String::from("{\n");
+    let object = file.as_object().expect("a stored file is an object");
+    for (at, (key, value)) in object.iter().enumerate() {
+        let comma = if at + 1 < object.len() { "," } else { "" };
+        match value.as_array() {
+            Some(rows) if !rows.is_empty() => {
+                out.push_str(&format!("  {}: [\n", json!(key)));
+                for (at, row) in rows.iter().enumerate() {
+                    let comma = if at + 1 < rows.len() { "," } else { "" };
+                    out.push_str(&format!("    {}{comma}\n", row));
+                }
+                out.push_str(&format!("  ]{comma}\n"));
+            }
+            _ => out.push_str(&format!("  {}: {}{comma}\n", json!(key), value)),
+        }
+    }
+    out.push_str("}\n");
+    out
+}
+
 /// The sets' own file: what a set is like, as the looks in it are.
 ///
 /// A set has no size — a dozen pieces covering a body is every set in the game — so it keeps
@@ -929,6 +961,65 @@ mod tests {
         let file = stored(3, "12.0.5.67", &[(1, made([1, 1, 1], None, None))]);
         assert_eq!(file["appearances"][0].get("size"), None);
         assert_eq!(file["sizeCuts"], serde_json::json!({}));
+    }
+
+    // What the committed file actually looks like, because that is the artefact: a header
+    // somebody can take in at a glance and one look to a line, so that a regenerated store after
+    // a patch is a diff of the appearances that changed rather than of the whole file.
+    #[test]
+    fn writes_one_row_to_a_line_under_a_header_that_fits_on_one() {
+        let file = stored(
+            3,
+            "12.0.5.67",
+            &[
+                (1, made([255, 0, 0], None, covering(0.1))),
+                (2, made([0, 255, 0], None, covering(0.5))),
+                (3, made([0, 0, 255], None, covering(0.9))),
+            ],
+        );
+        assert_eq!(
+            text(&file),
+            concat!(
+                "{\n",
+                "  \"appearances\": [\n",
+                "    {\"id\":1,\"primary\":\"#ff0000\",\"size\":\"small\"},\n",
+                "    {\"id\":2,\"primary\":\"#00ff00\",\"size\":\"medium\"},\n",
+                "    {\"id\":3,\"primary\":\"#0000ff\",\"size\":\"large\"}\n",
+                "  ],\n",
+                "  \"build\": \"12.0.5.67\",\n",
+                "  \"displayType\": 3,\n",
+                "  \"sizeCuts\": {\"cover\":{\"large\":0.9,\"rows\":3,\"small\":0.5}}\n",
+                "}\n",
+            ),
+        );
+    }
+
+    // A slot the install can say nothing about is still a file, and still one a reader can open:
+    // an empty list on a line rather than a bracket with nothing between it and its partner.
+    #[test]
+    fn writes_a_slot_with_nothing_in_it() {
+        let text = text(&stored(4, "12.0.5.67", &[]));
+        assert!(text.contains("\"appearances\": [],\n"), "{text}");
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["appearances"], json!([]));
+    }
+
+    // Whatever it writes has to read back as the thing it was written from, because the window
+    // parses it with an ordinary JSON reader and this is not an ordinary JSON writer.
+    #[test]
+    fn writes_something_a_json_reader_reads_back_unchanged() {
+        let file = stored(
+            0,
+            "12.0.5.67",
+            &[
+                (1, made([255, 0, 0], Some([0, 0, 0]), Some(Size { by: By::Geometry, of: 1.5 }))),
+                (2, made([0, 255, 0], None, None)),
+            ],
+        );
+        assert_eq!(serde_json::from_str::<Value>(&text(&file)).unwrap(), file);
+        assert_eq!(
+            serde_json::from_str::<Value>(&text(&stored_sets("12.0.5.67", &[]))).unwrap(),
+            stored_sets("12.0.5.67", &[]),
+        );
     }
 
     // A set is what its pieces are, counted by piece rather than by texel.

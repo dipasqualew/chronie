@@ -713,6 +713,29 @@ impl Held {
 /// `.build.info` is a pipe-separated table with a typed header; several branches can share
 /// one install, and only the active row describes the build on disk.
 fn live_build_key(install: &Path) -> Result<String, String> {
+    active_field(install, "Build Key", |key| key.len() == 32)
+}
+
+/// The version the active branch is on — `12.0.5.67823` and the like.
+///
+/// The build key above is what tells one build from another and is unreadable to a person;
+/// this is what a person calls the same build. Nothing in the running app needs it, and
+/// `examples/dump_qualities` does: what it writes into the repository is a measurement of one
+/// build of the game, and a stored measurement that does not say which build it came off is a
+/// number nobody can date.
+pub fn live_version(install: &Path) -> Result<String, String> {
+    active_field(install, "Version", |version| !version.is_empty())
+}
+
+/// One column of the active row of `.build.info`, where it holds something worth having.
+///
+/// The branches share the file and only one of them describes what is on disk, so a reader
+/// that took the first row would report another region's build on an install that has two.
+fn active_field(
+    install: &Path,
+    name: &str,
+    worth_having: impl Fn(&str) -> bool,
+) -> Result<String, String> {
     let path = install.join(".build.info");
     let text = std::fs::read_to_string(&path)
         .map_err(|error| format!("{}: {error}", path.display()))?;
@@ -723,15 +746,15 @@ fn live_build_key(install: &Path) -> Result<String, String> {
         .split('|')
         .collect();
     let column = |name: &str| header.iter().position(|field| field.starts_with(name));
-    let build_key = column("Build Key").ok_or("`.build.info` has no Build Key column.")?;
+    let wanted = column(name).ok_or(format!("`.build.info` has no {name} column."))?;
     let active = column("Active");
 
     for line in lines {
         let row: Vec<&str> = line.split('|').collect();
         let is_active = active.map_or(true, |at| row.get(at) == Some(&"1"));
         if is_active {
-            if let Some(key) = row.get(build_key).filter(|key| key.len() == 32) {
-                return Ok((*key).to_string());
+            if let Some(field) = row.get(wanted).filter(|field| worth_having(field)) {
+                return Ok((*field).to_string());
             }
         }
     }
