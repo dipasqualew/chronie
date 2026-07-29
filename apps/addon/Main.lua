@@ -72,6 +72,11 @@ local addonName, ns = ...
 ---key just the same — see ns.newScreenshotWatch for how the two are told apart.
 ---@field loggingCombat fun(enable: boolean?): boolean Client LoggingCombat: starts or stops
 ---combat logging when passed a value, and reports the current state either way.
+---Everything from here to setCVar is a way of getting a string out of the client and onto
+---disk, and every one of them is optional: they are undocumented on 12.0.5 and were read out
+---of the client binary, so a build that does not define one is an expected answer rather than
+---a broken install. `ns.newLogProbe` is the only consumer and treats nil as "absent".
+---@field logChannels fun(): LogProbeDeps The client seams the log probe writes through.
 ---@field getCVar fun(name: string): string? Reads a client setting.
 ---@field setCVar fun(name: string, value: string): any Writes one. Protected settings ignore
 ---this or raise, which is why nothing may assume the write took.
@@ -854,6 +859,16 @@ function ns.main(env)
     -- somebody has changed either switch by hand since.
     router.add("log", function()
         logger.info(combatLogging.describe(combatLogging.state()))
+    end)
+    -- Diagnostic, and undocumented on purpose in the usage line: it exists to answer one
+    -- question about this client build — which of its logging APIs put a string in a file —
+    -- and it answers it by writing marked lines the player then goes and greps for. Nothing
+    -- else in the addon calls it, and nothing should until the answer is in.
+    router.add("logprobe", function()
+        local probe = ns.newLogProbe(env.logChannels())
+        for _, line in ipairs(probe.run().lines) do
+            logger.info(line)
+        end
     end)
 
     local minimapButton = ns.newMinimapButton({
@@ -1740,6 +1755,34 @@ if CreateFrame then
             end,
             screenshot = Screenshot,
             loggingCombat = LoggingCombat,
+            -- Assembled fresh on each call and guarded field by field, because none of these
+            -- is documented: they were read out of the 12.0.5 client binary, and the probe's
+            -- job is precisely to find out which of them exist and which reach a file. A
+            -- missing one has to arrive as nil rather than as an index into a nil namespace.
+            logChannels = function()
+                return {
+                    now = time,
+                    logMessage = C_Log and C_Log.LogMessage,
+                    logErrorMessage = C_Log and C_Log.LogErrorMessage,
+                    logWarningMessage = C_Log and C_Log.LogWarningMessage,
+                    logMessageWithPriority = C_Log and C_Log.LogMessageWithPriority,
+                    logPriorities = Enum and Enum.LogPriority,
+                    chatLoggingEnabled = LoggingChat and function()
+                        return LoggingChat() and true or false
+                    end,
+                    setChatLogging = LoggingChat and function(enabled)
+                        LoggingChat(enabled)
+                    end,
+                    print = print,
+                    -- A method rather than a function, so it needs the frame back as self.
+                    addChatMessage = DEFAULT_CHAT_FRAME and function(message)
+                        DEFAULT_CHAT_FRAME:AddMessage(message)
+                    end,
+                    sendSystemMessage = SendSystemMessage,
+                    createCombatLogMessage = C_CombatLogSecure
+                        and C_CombatLogSecure.CreateCombatLogMessage,
+                }
+            end,
             -- C_CVar is the modern home of both; the bare globals are still defined and are
             -- what older clients have, so each is taken from whichever this build offers.
             getCVar = C_CVar and C_CVar.GetCVar or GetCVar,

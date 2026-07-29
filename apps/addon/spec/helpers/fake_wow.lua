@@ -1159,6 +1159,12 @@ function fake.newEnv(options)
             end
             return logging
         end,
+        -- A build that defines none of the logging APIs, which is the honest default: they are
+        -- undocumented, and whether any given client has them is the very thing the probe is
+        -- for. ns.newLogProbe reads every one of these as "absent" and says so.
+        logChannels = function()
+            return { now = function() return 0 end }
+        end,
         getCVar = function(name)
             return cvars[name]
         end,
