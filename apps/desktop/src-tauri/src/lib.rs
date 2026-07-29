@@ -1645,29 +1645,94 @@ fn updater_configured(plugins: &PluginConfig) -> bool {
     })
 }
 
-/// Where a startup failure gets recorded. The window and tray do not exist yet when
-/// `Builder::run` fails, so a file is the only channel that survives a double click.
-fn startup_error_log() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("Chronie")
-        .join("startup-error.log")
+/// How large the startup log is allowed to get before it starts over.
+///
+/// A launch costs two short lines, so a megabyte is somewhere north of ten thousand of them
+/// — long enough that whatever a person is being asked to look at is still in the file, and
+/// small enough that nothing has to prune a log the app itself never reads.
+const STARTUP_LOG_LIMIT: u64 = 1024 * 1024;
+
+/// The directory a startup log belongs in on `os`.
+///
+/// The failures worth recording all happen before there is an app to ask Tauri where its
+/// data lives, so this works out the place the same way the platform would. Windows keeps it
+/// beside the app's own data under `%LOCALAPPDATA%`; macOS has `~/Library/Logs`, which is
+/// both where Console.app looks and somewhere a person can be talked through opening; Linux
+/// uses the XDG state directory, which is what that specification has for exactly this — a
+/// file that should survive a reboot and that nobody would miss if it did not.
+///
+/// A temporary directory is the last resort and a bad one, because macOS sweeps it and that
+/// is precisely how the previous version of this lost every crash it recorded. It stands
+/// only for the case where the environment names no home at all.
+fn log_directory(
+    os: &str,
+    environment: impl Fn(&str) -> Option<PathBuf>,
+    temporary: &Path,
+) -> PathBuf {
+    let home = || environment("HOME");
+    match os {
+        "windows" => environment("LOCALAPPDATA").map(|data| data.join("Chronie")),
+        "macos" => home().map(|home| home.join("Library").join("Logs").join("Chronie")),
+        _ => environment("XDG_STATE_HOME")
+            .or_else(|| home().map(|home| home.join(".local").join("state")))
+            .map(|state| state.join("chronie")),
+    }
+    .unwrap_or_else(|| temporary.join("Chronie"))
+}
+
+/// Where this machine's startup log sits.
+fn startup_log() -> PathBuf {
+    log_directory(
+        std::env::consts::OS,
+        |key| std::env::var_os(key).map(PathBuf::from),
+        &std::env::temp_dir(),
+    )
+    .join("chronie.log")
+}
+
+/// Appends one stamped line to the log at `path`, starting the file over once it is too big.
+///
+/// Every error is swallowed by the caller rather than here: a log that cannot be written is
+/// not a reason to stop a launch that was otherwise going to work.
+fn append_log_line(path: &Path, line: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if fs::metadata(path).is_ok_and(|file| file.len() > STARTUP_LOG_LIMIT) {
+        fs::remove_file(path)?;
+    }
+    let stamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(format!("[{stamp}] {line}\n").as_bytes()))
+}
+
+/// Records one line about this launch, wherever this platform keeps them.
+fn record(line: &str) {
+    let _ = append_log_line(&startup_log(), line);
+}
+
+/// Sends panics to the log as well as to wherever they were already going.
+///
+/// A panic during startup — in `setup`, inside a plugin, in the context macro's own
+/// deserialising — unwinds straight past the error handling in [`run`] and takes the process
+/// with it. On a tray app with no console that is invisible: the icon never appears and
+/// nothing anywhere says why. Chaining onto the default hook rather than replacing it keeps
+/// the message on stderr for anyone running the binary from a terminal.
+fn install_panic_log() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic| {
+        record(&format!("panic: {panic}"));
+        previous(panic);
+    }));
 }
 
 fn report_startup_failure(message: &str) {
-    let path = startup_error_log();
     eprintln!("Chronie failed to start: {message}");
-    eprintln!("Recorded in {}", path.display());
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let stamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let _ = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .and_then(|mut file| file.write_all(format!("[{stamp}] {message}\n").as_bytes()));
+    eprintln!("Recorded in {}", startup_log().display());
+    record(&format!("failed to start: {message}"));
 }
 
 fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
@@ -1777,6 +1842,8 @@ pub fn export_bindings(check: bool) -> Result<(), String> {
 }
 
 pub fn run() {
+    install_panic_log();
+    record(&format!("starting Chronie {}", env!("CARGO_PKG_VERSION")));
     let context = tauri::generate_context!();
     let commands = command_builder();
     // The rolling dev release strips `plugins.updater` from the shipped config whenever no
@@ -1799,6 +1866,7 @@ pub fn run() {
     let result = builder
         .setup(move |app| {
             let data_dir = app.path().app_data_dir()?;
+            let data_directory = data_dir.clone();
             let database_path = data_dir.join("chronie.sqlite3");
             collector::initialize(&database_path).map_err(std::io::Error::other)?;
             let json_path = data_dir.join("segments.json");
@@ -1838,6 +1906,9 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
+            // Paired with the line at the top of `run`. Two lines and the app got up; one
+            // line and it died in here, which is the difference the log exists to draw.
+            record(&format!("ready; data in {}", data_directory.display()));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -2324,5 +2395,145 @@ mod tests {
         if plugins.0.contains_key(UPDATER_PLUGIN) {
             assert!(updater_configured(&plugins));
         }
+    }
+
+    /// An environment holding only the variables named, for driving [`log_directory`].
+    fn environment(variables: &[(&str, &str)]) -> impl Fn(&str) -> Option<PathBuf> {
+        let variables: Vec<(String, PathBuf)> = variables
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), PathBuf::from(value)))
+            .collect();
+        move |wanted| {
+            variables
+                .iter()
+                .find(|(key, _)| key == wanted)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    #[test]
+    fn keeps_the_log_where_each_platform_keeps_logs() {
+        let local = "C:\\Users\\ana\\AppData\\Local";
+        let home = [("HOME", "/home/ana"), ("LOCALAPPDATA", local)];
+        let cases = [
+            ("windows", PathBuf::from(local).join("Chronie")),
+            ("macos", PathBuf::from("/home/ana/Library/Logs").join("Chronie")),
+            ("linux", PathBuf::from("/home/ana/.local/state").join("chronie")),
+        ];
+        for (os, expected) in cases {
+            let directory = log_directory(os, environment(&home), Path::new("/tmp"));
+            assert_eq!(directory, expected, "wrong directory on {os}");
+        }
+    }
+
+    #[test]
+    fn prefers_the_xdg_state_directory_where_one_is_named() {
+        let named = [("HOME", "/home/ana"), ("XDG_STATE_HOME", "/home/ana/state")];
+        let directory = log_directory("linux", environment(&named), Path::new("/tmp"));
+        assert_eq!(directory, PathBuf::from("/home/ana/state").join("chronie"));
+    }
+
+    /// The old log went to a temporary directory on every platform but Windows, which on
+    /// macOS is swept — so the crashes it recorded were gone by the time anyone asked. It is
+    /// still the fallback, but only for an environment that names nowhere else at all.
+    #[test]
+    fn falls_back_to_a_temporary_directory_only_with_nowhere_else_to_go() {
+        for os in ["windows", "macos", "linux"] {
+            let directory = log_directory(os, environment(&[]), Path::new("/tmp"));
+            let expected = PathBuf::from("/tmp").join("Chronie");
+            assert_eq!(directory, expected, "wrong fallback on {os}");
+        }
+    }
+
+    #[test]
+    fn stamps_each_line_and_keeps_the_ones_already_written() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("logs").join("chronie.log");
+        append_log_line(&path, "starting Chronie 0.1.0").unwrap();
+        append_log_line(&path, "failed to start: no window").unwrap();
+
+        let written = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(lines.len(), 2, "expected both lines in {written}");
+        assert!(lines[0].ends_with("] starting Chronie 0.1.0"), "{}", lines[0]);
+        assert!(lines[1].ends_with("] failed to start: no window"), "{}", lines[1]);
+        // A stamp, so two launches can be told apart and a crash can be dated.
+        assert!(lines[0].starts_with('['), "{}", lines[0]);
+    }
+
+    #[test]
+    fn starts_the_log_over_once_it_outgrows_its_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("chronie.log");
+        fs::write(&path, vec![b'x'; STARTUP_LOG_LIMIT as usize + 1]).unwrap();
+
+        append_log_line(&path, "starting Chronie 0.1.0").unwrap();
+
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(!written.contains('x'), "the oversized log should have been dropped");
+        assert!(written.ends_with("] starting Chronie 0.1.0\n"), "{written}");
+    }
+
+    /// The manifest as it sits in the tree, so the tests judge what Cargo and the bundler
+    /// will actually read rather than a description of it written here.
+    const CARGO_TOML: &str = include_str!("../Cargo.toml");
+
+    /// Every `name = "…"` belonging to a table in the manifest opened by `header`.
+    ///
+    /// Enough of TOML to ask which binaries a manifest declares and what the package is
+    /// called, and no more — the alternative is a parser dependency in the shipped tree for
+    /// the sake of two assertions.
+    fn manifest_names(manifest: &str, header: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut inside = false;
+        for line in manifest.lines().map(str::trim) {
+            if line.starts_with('[') {
+                inside = line == header;
+            } else if inside {
+                if let Some(value) = line.strip_prefix("name").and_then(|rest| {
+                    rest.trim_start().strip_prefix('=').map(str::trim)
+                }) {
+                    names.push(value.trim_matches('"').to_string());
+                }
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn reads_the_names_a_manifest_declares_under_one_header() {
+        let manifest = "[package]\nname = \"app\"\n\n[[bin]]\nname = \"one\"\n[[bin]]\n\
+                        path = \"src/bin/two.rs\"\nname = \"two\"\n";
+        assert_eq!(manifest_names(manifest, "[package]"), ["app"]);
+        assert_eq!(manifest_names(manifest, "[[bin]]"), ["one", "two"]);
+    }
+
+    /// The bundle has to launch the app, and which binary that is comes from the manifest.
+    ///
+    /// A crate that declares no `[[bin]]` leaves the bundler to discover its binaries by
+    /// reading `src/bin/`, and a crate whose search turns up exactly one promotes it to the
+    /// bundle's main executable whatever it happens to be called. `src/main.rs` is never in
+    /// that search, because Cargo does not need it named to build it. So the moment
+    /// `src/bin/export_bindings.rs` arrived, the shipped app started launching the bindings
+    /// exporter — which writes a file and exits — and a player saw a program that died the
+    /// instant it opened. Naming the binaries settles it, and this fails if they stop being
+    /// named while something still sits in `src/bin/`.
+    #[test]
+    fn the_manifest_names_the_binary_the_bundle_has_to_launch() {
+        let discovered = fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .count();
+        if discovered == 0 {
+            return;
+        }
+        let package = manifest_names(CARGO_TOML, "[package]");
+        let package = package.first().expect("the manifest should name the package");
+        assert!(
+            manifest_names(CARGO_TOML, "[[bin]]").iter().any(|bin| bin == package),
+            "src/bin holds {discovered} binary target(s), so the manifest has to declare a \
+             [[bin]] named {package} or the bundle will launch one of them instead of the app"
+        );
     }
 }

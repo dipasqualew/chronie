@@ -67,9 +67,14 @@ function build(bundles?: string): void {
 }
 
 /**
- * The name cargo gives the executable, which is the Cargo package's and not `productName`'s.
- * Asked of cargo rather than read out of `Cargo.toml`, because nothing here parses TOML and
- * `[[bin]]` could rename it again anyway.
+ * The name cargo gives the app's executable, which is the Cargo package's and not
+ * `productName`'s. Asked of cargo rather than read out of `Cargo.toml`, because nothing here
+ * parses TOML and `[[bin]]` could rename it again anyway.
+ *
+ * The crate builds more than one binary — `export_bindings` is the other — so this asks for
+ * the one named after the package rather than for the first one listed. Taking whatever came
+ * first is how the bundled `.app` ended up launching the bindings exporter, and it would be
+ * no better a way to pick what gets copied into `%LOCALAPPDATA%`.
  */
 function cargoPackageName(): string {
     const metadata = JSON.parse(
@@ -78,10 +83,13 @@ function cargoPackageName(): string {
             ["metadata", "--format-version", "1", "--no-deps", "--manifest-path", join(TAURI_DIR, "Cargo.toml")],
             { encoding: "utf8" },
         ),
-    ) as { packages: { targets: { kind: string[]; name: string }[] }[] };
-    const binary = metadata.packages[0]?.targets.find((target) => target.kind.includes("bin"));
+    ) as { packages: { name: string; targets: { kind: string[]; name: string }[] }[] };
+    const crate = metadata.packages[0];
+    const binary = crate?.targets.find(
+        (target) => target.kind.includes("bin") && target.name === crate.name,
+    );
     if (!binary) {
-        throw new Error("The desktop crate has no binary target.");
+        throw new Error(`The desktop crate has no binary target named ${crate?.name}.`);
     }
     return binary.name;
 }

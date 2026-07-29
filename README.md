@@ -100,6 +100,24 @@ neither encrypted nor authenticated — it is a transfer between two machines in
 home, guarded by somebody being at both of them. Chronie listens on port 51571 for
 as long as it is waiting and not a moment longer.
 
+## When it will not start
+
+Chronie lives in the tray and opens no console, so a launch that dies has nothing
+to say for itself on screen. It writes what it can to a log instead — a line as it
+starts, a line once the window and tray are up, and the message from any panic or
+startup failure in between. Two lines and it got up; one line and it died on the
+way, and the failure is on the one after it.
+
+| Platform | Log                                  |
+| -------- | ------------------------------------ |
+| Windows  | `%LOCALAPPDATA%\Chronie\chronie.log` |
+| macOS    | `~/Library/Logs/Chronie/chronie.log` |
+| Linux    | `~/.local/state/chronie/chronie.log` |
+
+A crash that never reaches Chronie's own code leaves nothing there. macOS keeps
+those in Console.app under **Crash Reports**; Windows keeps them in Event Viewer
+under **Windows Logs → Application**.
+
 ## Development
 
 Prerequisites: [Bun](https://bun.sh/), Rust, and the platform prerequisites from
