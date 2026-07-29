@@ -1401,9 +1401,19 @@ export interface E2EMock {
    * one of them is what lets a test say which outfit the window actually asked for, which is
    * the whole of what a row toggling changes. */
   wornSets: Record<string, string>;
+  /** Whose body the window asked an outfit to be drawn on, in the order asked. State rather
+   * than a fixture, and the only thing a test can see of that question: the mock holds one
+   * picture of a body and has no game to redraw it from, so what is checkable is that the
+   * character view asked on behalf of the character whose page it is. */
+  wornSetsAskedFor: string[];
   /** The decoded icons, keyed the way whatever named them named them. An id absent from here
    * is an icon the install cannot show, which is a row the real backend answers nothing for. */
   gameIcons: Record<number, string>;
+  /** The picture each currency is drawn with, keyed by the currency's own id rather than by the
+   * file behind it — which is the whole shape of the real command, because the hop from one to
+   * the other happens in the backend. A currency absent from here is one the game names no
+   * picture for, which the real backend also leaves out. */
+  currencyIcons: Record<number, string>;
   /** What the game says about each achievement, keyed by id. An id absent from here is one
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;

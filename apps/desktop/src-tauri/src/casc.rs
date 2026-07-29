@@ -113,6 +113,12 @@ pub fn item_fixture_files() -> DirFiles {
     fixtures("items")
 }
 
+/// The fixtures for `CurrencyTypes`, written by `scripts/make-currency-fixtures.ts`.
+#[cfg(test)]
+pub fn currency_fixture_files() -> DirFiles {
+    fixtures("currencies")
+}
+
 /* ---------- the real thing ---------- */
 
 /// The 30-byte record CASC writes in front of every BLTE payload inside a `data.NNN`.

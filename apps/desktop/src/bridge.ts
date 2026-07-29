@@ -235,6 +235,13 @@ export const desktop = {
   gameIcons: (iconFileDataIds: number[]): Promise<IconsPayload> => mock
     ? Promise.resolve({ icons: mockIcons(iconFileDataIds) })
     : invoke<IconsPayload>("game_icons", { iconFileDataIds }),
+  // The picture each of a list of currencies is drawn with, keyed by the currency rather than
+  // by the file: the hop from one to the other is a table this side of the bridge has no reason
+  // to learn, so the whole errand happens in the backend and the window gets back an `<img>`
+  // source. See `currencies.rs`.
+  currencyIcons: (currencyIds: number[]): Promise<IconsPayload> => mock
+    ? Promise.resolve({ icons: mockCurrencyIcons(currencyIds) })
+    : invoke<IconsPayload>("currency_icons", { currencyIds }),
   // The body every appearance is worn on. One model for the whole app, so the window asks the
   // first time a set is opened and keeps it for every set after.
   characterModel: (): Promise<CharacterModelPayload> => mock
@@ -282,6 +289,18 @@ export const desktop = {
   wornSet: (pieces: WornPiece[]): Promise<WornSetPayload> => mock
     ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null })
     : invoke<WornSetPayload>("worn_set", { pieces }),
+  // The same, on the body of somebody the reader actually plays rather than on the one the
+  // transmog screen is set to. The character view is the only place that asks: everywhere else
+  // a look is being chosen, and it should be shown on whoever is going to wear it.
+  //
+  // The stub answers out of the same map `wornSet` reads and ignores the name, which is honest
+  // rather than lazy: the fixture holds one picture of a body and there is no game behind it to
+  // redraw from, so what a test can see is which outfit the window asked for and on whose behalf.
+  characterWornSet: (character: string, pieces: WornPiece[]): Promise<WornSetPayload> => {
+    if (!mock) return invoke<WornSetPayload>("character_worn_set", { character, pieces });
+    mock.wornSetsAskedFor.push(character);
+    return Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null });
+  },
   // A page of the wardrobe, each look on a body of its own. A page at a time rather than a row
   // at a time because the two cost almost the same: the body, her skin and the game's six tables
   // are read once for whatever is asked for, and a row adds only its own textures and geometry.
@@ -634,6 +653,23 @@ function mockIcons(wanted: number[]): Record<string, string> {
   const found: Record<string, string> = {};
   for (const id of wanted) {
     const url = mock.gameIcons[id];
+    if (url) found[String(id)] = url;
+  }
+  return found;
+}
+
+/**
+ * The currency pictures the e2e mock holds among those asked for.
+ *
+ * Keyed by the currency rather than by the file, because that is what the real command answers:
+ * a currency the game names no picture for is simply absent, and so is one whose picture this
+ * install cannot decode — the two are the same row on screen.
+ */
+function mockCurrencyIcons(wanted: number[]): Record<string, string> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, string> = {};
+  for (const id of wanted) {
+    const url = mock.currencyIcons[id];
     if (url) found[String(id)] = url;
   }
   return found;

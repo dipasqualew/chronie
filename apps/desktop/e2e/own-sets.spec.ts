@@ -142,9 +142,9 @@ test("reads the sets the player saved in the game, and sends one back", async ({
   await test.step("the sets saved in the game are grouped by who saved them", async () => {
     await transmog.browseBy("Personal in-game sets");
 
-    await expect(inGame.characters()).toHaveText(["Aster-Ravencrest"]);
-    // Nerine has been played with the addon on and saves nothing in game, which is a heading
-    // with nothing under it — so she is not drawn, and the count above is of what is.
+    await expect(inGame.characters()).toHaveText(["Aster-Vale"]);
+    // Brin-Hearth has been played with the addon on and saves nothing in game, which is a
+    // heading with nothing under it — so they are not drawn, and the count above is of what is.
     await expect(inGame.names()).toHaveText(["Tideglass", "Unnamed set"]);
     await expect(inGame.saying("2 sets shown")).toBeVisible();
     // A set the client would not name is still a set: it is headed by the label the app gives

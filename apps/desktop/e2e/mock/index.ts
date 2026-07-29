@@ -14,7 +14,9 @@ import type { E2EMock } from "../../src/types";
 
 import { captureImages } from "./captures";
 import { dashboard } from "./dashboard";
-import { achievementDetails, gameIcons, itemAppearances, itemDetails } from "./game";
+import {
+  achievementDetails, currencyIcons, gameIcons, itemAppearances, itemDetails,
+} from "./game";
 import { query } from "./query";
 import {
   appUpdate, chosenPath, combatLog, installResult, logRetention, openedUrls, release, settings,
@@ -22,7 +24,7 @@ import {
 } from "./settings";
 import {
   characterLook, characterModel, characterQuestions, customSets, inGameSetAppearances, inGameSets,
-  setRequests, transmog, transmogItems, transmogMarks, wardrobe, wornSets,
+  setRequests, transmog, transmogItems, transmogMarks, wardrobe, wornSets, wornSetsAskedFor,
 } from "./transmog";
 import { wifi } from "./wifi";
 
@@ -52,6 +54,7 @@ export const mockDesktop: E2EMock = {
   inGameSetAppearances,
   setRequests,
   gameIcons,
+  currencyIcons,
   achievementDetails,
   itemAppearances,
   itemDetails,
@@ -60,6 +63,7 @@ export const mockDesktop: E2EMock = {
   characterLook,
   characterQuestions,
   wornSets,
+  wornSetsAskedFor,
   settings,
   combatLog,
   logRetention,

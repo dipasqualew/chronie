@@ -285,6 +285,29 @@ describe("buildCharacters against what the account holds", () => {
     expect(factions.find((entry) => entry.faction === "Cavern Cartographers")?.leads).toBe(false);
   });
 
+  // The comparison is the point rather than the badge: a reputation is grind a warband does
+  // once, so "Honored, and the alt you never play is Revered" is a different thing to read
+  // than "Honored" — and the character who is in front needs it stated as much as one who is
+  // not, or their row has an empty column where everybody else's has a name.
+  it("carries the furthest anybody on the account has got, whoever that is", () => {
+    const factions = profileFor("Aster-Vale").factions;
+
+    expect(factions.find((entry) => entry.faction === "Cavern Cartographers")?.best)
+      .toEqual({ character: "Brin-Hearth", standing: "Revered", rank: 7, system: "reaction" });
+    expect(factions.find((entry) => entry.faction === "Deepwater Wardens")?.best)
+      .toEqual({ character: "Aster-Vale", standing: "Exalted", rank: 8, system: "reaction" });
+  });
+
+  // Nobody's standing with it could be placed on a ladder at all, which is a different thing
+  // from nobody being ahead — and a column that invented a leader would be inventing one.
+  it("has no account leader for a faction no standing could be placed on", () => {
+    const lamplighters = profileFor("Aster-Vale").factions
+      .find((entry) => entry.faction === "Lamplighters");
+
+    expect(lamplighters?.best).toBeNull();
+    expect(lamplighters?.leads).toBe(false);
+  });
+
   it("has nothing to say about holdings on a history that never reported any", () => {
     const [profile] = buildCharacters(played("Aster-Vale", [{}]));
 
