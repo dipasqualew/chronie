@@ -19,6 +19,7 @@
 
 use crate::combatlog::{Found, LogFile};
 use serde::Serialize;
+use specta::Type;
 use std::collections::HashMap;
 
 /// How long a log is kept when nobody has said otherwise.
@@ -159,7 +160,7 @@ pub fn plan(
 pub const SHOWN: usize = 10;
 
 /// A group of logs, as a number to weigh and a few names to check it against.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Pile {
     pub count: usize,
@@ -185,11 +186,12 @@ impl Pile {
 }
 
 /// One log that is gone, as the record of its going.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Gone {
     pub name: String,
     pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<i64>,
     pub lines_read: i64,
     pub retain_days: u32,
@@ -201,7 +203,7 @@ pub struct Gone {
 /// The preview is computed whether or not the sweeper is on, because the question somebody has
 /// to answer before turning it on is "what would this delete", and the only useful answer names
 /// the files. That is the dry run: it is on screen before the switch, not after the first sweep.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
     /// Whether the sweeper is actually running. Off until somebody turns it on: the first sweep

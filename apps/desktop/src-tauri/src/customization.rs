@@ -95,6 +95,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::body::Body;
 use crate::casc::GameFiles;
@@ -223,7 +224,7 @@ pub struct Question {
 /// survive a patch. Both halves are the game's own ids, and both are checked before anything is
 /// drawn from them — a question this body does not have, or a swatch that belongs to another
 /// question, is dropped rather than obeyed. See [`chosen_by`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Picked {
     pub question: u32,

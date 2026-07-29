@@ -35,6 +35,7 @@
 
 use crate::collector::{self, Summary};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use specta::Type;
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, Read, Write},
@@ -83,7 +84,7 @@ const DISCOVERY_WAIT: Duration = Duration::from_millis(1200);
 const POLL: Duration = Duration::from_millis(150);
 
 /// What a sender says about the database it is offering, before sending any of it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Offer {
     pub protocol: u32,
@@ -91,12 +92,13 @@ pub struct Offer {
     pub device: String,
     pub segment_count: i64,
     pub character_count: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub newest_day: Option<String>,
     pub bytes: u64,
 }
 
 /// The receiving person's answer, which is the whole point of the exchange.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Decision {
     pub accepted: bool,
@@ -106,18 +108,16 @@ pub struct Decision {
 
 /// What became of the bytes, told to the sender so it can report something better than
 /// "sent".
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Receipt {
     pub stored: bool,
-    #[serde(default)]
     pub reason: String,
-    #[serde(default)]
     pub segment_count: i64,
 }
 
 /// What a waiting machine answers a probe with.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Beacon {
     pub protocol: u32,
@@ -126,7 +126,7 @@ pub struct Beacon {
 }
 
 /// A machine found waiting, as the window lists it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Peer {
     pub device: String,
@@ -135,7 +135,7 @@ pub struct Peer {
 }
 
 /// An offer sitting on this machine's screen, waiting for somebody to answer it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Waiting {
     pub offer: Offer,
@@ -146,7 +146,7 @@ pub struct Waiting {
 }
 
 /// The last thing that happened, kept after the connection has gone so the window can say so.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
     pub stored: bool,
@@ -154,7 +154,7 @@ pub struct Outcome {
 }
 
 /// Everything the window draws the receiving half from, answered whole on every poll.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiveStatus {
     pub listening: bool,
@@ -164,7 +164,9 @@ pub struct ReceiveStatus {
     pub addresses: Vec<String>,
     /// The port it actually got, which is Chronie's own unless something else held it.
     pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offer: Option<Waiting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<Outcome>,
 }
 

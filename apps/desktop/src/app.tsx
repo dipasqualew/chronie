@@ -25,7 +25,7 @@ import { createCurrencyIcons } from "./currencies";
 import { Details } from "./details";
 import { duration, plural } from "./format";
 import { createAchievementBook } from "./achievements";
-import { desktop, message } from "./bridge";
+import { desktop, message } from "./desktop";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
 import { QueryView } from "./queryView";
@@ -192,7 +192,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // Somebody may be playing while this window is open, and the collector picks up what the
   // game wrote within half a minute. Anything new means every view is out of date at once.
   useEffect(() => {
-    if (globalThis.__Chronie_E2E__) return;
+    if (!desktop.pollDashboard) return;
     const signature = (list: Segment[]): string =>
       JSON.stringify(list.map((segment) => [segment.id, segment.endedAt]));
     const known = signature(segments);
@@ -473,6 +473,5 @@ const LOADING = "Reading the game's transmog tables…";
  * reload mid-test, so under it this does nothing.
  */
 const reloadWindow = (after: number) => (): void => {
-  if (globalThis.__Chronie_E2E__) return;
-  setTimeout(() => window.location.reload(), after);
+  desktop.reloadWindow(after);
 };

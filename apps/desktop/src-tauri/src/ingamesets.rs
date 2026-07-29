@@ -18,6 +18,7 @@
 //! for what that costs, which is that it cannot be *opened* there.
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use serde_json::Value;
 
 /// The client's `TransmogSlot` enumeration, which runs 0 to 12 inclusive.
@@ -33,28 +34,32 @@ const SLOTS: i64 = 13;
 /// second appearance or an enchant illusion only if it is the kind of slot that can — and the
 /// addon drops the `0` the client reports for "none", so absent here means nobody claimed
 /// anything rather than "claimed to be zero".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Slot {
     pub slot: i64,
     /// An `ItemModifiedAppearance` id — the same number a piece of a set saved in this app
     /// carries, which is what lets the two be drawn by one piece of code.
     pub appearance_id: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secondary_appearance_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub illusion_id: Option<i64>,
 }
 
 /// One set the player saved in game.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct InGameSet {
     /// The client's own id, which survives a rename and is what an edit names the set by.
     pub id: i64,
     pub name: String,
     /// The FileDataID of the picture the game shows it under, where it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<i64>,
     /// When the addon last saw this character's wardrobe *differ*, rather than when it last
     /// looked — the addon only moves it when two looks disagree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<i64>,
     /// What is in it, ascending by slot. Empty is ordinary: a set the player has named and not
     /// yet filled is a set, and the game will list it for them.
@@ -62,7 +67,7 @@ pub struct InGameSet {
 }
 
 /// One character's sets, and every character the database has any for.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct InGameSetsPayload {
     /// Keyed by the character the addon read them on, `Name-Realm`.
@@ -75,7 +80,7 @@ pub struct InGameSetsPayload {
 }
 
 /// What one character was last seen to have.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterSets {
     pub character: String,
@@ -181,19 +186,23 @@ pub fn read(value: &Value) -> Vec<CharacterSets> {
 ///
 /// The shape of a row of `transmog_set_requests` and its slots, and also the shape written into
 /// the addon's own folder — one idea of what a send is, rather than one per hop.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
     pub id: i64,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<i64>,
     pub created_at: i64,
     /// What the addon did about it, once it has: `created`, `updated`, `full`, `refused` or
     /// `failed`. Absent while the request is still waiting to be seen, which is the state the
     /// window draws differently and the state that keeps it being written into the game.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_at: Option<i64>,
     /// The client's id for the set that resulted, where one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set_id: Option<i64>,
     pub slots: Vec<Slot>,
 }

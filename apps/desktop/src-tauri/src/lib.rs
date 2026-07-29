@@ -12,6 +12,7 @@ pub mod currencies;
 pub mod customization;
 pub mod customsets;
 pub mod db2;
+mod dto;
 pub mod gallery;
 pub mod glb;
 pub mod icons;
@@ -37,7 +38,7 @@ use collector::{dashboard as load_dashboard, SyncResult};
 use icons::IconCache;
 use items::ItemBook;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use specta::Type;
 use std::{
     fs,
     io::Write,
@@ -74,7 +75,7 @@ fn body_default() -> u32 {
     body::DEFAULT
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
     wow_path: Option<String>,
@@ -206,13 +207,13 @@ impl AppState {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 struct InstallResult {
     version: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 struct AppUpdateResult {
     updated: bool,
@@ -233,7 +234,7 @@ const RELEASE_CHANNEL: &str = "dev";
 /// front of them. The commit does, and it is also the only one of the two that can be looked up
 /// afterwards, which is why both halves end up as links on screen. The whole forty characters
 /// travel; how much of them a reader is shown is the window's business.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 struct Release {
     channel: &'static str,
@@ -243,6 +244,7 @@ struct Release {
 /// Answers with the release this binary was built as. Baked in at compile time by build.rs,
 /// because a running app has no repository under it to ask.
 #[tauri::command]
+#[specta::specta]
 fn release() -> Release {
     Release {
         channel: RELEASE_CHANNEL,
@@ -294,8 +296,9 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
 }
 
 #[tauri::command]
-fn dashboard(state: State<'_, AppState>) -> Result<Value, String> {
-    load_dashboard(&state.database_path())
+#[specta::specta]
+fn dashboard(state: State<'_, AppState>) -> Result<dto::DashboardPayload, String> {
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 /// One query, typed by the reader, run against their own history.
@@ -305,30 +308,37 @@ fn dashboard(state: State<'_, AppState>) -> Result<Value, String> {
 /// one runs whatever somebody typed. `query::TIME_BUDGET` bounds how long that can take, but
 /// ten seconds of a frozen window would still be ten seconds of a frozen window.
 #[tauri::command]
+#[specta::specta]
 async fn run_query(
     sql: String,
     limit: usize,
     state: State<'_, AppState>,
-) -> Result<query::Answer, String> {
+) -> Result<dto::QueryAnswer, String> {
     let path = state.database_path();
     tauri::async_runtime::spawn_blocking(move || query::run(&path, &sql, limit))
         .await
         .map_err(|error| format!("That query did not finish: {error}"))?
+        .and_then(dto::convert)
 }
 
 /// What is in the history, so that a query can be written without reading the migrations.
 #[tauri::command]
-async fn query_schema(state: State<'_, AppState>) -> Result<query::Schema, String> {
+#[specta::specta]
+async fn query_schema(state: State<'_, AppState>) -> Result<dto::QuerySchema, String> {
     let path = state.database_path();
     tauri::async_runtime::spawn_blocking(move || query::schema(&path))
         .await
         .map_err(|error| format!("Reading the schema did not finish: {error}"))?
+        .and_then(dto::convert)
 }
 
 /// The transmog sets the installed game knows about.
 #[tauri::command]
-async fn transmog_sets(state: State<'_, AppState>) -> Result<Value, String> {
-    read_game_files(&state, transmog::sets).await
+#[specta::specta]
+async fn transmog_sets(state: State<'_, AppState>) -> Result<dto::TransmogPayload, String> {
+    read_game_files(&state, transmog::sets)
+        .await
+        .and_then(dto::convert)
 }
 
 /// What one transmog set is made of, walked out of the same files.
@@ -336,8 +346,14 @@ async fn transmog_sets(state: State<'_, AppState>) -> Result<Value, String> {
 /// The window already has the set from the grid, so only its id crosses over; everything a
 /// row shows is resolved here rather than assembled from two halves.
 #[tauri::command]
-async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<Value, String> {
-    read_game_files(&state, move |files| transmog::set_items(files, set_id)).await
+#[specta::specta]
+async fn transmog_set_items(
+    set_id: u32,
+    state: State<'_, AppState>,
+) -> Result<dto::TransmogSetItemsPayload, String> {
+    read_game_files(&state, move |files| transmog::set_items(files, set_id))
+        .await
+        .and_then(dto::convert)
 }
 
 /// Every appearance the game holds for one kind of place, whether or not a set names it.
@@ -347,14 +363,16 @@ async fn transmog_set_items(set_id: u32, state: State<'_, AppState>) -> Result<V
 /// type and everything held in a hand is five. Asked for a kind at a time — the whole
 /// wardrobe is fourteen megabytes and nobody browses fifty-five thousand rows at once.
 #[tauri::command]
+#[specta::specta]
 async fn transmog_appearances(
     display_types: Vec<u32>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::WardrobePayload, String> {
     read_game_files(&state, move |files| {
         wardrobe::appearances(files, &display_types)
     })
     .await
+    .and_then(dto::convert)
 }
 
 /// Everything anybody has said about the game's wardrobe with their own hands.
@@ -364,55 +382,62 @@ async fn transmog_appearances(
 /// it is what one person typed rather than what Blizzard shipped — see
 /// `collector::transmog_marks`.
 #[tauri::command]
-fn transmog_marks(state: State<'_, AppState>) -> Result<marks::MarksPayload, String> {
-    collector::transmog_marks(&state.database_path())
+#[specta::specta]
+fn transmog_marks(state: State<'_, AppState>) -> Result<dto::TransmogMarksPayload, String> {
+    collector::transmog_marks(&state.database_path()).and_then(dto::convert)
 }
 
 /// The three ways a mark changes, each answering with every mark rather than an
 /// acknowledgement — the same rule the activity and capture edits follow, so what the browser
 /// draws is what the database holds and never what the window hoped a write did.
 #[tauri::command]
+#[specta::specta]
 fn set_transmog_favourite(
-    kind: String,
+    kind: dto::MarkSubjectKind,
     id: i64,
     favourite: bool,
     state: State<'_, AppState>,
-) -> Result<marks::MarksPayload, String> {
+) -> Result<dto::TransmogMarksPayload, String> {
     collector::set_transmog_favourite(
         &state.database_path(),
-        &kind,
+        kind.as_str(),
         id,
         favourite,
         Utc::now().timestamp(),
     )
+    .and_then(dto::convert)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn set_transmog_tag(
-    kind: String,
+    kind: dto::MarkSubjectKind,
     id: i64,
     key: String,
     value: Option<String>,
     state: State<'_, AppState>,
-) -> Result<marks::MarksPayload, String> {
+) -> Result<dto::TransmogMarksPayload, String> {
     collector::set_transmog_tag(
         &state.database_path(),
-        &kind,
+        kind.as_str(),
         id,
         &key,
         value.as_deref(),
         Utc::now().timestamp(),
     )
+    .and_then(dto::convert)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn delete_transmog_tag(
-    kind: String,
+    kind: dto::MarkSubjectKind,
     id: i64,
     key: String,
     state: State<'_, AppState>,
-) -> Result<marks::MarksPayload, String> {
-    collector::delete_transmog_tag(&state.database_path(), &kind, id, &key)
+) -> Result<dto::TransmogMarksPayload, String> {
+    collector::delete_transmog_tag(&state.database_path(), kind.as_str(), id, &key)
+        .and_then(dto::convert)
 }
 
 /// The sets the reader put together on the character themselves.
@@ -422,6 +447,7 @@ fn delete_transmog_tag(
 /// game at large, saved under a name and browsed beside Blizzard's own ever after. Read whole
 /// for the reason the marks are — see `collector::custom_sets`.
 #[tauri::command]
+#[specta::specta]
 fn custom_sets(state: State<'_, AppState>) -> Result<customsets::CustomSetsPayload, String> {
     collector::custom_sets(&state.database_path())
 }
@@ -429,11 +455,13 @@ fn custom_sets(state: State<'_, AppState>) -> Result<customsets::CustomSetsPaylo
 /// The two ways a saved set changes, each answering with every saved set rather than an
 /// acknowledgement — the same rule the marks and the activity edits follow.
 #[tauri::command]
+#[specta::specta]
 fn save_custom_set(
     name: String,
-    pieces: Vec<customsets::Piece>,
+    pieces: Vec<dto::CustomSetPiece>,
     state: State<'_, AppState>,
 ) -> Result<customsets::CustomSetsPayload, String> {
+    let pieces = dto::convert(pieces)?;
     collector::save_custom_set(
         &state.database_path(),
         &name,
@@ -443,6 +471,7 @@ fn save_custom_set(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn delete_custom_set(
     id: i64,
     state: State<'_, AppState>,
@@ -458,6 +487,7 @@ fn delete_custom_set(
 /// database rather than the install, so a machine without the game still lists them — see
 /// `0018_in_game_sets.sql` for why listing is as far as that goes.
 #[tauri::command]
+#[specta::specta]
 fn in_game_sets(state: State<'_, AppState>) -> Result<ingamesets::InGameSetsPayload, String> {
     collector::in_game_sets(&state.database_path())
 }
@@ -474,10 +504,11 @@ fn in_game_sets(state: State<'_, AppState>) -> Result<ingamesets::InGameSetsPayl
 /// other read of the game's tables here is deferred: a roster's worth of wardrobes is a lot of
 /// walking for rows nobody has looked at.
 #[tauri::command]
+#[specta::specta]
 async fn in_game_set_appearances(
     appearance_ids: Vec<u32>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::InGameSetAppearancesPayload, String> {
     read_game_files(&state, move |files| {
         let found = transmog::appearances_of(files, &appearance_ids)?;
         let named = found.iter().filter(|row| row.item_id != 0).count();
@@ -488,6 +519,7 @@ async fn in_game_set_appearances(
         }))
     })
     .await
+    .and_then(dto::convert)
 }
 
 /// Asks the game to save an outfit into the account's own transmog sets.
@@ -504,14 +536,17 @@ async fn in_game_set_appearances(
 /// stored, every later install and every later send writes the file again, and telling somebody
 /// their outfit was not saved when it is queued would be the wrong sentence.
 #[tauri::command]
+#[specta::specta]
 fn send_set_to_game(
     name: String,
     icon: Option<i64>,
-    slots: Vec<ingamesets::Slot>,
+    slots: Vec<dto::InGameSetSlot>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ingamesets::Request>, String> {
+    let slots: Vec<ingamesets::Slot> = dto::convert(slots)?;
     let now = Utc::now().timestamp();
-    let requests = collector::request_set_in_game(&state.database_path(), &name, icon, &slots, now)?;
+    let requests =
+        collector::request_set_in_game(&state.database_path(), &name, icon, &slots, now)?;
     if let Ok(wow_path) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings)
@@ -524,6 +559,7 @@ fn send_set_to_game(
 
 /// Every outfit this app has asked the game for, and what became of each.
 #[tauri::command]
+#[specta::specta]
 fn set_requests(state: State<'_, AppState>) -> Result<Vec<ingamesets::Request>, String> {
     collector::set_requests(&state.database_path())
 }
@@ -536,7 +572,11 @@ fn set_requests(state: State<'_, AppState>) -> Result<Vec<ingamesets::Request>, 
 /// icons are: a list of achievements is worth reading while the tables that describe them
 /// are still being opened.
 #[tauri::command]
-async fn achievement_details(ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+async fn achievement_details(
+    ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<dto::AchievementDetailsPayload, String> {
     let book = Arc::clone(&state.achievements);
     let missing = book.missing(&ids);
     if !missing.is_empty() {
@@ -544,7 +584,7 @@ async fn achievement_details(ids: Vec<u32>, state: State<'_, AppState>) -> Resul
             read_game_files(&state, move |files| achievements::read(files, &missing)).await?;
         book.store(found);
     }
-    Ok(book.answer(&ids))
+    dto::convert(book.answer(&ids))
 }
 
 /// What the game says about the items a window is showing.
@@ -555,14 +595,18 @@ async fn achievement_details(ids: Vec<u32>, state: State<'_, AppState>) -> Resul
 /// answers with is numbers rather than words; which subclass of armour is "Leather" is the
 /// window's business.
 #[tauri::command]
-async fn item_details(ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+async fn item_details(
+    ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<dto::ItemDetailsPayload, String> {
     let book = Arc::clone(&state.items);
     let missing = book.missing(&ids);
     if !missing.is_empty() {
         let found = read_game_files(&state, move |files| items::read(files, &missing)).await?;
         book.store(found);
     }
-    Ok(book.answer(&ids))
+    dto::convert(book.answer(&ids))
 }
 
 /// The game's own pictures for a list of things, as PNG data URLs keyed by FileDataID.
@@ -575,10 +619,11 @@ async fn item_details(ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value
 /// memory, which is what makes the second set of a collection cost nothing — so this only
 /// reaches the game's storage when the request holds something genuinely new.
 #[tauri::command]
+#[specta::specta]
 async fn game_icons(
     icon_file_data_ids: Vec<u32>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::IconsPayload, String> {
     let cache = Arc::clone(&state.icons);
     let missing = cache.missing(&icon_file_data_ids);
     if !missing.is_empty() {
@@ -586,7 +631,7 @@ async fn game_icons(
             read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
         cache.store(decoded);
     }
-    Ok(cache.answer(&icon_file_data_ids))
+    dto::convert(cache.answer(&icon_file_data_ids))
 }
 
 /// The character an appearance is worn on, bare, as a `.glb` in a data URL.
@@ -599,9 +644,12 @@ async fn game_icons(
 /// draw her, and because a window that had to remember to pass it could forget in one of them —
 /// which would be a wardrobe of strangers.
 #[tauri::command]
-async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+async fn character_model(state: State<'_, AppState>) -> Result<dto::CharacterModelPayload, String> {
     let who = character_look_of(&state)?;
-    read_game_files(&state, move |files| character::model_of(files, &who)).await
+    read_game_files(&state, move |files| character::model_of(files, &who))
+        .await
+        .and_then(dto::convert)
 }
 
 /// What the reader may be asked about her, what they have answered so far, and who they play.
@@ -616,7 +664,8 @@ async fn character_model(state: State<'_, AppState>) -> Result<Value, String> {
 /// it separately would be making two round trips to draw one panel. It is re-read whenever the
 /// body changes, which costs a query against a table with one row per character.
 #[tauri::command]
-async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+async fn character_look(state: State<'_, AppState>) -> Result<dto::CharacterLookPayload, String> {
     let who = character_look_of(&state)?;
     let body = who.body;
     // Out of the database, where it is stored as the addon read it: a race and a sex, which mean
@@ -630,7 +679,7 @@ async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
         ))
     })
     .await?;
-    Ok(serde_json::json!({
+    dto::convert(serde_json::json!({
         "bodies": bodies,
         "body": who.body,
         "questions": questions,
@@ -648,18 +697,20 @@ async fn character_look(state: State<'_, AppState>) -> Result<Value, String> {
 /// time a body is drawn rather than here, because an install can change under a settings file —
 /// see [`customization::of`].
 #[tauri::command]
+#[specta::specta]
 async fn save_character_look(
     body: u32,
-    picked: Vec<customization::Picked>,
+    picked: Vec<dto::CharacterPick>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::CharacterChosen, String> {
     let body = read_game_files(&state, move |files| body::known(files, body)).await?;
+    let picked = dto::convert(picked)?;
     let cleaned = customization::clean(picked)?;
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.character_body = body;
     settings.character_look = cleaned.clone();
     state.save(&settings)?;
-    Ok(serde_json::json!({ "body": body, "picked": cleaned }))
+    dto::convert(serde_json::json!({ "body": body, "picked": cleaned }))
 }
 
 /// The answers the settings file holds, copied out from under the lock.
@@ -695,12 +746,18 @@ fn character_look_of(state: &State<'_, AppState>) -> Result<character::Who, Stri
 /// weapon is held in. `null` is the ordinary answer for an outfit this install can say nothing
 /// about, and leaves the window showing the icons.
 #[tauri::command]
-async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+async fn worn_set(
+    pieces: Vec<dto::WornPiece>,
+    state: State<'_, AppState>,
+) -> Result<dto::WornSetPayload, String> {
+    let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
     let who = character_look_of(&state)?;
     read_game_files(&state, move |files| {
         character::worn_set_of(files, &pieces, &who)
     })
     .await
+    .and_then(dto::convert)
 }
 
 /// The same, on a body belonging to somebody the reader actually plays.
@@ -718,11 +775,13 @@ async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Resul
 /// seen one. A picture on the wrong body is still a picture of the clothes, which is most of
 /// what the pane is for, and the alternative is an empty stage on most of a roster.
 #[tauri::command]
+#[specta::specta]
 async fn character_worn_set(
     character: String,
-    pieces: Vec<worn::Piece>,
+    pieces: Vec<dto::WornPiece>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::WornSetPayload, String> {
+    let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
     let fallback = character_look_of(&state)?;
     let looks = collector::character_looks(&state.database_path())?;
     read_game_files(&state, move |files| {
@@ -730,6 +789,7 @@ async fn character_worn_set(
         character::worn_set_of(files, &pieces, &who)
     })
     .await
+    .and_then(dto::convert)
 }
 
 /// The pictures a list of currencies is drawn with, keyed by the currency rather than the file.
@@ -742,10 +802,11 @@ async fn character_worn_set(
 /// The textures themselves go through the same cache every other icon does, so a second
 /// character holding the same currency costs the table read and nothing else.
 #[tauri::command]
+#[specta::specta]
 async fn currency_icons(
     currency_ids: Vec<u32>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::IconsPayload, String> {
     let cache = Arc::clone(&state.icons);
     let named = read_game_files(&state, move |files| currencies::icons_of(files, &currency_ids))
         .await?;
@@ -765,7 +826,7 @@ async fn currency_icons(
             icons.insert(currency.to_string(), url.clone());
         }
     }
-    Ok(serde_json::json!({ "icons": Value::Object(icons) }))
+    dto::convert(serde_json::json!({ "icons": icons }))
 }
 
 /// A page of the wardrobe, every appearance on it worn on a body of its own.
@@ -777,12 +838,16 @@ async fn currency_icons(
 /// row adds only its own textures and geometry. See [`gallery::of`], and `budget.rs` for what
 /// that claim is held to.
 #[tauri::command]
+#[specta::specta]
 async fn gallery_models(
-    pieces: Vec<worn::Piece>,
+    pieces: Vec<dto::WornPiece>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::GalleryPayload, String> {
+    let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
     let who = character_look_of(&state)?;
-    read_game_files(&state, move |files| gallery::of(files, &pieces, &who)).await
+    read_game_files(&state, move |files| gallery::of(files, &pieces, &who))
+        .await
+        .and_then(dto::convert)
 }
 
 /// A page of the set grid, each set worn whole on a body of its own.
@@ -793,9 +858,15 @@ async fn gallery_models(
 /// page out of one walk of each table, rather than by opening a dozen sets one at a time. See
 /// [`gallery::sets`].
 #[tauri::command]
-async fn gallery_sets(set_ids: Vec<u32>, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+async fn gallery_sets(
+    set_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<dto::SetGalleryPayload, String> {
     let who = character_look_of(&state)?;
-    read_game_files(&state, move |files| gallery::sets(files, &set_ids, &who)).await
+    read_game_files(&state, move |files| gallery::sets(files, &set_ids, &who))
+        .await
+        .and_then(dto::convert)
 }
 
 /// The look a list of items carries, as the three numbers a render is asked for by.
@@ -809,11 +880,14 @@ async fn gallery_sets(set_ids: Vec<u32>, state: State<'_, AppState>) -> Result<V
 /// thirty sources would otherwise walk three of the game's tables to fill in pictures nobody
 /// asked to see.
 #[tauri::command]
+#[specta::specta]
 async fn item_appearances(
     item_ids: Vec<u32>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
-    read_game_files(&state, move |files| appearances::of_items(files, &item_ids)).await
+) -> Result<dto::ItemAppearancesPayload, String> {
+    read_game_files(&state, move |files| appearances::of_items(files, &item_ids))
+        .await
+        .and_then(dto::convert)
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -847,12 +921,14 @@ where
 }
 
 #[tauri::command]
-fn settings(state: State<'_, AppState>) -> Result<Settings, String> {
+#[specta::specta]
+fn settings(state: State<'_, AppState>) -> Result<dto::SettingsPayload, String> {
     state
         .settings
         .lock()
         .map(|settings| settings.clone())
         .map_err(|_| "Settings lock failed.".to_string())
+        .and_then(dto::convert)
 }
 
 /// Asks the user for the game folder.
@@ -863,6 +939,7 @@ fn settings(state: State<'_, AppState>) -> Result<Settings, String> {
 /// An async command runs off the main thread, which is what the dialog plugin's own
 /// documentation calls for.
 #[tauri::command]
+#[specta::specta]
 async fn choose_wow_path(window: WebviewWindow) -> Option<String> {
     window
         .dialog()
@@ -873,15 +950,20 @@ async fn choose_wow_path(window: WebviewWindow) -> Option<String> {
 }
 
 #[tauri::command]
-fn save_wow_path(wow_path: String, state: State<'_, AppState>) -> Result<Settings, String> {
+#[specta::specta]
+fn save_wow_path(
+    wow_path: String,
+    state: State<'_, AppState>,
+) -> Result<dto::SettingsPayload, String> {
     let resolved = collector::resolve_wow_path(Path::new(wow_path.trim()))?;
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.wow_path = Some(resolved.to_string_lossy().into_owned());
     state.save(&settings)?;
-    Ok(settings.clone())
+    dto::convert(settings.clone())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> {
     perform_sync(&state)
 }
@@ -909,17 +991,13 @@ fn combat_log_status(state: &AppState) -> Result<combatlog::Status, String> {
         .combat_log_seen
         .lock()
         .map_err(|_| "Combat log lock failed.")?;
-    let status = combatlog::status(
-        &wow_path,
-        requested,
-        seen.as_ref(),
-        Utc::now().timestamp(),
-    );
+    let status = combatlog::status(&wow_path, requested, seen.as_ref(), Utc::now().timestamp());
     seen.clone_from(&status.log);
     Ok(status)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn combat_logging(state: State<'_, AppState>) -> Result<combatlog::Status, String> {
     combat_log_status(&state)
 }
@@ -932,6 +1010,7 @@ fn combat_logging(state: State<'_, AppState>) -> Result<combatlog::Status, Strin
 /// hoped. The game reads addon files once, at load, so this takes effect at the next login or
 /// `/reload`; the panel is what says so.
 #[tauri::command]
+#[specta::specta]
 fn set_combat_logging(
     enabled: bool,
     state: State<'_, AppState>,
@@ -961,7 +1040,10 @@ fn set_combat_logging(
 fn retention_report(state: &AppState) -> Result<retention::Report, String> {
     let (wow_path, retain_days) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
-        (configured_wow_path(&settings).ok(), settings.retain_log_days)
+        (
+            configured_wow_path(&settings).ok(),
+            settings.retain_log_days,
+        )
     };
     collector::retention_report(
         &state.database_path(),
@@ -972,6 +1054,7 @@ fn retention_report(state: &AppState) -> Result<retention::Report, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn log_retention(state: State<'_, AppState>) -> Result<retention::Report, String> {
     retention_report(&state)
 }
@@ -983,6 +1066,7 @@ fn log_retention(state: State<'_, AppState>) -> Result<retention::Report, String
 /// answer is the report again, so the panel repaints from what is now true rather than from
 /// what the click hoped.
 #[tauri::command]
+#[specta::specta]
 fn set_log_retention(
     days: Option<u32>,
     state: State<'_, AppState>,
@@ -1008,10 +1092,11 @@ fn set_log_retention(
 /// Answers with the whole of the settings, so the page repaints from what was stored rather
 /// than from what the click hoped.
 #[tauri::command]
+#[specta::specta]
 fn set_capture_triggers(
     triggers: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<Settings, String> {
+) -> Result<dto::SettingsPayload, String> {
     let (saved, configured) = {
         let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         settings.capture_triggers = triggers;
@@ -1024,7 +1109,7 @@ fn set_capture_triggers(
     if configured {
         install_bundled_addon(&state)?;
     }
-    Ok(saved)
+    dto::convert(saved)
 }
 
 /// What Chronie does with a screenshot once it has found the file: how much of it to keep,
@@ -1036,16 +1121,17 @@ fn set_capture_triggers(
 /// was taken custody of, which is the honest behaviour: nothing here goes back and recompresses
 /// something the player already has.
 #[tauri::command]
+#[specta::specta]
 fn set_capture_storage(
     quality: captures::Quality,
     keep_originals: bool,
     state: State<'_, AppState>,
-) -> Result<Settings, String> {
+) -> Result<dto::SettingsPayload, String> {
     let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
     settings.capture_quality = quality;
     settings.keep_original_screenshots = keep_originals;
     state.save(&settings)?;
-    Ok(settings.clone())
+    dto::convert(settings.clone())
 }
 
 /// The four ways a user can correct the app's guess about what a segment was.
@@ -1053,12 +1139,14 @@ fn set_capture_storage(
 /// Each one returns the whole dashboard rather than an acknowledgement, so the window
 /// repaints from stored state instead of from what the frontend hoped the write did.
 #[tauri::command]
+#[specta::specta]
 fn add_activity(
     segment_id: i64,
     kind: String,
-    metadata: Value,
+    metadata: dto::ActivityMetadata,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::DashboardPayload, String> {
+    let metadata = serde_json::to_value(metadata).map_err(|error| error.to_string())?;
     collector::add_activity(
         &state.database_path(),
         segment_id,
@@ -1066,16 +1154,18 @@ fn add_activity(
         &metadata,
         Utc::now().timestamp(),
     )?;
-    load_dashboard(&state.database_path())
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn update_activity(
     activity_id: i64,
     kind: String,
-    metadata: Value,
+    metadata: dto::ActivityMetadata,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::DashboardPayload, String> {
+    let metadata = serde_json::to_value(metadata).map_err(|error| error.to_string())?;
     collector::update_activity(
         &state.database_path(),
         activity_id,
@@ -1083,19 +1173,27 @@ fn update_activity(
         &metadata,
         Utc::now().timestamp(),
     )?;
-    load_dashboard(&state.database_path())
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 #[tauri::command]
-fn delete_activity(activity_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+fn delete_activity(
+    activity_id: i64,
+    state: State<'_, AppState>,
+) -> Result<dto::DashboardPayload, String> {
     collector::delete_activity(&state.database_path(), activity_id, Utc::now().timestamp())?;
-    load_dashboard(&state.database_path())
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 #[tauri::command]
-fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+fn reset_activities(
+    segment_id: i64,
+    state: State<'_, AppState>,
+) -> Result<dto::DashboardPayload, String> {
     collector::reset_activities(&state.database_path(), segment_id, Utc::now().timestamp())?;
-    load_dashboard(&state.database_path())
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 /// The two ways somebody changes a capture, answering with the whole dashboard for the same
@@ -1103,24 +1201,29 @@ fn reset_activities(segment_id: i64, state: State<'_, AppState>) -> Result<Value
 /// window hoped the write did. Which matters more here than anywhere — a note that looked
 /// saved and was not is a sentence somebody will not think to type again.
 #[tauri::command]
+#[specta::specta]
 fn set_capture_note(
     capture_id: i64,
     note: String,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<dto::DashboardPayload, String> {
     collector::set_capture_note(
         &state.database_path(),
         capture_id,
         &note,
         Utc::now().timestamp(),
     )?;
-    load_dashboard(&state.database_path())
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 #[tauri::command]
-fn delete_capture(capture_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
+#[specta::specta]
+fn delete_capture(
+    capture_id: i64,
+    state: State<'_, AppState>,
+) -> Result<dto::DashboardPayload, String> {
     collector::delete_capture(&state.database_path(), capture_id, Utc::now().timestamp())?;
-    load_dashboard(&state.database_path())
+    load_dashboard(&state.database_path()).and_then(dto::convert)
 }
 
 /// The pictures a grid of captures needs, asked for once the rows are drawn.
@@ -1130,17 +1233,22 @@ fn delete_capture(capture_id: i64, state: State<'_, AppState>) -> Result<Value, 
 /// thread for the length of the grid. Every one after that is a file read, because the
 /// thumbnails are kept beside the images they were made from.
 #[tauri::command]
+#[specta::specta]
 async fn capture_thumbnails(
     capture_ids: Vec<i64>,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
-    collector::capture_thumbnails(&state.database_path(), &capture_ids)
+) -> Result<dto::CaptureThumbnailsPayload, String> {
+    collector::capture_thumbnails(&state.database_path(), &capture_ids).and_then(dto::convert)
 }
 
 /// One capture at the size it was taken, which is what opening a picture asks for.
 #[tauri::command]
-async fn capture_image(capture_id: i64, state: State<'_, AppState>) -> Result<Value, String> {
-    collector::capture_image(&state.database_path(), capture_id)
+#[specta::specta]
+async fn capture_image(
+    capture_id: i64,
+    state: State<'_, AppState>,
+) -> Result<dto::CaptureImagePayload, String> {
+    collector::capture_image(&state.database_path(), capture_id).and_then(dto::convert)
 }
 
 /// The one file in the addon the app writes rather than copies: what it has been asked to do.
@@ -1323,6 +1431,7 @@ fn install_bundled_addon(state: &AppState) -> Result<InstallResult, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn install_addon(state: State<'_, AppState>) -> Result<InstallResult, String> {
     install_bundled_addon(&state)
 }
@@ -1335,11 +1444,13 @@ fn install_addon(state: State<'_, AppState>) -> Result<InstallResult, String> {
 /// does in the background: a machine that is always listening is one that can always be
 /// asked to throw its history away.
 #[tauri::command]
+#[specta::specta]
 fn wifi_receive_start(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, String> {
     state.station.start()
 }
 
 #[tauri::command]
+#[specta::specta]
 fn wifi_receive_stop(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, String> {
     state.station.stop()
 }
@@ -1348,12 +1459,14 @@ fn wifi_receive_stop(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, 
 /// rather than pushed because the whole of it is three fields, and a window that asks is a
 /// window that cannot miss the one event that mattered.
 #[tauri::command]
+#[specta::specta]
 fn wifi_receive_status(state: State<'_, AppState>) -> Result<wifi::ReceiveStatus, String> {
     state.station.status()
 }
 
 /// The answer to the offer on screen. `false` is a first-class outcome, not a cancel.
 #[tauri::command]
+#[specta::specta]
 fn wifi_answer_offer(
     accepted: bool,
     state: State<'_, AppState>,
@@ -1366,6 +1479,7 @@ fn wifi_answer_offer(
 /// Async because it spends a second or so listening for answers, which on the main thread
 /// would be a second of frozen window.
 #[tauri::command]
+#[specta::specta]
 async fn wifi_discover() -> Result<Vec<wifi::Peer>, String> {
     tauri::async_runtime::spawn_blocking(wifi::discover)
         .await
@@ -1377,6 +1491,7 @@ async fn wifi_discover() -> Result<Vec<wifi::Peer>, String> {
 /// Async and off the main thread for the same reason, only more so: this waits on somebody
 /// walking to another computer.
 #[tauri::command]
+#[specta::specta]
 async fn wifi_send(address: String, state: State<'_, AppState>) -> Result<wifi::Receipt, String> {
     let database_path = state.database_path();
     let data_dir = state.data_dir.clone();
@@ -1390,6 +1505,7 @@ async fn wifi_send(address: String, state: State<'_, AppState>) -> Result<wifi::
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn check_for_app_update(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1553,8 +1669,115 @@ fn report_startup_failure(message: &str) {
         .and_then(|mut file| file.write_all(format!("[{stamp}] {message}\n").as_bytes()));
 }
 
+fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+        achievement_details,
+        add_activity,
+        capture_image,
+        capture_thumbnails,
+        character_look,
+        character_model,
+        character_worn_set,
+        check_for_app_update,
+        choose_wow_path,
+        combat_logging,
+        currency_icons,
+        custom_sets,
+        dashboard,
+        delete_activity,
+        delete_capture,
+        delete_custom_set,
+        delete_transmog_tag,
+        gallery_models,
+        gallery_sets,
+        game_icons,
+        in_game_set_appearances,
+        in_game_sets,
+        install_addon,
+        item_appearances,
+        item_details,
+        log_retention,
+        query_schema,
+        release,
+        reset_activities,
+        run_query,
+        save_character_look,
+        save_custom_set,
+        save_wow_path,
+        send_set_to_game,
+        set_capture_note,
+        set_capture_storage,
+        set_capture_triggers,
+        set_combat_logging,
+        set_log_retention,
+        set_requests,
+        set_transmog_favourite,
+        set_transmog_tag,
+        settings,
+        sync_now,
+        transmog_appearances,
+        transmog_marks,
+        transmog_set_items,
+        transmog_sets,
+        update_activity,
+        wifi_answer_offer,
+        wifi_discover,
+        wifi_receive_start,
+        wifi_receive_status,
+        wifi_receive_stop,
+        wifi_send,
+        worn_set,
+    ])
+}
+
+fn checkout_bindings(source: &str) -> String {
+    source.replace("\r\n", "\n")
+}
+
+/// Writes the deterministic TypeScript command client, or verifies the committed copy.
+///
+/// This uses only Rust metadata and the filesystem: no Tauri process or webview is started,
+/// which makes the same operation suitable for local generation and CI drift detection.
+pub fn export_bindings(check: bool) -> Result<(), String> {
+    let destination = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/bindings.ts");
+    let language = || {
+        specta_typescript::Typescript::default()
+            .bigint(specta_typescript::BigIntExportBehavior::Number)
+            .header("// @ts-nocheck")
+    };
+    let generated = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+    command_builder()
+        .export(language(), generated.path())
+        .map_err(|error| error.to_string())?;
+    let generated = fs::read_to_string(generated.path()).map_err(|error| error.to_string())?;
+    let expected = generated
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    if !check {
+        return fs::write(destination, expected).map_err(|error| error.to_string());
+    }
+
+    let committed = fs::read_to_string(&destination).map_err(|_| {
+        format!(
+            "{} is missing; run `cargo run --bin export_bindings`.",
+            destination.display()
+        )
+    })?;
+    if expected != checkout_bindings(&committed) {
+        return Err(format!(
+            "{} is stale; run `cargo run --bin export_bindings`.",
+            destination.display()
+        ));
+    }
+    Ok(())
+}
+
 pub fn run() {
     let context = tauri::generate_context!();
+    let commands = command_builder();
     // The rolling dev release strips `plugins.updater` from the shipped config whenever no
     // signing key is available. Registering the plugin regardless makes Tauri fail while
     // deserializing the absent config, which aborts startup before a window or tray exists
@@ -1622,68 +1845,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        // Alphabetical, and that is the whole of the ordering: Tauri matches an incoming
-        // command by name, so nothing here depends on what is above it. Sorted rather than
-        // appended-to because an append is where two unrelated branches meet — every new
-        // command used to land on the same line, and git merges by line locality (issue #155).
-        .invoke_handler(tauri::generate_handler![
-            achievement_details,
-            add_activity,
-            capture_image,
-            capture_thumbnails,
-            character_look,
-            character_model,
-            character_worn_set,
-            check_for_app_update,
-            choose_wow_path,
-            combat_logging,
-            currency_icons,
-            custom_sets,
-            dashboard,
-            delete_activity,
-            delete_capture,
-            delete_custom_set,
-            delete_transmog_tag,
-            gallery_models,
-            gallery_sets,
-            game_icons,
-            in_game_set_appearances,
-            in_game_sets,
-            install_addon,
-            item_appearances,
-            item_details,
-            log_retention,
-            query_schema,
-            release,
-            reset_activities,
-            run_query,
-            save_character_look,
-            save_custom_set,
-            save_wow_path,
-            send_set_to_game,
-            set_capture_note,
-            set_capture_storage,
-            set_capture_triggers,
-            set_combat_logging,
-            set_log_retention,
-            set_requests,
-            set_transmog_favourite,
-            set_transmog_tag,
-            settings,
-            sync_now,
-            transmog_appearances,
-            transmog_marks,
-            transmog_set_items,
-            transmog_sets,
-            update_activity,
-            wifi_answer_offer,
-            wifi_discover,
-            wifi_receive_start,
-            wifi_receive_status,
-            wifi_receive_stop,
-            wifi_send,
-            worn_set,
-        ])
+        .invoke_handler(commands.invoke_handler())
         .run(context);
     if let Err(error) = result {
         report_startup_failure(&error.to_string());
@@ -1694,7 +1856,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     /// The addon's manifest as it sits in the tree, read again at compile time so the tests
     /// judge the bundle against the source rather than against a copy of it written here.
@@ -1702,6 +1864,11 @@ mod tests {
 
     fn plugins(value: Value) -> PluginConfig {
         PluginConfig(serde_json::from_value(value).unwrap())
+    }
+
+    #[test]
+    fn binding_drift_check_ignores_windows_checkout_line_endings() {
+        assert_eq!(checkout_bindings("one\r\ntwo\r\n"), "one\ntwo\n");
     }
 
     /// The files the .toc names, in the .toc's own order, read the way build.rs reads them.

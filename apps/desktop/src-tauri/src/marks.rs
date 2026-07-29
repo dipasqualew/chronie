@@ -17,6 +17,7 @@
 //! like a label and be neither.
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// A set the game ships, numbered by `TransmogSet.id`.
 pub const SET: &str = "set";
@@ -40,7 +41,7 @@ pub const KEY_LIMIT: usize = 48;
 pub const VALUE_LIMIT: usize = 160;
 
 /// One thing somebody said about a look or a set.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Tag {
     pub key: String,
     /// The value, or `None` where the key is the whole of what was said — which is a label.
@@ -52,7 +53,7 @@ pub struct Tag {
 /// A mark exists only where there is something to say: a subject nobody has starred and nobody
 /// has tagged has no row anywhere and no entry in a payload, which is what keeps this list the
 /// length of what a person did rather than the length of the game's wardrobe.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Mark {
     /// [`SET`], [`APPEARANCE`] or [`CUSTOM`].
@@ -71,7 +72,7 @@ pub struct Mark {
 /// hands, so it is hundreds of rows rather than the fifty-five thousand looks they were said
 /// about. Asking per set or per page would be four hundred round trips to save a payload that
 /// is smaller than one set's icons.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct MarksPayload {
     pub marks: Vec<Mark>,
 }

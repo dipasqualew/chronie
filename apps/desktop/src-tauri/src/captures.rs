@@ -22,6 +22,7 @@ use image::{
     Limits,
 };
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -284,7 +285,7 @@ pub struct Stored {
 ///
 /// Named rather than numbered: a quality slider is a number nobody can predict the effect of,
 /// and each of these says what it does to a screenshot in one sentence.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Quality {
     /// The file the game wrote, byte for byte. The only setting that keeps a PNG a PNG.

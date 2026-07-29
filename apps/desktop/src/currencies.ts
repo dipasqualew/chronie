@@ -67,7 +67,9 @@ export function createCurrencyIcons(
   async function send(ids: number[]): Promise<void> {
     try {
       const payload = await load(ids);
-      for (const [id, url] of Object.entries(payload.icons ?? {})) icons.set(Number(id), url);
+      for (const [id, url] of Object.entries(payload.icons ?? {})) {
+        if (url) icons.set(Number(id), url);
+      }
     } catch {
       for (const id of ids) asked.delete(id);
       return;

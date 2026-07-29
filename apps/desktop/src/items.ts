@@ -280,7 +280,9 @@ export function createItemBook(
   async function send(ids: number[]): Promise<void> {
     try {
       const payload = await load(ids);
-      for (const [id, detail] of Object.entries(payload.items ?? {})) known.set(Number(id), detail);
+      for (const [id, detail] of Object.entries(payload.items ?? {})) {
+        if (detail) known.set(Number(id), detail);
+      }
     } catch {
       for (const id of ids) asked.delete(id);
       return;
@@ -293,7 +295,9 @@ export function createItemBook(
     for (const fdid of pictures) askedIcons.add(fdid);
     try {
       const payload = await loadIcons(pictures);
-      for (const [fdid, url] of Object.entries(payload.icons ?? {})) icons.set(Number(fdid), url);
+      for (const [fdid, url] of Object.entries(payload.icons ?? {})) {
+        if (url) icons.set(Number(fdid), url);
+      }
     } catch {
       for (const fdid of pictures) askedIcons.delete(fdid);
       return;
