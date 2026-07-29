@@ -975,6 +975,23 @@ function fake.newEnv(options)
     -- How many times the addon reached for the shutter. There is nothing else to observe:
     -- the real Screenshot() is asynchronous and writes a file the addon can never see.
     local screenshots = 0
+    -- Everything the addon did to the dressing room, in the order it did it, because with a
+    -- preview the order is the whole of the behaviour: stripping the model after fitting the
+    -- item leaves the player looking at a naked character. `dressableItems` is the client's
+    -- answer to whether it will put an item on a body at all — false models the link the
+    -- client refuses, which opens no dressing room and so hands back no actor.
+    local dressingRoom = {}
+    local dressableItems = options.dressableItems ~= false
+    local dressUpActor = {
+        -- Colon methods, because the client's actor is an object rather than a table of
+        -- closures, and a caller reaching for it with a dot would raise inside the client.
+        Undress = function(_)
+            dressingRoom[#dressingRoom + 1] = { call = "undress" }
+        end,
+        TryOn = function(_, link)
+            dressingRoom[#dressingRoom + 1] = { call = "tryOn", link = link }
+        end,
+    }
     -- The client's own unique id for the logged-in character. `false` models every moment
     -- before the world has loaded, where the client will not name the player at all.
     local playerGUID = options.playerGUID
@@ -1195,7 +1212,18 @@ function fake.newEnv(options)
             }
         end,
         openAchievement = function() end,
-        previewTransmog = function() end,
+        dressUpItem = function(link)
+            dressingRoom[#dressingRoom + 1] = { call = "dressUp", link = link }
+            return dressableItems
+        end,
+        dressUpActor = function()
+            -- A client that opened no dressing room has no actor in it, which is the case the
+            -- addon has to survive rather than the odd one out.
+            if not dressableItems then
+                return nil
+            end
+            return dressUpActor
+        end,
         openTransmogCollection = function() end,
         playerGUID = function()
             return playerGUID or nil
@@ -1387,6 +1415,12 @@ function fake.newEnv(options)
         ---@return integer how many times the addon took a screenshot
         screenshots = function()
             return screenshots
+        end,
+        ---Everything the addon did to the dressing room, oldest first: `{ call, link }` where
+        ---call is "dressUp", "undress" or "tryOn".
+        ---@return table[]
+        dressingRoom = function()
+            return dressingRoom
         end,
         ---@return boolean whether the client is writing a combat log
         isLogging = function()
