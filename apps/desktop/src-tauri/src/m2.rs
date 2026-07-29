@@ -82,10 +82,11 @@ mod attachment_field {
     pub const POSITION: usize = 8;
 }
 
-/// The same for one `M2CompBone`. The two tracks are the ones that can still be doing something
-/// with nothing playing — see [`bound_to_a_global_sequence`].
+/// The same for one `M2CompBone`. The three tracks are the ones that can still be doing
+/// something with nothing playing — see [`at_rest`].
 mod bone_field {
     pub const PARENT: usize = 0x08;
+    pub const TRANSLATION: usize = 0x10;
     pub const ROTATION: usize = 0x24;
     pub const SCALE: usize = 0x38;
     pub const PIVOT: usize = 0x4c;
@@ -193,18 +194,15 @@ pub struct Part {
 ///
 /// **Except that ten of the 43 state no position at all**, and three of those are the ones a
 /// weapon needs: the shield, the right hand and the left. Their records hold the origin, and so
-/// do the bones they name — they are helper bones the game *animates* into the hand, and a
-/// still picture has no animation to do it with. What the file still says is where that bone
-/// chain hangs from, so the position falls back to the first ancestor that states one: the
-/// right wrist for attachment 1, the left for 2, the left forearm for the shield. See
-/// [`where_the_chain_puts_it`].
+/// do the bones they name — those are **helpers**, bones that are nowhere on the body and carry
+/// none of it. What they hold instead is where a hand grips and how, and reading it is
+/// [`how_the_chain_holds_it`].
 ///
-/// **The rotation and the scale are not.** They come off the bone, and this is the half that
-/// looks like it can be skipped and cannot: an attachment bone can carry rotation and scale
-/// tracks bound to a *global sequence*, which runs whether or not an animation does. On this
-/// body 35 of 203 bones carry one, and every one of them is an attachment's own bone — the two
-/// shoulders hold a constant scale of `0.62` and a mirrored 35° roll. Ignore them and a pair of
-/// pauldrons is drawn half again too large and lying flat.
+/// **The rotation and the scale are not.** They come off the bones too, and this is the half
+/// that looks like it can be skipped and cannot: a bone can carry rotation and scale tracks
+/// bound to a *global sequence*, which runs whether or not an animation does. On this body 35 of
+/// 203 bones carry one, and the two shoulders' hold a constant scale of `0.62` and a mirrored
+/// 35° roll. Ignore them and a pair of pauldrons is drawn half again too large and lying flat.
 ///
 /// The helm's bone and the back's carry nothing at all, which is why those two look right
 /// either way and why this was worth measuring rather than eyeballing.
@@ -448,31 +446,69 @@ pub fn attachments(skeleton: &[u8]) -> Result<Vec<Attachment>, String> {
     for index in 0..array.count {
         let record = array.record(ska1, index, ATTACHMENT_SIZE)?;
         let bone = read_u16(record, attachment_field::BONE)? as usize;
-        let (rotation, scale) = match bones {
-            Some(bones) => how_the_bone_sits(bones, bone)?,
-            None => (NO_ROTATION, NO_SCALE),
+        let held = match bones {
+            Some(bones) => how_the_chain_holds_it(bones, bone)?,
+            None => Held::nowhere(),
         };
         let stated = read_vector(record, attachment_field::POSITION)?;
-        let position = match (at_the_origin(stated), bones) {
-            (true, Some(bones)) => where_the_chain_puts_it(bones, bone)?,
-            _ => y_up(stated),
+        let position = if at_the_origin(stated) {
+            held.position
+        } else {
+            stated
         };
         found.push(Attachment {
             id: read_u32(record, attachment_field::ID)?,
-            position,
-            rotation,
-            scale,
+            position: y_up(position),
+            rotation: y_up_quaternion(held.rotation),
+            // A scale is three lengths rather than a direction, so the axes are permuted
+            // without the sign the position and the rotation take.
+            scale: [held.scale[0], held.scale[2], held.scale[1]],
         });
     }
     Ok(found)
 }
 
-/// Where the bones put an attachment that states no position of its own.
+/// How the bones above an attachment hold the thing hanging off it, in the game's own axes.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    position: [f32; 3],
+    rotation: [f32; 4],
+    scale: [f32; 3],
+}
+
+impl Held {
+    /// What a skeleton with no bones in it says, which is nothing.
+    fn nowhere() -> Self {
+        Self {
+            position: [0.0; 3],
+            rotation: NO_ROTATION,
+            scale: NO_SCALE,
+        }
+    }
+}
+
+/// Where the bones put an attachment, and how they turn and size what hangs off it.
 ///
-/// A bone's pivot is in model space, and in the bind pose it is simply where that bone is: no
-/// animation, no parent composition, nothing to accumulate. So the first bone up the chain that
-/// states a pivot is the place on the body the attachment belongs to — for the right hand,
-/// through two helper bones, the right wrist.
+/// A bone's pivot is in model space, and with nothing playing it is simply where that bone is:
+/// no animation, no parent composition, nothing to accumulate. So walking up the chain ends at
+/// the first bone that states a pivot, and that bone is a place on the body — the right wrist
+/// for the right hand, the left forearm for the shield.
+///
+/// **What the walk used to do there was stop and take the pivot, and that is a wrist rather than
+/// a grip.** The bones it walked past are not empty. A bone that states no pivot is a *helper*:
+/// it is nowhere on the body, carries none of the body's geometry, and exists to say where the
+/// thing hanging off it goes. Read off build `12.0.5.67823`, `humanfemale_hd`'s right hand hangs
+/// off bone 193, whose parent 102 states a position of `(0.0077, -0.6027, 1.0626)`, a 38° roll
+/// and a scale of `0.85` — the fist, the angle a sword sits in it at, and the size this body
+/// wears a weapon at. The wrist the walk used to stop at is nine centimetres up and inside her
+/// arm, which is a sword hanging off a forearm with its hilt past her fingers. The shield is
+/// worse: its chain hangs from the *elbow*, a quarter of a metre from where bone 46 says the
+/// shield goes.
+///
+/// So each helper is composed — `T(pivot) · T(translation) · R(rotation) · S(scale) · T(−pivot)`,
+/// which is the game's own bone transform — and the walk stops, as it did, at the first bone
+/// that is a place. That bone contributes only what [`at_rest`] allows it to, which is what it
+/// contributed before: the pauldrons' global sequences, and nothing else.
 ///
 /// **The origin is the sentinel, and it is one to be generous about.** Nothing hangs off a
 /// character between her feet, so a pivot there is a bone that has not been placed rather than
@@ -480,10 +516,15 @@ pub fn attachments(skeleton: &[u8]) -> Result<Vec<Attachment>, String> {
 /// bone whose pivot is a millimetre off the origin on one axis, which is a rounding of zero and
 /// not a place. [`NEAR_THE_ORIGIN`] is well under the height of anything real on a body.
 ///
-/// A chain that reaches the root without stating one leaves the attachment at the origin, which
-/// is what a caller drops rather than draws — see `crate::character::hung_on`.
-fn where_the_chain_puts_it(bones: &[u8], bone: usize) -> Result<[f32; 3], String> {
+/// **And the floor under all of it is the rule this replaced.** A chain whose helpers say
+/// nothing composes to the origin, and the first ancestor that states a pivot is still the
+/// honest answer to where the attachment belongs — a shield on an arm beats a shield between her
+/// feet. A chain that reaches the root without stating one leaves the attachment at the origin,
+/// which is what a caller drops rather than draws — see `crate::character::hung_on`.
+fn how_the_chain_holds_it(bones: &[u8], bone: usize) -> Result<Held, String> {
     let array = array_at(bones, BONES)?;
+    let mut held = Held::nowhere();
+    let mut hangs_from = [0.0f32; 3];
     let mut which = bone;
     // A skeleton whose parents form a loop is a file this cannot walk out of, and it cannot
     // take more steps than there are bones without having taken one twice.
@@ -493,8 +534,18 @@ fn where_the_chain_puts_it(bones: &[u8], bone: usize) -> Result<[f32; 3], String
         }
         let record = array.record(bones, which, BONE_SIZE)?;
         let pivot = read_vector(record, bone_field::PIVOT)?;
-        if !at_the_origin(pivot) {
-            return Ok(y_up(pivot));
+        let a_place = !at_the_origin(pivot);
+        let (translation, rotation, scale) = at_rest(bones, record, a_place)?;
+
+        let from_the_pivot = turned(rotation, sized(scale, minus(held.position, pivot)));
+        held = Held {
+            position: plus(plus(pivot, translation), from_the_pivot),
+            rotation: composed(rotation, held.rotation),
+            scale: sized(scale, held.scale),
+        };
+        if a_place {
+            hangs_from = pivot;
+            break;
         }
         let parent = read_u16(record, bone_field::PARENT)? as i16;
         if parent < 0 {
@@ -502,7 +553,10 @@ fn where_the_chain_puts_it(bones: &[u8], bone: usize) -> Result<[f32; 3], String
         }
         which = parent as usize;
     }
-    Ok([0.0; 3])
+    if at_the_origin(held.position) {
+        held.position = hangs_from;
+    }
+    Ok(held)
 }
 
 /// How close to the origin a position has to be to be no position at all, in the game's metres.
@@ -512,57 +566,67 @@ fn at_the_origin(position: [f32; 3]) -> bool {
     position.iter().all(|axis| axis.abs() < NEAR_THE_ORIGIN)
 }
 
-/// The rotation and scale a bone applies with no animation playing.
+/// What one bone contributes with nothing playing: a translation, a rotation and a scale.
 ///
-/// A bone this skeleton does not declare leaves both at rest, which is the same answer as a
-/// bone that says nothing — an attachment naming a bone past the end of the array is a file to
-/// draw something from anyway rather than one to refuse.
-fn how_the_bone_sits(bones: &[u8], which: usize) -> Result<([f32; 4], [f32; 3]), String> {
-    let array = array_at(bones, BONES)?;
-    if which >= array.count {
-        return Ok((NO_ROTATION, NO_SCALE));
-    }
-    let bone = array.record(bones, which, BONE_SIZE)?;
+/// `a_place` is the bone the walk is about to stop at — one that states a pivot, and so one the
+/// still picture has already drawn where it belongs. Only a global sequence may move that.
+fn at_rest(
+    bones: &[u8],
+    bone: &[u8],
+    a_place: bool,
+) -> Result<([f32; 3], [f32; 4], [f32; 3]), String> {
     // The record is a slice of `bones`, and a track's arrays are offsets into the whole chunk,
     // so the two are read against different things on purpose.
     let track = |field: usize| -> Result<Option<usize>, String> {
-        bound_to_a_global_sequence(bones, bone, field)
+        what_the_track_says(bones, bone, field, a_place)
     };
-
-    let rotation = match track(bone_field::ROTATION)? {
-        Some(at) => y_up_quaternion(read_quaternion(bones, at)?),
-        None => NO_ROTATION,
-    };
-    let scale = match track(bone_field::SCALE)? {
-        // A scale is three lengths rather than a direction, so the axes are permuted without
-        // the sign the position and the rotation take.
-        Some(at) => {
-            let [x, y, z] = read_vector(bones, at)?;
-            [x, z, y]
-        }
-        None => NO_SCALE,
-    };
-    Ok((rotation, scale))
+    Ok((
+        match track(bone_field::TRANSLATION)? {
+            Some(at) => read_vector(bones, at)?,
+            None => [0.0; 3],
+        },
+        match track(bone_field::ROTATION)? {
+            Some(at) => read_quaternion(bones, at)?,
+            None => NO_ROTATION,
+        },
+        match track(bone_field::SCALE)? {
+            Some(at) => read_vector(bones, at)?,
+            None => NO_SCALE,
+        },
+    ))
 }
 
-/// Where a bone's track keeps its first value, when the track is one that plays regardless.
+/// Where a track keeps the value a still picture may read, if it keeps one at all.
 ///
-/// **This is the whole of the finding, and it is a correction.** A still picture of a model is
-/// its bind pose, and a bone's ordinary tracks hold one array of keyframes per animation — with
-/// none playing there is nothing to read out of them, which is why bones are otherwise skipped.
-/// A track bound to a *global sequence* is not one of those: it runs on the world's clock and
-/// applies whether anything is playing or not, and it is where the game keeps the fact that a
-/// pauldron sits at 62% and tilted.
+/// **Two kinds of track say something with nothing playing, and neither is an animation.**
 ///
-/// The first keyframe is what a still picture takes. On `humanfemale_hd` the shoulders' 593
-/// keys are all the same value, so which is taken does not arise — but time zero is the honest
-/// answer to "what does this look like", and it is the one a reader can defend.
-fn bound_to_a_global_sequence(
+/// The first is a track bound to a *global sequence*. A still picture of a model is its bind
+/// pose, and a bone's ordinary tracks hold one array of keyframes per animation — with none
+/// playing there is nothing to read out of them, which is why bones are otherwise skipped. A
+/// global sequence is not one of those: it runs on the world's clock and applies whether
+/// anything is playing or not, and it is where the game keeps the fact that a pauldron sits at
+/// 62% and tilted. The first keyframe is what a still picture takes; on `humanfemale_hd` the
+/// shoulders' 593 keys are all the same value, so which is taken does not arise, but time zero
+/// is the honest answer to "what does this look like".
+///
+/// The second is a track that holds **one key**, which is a bone the animation does not move.
+/// One key is a constant written where a curve would go, and the grip a hand keeps a weapon in
+/// is exactly that: bone 102 of `humanfemale_hd` states its position, its roll and its `0.85`
+/// in a single key, and states the same key under all 410 animations. Reading it is not reading
+/// an animation, because there is no animation in it to read.
+///
+/// `a_place` withholds the second from the bone the walk stops at, and that is the whole of what
+/// keeps this from moving anything it should not. A bone that states a pivot is somewhere on the
+/// body, and the still picture has already drawn the body there; a bone that states none is a
+/// helper that carries nothing and is drawn nowhere, so what it holds is all it is for.
+fn what_the_track_says(
     bones: &[u8],
     bone: &[u8],
     field: usize,
+    a_place: bool,
 ) -> Result<Option<usize>, String> {
-    if read_u16(bone, field + track_field::GLOBAL_SEQUENCE)? == NO_GLOBAL_SEQUENCE {
+    let global = read_u16(bone, field + track_field::GLOBAL_SEQUENCE)? != NO_GLOBAL_SEQUENCE;
+    if a_place && !global {
         return Ok(None);
     }
     // One array per animation, each holding that animation's keys. A global sequence has the
@@ -572,7 +636,51 @@ fn bound_to_a_global_sequence(
         return Ok(None);
     }
     let keys = array_at(bones, per_animation.offset)?;
-    Ok((keys.count != 0).then_some(keys.offset))
+    if global {
+        return Ok((keys.count != 0).then_some(keys.offset));
+    }
+    Ok((keys.count == 1).then_some(keys.offset))
+}
+
+/* ---------- the arithmetic a bone chain is composed with ---------- */
+
+fn plus(one: [f32; 3], other: [f32; 3]) -> [f32; 3] {
+    [one[0] + other[0], one[1] + other[1], one[2] + other[2]]
+}
+
+fn minus(one: [f32; 3], other: [f32; 3]) -> [f32; 3] {
+    [one[0] - other[0], one[1] - other[1], one[2] - other[2]]
+}
+
+fn sized(scale: [f32; 3], point: [f32; 3]) -> [f32; 3] {
+    [scale[0] * point[0], scale[1] * point[1], scale[2] * point[2]]
+}
+
+/// Two rotations, one after the other: `one` applied to what `then` already turned.
+fn composed(one: [f32; 4], then: [f32; 4]) -> [f32; 4] {
+    let [ax, ay, az, aw] = one;
+    let [bx, by, bz, bw] = then;
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
+}
+
+/// A point turned by a quaternion, without building a matrix to do it with.
+fn turned(rotation: [f32; 4], point: [f32; 3]) -> [f32; 3] {
+    let [x, y, z, w] = rotation;
+    let across = [
+        2.0 * (y * point[2] - z * point[1]),
+        2.0 * (z * point[0] - x * point[2]),
+        2.0 * (x * point[1] - y * point[0]),
+    ];
+    [
+        point[0] + w * across[0] + y * across[2] - z * across[1],
+        point[1] + w * across[1] + z * across[0] - x * across[2],
+        point[2] + w * across[2] + x * across[1] - y * across[0],
+    ]
 }
 
 /// What the game writes in a track's global sequence when it is bound to none.
@@ -746,6 +854,8 @@ fn read_u16s(bytes: &[u8], array: Md21Array) -> Result<Vec<u16>, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::f32::consts::FRAC_1_SQRT_2;
+
     use super::*;
     use crate::casc::{fixture_files, GameFiles};
 
@@ -1043,17 +1153,52 @@ mod tests {
     // own. Left as the file states them they are all three at the origin, which on a character
     // is between her feet — so a sword, a shield and everything else a hand holds would be
     // drawn in a heap on the floor. What says where they go is the bone chain above them.
+    //
+    // **And where in the chain is the whole of this test.** The first ancestor that states a
+    // pivot is a *wrist*, which is where the walk used to stop; what a hand grips with is held
+    // by the helper bones it walked past, and on the real body the two are nine centimetres
+    // apart — a sword hanging off a forearm with its hilt past her fingers.
     #[test]
-    fn puts_a_hand_where_its_bones_do_when_the_attachment_states_nothing() {
+    fn puts_a_weapon_in_the_grip_its_helper_bones_state_rather_than_at_the_wrist() {
         let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
         let at = |id: u32| found(&attachments, id).position;
-        // The right hand is down the game's Y like the right shoulder, and the left up it —
-        // and the chain is walked through a bone that states nothing rather than stopping at
-        // the first ancestor.
-        assert_eq!(at(HAND_RIGHT), [1.0, 1.0, 3.0]);
-        assert_eq!(at(HAND_LEFT), [1.0, 1.0, -3.0]);
-        // The shield, which is neither hand and two bones up.
-        assert_eq!(at(SHIELD), [0.0, 2.0, -3.0]);
+        // The right hand is down the game's Y like the right shoulder, and the left up it. The
+        // wrists are `[1, 1, ±3]`; the grips are lower and further out, which is what being in
+        // a fist rather than on a forearm comes to.
+        assert_eq!(at(HAND_RIGHT), [1.0, 0.5, 3.5]);
+        assert_eq!(at(HAND_LEFT), [1.0, 0.5, -3.5]);
+    }
+
+    // The grip is a turn and a size as well as a place: a weapon is rolled to sit in the fist
+    // and drawn at the fraction of its modelled size this body wears one at — `0.85` on the
+    // real one. A reader that took the position and stopped draws a full-size sword held flat.
+    #[test]
+    fn takes_the_roll_and_the_size_a_grip_states_along_with_the_place() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let right = found(&attachments, HAND_RIGHT);
+        // A quarter turn about the game's X, which the turn into the viewer's axes leaves
+        // alone — X is the one axis the two agree about.
+        assert!(close(right.rotation, [FRAC_1_SQRT_2, 0.0, 0.0, FRAC_1_SQRT_2]), "{right:?}");
+        assert_eq!(right.scale, [0.8, 0.8, 0.8]);
+        // And the other hand's grip is the mirror of it, which is one weapon on two sides of
+        // her rather than one weapon twice.
+        let left = found(&attachments, HAND_LEFT);
+        assert!(close(left.rotation, [-FRAC_1_SQRT_2, 0.0, 0.0, FRAC_1_SQRT_2]), "{left:?}");
+    }
+
+    // The floor under it, and the rule this replaced. A chain whose helpers hold nothing a
+    // still picture may read still has to put the shield on her arm: the first ancestor that
+    // states a pivot is where the chain hangs from, and an arm beats the space between her
+    // feet. The fixture's shield is that — its helper holds a place, a turn and a size in a
+    // *run* of keys, which is an animation and not a grip.
+    #[test]
+    fn falls_back_to_the_arm_a_chain_hangs_from_when_its_helpers_only_animate() {
+        let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
+        let shield = found(&attachments, SHIELD);
+        assert_eq!(shield.position, [0.0, 2.0, -3.0]);
+        // Read as though the run of keys applied, it arrives nine metres away and tripled.
+        assert_eq!(shield.rotation, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(shield.scale, [1.0, 1.0, 1.0]);
     }
 
     // The tolerance under that, which the retail body needs and a strict reading of "states

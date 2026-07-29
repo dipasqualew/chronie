@@ -12,7 +12,9 @@ character's body. There is no mesh to show in isolation.
 2026-07-26; the attachments, the geoset groups the body actually holds, and the cape on
 2026-07-27; the hands, the shield, and the bone chains that place them on 2026-07-27 as
 well; that the bind pose leaves her eyes shut, every question a body can be asked, and what a
-body *is* — its layout, its sections and its atlas — on 2026-07-28. The rest is from [wowdev.wiki](https://wowdev.wiki) and
+body *is* — its layout, its sections and its atlas — on 2026-07-28; and what those bone chains
+hold besides a place — the grip a weapon is gripped at, and the single key it is stated in —
+on 2026-07-29, off build `12.0.5.67823`. The rest is from [wowdev.wiki](https://wowdev.wiki) and
 [wow.export](https://github.com/Kruithne/wow.export) (MIT), and is marked as such.
 
 ## One item, and then a set of them
@@ -556,9 +558,9 @@ say they are right. `examples/dump_attachments` prints the whole list:
 
 | Id | What | Position, game axes (X forward, Y left, Z up) |
 |---|---|---|
-| 0 | shield | *none stated* — the left forearm, `(-0.059, +0.372, 1.365)` |
-| 1 | hand, right | *none stated* — the right wrist, `(-0.010, -0.566, 1.149)` |
-| 2 | hand, left | *none stated* — the left wrist, `(-0.010, +0.566, 1.149)` |
+| 0 | shield | *none stated* — the grip, `(-0.007, +0.619, 1.185)` |
+| 1 | hand, right | *none stated* — the grip, `(+0.008, -0.603, 1.063)` |
+| 2 | hand, left | *none stated* — the grip, `(+0.008, +0.603, 1.063)` |
 | 5 | shoulder, right | `(-0.050, -0.096, 1.631)` |
 | 6 | shoulder, left | `(-0.050, +0.096, 1.631)` |
 | 11 | helm | `(-0.033, 0.000, 1.712)` |
@@ -572,34 +574,48 @@ Z 1.99.
 
 The three above are the exception to the paragraph before them, and it is not a small one.
 **The shield, the right hand and the left hold the origin in their records** — as do the two
-spell hands, the base, and four others — **and so do the bones they name.** They are helper
-bones the game *animates* into the hand: with an animation playing, the chain of rotations above
-them carries a point at the origin out to where the fist is, and per-animation translation
-tracks adjust it. A still picture has none of that, so reading the record and stopping puts a
-sword, a shield and everything else a hand holds in a heap between her feet.
+spell hands, the base, and four others — **and so do the bones they name.** Those bones are
+*helpers*: they are nowhere on the body, no vertex is weighted to them, and reading the record
+and stopping puts a sword, a shield and everything else a hand holds in a heap between her feet.
 
-What the file still says is where that chain hangs from. **A bone's pivot is in model space and
-in the bind pose it is simply where that bone is** — no parent composition, nothing to
-accumulate — so the first ancestor that states a pivot is the place on the body the attachment
-belongs to:
+A helper is not empty, though. **What it holds is the grip**, and it holds it in an ordinary
+track with a single key — see [a track with one key in it](#a-track-with-one-key-in-it-verified)
+below. Read off `12.0.5.67823` on 2026-07-29:
 
 ```
-attachment 1 → bone 193 (origin) → 102 (origin) → 49  = the right wrist
-attachment 2 → bone 198 (origin) → 95  (origin) → 43  = the left wrist
-attachment 0 → bone 188 (origin) → 46  (origin) → 37  = the left forearm, at the elbow joint
+attachment 1 → bone 193 (origin) → 102  position (0.0077, -0.6027, 1.0626), −38° roll, ×0.85
+attachment 2 → bone 198 (origin) → 95   the mirror of it
+attachment 0 → bone 188 (origin) → 46   position (-0.0068, 0.6194, 1.1852), 35° turn, ×0.85
 ```
 
-**The origin is a sentinel to be generous about.** Bone 102 states `(0, +0.0011, 0)` — a
-rounding of zero rather than a place on a person — and a reader that stopped at "not exactly
+The fist, the angle a weapon sits in it at, and the fraction of its modelled size this body
+wears one at. `how_the_chain_holds_it` composes them — `T(pivot)·T(translation)·R·S·T(−pivot)`,
+the game's own bone transform — walking up until it reaches a bone that states a pivot, and that
+bone is a *place*: the right wrist for attachment 1, the left for 2, the left forearm at the
+elbow for the shield. **The walk stops there and takes nothing from it but a global sequence**,
+because the still picture has already drawn the body where that bone is, and anything else its
+tracks say belongs to an animation that is not playing.
+
+Stopping at that pivot and taking it as the position is what this used to do, and it is issue
+#134: a sword hanging off a wrist with its hilt past her fingers, full size and lying flat, and
+a shield a quarter of a metre from her arm, out at the elbow. The pivot survives as the floor
+under the grip — a chain whose helpers say nothing still puts the shield on the arm rather than
+between her feet.
+
+**The origin is a sentinel to be generous about.** Bone 102 states a pivot of `(0, +0.0011, 0)`
+— a rounding of zero rather than a place on a person — and a reader that stopped at "not exactly
 zero" would hang a sword a millimetre off the floor. `m2.rs` treats anything within a centimetre
 of the origin as unstated, which is well under the height of anything real on a body.
 
-**What this does not give is the rotation.** A hand's bone carries no global sequence — the
-table below is the whole of what does — so a weapon is drawn in the axes it was modelled in,
-which is the game's own X forward. On a bind pose whose arms hang at her sides that reads as a
-blade held out level, and it is what the files say without an animation to say otherwise: a
-one-hander and a two-hander in the right hand, a shield across the left forearm. Where it would
-go wrong is subtler than being wrong about a position, and looks like a blade held hilt-first.
+**What none of this gives is a pose.** The grip is stated in the bind pose's own space, which is
+why it may be read at all — bone 102 says the same thing under every one of the body's 410
+animations — but the arm it is at the end of is the arm the file was modelled with, out at 45°.
+Composed at the Stand animation's first key the whole chain puts the right hand at
+`(0.044, -0.294, 0.865)` instead, down by her hip, and turns it by about 10°: the game's standing
+character holds a one-hander blade-forward and roughly level, which is what a bind-pose render
+holds it as too. So a weapon comes out held rather than posed, and posing it wants sequences, the
+`.anim` files and per-vertex skinning — the whole of what [the static subset](#m2-and-skin-the-static-subset)
+skips.
 
 ### The bone is not always identity, verified
 
@@ -631,6 +647,25 @@ So the transform for something hanging off a body is `T(position) · R · S`, wh
 glTF node's `translation`, `rotation` and `scale` — no matrix composition anywhere. It is
 `T(p)·R·S·T(−p)` composed with `T(p)`, and the two `T(−p)`/`T(p)` cancel precisely because the
 attachment sits at its bone's pivot.
+
+### A track with one key in it, verified
+
+The second kind of track that says something with nothing playing, and it is not a global
+sequence. **A track holding a single key is a constant written where a curve would go** — the
+bone does not move through that animation, so there is nothing in it a clock could advance.
+
+That is the whole of where a grip is kept. Read off `12.0.5.67823` on 2026-07-29, bone 102 of
+`humanfemale_hd` states one key for translation, one for rotation and one for scale, and states
+the same three under **all 410 of the body's animations** — while bone 49, the wrist above it,
+states 116 and 195 keys for the first animation alone. One is a bone saying where it sits; the
+other is a bone being animated, and a still picture has no clock for the second.
+
+`what_the_track_says` is the rule and it is withheld from one bone on purpose: the one the walk
+stops at, which states a pivot and is therefore somewhere the still picture has already drawn.
+Give that bone its constants too and the shoulders, the helm and the cape start moving; give the
+helpers only their global sequences and the grip goes back to being a wrist. Checked against the
+install both ways — of the body's 43 attachments, exactly the ten that state no position of their
+own change, and every one that states one comes out byte for byte where it was.
 
 **`M2CompQuat` wraps rather than scales.** Four `int16`s, and the mapping is
 `(v < 0 ? v + 32768 : v - 32767) / 32767` — so a *non-negative* number is the bottom half of the
