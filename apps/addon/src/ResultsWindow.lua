@@ -25,11 +25,14 @@ local _, ns = ...
 ---@field itemName fun(itemID: integer): string?
 ---@field now fun(): integer? Current time, for saying how old an account-wide figure is.
 ---@field accountStanding fun(faction: string): StandingRollup? Where the account as a whole
----stands with a faction, so a grind already finished elsewhere says so.
+---stands with a faction, so a gain can say who holds the highest standing anybody has reached
+---with it — and whether a grind is already finished elsewhere.
 ---@field accountCurrency fun(id: integer): CurrencyRollup? What the whole account holds of a
 ---currency, so a gain can be read against the balance it lands on.
----@field character fun(): string? "Name-Realm" of whoever is playing, so the account rollup
----can leave out the character whose own numbers are already on the line above.
+---@field character fun(): string? "Name-Realm" of whoever is playing, so the reading the
+---client just gave for them replaces the stale one their last logout filed. Left out where the
+---panel is drawing a filed record rather than the segment being played: nobody is at the
+---keyboard of a segment that ended an hour ago.
 ---@field tooltip table? The global GameTooltip. Given one, a faction opens the whole account's
 ---standings with it on hover; without one the panel simply has nothing to hover.
 ---@field title string|fun(summary: SegmentSummary): string?
@@ -615,30 +618,39 @@ function ns.newResultsWindow(deps)
             return age == "now" and "" or (", " .. age)
         end
 
-        ---Where the account as a whole stands with a faction this segment gained.
+        ---The highest standing with a faction this segment gained that anybody on the account
+        ---is known to hold, and who is holding it.
         ---
-        ---Only drawn when some other character is further along, because that is the whole
-        ---question it answers: whether grinding this faction here is worth anything when it
-        ---may already be finished elsewhere. The character's own bar is directly above, so
-        ---repeating its standing back at it would only take a line.
+        ---Always drawn, the character being played included. It used to appear only when
+        ---somebody else was further along, which left an absent line carrying the meaning "you
+        ---are the furthest" — on screen that is indistinguishable from the panel knowing
+        ---nothing about the faction at all, and a player cannot read the difference. Naming the
+        ---holder outright costs one line and answers the question whichever way it falls.
+        ---
+        ---The crown is `ns.bestStanding`'s, which is the one the tooltip over this same row
+        ---draws: it counts what has been earned this session rather than only what the store
+        ---filed, so a character that overtook the account's best an hour ago is told so.
         ---@param gain ReputationGain
         local function accountStandingLine(gain)
-            if not deps.accountStanding or not gain.faction then
+            if not gain.faction then
                 return
             end
-            local rollup = deps.accountStanding(gain.faction)
-            local best = rollup and rollup.best
-            if not best or best.character == (deps.character and deps.character()) then
+            local best = ns.bestStanding({
+                faction = gain.faction,
+                gain = gain,
+                rollup = deps.accountStanding and deps.accountStanding(gain.faction),
+                character = deps.character and deps.character(),
+                now = deps.now and deps.now(),
+            })
+            if not best then
                 return
             end
-            -- A standing on another ladder is not a better standing, only a different one,
-            -- and the store has already refused to rank the two against each other.
-            if gain.rank and best.system == gain.system and best.rank and best.rank <= gain.rank then
-                return
-            end
-            local who = best.character:match("^([^-]+)") or best.character
-            line("    best " .. (best.standing or "standing"),
-                who .. staleness(best.at), ACCOUNT_COLOR, nil, SUMMARY_VALUE_WIDTH)
+            -- "you" carries no staleness in the ordinary case, because the reading folded in
+            -- for the character being played is the client's own and a moment old. It still
+            -- gets one where the standing came off this character's stored row instead — a
+            -- faction the client would not place this time, read at some earlier logout.
+            local who = (best.you and "you" or best.name) .. staleness(best.at)
+            line("    best " .. (best.standing or "standing"), who, ACCOUNT_COLOR, nil, SUMMARY_VALUE_WIDTH)
         end
 
         -- Only what this hour of play produced. The balances it landed on — the wallet, what

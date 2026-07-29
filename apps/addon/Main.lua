@@ -683,6 +683,17 @@ function ns.main(env)
         previewTransmog = env.previewTransmog,
         openTransmogCollection = env.openTransmogCollection,
         itemName = env.itemName,
+        now = env.now,
+        -- Where the account stands now, beside what that evening earned. The HUD gets the
+        -- same two, and a segment read back an hour later asks the question harder than the
+        -- HUD does: "is this grind already finished elsewhere" is exactly what somebody
+        -- opening a filed run off the list is looking at it to decide.
+        --
+        -- Deliberately without `character`: the panel is drawing a record that may be an
+        -- alt's and is a reading from whenever it was filed, so there is no live standing to
+        -- fold in and nobody here is "you". The stored holdings are the whole answer.
+        accountStanding = holdings.standing,
+        tooltip = env.tooltip,
     })
 
     local segmentTable = ns.newSegmentTable({

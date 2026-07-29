@@ -710,7 +710,10 @@ describe("ns.newResultsWindow", function()
                 assert.equal("Alt, 3d ago", valueFor(rowsOf(frames[1]), "    best Renown 22"))
             end)
 
-            it("stays quiet when this character is the one out in front", function()
+            -- Naming the holder as "you" rather than leaving the line off: an absent line is
+            -- the one answer a player cannot read, because it looks exactly like the panel not
+            -- knowing. No staleness beside it, because that reading is a moment old.
+            it("names this character as the holder when it is the one out in front", function()
                 local window, frames = newWindow({
                     accountStanding = standingSource({
                         character = "Main-Ravencrest",
@@ -724,10 +727,13 @@ describe("ns.newResultsWindow", function()
 
                 expand(frames[1], "Reputation")
 
-                assert.is_nil(valueFor(rowsOf(frames[1]), "    best Renown 8"))
+                assert.equal("you", valueFor(rowsOf(frames[1]), "    best Renown 8"))
             end)
 
-            it("stays quiet when the character ahead is not actually ahead", function()
+            -- The store's best was filed at somebody's logout; this segment has been earning
+            -- since. A character that overtook the account's best while it was being played
+            -- holds the crown, and the line has to say the standing it is holding it at.
+            it("states the reading taken this session over the one the store had filed", function()
                 local window, frames = newWindow({
                     accountStanding = standingSource({
                         character = "Alt-Ravencrest",
@@ -741,12 +747,27 @@ describe("ns.newResultsWindow", function()
 
                 expand(frames[1], "Reputation")
 
-                assert.is_nil(valueFor(rowsOf(frames[1]), "    best Renown 4"))
+                assert.equal("you", valueFor(rowsOf(frames[1]), "    best Renown 8"))
             end)
 
-            it("says nothing about a faction no other character has been seen with", function()
+            it("states this character's own standing for a faction no other has been seen with", function()
                 local window, frames = newWindow({ accountStanding = standingSource(nil) })
                 window.update(summary(gained()))
+
+                expand(frames[1], "Reputation")
+
+                assert.equal("you", valueFor(rowsOf(frames[1]), "    best Renown 8"))
+            end)
+
+            -- The line reports the account's highest known standing, and a faction the client
+            -- would neither name nor place has no standing to be highest. Drawing "best
+            -- standing" over nothing would report knowing something it does not.
+            it("says nothing at all about a faction the client could not place", function()
+                local window, frames = newWindow({ accountStanding = standingSource(nil) })
+                window.update(summary({
+                    reputationTotal = 250,
+                    reputation = { { faction = "Dream Wardens", amount = 250 } },
+                }))
 
                 expand(frames[1], "Reputation")
 
@@ -757,9 +778,9 @@ describe("ns.newResultsWindow", function()
                 assert.is_nil((table.concat(labels, "\n")):match("best"))
             end)
 
-            -- The "best" line above is silent when nobody is ahead, and silence is the one
-            -- answer a player cannot read: it looks exactly like the panel not knowing. So
-            -- the whole roster is one hover away, whichever way the answer falls.
+            -- The "best" line above names the account's highest standing and who holds it, in
+            -- one line. The rest of that answer — every character seen with the faction, how
+            -- far each got, how stale each reading is — is one hover away.
             describe("on hover", function()
                 it("opens the account's standings over the faction pointed at", function()
                     local window, frames, recorded = newWindow({

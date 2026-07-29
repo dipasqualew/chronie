@@ -150,13 +150,8 @@ local function roster(holdings, playing, live, at)
     return rows, mine
 end
 
----Where every character on the account stands with one faction, as a tooltip.
----
----The question this answers is the one the panel's single "best" line only half answers: the
----line appears when somebody else is further along and says who, but says nothing at all when
----nobody is — so an empty space has to be read as "you are in front", which is
----indistinguishable from the panel not knowing. Hovering asks it outright, and gets the whole
----roster and which of them is furthest.
+---Every character the account has been seen with one faction as, furthest along first, and
+---which of them holds the crown.
 ---
 ---The crown is worked out here rather than taken from `rollup.best`, which is computed over
 ---stored rows only: a character that overtook the account's best during this very session
@@ -167,17 +162,15 @@ end
 ---every rank. Rows off the ladder — a client build that could not reach the friendship API, a
 ---faction it would name but not place — keep their place in the list and are simply never
 ---crowned, sorted to the end where they read as "known, but not comparable".
----@param options table `{ faction, gain, rollup, character, now }` — the faction hovered, the
----gain the panel is drawing for it, the store's rollup for it, who is being played, and the
----clock that says how stale a stored row is.
----@return AccountTooltipContent? nil when nothing at all is known, so nothing is drawn.
-function ns.standingTooltip(options)
-    options = options or {}
-    local faction = options.faction
-    if type(faction) ~= "string" or faction == "" then
-        return nil
-    end
-
+---
+---Shared by the tooltip and by `ns.bestStanding` because it has to be the same crown: a line
+---on the panel naming one character while the tooltip over that very line names another would
+---be worse than either of them alone.
+---@param options table `{ gain, rollup, character, now }`
+---@return table[] rows Sorted and named; empty when nothing at all is known.
+---@return table? mine The row for the character being played.
+---@return table? leader The row to crown, or nil when none of them can be ranked.
+local function rankStandings(options)
     local gain = options.gain or {}
     local live = (gain.standing or (gain.max or 0) > 0) and {
         standing = gain.standing,
@@ -190,7 +183,7 @@ function ns.standingTooltip(options)
         options.character, live, options.now)
 
     if #rows == 0 then
-        return nil
+        return rows
     end
 
     local ladder = (options.rollup and options.rollup.best and options.rollup.best.system)
@@ -218,8 +211,55 @@ function ns.standingTooltip(options)
     end)
     nameRows(rows)
 
+    return rows, mine, ranked(rows[1]) and rows[1] or nil
+end
+
+---The highest standing anybody on the account is known to hold with one faction.
+---
+---The panel's own answer to the question the tooltip answers at length, so that a row can name
+---who is furthest without having to be hovered: one row rather than a roster, named the way
+---the roster names it, and carrying `you` when the character being played is the one holding
+---it.
+---
+---Nil when there is nobody to crown — a faction nobody has been placed with, or one placed
+---only on ladders that do not compare — because a caller drawing "best" over nothing would be
+---reporting knowledge it does not have.
+---@param options table `{ faction, gain, rollup, character, now }` — as `ns.standingTooltip`
+---takes them.
+---@return table? `{ character, name, you, standing, current, max, rank, system, at }`
+function ns.bestStanding(options)
+    options = options or {}
+    if type(options.faction) ~= "string" or options.faction == "" then
+        return nil
+    end
+    local _, _, leader = rankStandings(options)
+    return leader
+end
+
+---Where every character on the account stands with one faction, as a tooltip.
+---
+---The panel's own "best" line names the account's highest standing and who holds it, in one
+---line and without being asked. This is the rest of that answer, asked for by hovering: every
+---character that has been seen with the faction, how far along each of them is, and how stale
+---each reading is — which is worth a frame of its own and worth nothing at all until somebody
+---wants it.
+---@param options table `{ faction, gain, rollup, character, now }` — the faction hovered, the
+---gain the panel is drawing for it, the store's rollup for it, who is being played, and the
+---clock that says how stale a stored row is.
+---@return AccountTooltipContent? nil when nothing at all is known, so nothing is drawn.
+function ns.standingTooltip(options)
+    options = options or {}
+    local faction = options.faction
+    if type(faction) ~= "string" or faction == "" then
+        return nil
+    end
+
+    local rows, _, leader = rankStandings(options)
+    if #rows == 0 then
+        return nil
+    end
+
     local lines = {}
-    local leader = ranked(rows[1]) and rows[1] or nil
     if leader then
         lines[#lines + 1] = {
             left = "Best",
