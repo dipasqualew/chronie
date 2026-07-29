@@ -16,6 +16,7 @@ import { captureImages } from "./captures";
 import { dashboard } from "./dashboard";
 import {
   achievementDetails,
+  bossPortraits,
   currencyIcons,
   gameIcons,
   itemAppearances,
@@ -84,6 +85,7 @@ export const mockDesktop: E2EMock = {
   gameIcons,
   currencyIcons,
   placeIcons,
+  bossPortraits,
   achievementDetails,
   itemAppearances,
   itemDetails,

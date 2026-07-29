@@ -19,10 +19,16 @@
 //! Together they answer for 805 places. Everywhere else draws no picture, and most names are
 //! everywhere else: an open-world zone is a name neither table has heard of.
 //!
-//! **Those are the only two tables in the game with an icon for any of the things a segment is
-//! filed under.** An expansion, a zone, a faction and a boss are each named on rows that hold no
-//! picture — `JournalTier`, `UiMap`, `Faction` and `JournalEncounter` have no icon column between
-//! them — so those are drawn without one. `docs/game-files.md` records what was looked at.
+//! An expansion and a zone are still drawn without a picture — `JournalTier` and `UiMap` have no
+//! icon column between them — so those rows read as they always did. `docs/game-files.md` records
+//! what was looked at.
+//!
+//! ## And the bosses inside them
+//!
+//! A segment also carries the fights that ended in it, and those are a different question with a
+//! different key: an encounter arrives as the `DungeonEncounterID` the client handed
+//! `ENCOUNTER_END`, which is a number rather than a name. Two more tables turn it into the
+//! portrait the Adventure Guide draws beside that boss. See [`portraits_of`].
 //!
 //! The column numbers below were read off a real install with `examples/dump_journal.rs`, which
 //! is what to run again after a patch: a reordered table shows wrong values rather than failing.
@@ -37,6 +43,12 @@ pub const JOURNAL_INSTANCE: u32 = 1_237_438;
 
 /// `LFGDungeons` — everything the group finder can put a player in, delves included.
 pub const LFG_DUNGEONS: u32 = 1_361_033;
+
+/// `JournalEncounter` — the Adventure Guide's bosses, one row per fight per difficulty tier.
+pub const JOURNAL_ENCOUNTER: u32 = 1_240_336;
+
+/// `JournalEncounterCreature` — the creatures shown for a fight, and their portraits.
+pub const JOURNAL_ENCOUNTER_CREATURE: u32 = 1_301_155;
 
 /// Columns of `JournalInstance`, an ordinary table of fixed-size records whose id sits in a list
 /// beside the rows rather than in a column of its own.
@@ -64,6 +76,48 @@ pub mod lfg_column {
     pub const NAME: usize = 0;
     /// The picture beside it in the finder's list, as a FileDataID.
     pub const ICON_TEXTURE_FILE_ID: usize = 5;
+}
+
+/// Columns of `JournalEncounter`, which holds no picture and is the way to the table that does.
+///
+/// Its id sits in a column of its own rather than in a list beside the rows — column 3, which
+/// [`crate::db2::Row::id`] reads for us — and that id is what `JournalEncounterCreature` hangs off.
+///
+/// **Read off build 12.0.5.67823 with `examples/dump_journal.rs`.**
+pub mod encounter_column {
+    /// What the fight is called, in the locale the install is running in: "Glubtok", "Queen
+    /// Ansurek". Not read to answer anything — the addon already caught the name off the client —
+    /// but it is what says a run of this table landed on the right rows.
+    pub const NAME: usize = 0;
+    /// The instance the fight is in, joining back to `JournalInstance`'s own id. Not part of the
+    /// portrait hop; it is what `examples/dump_journal.rs` checks the table against, because a
+    /// Deadmines boss reading 63 is the same 63 the place icons are already keyed by.
+    pub const JOURNAL_INSTANCE_ID: usize = 4;
+    /// The id the *client* knows this fight by, and the one thing here a segment already carries:
+    /// `ENCOUNTER_END`'s first argument is a `DungeonEncounterID`, and this is that column.
+    pub const DUNGEON_ENCOUNTER_ID: usize = 5;
+}
+
+/// Columns of `JournalEncounterCreature`, where the portraits are.
+///
+/// Its id is in column 2, and the row it belongs to is named in a column rather than through the
+/// relationship map — so this is an ordinary join on a number, not a [`crate::db2::Row::foreign_id`].
+///
+/// **Read off build 12.0.5.67823 with `examples/dump_journal.rs`.**
+pub mod creature_column {
+    /// The creature's own name, which is not always the fight's: the Ascendant Council is four
+    /// rows called Feludius, Ignacious, Arion and Terrastra. Only the dumper reads it.
+    pub const NAME: usize = 0;
+    /// The `JournalEncounter` row this creature belongs to, by that table's id.
+    pub const JOURNAL_ENCOUNTER_ID: usize = 3;
+    /// Where the guide puts this creature among the fight's others, counting from zero. The rows
+    /// are **not** stored in this order — see [`portraits_of`], which is the whole reason this
+    /// column is read at all.
+    pub const ORDER_INDEX: usize = 6;
+    /// The portrait, as a FileDataID to be decoded through [`crate::icons`]. Every one of the
+    /// 1,172 the table names decodes at 128×64, which is what makes it a portrait rather than one
+    /// of the banners and backgrounds this chain could otherwise have landed on.
+    pub const PORTRAIT_FILE_DATA_ID: usize = 5;
 }
 
 /// The icon each of the places asked for is drawn with, as a FileDataID, keyed by the name it was
@@ -131,6 +185,77 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
 /// One place name reduced to what two spellings of it have in common.
 fn key_of(name: &str) -> String {
     name.trim().to_lowercase()
+}
+
+/// The portrait the Adventure Guide draws each of the fights asked about with, as a FileDataID,
+/// keyed by the `DungeonEncounterID` it was asked for under.
+///
+/// The same bargain as [`icons_of`] and for the same reasons: only the fights a window is showing,
+/// all of them in one call because what costs is opening the game's storage, and a fight the game
+/// has no portrait for left out rather than answered with zero.
+///
+/// Unlike the places, the key needs no massaging. A segment's encounters carry the id the client
+/// handed `ENCOUNTER_END`, which is a `DungeonEncounterID`, and that is a column of
+/// `JournalEncounter` — so this is a join on numbers the game itself assigned rather than on a
+/// localised string, and it lands on **1,071 of the 1,072** fights the journal knows an id for.
+///
+/// Two turns of the chain are worth knowing about, because each one is a wrong answer rather than
+/// a missing one if it is skipped.
+///
+/// - **A fight can be several creatures, and they are not stored in the order the guide shows
+///   them.** The Ascendant Council is five rows and the fifth of them is the one the guide leads
+///   with; 11 of the 20 multi-portrait fights list their rows out of `OrderIndex` order. So the
+///   lowest order index wins rather than the first row, which is what makes Theralion and Valiona
+///   come back as Theralion and the Omnotron Defense System come back as Magmatron.
+/// - **One `DungeonEncounterID` can be on several `JournalEncounter` rows** — 12 of the 1,072 are,
+///   a fight the guide describes once per difficulty tier — so every row naming a wanted id is
+///   followed, and whichever of them reaches a portrait answers.
+pub fn portraits_of(
+    files: &dyn GameFiles,
+    encounters: &[u32],
+) -> Result<HashMap<u32, u32>, String> {
+    let mut found = HashMap::new();
+    if encounters.iter().all(|id| *id == 0) {
+        return Ok(found);
+    }
+
+    // Which journal rows belong to a fight somebody asked about, and which fight each one is. The
+    // map runs journal id → dungeon id because that is the direction the portraits are read in,
+    // and it is many-to-one: the same fight is described once per difficulty tier.
+    let mut asked_for: HashMap<u32, u32> = HashMap::new();
+    let table = Db2::parse(files.read(JOURNAL_ENCOUNTER)?)?;
+    for row in table.rows() {
+        let dungeon = row.number(encounter_column::DUNGEON_ENCOUNTER_ID);
+        if dungeon != 0 && encounters.contains(&dungeon) {
+            asked_for.insert(row.id(), dungeon);
+        }
+    }
+    if asked_for.is_empty() {
+        return Ok(found);
+    }
+
+    // The best portrait per fight, "best" being the creature the guide leads with. Kept beside the
+    // file so a later row with a lower order index can displace an earlier one.
+    let mut best: HashMap<u32, u32> = HashMap::new();
+    let table = Db2::parse(files.read(JOURNAL_ENCOUNTER_CREATURE)?)?;
+    for row in table.rows() {
+        let portrait = row.number(creature_column::PORTRAIT_FILE_DATA_ID);
+        if portrait == 0 {
+            continue;
+        }
+        let Some(dungeon) = asked_for
+            .get(&row.number(creature_column::JOURNAL_ENCOUNTER_ID))
+            .copied()
+        else {
+            continue;
+        };
+        let order = row.number(creature_column::ORDER_INDEX);
+        if best.get(&dungeon).is_none_or(|had| order < *had) {
+            best.insert(dungeon, order);
+            found.insert(dungeon, portrait);
+        }
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
@@ -211,6 +336,99 @@ mod tests {
     fn answers_nothing_when_nothing_was_asked_about() {
         assert!(icons_of(&journal_fixture_files(), &[]).unwrap().is_empty());
         assert!(icons_of(&journal_fixture_files(), &names(&["", "  "]))
+            .unwrap()
+            .is_empty());
+    }
+
+    /* ---------- the bosses ---------- */
+
+    /// The fixture's fights, by the `DungeonEncounterID` a segment would carry, and the portraits
+    /// they resolve to. See `scripts/make-journal-fixtures.ts`.
+    const SLUDGEFANG: u32 = 3101;
+    const SLUDGEFANG_PORTRAIT: u32 = 170011;
+    const GRASK: u32 = 3102;
+    const GRASK_PORTRAIT: u32 = 170012;
+    /// A council fight: three creatures, and the one the guide leads with is stored second.
+    const COUNCIL: u32 = 3103;
+    const COUNCIL_LEAD_PORTRAIT: u32 = 170014;
+    const COUNCIL_FIRST_STORED_PORTRAIT: u32 = 170013;
+    /// A fight the journal describes and hangs no creature off at all.
+    const NO_CREATURE: u32 = 3104;
+    /// A fight whose one creature names no portrait.
+    const UNDRAWN_CREATURE: u32 = 3105;
+    /// A fight whose one creature is in a section the game encrypts.
+    const WITHHELD_CREATURE: u32 = 3106;
+    /// A fight described on two journal rows, only the second of which reaches a creature.
+    const TWO_TIERS: u32 = 3107;
+    /// A fight whose portrait is a file this install has no bytes for.
+    const ABSENT_FILE: u32 = 3109;
+    const ABSENT_FILE_PORTRAIT: u32 = 170018;
+
+    #[test]
+    fn answers_the_portrait_each_fight_hangs_off() {
+        let found = portraits_of(&journal_fixture_files(), &[SLUDGEFANG, GRASK]).unwrap();
+        assert_eq!(found.get(&SLUDGEFANG), Some(&SLUDGEFANG_PORTRAIT));
+        assert_eq!(found.get(&GRASK), Some(&GRASK_PORTRAIT));
+    }
+
+    /// A council fight is several creatures on one encounter, and the table does not store them in
+    /// the order the guide shows them — 11 of the real table's 20 such fights are out of order. So
+    /// taking the first row met would put the wrong member of the council on the line: Valiona for
+    /// Theralion and Valiona, Terrastra for the Ascendant Council.
+    #[test]
+    fn answers_with_the_creature_the_guide_leads_with_rather_than_the_first_stored() {
+        let found = portraits_of(&journal_fixture_files(), &[COUNCIL]).unwrap();
+        assert_eq!(found.get(&COUNCIL), Some(&COUNCIL_LEAD_PORTRAIT));
+        assert_ne!(found.get(&COUNCIL), Some(&COUNCIL_FIRST_STORED_PORTRAIT));
+    }
+
+    /// One `DungeonEncounterID` can be described on several journal rows — a fight the guide lists
+    /// once per difficulty tier, which twelve of the real ones are — and there is no saying which
+    /// of them carries the creatures. A reader that stopped at the first row it matched would draw
+    /// nothing for the fight.
+    #[test]
+    fn follows_every_journal_row_one_fight_is_described_on() {
+        let found = portraits_of(&journal_fixture_files(), &[TWO_TIERS]).unwrap();
+        assert_eq!(found.get(&TWO_TIERS), Some(&SLUDGEFANG_PORTRAIT));
+    }
+
+    /// The three ways a fight the journal knows about reaches no picture. Each is a line that draws
+    /// its name and nothing else, which is what the line did before this existed — and none of them
+    /// is worth failing the other fights of a raid night over.
+    #[test]
+    fn leaves_out_a_fight_the_game_draws_no_portrait_for() {
+        let asked = [NO_CREATURE, UNDRAWN_CREATURE, WITHHELD_CREATURE];
+        let found = portraits_of(&journal_fixture_files(), &asked).unwrap();
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    /// A fight from a build newer than this install, which is every boss killed on a client the
+    /// reader's tables predate.
+    #[test]
+    fn leaves_out_a_fight_the_journal_has_never_heard_of() {
+        let found = portraits_of(&journal_fixture_files(), &[SLUDGEFANG, 9999]).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(!found.contains_key(&9999));
+    }
+
+    /// Whether the file behind the id is one this install holds is not this module's question —
+    /// [`crate::icons`] is where a texture the game withheld or never shipped turns into a row
+    /// that draws no picture. Answering the id and letting that happen is what keeps the two
+    /// reasons a portrait is missing from having to be told apart here.
+    #[test]
+    fn answers_the_portrait_it_found_even_where_no_file_stands_behind_it() {
+        let found = portraits_of(&journal_fixture_files(), &[ABSENT_FILE]).unwrap();
+        assert_eq!(found.get(&ABSENT_FILE), Some(&ABSENT_FILE_PORTRAIT));
+    }
+
+    /// Nothing asked about reads nothing at all, and zero is what an encounter recorded before the
+    /// client had an id for it comes across as — neither is worth opening the game's storage for.
+    #[test]
+    fn answers_nothing_when_no_fight_was_asked_about() {
+        assert!(portraits_of(&journal_fixture_files(), &[])
+            .unwrap()
+            .is_empty());
+        assert!(portraits_of(&journal_fixture_files(), &[0, 0])
             .unwrap()
             .is_empty());
     }

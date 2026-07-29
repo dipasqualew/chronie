@@ -21,6 +21,7 @@ import type { AppearanceModalState } from "./appearanceModal";
 import { GameItem } from "./item";
 import { itemName } from "./items";
 import type { ItemBook } from "./items";
+import type { BossPortraits } from "./bosses";
 import type { PlaceIcons } from "./places";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
@@ -138,6 +139,39 @@ function Earned({ event, book }: { event: AchievementEvent; book: AchievementBoo
       </div>
     </li>
   );
+}
+
+/**
+ * The portrait the Adventure Guide draws a boss with, beside the fight it was.
+ *
+ * The one place in the app where a picture is the ordinary case rather than the exception: the
+ * game has a portrait for all but one of the fights its journal gives an id to, so the frame is
+ * held whether or not the picture has landed yet — the same bargain the achievement icon beside it
+ * makes, and for the same reason. A list of eight bosses that indented itself as each picture
+ * arrived would be worse than one that waited.
+ *
+ * Where there is no book at all — a window with no game install behind it — there is no frame
+ * either, and the line reads exactly as it did before any of this existed.
+ *
+ * The picture says nothing: the row names the boss beside it, so the `<img>` is marked decorative
+ * and no reader hears the fight twice.
+ */
+function BossPortrait({
+  encounter,
+  bosses,
+}: {
+  encounter: number;
+  bosses?: BossPortraits;
+}): ReactNode {
+  // The book is a cache outside React, so a portrait landing changes nothing React would notice.
+  // This is what turns an arrival into a redraw. Each row asks for its own fight, and the book
+  // sends one request for whatever asked in that turn.
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
+  useEffect(() => bosses?.learn([encounter], redraw), [bosses, encounter]);
+
+  if (!bosses) return null;
+  const picture = bosses.icon(encounter);
+  return <span className="boss-portrait">{picture ? <img src={picture} alt="" /> : null}</span>;
 }
 
 /**
@@ -416,11 +450,14 @@ function Lists({
   segment,
   book,
   items,
+  bosses,
   onShowAppearance,
 }: {
   segment: Segment;
   book: AchievementBook;
   items: ItemBook;
+  /** The portraits the game draws a boss with. Absent leaves the encounter rows as they were. */
+  bosses?: BossPortraits;
   /** Absent where nothing can draw one, which is what leaves the transmog rows as they were. */
   onShowAppearance?: (showing: AppearanceModalState) => void;
 }): ReactNode {
@@ -438,9 +475,10 @@ function Lists({
     <>
       {encounters.length ? (
         <Section title="Encounters">
-          <ul>
+          <ul className="fought">
             {encounters.map((event, index) => (
               <li key={`${event.id}-${index}`}>
+                <BossPortrait encounter={event.id} bosses={bosses} />
                 {event.name || `Encounter ${event.id}`}{" "}
                 <span className={event.success ? "ok" : "loss"}>
                   {event.success ? "killed" : "wipe"}
@@ -665,6 +703,13 @@ export interface SegmentModalProps {
   /** The pictures the game draws a place with, shared with every other view that names one. */
   places?: PlaceIcons;
   /**
+   * The portraits the game draws a boss with. The modal is the only place a fight is named, so
+   * this is not shared with anything — but it is a book for the same reason the others are: a
+   * raid night is the same eight bosses over and over, and a reader stepping through its segments
+   * meets each of them on every one.
+   */
+  bosses?: BossPortraits;
+  /**
    * What every character on the account was last seen holding, so a gain can be read against
    * the account rather than only against the character that earned it. Absent on a history
    * collected before any character reported, which reads as nothing to add.
@@ -690,6 +735,7 @@ export function SegmentModal({
   achievements: book,
   items,
   places,
+  bosses,
   holdings,
   album,
   captures,
@@ -840,6 +886,7 @@ export function SegmentModal({
               segment={segment}
               book={book}
               items={items}
+              bosses={bosses}
               onShowAppearance={onShowAppearance}
             />
             <Gold segment={segment} holdings={holdings} />

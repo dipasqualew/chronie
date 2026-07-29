@@ -51,6 +51,28 @@
   border: 1px solid var(--border); background: var(--surface-2); overflow: hidden;
 }
 .earned-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* The portrait the Adventure Guide draws a boss with, on the fight it was.
+
+   Wider than tall, because the game's own is: every one of the 1,172 portraits in
+   `JournalEncounterCreature` is 128×64, drawn as a strip across the top of the guide's detail
+   view rather than as a square in a list. So it gets a frame of its own at that same two-to-one
+   rather than borrowing the square `.place-icon`, which would crop a face in half.
+
+   The frame is held whether or not a picture has arrived, unlike a place's: the game has a
+   portrait for all but one of the fights it gives an id to, so the few rows without one are the
+   exception and a list that indented itself as each picture landed would be worse.
+
+   The bullets go, the way they do on the transmog list: a row that opens with a picture is
+   already marked as a row, and a disc floating beside a 48-pixel strip only says so twice. */
+.detail-section ul.fought { list-style: none; padding-left: 0; }
+.detail-section ul.fought li { margin: 4px 0; }
+.boss-portrait {
+  display: inline-block; width: 48px; height: 24px; margin-right: 7px; vertical-align: -8px;
+  border-radius: 4px; border: 1px solid var(--border); background: var(--surface-2);
+  overflow: hidden;
+}
+.boss-portrait img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .detail-section .earned-what { color: var(--text-secondary); margin: 2px 0 0; }
 .detail-section .earned-reward { color: var(--gold); font-size: 12px; margin: 2px 0 0; }
 .detail-section .earned-facts {

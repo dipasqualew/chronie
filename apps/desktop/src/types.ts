@@ -200,6 +200,11 @@ export interface E2EMock {
    * from one to the other happens in the backend. A place absent from here is one the game names
    * no picture for, which is most of them: the open world has none anywhere. */
   placeIcons: Record<string, string>;
+  /** The portrait each boss is drawn with, keyed by the encounter id the segment recorded rather
+   * than by the file behind it — the same shape as the places, and the same two backend hops. A
+   * fight absent from here is one this install's journal has never heard of, which is what a boss
+   * from a newer build looks like. */
+  bossPortraits: Record<number, string>;
   /** What the game says about each achievement, keyed by id. An id absent from here is one
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;

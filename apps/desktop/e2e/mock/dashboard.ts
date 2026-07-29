@@ -219,7 +219,14 @@ export const dashboard: E2EMock["dashboard"] = {
         { id: 13, sourceId: "TEST|1|13", at: EVENING + 1500, imageState: "missing" },
       ],
       keystone: { level: 14, completed: true, onTime: true, upgrades: 1 },
-      encounters: [{ id: 900, name: "The Curator", at: EVENING + 400, success: true }],
+      // Two fights, and the game has a portrait for one of them: 900 resolves through the journal
+      // and 901 is a fight this install has never heard of, which is what a boss from a build
+      // newer than the reader's tables looks like. A wipe as well as a kill, because the modal
+      // says which each was.
+      encounters: [
+        { id: 900, name: "The Curator", at: EVENING + 400, success: true },
+        { id: 901, name: "Sand-Wrought Colossus", at: EVENING + 700, success: false },
+      ],
       character: "Aster-Vale",
       classFile: "MAGE",
       level: 12,

@@ -22,6 +22,7 @@ import { createCaptureAlbum } from "./captures";
 import { buildCharacters } from "./characters";
 import { Characters } from "./charactersView";
 import { createCurrencyIcons } from "./currencies";
+import { createBossPortraits } from "./bosses";
 import { createPlaceIcons } from "./places";
 import { Details } from "./details";
 import { duration, plural } from "./format";
@@ -144,6 +145,11 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // the same forty evenings on every screen, and most of what it is asked about — the open world
   // — comes back with nothing at all and is remembered as such.
   const placeIcons = useMemo(() => createPlaceIcons({ load: desktop.placeIcons }), []);
+
+  // And the portraits the game draws a boss with, which only the segment modal names. One book
+  // regardless, because a raid night is the same eight bosses across every segment of it and a
+  // reader stepping through them would otherwise ask about each fight once per evening it was in.
+  const bossPortraits = useMemo(() => createBossPortraits({ load: desktop.bossPortraits }), []);
 
   // The same argument as the achievement book: a thumbnail outlives any one grid, and a reader
   // scrolling back through a history meets the same evening's pictures over and over. One
@@ -544,6 +550,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         achievements={achievements}
         items={items}
         places={placeIcons}
+        bosses={bossPortraits}
         holdings={payload.holdings}
         album={album}
         captures={captureActions}

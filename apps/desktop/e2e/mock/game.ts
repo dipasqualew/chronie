@@ -57,6 +57,16 @@ export const placeIcons: E2EMock["placeIcons"] = {
     "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
+// The portrait each boss is drawn with, keyed by the encounter id the segment recorded — the same
+// shape as the places above, and the same two backend hops behind it. The scenario's one fight has
+// a portrait and the raid's second does not, which is the pair a row has to survive: the game has a
+// portrait for nearly every fight it knows, and none at all for one it has never heard of.
+export const bossPortraits: E2EMock["bossPortraits"] = {
+  900:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
+    "QVR42mP4z9DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
+};
+
 // What the game says about the achievements those segments name. 77 is deliberately absent:
 // an install can only describe the achievements it has, and a row still has to draw.
 export const achievementDetails: E2EMock["achievementDetails"] = {
