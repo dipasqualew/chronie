@@ -111,10 +111,16 @@ pub fn without_install(requested: bool) -> Status {
 pub fn cvar_in(text: &str, name: &str) -> Option<bool> {
     for line in text.lines() {
         let mut words = line.split_whitespace();
-        if !words.next().is_some_and(|word| word.eq_ignore_ascii_case("SET")) {
+        if !words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("SET"))
+        {
             continue;
         }
-        if !words.next().is_some_and(|word| word.eq_ignore_ascii_case(name)) {
+        if !words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case(name))
+        {
             continue;
         }
         let value = words.next().unwrap_or("").trim_matches('"');
@@ -267,9 +273,9 @@ pub fn year_of(found: &Found) -> i32 {
 /// The `MMDDYY_HHMMSS` in a log's name, as a year.
 fn stamped_year(name: &str) -> Option<i32> {
     let stamp = name.split(['-', '.', '_']).collect::<Vec<_>>().join("_");
-    let stamp = stamp.split('_').find(|part| {
-        part.len() == 6 && part.bytes().all(|byte| byte.is_ascii_digit())
-    })?;
+    let stamp = stamp
+        .split('_')
+        .find(|part| part.len() == 6 && part.bytes().all(|byte| byte.is_ascii_digit()))?;
     stamp[4..6].parse::<i32>().ok().map(|year| 2000 + year)
 }
 
@@ -332,7 +338,10 @@ pub fn status(wow_path: &Path, requested: bool, previous: Option<&LogFile>, now:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs::File, time::{Duration, SystemTime}};
+    use std::{
+        fs::File,
+        time::{Duration, SystemTime},
+    };
 
     const NOW: i64 = 1_800_000_000;
 
@@ -368,7 +377,10 @@ mod tests {
 
     #[test]
     fn reads_a_cvar_the_player_has_turned_off() {
-        assert_eq!(cvar_in("SET advancedCombatLogging \"0\"", ADVANCED_CVAR), Some(false));
+        assert_eq!(
+            cvar_in("SET advancedCombatLogging \"0\"", ADVANCED_CVAR),
+            Some(false)
+        );
     }
 
     #[test]
@@ -379,7 +391,10 @@ mod tests {
     /// A CVar whose name merely contains the one being asked for is a different setting.
     #[test]
     fn does_not_match_a_longer_cvar_name() {
-        assert_eq!(cvar_in("SET advancedCombatLoggingXYZ \"1\"", ADVANCED_CVAR), None);
+        assert_eq!(
+            cvar_in("SET advancedCombatLoggingXYZ \"1\"", ADVANCED_CVAR),
+            None
+        );
     }
 
     #[test]
@@ -387,7 +402,11 @@ mod tests {
         let wow = tempfile::tempdir().unwrap();
         // The newest config is an account that has never been near the Network options; the
         // older one ticked the box. Silence must not outvote an answer.
-        write(&wow.path().join("WTF/Account/QUIET/config-cache.wtf"), "SET gxWindow \"1\"", NOW);
+        write(
+            &wow.path().join("WTF/Account/QUIET/config-cache.wtf"),
+            "SET gxWindow \"1\"",
+            NOW,
+        );
         write(
             &wow.path().join("WTF/Account/MAIN/config-cache.wtf"),
             "SET advancedCombatLogging \"1\"",
@@ -397,7 +416,10 @@ mod tests {
         let status = status(wow.path(), true, None, NOW);
 
         assert_eq!(status.advanced, Some(true));
-        assert_eq!(status.source.as_deref(), Some("WTF/Account/MAIN/config-cache.wtf"));
+        assert_eq!(
+            status.source.as_deref(),
+            Some("WTF/Account/MAIN/config-cache.wtf")
+        );
     }
 
     #[test]
@@ -417,7 +439,11 @@ mod tests {
     #[test]
     fn treats_a_config_that_never_mentions_it_as_off() {
         let wow = tempfile::tempdir().unwrap();
-        write(&wow.path().join("WTF/Config.wtf"), "SET gxWindow \"1\"", NOW);
+        write(
+            &wow.path().join("WTF/Config.wtf"),
+            "SET gxWindow \"1\"",
+            NOW,
+        );
 
         let status = status(wow.path(), true, None, NOW);
 
@@ -457,9 +483,21 @@ mod tests {
     #[test]
     fn finds_the_newest_of_the_session_logs() {
         let wow = tempfile::tempdir().unwrap();
-        write(&wow.path().join("Logs/WoWCombatLog-070926_182310.txt"), "old", NOW - 90_000);
-        write(&wow.path().join("Logs/WoWCombatLog-071026_201500.txt"), "newer", NOW - 60);
-        write(&wow.path().join("Logs/Client.log"), "not a combat log at all", NOW);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-070926_182310.txt"),
+            "old",
+            NOW - 90_000,
+        );
+        write(
+            &wow.path().join("Logs/WoWCombatLog-071026_201500.txt"),
+            "newer",
+            NOW - 60,
+        );
+        write(
+            &wow.path().join("Logs/Client.log"),
+            "not a combat log at all",
+            NOW,
+        );
 
         let log = newest_log(wow.path()).unwrap();
 
@@ -484,7 +522,11 @@ mod tests {
             "SET advancedCombatLogging \"1\"",
             NOW,
         );
-        write(&wow.path().join("Logs/WoWCombatLog-071026_201500.txt"), "lines", NOW - 30);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-071026_201500.txt"),
+            "lines",
+            NOW - 30,
+        );
 
         assert_eq!(status(wow.path(), true, None, NOW).state, State::Advanced);
     }
@@ -497,7 +539,11 @@ mod tests {
             "SET advancedCombatLogging \"1\"",
             NOW,
         );
-        write(&wow.path().join("Logs/WoWCombatLog-070126_201500.txt"), "lines", NOW - 600_000);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-070126_201500.txt"),
+            "lines",
+            NOW - 600_000,
+        );
 
         let status = status(wow.path(), true, None, NOW);
 
@@ -516,7 +562,11 @@ mod tests {
             "SET advancedCombatLogging \"1\"",
             NOW,
         );
-        write(&wow.path().join("Logs/WoWCombatLog-071026_201500.txt"), "more lines", NOW - 90_000);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-071026_201500.txt"),
+            "more lines",
+            NOW - 90_000,
+        );
         let before = LogFile {
             name: "WoWCombatLog-071026_201500.txt".into(),
             bytes: 4,
@@ -538,7 +588,11 @@ mod tests {
             "SET advancedCombatLogging \"1\"",
             NOW,
         );
-        write(&wow.path().join("Logs/WoWCombatLog-071126_090000.txt"), "x", NOW - 90_000);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-071126_090000.txt"),
+            "x",
+            NOW - 90_000,
+        );
         let before = LogFile {
             name: "WoWCombatLog-071026_201500.txt".into(),
             bytes: 900,
@@ -558,7 +612,11 @@ mod tests {
             "SET advancedCombatLogging \"0\"",
             NOW,
         );
-        write(&wow.path().join("Logs/WoWCombatLog-071026_201500.txt"), "lines", NOW - 30);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-071026_201500.txt"),
+            "lines",
+            NOW - 30,
+        );
 
         let status = status(wow.path(), true, None, NOW);
 
@@ -578,7 +636,11 @@ mod tests {
             "SET advancedCombatLogging \"1\"",
             NOW,
         );
-        write(&wow.path().join("Logs/WoWCombatLog-071026_201500.txt"), "lines", NOW - 30);
+        write(
+            &wow.path().join("Logs/WoWCombatLog-071026_201500.txt"),
+            "lines",
+            NOW - 30,
+        );
 
         let status = status(wow.path(), false, None, NOW);
 

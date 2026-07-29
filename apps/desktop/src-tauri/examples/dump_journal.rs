@@ -197,7 +197,11 @@ fn report(
     let mut shown = 0usize;
     for row in &named {
         let name = row.text(name_column);
-        if !wanted.is_empty() && !wanted.iter().any(|asked| name.to_lowercase().contains(asked)) {
+        if !wanted.is_empty()
+            && !wanted
+                .iter()
+                .any(|asked| name.to_lowercase().contains(asked))
+        {
             continue;
         }
         if shown >= SHOWN {

@@ -428,9 +428,18 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     let mut open: Option<(i64, i64, Value)> = None;
     for row in rows {
         let (segment_id, change_id, change, slot) = row.map_err(|error| error.to_string())?;
-        if open.as_ref().is_none_or(|(_, open_id, _)| *open_id != change_id) {
+        if open
+            .as_ref()
+            .is_none_or(|(_, open_id, _)| *open_id != change_id)
+        {
             if let Some((previous_segment, _, built)) = open.take() {
-                push_event(&mut segments, &indices, previous_segment, "equipsetChanges", built);
+                push_event(
+                    &mut segments,
+                    &indices,
+                    previous_segment,
+                    "equipsetChanges",
+                    built,
+                );
             }
             let mut change = change;
             change["items"] = Value::Array(Vec::new());
@@ -443,7 +452,13 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
         }
     }
     if let Some((segment_id, _, built)) = open {
-        push_event(&mut segments, &indices, segment_id, "equipsetChanges", built);
+        push_event(
+            &mut segments,
+            &indices,
+            segment_id,
+            "equipsetChanges",
+            built,
+        );
     }
     drop(statement);
 

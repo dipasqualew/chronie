@@ -208,8 +208,7 @@ impl Db2 {
         let record_size = word(head + 8)? as usize;
         // Bit 0 says the records vary in length; bit 2 says the ids are kept beside them.
         let variable = u16::from_le_bytes(data[head + 36..head + 38].try_into().unwrap()) & 1 != 0;
-        let id_column =
-            u16::from_le_bytes(data[head + 38..head + 40].try_into().unwrap()) as usize;
+        let id_column = u16::from_le_bytes(data[head + 38..head + 40].try_into().unwrap()) as usize;
         let total_column_count = word(head + 40)? as usize;
         let storage_info_size = word(head + 52)? as usize;
         let common_size = word(head + 56)? as usize;
@@ -723,8 +722,8 @@ impl Row<'_> {
         let column_at = rows_before + self.index * table.record_size + (offset_bits / 8) as usize;
         // Positions are counted from the end of the whole table's rows, which is what lets
         // an offset written into an early row still land inside the strings.
-        let index = column_at as isize - (table.total_rows * table.record_size) as isize
-            + offset as isize;
+        let index =
+            column_at as isize - (table.total_rows * table.record_size) as isize + offset as isize;
         if index < 0 {
             return String::new();
         }
@@ -839,7 +838,9 @@ fn c_string_length(data: &[u8], at: usize, end: usize) -> usize {
     let Some(rest) = data.get(at..end.min(data.len())) else {
         return 0;
     };
-    rest.iter().position(|byte| *byte == 0).unwrap_or(rest.len())
+    rest.iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(rest.len())
 }
 
 fn read_c_string(data: &[u8], at: usize, end: usize) -> String {
@@ -1080,7 +1081,9 @@ mod tests {
         let sets = table(TRANSMOG_SET);
         assert_eq!(sets.rows().count(), 9);
         assert_eq!(sets.declared_rows(), 11);
-        assert!(!names(&sets, set::NAME).iter().any(|name| name.contains("Unreleased")));
+        assert!(!names(&sets, set::NAME)
+            .iter()
+            .any(|name| name.contains("Unreleased")));
         assert!(!ids(&sets).contains(&900));
 
         let items = table(TRANSMOG_SET_ITEM);
@@ -1091,7 +1094,9 @@ mod tests {
     fn refuses_a_file_that_is_not_a_wdc5_table() {
         let mut bytes = fixture_files().read(TRANSMOG_SET).unwrap().to_vec();
         bytes[0..4].copy_from_slice(b"WDC4");
-        let error = Db2::parse(Arc::new(bytes)).err().expect("a WDC4 table is refused");
+        let error = Db2::parse(Arc::new(bytes))
+            .err()
+            .expect("a WDC4 table is refused");
         assert!(error.contains("WDC5"), "{error}");
 
         assert!(Db2::parse(Arc::new(Vec::new())).is_err());
@@ -1428,7 +1433,10 @@ mod tests {
             .map(|row| row.text(sparse::DESCRIPTION))
             .filter(|text| !text.is_empty())
             .collect();
-        assert_eq!(described, vec!["Woven from the glass the tide leaves behind."]);
+        assert_eq!(
+            described,
+            vec!["Woven from the glass the tide leaves behind."]
+        );
     }
 
     // The encrypted section is written as zeroes like any other, offset map included — so its
@@ -1439,7 +1447,10 @@ mod tests {
         assert_eq!(table.rows().count(), 21);
         assert_eq!(table.declared_rows(), 24);
         for id in [30011, 30012, 30900] {
-            assert!(!table.rows().any(|row| row.id() == id), "{id} was decrypted");
+            assert!(
+                !table.rows().any(|row| row.id() == id),
+                "{id} was decrypted"
+            );
         }
     }
 
@@ -1451,7 +1462,11 @@ mod tests {
         let table = Db2::parse(fixture_files().read(ITEM_SPARSE).unwrap()).unwrap();
         assert_eq!(table.rows().count(), 21);
         assert_eq!(
-            table.rows().map(|row| row.id()).take(3).collect::<Vec<u32>>(),
+            table
+                .rows()
+                .map(|row| row.id())
+                .take(3)
+                .collect::<Vec<u32>>(),
             vec![30001, 30002, 30003]
         );
         for row in table.rows() {

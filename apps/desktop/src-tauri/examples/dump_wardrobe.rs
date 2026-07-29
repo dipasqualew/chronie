@@ -74,10 +74,15 @@ fn report(files: &dyn casc::GameFiles, display_types: &[u32], listed: bool) {
             std::process::exit(1);
         }
     };
-    let rows = payload["appearances"].as_array().cloned().unwrap_or_default();
+    let rows = payload["appearances"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     println!(
         "display types {display_types:?}: {} looks, {} the install cannot reach, in {:?}",
-        payload["readCount"], payload["withheldCount"], started.elapsed()
+        payload["readCount"],
+        payload["withheldCount"],
+        started.elapsed()
     );
     if !listed {
         return;
@@ -96,8 +101,7 @@ fn report(files: &dyn casc::GameFiles, display_types: &[u32], listed: bool) {
     for row in rows.iter().take(A_FEW) {
         println!(
             "  {} — appearance {}, item {}, {} items give it, display {}",
-            row["name"], row["appearanceId"], row["itemId"], row["itemCount"],
-            row["displayInfoId"]
+            row["name"], row["appearanceId"], row["itemId"], row["itemCount"], row["displayInfoId"]
         );
     }
 }

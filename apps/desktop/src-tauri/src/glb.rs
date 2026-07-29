@@ -76,7 +76,10 @@ impl<'a> Piece<'a> {
 /// A `.glb` for a scene, with every texture every piece of it uses embedded in it.
 #[tracing::instrument(name = "glb.write", skip_all, fields(pieces = pieces.len()))]
 pub fn write(pieces: &[Piece<'_>]) -> Result<Vec<u8>, String> {
-    if pieces.iter().any(|piece| piece.mesh.vertices.is_empty() || piece.mesh.parts.is_empty()) {
+    if pieces
+        .iter()
+        .any(|piece| piece.mesh.vertices.is_empty() || piece.mesh.parts.is_empty())
+    {
         return Err("the model holds no geometry".into());
     }
     if pieces.is_empty() {
@@ -146,7 +149,11 @@ fn write_piece(
 
     /* The vertices, as three lists the parts all share — and only the ones the parts below
     actually point at. */
-    let vertices = || kept.order.iter().map(|index| &mesh.vertices[*index as usize]);
+    let vertices = || {
+        kept.order
+            .iter()
+            .map(|index| &mesh.vertices[*index as usize])
+    };
     let positions: Vec<[f32; 3]> = vertices().map(|vertex| vertex.position).collect();
     let normals: Vec<[f32; 3]> = vertices().map(|vertex| vertex.normal).collect();
     let uvs: Vec<[f32; 2]> = vertices().map(|vertex| vertex.uv).collect();
@@ -214,7 +221,10 @@ fn write_piece(
 
         let indices = bin.view(
             root,
-            part.indices.iter().flat_map(|index| kept.at(*index).to_le_bytes()).collect(),
+            part.indices
+                .iter()
+                .flat_map(|index| kept.at(*index).to_le_bytes())
+                .collect(),
             Some(ELEMENT_ARRAY_BUFFER),
         );
         let indices = root.push(accessor(
@@ -357,7 +367,8 @@ impl Kept {
 /// The two `target` values a buffer view can declare, which tell a loader what the bytes are
 /// for. glTF spells them as the OpenGL constants.
 const ARRAY_BUFFER: gltf_json::buffer::Target = gltf_json::buffer::Target::ArrayBuffer;
-const ELEMENT_ARRAY_BUFFER: gltf_json::buffer::Target = gltf_json::buffer::Target::ElementArrayBuffer;
+const ELEMENT_ARRAY_BUFFER: gltf_json::buffer::Target =
+    gltf_json::buffer::Target::ElementArrayBuffer;
 
 /// The one binary blob a `.glb` carries, grown a view at a time.
 #[derive(Default)]
@@ -578,7 +589,10 @@ mod tests {
         // The one buffer is the binary chunk itself, which is what "no uri" means.
         assert_eq!(json["buffers"].as_array().unwrap().len(), 1);
         assert_eq!(json["buffers"][0]["uri"], Value::Null);
-        assert_eq!(json["buffers"][0]["byteLength"].as_u64().unwrap() as usize, bin.len());
+        assert_eq!(
+            json["buffers"][0]["byteLength"].as_u64().unwrap() as usize,
+            bin.len()
+        );
     }
 
     // The positions have to arrive intact, in the axes the parser turned them into, and the
@@ -623,12 +637,20 @@ mod tests {
         let mut one_triangle = whole.clone();
         one_triangle.parts.truncate(1);
         one_triangle.parts[0].indices.truncate(3);
-        assert!(whole.vertices.len() > 3, "the fixture helm has a mesh to cut down");
+        assert!(
+            whole.vertices.len() > 3,
+            "the fixture helm has a mesh to cut down"
+        );
 
         let glb = write(&[Piece::only(&one_triangle, &always(b"a picture"))]).unwrap();
         let parsed = parse(&glb);
         let carried = positions(&parsed, 0);
-        assert_eq!(carried.len(), 3, "the file carries {} vertices for one triangle", carried.len());
+        assert_eq!(
+            carried.len(),
+            3,
+            "the file carries {} vertices for one triangle",
+            carried.len()
+        );
 
         // Renumbered to match, in the order the part reaches them, and drawn at the same three
         // corners the game named.
@@ -659,8 +681,14 @@ mod tests {
         let mesh = mesh(HELM, HELM_SKIN);
         let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let json = parse(&glb).json;
-        assert_eq!(json["accessors"][0]["min"], serde_json::json!([-1.0, -1.0, -1.0]));
-        assert_eq!(json["accessors"][0]["max"], serde_json::json!([1.0, 1.0, 1.0]));
+        assert_eq!(
+            json["accessors"][0]["min"],
+            serde_json::json!([-1.0, -1.0, -1.0])
+        );
+        assert_eq!(
+            json["accessors"][0]["max"],
+            serde_json::json!([1.0, 1.0, 1.0])
+        );
     }
 
     // The picture travels inside the file, because the window has no origin to load one from.
@@ -676,7 +704,10 @@ mod tests {
         let at = view["byteOffset"].as_u64().unwrap() as usize;
         let length = view["byteLength"].as_u64().unwrap() as usize;
         assert_eq!(&bin[at..at + length], b"a picture");
-        assert_eq!(json["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"], 0);
+        assert_eq!(
+            json["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"],
+            0
+        );
     }
 
     // Several parts of a model share one texture, and a BLP decoded twice costs more than
@@ -715,7 +746,10 @@ mod tests {
                 )
             })
             .collect();
-        assert_eq!(modes, vec![("OPAQUE", false), ("MASK", true), ("BLEND", false)]);
+        assert_eq!(
+            modes,
+            vec![("OPAQUE", false), ("MASK", true), ("BLEND", false)]
+        );
     }
 
     // And the one it cannot carry: glTF's `alphaMode` runs to opaque, mask and source-over, and
@@ -726,12 +760,18 @@ mod tests {
     #[test]
     fn leaves_out_a_part_glt_f_has_no_compositing_for() {
         let mut mesh = mesh(CLOAK, CLOAK_SKIN);
-        let glow = crate::m2::Part { blend: Blend::Glow, ..mesh.parts[0].clone() };
+        let glow = crate::m2::Part {
+            blend: Blend::Glow,
+            ..mesh.parts[0].clone()
+        };
         mesh.parts.push(glow);
 
         let glb = write(&[Piece::only(&mesh, &always(b"a picture"))]).unwrap();
         let scene = parse(&glb).json;
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            scene["meshes"][0]["primitives"].as_array().unwrap().len(),
+            3
+        );
         // And the three that are drawn are untouched: leaving one out is not renumbering.
         assert_eq!(scene["materials"].as_array().unwrap().len(), 3);
         assert_eq!(scene["materials"][1]["alphaCutoff"], 0.5);
@@ -764,20 +804,30 @@ mod tests {
         // writes the file it always did.
         assert_eq!(json["nodes"][0], serde_json::json!({ "mesh": 0 }));
         assert_eq!(json["nodes"][1]["mesh"], 1);
-        assert_eq!(json["nodes"][1]["translation"], serde_json::json!([0.0, 4.0, -2.0]));
+        assert_eq!(
+            json["nodes"][1]["translation"],
+            serde_json::json!([0.0, 4.0, -2.0])
+        );
         // How it sits there as well as where, because a pauldron is worn smaller than it was
         // modelled and rolled outward, and both come off the body's own skeleton.
-        assert_eq!(json["nodes"][1]["scale"], serde_json::json!([0.62, 0.62, 0.62]));
+        assert_eq!(
+            json["nodes"][1]["scale"],
+            serde_json::json!([0.62, 0.62, 0.62])
+        );
         let turned = json["nodes"][1]["rotation"].as_array().unwrap().clone();
         assert_eq!(turned[0], 0.0);
-        assert!((turned[2].as_f64().unwrap() - 0.5f64.sqrt()).abs() < 1e-6, "{turned:?}");
+        assert!(
+            (turned[2].as_f64().unwrap() - 0.5f64.sqrt()).abs() < 1e-6,
+            "{turned:?}"
+        );
 
         // Two meshes, two sets of vertices, and two pictures — one per piece rather than one
         // shared between them.
         assert_eq!(json["meshes"].as_array().unwrap().len(), 2);
         assert_eq!(json["images"].as_array().unwrap().len(), 2);
         let picture = |at: usize| {
-            let view = &json["bufferViews"][json["images"][at]["bufferView"].as_u64().unwrap() as usize];
+            let view =
+                &json["bufferViews"][json["images"][at]["bufferView"].as_u64().unwrap() as usize];
             let from = view["byteOffset"].as_u64().unwrap() as usize;
             bin[from..from + view["byteLength"].as_u64().unwrap() as usize].to_vec()
         };

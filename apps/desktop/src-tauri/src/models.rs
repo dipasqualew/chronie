@@ -137,25 +137,30 @@ pub fn each(
                     // appearance's material is it. Only a character declares several and has to
                     // tell them apart.
                     Paint::Supplied(_) => {
-                        *supplied.borrow_mut().get_or_insert_with(|| match material_resource {
-                            0 => None,
-                            resource => {
-                                let mut held = textures.borrow_mut();
-                                let table = match held.as_ref() {
-                                    Some(table) => table,
-                                    None => match crate::worn::TextureFiles::read(files) {
-                                        Ok(read) => held.insert(read),
-                                        Err(_) => return None,
-                                    },
-                                };
-                                table.named(resource)
-                            }
-                        })
+                        *supplied
+                            .borrow_mut()
+                            .get_or_insert_with(|| match material_resource {
+                                0 => None,
+                                resource => {
+                                    let mut held = textures.borrow_mut();
+                                    let table = match held.as_ref() {
+                                        Some(table) => table,
+                                        None => match crate::worn::TextureFiles::read(files) {
+                                            Ok(read) => held.insert(read),
+                                            Err(_) => return None,
+                                        },
+                                    };
+                                    table.named(resource)
+                                }
+                            })
                     }
                 }?;
                 // A texture that will not decode leaves its part grey rather than failing the
                 // model: the shape of a helm is most of what a reader opened it for.
-                files.read(texture).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
+                files
+                    .read(texture)
+                    .and_then(|blp| png_of(&blp, LARGEST_TEXTURE))
+                    .ok()
             };
             Ok(Some(glb::write(&[glb::Piece::only(&mesh, &picture)])?))
         })
@@ -267,7 +272,10 @@ mod tests {
     fn walks_a_display_down_to_a_model_a_window_can_show() {
         let scene = scene(&model(HELM).expect("the helm has geometry"));
         assert_eq!(scene["asset"]["version"], "2.0");
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            scene["meshes"][0]["primitives"].as_array().unwrap().len(),
+            1
+        );
         assert_eq!(scene["accessors"][0]["count"], 8);
         assert_eq!(scene["images"][0]["mimeType"], "image/png");
     }
@@ -286,9 +294,9 @@ mod tests {
                 // Which of the resource's three files is this body's, which is a table of
                 // its own — and the reason a helm shown alone is the same helm worn.
                 1_349_053, // ComponentModelFileData
-                140001, // the helm's .m2
-                141001, // the skin profile its SFID names
-                150001, // the texture its TXID names
+                140001,    // the helm's .m2
+                141001,    // the skin profile its SFID names
+                150001,    // the texture its TXID names
             ]
         );
     }
@@ -298,7 +306,9 @@ mod tests {
     #[test]
     fn paints_a_model_with_the_texture_the_item_supplies() {
         let files = Noted::new();
-        let answer = glb_of(&files, &hers(), SHOULDERS).unwrap().expect("the pad has geometry");
+        let answer = glb_of(&files, &hers(), SHOULDERS)
+            .unwrap()
+            .expect("the pad has geometry");
         let asked = files.asked.into_inner();
         assert!(asked.contains(&TEXTURE_FILE_DATA), "{asked:?}");
         // 51002 is the shoulder's first material, and 150002 the texture the table gives it.
@@ -336,7 +346,10 @@ mod tests {
     #[test]
     fn shows_a_weapon_as_well_as_a_helm() {
         let scene = scene(&model(WEAPON).expect("the weapon has geometry"));
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            scene["meshes"][0]["primitives"].as_array().unwrap().len(),
+            2
+        );
     }
 
     // A model the install does not hold is a gap in the install, not a broken app — but a

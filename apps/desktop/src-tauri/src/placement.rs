@@ -123,7 +123,11 @@ mod tests {
     /// with the track sampling either side of it.
     #[test]
     fn takes_the_point_nearest_in_time() {
-        let track = [point(-9_000, 0.1, 0.1), point(-2_000, 0.4, 0.6), point(3_000, 0.5, 0.7)];
+        let track = [
+            point(-9_000, 0.1, 0.1),
+            point(-2_000, 0.4, 0.6),
+            point(3_000, 0.5, 0.7),
+        ];
 
         let placed = place(moment(), &track).expect("a point within reach");
 
@@ -168,7 +172,10 @@ mod tests {
     fn allows_a_point_exactly_at_the_reach() {
         let track = [point(REACH_MS, 0.4, 0.6)];
 
-        assert_eq!(place(moment(), &track).map(|placed| placed.gap_ms), Some(REACH_MS));
+        assert_eq!(
+            place(moment(), &track).map(|placed| placed.gap_ms),
+            Some(REACH_MS)
+        );
     }
 
     /// A point recorded on another map is a point in another building. Its coordinates are
@@ -189,7 +196,10 @@ mod tests {
     #[test]
     fn prefers_the_right_map_over_the_nearer_point() {
         let track = [
-            Point { ui_map_id: Some(2549), ..point(-500, 0.9, 0.9) },
+            Point {
+                ui_map_id: Some(2549),
+                ..point(-500, 0.9, 0.9)
+            },
             point(-8_000, 0.4, 0.6),
         ];
 

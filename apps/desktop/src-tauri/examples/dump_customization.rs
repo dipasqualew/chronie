@@ -126,7 +126,11 @@ fn main() {
     }
 
     let wanted: Vec<u32> = rest.iter().filter_map(|arg| arg.parse().ok()).collect();
-    let wanted = if wanted.is_empty() { vec![DEFAULT_SKIN] } else { wanted };
+    let wanted = if wanted.is_empty() {
+        vec![DEFAULT_SKIN]
+    } else {
+        wanted
+    };
 
     shapes(files);
     let target = layers(files);
@@ -152,7 +156,11 @@ fn questions(files: &dyn casc::GameFiles, body: u32) {
     };
     println!("{} questions about this body:", asked.len());
     for question in &asked {
-        let named = question.swatches.iter().filter(|swatch| !swatch.name.is_empty()).count();
+        let named = question
+            .swatches
+            .iter()
+            .filter(|swatch| !swatch.name.is_empty())
+            .count();
         println!(
             "\n  {:<6} {:?} — {} swatches, {named} of them named",
             question.id,
@@ -217,7 +225,10 @@ fn layers(files: &dyn casc::GameFiles) -> u32 {
     };
     println!("\nChrModelTextureLayer, layout {LAYOUT}:");
     let mut base = 0;
-    let mut rows: Vec<_> = table.rows().filter(|row| row.foreign_id() == LAYOUT).collect();
+    let mut rows: Vec<_> = table
+        .rows()
+        .filter(|row| row.foreign_id() == LAYOUT)
+        .collect();
     rows.sort_by_key(|row| row.number(LAYER_LAYER));
     for row in &rows {
         let (texture_type, layer, blend) = (

@@ -323,9 +323,9 @@ pub fn infer(segment: &Segment) -> Vec<Activity> {
         prey(segment),
         delve(segment),
     ]
-        .into_iter()
-        .flatten()
-        .collect()
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 #[cfg(test)]
@@ -608,7 +608,9 @@ mod tests {
     // nameless quest is an ordinary thing to meet rather than a broken record.
     #[test]
     fn guesses_nothing_from_a_quest_whose_title_was_never_recorded() {
-        assert!(!kinds(&segment(json!({ "quests": [{ "id": 1 }] }))).contains(&KIND_PREY.to_string()));
+        assert!(
+            !kinds(&segment(json!({ "quests": [{ "id": 1 }] }))).contains(&KIND_PREY.to_string())
+        );
     }
 
     // Nothing in a segment recorded before the addon knew what a delve was says which tier it

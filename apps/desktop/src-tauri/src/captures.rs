@@ -18,13 +18,12 @@
 //! plain list of names before anything touches a byte.
 
 use image::{
-    codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageFormat, ImageReader,
-    Limits,
+    codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, ImageFormat, ImageReader, Limits,
 };
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use specta::Type;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
@@ -118,7 +117,10 @@ impl Marker {
 /// entry missing an id or a moment is not readable as a record at all and is skipped; every
 /// other field is allowed to be absent.
 pub fn markers(saved: &Value) -> Vec<Marker> {
-    saved.get("entries").map(markers_from_entries).unwrap_or_default()
+    saved
+        .get("entries")
+        .map(markers_from_entries)
+        .unwrap_or_default()
 }
 
 /// The typed SavedVariables root hands the entry feed over directly, so the collector does not
@@ -353,8 +355,8 @@ impl Quality {
 /// away, which is the ordinary outcome for a small PNG and for a JPEG the client already
 /// compressed harder than this would.
 pub fn store(source: &Path, root: &Path, quality: Quality) -> Result<Stored, String> {
-    let found =
-        fs::read(source).map_err(|error| format!("Could not read {}: {error}", source.display()))?;
+    let found = fs::read(source)
+        .map_err(|error| format!("Could not read {}: {error}", source.display()))?;
     let (bytes, suffix) = match recoded(&found, source, quality) {
         Some(smaller) => (smaller, ".jpg".to_string()),
         None => (found, extension(source)),
@@ -536,12 +538,10 @@ fn without_escapes(raw: &str) -> String {
         // character boundary.
         rest = match after.as_bytes().first() {
             // `|Hitem:19019|h[Thunderfury]|h` — the link, then the words, then the end of it.
-            Some(b'H') => match after[1..]
-                .find("|h")
-                .and_then(|opens| {
-                    let words = &after[1 + opens + 2..];
-                    words.find("|h").map(|closes| (words, closes))
-                }) {
+            Some(b'H') => match after[1..].find("|h").and_then(|opens| {
+                let words = &after[1 + opens + 2..];
+                words.find("|h").map(|closes| (words, closes))
+            }) {
                 Some((words, closes)) => {
                     kept.push_str(&words[..closes]);
                     &words[closes + 2..]
@@ -618,8 +618,8 @@ pub fn thumbnail(root: &Path, file_path: &str, content_hash: &str) -> Result<Vec
     }
 
     let image = root.join(file_path);
-    let bytes = fs::read(&image)
-        .map_err(|error| format!("Could not read {}: {error}", image.display()))?;
+    let bytes =
+        fs::read(&image).map_err(|error| format!("Could not read {}: {error}", image.display()))?;
     let small = shrink(&bytes, format_of(file_path), THUMBNAIL_EDGE)?;
 
     // A thumbnail that could not be written is not worth failing over: it is a cache, and the
@@ -797,7 +797,10 @@ mod tests {
                 "achievement": 4001,
             }],
         }));
-        assert_eq!(markers[0].trigger.as_deref(), Some("accountFirstAchievement"));
+        assert_eq!(
+            markers[0].trigger.as_deref(),
+            Some("accountFirstAchievement")
+        );
         assert_eq!(markers[0].achievement, Some(4001));
     }
 
@@ -913,10 +916,22 @@ mod tests {
 
     #[test]
     fn steps_a_second_across_a_minute_and_an_hour_in_both_directions() {
-        assert_eq!(shifted("111423_115959", 1).as_deref(), Some("111423_120000"));
-        assert_eq!(shifted("111423_235959", 1).as_deref(), Some("111523_000000"));
-        assert_eq!(shifted("111423_120000", -1).as_deref(), Some("111423_115959"));
-        assert_eq!(shifted("111523_000000", -1).as_deref(), Some("111423_235959"));
+        assert_eq!(
+            shifted("111423_115959", 1).as_deref(),
+            Some("111423_120000")
+        );
+        assert_eq!(
+            shifted("111423_235959", 1).as_deref(),
+            Some("111523_000000")
+        );
+        assert_eq!(
+            shifted("111423_120000", -1).as_deref(),
+            Some("111423_115959")
+        );
+        assert_eq!(
+            shifted("111523_000000", -1).as_deref(),
+            Some("111423_235959")
+        );
         assert_eq!(shifted("nonsense", 1), None);
         assert_eq!(shifted("nonsense", -1), None);
     }
@@ -1012,8 +1027,14 @@ mod tests {
 
     #[test]
     fn ignores_everything_in_the_folder_that_is_not_a_screenshot() {
-        assert_eq!(stamp_of("WoWScrnShot_111423_120000.jpg").as_deref(), Some("111423_120000"));
-        assert_eq!(stamp_of("WoWScrnShot_111423_120000.tga").as_deref(), Some("111423_120000"));
+        assert_eq!(
+            stamp_of("WoWScrnShot_111423_120000.jpg").as_deref(),
+            Some("111423_120000")
+        );
+        assert_eq!(
+            stamp_of("WoWScrnShot_111423_120000.tga").as_deref(),
+            Some("111423_120000")
+        );
         assert_eq!(stamp_of("holiday.jpg"), None);
         assert_eq!(stamp_of("WoWScrnShot_notatime.jpg"), None);
         assert_eq!(stamp_of("WoWScrnShot_111423_12000.jpg"), None);
@@ -1281,22 +1302,40 @@ mod tests {
             // the pipe, and what follows it is text.
             Some("got [Thunderfury]r"),
         );
-        assert_eq!(note_text("|TInterface\\Icons\\x:16|t look").as_deref(), Some("look"));
-        assert_eq!(note_text("|Aatlas:thing:1:1|a here").as_deref(), Some("here"));
+        assert_eq!(
+            note_text("|TInterface\\Icons\\x:16|t look").as_deref(),
+            Some("look")
+        );
+        assert_eq!(
+            note_text("|Aatlas:thing:1:1|a here").as_deref(),
+            Some("here")
+        );
         assert_eq!(note_text("a || b").as_deref(), Some("a b"));
     }
 
     // An escape somebody typed half of is text, not a licence to eat the rest of the note.
     #[test]
     fn keeps_the_rest_of_a_note_whose_escape_never_closes() {
-        assert_eq!(note_text("|Hitem:19019|h[Thunderfury] and more").as_deref(), Some("Hitem:19019h[Thunderfury] and more"));
-        assert_eq!(note_text("|Tno end of it").as_deref(), Some("Tno end of it"));
-        assert_eq!(note_text("|cffzzzz nonsense").as_deref(), Some("cffzzzz nonsense"));
+        assert_eq!(
+            note_text("|Hitem:19019|h[Thunderfury] and more").as_deref(),
+            Some("Hitem:19019h[Thunderfury] and more")
+        );
+        assert_eq!(
+            note_text("|Tno end of it").as_deref(),
+            Some("Tno end of it")
+        );
+        assert_eq!(
+            note_text("|cffzzzz nonsense").as_deref(),
+            Some("cffzzzz nonsense")
+        );
     }
 
     #[test]
     fn folds_a_pasted_note_onto_one_line() {
-        assert_eq!(note_text("two\nlines\tapart").as_deref(), Some("two lines apart"));
+        assert_eq!(
+            note_text("two\nlines\tapart").as_deref(),
+            Some("two lines apart")
+        );
         assert_eq!(note_text("  padded  out  ").as_deref(), Some("padded out"));
     }
 
@@ -1446,7 +1485,11 @@ mod tests {
     }
 
     /// One screenshot written into a fresh store at a given quality, and what came back.
-    fn stored_at(quality: Quality, bytes: &[u8], name: &str) -> (tempfile::TempDir, Stored, Vec<u8>) {
+    fn stored_at(
+        quality: Quality,
+        bytes: &[u8],
+        name: &str,
+    ) -> (tempfile::TempDir, Stored, Vec<u8>) {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("store");
         let source = temp.path().join(name);
@@ -1467,8 +1510,7 @@ mod tests {
             (Quality::Balanced, 2560),
             (Quality::Small, 1600),
         ] {
-            let (_temp, stored, held) =
-                stored_at(quality, &png, "WoWScrnShot_111423_120000.png");
+            let (_temp, stored, held) = stored_at(quality, &png, "WoWScrnShot_111423_120000.png");
 
             assert_eq!(sized(&held).0, edge, "{quality:?}");
             assert!(held.len() < png.len(), "{quality:?} did not save anything");
@@ -1504,7 +1546,9 @@ mod tests {
         assert_ne!(held, png, "the re-encode was expected to change the bytes");
         assert_eq!(stored.content_hash, digest(&held));
         assert_eq!(stored.byte_size, held.len() as i64);
-        assert!(stored.file_path.starts_with(&format!("{}/", &stored.content_hash[..2])));
+        assert!(stored
+            .file_path
+            .starts_with(&format!("{}/", &stored.content_hash[..2])));
     }
 
     /// A picture already smaller than the encoder would make it is left alone. Compressing a

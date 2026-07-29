@@ -229,7 +229,12 @@ impl Atlas {
                 image::imageops::resize(&decoded, rect.width, rect.height, FilterType::Triangle);
             // `overlay` composites source-over, which is the blend the paragraph above is
             // about; `replace` is the copy that would take the holes with it.
-            image::imageops::overlay(&mut self.pixels, &scaled, i64::from(rect.x), i64::from(rect.y));
+            image::imageops::overlay(
+                &mut self.pixels,
+                &scaled,
+                i64::from(rect.x),
+                i64::from(rect.y),
+            );
         }
     }
 
@@ -438,7 +443,9 @@ impl<'a> Mannequin<'a> {
         };
 
         let painted = self.atlas_png(worn)?;
-        let cape = worn.and_then(|worn| worn.cape).and_then(|fdid| decode_file(files, fdid));
+        let cape = worn
+            .and_then(|worn| worn.cape)
+            .and_then(|fdid| decode_file(files, fdid));
         let body = |paint| match paint {
             // The model's own textures, which on a body are the few things not customized.
             Paint::File(fdid) => decode_file(files, fdid),
@@ -561,7 +568,10 @@ impl<'a> Mannequin<'a> {
                 .ok_or("a worn model names no skin profile, so nothing says how to draw it")?;
             let mesh = parsed.with_skin(&self.files.read(skin)?)?;
             let texture = model.texture.and_then(|fdid| {
-                self.files.read(fdid).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
+                self.files
+                    .read(fdid)
+                    .and_then(|blp| png_of(&blp, LARGEST_TEXTURE))
+                    .ok()
             });
             hung.push((mesh, at, texture));
         }
@@ -688,7 +698,10 @@ fn dressed(mesh: &Mesh, worn: Option<&Worn>, herself: Option<&Customization>) ->
 /// A picture that will not decode leaves its part grey rather than failing the whole body,
 /// which is the same bargain the item models make: the shape is most of what was asked for.
 fn decode_file(files: &dyn GameFiles, fdid: u32) -> Option<Vec<u8>> {
-    files.read(fdid).and_then(|blp| png_of(&blp, LARGEST_TEXTURE)).ok()
+    files
+        .read(fdid)
+        .and_then(|blp| png_of(&blp, LARGEST_TEXTURE))
+        .ok()
 }
 
 #[cfg(test)]
@@ -783,20 +796,39 @@ mod tests {
     /// each texture lands in are read without the skin underneath colouring the answer.
     fn atlas_of((display_info_id, display_type, inventory_type): Appearance) -> RgbaImage {
         let files = fixture_files();
-        let worn = crate::worn::of(&files, &hers(), display_info_id, display_type, inventory_type).unwrap();
+        let worn = crate::worn::of(
+            &files,
+            &hers(),
+            display_info_id,
+            display_type,
+            inventory_type,
+        )
+        .unwrap();
         let mut atlas = Atlas::unpainted(&hers());
         atlas.wear(&hers(), &files, &worn.textures);
-        image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
+        image::load_from_memory(&atlas.png().unwrap())
+            .unwrap()
+            .into_rgba8()
     }
 
     /// The atlas the app actually paints a body with: the skin, and an appearance over it.
     fn body_atlas(worn: Option<Appearance>) -> RgbaImage {
         let files = fixture_files();
         let worn = worn.map(|(display_info_id, display_type, inventory_type)| {
-            crate::worn::of(&files, &hers(), display_info_id, display_type, inventory_type).unwrap()
+            crate::worn::of(
+                &files,
+                &hers(),
+                display_info_id,
+                display_type,
+                inventory_type,
+            )
+            .unwrap()
         });
 
-        let png = Mannequin::standing(&files, &hers(), &[]).unwrap().atlas_png(worn.as_ref()).unwrap();
+        let png = Mannequin::standing(&files, &hers(), &[])
+            .unwrap()
+            .atlas_png(worn.as_ref())
+            .unwrap();
         image::load_from_memory(&png).unwrap().into_rgba8()
     }
 
@@ -807,8 +839,12 @@ mod tests {
     /// resolved against the neighbouring one.
     fn middle_of(atlas: &RgbaImage, section: u32) -> [u8; 4] {
         let hers = hers();
-        let rect = hers.rect_of(section).expect("the layout has a rectangle for that section");
-        atlas.get_pixel(rect.x + rect.width / 2, rect.y + rect.height / 4).0
+        let rect = hers
+            .rect_of(section)
+            .expect("the layout has a rectangle for that section");
+        atlas
+            .get_pixel(rect.x + rect.width / 2, rect.y + rect.height / 4)
+            .0
     }
 
     /// The scene the window is handed for one appearance worn on the body.
@@ -834,7 +870,10 @@ mod tests {
         // Sleeves, trousers, boots, a helm, a cape, a belt, another hairstyle: what an item
         // switches on instead, or what the player picked instead.
         for hidden in [802, 804, 1102, 1104, 2002, 2005, 2702, 2703, 1502, 1802, 2] {
-            assert!(!bare(hidden), "{hidden} is an item's variant and has to be hidden");
+            assert!(
+                !bare(hidden),
+                "{hidden} is an item's variant and has to be hidden"
+            );
         }
     }
 
@@ -846,16 +885,25 @@ mod tests {
     fn draws_each_part_of_the_body_once() {
         let body = mesh();
         let geosets = drawn(&body);
-        assert_eq!(geosets, vec![0, 801, 1101, 2001, 2701, 2, 1001, 1301, 501, 3202, 702, 1701, 2101]);
+        assert_eq!(
+            geosets,
+            vec![0, 801, 1101, 2001, 2701, 2, 1001, 1301, 501, 3202, 702, 1701, 2101]
+        );
 
         // One group, one part — for every group but the hair's, which is group 0 and which
         // the skin shares because the skin is the one geoset with no group of its own.
-        let mut groups: Vec<u16> = geosets.iter().filter(|geoset| **geoset != 0)
-            .map(|geoset| geoset / 100).collect();
+        let mut groups: Vec<u16> = geosets
+            .iter()
+            .filter(|geoset| **geoset != 0)
+            .map(|geoset| geoset / 100)
+            .collect();
         groups.sort_unstable();
         let mut distinct = groups.clone();
         distinct.dedup();
-        assert_eq!(groups, distinct, "a group drawn twice is a limb drawn twice");
+        assert_eq!(
+            groups, distinct,
+            "a group drawn twice is a limb drawn twice"
+        );
     }
 
     // The head, which is the one part of a body no appearance ever asks for and no rule about
@@ -869,9 +917,15 @@ mod tests {
     fn draws_the_head_and_ears_her_own_customization_names() {
         let geosets = drawn(&mesh());
         assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
-        assert!(!geosets.contains(&3201), "and not the scrap beside it: {geosets:?}");
+        assert!(
+            !geosets.contains(&3201),
+            "and not the scrap beside it: {geosets:?}"
+        );
         assert!(geosets.contains(&702), "she has no ears: {geosets:?}");
-        assert!(!geosets.contains(&3601), "she is wearing jewellery nobody chose: {geosets:?}");
+        assert!(
+            !geosets.contains(&3601),
+            "she is wearing jewellery nobody chose: {geosets:?}"
+        );
         // And the hairstyle she was given rather than the first the file happens to hold.
         assert!(geosets.contains(&2), "{geosets:?}");
         assert!(!geosets.contains(&1), "{geosets:?}");
@@ -903,9 +957,15 @@ mod tests {
     // part in it cannot have come from her mesh however the rest of this went.
     #[test]
     fn draws_the_body_it_was_asked_for_rather_than_the_one_it_always_drew() {
-        let his = his_mesh(&[Picked { question: 42, swatch: 421 }]);
+        let his = his_mesh(&[Picked {
+            question: 42,
+            swatch: 421,
+        }]);
         assert!(his.contains(&101), "his beard: {his:?}");
-        assert!(!drawn(&mesh()).contains(&101), "the female body has no group 1 to draw");
+        assert!(
+            !drawn(&mesh()).contains(&101),
+            "the female body has no group 1 to draw"
+        );
         // And his own hairstyle, out of a question only his body is asked.
         assert!(his.contains(&2), "his hairstyle: {his:?}");
     }
@@ -922,7 +982,11 @@ mod tests {
         let atlas = image::load_from_memory(&png).unwrap().into_rgba8();
 
         assert_eq!((atlas.width(), atlas.height()), his.atlas);
-        assert_ne!(his.atlas, hers().atlas, "the two layouts have to differ to prove anything");
+        assert_ne!(
+            his.atlas,
+            hers().atlas,
+            "the two layouts have to differ to prove anything"
+        );
         // The colour his own skin swatch paints, over the whole buffer — and not hers.
         assert_eq!(atlas.get_pixel(1, 1).0, [90, 90, 90, 255]);
     }
@@ -954,9 +1018,15 @@ mod tests {
     fn draws_the_hairstyle_the_reader_chose_rather_than_the_one_the_game_opens_on() {
         let files = fixture_files();
         let hers = hers();
-        let herself =
-            crate::customization::of(&files, &hers, &[Picked { question: 16, swatch: 133 }])
-                .unwrap();
+        let herself = crate::customization::of(
+            &files,
+            &hers,
+            &[Picked {
+                question: 16,
+                swatch: 133,
+            }],
+        )
+        .unwrap();
         let model = Model::parse(&files.read(hers.model).unwrap()).unwrap();
         let skin = model.skin_file_data_id().unwrap();
         let body = model.with_skin(&files.read(skin).unwrap()).unwrap();
@@ -964,7 +1034,10 @@ mod tests {
         let geosets = drawn(&dressed(&body, None, herself.as_ref()));
 
         assert!(geosets.contains(&1), "the hairstyle she chose: {geosets:?}");
-        assert!(!geosets.contains(&2), "and not the one the game opens on: {geosets:?}");
+        assert!(
+            !geosets.contains(&2),
+            "and not the one the game opens on: {geosets:?}"
+        );
         assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
         assert!(geosets.contains(&702), "she has no ears: {geosets:?}");
     }
@@ -981,18 +1054,30 @@ mod tests {
         let body = body_of(&[0, 3201, 3202, 702, 703, 801, 802]);
         // Everything she is asked about, which on such a body is her hairstyle and no more.
         let herself = Customization {
-            geosets: vec![Geoset { group: 0, geoset: 2 }],
+            geosets: vec![Geoset {
+                group: 0,
+                geoset: 2,
+            }],
             ..Default::default()
         };
 
         let geosets = drawn(&dressed(&body, None, Some(&herself)));
 
         assert!(geosets.contains(&3202), "he has no head: {geosets:?}");
-        assert!(!geosets.contains(&3201), "only the stub a helm leaves: {geosets:?}");
+        assert!(
+            !geosets.contains(&3201),
+            "only the stub a helm leaves: {geosets:?}"
+        );
         assert!(geosets.contains(&702), "he has no ears: {geosets:?}");
-        assert!(!geosets.contains(&703), "and only the one pair: {geosets:?}");
+        assert!(
+            !geosets.contains(&703),
+            "and only the one pair: {geosets:?}"
+        );
         // The armour groups keep the convention that is theirs: bare arms rather than sleeves.
-        assert!(geosets.contains(&801) && !geosets.contains(&802), "{geosets:?}");
+        assert!(
+            geosets.contains(&801) && !geosets.contains(&802),
+            "{geosets:?}"
+        );
     }
 
     // And the floor under it, which is the one this repository keeps everywhere else: a value
@@ -1003,7 +1088,10 @@ mod tests {
     fn keeps_the_only_head_a_body_holds_whichever_value_it_is() {
         let body = body_of(&[0, 3201]);
         let geosets = drawn(&dressed(&body, None, None));
-        assert!(geosets.contains(&3201), "he has no head at all: {geosets:?}");
+        assert!(
+            geosets.contains(&3201),
+            "he has no head at all: {geosets:?}"
+        );
     }
 
     /// A body holding exactly the geosets named, one part each, and nothing else about it.
@@ -1031,7 +1119,10 @@ mod tests {
     #[test]
     fn selects_the_eye_glow_and_leaves_it_out_of_the_picture() {
         let body = mesh();
-        assert!(drawn(&body).contains(&1701), "the glow is one of the parts a bare body draws");
+        assert!(
+            drawn(&body).contains(&1701),
+            "the glow is one of the parts a bare body draws"
+        );
 
         let scene = scene(&glb_of(&fixture_files(), None, &Who::default()).unwrap());
         assert_eq!(
@@ -1047,10 +1138,18 @@ mod tests {
     #[test]
     fn draws_a_default_geoset_that_sits_past_the_first_64k_indices() {
         let body = mesh();
-        let skull = body.parts.iter().find(|part| part.geoset == 2101).expect("the body has a skull");
+        let skull = body
+            .parts
+            .iter()
+            .find(|part| part.geoset == 2101)
+            .expect("the body has a skull");
         // The generator puts each geoset on a cube of its own, eight vertices at a time, and
         // the skull's is the eleventh.
-        assert!(skull.indices.iter().all(|index| (80..88).contains(index)), "{:?}", &skull.indices[..6]);
+        assert!(
+            skull.indices.iter().all(|index| (80..88).contains(index)),
+            "{:?}",
+            &skull.indices[..6]
+        );
     }
 
     // A body asks for its pictures by type, and the types are different pictures. Type 1 is the
@@ -1069,7 +1168,10 @@ mod tests {
             }
         })])
         .unwrap();
-        assert_eq!(asked.into_inner(), vec![Paint::Supplied(1), Paint::Supplied(6)]);
+        assert_eq!(
+            asked.into_inner(),
+            vec![Paint::Supplied(1), Paint::Supplied(6)]
+        );
     }
 
     // And the hair is handed a picture rather than nothing, which is the whole of the difference
@@ -1077,15 +1179,19 @@ mod tests {
     // is drawn in glTF's default colour, and on a head that reads as a mask.
     #[test]
     fn paints_the_hair_with_the_atlas_of_its_own_rather_than_leaving_it_white() {
-        let herself = crate::customization::of(&fixture_files(), &hers(), &[]).unwrap().expect("a character");
+        let herself = crate::customization::of(&fixture_files(), &hers(), &[])
+            .unwrap()
+            .expect("a character");
         assert_eq!(herself.atlases, vec![(6, 160_007), (19, 160_008)]);
 
         let scene = scene(&glb_of(&fixture_files(), None, &Who::default()).unwrap());
         let materials = scene["materials"].as_array().unwrap();
         assert!(
-            materials.iter().all(|material| material["pbrMetallicRoughness"]
-                .get("baseColorTexture")
-                .is_some()),
+            materials
+                .iter()
+                .all(|material| material["pbrMetallicRoughness"]
+                    .get("baseColorTexture")
+                    .is_some()),
             "{materials:?}"
         );
         // The body's own atlas and the hair's, and no third picture: the eyes' atlas is hers
@@ -1109,13 +1215,20 @@ mod tests {
     #[test]
     fn lays_the_base_skin_over_the_whole_atlas() {
         let mut atlas = Atlas::unpainted(&hers());
-        atlas.base(&hers(), &fixture_files().read(BASE_SKIN).unwrap()).unwrap();
-        let decoded = image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8();
+        atlas
+            .base(&hers(), &fixture_files().read(BASE_SKIN).unwrap())
+            .unwrap();
+        let decoded = image::load_from_memory(&atlas.png().unwrap())
+            .unwrap()
+            .into_rgba8();
         assert_eq!((decoded.width(), decoded.height()), (2048, 1024));
 
         // A quarter of the fixture skin per quarter of the atlas, sampled well inside each so
         // that the linear filter's seams are not what is being measured.
-        for (quadrant, (x, y)) in [(256, 128), (1792, 128), (256, 896), (1792, 896)].iter().enumerate() {
+        for (quadrant, (x, y)) in [(256, 128), (1792, 128), (256, 896), (1792, 896)]
+            .iter()
+            .enumerate()
+        {
             let pixel = decoded.get_pixel(*x, *y);
             assert_eq!(
                 [pixel[0], pixel[1], pixel[2]],
@@ -1133,8 +1246,15 @@ mod tests {
         let atlas = body_atlas(None);
         for (quadrant, (x, y)) in [(0, (256, 128)), (2, (256, 896))] {
             let pixel = atlas.get_pixel(x, y).0;
-            assert_ne!(pixel, UNPAINTED, "the body is still the unpainted tone at {x},{y}");
-            assert_eq!([pixel[0], pixel[1], pixel[2]], QUADRANTS[quadrant], "at {x},{y}");
+            assert_ne!(
+                pixel, UNPAINTED,
+                "the body is still the unpainted tone at {x},{y}"
+            );
+            assert_eq!(
+                [pixel[0], pixel[1], pixel[2]],
+                QUADRANTS[quadrant],
+                "at {x},{y}"
+            );
         }
     }
 
@@ -1145,7 +1265,11 @@ mod tests {
     fn paints_her_face_into_the_half_of_the_atlas_the_head_reads() {
         let atlas = body_atlas(None);
         assert_eq!(middle_of(&atlas, 10), [230, 170, 60, 255], "the face");
-        assert_eq!(middle_of(&atlas, 9), middle_of(&atlas, 10), "which the scalp shares");
+        assert_eq!(
+            middle_of(&atlas, 9),
+            middle_of(&atlas, 10),
+            "which the scalp shares"
+        );
         // And nowhere else: sections 9 and 10 are one rectangle, and it is not the torso's.
         assert_ne!(middle_of(&atlas, 3), middle_of(&atlas, 10));
     }
@@ -1164,7 +1288,11 @@ mod tests {
         assert_eq!(middle_of(&bare, 4), middle_of(&bare, 0));
 
         let chestpiece = body_atlas(Some(CHESTPIECE));
-        assert_eq!(middle_of(&chestpiece, 3), [40, 160, 220, 255], "and armour goes over it");
+        assert_eq!(
+            middle_of(&chestpiece, 3),
+            [40, 160, 220, 255],
+            "and armour goes over it"
+        );
     }
 
     // And the other half of it: an appearance worn on that body still lands where the layout
@@ -1180,12 +1308,24 @@ mod tests {
         assert_eq!(middle_of(&robe, 3), [240, 130, 20, 255]); // upper torso
         assert_eq!(middle_of(&robe, 5), [70, 20, 190, 255]); // upper legs
         assert_eq!(middle_of(&robe, 6), [200, 240, 40, 255]); // lower legs
-        assert_eq!(middle_of(&robe, 0), middle_of(&bare, 0), "a sleeveless robe leaves the arm");
+        assert_eq!(
+            middle_of(&robe, 0),
+            middle_of(&bare, 0),
+            "a sleeveless robe leaves the arm"
+        );
 
         let chestpiece = body_atlas(Some(CHESTPIECE));
         assert_eq!(middle_of(&chestpiece, 0), [90, 200, 60, 255]); // upper arms
-        assert_eq!(middle_of(&chestpiece, 5), middle_of(&bare, 5), "the chestpiece paints no legs");
-        assert_ne!(middle_of(&bare, 5), UNPAINTED, "and what is left there is skin");
+        assert_eq!(
+            middle_of(&chestpiece, 5),
+            middle_of(&bare, 5),
+            "the chestpiece paints no legs"
+        );
+        assert_ne!(
+            middle_of(&bare, 5),
+            UNPAINTED,
+            "and what is left there is skin"
+        );
     }
 
     // The trap the base is the other side of: a sleeveless chestpiece is transparent where the
@@ -1207,12 +1347,17 @@ mod tests {
     fn hands_the_window_a_body_to_turn_around() {
         let answer = model_of(&fixture_files(), &Who::default()).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
-        let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
+        let encoded = url
+            .strip_prefix("data:model/gltf-binary;base64,")
+            .expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
         let scene = scene(&STANDARD.decode(encoded).unwrap());
 
         assert_eq!(scene["asset"]["version"], "2.0");
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 12);
+        assert_eq!(
+            scene["meshes"][0]["primitives"].as_array().unwrap().len(),
+            12
+        );
         // Two pictures: the composited atlas, and the hair's, which is an atlas of its own.
         assert_eq!(scene["images"].as_array().unwrap().len(), 2);
         assert_eq!(scene["images"][0]["mimeType"], "image/png");
@@ -1253,8 +1398,11 @@ mod tests {
         for appearance in [CHESTPIECE, BOOTS, ROBE] {
             let body = worn_mesh(&worn_of(appearance));
             assert_eq!(body.parts.len(), bare, "{appearance:?}");
-            let mut groups: Vec<u16> = drawn(&body).iter().filter(|geoset| **geoset != 0)
-                .map(|geoset| geoset / 100).collect();
+            let mut groups: Vec<u16> = drawn(&body)
+                .iter()
+                .filter(|geoset| **geoset != 0)
+                .map(|geoset| geoset / 100)
+                .collect();
             groups.sort_unstable();
             let mut distinct = groups.clone();
             distinct.dedup();
@@ -1267,7 +1415,16 @@ mod tests {
     // simply absent is the worst way to be wrong about a geoset, and this is what rules it out.
     #[test]
     fn leaves_a_group_alone_when_the_body_holds_nothing_it_asks_for() {
-        let absent = [Geoset { group: 11, geoset: 1177 }, Geoset { group: 4, geoset: 402 }];
+        let absent = [
+            Geoset {
+                group: 11,
+                geoset: 1177,
+            },
+            Geoset {
+                group: 4,
+                geoset: 402,
+            },
+        ];
         assert_eq!(drawn(&geoset_mesh(&absent)), drawn(&mesh()));
     }
 
@@ -1281,9 +1438,9 @@ mod tests {
         assert_eq!(middle_of(&atlas, 1), [120, 40, 200, 255]); // lower arms
         assert_eq!(middle_of(&atlas, 3), [40, 160, 220, 255]); // upper torso
         assert_eq!(middle_of(&atlas, 4), [30, 210, 170, 255]); // lower torso
-        // The parts of the body it does not paint keep the tone underneath. The legs are the
-        // ones worth naming: they sit directly under the torso in the atlas, so a rectangle
-        // one row too tall shows up here rather than anywhere else.
+                                                               // The parts of the body it does not paint keep the tone underneath. The legs are the
+                                                               // ones worth naming: they sit directly under the torso in the atlas, so a rectangle
+                                                               // one row too tall shows up here rather than anywhere else.
         assert_eq!(middle_of(&atlas, 5), UNPAINTED);
         assert_eq!(middle_of(&atlas, 7), UNPAINTED);
 
@@ -1306,9 +1463,17 @@ mod tests {
         let arms = hers.rect_of(0).unwrap();
         // The upper-arm texture is painted for its top half and empty for its bottom one, so
         // the sleeve is there and the arm below it is still the body.
-        assert_eq!(atlas.get_pixel(arms.x + arms.width / 2, arms.y + arms.height / 4).0, [90, 200, 60, 255]);
+        assert_eq!(
+            atlas
+                .get_pixel(arms.x + arms.width / 2, arms.y + arms.height / 4)
+                .0,
+            [90, 200, 60, 255]
+        );
         let below = atlas.get_pixel(arms.x + arms.width / 2, arms.y + arms.height - 8);
-        assert_eq!(below.0, UNPAINTED, "a transparent sleeve punched a hole in the arm");
+        assert_eq!(
+            below.0, UNPAINTED,
+            "a transparent sleeve punched a hole in the arm"
+        );
     }
 
     // The other trap: armour textures are authored a few dozen pixels tall and land in
@@ -1320,13 +1485,21 @@ mod tests {
         let atlas = atlas_of(CHESTPIECE);
         let hers = hers();
         let torso = hers.rect_of(3).unwrap();
-        let seam = atlas.get_pixel(torso.x + torso.width / 2, torso.y + torso.height / 2).0;
+        let seam = atlas
+            .get_pixel(torso.x + torso.width / 2, torso.y + torso.height / 2)
+            .0;
         let (top, bottom) = ([40, 160, 220, 255], [220, 60, 140, 255]);
         assert_ne!(seam, top);
         assert_ne!(seam, bottom);
         for channel in 0..3 {
-            let (low, high) = (top[channel].min(bottom[channel]), top[channel].max(bottom[channel]));
-            assert!((low..=high).contains(&seam[channel]), "{seam:?} is not between the two bands");
+            let (low, high) = (
+                top[channel].min(bottom[channel]),
+                top[channel].max(bottom[channel]),
+            );
+            assert!(
+                (low..=high).contains(&seam[channel]),
+                "{seam:?} is not between the two bands"
+            );
         }
     }
 
@@ -1359,10 +1532,15 @@ mod tests {
     fn hands_the_window_a_body_with_one_appearance_on_it() {
         let answer = worn_set_of(&fixture_files(), &[piece(ROBE)], &Who::default()).unwrap();
         let url = answer["model"].as_str().expect("the answer holds a model");
-        let encoded = url.strip_prefix("data:model/gltf-binary;base64,").expect(url);
+        let encoded = url
+            .strip_prefix("data:model/gltf-binary;base64,")
+            .expect(url);
         use base64::{engine::general_purpose::STANDARD, Engine};
         let scene = scene(&STANDARD.decode(encoded).unwrap());
-        assert_eq!(scene["meshes"][0]["primitives"].as_array().unwrap().len(), 12);
+        assert_eq!(
+            scene["meshes"][0]["primitives"].as_array().unwrap().len(),
+            12
+        );
         assert_eq!(scene["images"].as_array().unwrap().len(), 2);
     }
 
@@ -1371,12 +1549,20 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_an_appearance_it_cannot_read() {
         for display in [900_900, 404_040] {
-            let answer = worn_set_of(&fixture_files(), &[piece((display, CHESTPIECE.1, 0))], &Who::default()).unwrap();
+            let answer = worn_set_of(
+                &fixture_files(),
+                &[piece((display, CHESTPIECE.1, 0))],
+                &Who::default(),
+            )
+            .unwrap();
             assert_eq!(answer["model"], Value::Null, "display {display}");
         }
         // And an outfit with nothing in it at all, which is what taking every piece off comes
         // to: the same `null`, and the window falls back to the bare body it already holds.
-        assert_eq!(worn_set_of(&fixture_files(), &[], &Who::default()).unwrap()["model"], Value::Null);
+        assert_eq!(
+            worn_set_of(&fixture_files(), &[], &Who::default()).unwrap()["model"],
+            Value::Null
+        );
     }
 
     /* ---------- wearing the four slots that have geometry ---------- */
@@ -1396,7 +1582,10 @@ mod tests {
             ])
         );
         // Geometry, not merely a node: the helm's own cube, whole.
-        assert_eq!(scene["meshes"][1]["primitives"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            scene["meshes"][1]["primitives"].as_array().unwrap().len(),
+            1
+        );
     }
 
     // And for a pair of shoulders: two pads, on the two shoulders, either side of her. One pad
@@ -1437,7 +1626,10 @@ mod tests {
     #[test]
     fn a_helm_that_hides_hair_hides_it_and_leaves_the_body_on() {
         let bare = drawn(&mesh());
-        assert!(bare.contains(&2), "a bare body wears the hairstyle she was given");
+        assert!(
+            bare.contains(&2),
+            "a bare body wears the hairstyle she was given"
+        );
 
         let helmed = drawn(&worn_mesh(&worn_of(HELM)));
         assert!(!helmed.contains(&2), "the helm covers the hair");
@@ -1446,7 +1638,10 @@ mod tests {
         assert!(!helmed.contains(&1));
         // And nothing else: the helm's own group swaps as any item's does, and every other
         // group is where a bare body left it.
-        assert_eq!(helmed, vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 3202, 702, 1701, 2101]);
+        assert_eq!(
+            helmed,
+            vec![0, 801, 1101, 2001, 2702, 1001, 1301, 501, 3202, 702, 1701, 2101]
+        );
     }
 
     // Taking it off puts the hair back, which is the same sentence read the other way: the
@@ -1473,15 +1668,31 @@ mod tests {
         let held = &right["nodes"][1];
         assert_eq!(held["translation"], serde_json::json!([1.0, 0.5, 3.5]));
         assert_eq!(held["scale"], serde_json::json!([0.8, 0.8, 0.8]));
-        let roll = |node: &Value| node["rotation"][0].as_f64().expect("a roll about the X axis");
+        let roll = |node: &Value| {
+            node["rotation"][0]
+                .as_f64()
+                .expect("a roll about the X axis")
+        };
         assert!(roll(held) > 0.7, "{held}");
         // Geometry, and not merely a node: the weapon's two submeshes, whole.
-        assert_eq!(right["meshes"][1]["primitives"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            right["meshes"][1]["primitives"].as_array().unwrap().len(),
+            2
+        );
 
         let left = worn_scene(OFF_HAND);
-        assert_eq!(left["nodes"][1]["translation"], serde_json::json!([1.0, 0.5, -3.5]));
-        assert!(roll(&left["nodes"][1]) < -0.7, "the other hand grips the other way");
-        assert_eq!(right["meshes"], left["meshes"], "the same weapon, the other hand");
+        assert_eq!(
+            left["nodes"][1]["translation"],
+            serde_json::json!([1.0, 0.5, -3.5])
+        );
+        assert!(
+            roll(&left["nodes"][1]) < -0.7,
+            "the other hand grips the other way"
+        );
+        assert_eq!(
+            right["meshes"], left["meshes"],
+            "the same weapon, the other hand"
+        );
     }
 
     // A shield is neither hand: it hangs off the arm, and on the real body off a bone the
@@ -1490,7 +1701,10 @@ mod tests {
     fn hangs_a_shield_off_her_arm() {
         let scene = worn_scene(SHIELD);
         assert_eq!(scene["nodes"].as_array().unwrap().len(), 2);
-        assert_eq!(scene["nodes"][1]["translation"], serde_json::json!([0.0, 2.0, -3.0]));
+        assert_eq!(
+            scene["nodes"][1]["translation"],
+            serde_json::json!([0.0, 2.0, -3.0])
+        );
     }
 
     // And the body underneath is untouched by any of it. A weapon paints nothing into the
@@ -1514,7 +1728,9 @@ mod tests {
         let files = fixture_files();
         let mut atlas = Atlas::unpainted(&hers());
         atlas.wear(&hers(), &files, &outfit_of(appearances).textures);
-        image::load_from_memory(&atlas.png().unwrap()).unwrap().into_rgba8()
+        image::load_from_memory(&atlas.png().unwrap())
+            .unwrap()
+            .into_rgba8()
     }
 
     // The acceptance, from the far end of the pipe: a set on one body, with no doubled limbs and
@@ -1552,7 +1768,10 @@ mod tests {
         groups.sort_unstable();
         let mut distinct = groups.clone();
         distinct.dedup();
-        assert_eq!(groups, distinct, "a group drawn twice is a limb drawn twice");
+        assert_eq!(
+            groups, distinct,
+            "a group drawn twice is a limb drawn twice"
+        );
 
         // And nothing went missing: a bare body draws ten parts and this draws nine, the one
         // difference being the hairstyle the helm covers.
@@ -1583,10 +1802,18 @@ mod tests {
     fn paints_two_pieces_that_share_a_rectangle_in_the_order_they_composite() {
         for order in [[ROBE, BOOTS], [BOOTS, ROBE]] {
             let atlas = outfit_atlas(&order);
-            assert_eq!(middle_of(&atlas, 6), [200, 240, 40, 255], "the robe's lower legs");
+            assert_eq!(
+                middle_of(&atlas, 6),
+                [200, 240, 40, 255],
+                "the robe's lower legs"
+            );
             // And each piece still owns the rectangles nothing contests.
             assert_eq!(middle_of(&atlas, 7), [20, 100, 240, 255], "the boots' feet");
-            assert_eq!(middle_of(&atlas, 3), [240, 130, 20, 255], "the robe's torso");
+            assert_eq!(
+                middle_of(&atlas, 3),
+                [240, 130, 20, 255],
+                "the robe's torso"
+            );
         }
     }
 
@@ -1598,10 +1825,20 @@ mod tests {
         let files = fixture_files();
         let over = |first, second| {
             let mut atlas = Atlas::unpainted(&hers());
-            atlas.wear(&hers(), &files, &[
-                ComponentTexture { section: 6, file: first },
-                ComponentTexture { section: 6, file: second },
-            ]);
+            atlas.wear(
+                &hers(),
+                &files,
+                &[
+                    ComponentTexture {
+                        section: 6,
+                        file: first,
+                    },
+                    ComponentTexture {
+                        section: 6,
+                        file: second,
+                    },
+                ],
+            );
             let png = atlas.png().unwrap();
             middle_of(&image::load_from_memory(&png).unwrap().into_rgba8(), 6)
         };
@@ -1636,9 +1873,18 @@ mod tests {
         let robe = worn_of(ROBE);
         let helm = worn_of(HELM);
         for (name, written) in [
-            ("character.glb", glb_of(&fixture_files(), None, &Who::default()).unwrap()),
-            ("robe.glb", glb_of(&fixture_files(), Some(&robe), &Who::default()).unwrap()),
-            ("worn-helm.glb", glb_of(&fixture_files(), Some(&helm), &Who::default()).unwrap()),
+            (
+                "character.glb",
+                glb_of(&fixture_files(), None, &Who::default()).unwrap(),
+            ),
+            (
+                "robe.glb",
+                glb_of(&fixture_files(), Some(&robe), &Who::default()).unwrap(),
+            ),
+            (
+                "worn-helm.glb",
+                glb_of(&fixture_files(), Some(&helm), &Who::default()).unwrap(),
+            ),
         ] {
             let committed = std::fs::read(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1692,13 +1938,28 @@ mod tests {
     fn finds_one_of_the_readers_own_characters_by_name() {
         let looks = vec![
             played("Zia-Vale", HUMAN, vec![]),
-            played("Aster-Vale", HUMAN, vec![Picked { question: 14, swatch: 133 }]),
+            played(
+                "Aster-Vale",
+                HUMAN,
+                vec![Picked {
+                    question: 14,
+                    swatch: 133,
+                }],
+            ),
         ];
 
-        let who = who_is(&fixture_files(), &looks, "Aster-Vale").unwrap().unwrap();
+        let who = who_is(&fixture_files(), &looks, "Aster-Vale")
+            .unwrap()
+            .unwrap();
 
         assert_eq!(who.body, HUMAN_FEMALE);
-        assert_eq!(who.picked, vec![Picked { question: 14, swatch: 133 }]);
+        assert_eq!(
+            who.picked,
+            vec![Picked {
+                question: 14,
+                swatch: 133
+            }]
+        );
     }
 
     /// Which is most of a roster, and is why the caller has a body of its own to fall back on.
@@ -1706,7 +1967,10 @@ mod tests {
     fn finds_nobody_for_a_character_the_addon_has_never_read_a_race_off() {
         let looks = vec![played("Zia-Vale", HUMAN, vec![])];
 
-        assert_eq!(who_is(&fixture_files(), &looks, "Aster-Vale").unwrap(), None);
+        assert_eq!(
+            who_is(&fixture_files(), &looks, "Aster-Vale").unwrap(),
+            None
+        );
     }
 
     /// Two Asters on two realms are two people, and the whole database files them apart by the
@@ -1714,12 +1978,34 @@ mod tests {
     #[test]
     fn tells_two_characters_of_one_name_on_two_realms_apart() {
         let looks = vec![
-            played("Aster-Vale", HUMAN, vec![Picked { question: 14, swatch: 133 }]),
-            played("Aster-Ridge", HUMAN, vec![Picked { question: 14, swatch: 21 }]),
+            played(
+                "Aster-Vale",
+                HUMAN,
+                vec![Picked {
+                    question: 14,
+                    swatch: 133,
+                }],
+            ),
+            played(
+                "Aster-Ridge",
+                HUMAN,
+                vec![Picked {
+                    question: 14,
+                    swatch: 21,
+                }],
+            ),
         ];
 
-        let who = who_is(&fixture_files(), &looks, "Aster-Ridge").unwrap().unwrap();
+        let who = who_is(&fixture_files(), &looks, "Aster-Ridge")
+            .unwrap()
+            .unwrap();
 
-        assert_eq!(who.picked, vec![Picked { question: 14, swatch: 21 }]);
+        assert_eq!(
+            who.picked,
+            vec![Picked {
+                question: 14,
+                swatch: 21
+            }]
+        );
     }
 }

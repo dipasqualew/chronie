@@ -145,7 +145,9 @@ pub fn run_within(
     connection.progress_handler(PROGRESS_STEPS, Some(move || Instant::now() > deadline));
 
     let started = Instant::now();
-    let mut prepared = connection.prepare(statement).map_err(|error| explain(&error, budget))?;
+    let mut prepared = connection
+        .prepare(statement)
+        .map_err(|error| explain(&error, budget))?;
     if !prepared.readonly() {
         return Err("That statement would change the history, so Chronie did not run it.".into());
     }
@@ -164,7 +166,9 @@ pub fn run_within(
 
     let mut rows = Vec::new();
     let mut truncated = false;
-    let mut cursor = prepared.query([]).map_err(|error| explain(&error, budget))?;
+    let mut cursor = prepared
+        .query([])
+        .map_err(|error| explain(&error, budget))?;
     // One row past the limit, so "there was more" is something that was observed rather than
     // guessed at from a full page.
     while let Some(row) = cursor.next().map_err(|error| explain(&error, budget))? {
@@ -231,9 +235,11 @@ pub fn schema(database_path: &Path) -> Result<Schema, String> {
             None
         } else {
             connection
-                .query_row(&format!("SELECT COUNT(*) FROM {}", quoted(&name)), [], |row| {
-                    row.get::<_, i64>(0)
-                })
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {}", quoted(&name)),
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
                 .ok()
         };
         tables.push(Table {
@@ -448,7 +454,8 @@ mod tests {
 
     #[test]
     fn answers_with_the_columns_and_rows_a_select_asked_for() {
-        let answer = ask("SELECT instance_name, duration_seconds FROM segments ORDER BY id").unwrap();
+        let answer =
+            ask("SELECT instance_name, duration_seconds FROM segments ORDER BY id").unwrap();
         assert_eq!(answer.columns, ["instance_name", "duration_seconds"]);
         assert_eq!(
             answer.rows,
@@ -464,7 +471,8 @@ mod tests {
     /// The reason numbers are not stringified on the way over: the chart plots what it is given.
     #[test]
     fn keeps_numbers_as_numbers_and_nulls_as_null() {
-        let answer = ask("SELECT AVG(duration_seconds), note FROM segments WHERE note IS NULL").unwrap();
+        let answer =
+            ask("SELECT AVG(duration_seconds), note FROM segments WHERE note IS NULL").unwrap();
         assert_eq!(answer.rows[0][0], Value::from(1650.0));
         assert_eq!(answer.rows[0][1], Value::Null);
     }
@@ -509,7 +517,10 @@ mod tests {
             "ALTER TABLE segments RENAME TO gone",
         ] {
             let refused = ask(sql).expect_err(sql);
-            assert!(refused.contains("only runs queries that read"), "{sql}: {refused}");
+            assert!(
+                refused.contains("only runs queries that read"),
+                "{sql}: {refused}"
+            );
         }
     }
 
@@ -517,9 +528,16 @@ mod tests {
     /// two of them change the file on disk.
     #[test]
     fn refuses_the_statements_sqlite_itself_calls_read_only() {
-        for sql in ["PRAGMA journal_mode = DELETE", "VACUUM", "ATTACH '/tmp/other.db' AS other"] {
+        for sql in [
+            "PRAGMA journal_mode = DELETE",
+            "VACUUM",
+            "ATTACH '/tmp/other.db' AS other",
+        ] {
             let refused = ask(sql).expect_err(sql);
-            assert!(refused.contains("only runs queries that read"), "{sql}: {refused}");
+            assert!(
+                refused.contains("only runs queries that read"),
+                "{sql}: {refused}"
+            );
         }
     }
 
@@ -546,7 +564,10 @@ mod tests {
     #[test]
     fn a_trailing_semicolon_is_not_a_second_statement() {
         assert_eq!(ask("SELECT 1;").unwrap().rows, vec![vec![Value::from(1)]]);
-        assert_eq!(ask("SELECT 1;  -- done\n").unwrap().rows, vec![vec![Value::from(1)]]);
+        assert_eq!(
+            ask("SELECT 1;  -- done\n").unwrap().rows,
+            vec![vec![Value::from(1)]]
+        );
     }
 
     #[test]
@@ -565,14 +586,23 @@ mod tests {
 
     #[test]
     fn reads_past_a_leading_comment_to_find_the_keyword() {
-        assert_eq!(ask("-- gold per instance\nSELECT 1").unwrap().rows[0][0], Value::from(1));
-        assert_eq!(ask("/* gold */ SELECT 2").unwrap().rows[0][0], Value::from(2));
+        assert_eq!(
+            ask("-- gold per instance\nSELECT 1").unwrap().rows[0][0],
+            Value::from(1)
+        );
+        assert_eq!(
+            ask("/* gold */ SELECT 2").unwrap().rows[0][0],
+            Value::from(2)
+        );
     }
 
     #[test]
     fn an_empty_query_is_asked_for_rather_than_run() {
         for sql in ["", "   \n  ", "-- nothing but a thought\n"] {
-            assert!(ask(sql).unwrap_err().contains("Write a query first"), "{sql:?}");
+            assert!(
+                ask(sql).unwrap_err().contains("Write a query first"),
+                "{sql:?}"
+            );
         }
     }
 
@@ -623,12 +653,26 @@ mod tests {
     fn describes_the_tables_a_query_could_name() {
         let (_held, path) = history();
         let schema = schema(&path).unwrap();
-        let segments = schema.tables.iter().find(|table| table.name == "segments").unwrap();
+        let segments = schema
+            .tables
+            .iter()
+            .find(|table| table.name == "segments")
+            .unwrap();
         assert!(!segments.view);
         assert_eq!(segments.row_count, Some(3));
         assert_eq!(
-            segments.columns.iter().map(|column| column.name.as_str()).collect::<Vec<_>>(),
-            ["id", "instance_name", "duration_seconds", "loot_value", "note"]
+            segments
+                .columns
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "id",
+                "instance_name",
+                "duration_seconds",
+                "loot_value",
+                "note"
+            ]
         );
         assert_eq!(segments.columns[0].kind, "INTEGER");
         assert!(segments.columns[0].primary_key);
@@ -641,7 +685,11 @@ mod tests {
     fn lists_views_without_counting_them() {
         let (_held, path) = history();
         let schema = schema(&path).unwrap();
-        let view = schema.tables.iter().find(|table| table.name == "long_ones").unwrap();
+        let view = schema
+            .tables
+            .iter()
+            .find(|table| table.name == "long_ones")
+            .unwrap();
         assert!(view.view);
         assert_eq!(view.row_count, None);
         assert_eq!(view.columns.len(), 5);
@@ -651,6 +699,9 @@ mod tests {
     fn leaves_sqlites_own_bookkeeping_out_of_the_listing() {
         let (_held, path) = history();
         let schema = schema(&path).unwrap();
-        assert!(!schema.tables.iter().any(|table| table.name.starts_with("sqlite_")));
+        assert!(!schema
+            .tables
+            .iter()
+            .any(|table| table.name.starts_with("sqlite_")));
     }
 }

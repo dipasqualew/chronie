@@ -17,8 +17,8 @@
 //! the fact that a pauldron is worn at 62% of the size it was modelled. Blank means the bone
 //! says nothing and the thing hanging there is left where it was authored.
 
-use chronie_desktop_lib::casc;
 use chronie_desktop_lib::body;
+use chronie_desktop_lib::casc;
 use chronie_desktop_lib::m2::{self, Model};
 
 /// What the community calls each of the attachments this app might hang something off.

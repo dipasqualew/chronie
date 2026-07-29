@@ -225,7 +225,8 @@ impl CascFiles {
         };
 
         storage.encoding = {
-            let held = tracing::info_span!("casc.encoding", bytes = tracing::field::Empty).entered();
+            let held =
+                tracing::info_span!("casc.encoding", bytes = tracing::field::Empty).entered();
             let bytes = storage.fetch(&parse_key(encoding_ekey)?)?;
             held.record("bytes", bytes.len());
             Encoding::parse(bytes)?
@@ -663,7 +664,10 @@ impl<T: GameFiles> Remembered<T> {
 
     /// How many bytes of decoded files are being held.
     pub fn weight(&self) -> usize {
-        self.held.lock().unwrap_or_else(|held| held.into_inner()).bytes
+        self.held
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .bytes
     }
 }
 
@@ -749,8 +753,8 @@ fn active_field(
     worth_having: impl Fn(&str) -> bool,
 ) -> Result<String, String> {
     let path = install.join(".build.info");
-    let text = std::fs::read_to_string(&path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut lines = text.lines();
     let header: Vec<&str> = lines
         .next()
@@ -780,8 +784,8 @@ fn read_config(data_dir: &Path, key: &str) -> Result<HashMap<String, String>, St
         .join(&key[0..2])
         .join(&key[2..4])
         .join(key);
-    let text = std::fs::read_to_string(&path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(text
         .lines()
         .filter(|line| !line.starts_with('#'))
@@ -1007,7 +1011,11 @@ pub fn blte_decode(data: &[u8]) -> Result<Vec<u8>, String> {
 /// Onto the end rather than into a `Vec` of its own: a payload is a run of chunks that are
 /// concatenated anyway, and the intermediate copy is the whole file again for the one file
 /// where that is worth caring about.
-fn decode_chunk(chunk: &[u8], decompressed: Option<usize>, out: &mut Vec<u8>) -> Result<(), String> {
+fn decode_chunk(
+    chunk: &[u8],
+    decompressed: Option<usize>,
+    out: &mut Vec<u8>,
+) -> Result<(), String> {
     let (mode, body) = chunk.split_first().ok_or("Empty BLTE chunk.")?;
     match mode {
         b'N' => out.extend_from_slice(body),
@@ -1199,8 +1207,14 @@ mod tests {
     fn inflates_a_chunk_that_was_compressed() {
         let body = b"tideglass tideglass tideglass tideglass".repeat(4);
         let chunk = deflated(&body);
-        assert!(chunk.len() < body.len(), "the fixture is not actually compressed");
-        assert_eq!(blte_decode(&blte(&[(chunk, body.len() as u32)])).unwrap(), body);
+        assert!(
+            chunk.len() < body.len(),
+            "the fixture is not actually compressed"
+        );
+        assert_eq!(
+            blte_decode(&blte(&[(chunk, body.len() as u32)])).unwrap(),
+            body
+        );
     }
 
     // Chunks are concatenated in the order the table lists them, whatever each was stored as.
@@ -1244,7 +1258,10 @@ mod tests {
             ("not a payload at all", b"WDC5".to_vec()),
             ("nothing but the magic", b"BLTE".to_vec()),
             ("an implicit chunk with no body", b"BLTE\0\0\0\0".to_vec()),
-            ("a chunk table cut in half", whole[..whole.len() - 40].to_vec()),
+            (
+                "a chunk table cut in half",
+                whole[..whole.len() - 40].to_vec(),
+            ),
             ("chunk data cut short", whole[..whole.len() - 4].to_vec()),
         ];
         for (what, payload) in cases {
@@ -1344,7 +1361,12 @@ mod tests {
 
     fn only_key(root: &Root, fdid: u32) -> [u8; 16] {
         let variants = root.variants(fdid);
-        assert_eq!(variants.len(), 1, "file {fdid} has {} variants", variants.len());
+        assert_eq!(
+            variants.len(),
+            1,
+            "file {fdid} has {} variants",
+            variants.len()
+        );
         variants[0].1
     }
 
@@ -1393,7 +1415,10 @@ mod tests {
         .unwrap();
         assert_eq!(only_key(&root, 70), ckey(1));
         assert_eq!(only_key(&root, 900), ckey(2));
-        assert!(root.variants(500).is_empty(), "a block for no locale was read anyway");
+        assert!(
+            root.variants(500).is_empty(),
+            "a block for no locale was read anyway"
+        );
     }
 
     // Whether a block carries path hashes is a flag, and what it changes is how many bytes
@@ -1417,11 +1442,7 @@ mod tests {
     // (absent) records.
     #[test]
     fn reads_past_a_block_holding_no_records() {
-        let root = Root::parse(&root_of(&[
-            Block::of(&[]),
-            Block::of(&[(70, 1)]),
-        ]))
-        .unwrap();
+        let root = Root::parse(&root_of(&[Block::of(&[]), Block::of(&[(70, 1)])])).unwrap();
         assert_eq!(only_key(&root, 70), ckey(1));
     }
 
@@ -1504,9 +1525,18 @@ mod tests {
         let opens = std::cell::Cell::new(0);
         let cached: Cached<u32> = Cached::default();
         let here = Path::new("/games/wow");
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            1
+        );
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            1
+        );
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            1
+        );
         assert_eq!(opens.get(), 1);
     }
 
@@ -1517,7 +1547,10 @@ mod tests {
         let opens = std::cell::Cell::new(0);
         let cached: Cached<u32> = Cached::default();
         let here = Path::new("/games/wow");
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            1
+        );
         assert_eq!(*cached.get(here, gone_stale, counted(&opens)).unwrap(), 2);
         assert_eq!(opens.get(), 2);
     }
@@ -1545,9 +1578,15 @@ mod tests {
         let opens = std::cell::Cell::new(0);
         let cached: Cached<u32> = Cached::default();
         let here = Path::new("/games/wow");
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            1
+        );
         cached.release();
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 2);
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            2
+        );
     }
 
     // A game folder that is not one yet — the app starts before the setting is right — must
@@ -1556,9 +1595,14 @@ mod tests {
     fn holds_nothing_after_an_open_that_failed() {
         let cached: Cached<u32> = Cached::default();
         let here = Path::new("/games/wow");
-        assert!(cached.get(here, still_current, |_| Err("no Data folder".into())).is_err());
+        assert!(cached
+            .get(here, still_current, |_| Err("no Data folder".into()))
+            .is_err());
         let opens = std::cell::Cell::new(0);
-        assert_eq!(*cached.get(here, still_current, counted(&opens)).unwrap(), 1);
+        assert_eq!(
+            *cached.get(here, still_current, counted(&opens)).unwrap(),
+            1
+        );
     }
 
     /* ---------- what was already decoded ---------- */
@@ -1598,7 +1642,11 @@ mod tests {
         let remembered = Remembered::over(&files);
         let first = remembered.read(64).unwrap();
         let second = remembered.read(64).unwrap();
-        assert_eq!(files.reads(), vec![64], "the second read reached the storage");
+        assert_eq!(
+            files.reads(),
+            vec![64],
+            "the second read reached the storage"
+        );
         // The same allocation, not a copy of it — which is the whole point for a 63MB table.
         assert!(Arc::ptr_eq(&first, &second));
     }
@@ -1636,7 +1684,10 @@ mod tests {
         let big = (REMEMBERED_BUDGET / 3 * 2) as u32;
         remembered.read(big).unwrap();
         remembered.read(big + 1).unwrap();
-        assert!(remembered.weight() <= REMEMBERED_BUDGET, "held past the budget");
+        assert!(
+            remembered.weight() <= REMEMBERED_BUDGET,
+            "held past the budget"
+        );
 
         remembered.read(big).unwrap();
         assert_eq!(
@@ -1677,9 +1728,17 @@ mod tests {
         remembered.read(16).unwrap();
         let huge = (REMEMBERED_BUDGET + 1) as u32;
         assert_eq!(remembered.read(huge).unwrap().len(), huge as usize);
-        assert_eq!(remembered.weight(), 16, "the oversized file was kept anyway");
+        assert_eq!(
+            remembered.weight(),
+            16,
+            "the oversized file was kept anyway"
+        );
         assert_eq!(remembered.read(16).unwrap().len(), 16);
-        assert_eq!(files.reads(), vec![16, huge], "the small file was evicted for it");
+        assert_eq!(
+            files.reads(),
+            vec![16, huge],
+            "the small file was evicted for it"
+        );
     }
 
     /* ---------- encoding ---------- */

@@ -34,8 +34,8 @@
 
 use std::collections::BTreeMap;
 
-use chronie_desktop_lib::casc::{self, GameFiles};
 use chronie_desktop_lib::body::{self, Body};
+use chronie_desktop_lib::casc::{self, GameFiles};
 use chronie_desktop_lib::character;
 use chronie_desktop_lib::icons::pixels_of;
 use chronie_desktop_lib::m2::{Model, Paint};
@@ -86,11 +86,15 @@ fn main() {
             std::process::exit(1);
         }
     };
-    println!("drawing on {} — ChrModel {}, layout {}\n", hers.name, hers.id, hers.layout);
+    println!(
+        "drawing on {} — ChrModel {}, layout {}\n",
+        hers.name, hers.id, hers.layout
+    );
 
-    let mut args = rest.iter().filter(|arg| !arg.starts_with("--")).filter(|arg| {
-        arg.parse::<u32>().is_ok()
-    });
+    let mut args = rest
+        .iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .filter(|arg| arg.parse::<u32>().is_ok());
     let appearance: Option<(u32, u32)> = match (args.next(), args.next()) {
         (Some(display), Some(slot)) => Some((
             display.parse().unwrap_or_else(|_| usage()),
@@ -145,7 +149,10 @@ fn body(files: &dyn GameFiles, hers: &Body) {
 
     // The line the whole tool exists for. A part whose paint the app supplies nothing for is
     // a part with no picture, and a glTF material with no picture is white.
-    println!("\n  what each of its {} parts asks to be painted with:", mesh.parts.len());
+    println!(
+        "\n  what each of its {} parts asks to be painted with:",
+        mesh.parts.len()
+    );
     let mut asked: BTreeMap<String, usize> = BTreeMap::new();
     for part in &mesh.parts {
         *asked.entry(describe(part.paint)).or_default() += 1;
@@ -199,7 +206,10 @@ fn wearing(files: &dyn GameFiles, hers: &Body, display: u32, slot: u32) -> Worn 
         let read = match files.read(texture.file) {
             Ok(bytes) => bytes,
             Err(error) => {
-                println!("    section {:<2} file {:<9} unreadable: {error}", texture.section, texture.file);
+                println!(
+                    "    section {:<2} file {:<9} unreadable: {error}",
+                    texture.section, texture.file
+                );
                 continue;
             }
         };
@@ -252,7 +262,10 @@ fn atlas(files: &dyn GameFiles, hers: &Body, worn: Option<&Worn>) {
                 if colours.len() == 1 { "" } else { "s" }
             );
             if colours.len() == 1 {
-                println!("  nothing has been composited into it: every pixel is {:?}", colours[0]);
+                println!(
+                    "  nothing has been composited into it: every pixel is {:?}",
+                    colours[0]
+                );
             }
         }
         Err(error) => println!("  the atlas would not read back: {error}"),
@@ -269,7 +282,10 @@ fn atlas(files: &dyn GameFiles, hers: &Body, worn: Option<&Worn>) {
 /// Every other line above explains *why*; this is the one that matches what is on screen.
 fn handed_over(files: &dyn GameFiles, hers: &Body, worn: Option<&Worn>) {
     println!("\n== the glb the window gets ==\n");
-    let who = character::Who { body: hers.id, picked: Vec::new() };
+    let who = character::Who {
+        body: hers.id,
+        picked: Vec::new(),
+    };
     let glb = match character::glb_of(files, worn, &who) {
         Ok(glb) => glb,
         Err(error) => {
@@ -283,16 +299,19 @@ fn handed_over(files: &dyn GameFiles, hers: &Body, worn: Option<&Worn>) {
     };
 
     let materials = scene["materials"].as_array().map_or(0, Vec::len);
-    let painted = scene["materials"]
-        .as_array()
-        .map_or(0, |all| {
-            all.iter()
-                .filter(|material| !material["pbrMetallicRoughness"]["baseColorTexture"].is_null())
-                .count()
-        });
+    let painted = scene["materials"].as_array().map_or(0, |all| {
+        all.iter()
+            .filter(|material| !material["pbrMetallicRoughness"]["baseColorTexture"].is_null())
+            .count()
+    });
     let images = scene["images"].as_array().map_or(0, Vec::len);
     println!("  {} bytes", glb.len());
-    println!("  {} primitives", scene["meshes"][0]["primitives"].as_array().map_or(0, Vec::len));
+    println!(
+        "  {} primitives",
+        scene["meshes"][0]["primitives"]
+            .as_array()
+            .map_or(0, Vec::len)
+    );
     println!("  {images} image{}", if images == 1 { "" } else { "s" });
     println!("  {painted} of {materials} materials carry a picture");
     if painted < materials {
@@ -310,8 +329,6 @@ fn json_of(glb: &[u8]) -> Option<serde_json::Value> {
 }
 
 fn usage() -> ! {
-    eprintln!(
-        "usage: dump_paint <wow install> | --fixtures <dir> [<displayInfoID> <displayType>]"
-    );
+    eprintln!("usage: dump_paint <wow install> | --fixtures <dir> [<displayInfoID> <displayType>]");
     std::process::exit(2)
 }

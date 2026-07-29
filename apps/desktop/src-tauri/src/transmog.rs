@@ -327,7 +327,12 @@ fn same_looks(
     let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
     let appearance_of: HashMap<u32, u32> = modified
         .rows()
-        .map(|row| (row.id(), row.number(modified_appearance_column::APPEARANCE_ID)))
+        .map(|row| {
+            (
+                row.id(),
+                row.number(modified_appearance_column::APPEARANCE_ID),
+            )
+        })
         .collect();
 
     let mut by_look: HashMap<Vec<u32>, Vec<u32>> = HashMap::new();
@@ -357,17 +362,17 @@ fn same_looks(
         if ids.len() < 2 {
             continue;
         }
-        let Some(shown) = ids
-            .iter()
-            .copied()
-            .min_by_key(|id| {
-                let set = facts[id];
-                // A patch of zero is the table declining to say rather than the dawn of time,
-                // so it sorts last and lets the ordering and the id decide.
-                let patch = if set.patch_introduced == 0 { u32::MAX } else { set.patch_introduced };
-                (patch, set.ui_order, *id)
-            })
-        else {
+        let Some(shown) = ids.iter().copied().min_by_key(|id| {
+            let set = facts[id];
+            // A patch of zero is the table declining to say rather than the dawn of time,
+            // so it sorts last and lets the ordering and the id decide.
+            let patch = if set.patch_introduced == 0 {
+                u32::MAX
+            } else {
+                set.patch_introduced
+            };
+            (patch, set.ui_order, *id)
+        }) else {
             continue;
         };
         for id in ids {
@@ -488,7 +493,12 @@ pub fn set_appearances(files: &dyn GameFiles) -> Result<BTreeMap<u32, Vec<u32>>,
     let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
     let appearance_of: HashMap<u32, u32> = modified
         .rows()
-        .map(|row| (row.id(), row.number(modified_appearance_column::APPEARANCE_ID)))
+        .map(|row| {
+            (
+                row.id(),
+                row.number(modified_appearance_column::APPEARANCE_ID),
+            )
+        })
         .collect();
 
     let items = Db2::parse(files.read(TRANSMOG_SET_ITEM)?)?;
@@ -1048,9 +1058,7 @@ mod tests {
             assert_eq!(shown["sameLookAs"], Value::Null, "{under} is folded too");
             let names_back = shown["alternates"]
                 .as_array()
-                .map(|alternates| {
-                    alternates.iter().any(|one| one["id"] == set["id"])
-                })
+                .map(|alternates| alternates.iter().any(|one| one["id"] == set["id"]))
                 .unwrap_or(false);
             assert!(names_back, "set {under} does not name {}", set["id"]);
         }
@@ -1074,14 +1082,31 @@ mod tests {
     #[test]
     fn says_why_two_sets_of_the_same_clothes_are_two_sets() {
         let base = TransmogSet {
-            id: 1, name: String::new(), group: String::new(), group_id: 0, class_mask: 0x23,
-            expansion_id: 4, parent_id: 0, flags: 0, ui_order: 0, patch_introduced: 0,
-            item_count: 0, alternates: Vec::new(), same_look_as: 0,
+            id: 1,
+            name: String::new(),
+            group: String::new(),
+            group_id: 0,
+            class_mask: 0x23,
+            expansion_id: 4,
+            parent_id: 0,
+            flags: 0,
+            ui_order: 0,
+            patch_introduced: 0,
+            item_count: 0,
+            alternates: Vec::new(),
+            same_look_as: 0,
         };
-        let with = |flags: u32, class_mask: u32| TransmogSet { flags, class_mask, ..base.clone() };
+        let with = |flags: u32, class_mask: u32| TransmogSet {
+            flags,
+            class_mask,
+            ..base.clone()
+        };
 
         // One faction bit each, which the install never sets together.
-        assert_eq!(why(&with(0b0100, 0x23), &with(0b1000, 0x23)), SameLook::Faction);
+        assert_eq!(
+            why(&with(0b0100, 0x23), &with(0b1000, 0x23)),
+            SameLook::Faction
+        );
         // A faction bit on one and none on the other is not a pair.
         assert_eq!(why(&with(0b0100, 0x23), &with(0, 0x23)), SameLook::Reissue);
         assert_eq!(why(&with(0b0100, 0x23), &with(0, 0x1044)), SameLook::Class);
@@ -1173,11 +1198,36 @@ mod tests {
             vec![
                 // The head, three times over: the set's own piece is Warrior-only, and two
                 // other items give the same look to anybody — the second of them cheaper.
-                (&json!("Stormforged Helm"), &json!(0b1), &json!(60), &json!(4)),
-                (&json!("Stormforged Greathelm"), &json!(0xffff), &json!(60), &json!(4)),
-                (&json!("Helm of the Tempest"), &json!(0xffff), &json!(45), &json!(3)),
-                (&json!("Stormforged Breastplate"), &json!(0b1), &json!(60), &json!(4)),
-                (&json!("Breastplate of the Tempest"), &json!(0xffff), &json!(60), &json!(4)),
+                (
+                    &json!("Stormforged Helm"),
+                    &json!(0b1),
+                    &json!(60),
+                    &json!(4)
+                ),
+                (
+                    &json!("Stormforged Greathelm"),
+                    &json!(0xffff),
+                    &json!(60),
+                    &json!(4)
+                ),
+                (
+                    &json!("Helm of the Tempest"),
+                    &json!(0xffff),
+                    &json!(45),
+                    &json!(3)
+                ),
+                (
+                    &json!("Stormforged Breastplate"),
+                    &json!(0b1),
+                    &json!(60),
+                    &json!(4)
+                ),
+                (
+                    &json!("Breastplate of the Tempest"),
+                    &json!(0xffff),
+                    &json!(60),
+                    &json!(4)
+                ),
             ]
         );
 
@@ -1374,7 +1424,10 @@ mod tests {
         // Set 900 is content the game has not shipped, and `TransmogSetItem` holds no row for it
         // at all — so it is not in the answer. What is in the answer is what the table names.
         assert_eq!(held.get(&900), None);
-        assert_eq!(files.asked.into_inner(), vec![ITEM_MODIFIED_APPEARANCE, TRANSMOG_SET_ITEM]);
+        assert_eq!(
+            files.asked.into_inner(),
+            vec![ITEM_MODIFIED_APPEARANCE, TRANSMOG_SET_ITEM]
+        );
     }
 
     // Sorted and deduplicated, because the one caller writes a file that has to be the same
@@ -1488,7 +1541,11 @@ mod tests {
                     pieces
                         .into_iter()
                         .map(|piece| {
-                            (piece.display_info_id, piece.display_type, piece.inventory_type)
+                            (
+                                piece.display_info_id,
+                                piece.display_type,
+                                piece.inventory_type,
+                            )
                         })
                         .collect(),
                 )
@@ -1502,7 +1559,12 @@ mod tests {
     fn says_what_a_set_is_wearing() {
         assert_eq!(
             wearing(203),
-            vec![(900_001, 0, 1), (900_009, 1, 3), (900_003, 3, 5), (900_006, 5, 7)],
+            vec![
+                (900_001, 0, 1),
+                (900_009, 1, 3),
+                (900_003, 3, 5),
+                (900_006, 5, 7)
+            ],
         );
     }
 
@@ -1511,7 +1573,10 @@ mod tests {
     #[test]
     fn answers_for_every_set_of_a_page() {
         let page = pieces_of(&fixture_files(), &[201, 202, 203]);
-        assert_eq!(page.keys().copied().collect::<Vec<u32>>(), vec![201, 202, 203]);
+        assert_eq!(
+            page.keys().copied().collect::<Vec<u32>>(),
+            vec![201, 202, 203]
+        );
         assert_eq!(page[&202], vec![(900_004, 6, 8), (900_005, 8, 10)]);
     }
 
@@ -1531,7 +1596,12 @@ mod tests {
     fn says_where_a_sets_weapons_are_held() {
         assert_eq!(
             wearing(204),
-            vec![(900_007, 11, 13), (900_014, 11, 17), (900_015, 13, 14), (900_007, 15, 23)],
+            vec![
+                (900_007, 11, 13),
+                (900_014, 11, 17),
+                (900_015, 13, 14),
+                (900_007, 15, 23)
+            ],
         );
     }
 
@@ -1555,7 +1625,12 @@ mod tests {
         let files = Noted::new();
         set_pieces(&files, &[201, 202, 203, 204]).unwrap();
         let asked = files.asked.into_inner();
-        for table in [TRANSMOG_SET_ITEM, ITEM_MODIFIED_APPEARANCE, ITEM_APPEARANCE, ITEM_SPARSE] {
+        for table in [
+            TRANSMOG_SET_ITEM,
+            ITEM_MODIFIED_APPEARANCE,
+            ITEM_APPEARANCE,
+            ITEM_SPARSE,
+        ] {
             assert_eq!(
                 asked.iter().filter(|fdid| **fdid == table).count(),
                 1,
@@ -1580,7 +1655,9 @@ mod tests {
     #[test]
     fn asks_the_game_nothing_for_a_page_of_no_sets() {
         let temp = tempfile::tempdir().unwrap();
-        assert!(set_pieces(&DirFiles::new(temp.path()), &[]).unwrap().is_empty());
+        assert!(set_pieces(&DirFiles::new(temp.path()), &[])
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

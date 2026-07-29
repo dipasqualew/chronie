@@ -89,7 +89,9 @@ fn describe(files: &dyn GameFiles, named: &Named) {
 
     match files.read(body.model) {
         Ok(bytes) => {
-            let skin = Model::parse(&bytes).ok().and_then(|model| model.skin_file_data_id());
+            let skin = Model::parse(&bytes)
+                .ok()
+                .and_then(|model| model.skin_file_data_id());
             println!(
                 "  mesh {} — {} bytes, {:?}, skin profile {skin:?}",
                 body.model,
@@ -109,7 +111,11 @@ fn describe(files: &dyn GameFiles, named: &Named) {
             rect.y,
             rect.width,
             rect.height,
-            if outside { "  ← outside the atlas" } else { "" }
+            if outside {
+                "  ← outside the atlas"
+            } else {
+                ""
+            }
         );
     }
 }

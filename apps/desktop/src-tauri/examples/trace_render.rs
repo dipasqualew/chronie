@@ -63,7 +63,11 @@ fn main() {
 
     let first = args.next().unwrap_or_else(|| usage());
     let install = (first != "--fixtures").then(|| first.clone());
-    let root = if install.is_some() { first } else { args.next().unwrap_or_else(|| usage()) };
+    let root = if install.is_some() {
+        first
+    } else {
+        args.next().unwrap_or_else(|| usage())
+    };
     let what = args.next().unwrap_or_else(|| usage());
 
     let totals = Arc::new(Mutex::new(Totals::default()));
@@ -82,7 +86,9 @@ fn main() {
     // Held across runs unless `--reopen`, which throws away the memory along with the handle —
     // the two go together, because what was remembered is a fact about a build.
     let held = (!reopen).then(|| open(&install, &root));
-    let held_counted = held.as_ref().map(|files| budget::Counted::over(files.as_ref()));
+    let held_counted = held
+        .as_ref()
+        .map(|files| budget::Counted::over(files.as_ref()));
     let held_cache = held_counted.as_ref().map(casc::Remembered::over);
 
     for run in 1..=runs {
@@ -92,10 +98,18 @@ fn main() {
         // Under `--reopen` the open is inside the timed region on purpose: that is what a
         // reader waited for when the window opened the storage afresh for every command.
         let opened_here = held.is_none().then(|| open(&install, &root));
-        let counted_here = opened_here.as_ref().map(|files| budget::Counted::over(files.as_ref()));
+        let counted_here = opened_here
+            .as_ref()
+            .map(|files| budget::Counted::over(files.as_ref()));
         let cache_here = counted_here.as_ref().map(casc::Remembered::over);
-        let counted = held_counted.as_ref().or(counted_here.as_ref()).expect("one of the two");
-        let files = held_cache.as_ref().or(cache_here.as_ref()).expect("one of the two");
+        let counted = held_counted
+            .as_ref()
+            .or(counted_here.as_ref())
+            .expect("one of the two");
+        let files = held_cache
+            .as_ref()
+            .or(cache_here.as_ref())
+            .expect("one of the two");
 
         let opened = started.elapsed();
         // Counted as well as timed, because the numbers `budget.rs` ratchets in CI are counts
@@ -151,7 +165,11 @@ fn draw(files: &dyn casc::GameFiles, what: &str) -> Result<Drawn, String> {
         ["worn", display, slot] | ["worn", display, slot, _] => vec![worn::Piece {
             display_info_id: display.parse().map_err(|_| "not a display id")?,
             display_type: slot.parse().map_err(|_| "not a display type")?,
-            inventory_type: what.split('/').nth(3).and_then(|it| it.parse().ok()).unwrap_or(0),
+            inventory_type: what
+                .split('/')
+                .nth(3)
+                .and_then(|it| it.parse().ok())
+                .unwrap_or(0),
         }],
         ["character"] => Vec::new(),
         _ => return Err(format!("`{what}` is not something to draw")),
@@ -198,7 +216,9 @@ fn report_counts(work: &budget::Work, payload: &budget::Payload, remembered: usi
 /// The pieces of one set, the way `dump_model` reads them and the window sends them.
 fn set_pieces(files: &dyn casc::GameFiles, set_id: u32) -> Result<Vec<worn::Piece>, String> {
     let payload = transmog::set_items(files, set_id)?;
-    let appearances = payload["appearances"].as_array().ok_or("the set holds no appearances")?;
+    let appearances = payload["appearances"]
+        .as_array()
+        .ok_or("the set holds no appearances")?;
     Ok(appearances
         .iter()
         .filter_map(|appearance| {
@@ -219,11 +239,16 @@ fn set_pieces(files: &dyn casc::GameFiles, set_id: u32) -> Result<Vec<worn::Piec
 /// contains a `casc.fetch` contains a `casc.blte`, and adding those up would count the same
 /// microsecond three times. Sorted by cost, because the point of the table is the top of it.
 fn report(self_time: &HashMap<&'static str, (Duration, u64)>, whole: Duration) {
-    let mut rows: Vec<(&str, Duration, u64)> =
-        self_time.iter().map(|(name, (took, count))| (*name, *took, *count)).collect();
+    let mut rows: Vec<(&str, Duration, u64)> = self_time
+        .iter()
+        .map(|(name, (took, count))| (*name, *took, *count))
+        .collect();
     rows.sort_by_key(|(_, took, _)| std::cmp::Reverse(*took));
 
-    println!("{:<24} {:>10} {:>7} {:>9}", "span", "self", "share", "calls");
+    println!(
+        "{:<24} {:>10} {:>7} {:>9}",
+        "span", "self", "share", "calls"
+    );
     for (name, took, count) in rows.iter().filter(|(_, took, _)| took.as_micros() > 0) {
         let share = 100.0 * took.as_secs_f64() / whole.as_secs_f64();
         println!("{name:<24} {:>9.1?} {share:>6.1}% {count:>9}", took);
@@ -281,8 +306,10 @@ impl Totals {
 
 /// The files a run spent the longest reading, whole time rather than self.
 fn by_file(files: &HashMap<u32, (Duration, u64)>) {
-    let mut rows: Vec<(u32, Duration, u64)> =
-        files.iter().map(|(fdid, (took, count))| (*fdid, *took, *count)).collect();
+    let mut rows: Vec<(u32, Duration, u64)> = files
+        .iter()
+        .map(|(fdid, (took, count))| (*fdid, *took, *count))
+        .collect();
     rows.sort_by_key(|(_, took, _)| std::cmp::Reverse(*took));
     println!("\n{:<12} {:>10} {:>9}", "file", "read", "reads");
     for (fdid, took, count) in rows.iter().take(12) {
@@ -325,7 +352,10 @@ struct ReadOf(u32);
 
 impl SelfTime {
     fn new(totals: Arc<Mutex<Totals>>) -> Self {
-        Self { totals, stack: Mutex::new(Vec::new()) }
+        Self {
+            totals,
+            stack: Mutex::new(Vec::new()),
+        }
     }
 }
 
@@ -373,7 +403,10 @@ where
             return;
         };
         let mut totals = self.totals.lock().unwrap();
-        let entry = totals.self_time.entry(span.name()).or_insert((Duration::ZERO, 0));
+        let entry = totals
+            .self_time
+            .entry(span.name())
+            .or_insert((Duration::ZERO, 0));
         entry.0 += whole.saturating_sub(frame.children);
         entry.1 += 1;
         let read_of = span.extensions().get::<ReadOf>().map(|ReadOf(fdid)| *fdid);

@@ -64,7 +64,8 @@ pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
 /// its own — and the palette trap below has to be dodged exactly once.
 #[tracing::instrument(name = "blp.pixels_of", skip_all, fields(bytes = blp.len()))]
 pub fn pixels_of(blp: &[u8], largest: u32) -> Result<RgbaImage, String> {
-    let parsed = parse_blp(blp).map_err(|error| format!("not a texture this build can read: {error}"))?;
+    let parsed =
+        parse_blp(blp).map_err(|error| format!("not a texture this build can read: {error}"))?;
     let decoded = blp_to_image(&parsed, 0).map_err(|error| format!("would not decode: {error}"))?;
     let (width, height) = (decoded.width(), decoded.height());
     if width == 0 || height == 0 {
@@ -193,7 +194,8 @@ mod tests {
     /// the window would actually be handed.
     fn decoded(fdid: u32) -> image::RgbaImage {
         let bytes = fixture_files().read(fdid).unwrap();
-        let png = png_of(&bytes, LARGEST_ICON).unwrap_or_else(|error| panic!("icon {fdid}: {error}"));
+        let png =
+            png_of(&bytes, LARGEST_ICON).unwrap_or_else(|error| panic!("icon {fdid}: {error}"));
         image::load_from_memory_with_format(&png, ImageFormat::Png)
             .unwrap()
             .into_rgba8()
@@ -296,7 +298,10 @@ mod tests {
         assert_eq!(corners(&decoded(PALETTE))[0], with_alpha(TOP_LEFT, 255));
         // The same colours through an encoding that needs no correction, which is what says
         // the swap above is the format's and not this module's.
-        assert_eq!(corners(&decoded(UNCOMPRESSED))[0], with_alpha(TOP_LEFT, 255));
+        assert_eq!(
+            corners(&decoded(UNCOMPRESSED))[0],
+            with_alpha(TOP_LEFT, 255)
+        );
     }
 
     #[test]
@@ -324,8 +329,12 @@ mod tests {
 
     #[test]
     fn says_what_was_wrong_with_a_texture_it_could_not_read() {
-        assert!(png_of(&[0u8; 1172], LARGEST_ICON).unwrap_err().contains("not a texture"));
-        assert!(png_of(&[], LARGEST_ICON).unwrap_err().contains("not a texture"));
+        assert!(png_of(&[0u8; 1172], LARGEST_ICON)
+            .unwrap_err()
+            .contains("not a texture"));
+        assert!(png_of(&[], LARGEST_ICON)
+            .unwrap_err()
+            .contains("not a texture"));
     }
 
     /* ---------- the cache ---------- */
@@ -370,7 +379,10 @@ mod tests {
     #[test]
     fn asks_for_one_texture_however_many_rows_name_it() {
         let cache = IconCache::default();
-        assert_eq!(cache.missing(&[PALETTE, PALETTE, 0, DXT1, PALETTE]), vec![PALETTE, DXT1]);
+        assert_eq!(
+            cache.missing(&[PALETTE, PALETTE, 0, DXT1, PALETTE]),
+            vec![PALETTE, DXT1]
+        );
     }
 
     // The window keys what it draws by the id the row carries, so the answer is keyed the

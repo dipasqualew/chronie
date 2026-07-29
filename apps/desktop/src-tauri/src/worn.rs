@@ -82,8 +82,8 @@ use serde::Deserialize;
 use crate::body::Body;
 use crate::casc::GameFiles;
 use crate::db2::{Db2, Row};
-use crate::models::{MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
 use crate::models::TEXTURE_FILE_DATA;
+use crate::models::{MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
 use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
 
 /// `ItemDisplayInfoMaterialRes` — which texture an appearance paints each part of a body with.
@@ -218,23 +218,23 @@ const SLOT_GROUPS: [&[u16]; 11] = [
 /// they are inert rather than wrong — the one contest that does fire is group 13, where a robe
 /// worn on the chest beats a pair of legs, which is the sentence the whole table is here for.
 const GEOSET_PRIORITY: [(u16, &[u32]); 17] = [
-    (8, &[8, 3, 2]),  // sleeves: gloves, then chest, then shirt
-    (10, &[3, 2]),    // chest: chest, then shirt
-    (13, &[3, 5]),    // robe: the chest beats the legs
-    (12, &[10]),      // tabard
-    (15, &[9]),       // cape
-    (18, &[4]),       // belt
-    (20, &[6]),       // feet
-    (22, &[3]),       // torso
-    (23, &[8]),       // hand attach
-    (27, &[0]),       // helm
-    (28, &[3]),       // arm upper
-    (21, &[0]),       // skull
-    (26, &[1]),       // shoulders
-    (5, &[6]),        // boot
-    (4, &[8]),        // gloves
-    (11, &[5]),       // pants
-    (9, &[5]),        // kneepads
+    (8, &[8, 3, 2]), // sleeves: gloves, then chest, then shirt
+    (10, &[3, 2]),   // chest: chest, then shirt
+    (13, &[3, 5]),   // robe: the chest beats the legs
+    (12, &[10]),     // tabard
+    (15, &[9]),      // cape
+    (18, &[4]),      // belt
+    (20, &[6]),      // feet
+    (22, &[3]),      // torso
+    (23, &[8]),      // hand attach
+    (27, &[0]),      // helm
+    (28, &[3]),      // arm upper
+    (21, &[0]),      // skull
+    (26, &[1]),      // shoulders
+    (5, &[6]),       // boot
+    (4, &[8]),       // gloves
+    (11, &[5]),      // pants
+    (9, &[5]),       // kneepads
 ];
 
 /// What order a slot's textures go into the atlas, lowest first.
@@ -298,17 +298,17 @@ const HELMETED: u16 = 2702;
 /// sits at the top of the head, 5 and 6 are a mirrored pair at shoulder height, and 12 is
 /// behind the chest.
 const SLOT_ATTACHMENTS: [&[u32]; 11] = [
-    &[11],    // 0  head: the helm
-    &[6, 5],  // 1  shoulder: the left pad, then the right
-    &[],      // 2  shirt
-    &[],      // 3  chest
-    &[],      // 4  waist
-    &[],      // 5  legs
-    &[],      // 6  feet
-    &[],      // 7  wrist
-    &[],      // 8  hands
-    &[],      // 9  back — a cape is the body's own geometry, not a model. See [`cape_of`].
-    &[],      // 10 tabard
+    &[11],   // 0  head: the helm
+    &[6, 5], // 1  shoulder: the left pad, then the right
+    &[],     // 2  shirt
+    &[],     // 3  chest
+    &[],     // 4  waist
+    &[],     // 5  legs
+    &[],     // 6  feet
+    &[],     // 7  wrist
+    &[],     // 8  hands
+    &[],     // 9  back — a cape is the body's own geometry, not a model. See [`cape_of`].
+    &[],     // 10 tabard
 ];
 
 /// The three attachments a weapon can hang off, as the community numbers them.
@@ -633,8 +633,12 @@ pub fn each(files: &dyn GameFiles, body: &Body, outfits: &[&[Piece]]) -> Result<
         .iter()
         .map(|outfit| {
             let painted = if outfit.paints_anything() {
-                let named = textures.as_ref().expect("a painted outfit opened the texture table");
-                let bodies = bodies.as_ref().expect("a painted outfit opened the body table");
+                let named = textures
+                    .as_ref()
+                    .expect("a painted outfit opened the texture table");
+                let bodies = bodies
+                    .as_ref()
+                    .expect("a painted outfit opened the body table");
                 outfit
                     .paints
                     .iter()
@@ -711,7 +715,11 @@ fn hangs_in(drawn: &[(Piece, &Row<'_>)]) -> Vec<Hung> {
                 .map(move |(slot, attachment)| Hung {
                     slot,
                     attachment,
-                    model: display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
+                    model: display.element(
+                        display_column::MODEL_RESOURCES_ID,
+                        slot,
+                        MODEL_SLOT_BITS,
+                    ),
                     material: display.element(
                         display_column::MATERIAL_RESOURCES_ID,
                         slot,
@@ -793,7 +801,9 @@ fn hangs_from(display: &Row<'_>, display_type: u32, inventory_type: u32) -> Vec<
         return Vec::new();
     };
     let filled = (0..MODEL_SLOTS)
-        .find(|slot| display.element(display_column::MODEL_RESOURCES_ID, *slot, MODEL_SLOT_BITS) != 0)
+        .find(|slot| {
+            display.element(display_column::MODEL_RESOURCES_ID, *slot, MODEL_SLOT_BITS) != 0
+        })
         .unwrap_or(0);
     vec![(filled, hand)]
 }
@@ -949,7 +959,9 @@ fn cape_in(drawn: &[(Piece, &Row<'_>)]) -> Option<u32> {
     drawn
         .iter()
         .filter(|(piece, _)| piece.display_type == BACK)
-        .map(|(_, display)| display.element(display_column::MATERIAL_RESOURCES_ID, 0, MODEL_SLOT_BITS))
+        .map(|(_, display)| {
+            display.element(display_column::MATERIAL_RESOURCES_ID, 0, MODEL_SLOT_BITS)
+        })
         .find(|resource| *resource != 0)
 }
 
@@ -997,12 +1009,9 @@ impl Helmets {
         }
         let table = Db2::parse(files.read(HELMET_GEOSET_DATA)?)?;
         let mut hiding: HashMap<u32, Vec<u16>> = HashMap::new();
-        for row in table
-            .rows()
-            .filter(|row| {
-                wanted.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == race
-            })
-        {
+        for row in table.rows().filter(|row| {
+            wanted.contains(&row.foreign_id()) && row.number(helmet_column::RACE) == race
+        }) {
             let Ok(group) = u16::try_from(row.number(helmet_column::HIDE_GEOSET_GROUP)) else {
                 continue;
             };
@@ -1042,7 +1051,10 @@ impl Helmets {
 fn sections(table: &Db2, pieces: &[Piece]) -> Vec<Vec<(u32, u32)>> {
     let wanted: HashSet<u32> = pieces.iter().map(|piece| piece.display_info_id).collect();
     let mut found: HashMap<u32, Vec<(u32, u32)>> = HashMap::new();
-    for row in table.rows().filter(|row| wanted.contains(&row.foreign_id())) {
+    for row in table
+        .rows()
+        .filter(|row| wanted.contains(&row.foreign_id()))
+    {
         let material = row.number(material_column::MATERIAL_RESOURCES_ID);
         if material == 0 {
             continue;
@@ -1057,7 +1069,12 @@ fn sections(table: &Db2, pieces: &[Piece]) -> Vec<Vec<(u32, u32)>> {
     }
     pieces
         .iter()
-        .map(|piece| found.get(&piece.display_info_id).cloned().unwrap_or_default())
+        .map(|piece| {
+            found
+                .get(&piece.display_info_id)
+                .cloned()
+                .unwrap_or_default()
+        })
         .collect()
 }
 
@@ -1116,8 +1133,12 @@ fn for_this_body(
             best = Some((rank, *file));
         }
     }
-    best.map(|(_, file)| file)
-        .or_else(|| candidates.iter().find(|file| !bodies.contains_key(file)).copied())
+    best.map(|(_, file)| file).or_else(|| {
+        candidates
+            .iter()
+            .find(|file| !bodies.contains_key(file))
+            .copied()
+    })
 }
 
 /// The one geoset per group an outfit ends up switching on, with the contests settled.
@@ -1267,12 +1288,26 @@ mod tests {
     const AMMO: u32 = 24;
 
     fn worn(display_info_id: u32, display_type: u32) -> Worn {
-        of(&fixture_files(), &hers(), display_info_id, display_type, NOT_A_WEAPON).unwrap()
+        of(
+            &fixture_files(),
+            &hers(),
+            display_info_id,
+            display_type,
+            NOT_A_WEAPON,
+        )
+        .unwrap()
     }
 
     /// The same for a weapon, which needs the one thing its slot does not say.
     fn held(display_info_id: u32, display_type: u32, inventory_type: u32) -> Worn {
-        of(&fixture_files(), &hers(), display_info_id, display_type, inventory_type).unwrap()
+        of(
+            &fixture_files(),
+            &hers(),
+            display_info_id,
+            display_type,
+            inventory_type,
+        )
+        .unwrap()
     }
 
     /// What an item that is not held in a hand says about where it is worn, which is nothing.
@@ -1354,7 +1389,10 @@ mod tests {
     // chestpiece, and it leaves the chest bare to hang a skirt over the legs instead.
     #[test]
     fn switches_a_robe_on_where_a_chestpiece_switches_a_chest_on() {
-        assert_eq!(switched(&worn(ROBE, CHEST)), vec![802, 1001, 1302, 2201, 2801]);
+        assert_eq!(
+            switched(&worn(ROBE, CHEST)),
+            vec![802, 1001, 1302, 2201, 2801]
+        );
         assert_eq!(
             painted(&worn(ROBE, CHEST)),
             vec![(3, 151_006), (5, 151_007), (6, 151_008)]
@@ -1376,7 +1414,13 @@ mod tests {
     fn reads_a_helm_the_same_way_and_drops_the_group_it_says_nothing_for() {
         let helm = worn(HELM_DISPLAY, HEAD);
         assert_eq!(switched(&helm), vec![2702]);
-        assert_eq!(helm.geosets.iter().map(|geoset| geoset.group).collect::<Vec<u16>>(), vec![27]);
+        assert_eq!(
+            helm.geosets
+                .iter()
+                .map(|geoset| geoset.group)
+                .collect::<Vec<u16>>(),
+            vec![27]
+        );
     }
 
     // The formula itself, at the edges. A value that cannot be one is the difference between
@@ -1449,8 +1493,16 @@ mod tests {
         assert_eq!(
             worn(SHOULDERS, SHOULDER).models,
             vec![
-                WornModel { attachment: 6, file: 140_002, texture: Some(150_002) },
-                WornModel { attachment: 5, file: 140_006, texture: Some(150_007) },
+                WornModel {
+                    attachment: 6,
+                    file: 140_002,
+                    texture: Some(150_002)
+                },
+                WornModel {
+                    attachment: 5,
+                    file: 140_006,
+                    texture: Some(150_007)
+                },
             ]
         );
     }
@@ -1486,11 +1538,19 @@ mod tests {
     fn puts_a_one_hander_in_her_right_hand_and_an_off_hand_in_her_left() {
         assert_eq!(
             held(WEAPON, WEAPON_SLOT, ONE_HAND).models,
-            vec![WornModel { attachment: 1, file: 140_004, texture: Some(150_005) }]
+            vec![WornModel {
+                attachment: 1,
+                file: 140_004,
+                texture: Some(150_005)
+            }]
         );
         assert_eq!(
             held(WEAPON, OFF_HAND_SLOT, HELD_IN_OFF_HAND).models,
-            vec![WornModel { attachment: 2, file: 140_004, texture: Some(150_005) }]
+            vec![WornModel {
+                attachment: 2,
+                file: 140_004,
+                texture: Some(150_005)
+            }]
         );
     }
 
@@ -1500,7 +1560,11 @@ mod tests {
     fn holds_a_two_hander_in_one_hand_rather_than_two() {
         assert_eq!(
             held(SECOND_WEAPON, WEAPON_SLOT, TWO_HAND).models,
-            vec![WornModel { attachment: 1, file: 140_005, texture: Some(150_003) }]
+            vec![WornModel {
+                attachment: 1,
+                file: 140_005,
+                texture: Some(150_003)
+            }]
         );
     }
 
@@ -1512,7 +1576,11 @@ mod tests {
     fn hangs_a_shield_off_the_arm_rather_than_out_of_a_hand() {
         assert_eq!(
             held(SECOND_SLOT_WEAPON, SHIELD_SLOT, A_SHIELD).models,
-            vec![WornModel { attachment: 0, file: 140_004, texture: Some(150_005) }]
+            vec![WornModel {
+                attachment: 0,
+                file: 140_004,
+                texture: Some(150_005)
+            }]
         );
     }
 
@@ -1590,7 +1658,9 @@ mod tests {
         // The helm read as though it were worn somewhere else, which is the same question
         // asked of the same row and has to come back empty.
         assert_eq!(
-            of(&fixture_files(), &hers(), HELM_DISPLAY, CHEST, NOT_A_WEAPON).unwrap().hidden,
+            of(&fixture_files(), &hers(), HELM_DISPLAY, CHEST, NOT_A_WEAPON)
+                .unwrap()
+                .hidden,
             Vec::<u16>::new()
         );
     }
@@ -1598,7 +1668,14 @@ mod tests {
     #[test]
     fn says_so_when_the_chain_starts_at_a_table_that_is_not_there() {
         let temp = tempfile::tempdir().unwrap();
-        let error = of(&DirFiles::new(temp.path()), &hers(), CHESTPIECE, CHEST, NOT_A_WEAPON).unwrap_err();
+        let error = of(
+            &DirFiles::new(temp.path()),
+            &hers(),
+            CHESTPIECE,
+            CHEST,
+            NOT_A_WEAPON,
+        )
+        .unwrap_err();
         assert!(error.contains("1280614.db2"), "{error}");
     }
 
@@ -1634,12 +1711,19 @@ mod tests {
         ] {
             let dressed = outfit(&order);
             assert_eq!(
-                dressed.geosets.iter().filter(|geoset| geoset.group == 13).count(),
+                dressed
+                    .geosets
+                    .iter()
+                    .filter(|geoset| geoset.group == 13)
+                    .count(),
                 1,
                 "a group with two values in it is two skirts on one pair of legs"
             );
             assert!(
-                dressed.geosets.contains(&Geoset { group: 13, geoset: 1302 }),
+                dressed.geosets.contains(&Geoset {
+                    group: 13,
+                    geoset: 1302
+                }),
                 "the robe lost group 13 to the legs, given {order:?}: {:?}",
                 dressed.geosets
             );
@@ -1677,7 +1761,11 @@ mod tests {
     #[test]
     fn says_which_slot_owns_each_group_two_slots_can_both_drive() {
         // The three rows that can fire at all, given what the slots drive.
-        assert_eq!(owner(8, &[(3, 802), (2, 801)]), 802, "the chest beats the shirt");
+        assert_eq!(
+            owner(8, &[(3, 802), (2, 801)]),
+            802,
+            "the chest beats the shirt"
+        );
         assert_eq!(owner(8, &[(2, 801), (8, 803)]), 803, "and gloves beat both");
         assert_eq!(owner(10, &[(2, 1001), (3, 1002)]), 1002);
         assert_eq!(owner(13, &[(5, 1301), (3, 1302)]), 1302);
@@ -1694,7 +1782,15 @@ mod tests {
     fn owner(group: u16, claims: &[(u32, u16)]) -> u16 {
         let claims: Vec<(u32, Geoset)> = claims
             .iter()
-            .map(|(slot, geoset)| (*slot, Geoset { group, geoset: *geoset }))
+            .map(|(slot, geoset)| {
+                (
+                    *slot,
+                    Geoset {
+                        group,
+                        geoset: *geoset,
+                    },
+                )
+            })
             .collect();
         owner_of(group, &claims).geoset
     }
@@ -1710,8 +1806,14 @@ mod tests {
             [(BOOTS, FEET_SLOT), (ROBE, CHEST)],
         ] {
             let painted = painted(&outfit(&order));
-            let boots = painted.iter().position(|(section, _)| *section == 7).expect("the feet");
-            let robe = painted.iter().position(|(section, _)| *section == 5).expect("the legs");
+            let boots = painted
+                .iter()
+                .position(|(section, _)| *section == 7)
+                .expect("the feet");
+            let robe = painted
+                .iter()
+                .position(|(section, _)| *section == 5)
+                .expect("the legs");
             assert!(boots < robe, "given {order:?}: {painted:?}");
 
             // And the two that overlap, in that order: 151010 is the boots' lower legs and
@@ -1742,13 +1844,29 @@ mod tests {
     // on each shoulder is three models from two pieces.
     #[test]
     fn hangs_the_geometry_of_every_piece_that_has_any() {
-        let dressed = outfit(&[(HELM_DISPLAY, HEAD), (SHOULDERS, SHOULDER), (CHESTPIECE, CHEST)]);
+        let dressed = outfit(&[
+            (HELM_DISPLAY, HEAD),
+            (SHOULDERS, SHOULDER),
+            (CHESTPIECE, CHEST),
+        ]);
         assert_eq!(
             dressed.models,
             vec![
-                WornModel { attachment: 11, file: 140_001, texture: Some(150_004) },
-                WornModel { attachment: 6, file: 140_002, texture: Some(150_002) },
-                WornModel { attachment: 5, file: 140_006, texture: Some(150_007) },
+                WornModel {
+                    attachment: 11,
+                    file: 140_001,
+                    texture: Some(150_004)
+                },
+                WornModel {
+                    attachment: 6,
+                    file: 140_002,
+                    texture: Some(150_002)
+                },
+                WornModel {
+                    attachment: 5,
+                    file: 140_006,
+                    texture: Some(150_007)
+                },
             ]
         );
         // And what a helm takes away is taken away from the outfit, not from the helm.
@@ -1779,13 +1897,41 @@ mod tests {
             &files,
             &hers(),
             &[
-                Piece { display_info_id: HELM_DISPLAY, display_type: HEAD, inventory_type: 0 },
-                Piece { display_info_id: SHOULDERS, display_type: SHOULDER, inventory_type: 0 },
-                Piece { display_info_id: ROBE, display_type: CHEST, inventory_type: 0 },
-                Piece { display_info_id: LEGS, display_type: LEGS_SLOT, inventory_type: 0 },
-                Piece { display_info_id: BOOTS, display_type: FEET_SLOT, inventory_type: 0 },
-                Piece { display_info_id: GLOVES, display_type: HANDS, inventory_type: 0 },
-                Piece { display_info_id: CAPE, display_type: BACK_SLOT, inventory_type: 0 },
+                Piece {
+                    display_info_id: HELM_DISPLAY,
+                    display_type: HEAD,
+                    inventory_type: 0,
+                },
+                Piece {
+                    display_info_id: SHOULDERS,
+                    display_type: SHOULDER,
+                    inventory_type: 0,
+                },
+                Piece {
+                    display_info_id: ROBE,
+                    display_type: CHEST,
+                    inventory_type: 0,
+                },
+                Piece {
+                    display_info_id: LEGS,
+                    display_type: LEGS_SLOT,
+                    inventory_type: 0,
+                },
+                Piece {
+                    display_info_id: BOOTS,
+                    display_type: FEET_SLOT,
+                    inventory_type: 0,
+                },
+                Piece {
+                    display_info_id: GLOVES,
+                    display_type: HANDS,
+                    inventory_type: 0,
+                },
+                Piece {
+                    display_info_id: CAPE,
+                    display_type: BACK_SLOT,
+                    inventory_type: 0,
+                },
             ],
         )
         .unwrap();
@@ -1794,7 +1940,10 @@ mod tests {
         opened.sort_unstable();
         let mut once = opened.clone();
         once.dedup();
-        assert_eq!(opened, once, "a table was parsed more than once for one outfit");
+        assert_eq!(
+            opened, once,
+            "a table was parsed more than once for one outfit"
+        );
 
         let mut wanted = vec![
             ITEM_DISPLAY_INFO_MATERIAL_RES,
@@ -1817,7 +1966,11 @@ mod tests {
         of_set(
             &files,
             &hers(),
-            &[Piece { display_info_id: CHESTPIECE, display_type: CHEST, inventory_type: 0 }],
+            &[Piece {
+                display_info_id: CHESTPIECE,
+                display_type: CHEST,
+                inventory_type: 0,
+            }],
         )
         .unwrap();
         let opened = files.asked.into_inner();

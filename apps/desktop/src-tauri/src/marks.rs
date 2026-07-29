@@ -142,7 +142,9 @@ pub fn clean_value(raw: Option<&str>) -> Result<Option<String>, String> {
         return Ok(None);
     }
     if value.chars().count() > VALUE_LIMIT {
-        return Err(format!("A tag's value has to fit in {VALUE_LIMIT} characters."));
+        return Err(format!(
+            "A tag's value has to fit in {VALUE_LIMIT} characters."
+        ));
     }
     Ok(Some(value))
 }

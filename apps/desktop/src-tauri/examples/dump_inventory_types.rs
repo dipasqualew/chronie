@@ -41,17 +41,17 @@ const APPEARANCE_DISPLAY_TYPE: usize = 0;
 /// What every armour `DisplayType` has to say in `InventoryType`, which is what identifies the
 /// column. The chest slot is the one with two answers: a robe is 20 and a breastplate 5.
 const ARMOUR: [(u32, &[u32]); 11] = [
-    (0, &[1]),      // head
-    (1, &[3]),      // shoulder
-    (2, &[4]),      // shirt
-    (3, &[5, 20]),  // chest, and a robe
-    (4, &[6]),      // waist
-    (5, &[7]),      // legs
-    (6, &[8]),      // feet
-    (7, &[9]),      // wrist
-    (8, &[10]),     // hands
-    (9, &[16]),     // back
-    (10, &[19]),    // tabard
+    (0, &[1]),     // head
+    (1, &[3]),     // shoulder
+    (2, &[4]),     // shirt
+    (3, &[5, 20]), // chest, and a robe
+    (4, &[6]),     // waist
+    (5, &[7]),     // legs
+    (6, &[8]),     // feet
+    (7, &[9]),     // wrist
+    (8, &[10]),    // hands
+    (9, &[16]),    // back
+    (10, &[19]),   // tabard
 ];
 
 /// How many columns to print, best agreement first.
@@ -145,14 +145,22 @@ fn main() {
             display_type.insert(item, *slot);
         }
     }
-    println!("{} items have a slot the appearance tables name", display_type.len());
+    println!(
+        "{} items have a slot the appearance tables name",
+        display_type.len()
+    );
 
-    let items = Db2::parse_with_text_columns(read(transmog::ITEM_SPARSE), &transmog::item_column::TEXT)
-        .unwrap_or_else(|error| {
-            eprintln!("Could not parse ItemSparse: {error}");
-            std::process::exit(1);
-        });
-    println!("ItemSparse: {} columns, {} rows readable\n", items.column_count(), items.rows().count());
+    let items =
+        Db2::parse_with_text_columns(read(transmog::ITEM_SPARSE), &transmog::item_column::TEXT)
+            .unwrap_or_else(|error| {
+                eprintln!("Could not parse ItemSparse: {error}");
+                std::process::exit(1);
+            });
+    println!(
+        "ItemSparse: {} columns, {} rows readable\n",
+        items.column_count(),
+        items.rows().count()
+    );
 
     // Every column against every armour item, which is the whole of the identification.
     let mut agreed = vec![0usize; items.column_count()];
@@ -174,7 +182,9 @@ fn main() {
             None => weapons.push((
                 row.id(),
                 slot,
-                (0..items.column_count()).map(|column| row.number(column)).collect(),
+                (0..items.column_count())
+                    .map(|column| row.number(column))
+                    .collect(),
             )),
         }
     }
@@ -229,13 +239,19 @@ fn main() {
     println!();
     let mut pairs: Vec<((u32, u32), usize)> = cross.into_iter().collect();
     pairs.sort_by(|left, right| left.0.cmp(&right.0));
-    println!("{} weapons and shields, by the slot and what they say:", weapons.len());
+    println!(
+        "{} weapons and shields, by the slot and what they say:",
+        weapons.len()
+    );
     let mut last = u32::MAX;
     for ((slot, inventory_type), count) in pairs {
         if slot != last {
             println!("  DisplayType {slot}");
             last = slot;
         }
-        println!("      {inventory_type:>3} {:<20} {count:>6}", named(inventory_type));
+        println!(
+            "      {inventory_type:>3} {:<20} {count:>6}",
+            named(inventory_type)
+        );
     }
 }

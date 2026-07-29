@@ -160,7 +160,10 @@ mod tests {
     // is keyed on everywhere else in this app.
     #[test]
     fn names_the_appearance_the_rest_of_the_app_keys_marks_on() {
-        assert_ne!(of(&[HELM_ITEM])["appearances"][HELM_ITEM.to_string()]["appearanceId"], 0);
+        assert_ne!(
+            of(&[HELM_ITEM])["appearances"][HELM_ITEM.to_string()]["appearanceId"],
+            0
+        );
     }
 
     // The hand, which is the one thing the slot cannot say and the reason `Item` is opened at
@@ -169,7 +172,10 @@ mod tests {
     fn says_which_hand_a_weapon_is_held_in() {
         let (_, display_type, inventory_type) =
             piece(&of(&[WEAPON_ITEM]), WEAPON_ITEM).expect("the fixture weapon resolves");
-        assert!(display_type > 10, "a weapon is filed above every armour slot");
+        assert!(
+            display_type > 10,
+            "a weapon is filed above every armour slot"
+        );
         assert_ne!(inventory_type, 0, "and the item says where it is held");
     }
 

@@ -160,7 +160,11 @@ pub(super) fn upsert_capture(
     marker: &Marker,
     now: i64,
 ) -> Result<(), String> {
-    let state = if marker.wants_image { "missing" } else { "none" };
+    let state = if marker.wants_image {
+        "missing"
+    } else {
+        "none"
+    };
     transaction
         .execute(
             "INSERT INTO captures (
@@ -385,7 +389,9 @@ pub(super) fn place_captures(connection: &mut Connection) -> Result<(), String> 
     }
     drop(statement);
 
-    let transaction = connection.transaction().map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
     for (capture, (moment, points)) in wanting {
         let Some(placed) = placement::place(moment, &points) else {
             continue;

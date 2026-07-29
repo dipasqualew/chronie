@@ -261,7 +261,9 @@ impl Model {
 
         let mut at = 0usize;
         while at + 8 <= bytes.len() {
-            let magic: [u8; 4] = bytes[at..at + 4].try_into().expect("four bytes are four bytes");
+            let magic: [u8; 4] = bytes[at..at + 4]
+                .try_into()
+                .expect("four bytes are four bytes");
             let size = read_u32(bytes, at + 4)? as usize;
             let start = at + 8;
             // A chunk that runs past the end of the file is a truncated download rather than
@@ -653,7 +655,11 @@ fn minus(one: [f32; 3], other: [f32; 3]) -> [f32; 3] {
 }
 
 fn sized(scale: [f32; 3], point: [f32; 3]) -> [f32; 3] {
-    [scale[0] * point[0], scale[1] * point[1], scale[2] * point[2]]
+    [
+        scale[0] * point[0],
+        scale[1] * point[1],
+        scale[2] * point[2],
+    ]
 }
 
 /// Two rotations, one after the other: `one` applied to what `then` already turned.
@@ -892,7 +898,9 @@ mod tests {
 
     /// Two rotations that are the same rotation, to within what an `int16` can say.
     fn close(left: [f32; 4], right: [f32; 4]) -> bool {
-        left.iter().zip(right).all(|(one, other)| (one - other).abs() < 0.0001)
+        left.iter()
+            .zip(right)
+            .all(|(one, other)| (one - other).abs() < 0.0001)
     }
 
     fn model(fdid: u32) -> Model {
@@ -915,7 +923,10 @@ mod tests {
         assert_eq!(mesh.parts.len(), 1);
         let part = &mesh.parts[0];
         assert_eq!(part.indices.len(), 36);
-        assert!(part.indices.iter().all(|index| (*index as usize) < mesh.vertices.len()));
+        assert!(part
+            .indices
+            .iter()
+            .all(|index| (*index as usize) < mesh.vertices.len()));
         assert_eq!(part.paint, Paint::File(150001));
         assert_eq!(part.blend, Blend::Opaque);
         assert!(!part.two_sided);
@@ -931,7 +942,9 @@ mod tests {
         let positions: Vec<[f32; 3]> = mesh.vertices.iter().map(|vertex| vertex.position).collect();
         assert!(positions.contains(&[-1.0, -1.0, 1.0]), "{positions:?}");
         assert!(positions.contains(&[1.0, 1.0, -1.0]), "{positions:?}");
-        assert!(positions.iter().all(|[x, y, z]| x.abs() == 1.0 && y.abs() == 1.0 && z.abs() == 1.0));
+        assert!(positions
+            .iter()
+            .all(|[x, y, z]| x.abs() == 1.0 && y.abs() == 1.0 && z.abs() == 1.0));
     }
 
     // M2 is Z-up and glTF is Y-up, and the conversion has to be a rotation: a mirror would
@@ -963,7 +976,11 @@ mod tests {
         let blade = &mesh.parts[0];
         let far = &mesh.parts[1];
         assert!(blade.indices.iter().all(|index| *index < 8));
-        assert!(far.indices.iter().all(|index| *index >= 8), "{:?}", &far.indices[..6]);
+        assert!(
+            far.indices.iter().all(|index| *index >= 8),
+            "{:?}",
+            &far.indices[..6]
+        );
     }
 
     // A model says which of its textures it owns and which the item supplies; the second kind
@@ -988,11 +1005,29 @@ mod tests {
         let body = mesh(CHARACTER, CHARACTER_SKIN);
         let types: Vec<Paint> = body.parts.iter().map(|part| part.paint).collect();
         // Every part but the hair is the composited body atlas, which is type 1.
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(1)).count(), 22);
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(6)).count(), 2);
+        assert_eq!(
+            types
+                .iter()
+                .filter(|paint| **paint == Paint::Supplied(1))
+                .count(),
+            22
+        );
+        assert_eq!(
+            types
+                .iter()
+                .filter(|paint| **paint == Paint::Supplied(6))
+                .count(),
+            2
+        );
         // And the cape, which is the third: a body wears one item picture out of its own
         // geometry, and it is neither the atlas nor the hair.
-        assert_eq!(types.iter().filter(|paint| **paint == Paint::Supplied(2)).count(), 1);
+        assert_eq!(
+            types
+                .iter()
+                .filter(|paint| **paint == Paint::Supplied(2))
+                .count(),
+            1
+        );
     }
 
     // The geoset is what says whether a part of a body is drawn at all, and it is the one
@@ -1004,12 +1039,15 @@ mod tests {
         assert_eq!(
             geosets,
             vec![
-                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 1, 2, 1001, 1002, 1301, 1302,
-                501, 502, 1502, 3201, 3202, 3203, 702, 3601, 1701, 2101,
+                0, 801, 802, 1101, 1104, 2001, 2002, 2701, 2702, 1, 2, 1001, 1002, 1301, 1302, 501,
+                502, 1502, 3201, 3202, 3203, 702, 3601, 1701, 2101,
             ]
         );
         // An item is drawn whole, and says so by belonging to no geoset.
-        assert!(mesh(HELM, HELM_SKIN).parts.iter().all(|part| part.geoset == 0));
+        assert!(mesh(HELM, HELM_SKIN)
+            .parts
+            .iter()
+            .all(|part| part.geoset == 0));
     }
 
     // Blend mode and two-sidedness are the two material properties a still picture needs: one
@@ -1024,7 +1062,11 @@ mod tests {
             .collect();
         assert_eq!(
             blends,
-            vec![(Blend::Opaque, false), (Blend::Mask, true), (Blend::Blend, false)]
+            vec![
+                (Blend::Opaque, false),
+                (Blend::Mask, true),
+                (Blend::Blend, false)
+            ]
         );
     }
 
@@ -1036,11 +1078,24 @@ mod tests {
     #[test]
     fn tells_the_blend_it_can_draw_from_the_family_it_cannot() {
         let body = mesh(CHARACTER, CHARACTER_SKIN);
-        let glow = body.parts.iter().find(|part| part.geoset == 1701).expect("the eye glow");
+        let glow = body
+            .parts
+            .iter()
+            .find(|part| part.geoset == 1701)
+            .expect("the eye glow");
         assert_eq!(glow.blend, Blend::Glow);
-        assert!(glow.two_sided, "a glow is a sheet, and a sheet is drawn from both sides");
+        assert!(
+            glow.two_sided,
+            "a glow is a sheet, and a sheet is drawn from both sides"
+        );
         // And nothing else on the body is one: everything a reader can see is drawable.
-        assert_eq!(body.parts.iter().filter(|part| part.blend == Blend::Glow).count(), 1);
+        assert_eq!(
+            body.parts
+                .iter()
+                .filter(|part| part.blend == Blend::Glow)
+                .count(),
+            1
+        );
     }
 
     // Layers past the first are overlays a shader composites onto the base one. Kept, they
@@ -1086,7 +1141,15 @@ mod tests {
         assert_eq!(left.scale, [0.5, 0.5, 0.5]);
         // A quarter turn about the game's Y, which is the axis the turn into the viewer's axes
         // negates: (0, 0.707, 0, 0.707) has to arrive as (0, 0, -0.707, 0.707).
-        assert!(close(left.rotation, [0.0, 0.0, -std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2]));
+        assert!(close(
+            left.rotation,
+            [
+                0.0,
+                0.0,
+                -std::f32::consts::FRAC_1_SQRT_2,
+                std::f32::consts::FRAC_1_SQRT_2
+            ]
+        ));
 
         // A bone can hold one and not the other, and a scale is three lengths rather than a
         // direction — so the axes are permuted without the sign a position takes.
@@ -1129,7 +1192,10 @@ mod tests {
         assert_eq!(packed([0, 0, 0, -1]), [-1.0, -1.0, -1.0, 1.0]);
         assert_eq!(packed([32767, 32767, 32767, 32767]), [0.0; 4]);
         // The two the real body's right shoulder carries, to four places.
-        assert!(close(packed([22800, 32767, -32040, -1563]), [-0.3042, 0.0, 0.0222, 0.9523]));
+        assert!(close(
+            packed([22800, 32767, -32040, -1563]),
+            [-0.3042, 0.0, 0.0222, 0.9523]
+        ));
     }
 
     // An attachment is found by the id in its record and not by where it sits in the array.
@@ -1143,7 +1209,12 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                BACK, LEFT_SHOULDER, HELM_ATTACHMENT, HAND_RIGHT, RIGHT_SHOULDER, HAND_LEFT,
+                BACK,
+                LEFT_SHOULDER,
+                HELM_ATTACHMENT,
+                HAND_RIGHT,
+                RIGHT_SHOULDER,
+                HAND_LEFT,
                 SHIELD,
             ]
         );
@@ -1178,12 +1249,18 @@ mod tests {
         let right = found(&attachments, HAND_RIGHT);
         // A quarter turn about the game's X, which the turn into the viewer's axes leaves
         // alone — X is the one axis the two agree about.
-        assert!(close(right.rotation, [FRAC_1_SQRT_2, 0.0, 0.0, FRAC_1_SQRT_2]), "{right:?}");
+        assert!(
+            close(right.rotation, [FRAC_1_SQRT_2, 0.0, 0.0, FRAC_1_SQRT_2]),
+            "{right:?}"
+        );
         assert_eq!(right.scale, [0.8, 0.8, 0.8]);
         // And the other hand's grip is the mirror of it, which is one weapon on two sides of
         // her rather than one weapon twice.
         let left = found(&attachments, HAND_LEFT);
-        assert!(close(left.rotation, [-FRAC_1_SQRT_2, 0.0, 0.0, FRAC_1_SQRT_2]), "{left:?}");
+        assert!(
+            close(left.rotation, [-FRAC_1_SQRT_2, 0.0, 0.0, FRAC_1_SQRT_2]),
+            "{left:?}"
+        );
     }
 
     // The floor under it, and the rule this replaced. A chain whose helpers hold nothing a
@@ -1217,7 +1294,10 @@ mod tests {
     #[test]
     fn leaves_an_attachment_that_states_a_position_where_it_states() {
         let attachments = attachments(&fixture_files().read(SKELETON).unwrap()).unwrap();
-        assert_eq!(found(&attachments, HELM_ATTACHMENT).position, [0.0, 4.0, 0.0]);
+        assert_eq!(
+            found(&attachments, HELM_ATTACHMENT).position,
+            [0.0, 4.0, 0.0]
+        );
     }
 
     // An item's model hangs things off nothing and says so, and a file with no attachments in
@@ -1240,9 +1320,14 @@ mod tests {
         let mut headerless = b"MD21".to_vec();
         headerless.extend_from_slice(&4u32.to_le_bytes());
         headerless.extend_from_slice(b"junk");
-        assert!(Model::parse(&headerless).unwrap_err().contains("holds no M2"));
+        assert!(Model::parse(&headerless)
+            .unwrap_err()
+            .contains("holds no M2"));
 
         let helm = model(HELM);
-        assert!(helm.with_skin(&[]).unwrap_err().contains("does not start with SKIN"));
+        assert!(helm
+            .with_skin(&[])
+            .unwrap_err()
+            .contains("does not start with SKIN"));
     }
 }

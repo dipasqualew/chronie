@@ -32,9 +32,8 @@ use crate::casc::GameFiles;
 use crate::db2::Db2;
 use crate::items::{self, ANY_CLASS};
 use crate::transmog::{
-    appearance_column, display_column, item_column, modified_appearance_column,
-    ITEM_APPEARANCE, ITEM_DISPLAY_INFO, ITEM_MODIFIED_APPEARANCE, ITEM_SPARSE, MODEL_SLOTS,
-    MODEL_SLOT_BITS,
+    appearance_column, display_column, item_column, modified_appearance_column, ITEM_APPEARANCE,
+    ITEM_DISPLAY_INFO, ITEM_MODIFIED_APPEARANCE, ITEM_SPARSE, MODEL_SLOTS, MODEL_SLOT_BITS,
 };
 
 /// One look, as the wardrobe list draws it.
@@ -234,9 +233,9 @@ fn lifts_restriction(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> bool {
             .is_some_and(|about| about.allowable_class == ANY_CLASS)
     };
     let locked = |item_id: &u32| {
-        facts.get(item_id).is_some_and(|about| {
-            about.allowable_class != ANY_CLASS && about.allowable_class != 0
-        })
+        facts
+            .get(item_id)
+            .is_some_and(|about| about.allowable_class != ANY_CLASS && about.allowable_class != 0)
     };
     reached.iter().any(open) && reached.iter().any(locked)
 }

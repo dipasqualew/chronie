@@ -157,7 +157,11 @@ fn slot_file(
                 looks.push((*appearance_id, look));
             }
         }
-        print!("\r  slot {slot}: {} of {} measured", looks.len(), rows.len());
+        print!(
+            "\r  slot {slot}: {} of {} measured",
+            looks.len(),
+            rows.len()
+        );
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 
@@ -237,7 +241,9 @@ fn parse() -> Options {
     while let Some(argument) = argv.next() {
         match argument.as_str() {
             "--fixtures" => {
-                source = Some(Source::Fixtures(argv.next().unwrap_or_else(|| usage()).into()));
+                source = Some(Source::Fixtures(
+                    argv.next().unwrap_or_else(|| usage()).into(),
+                ));
             }
             "--out" => out = Some(argv.next().unwrap_or_else(|| usage()).into()),
             "--only" => {
