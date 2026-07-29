@@ -40,11 +40,11 @@ import type { PlaceIcons } from "./places";
 import { classProps, className } from "./ui";
 import type { OpenSegment } from "./ui";
 import type {
+  CharacterWornSetPayload,
   InGameSet,
   InGameSetAppearancesPayload,
   InGameSetsPayload,
   WornPiece,
-  WornSetPayload,
 } from "./types";
 
 /** The two pages the pane holds, in the order a reader meets them. */
@@ -77,7 +77,7 @@ export interface CharactersProps {
   /** What one of those sets turns out to be, for the portrait to dress the character in. */
   loadSetAppearances: (appearanceIds: number[]) => Promise<InGameSetAppearancesPayload>;
   /** And the character themselves wearing it, on their own body. */
-  loadWorn: (character: string, pieces: WornPiece[]) => Promise<WornSetPayload>;
+  loadWorn: (character: string, pieces: WornPiece[]) => Promise<CharacterWornSetPayload>;
 }
 
 export function Characters({
@@ -225,7 +225,7 @@ interface ProfileProps {
   /** What this character has saved in game, or null when Chronie has never read their wardrobe. */
   wardrobe: InGameSet[] | null;
   loadSetAppearances: (appearanceIds: number[]) => Promise<InGameSetAppearancesPayload>;
-  loadWorn: (character: string, pieces: WornPiece[]) => Promise<WornSetPayload>;
+  loadWorn: (character: string, pieces: WornPiece[]) => Promise<CharacterWornSetPayload>;
   onOpenSegment: OpenSegment;
 }
 
@@ -235,6 +235,12 @@ interface ProfileProps {
  * The pages are tabs rather than two panels down one column, and rather than a router. Both
  * halves are long, only one is being read, and neither is somewhere a reader should have to
  * arrive at by scrolling — the same argument the window's own view tabs make one level up.
+ *
+ * **The portrait stands beside the facts rather than above them** (#222). Across the top it was a
+ * wide, shallow band — the one shape a standing person fits worst — and it pushed the tabs and
+ * everything under them down the page by its whole height. Down the side it is as tall as the
+ * pane allows, which is what a portrait wants, and it stays put while a reader moves between
+ * Summary and Activity: the picture is who they are, and neither page stops that being true.
  */
 function Profile({
   entry,
@@ -253,20 +259,71 @@ function Profile({
   onOpenSegment,
 }: ProfileProps): ReactNode {
   return (
-    <>
-      <header className="profile-head" {...classProps(entry.classFile)}>
-        <span className="circle" aria-hidden="true">
-          {initials(entry.name)}
-        </span>
-        <div>
-          <h2>{entry.name}</h2>
-          <p className="sub">
-            {className(entry.classFile)}
-            {entry.level == null ? "" : ` · level ${entry.level}`}
-            {` · last played ${ago(entry.lastSeen)}`}
-          </p>
+    <div className="profile">
+      <div className="profile-facts">
+        <header className="profile-head" {...classProps(entry.classFile)}>
+          <span className="circle" aria-hidden="true">
+            {initials(entry.name)}
+          </span>
+          <div>
+            <h2>{entry.name}</h2>
+            <p className="sub">
+              {className(entry.classFile)}
+              {entry.level == null ? "" : ` · level ${entry.level}`}
+              {` · last played ${ago(entry.lastSeen)}`}
+            </p>
+          </div>
+        </header>
+
+        {/* Named for what it switches rather than for what it is: a screen reader arriving here is
+          told these are the two halves of this character, which is the whole of the idea. */}
+        <div
+          className="profile-pages"
+          role="tablist"
+          aria-label="What to show about this character"
+        >
+          {PAGES.map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              id={`character-${name}-tab`}
+              className={name === page ? "primary" : undefined}
+              aria-selected={name === page}
+              aria-controls={`character-${name}-page`}
+              onClick={() => onPage(name)}
+            >
+              {PAGE_LABELS[name]}
+            </button>
+          ))}
         </div>
-      </header>
+
+        <div
+          className="profile-page"
+          role="tabpanel"
+          id={`character-${page}-page`}
+          aria-labelledby={`character-${page}-tab`}
+        >
+          {page === "summary" ? (
+            <CharacterSummary
+              entry={entry}
+              wardrobe={wardrobe}
+              currencyIcons={currencyIcons}
+              factionIcons={factionIcons}
+            />
+          ) : (
+            <CharacterActivity
+              entry={entry}
+              range={range}
+              onRange={onRange}
+              now={now}
+              items={items}
+              places={places}
+              onOpenSegment={onOpenSegment}
+            />
+          )}
+        </div>
+      </div>
 
       <CharacterFigure
         // Keyed by the character, so moving to somebody else starts a fresh portrait rather than
@@ -277,51 +334,6 @@ function Profile({
         loadAppearances={loadSetAppearances}
         loadWorn={loadWorn}
       />
-
-      {/* Named for what it switches rather than for what it is: a screen reader arriving here is
-        told these are the two halves of this character, which is the whole of the idea. */}
-      <div className="profile-pages" role="tablist" aria-label="What to show about this character">
-        {PAGES.map((name) => (
-          <button
-            key={name}
-            type="button"
-            role="tab"
-            id={`character-${name}-tab`}
-            className={name === page ? "primary" : undefined}
-            aria-selected={name === page}
-            aria-controls={`character-${name}-page`}
-            onClick={() => onPage(name)}
-          >
-            {PAGE_LABELS[name]}
-          </button>
-        ))}
-      </div>
-
-      <div
-        className="profile-page"
-        role="tabpanel"
-        id={`character-${page}-page`}
-        aria-labelledby={`character-${page}-tab`}
-      >
-        {page === "summary" ? (
-          <CharacterSummary
-            entry={entry}
-            wardrobe={wardrobe}
-            currencyIcons={currencyIcons}
-            factionIcons={factionIcons}
-          />
-        ) : (
-          <CharacterActivity
-            entry={entry}
-            range={range}
-            onRange={onRange}
-            now={now}
-            items={items}
-            places={places}
-            onOpenSegment={onOpenSegment}
-          />
-        )}
-      </div>
-    </>
+    </div>
   );
 }

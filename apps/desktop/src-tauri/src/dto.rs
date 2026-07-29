@@ -594,6 +594,17 @@ dto!(WornSetPayload {
     pub model: Option<String>,
 });
 
+dto!(CharacterWornSetPayload {
+    pub model: Option<String>,
+    /// How much of the character the body is really theirs — see [`character::Likeness`].
+    ///
+    /// A shape of its own rather than a `WornSetPayload` with a field added, because the two
+    /// commands are asking different questions: the wardrobe draws whoever the reader invented
+    /// and there is nothing to be uncertain about, and this draws somebody the app has to
+    /// recognise first and is frequently unable to.
+    pub likeness: crate::character::Likeness,
+});
+
 dto!(GalleryModel {
     pub display_info_id: u32,
     pub kind: GalleryKind,

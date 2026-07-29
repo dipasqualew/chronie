@@ -17,6 +17,7 @@
  */
 
 import { expect, test } from "./harness";
+import { GALLERY_PATIENCE_MS } from "./mock";
 import { Roster } from "./pages/characters";
 import { railColours } from "./pages/paint";
 import { SegmentDetail } from "./pages/segment";
@@ -62,6 +63,60 @@ test("gives every character a page of their own", async ({ page }) => {
     await roster.pick("Aster-Vale");
 
     await expect(roster.drawn("Aster-Vale", "Tideglass")).toBeVisible();
+  });
+
+  /**
+   * The shape of the pane, which is most of what #222 was about.
+   *
+   * It used to paint through the gallery's stage: a 256-pixel bitmap on a plain 2D canvas,
+   * `object-fit: contain`-ed into a band 260 pixels tall across the whole width of the page. So the
+   * character was small, soft, and had an empty field of background either side — and dragging her
+   * turned a bitmap. She is drawn on the app's one live pane now, and the two things worth
+   * asserting about that are both facts about geometry that no accessible name can carry.
+   *
+   * **The canvas covers its pane and no more**, which is the fault behind #146 ruled out for a
+   * third pane: the drawing buffer is sized in device pixels and nothing in the renderer can size
+   * the *element*, so a pane whose stylesheet forgets to lay the canvas out grows itself off the
+   * screen a frame at a time. **And the pane is taller than it is wide**, which is what says the
+   * shape is a person rather than a letterbox.
+   */
+  await test.step("on a pane the size of its pane, taller than it is wide", async () => {
+    // Read after the model is on the stage and a few frames past it, because the runaway this
+    // rules out needs a `ResizeObserver` tick or two to become visible.
+    await expect
+      .poll(() => roster.portraitCamera("Aster-Vale", "Tideglass"), {
+        timeout: GALLERY_PATIENCE_MS,
+      })
+      .toBeTruthy();
+    await page.waitForTimeout(500);
+
+    const shape = await roster.portraitShape("Aster-Vale", "Tideglass");
+    expect(shape.canvas).toEqual(shape.pane);
+    expect(shape.pane[1]).toBeGreaterThan(shape.pane[0]);
+  });
+
+  // And beside the facts rather than above them, which is the other half of the same complaint:
+  // a portrait across the top pushed both tabs and everything under them down the page by its
+  // whole height, and left the picture the shape a picture of a standing person fits worst.
+  await test.step("and beside the page of facts rather than above it", async () => {
+    const picture = await roster.figure("Aster-Vale").boundingBox();
+    const tabs = await roster.pageTab("Summary").boundingBox();
+
+    expect(picture!.x).toBeGreaterThan(tabs!.x + tabs!.width);
+  });
+
+  // Turning her is what a live pane is for, and it is the thing the bitmap could only pretend at.
+  // The camera moves because the reader dragged it, and goes back because they asked — which is
+  // the only way out of a drag that went too far, since an empty pane and a pane pointed at her
+  // ankle draw the same rectangle.
+  await test.step("she turns under the pointer, and the camera comes back", async () => {
+    const opened = await roster.portraitCamera("Aster-Vale", "Tideglass");
+
+    await roster.turnPortrait("Aster-Vale", "Tideglass");
+    await expect.poll(() => roster.portraitCamera("Aster-Vale", "Tideglass")).not.toBe(opened);
+
+    await roster.resetPortrait("Aster-Vale").click();
+    await expect.poll(() => roster.portraitCamera("Aster-Vale", "Tideglass")).toBe(opened);
   });
 
   // Brin-Hearth has been played with the addon on and saves nothing in game, which is a

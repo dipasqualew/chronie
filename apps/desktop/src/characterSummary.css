@@ -9,9 +9,14 @@
 .holdings { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .holdings caption { text-align: left; color: var(--text-muted); padding-bottom: 4px; }
 .holdings th, .holdings td { text-align: left; padding: 5px 8px; vertical-align: middle; }
+/* Wrapping rather than `nowrap`, which is what these headers used to say. The pane they sit in is
+   a column beside the character's portrait now rather than the whole width of the page (#222), and
+   a header that may not wrap is a column that cannot narrow: "Furthest on the account" is four
+   words that took the whole row out past the panel's edge. Two lines of 10.5px caps cost less than
+   a table whose right-hand side is off the panel. */
 .holdings thead th {
   font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap;
+  color: var(--text-muted); border-bottom: 1px solid var(--border);
 }
 .holdings tbody th { font-weight: 550; }
 .holdings tbody tr + tr th, .holdings tbody tr + tr td {
@@ -31,7 +36,13 @@
 /* A reputation's bar is the whole of its cell, so it drops the top margin it carries where it
    sits under a faction's name. Named through the cell to out-specify `ui.css`'s own rule,
    which is written for that other place and would otherwise win or lose by import order. */
-.holdings td .rep-standing { margin: 0; }
-.holdings td .rep-bar { width: 140px; }
+/* A row of two things that may become two rows of one. There is no whitespace between the bar and
+   the words beside it — see `StandingBar` — so a cell too narrow for both had no break to take and
+   printed the standing over the column to its right instead. Flex with wrapping gives it one. */
+.holdings td .rep-standing {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px;
+}
+/* And the bar takes its cell rather than a fixed 140px, so it narrows with the column. */
+.holdings td .rep-bar { width: 100%; max-width: 140px; min-width: 60px; }
 
 .profile-sets { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }

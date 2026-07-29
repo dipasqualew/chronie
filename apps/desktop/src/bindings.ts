@@ -113,13 +113,15 @@ async characterModel() : Promise<Result<CharacterModelPayload, string>> {
  * what does this Tauren I play look like in the set she saved — and answering it with the
  * Human Female the transmog screen happens to be set to would be answering somebody else's.
  *
- * Falls back to the reader's own body for a character this install cannot draw. That is not a
- * failure worth reporting: a race the game does not have, and — far more often — a character
- * the addon has never read a race off at all, because a look is only stored once the addon has
- * seen one. A picture on the wrong body is still a picture of the clothes, which is most of
- * what the pane is for, and the alternative is an empty stage on most of a roster.
+ * **Which is exactly what it used to do.** A character this install cannot recognise fell back
+ * to the reader's own body, on the argument that a picture on the wrong body is still a picture
+ * of the clothes. That argument belongs to the wardrobe and not to a portrait: on the machine
+ * that reported #222 there was no look stored for anybody, so every night elf on the roster was
+ * drawn as the Kul Tiran Male the transmog screen happened to be set to, and nothing said so.
+ * So the fallback is gone, and what comes back instead says how much of the body is really the
+ * character's — see [`character::Likeness`], and `look.rs` for why it is so often so little.
  */
-async characterWornSet(character: string, pieces: WornPiece[]) : Promise<Result<WornSetPayload, string>> {
+async characterWornSet(character: string, pieces: WornPiece[]) : Promise<Result<CharacterWornSetPayload, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("character_worn_set", { character, pieces }) };
 } catch (e) {
@@ -884,6 +886,16 @@ export type CharacterQuestion = { id: number; name: string; swatches: CharacterS
 export type CharacterSets = { character: string; sets: InGameSet[] }
 export type CharacterStanding = { character: string; standing?: string | null; current?: number | null; max?: number | null; rank?: number | null; system?: string | null; at?: number | null }
 export type CharacterSwatch = { id: number; name: string }
+export type CharacterWornSetPayload = { model: string | null;
+/**
+ * How much of the character the body is really theirs — see [`character::Likeness`].
+ *
+ * A shape of its own rather than a `WornSetPayload` with a field added, because the two
+ * commands are asking different questions: the wardrobe draws whoever the reader invented
+ * and there is nothing to be uncertain about, and this draws somebody the app has to
+ * recognise first and is frequently unable to.
+ */
+likeness: Likeness }
 export type CollectibleEvent = { id: number; name?: string | null; at?: number | null; guid?: string | null }
 export type CurrencyGain = { id: number; name: string; amount: number; at?: number | null; total?: number | null }
 export type CurrencyHolder = { character: string; total: number; at?: number | null }
@@ -985,6 +997,38 @@ export type ItemDetail = { id: number; name: string; classId: number; subclassId
 export type ItemDetailsPayload = { items: Partial<{ [key in string]: ItemDetail }> }
 export type KeystoneRun = { level: number; mapId?: number | null; affixes?: number[]; startedAt?: number | null; completedAt?: number | null; completed: boolean; durationMs?: number | null; onTime?: boolean | null; upgrades?: number | null }
 export type LevelUpEvent = { level: number; at?: number | null }
+/**
+ * How much of who a character is went into the body they were drawn on.
+ *
+ * **A portrait is worth nothing if it is somebody else's**, which is the whole reason this
+ * travels beside the picture. Two of the three answers below are pictures the app can draw and
+ * only one of them is the character; a pane that showed all three the same way would be
+ * confidently wrong about most of a roster, and nothing on screen would say which.
+ *
+ * The distinction is the game's rather than this app's. `UnitRace` and `UnitSex` are readable
+ * wherever a character is standing, so the *body* arrives for anybody the addon has seen log
+ * in; what they are made of only enumerates at a barber's chair, so the *colouring* arrives
+ * for a character somebody has had a haircut on and for nobody else. See `look.rs`, and
+ * `docs/character-rendering.md` for the read off the client that settled it.
+ */
+export type Likeness =
+/**
+ * Nobody at all: the addon has never read this character's race, so there is no body to
+ * draw them on and none is drawn. **Not the reader's own body**, which is what this used to
+ * be — a Kul Tiran Male standing in for every night elf on the roster, with the pane
+ * saying nothing about it.
+ */
+"nobody" |
+/**
+ * The body their race and sex name, at the swatches the game itself opens on. The clothes
+ * are theirs and the shape is theirs; the skin, the hair and the face are the game's
+ * defaults rather than the ones the player chose.
+ */
+"race" |
+/**
+ * Their own colouring as well, off a character the addon caught in a barber's chair.
+ */
+"themselves"
 /**
  * The newest combat log found, as the window describes it to a reader.
  */

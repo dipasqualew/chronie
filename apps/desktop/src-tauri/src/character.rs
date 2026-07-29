@@ -52,7 +52,9 @@ use std::cell::OnceCell;
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
 use image::{ImageEncoder, Rgba, RgbaImage};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use specta::Type;
 
 use crate::body::{self, Body};
 use crate::casc::GameFiles;
@@ -292,6 +294,68 @@ pub fn worn_set_of(
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
+/// The same outfit on a body belonging to somebody the reader actually plays, and how much of
+/// that body is really theirs.
+///
+/// **A character this install knows nothing about is drawn as nothing at all**, and that is the
+/// whole of what this adds over [`worn_set_of`]. Falling back to the reader's own invented body
+/// was the old answer and it is the wrong one *here*, however right it is in the wardrobe. There
+/// a look is being chosen and any body it is chosen on is a fair picture of the clothes; this is
+/// a portrait, its one job is "who is this", and the settings file has no opinion about somebody
+/// else's alt. On the machine that reported this it was a Kul Tiran Male standing in for every
+/// night elf on the roster.
+///
+/// So the answer says which of the three it is and the window says so out loud. `null` for the
+/// model keeps every meaning it already had — see [`worn_set_of`] — and gains one: nobody to draw.
+pub fn own_worn_set_of(
+    files: &dyn GameFiles,
+    pieces: &[crate::worn::Piece],
+    who: Option<&Who>,
+) -> Result<Value, String> {
+    let Some(who) = who else {
+        return Ok(serde_json::json!({ "model": Value::Null, "likeness": Likeness::Nobody }));
+    };
+    let likeness = if who.picked.is_empty() {
+        Likeness::Race
+    } else {
+        Likeness::Themselves
+    };
+    let mut drawn = worn_set_of(files, pieces, who)?;
+    // Written into what `worn_set_of` built rather than assembled beside it, because the model is
+    // the expensive half and there is nothing to be gained by copying it into a second object.
+    drawn["likeness"] = serde_json::to_value(likeness)
+        .map_err(|error| format!("the likeness would not serialise: {error}"))?;
+    Ok(drawn)
+}
+
+/// How much of who a character is went into the body they were drawn on.
+///
+/// **A portrait is worth nothing if it is somebody else's**, which is the whole reason this
+/// travels beside the picture. Two of the three answers below are pictures the app can draw and
+/// only one of them is the character; a pane that showed all three the same way would be
+/// confidently wrong about most of a roster, and nothing on screen would say which.
+///
+/// The distinction is the game's rather than this app's. `UnitRace` and `UnitSex` are readable
+/// wherever a character is standing, so the *body* arrives for anybody the addon has seen log
+/// in; what they are made of only enumerates at a barber's chair, so the *colouring* arrives
+/// for a character somebody has had a haircut on and for nobody else. See `look.rs`, and
+/// `docs/character-rendering.md` for the read off the client that settled it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Likeness {
+    /// Nobody at all: the addon has never read this character's race, so there is no body to
+    /// draw them on and none is drawn. **Not the reader's own body**, which is what this used to
+    /// be — a Kul Tiran Male standing in for every night elf on the roster, with the pane
+    /// saying nothing about it.
+    Nobody,
+    /// The body their race and sex name, at the swatches the game itself opens on. The clothes
+    /// are theirs and the shape is theirs; the skin, the hair and the face are the game's
+    /// defaults rather than the ones the player chose.
+    Race,
+    /// Their own colouring as well, off a character the addon caught in a barber's chair.
+    Themselves,
+}
+
 /// One of the reader's own characters as somebody to draw, or nothing where they cannot be.
 ///
 /// The way from a name — which is what the character view has, and the only thing it has — to
@@ -299,10 +363,10 @@ pub fn worn_set_of(
 /// panel's shortcut makes, arrived at from the other end: there a reader picks somebody off a
 /// list that was already resolved, and here a pane already showing one asks who they are.
 ///
-/// **Nothing is the ordinary answer for most of a roster**, and the caller has to have something
-/// to fall back to. The addon only learns what a character is made of at a barber's chair — see
-/// `look.rs` — so a name is here at all only once one has been read, and a race the installed
-/// game does not have drops out at [`crate::look::resolve`] besides.
+/// **Nothing is the ordinary answer for most of a roster.** The addon only learns what a
+/// character is made of at a barber's chair — see `look.rs` — so a name is here at all only once
+/// one has been read, and a race the installed game does not have drops out at
+/// [`crate::look::resolve`] besides.
 pub fn who_is(
     files: &dyn GameFiles,
     looks: &[crate::look::Look],
@@ -1965,7 +2029,7 @@ mod tests {
         );
     }
 
-    /// Which is most of a roster, and is why the caller has a body of its own to fall back on.
+    /// Which is most of a roster, and is why the portrait has to be able to say so.
     #[test]
     fn finds_nobody_for_a_character_the_addon_has_never_read_a_race_off() {
         let looks = vec![played("Zia-Vale", HUMAN, vec![])];
@@ -2010,5 +2074,71 @@ mod tests {
                 swatch: 21
             }]
         );
+    }
+
+    /* ---------- and drawn as themselves, or not drawn ---------- */
+
+    /// The fault behind #222, stated at the level it lives at.
+    ///
+    /// A character the addon has never read a race off used to be handed to `worn_set_of` on the
+    /// *reader's* body, and the picture that came back was a stranger wearing this character's
+    /// clothes with nothing on screen to say so. On the machine that reported it, that was every
+    /// character on the roster: no look had ever been stored, so the settings file's Kul Tiran
+    /// Male stood in for sixteen night elves.
+    #[test]
+    fn draws_nobody_at_all_for_a_character_it_cannot_recognise() {
+        let answer = own_worn_set_of(&fixture_files(), &[piece(ROBE)], None).unwrap();
+
+        assert_eq!(answer["model"], Value::Null);
+        assert_eq!(answer["likeness"], "nobody");
+    }
+
+    /// Most of a roster: the race is readable wherever they are standing, so the body is right
+    /// and the colouring is the game's own defaults. Worth drawing, and worth being honest about.
+    #[test]
+    fn says_a_body_off_a_race_alone_is_not_their_colouring() {
+        let who = Who {
+            body: body::DEFAULT,
+            picked: Vec::new(),
+        };
+
+        let answer = own_worn_set_of(&fixture_files(), &[piece(ROBE)], Some(&who)).unwrap();
+
+        assert!(answer["model"].is_string());
+        assert_eq!(answer["likeness"], "race");
+    }
+
+    /// And the one a barber's chair has been sat in: the body and the colours are both theirs.
+    #[test]
+    fn says_so_when_the_body_is_the_character_themselves() {
+        let who = Who {
+            body: body::DEFAULT,
+            picked: vec![Picked {
+                question: 14,
+                swatch: 133,
+            }],
+        };
+
+        let answer = own_worn_set_of(&fixture_files(), &[piece(ROBE)], Some(&who)).unwrap();
+
+        assert!(answer["model"].is_string());
+        assert_eq!(answer["likeness"], "themselves");
+    }
+
+    /// The `null` this already had keeps its meaning beside the new one, and the likeness is
+    /// still the answer to a different question: there is somebody to draw and nothing to put on
+    /// them. A window that read `null` as "nobody" would tell the reader their alt is unknown
+    /// every time a set turned out to be undrawable.
+    #[test]
+    fn tells_a_set_it_cannot_draw_apart_from_a_character_it_cannot_recognise() {
+        let who = Who {
+            body: body::DEFAULT,
+            picked: Vec::new(),
+        };
+
+        let answer = own_worn_set_of(&fixture_files(), &[], Some(&who)).unwrap();
+
+        assert_eq!(answer["model"], Value::Null);
+        assert_eq!(answer["likeness"], "race");
     }
 }
