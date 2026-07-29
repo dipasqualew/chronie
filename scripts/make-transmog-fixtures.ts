@@ -2141,19 +2141,37 @@ interface AttachmentSpec {
   scale?: readonly [number, number, number];
   animated?: boolean;
   /**
-   * The bones above this attachment's own, nearest first, as the pivots each of them states.
+   * The bones above this attachment's own, nearest first.
    *
    * This is how the game writes the three attachments a weapon needs. The shield, the right
    * hand and the left state **no position at all** on the retail body, and neither do the
-   * bones they name: they are helpers the game animates into place, and a still picture has no
-   * animation to do it with. What the file still says is where that chain hangs from, so a
-   * reader falls back to the first ancestor that states a pivot — and a fixture without a
-   * chain to walk cannot tell that reader from one that leaves a sword at the origin, which on
-   * a character is between her feet.
-   *
-   * A link of `null` is a bone that states no pivot either, so the walk has to keep going.
+   * bones they name: they are helpers the game carries into the hand, and a still picture has
+   * no animation to carry them with. What the file still says is where that chain hangs from,
+   * so a reader that finds nothing else falls back to the first ancestor that states a pivot —
+   * and a fixture without a chain to walk cannot tell that reader from one that leaves a sword
+   * at the origin, which on a character is between her feet.
    */
-  chain?: ReadonlyArray<readonly [number, number, number] | null>;
+  chain?: readonly ChainSpec[];
+}
+
+/**
+ * One bone above an attachment's own, and what it holds.
+ *
+ * A link with no `pivot` is a helper that states no place of its own, so the walk keeps going.
+ * A link with one is where the chain hangs from, and the walk stops there.
+ *
+ * `at`, `rotation` and `scale` are **the grip**: what the retail body's helper bones hold, and
+ * they hold it in an *ordinary* track rather than a global sequence — one key, and the same key
+ * in every animation, which is a bone stating where it sits rather than one being animated.
+ * `moving` writes the same values as a run of keys instead, which is what an animated bone looks
+ * like and what a still picture has to ignore.
+ */
+interface ChainSpec {
+  pivot?: readonly [number, number, number];
+  at?: readonly [number, number, number];
+  rotation?: readonly [number, number, number, number];
+  scale?: readonly [number, number, number];
+  moving?: boolean;
 }
 
 /**
@@ -2220,15 +2238,24 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
   /** One track's keyframes, and where the two nested arrays naming them begin. */
   interface Keys { times: number; values: number }
 
-  const lay = (write: (into: Bytes) => void): Keys => {
+  /**
+   * One track's keys, written into the trailer.
+   *
+   * `keyframes` is the whole of the difference between a bone stating where it sits and a bone
+   * being animated: one key is a constant a still picture may read, and a run of them is a
+   * movement it has no clock for. The values written are the same either way, so a reader that
+   * confuses the two is caught by where the thing hanging off the bone ends up rather than by
+   * a count it could have checked for itself.
+   */
+  const lay = (write: (into: Bytes) => void, keyframes = 1): Keys => {
     const times = trailerAt + trailer.length;
-    trailer.u32(1); // the inner array: one key, which is what a constant is
+    trailer.u32(keyframes); // the inner array, per animation
     trailer.u32(times + 8); // sitting just past this pair
-    trailer.u32(0); // the timestamp itself
+    for (let key = 0; key < keyframes; key += 1) trailer.u32(key * 100); // the timestamps
     const values = trailerAt + trailer.length;
-    trailer.u32(1);
+    trailer.u32(keyframes);
     trailer.u32(values + 8);
-    write(trailer);
+    for (let key = 0; key < keyframes; key += 1) write(trailer);
     return { times, values };
   };
 
@@ -2261,15 +2288,29 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
     }
   };
 
-  /** One bone with nothing to say: no tracks, and a pivot and a parent given to it. */
-  const plain = (pivot: readonly [number, number, number], parent: number): void => {
+  /** One bone of a chain: its pivot, its parent, and whatever grip it holds. */
+  const link = (spec: ChainSpec, parent: number): void => {
+    const keyframes = spec.moving ? 4 : 1;
+    const laid = (write: ((into: Bytes) => void) | null): Keys | null =>
+      write === null ? null : lay(write, keyframes);
+    const translation = laid(
+      spec.at ? (into) => { for (const axis of spec.at!) into.f32(axis); } : null,
+    );
+    const rotation = laid(
+      spec.rotation ? (into) => { for (const part of spec.rotation!) into.u16(compressed(part)); } : null,
+    );
+    const scale = laid(
+      spec.scale ? (into) => { for (const axis of spec.scale!) into.f32(axis); } : null,
+    );
     bones.u32(0xffffffff);
     bones.u32(0x0200);
     bones.u16(parent);
     bones.u16(0);
     bones.u32(0);
-    for (let track = 0; track < 3; track += 1) emit(false, null);
-    for (const axis of pivot) bones.f32(axis);
+    emit(false, translation);
+    emit(false, rotation);
+    emit(false, scale);
+    for (const axis of spec.pivot ?? [0, 0, 0]) bones.f32(axis);
   };
 
   attachments.forEach((attachment, index) => {
@@ -2286,9 +2327,9 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
     for (const axis of attachment.at) bones.f32(axis); // the pivot, which is where it is
   });
   chains.forEach((chain, index) => {
-    chain.forEach((pivot, step) => {
+    chain.forEach((spec, step) => {
       const last = step === chain.length - 1;
-      plain(pivot ?? [0, 0, 0], last ? 0xffff : ancestorsAt[index]! + step + 1);
+      link(spec, last ? 0xffff : ancestorsAt[index]! + step + 1);
     });
   });
 
@@ -2351,19 +2392,52 @@ const ATTACHMENTS: readonly AttachmentSpec[] = [
   { id: 6, at: [0, 2, 3], rotation: [0, HALF_ROOT_TWO, 0, HALF_ROOT_TWO], scale: [0.5, 0.5, 0.5] },
   { id: 11, at: [0, 0, 4] }, // the helm, whose bone says nothing — as the real one's does not
   // The right hand, and the shape the retail body gives all three of a weapon's attachments:
-  // the record states the origin, its own bone states the origin, and the place it belongs to
-  // is the first ancestor that states one. The link in between is a millimetre off the origin,
-  // which the real body has too — a rounding of zero rather than a place on a person, and what
-  // a reader that stops at "not exactly zero" would hang a sword off.
-  { id: 1, at: [0, 0, 0], chain: [[0, 0.001, 0], [1, -3, 1]] },
+  // the record states the origin, its own bone states the origin, and everything that says
+  // where the weapon goes is held by the bones above it.
+  //
+  // The first of those is the **grip**: a helper whose pivot is a millimetre off the origin —
+  // a rounding of zero rather than a place on a person, which the real body has too — holding
+  // a position, a roll and a size in an ordinary track with a single key. That is a bone
+  // stating where it sits rather than one being animated, and it is the difference between a
+  // sword in a fist and a sword hanging off a wrist.
+  //
+  // The second is the wrist, which states a pivot *and* moves: a run of keys, none of which a
+  // still picture has a clock for. Read as though it applied, the sword arrives quarter-turned.
+  {
+    id: 1,
+    at: [0, 0, 0],
+    chain: [
+      { pivot: [0, 0.001, 0] },
+      { at: [1, -3.5, 0.5], rotation: [HALF_ROOT_TWO, 0, 0, HALF_ROOT_TWO], scale: [0.8, 0.8, 0.8] },
+      { pivot: [1, -3, 1] },
+    ],
+  },
   // The right shoulder: a scale and no rotation, which is the other way a bone can be half
   // silent. Three different lengths, so that the axes being permuted shows up here too.
   { id: 5, at: [0, -2, 3], scale: [1, 2, 4] },
-  // The left hand, whose chain is one bone and states nothing in between.
-  { id: 2, at: [0, 0, 0], chain: [[1, 3, 1]] },
+  // The left hand, whose grip is the right one's mirror — the same weapon, the other side of
+  // her — and whose chain stops one bone sooner.
+  {
+    id: 2,
+    at: [0, 0, 0],
+    chain: [
+      { at: [1, 3.5, 0.5], rotation: [-HALF_ROOT_TWO, 0, 0, HALF_ROOT_TWO], scale: [0.8, 0.8, 0.8] },
+      { pivot: [1, 3, 1] },
+    ],
+  },
   // The shield, which is neither hand: on the real body it hangs off the left forearm, two
-  // helper bones up. A chain that states nothing until its end is what makes the walk a walk.
-  { id: 0, at: [0, 0, 0], chain: [null, [0, 3, 2]] },
+  // helper bones up. Its one helper holds the same three things a grip does and holds them as a
+  // *run* of keys, which is a bone an animation moves rather than one stating where it sits —
+  // so a still picture has to read none of it and fall back to the arm the chain hangs from.
+  // Read as though it applied, the shield arrives nine metres away, quarter-turned and tripled.
+  {
+    id: 0,
+    at: [0, 0, 0],
+    chain: [
+      { moving: true, at: [9, -9, 9], rotation: [0, 0, HALF_ROOT_TWO, HALF_ROOT_TWO], scale: [3, 3, 3] },
+      { pivot: [0, 3, 2] },
+    ],
+  },
 ];
 
 /**

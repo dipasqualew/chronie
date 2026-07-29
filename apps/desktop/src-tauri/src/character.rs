@@ -1457,24 +1457,30 @@ mod tests {
         assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&2), true);
     }
 
-    // The acceptance for a weapon: it is in her hand rather than in mid-air, and *which* hand
-    // is the one thing the display cannot say. The same display, read as a one-hander and as
-    // something held in the other hand, is the same mesh on two different sides of her.
+    // The acceptance for a weapon: it is *held* rather than hanging in mid-air beside her, and
+    // *which* hand is the one thing the display cannot say. The same display, read as a
+    // one-hander and as something held in the other hand, is the same mesh on two different
+    // sides of her.
+    //
+    // All three parts of the node say so and the last two are what issue #134 was: the place is
+    // the grip the body's helper bones state rather than the wrist above it, the rotation is the
+    // angle a fist holds a weapon at, and the scale is the fraction of its modelled size this
+    // body wears one at. A sword drawn at the wrist, unturned and full size, is a sword held by
+    // nobody.
     #[test]
     fn puts_a_sword_in_the_hand_the_game_says_it_is_held_in() {
         let right = worn_scene(ONE_HANDER);
-        assert_eq!(
-            right["nodes"],
-            serde_json::json!([
-                { "mesh": 0 },
-                { "mesh": 1, "translation": [1.0, 1.0, 3.0] },
-            ])
-        );
+        let held = &right["nodes"][1];
+        assert_eq!(held["translation"], serde_json::json!([1.0, 0.5, 3.5]));
+        assert_eq!(held["scale"], serde_json::json!([0.8, 0.8, 0.8]));
+        let roll = |node: &Value| node["rotation"][0].as_f64().expect("a roll about the X axis");
+        assert!(roll(held) > 0.7, "{held}");
         // Geometry, and not merely a node: the weapon's two submeshes, whole.
         assert_eq!(right["meshes"][1]["primitives"].as_array().unwrap().len(), 2);
 
         let left = worn_scene(OFF_HAND);
-        assert_eq!(left["nodes"][1]["translation"], serde_json::json!([1.0, 1.0, -3.0]));
+        assert_eq!(left["nodes"][1]["translation"], serde_json::json!([1.0, 0.5, -3.5]));
+        assert!(roll(&left["nodes"][1]) < -0.7, "the other hand grips the other way");
         assert_eq!(right["meshes"], left["meshes"], "the same weapon, the other hand");
     }
 
