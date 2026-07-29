@@ -11,8 +11,9 @@
 //!
 //! * `dungeon` — a party instance that was not a keystone, from `instanceType == "party"`
 //!   plus its difficulty and encounter list. Needs nothing new.
-//! * `delve` and `scenario` — `instanceType == "scenario"`; delves would want the tier,
-//!   which the addon does not record yet.
+//! * `scenario` — the rest of `instanceType == "scenario"` once delves are taken out of it.
+//!   Derivable today, but a Horrific Vision and a boost tutorial are not one activity, and
+//!   nothing in a segment tells them apart.
 //! * `raid_finder` — already separable from the difficulty name, but only worth splitting
 //!   out of the raid kinds once there is a reason to treat it differently.
 //! * `questing` — a run of completed quests in an outdoor zone. Derivable today from
@@ -33,6 +34,12 @@ use serde_json::{json, Map, Value};
 /// still recognisably a keystone run even without the run's own data.
 const MYTHIC_KEYSTONE_DIFFICULTY: i64 = 8;
 
+/// The one difficulty every delve runs at, whatever tier its entrance was set to. Read off
+/// `Difficulty.db2` on 12.0.5, where row 208 is "Delves" with `InstanceType` 5 — the same
+/// scenario type the client reports for every other scenario, which is why the difficulty
+/// rather than the type is what separates a delve from a Horrific Vision.
+const DELVE_DIFFICULTY: i64 = 208;
+
 /// How much of a level has to be earned before a segment is called levelling. Below this a
 /// gain is just the incidental experience that comes from doing something else.
 const LEVELLING_PERCENT_THRESHOLD: f64 = 0.05;
@@ -42,6 +49,7 @@ pub const KIND_PROGRESS_RAID: &str = "progress_raid";
 pub const KIND_LEGACY_RAID: &str = "legacy_raid";
 pub const KIND_LEVELLING: &str = "levelling";
 pub const KIND_PREY: &str = "prey";
+pub const KIND_DELVE: &str = "delve";
 
 /// Every kind this build knows how to name, for the desktop app's editor. A user is not
 /// limited to these — a kind they type in is stored verbatim — but these are the ones the
@@ -52,6 +60,7 @@ pub const KNOWN_KINDS: &[&str] = &[
     KIND_LEGACY_RAID,
     KIND_LEVELLING,
     KIND_PREY,
+    KIND_DELVE,
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -255,6 +264,52 @@ fn prey(segment: &Segment) -> Option<Activity> {
     ))
 }
 
+/// A delve, from the difficulty the client filed the instance under.
+///
+/// The delve names itself: a delve is an instance of its own and the segment is already named
+/// for it, which is what lets this recognise every delve in history, including the ones
+/// recorded long before the addon knew what a delve was.
+///
+/// What the difficulty cannot say is the tier — every tier is difficulty 208 — so a segment
+/// the addon watched carries a run of its own, and that is where the tier and the story come
+/// from. Confidence follows the tier rather than the delve: which delve it was is certain
+/// either way, and a tier nobody recorded is the one thing anybody would want back.
+///
+/// The story is a scenario id because there is no name to give. Each delve has three to six
+/// of them, every one a `Scenario` row of its own whose steps all carry the delve's name, so
+/// the id is the only thing that tells one telling from another.
+fn delve(segment: &Segment) -> Option<Activity> {
+    if segment.instance_type != "scenario" || segment.difficulty_id != Some(DELVE_DIFFICULTY) {
+        return None;
+    }
+    let name = segment.instance.as_str();
+    let Some(run) = segment.delve.as_ref() else {
+        return Some(Activity::new(
+            KIND_DELVE,
+            0.5,
+            json!({ "delve": name, "durationSeconds": segment.seconds }),
+        ));
+    };
+
+    // The run's own clock when it has one, because a segment lasts as long as the player
+    // stayed in the instance and a delve ends when it is finished, not when they walk out.
+    let seconds = match (run.started_at, run.completed_at) {
+        (Some(started), Some(completed)) if completed >= started => completed - started,
+        _ => segment.seconds,
+    };
+    Some(Activity::new(
+        KIND_DELVE,
+        if run.tier.is_some() { 1.0 } else { 0.5 },
+        compact(json!({
+            "delve": name,
+            "tier": run.tier,
+            "storyId": run.scenario_id,
+            "completed": run.completed,
+            "durationSeconds": seconds,
+        })),
+    ))
+}
+
 /// Every guess this build can make about one segment.
 ///
 /// More than one may apply at once and that is not a conflict: a levelling raid night is
@@ -266,6 +321,7 @@ pub fn infer(segment: &Segment) -> Vec<Activity> {
         raid(segment),
         levelling(segment),
         prey(segment),
+        delve(segment),
     ]
         .into_iter()
         .flatten()
@@ -553,6 +609,102 @@ mod tests {
     #[test]
     fn guesses_nothing_from_a_quest_whose_title_was_never_recorded() {
         assert!(!kinds(&segment(json!({ "quests": [{ "id": 1 }] }))).contains(&KIND_PREY.to_string()));
+    }
+
+    // Nothing in a segment recorded before the addon knew what a delve was says which tier it
+    // was run at, but the difficulty and the instance's own name are enough to know it was
+    // one and which one — so it is still guessed, and still says the tier is missing.
+    #[test]
+    fn recognises_a_delve_with_no_run_recorded_but_admits_it_lacks_the_tier() {
+        let activity = only(
+            &segment(json!({
+                "instance": "Fungal Folly",
+                "instanceType": "scenario",
+                "difficultyId": DELVE_DIFFICULTY,
+                "seconds": 900,
+            })),
+            KIND_DELVE,
+        );
+
+        assert!(activity.confidence < 1.0);
+        assert_eq!(activity.metadata["delve"], "Fungal Folly");
+        assert!(activity.metadata.get("tier").is_none());
+        assert_eq!(activity.metadata["durationSeconds"], 900);
+    }
+
+    // The run's own clock rather than the segment's, because a segment lasts as long as the
+    // player stayed in the instance and a delve ends when it is finished, not when they leave.
+    #[test]
+    fn reads_a_delves_tier_and_story_off_the_run_itself() {
+        let activity = only(
+            &segment(json!({
+                "instance": "Kriegval's Rest",
+                "instanceType": "scenario",
+                "difficultyId": DELVE_DIFFICULTY,
+                "seconds": 1800,
+                "delve": {
+                    "tier": 8,
+                    "scenarioId": 2680,
+                    "startedAt": 2_000_000_000i64,
+                    "completedAt": 2_000_000_780i64,
+                    "completed": true,
+                },
+            })),
+            KIND_DELVE,
+        );
+
+        assert_eq!(activity.confidence, 1.0);
+        assert_eq!(activity.metadata["delve"], "Kriegval's Rest");
+        assert_eq!(activity.metadata["tier"], 8);
+        assert_eq!(activity.metadata["storyId"], 2680);
+        assert_eq!(activity.metadata["completed"], true);
+        assert_eq!(activity.metadata["durationSeconds"], 780);
+    }
+
+    // The addon can watch a delve start before the client will say which tier it is: the run
+    // is real, the tier is the one thing missing, and confidence follows the tier.
+    #[test]
+    fn records_a_delve_whose_tier_was_never_answered_but_says_it_is_unsure() {
+        let activity = only(
+            &segment(json!({
+                "instance": "Fungal Folly",
+                "instanceType": "scenario",
+                "difficultyId": DELVE_DIFFICULTY,
+                "seconds": 600,
+                "delve": { "scenarioId": 2680, "completed": false },
+            })),
+            KIND_DELVE,
+        );
+
+        assert!(activity.confidence < 1.0);
+        assert_eq!(activity.metadata["storyId"], 2680);
+        assert_eq!(activity.metadata["completed"], false);
+        assert!(activity.metadata.get("tier").is_none());
+        assert_eq!(activity.metadata["durationSeconds"], 600);
+    }
+
+    // Every scenario reports instanceType "scenario", which is exactly why the difficulty is
+    // what the rule reads: a Horrific Vision runs at its own difficulty and is not a delve.
+    #[test]
+    fn leaves_a_scenario_that_is_not_a_delve_alone() {
+        assert!(!kinds(&segment(json!({
+            "instance": "Horrific Vision of Orgrimmar",
+            "instanceType": "scenario",
+            "difficultyId": 12,
+        })))
+        .contains(&KIND_DELVE.to_string()));
+    }
+
+    // Nonsense the client would never report, and that is the point: the difficulty is read
+    // together with the type, so neither half alone can call something a delve.
+    #[test]
+    fn leaves_a_party_dungeon_at_the_delve_difficulty_alone() {
+        assert!(!kinds(&segment(json!({
+            "instance": "Halls of Atonement",
+            "instanceType": "party",
+            "difficultyId": DELVE_DIFFICULTY,
+        })))
+        .contains(&KIND_DELVE.to_string()));
     }
 
     #[test]

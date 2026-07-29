@@ -11,7 +11,7 @@ use crate::marks;
 use crate::placement;
 use crate::retention;
 use crate::saved_variables::{
-    self, EncounterEvent, Experience, Keystone, LevelUpEvent, RawHoldingSnapshot, RawLockout,
+    self, Delve, EncounterEvent, Experience, Keystone, LevelUpEvent, RawHoldingSnapshot, RawLockout,
     RawLockoutActivity, RawRosterEntry, RawWarband, Segment,
 };
 use chrono::{DateTime, Datelike, Local, Utc};
@@ -1020,6 +1020,7 @@ fn clear_outcomes(transaction: &Transaction<'_>, segment_id: i64) -> Result<(), 
         "housing_level_ups",
         "encounters",
         "keystone_runs",
+        "delve_runs",
         // equipset_slots hang off the change row and go with it.
         "equipset_changes",
     ] {
@@ -1319,6 +1320,27 @@ fn insert_outcomes(
                 )
                 .map_err(|error| error.to_string())?;
         }
+    }
+
+    if let Some(delve) = &segment.delve {
+        // Every column but the segment is nullable here, unlike a keystone run: a delve the
+        // addon saw start is worth recording even when the client had not yet said which
+        // tier or which story it was, because the segment names the delve either way.
+        transaction
+            .execute(
+                "INSERT INTO delve_runs (
+                     segment_id, tier, scenario_id, started_at, completed_at, completed
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    segment_id,
+                    delve.tier,
+                    delve.scenario_id,
+                    delve.started_at,
+                    delve.completed_at,
+                    i64::from(delve.completed)
+                ],
+            )
+            .map_err(|error| error.to_string())?;
     }
 
     insert_equipset_changes(transaction, character_id, segment_id, segment)?;
@@ -3733,6 +3755,35 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     }
     drop(statement);
 
+    // A delve run is one per segment too, and goes on the same way.
+    let mut statement = connection
+        .prepare(
+            "SELECT segment_id, tier, scenario_id, started_at, completed_at, completed
+             FROM delve_runs",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                serde_json::json!({
+                    "tier": row.get::<_, Option<i64>>(1)?,
+                    "scenarioId": row.get::<_, Option<i64>>(2)?,
+                    "startedAt": row.get::<_, Option<i64>>(3)?,
+                    "completedAt": row.get::<_, Option<i64>>(4)?,
+                    "completed": row.get::<_, i64>(5)? != 0,
+                }),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (segment_id, delve) = row.map_err(|error| error.to_string())?;
+        if let Some(index) = indices.get(&segment_id) {
+            segments[*index]["delve"] = delve;
+        }
+    }
+    drop(statement);
+
     let holdings = account_holdings(&connection)?;
 
     Ok(serde_json::json!({
@@ -4830,6 +4881,24 @@ fn segment_for_inference(
         )
         .optional()
         .map_err(|error| error.to_string())?;
+
+    segment.delve = transaction
+        .query_row(
+            "SELECT tier, scenario_id, started_at, completed_at, completed
+             FROM delve_runs WHERE segment_id = ?1",
+            [segment_id],
+            |row| {
+                Ok(Delve {
+                    tier: row.get(0)?,
+                    scenario_id: row.get(1)?,
+                    started_at: row.get(2)?,
+                    completed_at: row.get(3)?,
+                    completed: row.get::<_, i64>(4)? != 0,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
     Ok(segment)
 }
 
@@ -5454,6 +5523,30 @@ ChronieDB = {{ ["segments"] = {{
     }
 
     #[test]
+    fn stores_a_delve_run_and_guesses_the_activity_from_it() {
+        let delve = r#"
+          { ["id"] = "delve-1", ["character"] = "Aster-Vale", ["instance"] = "Fungal Folly",
+            ["instanceType"] = "scenario", ["difficultyId"] = 208, ["endedAt"] = 2000000000,
+            ["delve"] = { ["tier"] = 8, ["scenarioId"] = 2680, ["startedAt"] = 1999999220,
+              ["completedAt"] = 2000000000, ["completed"] = true } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(delve);
+
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
+
+        let segment = &dashboard(&database).unwrap()["segments"][0];
+        assert_eq!(segment["delve"]["tier"], 8);
+        assert_eq!(segment["delve"]["scenarioId"], 2680);
+        assert_eq!(segment["delve"]["completed"], true);
+        let activities = segment["activities"].as_array().unwrap();
+        assert_eq!(activities.len(), 1);
+        assert_eq!(activities[0]["kind"], "delve");
+        assert_eq!(activities[0]["source"], "inferred");
+        assert_eq!(activities[0]["metadata"]["delve"], "Fungal Folly");
+        assert_eq!(activities[0]["metadata"]["tier"], 8);
+    }
+
+    #[test]
     fn stores_encounters_with_their_wipes_and_guesses_a_legacy_raid() {
         let (_temp, wow, database) = synthetic_install(RAID_SEGMENT);
 
@@ -5627,6 +5720,44 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(after[0]["metadata"]["keystoneLevel"], 9);
         assert_eq!(after[0]["metadata"]["timed"], false);
         assert_eq!(after[0]["metadata"]["durationSeconds"], 2400);
+    }
+
+    /// A reset re-guesses from what SQLite holds, never from the file the addon wrote — which
+    /// may be long gone, or may have been rotated out from under a segment kept forever. The
+    /// tier and the story are the two things only the stored run can supply: without them the
+    /// guess falls back to what the difficulty alone can say, and the delve quietly loses the
+    /// only two facts a segment cannot recover for itself.
+    #[test]
+    fn resetting_recovers_a_delves_tier_without_the_saved_variables() {
+        let delve = r#"
+          { ["id"] = "delve-2", ["character"] = "Aster-Vale", ["instance"] = "Kriegval's Rest",
+            ["instanceType"] = "scenario", ["difficultyId"] = 208, ["endedAt"] = 2000000000,
+            ["delve"] = { ["tier"] = 11, ["scenarioId"] = 2681, ["startedAt"] = 1999999100,
+              ["completedAt"] = 2000000000, ["completed"] = true } }
+        "#;
+        let (_temp, wow, database) = synthetic_install(delve);
+        collect(&wow, &database, 2_000_000_000, Options::default()).unwrap();
+        let segment_id = dashboard(&database).unwrap()["segments"][0]["segmentId"]
+            .as_i64()
+            .unwrap();
+        delete_activity(
+            &database,
+            activities_of(&database)[0]["id"].as_i64().unwrap(),
+            2_000_000_100,
+        )
+        .unwrap();
+
+        reset_activities(&database, segment_id, 2_000_000_200).unwrap();
+
+        let after = activities_of(&database);
+        assert_eq!(after[0]["kind"], "delve");
+        assert_eq!(after[0]["metadata"]["delve"], "Kriegval's Rest");
+        assert_eq!(after[0]["metadata"]["tier"], 11);
+        assert_eq!(after[0]["metadata"]["storyId"], 2681);
+        assert_eq!(after[0]["metadata"]["completed"], true);
+        // The run's own clock survives the round trip through SQLite too: 900 seconds of
+        // delve inside a segment that the player stayed in for longer.
+        assert_eq!(after[0]["metadata"]["durationSeconds"], 900);
     }
 
     /// An existing database predates the activities schema entirely; the migration has to

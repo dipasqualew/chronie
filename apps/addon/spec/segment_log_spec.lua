@@ -151,6 +151,7 @@ describe("ns.newSegmentLog", function()
             log.record(visit())
 
             assert.is_nil(db.segments[1].keystone)
+            assert.is_nil(db.segments[1].delve)
         end)
 
         -- The log is a record of events and the wallet's balance is not one. The movement
@@ -189,6 +190,27 @@ describe("ns.newSegmentLog", function()
                 completedAt = NOW, completed = true, durationMs = 1740000,
                 onTime = true, upgrades = 1,
             }, db.segments[1].keystone)
+        end)
+
+        -- The tier and the story are the only two things the record cannot recover for
+        -- itself: the delve names the segment it was run in, but nothing else says which
+        -- tier the entrance was set to or which of the delve's stories the client rolled.
+        it("carries a delve run onto the record", function()
+            local log, db = newLog()
+
+            log.record(visit({
+                summary = {
+                    delve = {
+                        tier = 8, scenarioId = 2680, startedAt = NOW - 900,
+                        completedAt = NOW, completed = true,
+                    },
+                },
+            }))
+
+            assert.same({
+                tier = 8, scenarioId = 2680, startedAt = NOW - 900,
+                completedAt = NOW, completed = true,
+            }, db.segments[1].delve)
         end)
 
         it("dates the record by the day the visit ended", function()

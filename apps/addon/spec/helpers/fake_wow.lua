@@ -53,6 +53,11 @@ fake.KNOWN_EVENTS = {
     -- Read out of the 12.0.5.67823 client's own event table, where all three sit together:
     -- SCREENSHOT_STARTED, SCREENSHOT_SUCCEEDED and SCREENSHOT_FAILED. The addon subscribes
     -- to the two that resolve a shot; the third says only that one has begun.
+    -- Read out of the same 12.0.5 client's event table, where the eight SCENARIO_* names sit
+    -- together. These two are the ones a delve announces itself through: the update that says
+    -- a scenario's state has moved, and the completion that says it reached its end.
+    "SCENARIO_COMPLETED",
+    "SCENARIO_UPDATE",
     "SCREENSHOT_FAILED",
     "SCREENSHOT_SUCCEEDED",
     "TRANSMOG_COLLECTION_SOURCE_ADDED",
@@ -903,6 +908,9 @@ function fake.newEnv(options)
     -- The keystone in the slot and the completion report, both nil until a test plants one.
     local activeKeystone = options.activeKeystone
     local keystoneCompletion = options.keystoneCompletion
+    -- What the client would say about a delve, already in the shape ns.readDelve returns.
+    -- nil until a test plants one, which is what every zone that is not a delve looks like.
+    local delveState = options.delveState
     -- Where the client says the character is standing. Mutable, so one test can walk from
     -- a zone that reports a point into an instance that reports only a map.
     local mapPosition = options.map
@@ -1000,6 +1008,9 @@ function fake.newEnv(options)
         end,
         keystoneCompletion = function()
             return keystoneCompletion
+        end,
+        delveState = function()
+            return delveState
         end,
         itemSellPrice = function(itemID)
             return itemPrices[itemID]
@@ -1284,6 +1295,12 @@ function fake.newEnv(options)
         ---@param value table? `{ level, mapId, durationMs, onTime, upgrades }`
         setKeystoneCompletion = function(value)
             keystoneCompletion = value
+        end,
+        ---Say what the client would about a delve, for the scenario events to read.
+        ---Passing nil models every scenario that is not one.
+        ---@param value DelveState?
+        setDelveState = function(value)
+            delveState = value
         end,
         ---Drive the instance type the addon reads through env.instanceInfo. Passing
         ---nil models zoning out into the open world.

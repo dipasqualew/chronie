@@ -77,6 +77,19 @@ export const ACTIVITY_KINDS: Record<string, ActivityKind | undefined> = {
       { key: "huntsCompleted", label: "Hunts completed", type: "number" },
     ],
   },
+  delve: {
+    label: "Delve",
+    icon: "🕳️",
+    fields: [
+      { key: "delve", label: "Delve", type: "text" },
+      { key: "tier", label: "Tier", type: "number" },
+      // A scenario id rather than a name because the game gives the stories no names — see
+      // the delve rule in activity.rs. Two runs sharing one told the same story.
+      { key: "storyId", label: "Story (scenario id)", type: "number" },
+      { key: "completed", label: "Completed", type: "boolean" },
+      { key: "durationSeconds", label: "Duration (seconds)", type: "number" },
+    ],
+  },
   levelling: {
     label: "Levelling",
     icon: "⬆️",
@@ -151,6 +164,15 @@ export function activitySummary(activity?: PartialActivity | null): string {
       // and a bare title would otherwise read as the whole of what the segment held.
       const hunts = number(meta.huntsCompleted);
       if (hunts !== null && hunts > 1) parts.push(`${hunts} hunts`);
+      break;
+    }
+    case "delve": {
+      if (meta.delve) parts.push(String(meta.delve));
+      // The tier is the whole of how hard a delve was, so an unknown one is said out loud
+      // rather than left off — the same reading a keystone of unknown level gets.
+      const tier = number(meta.tier);
+      parts.push(tier === null ? "tier unknown" : `tier ${tier}`);
+      if (meta.completed === false) parts.push("left unfinished");
       break;
     }
     case "levelling": {

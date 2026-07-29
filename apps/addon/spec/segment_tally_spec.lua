@@ -1255,6 +1255,97 @@ describe("ns.newSegmentTally", function()
         end)
     end)
 
+    describe("delve runs", function()
+        it("opens the run on the first sighting and carries it onto the summary", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.delveStart({ inProgress = true, tier = 8, scenarioId = 2680 }, 5000)
+
+            assert.same({
+                tier = 8, scenarioId = 2680, startedAt = 5000, completed = false,
+            }, tally.summary().delve)
+        end)
+
+        -- Every scenario update reads the client afresh, and one that has only just started
+        -- names neither the tier nor the story. The later reading fills those in; what it
+        -- must not do is move the run's start onto the update that finally answered.
+        it("keeps the first start time while filling in a tier that arrived late", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.delveStart({ inProgress = true }, 5000)
+
+            tally.delveStart({ inProgress = true, tier = 11, scenarioId = 2681 }, 5200)
+
+            assert.same({
+                tier = 11, scenarioId = 2681, startedAt = 5000, completed = false,
+            }, tally.summary().delve)
+        end)
+
+        it("closes the open run when the delve finishes", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.delveStart({ inProgress = true, tier = 8 }, 5000)
+
+            tally.delveComplete({ completed = true, tier = 8 }, 6800)
+
+            assert.same({
+                tier = 8, startedAt = 5000, completedAt = 6800, completed = true,
+            }, tally.summary().delve)
+        end)
+
+        -- The deliberate asymmetry with keystones. A keystone completion carries the run's
+        -- own level and so is worth filing on its own; a delve completion carries nothing the
+        -- segment does not already hold, and the client goes on answering "a delve was
+        -- completed" for a while after the player has left one. Without a start to close, a
+        -- scenario that merely followed a delve would be filed as a delve run of its own.
+        it("records nothing at all for a completion whose start was never seen", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.delveComplete({ completed = true, tier = 8 }, 6800)
+
+            assert.is_nil(tally.summary().delve)
+            assert.is_false(tally.hasEvents())
+        end)
+
+        -- A delve run with no loot, no gold and no boss in it is still the thing the player
+        -- spent the time doing, so the segment has to survive the walk out of the instance.
+        it("is enough on its own to make the segment worth filing", function()
+            local tally = newTally()
+            tally.begin(0)
+
+            tally.delveStart({ inProgress = true }, 5000)
+
+            assert.is_true(tally.hasEvents())
+        end)
+
+        it("ignores a start that arrives with no segment open", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.leave()
+
+            tally.delveStart({ inProgress = true, tier = 8 }, 5000)
+
+            assert.is_nil(tally.summary().delve)
+        end)
+
+        -- The summary is handed to the log and filed; if it were the tally's own table, the
+        -- next scenario update would rewrite a run that had already been written down.
+        it("does not hand the caller its own run table", function()
+            local tally = newTally()
+            tally.begin(0)
+            tally.delveStart({ inProgress = true, tier = 8 }, 5000)
+
+            local filed = tally.summary().delve
+            tally.delveComplete({ completed = true, tier = 11 }, 6800)
+
+            assert.equal(8, filed.tier)
+            assert.is_false(filed.completed)
+            assert.is_nil(filed.completedAt)
+        end)
+    end)
+
     describe("experience earned", function()
         ---@param baseline table? `{ level, xp, xpMax }` as the segment opens
         ---@return SegmentTally
@@ -1643,6 +1734,7 @@ describe("ns.newSegmentTally", function()
             assert.same({}, summary.housingLevelUps)
             assert.same({}, summary.encounters)
             assert.is_nil(summary.keystone)
+            assert.is_nil(summary.delve)
             assert.is_nil(summary.experience)
         end)
 

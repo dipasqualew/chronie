@@ -35,6 +35,7 @@ local _, ns = ...
 ---@field encounters EncounterEvent[] Boss fights that ended, kills and wipes alike.
 ---@field equipsetChanges EquipsetChange[] Equipment sets created, deleted or edited.
 ---@field keystone KeystoneRun? Present only when the segment was a Mythic+ run.
+---@field delve DelveRun? Present only when the segment was a delve.
 ---@field experience ExperienceGain? Present only when the character earned any.
 ---@field expansionTier integer? Encounter Journal tier the location belongs to, 1 = Classic.
 ---@field latestExpansionTier integer? The newest tier this client knows about. Together with
@@ -170,6 +171,7 @@ function ns.newSegmentLog(deps)
                 encounters = ns.copyEventList(specs.encounters, summary.encounters),
                 equipsetChanges = ns.copyEventList(specs.equipsetChanges, summary.equipsetChanges),
                 keystone = ns.copyDetail(details.keystone, summary.keystone),
+                delve = ns.copyDetail(details.delve, summary.delve),
                 experience = ns.copyDetail(details.experience, summary.experience),
             }
 

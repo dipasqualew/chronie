@@ -32,6 +32,7 @@ local addonName, ns = ...
 ---@field experienceState fun(): table? `{ level, xp, xpMax }`, or nil at the level cap.
 ---@field activeKeystone fun(): table? `{ level, mapId, affixes }` for the key in the slot.
 ---@field keystoneCompletion fun(): table? `{ level, mapId, durationMs, onTime, upgrades }`.
+---@field delveState fun(): DelveState? The delve the player is inside, when they are.
 ---@field itemSellPrice fun(itemID: integer): integer? Vendor price of one item, in copper.
 ---@field transmogSourceInfo fun(sourceID: integer): table?
 ---@field equipmentSets fun(): table<integer, EquipsetState> Every equipment set the character has.
@@ -1167,6 +1168,24 @@ function ns.main(env)
         end
     end)
     onTallyEvent("CHALLENGE_MODE_RESET", tally.keystoneReset)
+    -- The scenario events carry no payload either, and a delve is a scenario. Both of them
+    -- go and read the same state, because neither moment is reliably the one that has the
+    -- answers: a scenario that has only just started may not name its tier or its story yet,
+    -- and the completion is the only place the end of the run is announced.
+    local function foldDelve()
+        local state = env.delveState()
+        if not state then
+            return
+        end
+        if state.inProgress then
+            tally.delveStart(state, env.now())
+        end
+        if state.completed then
+            tally.delveComplete(state, env.now())
+        end
+    end
+    onTallyEvent("SCENARIO_UPDATE", foldDelve)
+    onTallyEvent("SCENARIO_COMPLETED", foldDelve)
     onTallyEvent("NEW_MOUNT_ADDED", function(id)
         tally.mount(id, env.mountInfo(id), env.now())
         autoCapture({ kind = "mount", id = id })
@@ -1412,6 +1431,19 @@ if CreateFrame then
                     onTime = onTime,
                     upgrades = upgrades,
                 }
+            end,
+            -- Four reads rather than one, because no single call describes a delve: the
+            -- party knows whether one is running, the delves UI knows the tier, and the
+            -- scenario knows which story is being told. Passed as functions rather than
+            -- called here so a client that has never heard of delves — every build before
+            -- The War Within — hands over nils and is simply told nothing.
+            delveState = function()
+                return ns.readDelve({
+                    isDelveInProgress = C_PartyInfo and C_PartyInfo.IsDelveInProgress,
+                    isDelveComplete = C_PartyInfo and C_PartyInfo.IsDelveComplete,
+                    activeTier = C_DelvesUI and C_DelvesUI.GetActiveDelveTier,
+                    scenarioStep = C_ScenarioInfo and C_ScenarioInfo.GetScenarioStepInfo,
+                })
             end,
             itemSellPrice = function(itemID)
                 if not itemID then

@@ -41,6 +41,9 @@ local _, ns = ...
 ---@field keystoneStart fun(info: table, at: integer) Open a Mythic+ run: `{ level, mapId, affixes }`.
 ---@field keystoneComplete fun(info: table, at: integer) Close it: `{ durationMs, onTime, upgrades, level }`.
 ---@field keystoneReset fun() Abandon the open run; the level and map stay, completion does not.
+---@field delveStart fun(state: DelveState, at: integer) Open a delve run, or fold a later
+---reading of the client into the one already open.
+---@field delveComplete fun(state: DelveState?, at: integer) Mark the open run finished.
 ---@field experience fun(level: integer, xp: integer, xpMax: integer) Fold the character's
 ---current experience standing into the segment's gain.
 ---@field isActive fun(): boolean
@@ -125,6 +128,16 @@ local _, ns = ...
 ---@field onTime boolean? Whether it beat the timer.
 ---@field upgrades integer? Keystone upgrade levels earned: 0 for depleted-but-completed, 1..3 otherwise.
 
+---A delve run, at most one per segment, on the same rule a keystone run follows: a party
+---that finishes one and walks straight into another never leaves the instance, so the
+---second overwrites the first rather than appending.
+---@class DelveRun
+---@field tier integer? The tier the delve was run at, when the client had one to give.
+---@field scenarioId integer? Which of the delve's stories the client rolled. See ns.readDelve.
+---@field startedAt integer When the delve was first seen running.
+---@field completedAt integer? When it finished; absent for one that was left part way.
+---@field completed boolean Whether the delve reached its end.
+
 ---How much experience the character earned over the segment.
 ---@class ExperienceGain
 ---@field gained integer Raw experience points.
@@ -155,6 +168,7 @@ local _, ns = ...
 ---@field housingLevelUps LevelUpEvent[] Housing levels gained, in the order they were.
 ---@field encounters EncounterEvent[] Boss fights that ended, in the order they did.
 ---@field keystone KeystoneRun? The Mythic+ run this segment was, when it was one.
+---@field delve DelveRun? The delve this segment was, when it was one.
 ---@field experience ExperienceGain? Experience earned, when the client ever reported any.
 
 ---@class SegmentTallyDeps
@@ -318,6 +332,7 @@ function ns.newSegmentTally(deps)
         segment.equipsetChanges = {}
         segment.entries = 0
         segment.keystone = nil
+        segment.delve = nil
         segment.experienceGained = 0
         segment.experiencePercent = 0
         segment.experienceBaseline = nil
@@ -746,6 +761,51 @@ function ns.newSegmentTally(deps)
             run.upgrades = info.upgrades
         end,
 
+        ---Opens a delve run on this segment, or folds a later reading into the open one.
+        ---
+        ---The client does not answer everything at once — a scenario that has only just
+        ---started may name neither the tier nor the story — so every reading fills in what
+        ---it knows and leaves what it does not. The start time is the exception: it belongs
+        ---to the first sighting of the run, not to the last update of it.
+        ---@param state DelveState
+        ---@param at integer
+        delveStart = function(state, at)
+            if not segment.active or not state then
+                return
+            end
+            local run = segment.delve
+            if not run then
+                run = { startedAt = at, completed = false }
+                segment.delve = run
+            end
+            run.tier = state.tier or run.tier
+            run.scenarioId = state.scenarioId or run.scenarioId
+        end,
+
+        ---Closes the open run.
+        ---
+        ---Unlike a keystone completion, this never opens a run of its own. A keystone
+        ---completion carries the run's own level and so is worth recording on its own; a
+        ---delve completion carries nothing a segment does not already hold, and the client
+        ---goes on answering "a delve was completed" for a while after the player has left
+        ---one. Requiring a start means a scenario that merely followed a delve can never be
+        ---filed as one — and a delve whose start was missed is still recognisable later from
+        ---the difficulty it ran at.
+        ---@param state DelveState?
+        ---@param at integer
+        delveComplete = function(state, at)
+            local run = segment.active and segment.delve
+            if not run then
+                return
+            end
+            run.completed = true
+            run.completedAt = at
+            if state then
+                run.tier = state.tier or run.tier
+                run.scenarioId = state.scenarioId or run.scenarioId
+            end
+        end,
+
         ---The party abandoned or reset the key. The run stays on the segment — it is still
         ---what the player spent the time doing — but it never became a completion.
         keystoneReset = function()
@@ -905,6 +965,7 @@ function ns.newSegmentTally(deps)
                 or #segment.equipsetChanges > 0
                 or segment.entries > 0
                 or segment.keystone ~= nil
+                or segment.delve ~= nil
                 or segment.experienceGained ~= 0
         end,
 
@@ -988,6 +1049,7 @@ function ns.newSegmentTally(deps)
                 encounters = ns.copyEventList(specs.encounters, segment.encounters),
                 equipsetChanges = ns.copyEventList(specs.equipsetChanges, segment.equipsetChanges),
                 keystone = ns.copyDetail(details.keystone, segment.keystone),
+                delve = ns.copyDetail(details.delve, segment.delve),
                 experience = ns.copyDetail(details.experience, experience),
             }
         end,
