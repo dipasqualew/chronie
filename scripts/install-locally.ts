@@ -71,10 +71,10 @@ function build(bundles?: string): void {
  * `productName`'s. Asked of cargo rather than read out of `Cargo.toml`, because nothing here
  * parses TOML and `[[bin]]` could rename it again anyway.
  *
- * The crate builds more than one binary — `export_bindings` is the other — so this asks for
- * the one named after the package rather than for the first one listed. Taking whatever came
- * first is how the bundled `.app` ended up launching the bindings exporter, and it would be
- * no better a way to pick what gets copied into `%LOCALAPPDATA%`.
+ * It asks for the binary named after the package rather than for the first one listed. Taking
+ * whatever came first is how the bundled `.app` ended up launching the bindings exporter back
+ * when that was a second binary, and it would be no better a way to pick what gets copied into
+ * `%LOCALAPPDATA%`.
  */
 function cargoPackageName(): string {
     const metadata = JSON.parse(

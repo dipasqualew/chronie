@@ -11,7 +11,7 @@
     "install-locally": "bun run scripts/install-locally.ts",
     "render": "bun run scripts/render-model.ts",
     "trace": "bun run scripts/trace-render.ts",
-    "bindings:generate": "cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --bin export_bindings",
+    "bindings:generate": "CHRONIE_WRITE_BINDINGS=1 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml the_committed_bindings_match_the_commands",
     "test": "bun run --cwd apps/desktop test",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
     "test:scripts": "node node_modules/vitest/vitest.mjs run",
