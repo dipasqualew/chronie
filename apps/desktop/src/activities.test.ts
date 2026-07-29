@@ -92,6 +92,19 @@ describe("activitySummary", () => {
     ).toBe("42.5% of a level");
   });
 
+  it("leads a prey hunt with what was hunted and how hard it was", () => {
+    expect(
+      activitySummary(activity("prey", { title: "Gorgetusk", difficulty: "Heroic", huntsCompleted: 1 })),
+    ).toBe("Gorgetusk · Heroic");
+  });
+
+  // The named hunt is the last of the segment, so a count is the only thing that keeps a
+  // single title from reading as the whole evening.
+  it("counts a segment's hunts only once there was more than one", () => {
+    expect(activitySummary(activity("prey", { title: "Gorgetusk", huntsCompleted: 3 })))
+      .toBe("Gorgetusk · 3 hunts");
+  });
+
   it("falls back to the raw metadata for a kind the app does not know", () => {
     expect(activitySummary(activity("transmog_farm", { target: "Val'anyr" })))
       .toBe("target: Val'anyr");
@@ -134,6 +147,13 @@ describe("parseMetadata", () => {
       expect(parseMetadata("mythic_plus", { [key]: "" })).toEqual({});
     },
   );
+
+  // The two things the issue behind this kind asked to be kept, and both editable: a hunt is
+  // recognised from a localised quest title, so a wrong reading is a thing a user can correct.
+  it("offers a prey hunt's own name and difficulty as fields", () => {
+    expect(parseMetadata("prey", { title: "Gorgetusk", difficulty: "Heroic" }))
+      .toEqual({ title: "Gorgetusk", difficulty: "Heroic" });
+  });
 
   it("drops a number that will not parse", () => {
     expect(parseMetadata("mythic_plus", { keystoneLevel: "twelve" })).toEqual({});
