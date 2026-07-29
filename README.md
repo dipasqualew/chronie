@@ -108,10 +108,11 @@ starts, a line once the window and tray are up, and the message from any panic o
 startup failure in between. Two lines and it got up; one line and it died on the
 way, and the failure is on the one after it.
 
-| Windows | `%LOCALAPPDATA%\Chronie\chronie.log`  |
-| ------- | ------------------------------------ |
-| macOS   | `~/Library/Logs/Chronie/chronie.log` |
-| Linux   | `~/.local/state/chronie/chronie.log` |
+| Platform | Log                                  |
+| -------- | ------------------------------------ |
+| Windows  | `%LOCALAPPDATA%\Chronie\chronie.log` |
+| macOS    | `~/Library/Logs/Chronie/chronie.log` |
+| Linux    | `~/.local/state/chronie/chronie.log` |
 
 A crash that never reaches Chronie's own code leaves nothing there. macOS keeps
 those in Console.app under **Crash Reports**; Windows keeps them in Event Viewer
