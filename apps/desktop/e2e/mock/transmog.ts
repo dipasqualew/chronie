@@ -411,12 +411,14 @@ export const customSets: E2EMock["customSets"] = { sets: [] };
 // this browser is ever populated at all.
 //
 // Two characters, because the list is grouped by character and one of them would never show
-// that. "Nerine-Ravencrest" saves nothing in game, which is the sentence the empty grouping
-// has to be able to say: read, and found none.
+// that. They are the two the dashboard is a history of, so this is one account throughout —
+// which is what lets the characters view draw somebody in clothes they actually saved.
+// "Brin-Hearth" has been played with the addon on and saves nothing in game, which is the
+// sentence the empty grouping has to be able to say: read, and found none.
 export const inGameSets: E2EMock["inGameSets"] = {
   characters: [
     {
-      character: "Aster-Ravencrest",
+      character: "Aster-Vale",
       sets: [
         {
           id: 4,
@@ -433,7 +435,7 @@ export const inGameSets: E2EMock["inGameSets"] = {
         { id: 5, name: "", icon: null, observedAt: null, slots: [] },
       ],
     },
-    { character: "Nerine-Ravencrest", sets: [] },
+    { character: "Brin-Hearth", sets: [] },
   ],
 };
 
@@ -522,6 +524,9 @@ export const wornSets: E2EMock["wornSets"] = {
   // pauldrons off again.
   "900001,900002,900012": fixtureModel("worn-helm.glb"),
   "900001,900009,900012": fixtureModel("worn-helm.glb"),
+  // The crown and the mantle of "Tideglass", which is the one set anybody saved in game and
+  // so the clothes the characters view draws its portrait in.
+  "900001,900002": fixtureModel("worn-helm.glb"),
   // Set 202 worn whole — sandals and gloves, which is all it holds. It is here because the
   // grid can be drawn as characters now, and every card of it asks for the set it is of.
   "900004,900005": fixtureModel("robe.glb"),
@@ -539,3 +544,13 @@ export const wornSets: E2EMock["wornSets"] = {
     GALLERY_LOOKS.map((look) => [String(look.displayInfoId), fixtureModel("robe.glb")]),
   ),
 };
+
+/**
+ * Whose body an outfit was asked to be drawn on, in the order asked.
+ *
+ * State rather than a fixture, and the only thing a test can see of that question: the mock
+ * holds one picture of a body and has no game to redraw it from, so what is checkable is that
+ * the character view asked on behalf of the character whose page it is rather than for whoever
+ * the transmog screen happens to be set to.
+ */
+export const wornSetsAskedFor: E2EMock["wornSetsAskedFor"] = [];

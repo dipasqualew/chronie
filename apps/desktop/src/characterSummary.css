@@ -1,0 +1,37 @@
+/*
+ * The standing balances on a character's page: what they are carrying, where they stand, and
+ * what they have hanging up.
+ *
+ * Two tables of the same shape, because they are the same shape of question — a named thing, a
+ * number about this character, and the same number about the account — and a reader comparing
+ * eight currencies is reading down a column rather than across a sentence.
+ */
+.holdings { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.holdings caption { text-align: left; color: var(--text-muted); padding-bottom: 4px; }
+.holdings th, .holdings td { text-align: left; padding: 5px 8px; vertical-align: middle; }
+.holdings thead th {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.holdings tbody th { font-weight: 550; }
+.holdings tbody tr + tr th, .holdings tbody tr + tr td {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+/* Numbers line up under each other or the column is worth nothing. */
+.holdings .number { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* The game's own picture, at the size the game stores one. A currency the game draws nothing
+   for keeps the box, so the names below it stay in a column rather than stepping left. */
+.holding-icon {
+  display: inline-block; width: 18px; height: 18px; margin-right: 7px; vertical-align: -4px;
+  border-radius: 4px; background: var(--surface-2);
+}
+.holding-icon img { width: 100%; height: 100%; border-radius: 4px; display: block; }
+
+/* A reputation's bar is the whole of its cell, so it drops the top margin it carries where it
+   sits under a faction's name. Named through the cell to out-specify `ui.css`'s own rule,
+   which is written for that other place and would otherwise win or lose by import order. */
+.holdings td .rep-standing { margin: 0; }
+.holdings td .rep-bar { width: 140px; }
+
+.profile-sets { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }

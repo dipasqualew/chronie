@@ -1,0 +1,21 @@
+/*
+ * The portrait at the top of a character's page.
+ *
+ * A fixed frame rather than one that grows with its contents: the picture arrives a second after
+ * the rest of the page and everything below it would jump down when it did. So the frame is the
+ * frame whether it holds a body, a sentence or a wait, and only what is inside it changes.
+ */
+.figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
+.figure-stage {
+  width: 100%; height: 260px; display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2);
+  overflow: hidden;
+}
+.figure-stage .mog-shot { width: 100%; height: 100%; }
+.figure-stage canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+.figure-stage canvas:active { cursor: grabbing; }
+.figure-note { margin: 0; padding: 0 16px; text-align: center; font-size: 12px; }
+
+.figure-pick { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.figure-pick label { color: var(--text-muted); }
+.figure-pick select { max-width: 220px; }

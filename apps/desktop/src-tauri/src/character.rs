@@ -287,6 +287,31 @@ pub fn worn_set_of(
     Ok(serde_json::json!({ "model": data_url("model/gltf-binary", &glb) }))
 }
 
+/// One of the reader's own characters as somebody to draw, or nothing where they cannot be.
+///
+/// The way from a name — which is what the character view has, and the only thing it has — to
+/// the pair every render in this app is asked for. It is the same resolution the transmog
+/// panel's shortcut makes, arrived at from the other end: there a reader picks somebody off a
+/// list that was already resolved, and here a pane already showing one asks who they are.
+///
+/// **Nothing is the ordinary answer for most of a roster**, and the caller has to have something
+/// to fall back to. The addon only learns what a character is made of at a barber's chair — see
+/// `look.rs` — so a name is here at all only once one has been read, and a race the installed
+/// game does not have drops out at [`crate::look::resolve`] besides.
+pub fn who_is(
+    files: &dyn GameFiles,
+    looks: &[crate::look::Look],
+    character: &str,
+) -> Result<Option<Who>, String> {
+    Ok(crate::look::resolve(files, looks)?
+        .into_iter()
+        .find(|known| known.character == character)
+        .map(|known| Who {
+            body: known.body,
+            picked: known.picked,
+        }))
+}
+
 /// Who the app is drawing: which body, and which swatch of each question about it.
 ///
 /// The two travel together everywhere because neither means anything without the other — a
@@ -1637,5 +1662,58 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = glb_of(&DirFiles::new(temp.path()), None, &Who::default()).unwrap_err();
         assert!(error.contains("1305311.db2"), "{error}");
+    }
+
+    /* ---------- one of the reader's own, by name ---------- */
+
+    /// The fixtures' races, as `look.rs`'s own tests name them: a Human, and the sexes the
+    /// client numbers rather than the tables.
+    const HUMAN: i64 = 1;
+    const UNIT_FEMALE: i64 = 3;
+    const HUMAN_FEMALE: u32 = 2;
+
+    fn played(character: &str, race: i64, picked: Vec<Picked>) -> crate::look::Look {
+        crate::look::Look {
+            character: character.into(),
+            race,
+            sex: UNIT_FEMALE,
+            observed_at: None,
+            picked,
+        }
+    }
+
+    #[test]
+    fn finds_one_of_the_readers_own_characters_by_name() {
+        let looks = vec![
+            played("Zia-Vale", HUMAN, vec![]),
+            played("Aster-Vale", HUMAN, vec![Picked { question: 14, swatch: 133 }]),
+        ];
+
+        let who = who_is(&fixture_files(), &looks, "Aster-Vale").unwrap().unwrap();
+
+        assert_eq!(who.body, HUMAN_FEMALE);
+        assert_eq!(who.picked, vec![Picked { question: 14, swatch: 133 }]);
+    }
+
+    /// Which is most of a roster, and is why the caller has a body of its own to fall back on.
+    #[test]
+    fn finds_nobody_for_a_character_the_addon_has_never_read_a_race_off() {
+        let looks = vec![played("Zia-Vale", HUMAN, vec![])];
+
+        assert_eq!(who_is(&fixture_files(), &looks, "Aster-Vale").unwrap(), None);
+    }
+
+    /// Two Asters on two realms are two people, and the whole database files them apart by the
+    /// realm — so a name matched on its first half would draw one of them as the other.
+    #[test]
+    fn tells_two_characters_of_one_name_on_two_realms_apart() {
+        let looks = vec![
+            played("Aster-Vale", HUMAN, vec![Picked { question: 14, swatch: 133 }]),
+            played("Aster-Ridge", HUMAN, vec![Picked { question: 14, swatch: 21 }]),
+        ];
+
+        let who = who_is(&fixture_files(), &looks, "Aster-Ridge").unwrap().unwrap();
+
+        assert_eq!(who.picked, vec![Picked { question: 14, swatch: 21 }]);
     }
 }

@@ -24,13 +24,14 @@
  */
 
 import { ago, plural } from "./format";
+import { wearable } from "./modelPreview";
 import { wornPieces } from "./outfit";
 import type { Outfit } from "./outfit";
 import { ANY_CLASS, heldIn, slotName } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import type {
   CharacterInGameSets, InGameSet, InGameSetSlot, InGameSetsPayload, SetRequest,
-  TransmogAppearance,
+  TransmogAppearance, WornPiece,
 } from "./types";
 
 /** What the game calls a set it would not name — its own API is documented as sometimes not. */
@@ -105,6 +106,36 @@ export function rowOf(appearance: TransmogAppearance): AppearanceRow {
 /** And a whole opened set as rows, which is what the list draws and what she is dressed in. */
 export function rowsOf(appearances: TransmogAppearance[]): AppearanceRow[] {
   return appearances.map(rowOf);
+}
+
+/**
+ * The same set as an outfit to be drawn on a body, which is what the character view asks for.
+ *
+ * The other thing an opened set is good for, and the shorter road: the transmog view resolves a
+ * set into rows so that a reader can put pieces on one at a time, and the character view has
+ * nobody to dress but the character whose page it is — so it takes the set whole.
+ *
+ * **A piece the character has nowhere to put is left out rather than sent.** Those are exactly
+ * the two [`wearable`] refuses — an appearance the game encrypts, and a thing filed under a
+ * weapon slot nobody holds — and sending one would ask the backend to put a look somewhere no
+ * body has. The set is still what the set is; it simply has one fewer thing showing.
+ *
+ * At most one of each, because a picture of a set naming the same sword twice is the picture of
+ * it naming the sword once: the two hands are a fact about the *set*, which the list next door
+ * draws, and not a fact about the body.
+ */
+export function wornFrom(appearances: TransmogAppearance[]): WornPiece[] {
+  const worn: WornPiece[] = [];
+  for (const row of rowsOf(appearances)) {
+    const wanted = wearable(row);
+    if (wanted.kind !== "worn") continue;
+    const already = worn.some((one) =>
+      one.displayInfoId === wanted.piece.displayInfoId
+      && one.displayType === wanted.piece.displayType
+      && one.inventoryType === wanted.piece.inventoryType);
+    if (!already) worn.push(wanted.piece);
+  }
+  return worn;
 }
 
 /**

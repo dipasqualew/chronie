@@ -1,5 +1,5 @@
 /**
- * The characters view: the roster down the left, one character's whole history on the right.
+ * The characters view: the roster down the left, one character on the right.
  *
  * The timeline asks "what happened", the ledger asks "which segment"; this one asks "who". A
  * history is nearly always several characters deep and every other view cuts across them — an
@@ -7,35 +7,56 @@
  * that character's year. This is the one place a character is the subject.
  *
  * The roster stays beside its character rather than above them: picking somebody is a thing a
- * reader does repeatedly. Those segments are drawn with the same row the timeline unfolds into
- * and open the same detail modal every other view opens, so a segment reads identically
- * wherever it is met.
+ * reader does repeatedly.
+ *
+ * **The pane behind it is two pages rather than one**, and that is what this file mostly is. A
+ * character carries two entirely different kinds of fact and they were interleaved: a wallet, a
+ * reputation and a wardrobe are standing balances that are true whenever you ask, and an
+ * evening's achievements are dated. Reading them down one column meant scrolling past a
+ * fortnight of segments to find out how much Honor somebody had, and meant that the one control
+ * the dated half wants — a time range — had nothing to sit over. So Summary is what they are,
+ * Activity is what they have been doing, and each is drawn by a file of its own.
+ *
+ * What sits above both is the portrait, because it belongs to neither and to both: it is who
+ * they are before it is anything else.
  */
 
 import "./charactersView.css";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { byDay, dayOf } from "./characters";
-import type { CharacterGold, CharacterProfile } from "./characters";
-import { ago, dayLabel, duration, gold, initials, plural, signedGold } from "./format";
-import { setLabel, setSummary, setsFor, wardrobeSummary } from "./inGameSets";
+import { CharacterActivity } from "./characterActivity";
+import { DEFAULT_RANGE } from "./characterRange";
+import { CharacterFigure } from "./characterFigure";
+import { CharacterSummary } from "./characterSummary";
+import type { CharacterProfile } from "./characters";
+import type { CurrencyIcons } from "./currencies";
+import { ago, duration, initials, plural } from "./format";
+import { setsFor } from "./inGameSets";
 import type { ItemBook } from "./items";
-import {
-  HighlightList, SegmentButton, StandingBar, classProps, className, shownHighlights,
-} from "./ui";
+import { classProps, className } from "./ui";
 import type { OpenSegment } from "./ui";
-import type { InGameSet, InGameSetsPayload } from "./types";
+import type {
+  InGameSet, InGameSetAppearancesPayload, InGameSetsPayload, WornPiece, WornSetPayload,
+} from "./types";
 
-/** Only one summary is ever unfolded here, so its panels need only one namespace. */
-const SCOPE = "character";
+/** The two pages the pane holds, in the order a reader meets them. */
+const PAGES = ["summary", "activity"] as const;
+type Page = typeof PAGES[number];
+
+const PAGE_LABELS: Record<Page, string> = {
+  summary: "Summary",
+  activity: "Activity",
+};
 
 export interface CharactersProps {
   profiles: CharacterProfile[];
   onOpenSegment: OpenSegment;
-  /** What the game says about an item, for the summaries that unfold into transmog. */
+  /** What the game says about an item, for the gains that unfold into transmog. */
   items: ItemBook;
+  /** The pictures the game draws each currency with. */
+  currencyIcons: CurrencyIcons;
   /**
    * The transmog sets every character saved in the game, or null until they have been read.
    *
@@ -44,25 +65,37 @@ export interface CharactersProps {
    * full — is one this view says out loud. See `inGameSets.ts`.
    */
   inGameSets: InGameSetsPayload | null;
+  /** What one of those sets turns out to be, for the portrait to dress the character in. */
+  loadSetAppearances: (appearanceIds: number[]) => Promise<InGameSetAppearancesPayload>;
+  /** And the character themselves wearing it, on their own body. */
+  loadWorn: (character: string, pieces: WornPiece[]) => Promise<WornSetPayload>;
 }
 
 export function Characters(
-  { profiles, onOpenSegment, items, inGameSets }: CharactersProps,
+  {
+    profiles, onOpenSegment, items, currencyIcons, inGameSets, loadSetAppearances, loadWorn,
+  }: CharactersProps,
 ): ReactNode {
   // Held by name rather than by index: an activity edit repaints the whole view, and the
   // reader should come back to the character they were reading, wherever they have moved to
   // in the roster since.
   const [chosen, setChosen] = useState<string | null>(null);
-  const [unfolded, setUnfolded] = useState<string | null>(null);
+  const [page, setPage] = useState<Page>("summary");
+  // The range outlives the character, which is deliberate: a reader comparing two alts over the
+  // last fortnight is asking one question about both, and re-choosing it per person would be
+  // asking them to say it twice.
+  const [range, setRange] = useState<string>(DEFAULT_RANGE);
+
+  // Fixed for as long as the view is mounted, so every range on the page is reckoned from one
+  // moment. A `Date.now()` read during the render would move under a reader between two draws
+  // and quietly change which segments a fortnight holds.
+  const now = useMemo(() => Math.floor(Date.now() / 1000), []);
 
   const showing = profiles.find((entry) => entry.name === chosen) ?? profiles[0];
 
   const pick = (name: string): void => {
     if (name === showing?.name) return;
     setChosen(name);
-    // A summary unfolded on one character means nothing on the next, so picking somebody else
-    // starts them folded rather than opening a panel nobody asked for.
-    setUnfolded(null);
   };
 
   return (
@@ -87,12 +120,11 @@ export function Characters(
       >
         {showing
           ? <Profile
-            entry={showing} unfolded={unfolded} items={items}
+            entry={showing} page={page} onPage={setPage} range={range} onRange={setRange}
+            now={now} items={items} currencyIcons={currencyIcons}
             wardrobe={setsFor(inGameSets, showing.name)}
-            onUnfold={(kind) => setUnfolded((open) => (open === kind ? null : kind))}
-            // A summary chip, one of the things it unfolded into, and a segment row all open
-            // the modal, and all three walk this character's own segments.
-            onOpenSegment={(segmentId) => onOpenSegment(segmentId, showing.segments)}
+            loadSetAppearances={loadSetAppearances} loadWorn={loadWorn}
+            onOpenSegment={onOpenSegment}
           />
           : <p className="empty">Nothing to show until a character has been played.</p>}
       </section>
@@ -135,31 +167,35 @@ function RosterEntry(
   );
 }
 
-/**
- * One row of the fact grid: dropped entirely rather than drawn as a dash when unknown.
- *
- * The pair is a named group, which is the one thing `<dt>`/`<dd>` cannot do for itself: a
- * definition takes no name of its own, so nothing outside the grid can ask for "the played
- * figure" without counting from one end of it.
- */
-const Stat = ({ label, children }: { label: string; children: ReactNode }): ReactNode =>
-  <div role="group" aria-label={label}><dt>{label}</dt><dd>{children}</dd></div>;
-
 interface ProfileProps {
   entry: CharacterProfile;
-  unfolded: string | null;
+  page: Page;
+  onPage: (page: Page) => void;
+  range: string;
+  onRange: (key: string) => void;
+  now: number;
   items: ItemBook;
+  currencyIcons: CurrencyIcons;
   /** What this character has saved in game, or null when Chronie has never read their wardrobe. */
   wardrobe: InGameSet[] | null;
-  onUnfold: (kind: string) => void;
-  onOpenSegment: (segmentId: number) => void;
+  loadSetAppearances: (appearanceIds: number[]) => Promise<InGameSetAppearancesPayload>;
+  loadWorn: (character: string, pieces: WornPiece[]) => Promise<WornSetPayload>;
+  onOpenSegment: OpenSegment;
 }
 
-/** Everything known about the chosen character, and everything they did. */
+/**
+ * The chosen character: who they are, and then whichever of the two pages is open.
+ *
+ * The pages are tabs rather than two panels down one column, and rather than a router. Both
+ * halves are long, only one is being read, and neither is somewhere a reader should have to
+ * arrive at by scrolling — the same argument the window's own view tabs make one level up.
+ */
 function Profile(
-  { entry, unfolded, items, wardrobe, onUnfold, onOpenSegment }: ProfileProps,
+  {
+    entry, page, onPage, range, onRange, now, items, currencyIcons, wardrobe,
+    loadSetAppearances, loadWorn, onOpenSegment,
+  }: ProfileProps,
 ): ReactNode {
-  const where = entry.places.slice(0, 3).join(", ");
   return <>
     <header className="profile-head" {...classProps(entry.classFile)}>
       <span className="circle" aria-hidden="true">{initials(entry.name)}</span>
@@ -171,154 +207,37 @@ function Profile(
         </p>
       </div>
     </header>
-    <dl className="profile-stats">
-      <Stat label="Played">{duration(entry.seconds)}</Stat>
-      <Stat label="Segments">{entry.segmentCount}</Stat>
-      <Stat label="Days">{entry.dayCount}</Stat>
-      <Stat label="First seen">{dayLabel(dayOf(entry.firstSeen))}</Stat>
-      <Stat label="Looted"><span className="gold">{gold(entry.lootValue)}</span></Stat>
-      {/* The balance and the movement, in that order and never conflated: what the character
-          is carrying now is state the addon read off the client, where the net is the sum of
-          what every recorded segment did to it and knows nothing of the gold that was there
-          first. The balance is dropped rather than guessed on a character that has not
-          reported one. */}
-      {entry.gold ? <Stat label="Wallet"><span className="gold">{gold(entry.gold.total)}</span></Stat> : null}
-      <Stat label="Net">
-        <span className={entry.goldDiff < 0 ? "loss" : "gold"}>{signedGold(entry.goldDiff)}</span>
-      </Stat>
-    </dl>
-    {entry.gold ? <AccountWorth held={entry.gold} /> : null}
-    {where ? <p className="profile-where sub">Mostly in {where}</p> : null}
-    <div className="profile-highlights">
-      {shownHighlights(entry.highlights).length
-        ? <HighlightList
-          entries={entry.highlights} scope={SCOPE} expanded={unfolded} items={items}
-          onUnfold={onUnfold} onOpenSegment={onOpenSegment}
-        />
-        : <p className="muted">Nothing gained or collected yet.</p>}
-    </div>
-    <Currencies entry={entry} />
-    <Factions entry={entry} />
-    <Wardrobe sets={wardrobe} />
-    <section className="detail-section profile-segments">
-      <h3>{plural(entry.segmentCount, "segment")}</h3>
-      {byDay(entry.segments).map((group) => (
-        <section className="profile-day" key={group.day}>
-          <h4>{dayLabel(group.day)}</h4>
-          <ol className="segment-rows">
-            {group.segments.map((segment) => (
-              <li key={segment.segmentId}>
-                <SegmentButton segment={segment} onOpen={() => onOpenSegment(segment.segmentId)} />
-              </li>
-            ))}
-          </ol>
-        </section>
+
+    <CharacterFigure
+      // Keyed by the character, so moving to somebody else starts a fresh portrait rather than
+      // leaving the last one's body on screen while the next is being dressed.
+      key={entry.name} character={entry.name} sets={wardrobe}
+      loadAppearances={loadSetAppearances} loadWorn={loadWorn}
+    />
+
+    {/* Named for what it switches rather than for what it is: a screen reader arriving here is
+        told these are the two halves of this character, which is the whole of the idea. */}
+    <div className="profile-pages" role="tablist" aria-label="What to show about this character">
+      {PAGES.map((name) => (
+        <button
+          key={name} type="button" role="tab" id={`character-${name}-tab`}
+          className={name === page ? "primary" : undefined}
+          aria-selected={name === page} aria-controls={`character-${name}-page`}
+          onClick={() => onPage(name)}
+        >{PAGE_LABELS[name]}</button>
       ))}
-    </section>
+    </div>
+
+    <div
+      className="profile-page" role="tabpanel" id={`character-${page}-page`}
+      aria-labelledby={`character-${page}-tab`}
+    >
+      {page === "summary"
+        ? <CharacterSummary entry={entry} wardrobe={wardrobe} currencyIcons={currencyIcons} />
+        : <CharacterActivity
+          entry={entry} range={range} onRange={onRange} now={now} items={items}
+          onOpenSegment={onOpenSegment}
+        />}
+    </div>
   </>;
-}
-
-/**
- * The transmog sets this character saved in the game itself.
- *
- * Named and counted here and opened nowhere: what a set is *made of* costs four walks of the
- * game's own tables and a graphics context to show, and neither belongs on a page about who
- * somebody is. The transmog view is where a set gets worn — this is the roster answering "and
- * what have they got".
- *
- * Always drawn, even for a character that has saved none, because "none" is an answer somebody
- * came here for and a silently absent section is not. The one case that stays quiet is the
- * character Chronie has never read a wardrobe on, which is a question this app has not asked
- * rather than one the game answered.
- */
-function Wardrobe({ sets }: { sets: InGameSet[] | null }): ReactNode {
-  if (!sets) return null;
-  return (
-    <section className="detail-section profile-wardrobe">
-      <h3>Transmog sets</h3>
-      <p className="sub">{wardrobeSummary(sets)}</p>
-      <ul className="profile-sets">
-        {sets.map((set) => (
-          <li key={set.id}>
-            <span className="mog-name">{setLabel(set)}</span>
-            <span className="muted"> · {setSummary(set)}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/**
- * What the account is worth in gold, under the wallet it belongs to.
- *
- * Only drawn when it says something the wallet above does not — a lone character with an empty
- * warband bank is worth exactly what is in its pocket. The pot is named separately from the
- * wallets because it answers a different question: not what the roster is sitting on, but what
- * any one of them can reach from a bank.
- */
-function AccountWorth({ held }: { held: CharacterGold }): ReactNode {
-  if (held.accountTotal === held.total) return null;
-  const pot = held.warband ? ` · ${gold(held.warband)} in the warband bank` : "";
-  const eldest = held.oldest ? ` · eldest read ${ago(held.oldest)}` : "";
-  return (
-    <p className="profile-where sub">
-      <span className="account-total">{gold(held.accountTotal)} across the account</span>{pot}{eldest}
-    </p>
-  );
-}
-
-/**
- * What the character is carrying, against what the account has altogether.
- *
- * The account total is only worth saying when somebody else holds some too: on a currency only
- * this character has ever picked up, it is the number already on the line.
- *
- * A warband currency needs saying for the opposite reason. Its two numbers always match, so
- * the comparison below has nothing to add — and the balance on the line is not this
- * character's holding at all but the account's one pot, read from here. Left unlabelled it
- * would read as a coincidence rather than as the same money the alt beside it is looking at.
- */
-function Currencies({ entry }: { entry: CharacterProfile }): ReactNode {
-  if (!entry.currencies.length) return null;
-  return (
-    <section className="detail-section">
-      <h3>Currencies</h3>
-      <ul>
-        {entry.currencies.map((held) => {
-          const elsewhere = held.accountWide
-            ? " · shared across the warband"
-            : held.accountTotal > held.total
-              ? ` · ${held.accountTotal.toLocaleString()} across the account`
-              : "";
-          const read = held.at ? ` · read ${ago(held.at)}` : "";
-          return (
-            <li key={held.id}>
-              🪙 {held.name} <strong>{held.total.toLocaleString()}</strong>
-              {" "}<span className="muted">{elsewhere + read}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-/** Where the character stands with everyone they have met, and where they lead the account. */
-function Factions({ entry }: { entry: CharacterProfile }): ReactNode {
-  if (!entry.factions.length) return null;
-  return (
-    <section className="detail-section">
-      <h3>Reputation</h3>
-      <ul>
-        {entry.factions.map((standing) => (
-          <li key={standing.faction}>
-            🎖️ {standing.faction}
-            {standing.leads ? <> <span className="chip">furthest on the account</span></> : null}
-            <StandingBar standing={standing} faction={standing.faction} />
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
 }

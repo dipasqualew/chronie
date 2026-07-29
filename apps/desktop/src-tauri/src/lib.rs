@@ -8,6 +8,7 @@ pub mod casc;
 pub mod character;
 mod collector;
 pub mod combatlog;
+pub mod currencies;
 pub mod customization;
 pub mod customsets;
 pub mod db2;
@@ -700,6 +701,71 @@ async fn worn_set(pieces: Vec<worn::Piece>, state: State<'_, AppState>) -> Resul
         character::worn_set_of(files, &pieces, &who)
     })
     .await
+}
+
+/// The same, on a body belonging to somebody the reader actually plays.
+///
+/// The one place in the app where the body is not the reader's invented one. Everywhere else a
+/// picture is of a person somebody put together out of fifty-one bodies and a select per
+/// question, and that is right for a wardrobe: a look is being *chosen* there, and it should be
+/// shown on whoever the reader means to wear it. The character view asks a different question —
+/// what does this Tauren I play look like in the set she saved — and answering it with the
+/// Human Female the transmog screen happens to be set to would be answering somebody else's.
+///
+/// Falls back to the reader's own body for a character this install cannot draw. That is not a
+/// failure worth reporting: a race the game does not have, and — far more often — a character
+/// the addon has never read a race off at all, because a look is only stored once the addon has
+/// seen one. A picture on the wrong body is still a picture of the clothes, which is most of
+/// what the pane is for, and the alternative is an empty stage on most of a roster.
+#[tauri::command]
+async fn character_worn_set(
+    character: String,
+    pieces: Vec<worn::Piece>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let fallback = character_look_of(&state)?;
+    let looks = collector::character_looks(&state.database_path())?;
+    read_game_files(&state, move |files| {
+        let who = character::who_is(files, &looks, &character)?.unwrap_or(fallback);
+        character::worn_set_of(files, &pieces, &who)
+    })
+    .await
+}
+
+/// The pictures a list of currencies is drawn with, keyed by the currency rather than the file.
+///
+/// Keyed by the currency because that is what the caller holds: a balance arrives from the addon
+/// as an id, a name and a number, and the FileDataID behind it is a hop this side of the bridge
+/// has no way to make and no reason to learn. So the whole errand happens here — the table, then
+/// the texture — and the window gets back what it can put in an `<img>`.
+///
+/// The textures themselves go through the same cache every other icon does, so a second
+/// character holding the same currency costs the table read and nothing else.
+#[tauri::command]
+async fn currency_icons(
+    currency_ids: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let cache = Arc::clone(&state.icons);
+    let named = read_game_files(&state, move |files| currencies::icons_of(files, &currency_ids))
+        .await?;
+    let wanted: Vec<u32> = named.values().copied().collect();
+    let missing = cache.missing(&wanted);
+    if !missing.is_empty() {
+        let decoded = read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        cache.store(decoded);
+    }
+    // The icons keyed by the file they came out of, re-keyed by the currency that named it. Two
+    // currencies can name one picture — bonus Valorstones are drawn as Valorstones — so this is
+    // a fan-out rather than a rename, and the cache is asked once per file either way.
+    let by_file = cache.answer(&wanted);
+    let mut icons = serde_json::Map::new();
+    for (currency, file) in named {
+        if let Some(url) = by_file["icons"].get(file.to_string()) {
+            icons.insert(currency.to_string(), url.clone());
+        }
+    }
+    Ok(serde_json::json!({ "icons": Value::Object(icons) }))
 }
 
 /// A page of the wardrobe, every appearance on it worn on a body of its own.
@@ -1567,9 +1633,11 @@ pub fn run() {
             capture_thumbnails,
             character_look,
             character_model,
+            character_worn_set,
             check_for_app_update,
             choose_wow_path,
             combat_logging,
+            currency_icons,
             custom_sets,
             dashboard,
             delete_activity,

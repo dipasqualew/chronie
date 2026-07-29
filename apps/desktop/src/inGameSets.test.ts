@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   UNNAMED, appearanceIds, charactersWithSets, filterInGameSets, iconFrom, requestSummary, rowOf,
-  rowsOf, setLabel, setSummary, setsFor, slotsFrom, transmogSlotOf, wardrobeSummary,
+  rowsOf, setLabel, setSummary, setsFor, slotsFrom, transmogSlotOf, wardrobeSummary, wornFrom,
 } from "./inGameSets";
 import { NOTHING_ON, wear } from "./outfit";
 import type { Outfit, Worn } from "./outfit";
@@ -199,6 +199,51 @@ describe("rowsOf", () => {
     });
 
     expect(rowsOf([sword, sword])).toHaveLength(2);
+  });
+});
+
+describe("wornFrom", () => {
+  const CROWN = appearance();
+  const MANTLE = appearance({
+    modifiedAppearanceId: 71_002, name: "Tideglass Mantle", appearanceId: 80_002,
+    displayType: 1, inventoryType: 3, displayInfoId: 900_002,
+  });
+
+  it("is the set as an outfit, in the order the appearances were answered", () => {
+    expect(wornFrom([CROWN, MANTLE])).toEqual([
+      { displayInfoId: 900_001, displayType: 0, inventoryType: 1 },
+      { displayInfoId: 900_002, displayType: 1, inventoryType: 3 },
+    ]);
+  });
+
+  // The two `wearable` refuses, and sending either would be asking the backend to put a look
+  // somewhere no body has. The set is still what the set is; it has one fewer thing showing.
+  it("leaves out a piece the character has nowhere to put", () => {
+    const arrow = appearance({
+      modifiedAppearanceId: 71_020, itemId: 30_020, name: "Emberforge Arrow",
+      appearanceId: 80_020, displayType: 20, inventoryType: 24, displayInfoId: 900_020,
+    });
+
+    expect(wornFrom([CROWN, WITHHELD, arrow])).toEqual([
+      { displayInfoId: 900_001, displayType: 0, inventoryType: 1 },
+    ]);
+  });
+
+  // Which is the one place this differs from `rowsOf` above it, and deliberately: the two
+  // hands are a fact about the set, and the picture of a body wearing one sword twice is the
+  // picture of it wearing the sword once.
+  it("wears one appearance once however many slots the set gave it", () => {
+    const sword = appearance({
+      modifiedAppearanceId: 71_007, itemId: 30_007, name: "Emberforge Blade",
+      appearanceId: 80_007, displayType: 11, inventoryType: 13, displayInfoId: 900_007,
+    });
+
+    expect(wornFrom([sword, sword])).toHaveLength(1);
+  });
+
+  it("is nothing at all for a set that names nothing wearable", () => {
+    expect(wornFrom([])).toEqual([]);
+    expect(wornFrom([WITHHELD])).toEqual([]);
   });
 });
 

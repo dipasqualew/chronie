@@ -14,7 +14,8 @@ columns of `ItemDisplayInfo` and the `DisplayType` slot numbering against the sa
 customization chain below against `12.0.5.67823` on 2026-07-27; `ComponentModelFileData`,
 `HelmetGeosetData` and the cape chain against `12.0.5.67` on 2026-07-27; and the customization
 options, their swatches and the geosets those drive, and what a body is — `ChrModel`,
-`CharComponentTextureSections`, `ChrModelMaterial` — against `12.0.5.67` on 2026-07-28. Column
+`CharComponentTextureSections`, `ChrModelMaterial` — against `12.0.5.67` on 2026-07-28; and
+`CurrencyTypes` against `12.0.5.67823` on 2026-07-29. Column
 indices and file ids are stated as *verified* only where they were read out of that
 install and cross-checked against the data they resolve to. Everything else is marked
 as coming from [WoWDBDefs](https://github.com/wowdev/WoWDBDefs) or
@@ -865,6 +866,42 @@ handful of ids and is what to run after a patch — as `dump_items` is for `Item
 strings, `dump_item_facts` for the rest of what an item is, `dump_transmog` for the chain
 above and `dump_customization` for the skin.
 
+## Currencies, verified
+
+One table and one column of it. Everything else this app knows about a currency comes from
+the addon — the client tells it the id, the name and the balance — and the one thing an addon
+cannot send is the picture, because an addon has a texture *path* and this app draws from
+FileDataIDs. `currencies.rs` reads it for the handful of ids a character actually holds.
+
+```
+CurrencyTypes                     (id in a list beside the rows)
+  col0 = Name_lang                 "Honor", "Valorstones"
+  col1 = Description_lang          the sentence the tooltip shows
+  col2 = CategoryID
+  col3 = InventoryIconFileID     ──▶ a BLP icon, decoded through `icons`
+```
+
+An ordinary table of fixed-size records with its strings in a block of their own — reading it
+with `Db2::parse` and with `parse_with_text_columns` gives byte-identical answers, which is
+how that was settled rather than assumed.
+
+**Column 3 is the only one of the first ten that holds FileDataIDs at all.** Of the 1,490 rows
+readable on 12.0.5.67823, 574 hold something in column 3 and every one of those 574 is a
+six- or seven-digit id that resolves to a texture this install decodes. No other column in the
+run comes near: columns 2, 4, 5, 8 and 9 hold nothing above 100,000 on any row, and the two
+that hold a handful — 6 and 7 — hold single- and four-digit numbers on the rest. The other 916
+rows carry no icon, which is an answer rather than a gap: most of them are counters the game
+never shows a player.
+
+Checked against what the names resolve to, since a reordered table shows wrong values rather
+than failing: Honor (1792) at `1455894`, Conquest (1602) at `1523630`, Flightstones (2245) at
+`5172976` and Valorstones (3008) at `5868902` — the modern currencies, which sit at the far
+end of a table that opens in Burning Crusade — and every icon printed for the first two dozen
+rows decodes as a PNG.
+
+`cargo run --example dump_currencies -- "<install>"` prints the lot and is what to run after a
+patch; pass names to reach a modern row.
+
 ## Regenerating the fixtures
 
 Tests never read the game. One script per area writes real WDC5 tables and real BLP2
@@ -877,6 +914,7 @@ themselves are explained.
 bun run scripts/make-transmog-fixtures.ts
 bun run scripts/make-achievement-fixtures.ts
 bun run scripts/make-item-fixtures.ts
+bun run scripts/make-currency-fixtures.ts
 ```
 
 Every table on the chains above has a fixture, and between them they hold each way a hop can
@@ -909,6 +947,10 @@ makes that reading non-trivial — a second swatch whose skin lands on the same 
 element that drives a geoset and paints nothing, a copied layer belonging to another atlas, and
 another layout's base layer, which has the same shape as this one's and a target that must
 never be painted.
+
+The currency fixture is one table and three textures, and it holds each way a currency can fail
+to have a picture: one the game names and draws nothing for, one naming an icon this install has
+no file for, and one whose whole row is encrypted.
 
 The `ItemSparse` fixture is the only one with variable-length records, and it is where that
 half of the reader is exercised: strings written into the record, records addressed through

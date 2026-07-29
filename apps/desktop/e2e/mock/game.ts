@@ -30,6 +30,15 @@ export const gameIcons: E2EMock["gameIcons"] = {
     + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
+// The picture each currency is drawn with, keyed by the currency's own id rather than by the
+// file behind it — which is the shape of the real command, because the hop from one to the
+// other happens in the backend. The warband's shared pot is deliberately absent: the game names
+// a picture for most currencies and not all of them, and a row without one still has to draw.
+export const currencyIcons: E2EMock["currencyIcons"] = {
+  7: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
+    + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+};
+
 // What the game says about the achievements those segments name. 77 is deliberately absent:
 // an install can only describe the achievements it has, and a row still has to draw.
 export const achievementDetails: E2EMock["achievementDetails"] = {

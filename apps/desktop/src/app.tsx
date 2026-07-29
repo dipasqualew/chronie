@@ -21,6 +21,7 @@ import { ActivityEditor } from "./activityEditor";
 import { createCaptureAlbum } from "./captures";
 import { buildCharacters } from "./characters";
 import { Characters } from "./charactersView";
+import { createCurrencyIcons } from "./currencies";
 import { Details } from "./details";
 import { duration, plural } from "./format";
 import { createAchievementBook } from "./achievements";
@@ -109,6 +110,11 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     load: (ids) => desktop.itemDetails(ids),
     loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
   }), []);
+
+  // And the pictures the game draws a currency with, on the same terms and for the same reason:
+  // a reader walking a roster of ten alts meets the same handful of currencies on every one of
+  // them, so each is asked about once for the life of the window.
+  const currencyIcons = useMemo(() => createCurrencyIcons({ load: desktop.currencyIcons }), []);
 
   // The same argument as the achievement book: a thumbnail outlives any one grid, and a reader
   // scrolling back through a history meets the same evening's pictures over and over. One
@@ -297,6 +303,9 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         </header>
         <Characters
           profiles={profiles} onOpenSegment={openSegment} items={items} inGameSets={inGameSets}
+          currencyIcons={currencyIcons}
+          loadSetAppearances={desktop.inGameSetAppearances}
+          loadWorn={desktop.characterWornSet}
         />
       </section>
 

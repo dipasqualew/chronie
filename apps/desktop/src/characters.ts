@@ -61,6 +61,18 @@ export interface CharacterFaction extends CharacterStanding {
   faction: string;
   /** True when no other character on the account has got further up this faction's ladder. */
   leads: boolean;
+  /**
+   * The furthest anybody on the account has got with this faction, which is often this
+   * character themselves — [`leads`] is what says which.
+   *
+   * It travels with the standing rather than being looked up where it is drawn, because the
+   * comparison is the point: a reputation is grind that a warband does once, and "Revered, and
+   * the alt you never play is Exalted" is a different thing to read than "Revered".
+   *
+   * Null where no character's standing with this faction could be placed on a ladder at all,
+   * which is not the same as nobody being ahead. See `AccountFaction.best`.
+   */
+  best: CharacterStanding | null;
 }
 
 /**
@@ -206,7 +218,12 @@ function factionsOf(name: string, holdings?: AccountHoldings): CharacterFaction[
     .flatMap((faction) => {
       const standing = faction.characters.find((entry) => entry.character === name);
       if (!standing) return [];
-      return [{ ...standing, faction: faction.faction, leads: faction.best?.character === name }];
+      return [{
+        ...standing,
+        faction: faction.faction,
+        leads: faction.best?.character === name,
+        best: faction.best ?? null,
+      }];
     })
     .sort((left, right) => (right.rank ?? -1) - (left.rank ?? -1) || (left.faction < right.faction ? -1 : 1));
 }
