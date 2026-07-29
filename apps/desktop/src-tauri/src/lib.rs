@@ -2698,7 +2698,7 @@ mod tests {
             .expect("the manifest should name the package");
         assert_eq!(
             manifest_names(CARGO_TOML, "[[bin]]"),
-            [package.clone()],
+            std::slice::from_ref(package),
             "the manifest has to declare a [[bin]] named {package} and no other, or the \
              bundle will launch or carry a binary that is not the app"
         );

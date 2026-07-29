@@ -359,6 +359,10 @@ pub fn glb_of(files: &dyn GameFiles, worn: Option<&Worn>, who: &Who) -> Result<V
 /// and both for the same reason: most of a wardrobe hangs nothing off the body, so the skeleton
 /// is 16MB nobody asked for — and most of a wardrobe paints nothing onto it either, so the
 /// encoded base atlas is a PNG of 2 million pixels that a gallery of helms would never look at.
+/// What answers one hung piece's requests for a picture, as `glb` asks them: a closure per piece,
+/// each owning the texture that piece is painted with and borrowing the install for the rest.
+type Painter<'a> = Box<dyn Fn(Paint) -> Option<Vec<u8>> + 'a>;
+
 pub struct Mannequin<'a> {
     files: &'a dyn GameFiles,
     /// Whose body it is: the mesh it was read out of, and the atlas its parts are painted in.
@@ -464,17 +468,16 @@ impl<'a> Mannequin<'a> {
         // its mesh and the closure that paints it, and each of those closures owns a picture of
         // its own — a helm's texture is not a shoulder's and neither is the atlas.
         let hung = self.hung_on(worn)?;
-        let painters: Vec<Box<dyn Fn(Paint) -> Option<Vec<u8>>>> = hung
+        let painters: Vec<Painter> = hung
             .iter()
             .map(|(_, _, texture)| {
                 let texture = texture.clone();
-                let painter: Box<dyn Fn(Paint) -> Option<Vec<u8>>> =
-                    Box::new(move |paint| match paint {
-                        // An item's model wants the one picture, whatever type it asked for. Only
-                        // a body declares several and has to tell them apart.
-                        Paint::File(fdid) => decode_file(files, fdid),
-                        Paint::Supplied(_) => texture.clone(),
-                    });
+                let painter: Painter = Box::new(move |paint| match paint {
+                    // An item's model wants the one picture, whatever type it asked for. Only
+                    // a body declares several and has to tell them apart.
+                    Paint::File(fdid) => decode_file(files, fdid),
+                    Paint::Supplied(_) => texture.clone(),
+                });
                 painter
             })
             .collect();
@@ -1649,7 +1652,7 @@ mod tests {
     #[test]
     fn taking_the_helm_off_puts_the_hair_back() {
         assert_eq!(drawn(&worn_mesh(&Worn::default())), drawn(&mesh()));
-        assert_eq!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&2), true);
+        assert!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&2));
     }
 
     // The acceptance for a weapon: it is *held* rather than hanging in mid-air beside her, and

@@ -568,15 +568,14 @@ fn at_the_origin(position: [f32; 3]) -> bool {
     position.iter().all(|axis| axis.abs() < NEAR_THE_ORIGIN)
 }
 
-/// What one bone contributes with nothing playing: a translation, a rotation and a scale.
+/// A translation, a rotation as a quaternion, and a scale — one bone's whole contribution.
+type Rest = ([f32; 3], [f32; 4], [f32; 3]);
+
+/// What one bone contributes with nothing playing.
 ///
 /// `a_place` is the bone the walk is about to stop at — one that states a pivot, and so one the
 /// still picture has already drawn where it belongs. Only a global sequence may move that.
-fn at_rest(
-    bones: &[u8],
-    bone: &[u8],
-    a_place: bool,
-) -> Result<([f32; 3], [f32; 4], [f32; 3]), String> {
+fn at_rest(bones: &[u8], bone: &[u8], a_place: bool) -> Result<Rest, String> {
     // The record is a slice of `bones`, and a track's arrays are offsets into the whole chunk,
     // so the two are read against different things on purpose.
     let track = |field: usize| -> Result<Option<usize>, String> {

@@ -1038,10 +1038,10 @@ fn worn(found: &[&str]) -> Value {
                     "bonusIds": parts
                         .get(3)
                         .and_then(|field| group(field))
-                        .map(|inner| {
+                        .map(|inner| -> Vec<i64> {
                             entries(inner).iter().filter_map(|entry| integer(entry)).collect()
                         })
-                        .unwrap_or_else(Vec::<i64>::new),
+                        .unwrap_or_default(),
                 }))
             })
             .collect(),

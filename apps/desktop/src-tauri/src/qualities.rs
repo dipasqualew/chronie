@@ -320,8 +320,8 @@ impl Gathered {
             let each = share / held.counted;
             let held = self.buckets.entry(*colour).or_insert((0.0, [0.0; 3]));
             held.0 += count * each;
-            for channel in 0..3 {
-                held.1[channel] += sum[channel] * each;
+            for (into, channel) in held.1.iter_mut().zip(sum) {
+                *into += channel * each;
             }
         }
     }
@@ -717,8 +717,8 @@ pub fn of_set(looks: &[Look]) -> Option<Look> {
                 .entry([colour[0] & BUCKET, colour[1] & BUCKET, colour[2] & BUCKET])
                 .or_insert((0.0, [0.0; 3]));
             held.0 += weight;
-            for channel in 0..3 {
-                held.1[channel] += f64::from(colour[channel]) * weight;
+            for (into, channel) in held.1.iter_mut().zip(colour) {
+                *into += f64::from(channel) * weight;
             }
         }
     }

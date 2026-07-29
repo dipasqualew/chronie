@@ -32,6 +32,12 @@ pub const REACH_MS: i64 = 15_000;
 /// leave that rule with nothing to be written against.
 pub const KEEP_MS: i64 = 120_000;
 
+/// The "on purpose" above, held rather than described. A sweep that kept less of the track than a
+/// point may speak across would throw away rows this rule itself still reads, so the two constants
+/// are not independently tunable — and a compile-time assertion is where that belongs, because
+/// there is no run in which it could be true and no run in which a test could observe it false.
+const _: () = assert!(KEEP_MS > REACH_MS);
+
 /// One row of the track, exactly as `log_positions` holds it.
 ///
 /// The two nullable pairs are not defensive typing. A point whose map is unknown, or one recorded
@@ -238,12 +244,5 @@ mod tests {
     #[test]
     fn places_nothing_from_an_empty_track() {
         assert_eq!(place(moment(), &[]), None);
-    }
-
-    /// The window kept around a moment is wider than the window a point may speak across, which
-    /// is what leaves a later rule something to be written against.
-    #[test]
-    fn keeps_more_of_the_track_than_it_reads() {
-        assert!(KEEP_MS > REACH_MS);
     }
 }

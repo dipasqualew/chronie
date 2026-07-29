@@ -173,9 +173,9 @@ fn main() {
         match ARMOUR.iter().find(|(display, _)| *display == slot) {
             Some((_, expected)) => {
                 armour += 1;
-                for column in 0..items.column_count() {
+                for (column, hits) in agreed.iter_mut().enumerate() {
                     if expected.contains(&row.number(column)) {
-                        agreed[column] += 1;
+                        *hits += 1;
                     }
                 }
             }

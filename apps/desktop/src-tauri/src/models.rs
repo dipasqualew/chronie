@@ -167,8 +167,12 @@ pub fn each(
         .collect()
 }
 
-/// What each display says it is drawn with: a model slot, its resource, and the material that
-/// paints it — in the order asked, and `None` for a display with no geometry.
+/// The three numbers a display is drawn out of: which of the two model slots holds anything, the
+/// model resource in it, and the material resource that paints that model.
+type Drawn = (usize, u32, u32);
+
+/// What each display says it is drawn with, in the order asked, and `None` for a display with no
+/// geometry.
 ///
 /// Both arrays are of two. This shows the first slot that holds anything, which for a helm or
 /// a weapon is the whole of it — and for a pair of shoulders is one pad. Showing both is what
@@ -178,13 +182,10 @@ pub fn each(
 /// One walk of the table for the whole batch. The lookup is a map rather than a `find` per
 /// display for the reason [`each`] gives: the walk is the cost, and it is the same walk whether
 /// one display is wanted out of it or twenty.
-fn resources(
-    files: &dyn GameFiles,
-    wanted: &[u32],
-) -> Result<Vec<Option<(usize, u32, u32)>>, String> {
+fn resources(files: &dyn GameFiles, wanted: &[u32]) -> Result<Vec<Option<Drawn>>, String> {
     let asked: HashSet<u32> = wanted.iter().copied().collect();
     let displays = Db2::parse(files.read(ITEM_DISPLAY_INFO)?)?;
-    let drawn_with: HashMap<u32, (usize, u32, u32)> = displays
+    let drawn_with: HashMap<u32, Drawn> = displays
         .rows()
         .filter(|row| asked.contains(&row.id()))
         .filter_map(|display| {

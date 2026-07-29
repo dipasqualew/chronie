@@ -125,9 +125,9 @@ fn main() {
             continue;
         };
         both += 1;
-        for column in 0..item.column_count() {
+        for (column, hits) in agreed.iter_mut().enumerate() {
             if row.number(column) == slot {
-                agreed[column] += 1;
+                *hits += 1;
             }
         }
     }

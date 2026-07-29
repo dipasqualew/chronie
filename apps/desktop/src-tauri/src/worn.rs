@@ -137,12 +137,12 @@ mod helmet_column {
     pub const HIDE_GEOSET_GROUP: usize = 1;
 }
 
-/// There is no class anywhere in this module, and that is a decision rather than an omission: a
-/// class-specific texture is a demon hunter's tattoos and a handful of tabards, and a wardrobe is
-/// browsed by a reader rather than by a character.
-///
-/// The *body* is [`crate::body::Body`], passed in — its race and its sex are what an item's
-/// textures and a helm's hidden groups are chosen by, and both used to be a Human Female here.
+// There is no class anywhere in this module, and that is a decision rather than an omission: a
+// class-specific texture is a demon hunter's tattoos and a handful of tabards, and a wardrobe is
+// browsed by a reader rather than by a character.
+//
+// The *body* is `crate::body::Body`, passed in — its race and its sex are what an item's
+// textures and a helm's hidden groups are chosen by, and both used to be a Human Female here.
 
 /// The genders the game marks a file with when it does not belong to one body, and the class
 /// it marks one with when it fits any class. All three are "no opinion" rather than a body.
@@ -386,12 +386,12 @@ pub fn held(display_type: u32) -> bool {
 const BACK: u32 = 9;
 const HEAD: u32 = 0;
 
-/// `HelmetGeosetVis` is two elements, male then female — which is the community's reading and is
-/// exactly [`crate::body::Body::sex`], so the sex indexes the array directly.
-///
-/// On 12.0.5.67 the two elements name the same hidden groups for hair on every one of the 5,698
-/// helms in the table — 4,576 hide it either way — so nothing about a *hairstyle* turns on the
-/// choice; the rarer groups do.
+// `HelmetGeosetVis` is two elements, male then female — which is the community's reading and is
+// exactly `crate::body::Body::sex`, so the sex indexes the array directly.
+//
+// On 12.0.5.67 the two elements name the same hidden groups for hair on every one of the 5,698
+// helms in the table — 4,576 hide it either way — so nothing about a *hairstyle* turns on the
+// choice; the rarer groups do.
 
 /// One piece of an outfit: which appearance, which slot it fills, and where its item is worn.
 ///

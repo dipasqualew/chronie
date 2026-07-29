@@ -1,4 +1,8 @@
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn main() {
     embed_addon();
@@ -227,7 +231,7 @@ fn embed_addon() {
 
 /// One `(path, bytes)` row. Both literals go through `{:?}`, which escapes the backslashes a
 /// Windows path arrives with instead of letting them start an escape sequence.
-fn entry(source: &PathBuf, relative: &str) -> String {
+fn entry(source: &Path, relative: &str) -> String {
     format!(
         "    ({relative:?}, include_bytes!({:?})),\n",
         source.to_string_lossy()

@@ -767,7 +767,7 @@ fn active_field(
 
     for line in lines {
         let row: Vec<&str> = line.split('|').collect();
-        let is_active = active.map_or(true, |at| row.get(at) == Some(&"1"));
+        let is_active = active.is_none_or(|at| row.get(at) == Some(&"1"));
         if is_active {
             if let Some(field) = row.get(wanted).filter(|field| worth_having(field)) {
                 return Ok((*field).to_string());
