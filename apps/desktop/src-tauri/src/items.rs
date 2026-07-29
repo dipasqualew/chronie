@@ -11,10 +11,10 @@
 //! "Head" is the window's business, and doing it there keeps the language beside the markup
 //! it goes in; this answers with the numbers the game stores and no more.
 //!
-//! The column positions were read off build 12.0.5.67 with `examples/dump_item_facts`, which
-//! finds them rather than trusting them and is what to run again after a patch — the same
-//! arrangement `docs/game-files.md` describes for the rest of these tables. A patch that
-//! reorders one shows wrong values rather than failing, so every position below is one the
+//! The column positions are [`crate::tables`]'s, out of `docs/game-tables.json`, and were read
+//! off build 12.0.5.67 with `examples/dump_item_facts` — which finds them rather than trusting
+//! them and is what to run again after a patch. A patch that reorders one shows wrong values
+//! rather than failing, so every position the registry holds for these two tables is one that
 //! tool checks against something a wrong column could not produce.
 
 use std::collections::HashMap;
@@ -25,45 +25,9 @@ use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-use crate::transmog::{item_column, ITEM_SPARSE};
-
-/// Every item in the game, as the two megabytes of what-kind-of-thing-it-is.
-///
-/// Public for `examples/dump_item_facts`, which is how the columns below get checked against
-/// a real install after a patch.
-pub const ITEM: u32 = 841626;
-
-/// Columns of `Item`, in the order the file stores them.
-///
-/// Verified on 12.0.5.67: [`column::INVENTORY_TYPE`] agrees with the `ItemSparse` column
-/// `dump_inventory_types` found on 99.99% of the items both tables hold, and every piece of
-/// armour in the game reads as [`ARMOR`] with one of the five armour subclasses.
-pub mod column {
-    /// What kind of thing it is: [`super::ARMOR`], [`super::WEAPON`], a trade good, a mount.
-    pub const CLASS: usize = 0;
-    /// Which kind of that kind: for armour, which armour class; for a weapon, which weapon.
-    pub const SUBCLASS: usize = 1;
-    /// Where it is worn, in the same numbering `ItemSparse` uses. Kept in both tables; this
-    /// is the copy in the small one, and the reason `ItemSparse` is opened only for names.
-    pub const INVENTORY_TYPE: usize = 3;
-    /// The picture the game draws beside it, as a FileDataID to be decoded through `icons`.
-    pub const ICON_FILE_ID: usize = 6;
-}
-
-/// The columns of `ItemSparse` this module reads, beside the name `transmog` already reads.
-///
-/// Verified on the same build: quality spans exactly the game's nine values with the bulk of
-/// the table common or uncommon, the required level never exceeds the level cap, and the
-/// class mask is [`ANY_CLASS`] on all but the class sets and class trinkets.
-pub mod sparse_column {
-    /// Which classes may use it, as a bit per class. [`super::ANY_CLASS`] for nearly
-    /// everything.
-    pub const ALLOWABLE_CLASS: usize = 52;
-    /// The level a character has to have reached to equip it. Zero for most things.
-    pub const REQUIRED_LEVEL: usize = 65;
-    /// Poor, common, rare, and the rest — the colour the game writes the name in.
-    pub const QUALITY: usize = 67;
-}
+use crate::tables::item as column;
+use crate::tables::item_sparse as item_column;
+use crate::tables::{ITEM, ITEM_SPARSE};
 
 /// What the game files armour and weapons under, which is all this module names by hand.
 pub const ARMOR: u32 = 4;
@@ -151,9 +115,9 @@ pub fn read(files: &dyn GameFiles, wanted: &[u32]) -> Result<Vec<(u32, Option<It
                 continue;
             };
             item.name = row.text(item_column::NAME);
-            item.quality = row.number(sparse_column::QUALITY);
-            item.required_level = row.number(sparse_column::REQUIRED_LEVEL);
-            item.allowable_class = row.number(sparse_column::ALLOWABLE_CLASS);
+            item.quality = row.number(item_column::QUALITY);
+            item.required_level = row.number(item_column::REQUIRED_LEVEL);
+            item.allowable_class = row.number(item_column::ALLOWABLE_CLASS);
         }
     }
 

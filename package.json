@@ -12,6 +12,7 @@
     "render": "bun run scripts/render-model.ts",
     "trace": "bun run scripts/trace-render.ts",
     "bindings:generate": "CHRONIE_WRITE_BINDINGS=1 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml the_committed_bindings_match_the_commands",
+    "tables:generate": "bun run scripts/make-game-tables.ts",
     "test": "bun run --cwd apps/desktop test",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
     "test:scripts": "node node_modules/vitest/vitest.mjs run",

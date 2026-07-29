@@ -23,7 +23,9 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   // Nothing generated, nothing built, and nothing anybody here wrote. `bindings.ts` is
-  // tauri-specta's output and `scripts/check-rust.sh` is what holds it to its source.
+  // tauri-specta's output and `scripts/check-rust.sh` is what holds it to its source;
+  // `scripts/tables.ts` comes out of `docs/game-tables.json` and `scripts/game-tables.test.ts`
+  // is what holds that one.
   {
     ignores: [
       "**/dist/**",
@@ -32,6 +34,7 @@ export default tseslint.config(
       "**/test-results/**",
       "**/playwright-report/**",
       "apps/desktop/src/bindings.ts",
+      "scripts/tables.ts",
     ],
   },
 

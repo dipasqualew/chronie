@@ -21,37 +21,9 @@ use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-
-/// What the game calls each table.
-///
-/// `ACHIEVEMENT` is public because `reputations.rs` reads the same table for a different
-/// question — the picture a faction borrows from its own reputation achievement — and a
-/// FileDataID and a column list this app has already settled should be settled in one place.
-pub const ACHIEVEMENT: u32 = 1_260_179;
-const ACHIEVEMENT_CATEGORY: u32 = 1_324_299;
-
-/// Columns of `Achievement`, in the order the file stores them.
-pub mod column {
-    pub const DESCRIPTION: usize = 0;
-    pub const TITLE: usize = 1;
-    pub const REWARD: usize = 2;
-    pub const FACTION: usize = 5;
-    pub const CATEGORY: usize = 7;
-    /// Not the number of points on its own — see [`super::points_of`].
-    pub const POINTS: usize = 9;
-    pub const ICON_FILE_ID: usize = 12;
-    /// The root of the tree of criteria that earns it, into `CriteriaTree`. Nothing here reads
-    /// it — it is how [`crate::reputations`] gets from a faction back to an achievement, and it
-    /// lives here because it is a column of this table and would otherwise be settled twice.
-    pub const CRITERIA_TREE: usize = 14;
-}
-
-/// Columns of `Achievement_Category`. A category names its parent and nothing else, which is
-/// what makes the tree something to walk rather than something to read.
-mod category_column {
-    pub const NAME: usize = 0;
-    pub const PARENT: usize = 2;
-}
+use crate::tables::achievement as column;
+use crate::tables::achievement_category as category_column;
+use crate::tables::{ACHIEVEMENT, ACHIEVEMENT_CATEGORY};
 
 /// Which bits of the points column are the points.
 ///

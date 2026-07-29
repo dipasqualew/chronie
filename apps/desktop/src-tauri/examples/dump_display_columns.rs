@@ -26,13 +26,13 @@
 //!
 //! The `worn:` line under each row is what the app itself makes of it, which is the check that
 //! the numbers are being turned into geosets a body could hold. If they are wrong, the column
-//! moved: `transmog::display_column::GEOSET_GROUP` is what to change, and the symptom in the
+//! moved: `tables::item_display_info::GEOSET_GROUP` is what to change, and the symptom in the
 //! app is armour that swaps no geometry — a robe painted over legs that stay bare.
 
 use std::collections::HashMap;
 
 use chronie_desktop_lib::db2::Db2;
-use chronie_desktop_lib::{casc, transmog, worn};
+use chronie_desktop_lib::{casc, tables, worn};
 
 /// `ItemModifiedAppearance` and `ItemAppearance`, the two hops from an item to its display.
 const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
@@ -130,7 +130,7 @@ fn main() {
         asked
     };
 
-    let displays = match files.read(transmog::ITEM_DISPLAY_INFO).and_then(Db2::parse) {
+    let displays = match files.read(tables::ITEM_DISPLAY_INFO).and_then(Db2::parse) {
         Ok(table) => table,
         Err(error) => {
             eprintln!("Could not read ItemDisplayInfo: {error}");
@@ -295,15 +295,13 @@ fn names(
     files: &dyn casc::GameFiles,
     wanted: &[(String, u32)],
 ) -> Result<Vec<(u32, String)>, String> {
-    let table = Db2::parse_with_text_columns(
-        files.read(transmog::ITEM_SPARSE)?,
-        &transmog::item_column::TEXT,
-    )?;
+    let table =
+        Db2::parse_with_text_columns(files.read(tables::ITEM_SPARSE)?, &tables::item_sparse::TEXT)?;
     let lowered: Vec<String> = wanted.iter().map(|(name, _)| name.to_lowercase()).collect();
     Ok(table
         .rows()
         .filter_map(|row| {
-            let name = row.text(transmog::item_column::NAME);
+            let name = row.text(tables::item_sparse::NAME);
             let matches = lowered
                 .iter()
                 .any(|wanted| name.to_lowercase().contains(wanted));

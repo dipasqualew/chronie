@@ -858,6 +858,14 @@ mod tests {
 
     /// The invented tables under `apps/desktop/fixtures/transmog`, which have the shape of the
     /// game's own — same columns, same storage per column, same bit offsets.
+    ///
+    /// **These literals are deliberately not [`crate::tables`]'s, and must not become them.**
+    /// Every reader in this app takes its ids and columns from `docs/game-tables.json`, which is
+    /// what stopped the same numbers being maintained in three places — and which means a wrong
+    /// number in that registry moves every reader at once. What is left to catch it is a test
+    /// that says, in numbers of its own, which column of which file holds which value, and holds
+    /// that against the committed bytes. Importing the registry here would turn the whole module
+    /// below into two generated halves agreeing with each other.
     const TRANSMOG_SET: u32 = 1376213;
     const TRANSMOG_SET_ITEM: u32 = 1376212;
     const TRANSMOG_SET_GROUP: u32 = 1576116;

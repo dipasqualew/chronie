@@ -37,88 +37,13 @@ use std::collections::HashMap;
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-
-/// `JournalInstance` — the Encounter Journal's dungeons and raids.
-pub const JOURNAL_INSTANCE: u32 = 1_237_438;
-
-/// `LFGDungeons` — everything the group finder can put a player in, delves included.
-pub const LFG_DUNGEONS: u32 = 1_361_033;
-
-/// `JournalEncounter` — the Adventure Guide's bosses, one row per fight per difficulty tier.
-pub const JOURNAL_ENCOUNTER: u32 = 1_240_336;
-
-/// `JournalEncounterCreature` — the creatures shown for a fight, and their portraits.
-pub const JOURNAL_ENCOUNTER_CREATURE: u32 = 1_301_155;
-
-/// Columns of `JournalInstance`, an ordinary table of fixed-size records whose id sits in a list
-/// beside the rows rather than in a column of its own.
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_journal.rs`**; `docs/game-files.md` records
-/// what each was checked against. The table holds four FileDataIDs side by side and only one of
-/// them is an icon — the others are a 512×512 background, a 256×128 button banner and a 512×512
-/// lore illustration — so taking the wrong one of the four hands the window a picture far too
-/// large for the space, which is the symptom to look for.
-pub mod journal_column {
-    /// What the instance is called, in the locale the install is running in.
-    pub const NAME: usize = 0;
-    /// The picture beside it, as a FileDataID to be decoded through [`crate::icons`]. Every one
-    /// of the 209 the table names decodes at 128×128, which is what makes this the one of the
-    /// four files an icon can be.
-    pub const BUTTON_SMALL_FILE_DATA_ID: usize = 5;
-}
-
-/// Columns of `LFGDungeons`, the same shape of table: fixed-size records, ids in a list beside
-/// them, strings in a block of their own.
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_journal.rs`.**
-pub mod lfg_column {
-    /// What the group finder calls the place, in the locale the install is running in.
-    pub const NAME: usize = 0;
-    /// The picture beside it in the finder's list, as a FileDataID.
-    pub const ICON_TEXTURE_FILE_ID: usize = 5;
-}
-
-/// Columns of `JournalEncounter`, which holds no picture and is the way to the table that does.
-///
-/// Its id sits in a column of its own rather than in a list beside the rows — column 3, which
-/// [`crate::db2::Row::id`] reads for us — and that id is what `JournalEncounterCreature` hangs off.
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_journal.rs`.**
-pub mod encounter_column {
-    /// What the fight is called, in the locale the install is running in: "Glubtok", "Queen
-    /// Ansurek". Not read to answer anything — the addon already caught the name off the client —
-    /// but it is what says a run of this table landed on the right rows.
-    pub const NAME: usize = 0;
-    /// The instance the fight is in, joining back to `JournalInstance`'s own id. Not part of the
-    /// portrait hop; it is what `examples/dump_journal.rs` checks the table against, because a
-    /// Deadmines boss reading 63 is the same 63 the place icons are already keyed by.
-    pub const JOURNAL_INSTANCE_ID: usize = 4;
-    /// The id the *client* knows this fight by, and the one thing here a segment already carries:
-    /// `ENCOUNTER_END`'s first argument is a `DungeonEncounterID`, and this is that column.
-    pub const DUNGEON_ENCOUNTER_ID: usize = 5;
-}
-
-/// Columns of `JournalEncounterCreature`, where the portraits are.
-///
-/// Its id is in column 2, and the row it belongs to is named in a column rather than through the
-/// relationship map — so this is an ordinary join on a number, not a [`crate::db2::Row::foreign_id`].
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_journal.rs`.**
-pub mod creature_column {
-    /// The creature's own name, which is not always the fight's: the Ascendant Council is four
-    /// rows called Feludius, Ignacious, Arion and Terrastra. Only the dumper reads it.
-    pub const NAME: usize = 0;
-    /// The `JournalEncounter` row this creature belongs to, by that table's id.
-    pub const JOURNAL_ENCOUNTER_ID: usize = 3;
-    /// Where the guide puts this creature among the fight's others, counting from zero. The rows
-    /// are **not** stored in this order — see [`portraits_of`], which is the whole reason this
-    /// column is read at all.
-    pub const ORDER_INDEX: usize = 6;
-    /// The portrait, as a FileDataID to be decoded through [`crate::icons`]. Every one of the
-    /// 1,172 the table names decodes at 128×64, which is what makes it a portrait rather than one
-    /// of the banners and backgrounds this chain could otherwise have landed on.
-    pub const PORTRAIT_FILE_DATA_ID: usize = 5;
-}
+use crate::tables::journal_encounter as encounter_column;
+use crate::tables::journal_encounter_creature as creature_column;
+use crate::tables::journal_instance as journal_column;
+use crate::tables::lfg_dungeons as lfg_column;
+use crate::tables::{
+    JOURNAL_ENCOUNTER, JOURNAL_ENCOUNTER_CREATURE, JOURNAL_INSTANCE, LFG_DUNGEONS,
+};
 
 /// The icon each of the places asked for is drawn with, as a FileDataID, keyed by the name it was
 /// asked for under.
@@ -249,6 +174,8 @@ pub fn portraits_of(
         else {
             continue;
         };
+        // The guide's own order, which the rows are not stored in — the whole reason this column
+        // is read rather than the first row of a fight being taken.
         let order = row.number(creature_column::ORDER_INDEX);
         if best.get(&dungeon).is_none_or(|had| order < *had) {
             best.insert(dungeon, order);

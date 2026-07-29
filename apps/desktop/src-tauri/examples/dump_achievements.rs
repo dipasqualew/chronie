@@ -34,7 +34,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chronie_desktop_lib::db2::Db2;
-use chronie_desktop_lib::{achievements, casc, icons, reputations};
+use chronie_desktop_lib::{achievements, casc, icons, reputations, tables};
 
 /// Achievements worth looking at when no particular one was asked for: the first two levels,
 /// a dungeon achievement tied to an instance, a feat of strength, and one from the legacy
@@ -138,10 +138,10 @@ fn main() {
 /// rather than anything the reader itself reports.
 fn factions(files: &dyn casc::GameFiles) {
     for (what, file) in [
-        ("Faction", reputations::FACTION),
-        ("Criteria", reputations::CRITERIA),
-        ("CriteriaTree", reputations::CRITERIA_TREE),
-        ("Achievement", achievements::ACHIEVEMENT),
+        ("Faction", tables::FACTION),
+        ("Criteria", tables::CRITERIA),
+        ("CriteriaTree", tables::CRITERIA_TREE),
+        ("Achievement", tables::ACHIEVEMENT),
     ] {
         let table = match files.read(file).and_then(Db2::parse) {
             Ok(table) => table,
@@ -180,18 +180,18 @@ fn factions(files: &dyn casc::GameFiles) {
     }
 
     let factions = files
-        .read(reputations::FACTION)
+        .read(tables::FACTION)
         .and_then(Db2::parse)
         .expect("Faction reads");
     let criteria = files
-        .read(reputations::CRITERIA)
+        .read(tables::CRITERIA)
         .and_then(Db2::parse)
         .expect("Criteria reads");
 
     // What every faction is called, so that the walk can be read as names rather than numbers.
     let named: HashMap<u32, String> = factions
         .rows()
-        .map(|row| (row.id(), row.text(reputations::faction_column::NAME)))
+        .map(|row| (row.id(), row.text(tables::faction::NAME)))
         .filter(|(_, name)| !name.is_empty())
         .collect();
     let mut spellings: HashMap<String, usize> = HashMap::new();
@@ -211,10 +211,8 @@ fn factions(files: &dyn casc::GameFiles) {
     // The type-46 criteria, and the five assets that say the type is the right one.
     let about: HashMap<u32, u32> = criteria
         .rows()
-        .filter(|row| {
-            row.number(reputations::criteria_column::TYPE) == reputations::REPUTATION_CRITERIA
-        })
-        .map(|row| (row.id(), row.number(reputations::criteria_column::ASSET)))
+        .filter(|row| row.number(tables::criteria::TYPE) == reputations::REPUTATION_CRITERIA)
+        .map(|row| (row.id(), row.number(tables::criteria::ASSET)))
         .collect();
     let mentioned: HashSet<u32> = about.values().copied().collect();
     println!(

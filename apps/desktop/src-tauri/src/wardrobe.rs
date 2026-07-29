@@ -30,10 +30,16 @@ use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-use crate::items::{self, ANY_CLASS};
-use crate::transmog::{
-    appearance_column, display_column, item_column, modified_appearance_column, ITEM_APPEARANCE,
-    ITEM_DISPLAY_INFO, ITEM_MODIFIED_APPEARANCE, ITEM_SPARSE, MODEL_SLOTS, MODEL_SLOT_BITS,
+use crate::items::ANY_CLASS;
+use crate::tables::item;
+use crate::tables::item_display_info::{MODEL_RESOURCES_ID_BITS, MODEL_RESOURCES_ID_ELEMENTS};
+use crate::tables::item_sparse as item_column;
+use crate::tables::{
+    item_appearance as appearance_column, item_display_info as display_column,
+    item_modified_appearance as modified_appearance_column,
+};
+use crate::tables::{
+    ITEM, ITEM_APPEARANCE, ITEM_DISPLAY_INFO, ITEM_MODIFIED_APPEARANCE, ITEM_SPARSE,
 };
 
 /// One look, as the wardrobe list draws it.
@@ -54,7 +60,7 @@ pub struct WardrobeAppearance {
     pub display_type: u32,
     /// Where the item is worn, which for a weapon is what says which hand holds it.
     pub inventory_type: u32,
-    /// What kind of thing the item is: [`items::ARMOR`], [`items::WEAPON`], or another.
+    /// What kind of thing the item is: [`crate::items::ARMOR`], [`crate::items::WEAPON`], or another.
     pub class_id: u32,
     /// Which kind of that kind — the axe, the staff, the dagger. What the kinds are called is
     /// the window's business, here as everywhere else.
@@ -148,8 +154,12 @@ pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value
     let has_model: HashMap<u32, bool> = displays
         .rows()
         .map(|row| {
-            let modelled = (0..MODEL_SLOTS).any(|slot| {
-                row.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS) != 0
+            let modelled = (0..MODEL_RESOURCES_ID_ELEMENTS).any(|slot| {
+                row.element(
+                    display_column::MODEL_RESOURCES_ID,
+                    slot,
+                    MODEL_RESOURCES_ID_BITS,
+                ) != 0
             });
             (row.id(), modelled)
         })
@@ -256,7 +266,7 @@ fn describe(
         return Ok(HashMap::new());
     }
 
-    let kinds = Db2::parse(files.read(items::ITEM)?)?;
+    let kinds = Db2::parse(files.read(ITEM)?)?;
     let mut facts: HashMap<u32, ItemFacts> = kinds
         .rows()
         .filter(|row| wanted.contains(&row.id()))
@@ -264,8 +274,8 @@ fn describe(
             (
                 row.id(),
                 ItemFacts {
-                    class_id: row.number(items::column::CLASS),
-                    subclass_id: row.number(items::column::SUBCLASS),
+                    class_id: row.number(item::CLASS),
+                    subclass_id: row.number(item::SUBCLASS),
                     ..ItemFacts::default()
                 },
             )

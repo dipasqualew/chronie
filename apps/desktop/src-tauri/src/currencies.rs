@@ -15,24 +15,8 @@ use std::collections::HashMap;
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-
-/// `CurrencyTypes` — every currency the game has, with the picture each is drawn with.
-pub const CURRENCY_TYPES: u32 = 1_095_531;
-
-/// Columns of `CurrencyTypes`, which is an ordinary table of fixed-size records: its two strings
-/// sit in a block of their own, so nothing past them moves and no column has to be walked to.
-///
-/// **Read off build `12.0.5.67823` with `examples/dump_currencies.rs`**, which is what to run
-/// again after a patch; `docs/game-files.md` records what it answered. Column 3 is the only one
-/// of the table's first ten that holds FileDataIDs at all — 574 rows hold something there and
-/// every one of the 574 resolves to a texture this install can decode.
-pub mod column {
-    /// What the currency is called — "Honor", "Valorstones". Read by the dumper, not by the app:
-    /// the addon already sends the name the client showed the player.
-    pub const NAME: usize = 0;
-    /// The picture beside it, as a FileDataID to be decoded through [`crate::icons`].
-    pub const ICON_FILE_DATA_ID: usize = 3;
-}
+use crate::tables::currency_types as column;
+use crate::tables::CURRENCY_TYPES;
 
 /// The icon each of the currencies asked for is drawn with, as a FileDataID.
 ///

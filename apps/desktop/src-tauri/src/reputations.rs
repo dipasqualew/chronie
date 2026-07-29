@@ -39,18 +39,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::achievements::{self, ACHIEVEMENT};
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-
-/// `Faction` — every faction the game has a standing for, and what it is called.
-pub const FACTION: u32 = 1_361_972;
-
-/// `Criteria` — one row per thing that can be required of a player.
-pub const CRITERIA: u32 = 1_263_817;
-
-/// `CriteriaTree` — how criteria are grouped into what an achievement actually asks for.
-pub const CRITERIA_TREE: u32 = 1_263_818;
+use crate::tables::achievement as achievement_column;
+use crate::tables::criteria as criteria_column;
+use crate::tables::criteria_tree as tree_column;
+use crate::tables::faction as faction_column;
+use crate::tables::{ACHIEVEMENT, CRITERIA, CRITERIA_TREE, FACTION};
 
 /// The `Criteria` type meaning "reach a given reputation with a faction", whose asset is the
 /// faction's own id.
@@ -67,40 +62,6 @@ pub const REPUTATION_CRITERIA: u32 = 46;
 /// and a table reordered by a patch is exactly where a loop would come from — the same guard, for
 /// the same reason, as `achievements.rs` puts on the category tree.
 const DEEPEST_TREE: usize = 12;
-
-/// Columns of `Faction`, whose id sits in a list beside the rows.
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_achievements.rs`.** Column 0 is 256 bits wide
-/// — the four race masks the real table opens with, stored as one column — which is what puts the
-/// name at column 1 rather than at column 0 the way every other table in this app has it.
-pub mod faction_column {
-    /// What the faction is called, in the locale the install is running in. The only column read,
-    /// and the join: a segment carries this string and nothing else about the faction.
-    pub const NAME: usize = 1;
-}
-
-/// Columns of `Criteria`, whose id sits in column 0.
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_achievements.rs`.**
-pub mod criteria_column {
-    /// What kind of thing is being asked for. [`super::REPUTATION_CRITERIA`] is the one that
-    /// matters; the table has a hundred-odd others.
-    pub const TYPE: usize = 1;
-    /// What the requirement is about, whose meaning depends entirely on the type beside it. For a
-    /// type-46 row it is a faction id; for the row next to it, it could be a map or an item.
-    pub const ASSET: usize = 2;
-}
-
-/// Columns of `CriteriaTree`, whose id sits in a list beside the rows.
-///
-/// **Read off build 12.0.5.67823 with `examples/dump_achievements.rs`.**
-pub mod tree_column {
-    /// The node this one hangs off, and zero on a root. Every one of the 92,387 rows that name a
-    /// parent name a row that exists, which is what says this is the column.
-    pub const PARENT: usize = 1;
-    /// The criterion this node is, when it is a leaf rather than a grouping.
-    pub const CRITERIA_ID: usize = 4;
-}
 
 /// The icon each of the factions asked about is drawn with, as a FileDataID, keyed by the name it
 /// was asked for under.
@@ -196,7 +157,7 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
     let mut best: HashMap<u32, (u32, u32)> = HashMap::new();
     let table = Db2::parse(files.read(ACHIEVEMENT)?)?;
     for row in table.rows() {
-        let root = row.number(achievements::column::CRITERIA_TREE);
+        let root = row.number(achievement_column::CRITERIA_TREE);
         if root == 0 {
             continue;
         }
@@ -207,7 +168,7 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
         if !asked_for.contains_key(&faction) {
             continue;
         }
-        let icon = row.number(achievements::column::ICON_FILE_ID);
+        let icon = row.number(achievement_column::ICON_FILE_ID);
         if icon == 0 {
             continue;
         }

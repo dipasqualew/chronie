@@ -40,12 +40,16 @@ Two things an install does not change. **Nothing in the test suite may read it**
 tests run from those fixtures and from the fakes in
 `apps/addon/spec/helpers/fake_wow.lua`, always, because a test that passes only
 on a machine with the game installed is a test that fails for everybody else.
-And **the documents come first** — `docs/game-files.md` and
-`docs/character-rendering.md` hold the file ids, column indices, verified
-constants and traps that have already been paid for once. Going to look is for
-the questions they do not answer; when a look settles one, write the answer back
-into them, marked with the build it was read from, the way the rest of those
-documents are.
+And **what is already known comes first.** `docs/game-tables.json` is the
+registry of table FileDataIDs and consumed column positions, each with the build
+it was confirmed on; `docs/game-files.md` and `docs/character-rendering.md` are
+the traps, the evidence and the runs that settled them. Going to look is for the
+questions those do not answer. When a look settles one, the answer goes back into
+the registry — then `bun run tables:generate`, which rewrites the Rust constants,
+the fixture generators' ids and the document's own table together. Nothing else
+in the tree may declare a FileDataID or a column index; `scripts/game-tables.test.ts`
+fails the check when something does, and `docs/game-files.md` describes the whole
+loop under "Verifying a patch".
 
 The SavedVariables under `_retail_/WTF/` are a real person's characters. Reading
 them to understand a bug is the point of being allowed in there; committing one

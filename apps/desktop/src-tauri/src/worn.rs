@@ -27,12 +27,12 @@
 //! that table at all is not excluded**: silence is what most of the game's armour has, and
 //! reading it as "not for this body" would leave the character bare.
 //!
-//! The second chain is two positions rather than one, and both were read off an install:
-//! `GeosetGroup` is column 13 of `ItemDisplayInfo`, and which slot a display type names is
-//! item by item in [`SLOT_GROUPS`]. Neither is the community's, because the community is wrong
-//! about both — `docs/game-files.md` has the run that settled them. Getting either wrong is
-//! quiet rather than loud, which is why nothing here hides a group it cannot then show
-//! something for: see [`crate::character::dressed`].
+//! The second chain is two positions rather than one, and both were read off an install: where
+//! `GeosetGroup` sits in `ItemDisplayInfo` is in `docs/game-tables.json` with the build it was
+//! read off, and which slot a display type names is item by item in [`SLOT_GROUPS`]. Neither is
+//! the community's, because the community is wrong about both — `docs/game-files.md` has the run
+//! that settled them. Getting either wrong is quiet rather than loud, which is why nothing here
+//! hides a group it cannot then show something for: see [`crate::character::dressed`].
 //!
 //! The third chain is the same trap as the first, one table over. **A model resource names an
 //! `.m2` per body too** — a helm is modelled for every race and gender the game ships — and
@@ -82,41 +82,24 @@ use serde::Deserialize;
 use crate::body::Body;
 use crate::casc::GameFiles;
 use crate::db2::{Db2, Row};
-use crate::models::TEXTURE_FILE_DATA;
-use crate::models::{MATERIAL_RESOURCES_ID, MODEL_FILE_DATA, MODEL_RESOURCES_ID};
-use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
-
-/// `ItemDisplayInfoMaterialRes` — which texture an appearance paints each part of a body with.
-const ITEM_DISPLAY_INFO_MATERIAL_RES: u32 = 1280614;
-/// `ComponentTextureFileData` — which body a given texture file was painted for.
-const COMPONENT_TEXTURE_FILE_DATA: u32 = 1278239;
-/// `ComponentModelFileData` — the same for a model file, and the same three columns.
-const COMPONENT_MODEL_FILE_DATA: u32 = 1349053;
-/// `HelmetGeosetData` — which of a body's geoset groups a helm hides, race by race.
-const HELMET_GEOSET_DATA: u32 = 2821752;
-
-/// Columns of `ItemDisplayInfoMaterialRes`. Its own id is of no use to anybody: what ties a
-/// row to an appearance is the relationship block, which [`Row::foreign_id`] reads.
-mod material_column {
-    /// Which part of the body, 0 to 8. The layout says where each of those lands.
-    pub const COMPONENT_SECTION: usize = 0;
-    pub const MATERIAL_RESOURCES_ID: usize = 1;
-}
-
-/// Columns of `ComponentTextureFileData`, whose row id is the texture's own FileDataID — and
-/// of `ComponentModelFileData`, which is the same three columns with models behind them.
-///
-/// The models table carries a fourth, and it is not decoration: **`PositionIndex` is which
-/// shoulder.** Read off 12.0.5.67, the two tags are orthogonal and each slot uses exactly one
-/// of them — a helm is `gender 0 or 1, position -1`, and every one of the 10,449 shoulder
-/// resources is `gender 2, positions 0 and 1`. Which is to say a helm is modelled per body and
-/// a pauldron is modelled per side, and neither is modelled per both.
-mod component_column {
-    pub const GENDER: usize = 0;
-    pub const CLASS: usize = 1;
-    pub const RACE: usize = 2;
-    pub const POSITION: usize = 3;
-}
+// `component_model_file_data` is one module read for two tables, because they are the same
+// columns: `ComponentTextureFileData` is the first three of these with textures behind it rather
+// than models. That is the whole reason [`for_this_body`] takes a table's rows rather than
+// reading them itself.
+use crate::tables::component_model_file_data as component_column;
+use crate::tables::helmet_geoset_data as helmet_column;
+use crate::tables::item_display_info as display_column;
+use crate::tables::item_display_info::{
+    GEOSET_GROUP_BITS, GEOSET_GROUP_ELEMENTS, HELMET_GEOSET_VIS_BITS, MATERIAL_RESOURCES_ID_BITS,
+    MODEL_RESOURCES_ID_BITS, MODEL_RESOURCES_ID_ELEMENTS,
+};
+use crate::tables::item_display_info_material_res as material_column;
+use crate::tables::model_file_data::MODEL_RESOURCES_ID;
+use crate::tables::texture_file_data::MATERIAL_RESOURCES_ID;
+use crate::tables::{
+    COMPONENT_MODEL_FILE_DATA, COMPONENT_TEXTURE_FILE_DATA, HELMET_GEOSET_DATA, ITEM_DISPLAY_INFO,
+    ITEM_DISPLAY_INFO_MATERIAL_RES, MODEL_FILE_DATA, TEXTURE_FILE_DATA,
+};
 
 /// How many sides a model resource can be modelled for, which is two: a left pad and a right.
 ///
@@ -124,18 +107,6 @@ mod component_column {
 /// helm, and read unsigned it arrives as a number far past this. Treating it as a bound rather
 /// than as a sentinel is what keeps that true however the column is packed.
 const SIDES: u32 = 2;
-
-/// Columns of `HelmetGeosetData`. Which helm a row belongs to is the relationship block, as it
-/// is in `ItemDisplayInfoMaterialRes`, so [`Row::foreign_id`] is what reads it.
-///
-/// Two more columns follow these, read off 12.0.5.67 and left alone: one is zero on all but
-/// five of the table's 19,150 rows, and `RaceBitSelection` is `32` or `-1` throughout. Neither
-/// has a reading this app could act on, and ignoring them errs towards hiding — which is what
-/// a helm does.
-mod helmet_column {
-    pub const RACE: usize = 0;
-    pub const HIDE_GEOSET_GROUP: usize = 1;
-}
 
 // There is no class anywhere in this module, and that is a decision rather than an omission: a
 // class-specific texture is a demon hunter's tattoos and a handful of tabards, and a wardrobe is
@@ -154,13 +125,6 @@ mod helmet_column {
 const NO_GENDER: u32 = 2;
 const ANY_GENDER: u32 = 3;
 const ANY_CLASS: u32 = 0;
-
-/// How many geoset groups `ItemDisplayInfo` gives a display, and how wide one of them is.
-///
-/// A fixed-size array inside a single column, like the two model slots beside it, so the
-/// caller supplies the element width — the file records only the column's total.
-const GEOSET_GROUPS: usize = 6;
-const GEOSET_GROUP_BITS: u32 = 32;
 
 /// The largest number that can be a geoset value.
 ///
@@ -718,12 +682,12 @@ fn hangs_in(drawn: &[(Piece, &Row<'_>)]) -> Vec<Hung> {
                     model: display.element(
                         display_column::MODEL_RESOURCES_ID,
                         slot,
-                        MODEL_SLOT_BITS,
+                        MODEL_RESOURCES_ID_BITS,
                     ),
                     material: display.element(
                         display_column::MATERIAL_RESOURCES_ID,
                         slot,
-                        MODEL_SLOT_BITS,
+                        MATERIAL_RESOURCES_ID_BITS,
                     ),
                 })
         })
@@ -800,9 +764,13 @@ fn hangs_from(display: &Row<'_>, display_type: u32, inventory_type: u32) -> Vec<
     let Some(hand) = held_in(inventory_type) else {
         return Vec::new();
     };
-    let filled = (0..MODEL_SLOTS)
+    let filled = (0..MODEL_RESOURCES_ID_ELEMENTS)
         .find(|slot| {
-            display.element(display_column::MODEL_RESOURCES_ID, *slot, MODEL_SLOT_BITS) != 0
+            display.element(
+                display_column::MODEL_RESOURCES_ID,
+                *slot,
+                MODEL_RESOURCES_ID_BITS,
+            ) != 0
         })
         .unwrap_or(0);
     vec![(filled, hand)]
@@ -960,7 +928,11 @@ fn cape_in(drawn: &[(Piece, &Row<'_>)]) -> Option<u32> {
         .iter()
         .filter(|(piece, _)| piece.display_type == BACK)
         .map(|(_, display)| {
-            display.element(display_column::MATERIAL_RESOURCES_ID, 0, MODEL_SLOT_BITS)
+            display.element(
+                display_column::MATERIAL_RESOURCES_ID,
+                0,
+                MATERIAL_RESOURCES_ID_BITS,
+            )
         })
         .find(|resource| *resource != 0)
 }
@@ -981,7 +953,11 @@ fn helmet_vis(drawn: &[(Piece, &Row<'_>)], sex: usize) -> HashSet<u32> {
         .iter()
         .filter(|(piece, _)| piece.display_type == HEAD)
         .map(|(_, display)| {
-            display.element(display_column::HELMET_GEOSET_VIS, sex, MODEL_SLOT_BITS)
+            display.element(
+                display_column::HELMET_GEOSET_VIS,
+                sex,
+                HELMET_GEOSET_VIS_BITS,
+            )
         })
         // 210 of the game's helms say zero here, and it means an open helm that hides nothing.
         .filter(|entry| *entry != 0)
@@ -1206,7 +1182,7 @@ fn drives(display: &Row<'_>, display_type: u32) -> Vec<Geoset> {
         .unwrap_or(&[]);
     groups
         .iter()
-        .take(GEOSET_GROUPS)
+        .take(GEOSET_GROUP_ELEMENTS)
         .enumerate()
         .filter_map(|(index, group)| {
             let value = display.element(display_column::GEOSET_GROUP, index, GEOSET_GROUP_BITS);

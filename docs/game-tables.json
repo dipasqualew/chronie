@@ -1,0 +1,1157 @@
+{
+  "$comment": [
+    "The tables this app reads out of the game's own storage, and where each mechanical fact",
+    "came from. Authoritative: nothing else in the tree may declare a table's FileDataID or a",
+    "consumed column's position, and `scripts/make-game-tables.ts` writes the constants that do.",
+    "",
+    "What belongs here is what a game patch can invalidate — a FileDataID, a column index, how",
+    "many elements an array column holds and how wide one of them is — together with the build",
+    "it was last confirmed on and the tool that confirmed it. What does not belong here is any",
+    "reading of those values: what a class mask means, which slot wins a contested geoset, how a",
+    "points column is unpacked. Those live in the Rust and TypeScript that acts on them.",
+    "",
+    "Deliberately *not* consumed by the fixture generators beyond the FileDataIDs. A synthetic",
+    "table's column layout is decided in the `make-*-fixtures.ts` script and nowhere else, so a",
+    "wrong index here moves the reader without moving the bytes and the golden tests in",
+    "`db2.rs` — which carry their own literals — say so. See docs/game-files.md.",
+    "",
+    "    bun run tables:generate"
+  ],
+  "version": 1,
+  "listfile": "https://github.com/wowdev/wow-listfile",
+  "tables": [
+    {
+      "table": "TransmogSet",
+      "rust": "TRANSMOG_SET",
+      "ts": "transmogSet",
+      "module": "transmog_set",
+      "fileDataId": 1376213,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`TransmogSet` — the sets themselves, and the one table on the chain with a string in it."
+      ],
+      "columns": [
+        { "rust": "NAME", "index": 0, "field": "Name_lang" },
+        { "rust": "CLASS_MASK", "index": 2, "field": "ClassMask" },
+        { "rust": "FLAGS", "index": 4, "field": "Flags" },
+        { "rust": "GROUP_ID", "index": 5, "field": "TransmogSetGroupID" },
+        { "rust": "PARENT_ID", "index": 7, "field": "ParentTransmogSetID" },
+        { "rust": "EXPANSION_ID", "index": 9, "field": "ExpansionID" },
+        { "rust": "PATCH_INTRODUCED", "index": 10, "field": "PatchIntroduced" },
+        { "rust": "UI_ORDER", "index": 11, "field": "UiOrder" }
+      ]
+    },
+    {
+      "table": "TransmogSetItem",
+      "rust": "TRANSMOG_SET_ITEM",
+      "ts": "transmogSetItem",
+      "module": "transmog_set_item",
+      "fileDataId": 1376212,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`TransmogSetItem` — the appearances one set is made of, one row per piece."
+      ],
+      "columns": [
+        {
+          "rust": "SET_ID",
+          "index": 0,
+          "field": "TransmogSetID",
+          "doc": [
+            "The set is a relationship the game duplicates into the record, which is why it reads",
+            "as an ordinary column rather than through [`crate::db2::Row::foreign_id`]."
+          ]
+        },
+        {
+          "rust": "MODIFIED_APPEARANCE_ID",
+          "index": 1,
+          "field": "ItemModifiedAppearanceID"
+        }
+      ]
+    },
+    {
+      "table": "TransmogSetGroup",
+      "rust": "TRANSMOG_SET_GROUP",
+      "ts": "transmogSetGroup",
+      "module": "transmog_set_group",
+      "fileDataId": 1576116,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": ["`TransmogSetGroup` — what the collections a set can belong to are called."],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": ["The one column of the table that is not the row id."]
+        }
+      ]
+    },
+    {
+      "table": "ItemModifiedAppearance",
+      "rust": "ITEM_MODIFIED_APPEARANCE",
+      "ts": "itemModifiedAppearance",
+      "module": "item_modified_appearance",
+      "fileDataId": 982457,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ItemModifiedAppearance` — what ties an appearance to an item.",
+        "",
+        "Read from both ends: `transmog` asks what a named set is made of, `wardrobe` asks what",
+        "fills a place on the body."
+      ],
+      "columns": [
+        { "rust": "ITEM_ID", "index": 1, "field": "ItemID" },
+        { "rust": "APPEARANCE_ID", "index": 3, "field": "ItemAppearanceID" }
+      ]
+    },
+    {
+      "table": "ItemAppearance",
+      "rust": "ITEM_APPEARANCE",
+      "ts": "itemAppearance",
+      "module": "item_appearance",
+      "fileDataId": 982462,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": ["`ItemAppearance` — one look, and the picture the game draws it with."],
+      "columns": [
+        {
+          "rust": "DISPLAY_TYPE",
+          "index": 0,
+          "field": "DisplayType",
+          "doc": [
+            "Which slot the appearance fills; the game's own numbering, tabulated in the docs.",
+            "It says nothing about a weapon — see `ItemSparse.InventoryType`."
+          ]
+        },
+        { "rust": "DISPLAY_INFO_ID", "index": 1, "field": "ItemDisplayInfoID" },
+        { "rust": "ICON_FILE_DATA_ID", "index": 2, "field": "DefaultIconFileDataID" }
+      ]
+    },
+    {
+      "table": "ItemDisplayInfo",
+      "rust": "ITEM_DISPLAY_INFO",
+      "ts": "itemDisplayInfo",
+      "module": "item_display_info",
+      "fileDataId": 1266429,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_display_columns" },
+      "doc": [
+        "`ItemDisplayInfo` — what one look actually puts on a character: the models it swaps and",
+        "the geoset groups it switches.",
+        "",
+        "The tail of this table is array columns of awkward widths, and the community is wrong",
+        "about two of them. `docs/game-files.md` has the run that settled them."
+      ],
+      "columns": [
+        {
+          "rust": "MODEL_RESOURCES_ID",
+          "index": 10,
+          "field": "ModelResourcesID[2]",
+          "elements": 2,
+          "bits": 32,
+          "doc": [
+            "A fixed-size array of two, not a scalar. Shoulders keep a model in each slot, and a",
+            "reader that stops at the first element reports half of them as having no geometry."
+          ]
+        },
+        {
+          "rust": "MATERIAL_RESOURCES_ID",
+          "index": 11,
+          "field": "ModelMaterialResourcesID[2]",
+          "elements": 2,
+          "bits": 32,
+          "doc": [
+            "The same shape, and parallel to it: slot `i`'s model is painted with slot `i`'s",
+            "material. This is the texture an item's own model uses, and not the one armour is",
+            "drawn on the body with — that comes out of `ItemDisplayInfoMaterialRes`."
+          ]
+        },
+        {
+          "rust": "MODEL_TYPE",
+          "index": 12,
+          "field": "ModelType[2]",
+          "doc": [
+            "What kind of model each of the two slots holds. Nothing reads it; it is named because",
+            "it is what sits between the materials and the geoset groups, and reading it *as* the",
+            "geoset groups is the mistake this table invites."
+          ]
+        },
+        {
+          "rust": "GEOSET_GROUP",
+          "index": 13,
+          "field": "GeosetGroup[6]",
+          "elements": 6,
+          "bits": 32,
+          "doc": [
+            "Which variant of each geoset group the display switches on: an array of six, read one",
+            "element at a time like the two above.",
+            "",
+            "This column holds six values where 12 holds two, and a robe puts a 1 in its third",
+            "while leaving its second at 0."
+          ]
+        },
+        {
+          "rust": "HELMET_GEOSET_VIS",
+          "index": 15,
+          "field": "HelmetGeosetVis[2]",
+          "elements": 2,
+          "bits": 32,
+          "doc": [
+            "Which rows of `HelmetGeosetData` say what a helm hides: an array of two, one per",
+            "gender. Column 14 between them is `AttachmentGeosetGroup[6]`, which nothing reads."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "ItemDisplayInfoMaterialRes",
+      "rust": "ITEM_DISPLAY_INFO_MATERIAL_RES",
+      "ts": "itemDisplayInfoMaterialRes",
+      "module": "item_display_info_material_res",
+      "fileDataId": 1280614,
+      "records": "fixed",
+      "readable": "yes, needs `foreign_id()`",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ItemDisplayInfoMaterialRes` — which texture an appearance paints each part of a body",
+        "with.",
+        "",
+        "Its own id is of no use to anybody: what ties a row to an appearance is the relationship",
+        "block, which [`crate::db2::Row::foreign_id`] reads."
+      ],
+      "columns": [
+        {
+          "rust": "COMPONENT_SECTION",
+          "index": 0,
+          "field": "ComponentSection",
+          "doc": ["Which part of the body, 0 to 8. The layout says where each of those lands."]
+        },
+        { "rust": "MATERIAL_RESOURCES_ID", "index": 1, "field": "MaterialResourcesID" }
+      ]
+    },
+    {
+      "table": "ModelFileData",
+      "rust": "MODEL_FILE_DATA",
+      "ts": "modelFileData",
+      "module": "model_file_data",
+      "fileDataId": 1337833,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ModelFileData` — every `.m2` the client owns, keyed by the resource that names it.",
+        "",
+        "Read for an item's own model and for a model that goes on a body; the row id is the",
+        "file's own FileDataID."
+      ],
+      "columns": [
+        {
+          "rust": "MODEL_RESOURCES_ID",
+          "index": 4,
+          "field": "ModelResourcesID",
+          "doc": ["The one column that is not the row id: which model resource the file is."]
+        }
+      ]
+    },
+    {
+      "table": "TextureFileData",
+      "rust": "TEXTURE_FILE_DATA",
+      "ts": "textureFileData",
+      "module": "texture_file_data",
+      "fileDataId": 982459,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`TextureFileData` — the same for `.blp`s, and asked a wider question: an item's model",
+        "wants the one file its material names, and a body texture wants every file it names so",
+        "that another table can say which of them was painted for the character being drawn."
+      ],
+      "columns": [
+        { "rust": "MATERIAL_RESOURCES_ID", "index": 2, "field": "MaterialResourcesID" }
+      ]
+    },
+    {
+      "table": "ComponentTextureFileData",
+      "rust": "COMPONENT_TEXTURE_FILE_DATA",
+      "ts": "componentTextureFileData",
+      "module": "component_texture_file_data",
+      "fileDataId": 1278239,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ComponentTextureFileData` — which body a given texture file was painted for.",
+        "",
+        "Keyed by the texture's own FileDataID, which is the row id. Silence is not exclusion:",
+        "most of the game's armour has no row here at all."
+      ],
+      "columns": [
+        { "rust": "GENDER", "index": 0, "field": "GenderIndex" },
+        { "rust": "CLASS", "index": 1, "field": "ClassID" },
+        { "rust": "RACE", "index": 2, "field": "RaceID" }
+      ]
+    },
+    {
+      "table": "ComponentModelFileData",
+      "rust": "COMPONENT_MODEL_FILE_DATA",
+      "ts": "componentModelFileData",
+      "module": "component_model_file_data",
+      "fileDataId": 1349053,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ComponentModelFileData` — the same for a model file, and the same three columns with a",
+        "fourth behind them."
+      ],
+      "columns": [
+        { "rust": "GENDER", "index": 0, "field": "GenderIndex" },
+        { "rust": "CLASS", "index": 1, "field": "ClassID" },
+        { "rust": "RACE", "index": 2, "field": "RaceID" },
+        {
+          "rust": "POSITION",
+          "index": 3,
+          "field": "PositionIndex",
+          "doc": [
+            "Which shoulder. The two tags are orthogonal and each slot uses exactly one of them —",
+            "a helm is `gender 0 or 1, position -1`, and every one of the 10,449 shoulder",
+            "resources is `gender 2, positions 0 and 1`."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "HelmetGeosetData",
+      "rust": "HELMET_GEOSET_DATA",
+      "ts": "helmetGeosetData",
+      "module": "helmet_geoset_data",
+      "fileDataId": 2821752,
+      "records": "fixed",
+      "readable": "yes, needs `foreign_id()`",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`HelmetGeosetData` — which of a body's geoset groups a helm hides, race by race.",
+        "",
+        "Which helm a row belongs to is the relationship block, so [`crate::db2::Row::foreign_id`]",
+        "is what reads it. Two more columns follow the two below and are left alone: one is zero",
+        "on all but five of the table's 19,150 rows, and `RaceBitSelection` is `32` or `-1`",
+        "throughout."
+      ],
+      "columns": [
+        { "rust": "RACE", "index": 0, "field": "RaceID" },
+        { "rust": "HIDE_GEOSET_GROUP", "index": 1, "field": "HideGeosetGroup" }
+      ]
+    },
+    {
+      "table": "CharComponentTextureSections",
+      "rust": "CHAR_COMPONENT_TEXTURE_SECTIONS",
+      "ts": "charComponentTextureSections",
+      "module": "char_component_texture_sections",
+      "fileDataId": 1360263,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`CharComponentTextureSections` — where each part of a body lands in that layout's atlas.",
+        "",
+        "The layout is an ordinary column here rather than a relationship block, unlike",
+        "`ChrModelTextureLayer`'s."
+      ],
+      "columns": [
+        { "rust": "LAYOUT", "index": 0, "field": "CharComponentTexturelayoutsID" },
+        { "rust": "SECTION", "index": 1, "field": "SectionType" },
+        { "rust": "X", "index": 2, "field": "X" },
+        { "rust": "Y", "index": 3, "field": "Y" },
+        { "rust": "WIDTH", "index": 4, "field": "Width" },
+        { "rust": "HEIGHT", "index": 5, "field": "Height" }
+      ]
+    },
+    {
+      "table": "CharComponentTextureLayouts",
+      "rust": "CHAR_COMPONENT_TEXTURE_LAYOUTS",
+      "ts": "charComponentTextureLayouts",
+      "module": "char_component_texture_layouts",
+      "fileDataId": 1360262,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`CharComponentTextureLayouts` — the atlas layouts themselves. Named for the chain's sake",
+        "and read by nothing: what a layout *is* comes out of the two tables that key off it."
+      ],
+      "columns": []
+    },
+    {
+      "table": "ChrModelMaterial",
+      "rust": "CHR_MODEL_MATERIAL",
+      "ts": "chrModelMaterial",
+      "module": "chr_model_material",
+      "fileDataId": 3566562,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ChrModelMaterial` — how large each of a layout's atlases is, texture type by texture",
+        "type. Its id is its own first column."
+      ],
+      "columns": [
+        { "rust": "LAYOUT", "index": 1, "field": "CharComponentTextureLayoutsID" },
+        { "rust": "TEXTURE_TYPE", "index": 2, "field": "TextureType" },
+        { "rust": "WIDTH", "index": 3, "field": "Width" },
+        { "rust": "HEIGHT", "index": 4, "field": "Height" }
+      ]
+    },
+    {
+      "table": "ChrModelTextureLayer",
+      "rust": "CHR_MODEL_TEXTURE_LAYER",
+      "ts": "chrModelTextureLayer",
+      "module": "chr_model_texture_layer",
+      "fileDataId": 3548976,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ChrModelTextureLayer` — how one texture layout is composited, a layer at a time.",
+        "",
+        "Its id is beside the rows and the layout it belongs to is in the relationship block, so",
+        "neither is a column — which is what puts `TextureType` at 0 rather than at 1 or 2."
+      ],
+      "columns": [
+        { "rust": "TEXTURE_TYPE", "index": 0, "field": "TextureType" },
+        { "rust": "LAYER", "index": 1, "field": "Layer" },
+        { "rust": "BLEND_MODE", "index": 3, "field": "BlendMode" },
+        {
+          "rust": "SECTION_MASK",
+          "index": 4,
+          "field": "TextureSectionTypeBitMask",
+          "doc": ["Which of the layout's rectangles the layer paints, as one bit per `SectionType`."]
+        },
+        {
+          "rust": "TEXTURE_TARGET",
+          "index": 7,
+          "field": "ChrModelTextureTargetID[2]",
+          "elements": 2,
+          "bits": 32,
+          "doc": ["An array; the second element is unused on the body layout."]
+        }
+      ]
+    },
+    {
+      "table": "ChrModel",
+      "rust": "CHR_MODEL",
+      "ts": "chrModel",
+      "module": "chr_model",
+      "fileDataId": 3384313,
+      "records": "fixed",
+      "readable": "yes, **columns read**",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_bodies" },
+      "doc": [
+        "`ChrModel` — every playable body the game has, and which texture layout each composites",
+        "in. Keeps its id **inside** the row, in column 2."
+      ],
+      "columns": [
+        { "rust": "SEX", "index": 3, "field": "Sex" },
+        { "rust": "DISPLAY", "index": 4, "field": "DisplayID" },
+        { "rust": "LAYOUT", "index": 5, "field": "CharComponentTextureLayoutID" }
+      ]
+    },
+    {
+      "table": "ChrRaces",
+      "rust": "CHR_RACES",
+      "ts": "chrRaces",
+      "module": "chr_races",
+      "fileDataId": 1305311,
+      "records": "fixed",
+      "readable": "yes, **columns read**",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_bodies" },
+      "doc": [
+        "`ChrRaces` — every race the game ships, with the name to show and whether anybody can be",
+        "one."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 2,
+          "field": "Name_lang",
+          "doc": [
+            "The name a reader is shown. Column 1 beside it is the client's own word for the race,",
+            "and it is the one that calls the Undead \"Scourge\" and the Haranir \"Harronir\"."
+          ]
+        },
+        { "rust": "FLAGS", "index": 15, "field": "Flags" }
+      ]
+    },
+    {
+      "table": "ChrRaceXChrModel",
+      "rust": "CHR_RACE_X_CHR_MODEL",
+      "ts": "chrRaceXChrModel",
+      "module": "chr_race_x_chr_model",
+      "fileDataId": 3490304,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67" },
+      "doc": [
+        "`ChrRaceXChrModel` — which bodies a race is made of.",
+        "",
+        "It states a sex of its own in column 2, and it is not the one used: a Dracthyr's single",
+        "body is listed twice there, once under each, while the body itself says it belongs to",
+        "neither. What a body *is* comes from `ChrModel`."
+      ],
+      "columns": [
+        { "rust": "RACE", "index": 0, "field": "ChrRacesID" },
+        { "rust": "MODEL", "index": 1, "field": "ChrModelID" }
+      ]
+    },
+    {
+      "table": "CreatureDisplayInfo",
+      "rust": "CREATURE_DISPLAY_INFO",
+      "ts": "creatureDisplayInfo",
+      "module": "creature_display_info",
+      "fileDataId": 1108759,
+      "records": "fixed",
+      "readable": "yes, 119,028 rows",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_bodies" },
+      "doc": ["`CreatureDisplayInfo` — what a `ChrModel`'s display id actually displays."],
+      "columns": [{ "rust": "MODEL", "index": 1, "field": "ModelID" }]
+    },
+    {
+      "table": "CreatureModelData",
+      "rust": "CREATURE_MODEL_DATA",
+      "ts": "creatureModelData",
+      "module": "creature_model_data",
+      "fileDataId": 1365368,
+      "records": "fixed",
+      "readable": "yes, id beside the rows",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_bodies" },
+      "doc": ["`CreatureModelData` — and the mesh behind that."],
+      "columns": [{ "rust": "FILE", "index": 2, "field": "FileDataID" }]
+    },
+    {
+      "table": "ChrCustomizationOption",
+      "rust": "CHR_CUSTOMIZATION_OPTION",
+      "ts": "chrCustomizationOption",
+      "module": "chr_customization_option",
+      "fileDataId": 3384247,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_customization" },
+      "doc": [
+        "`ChrCustomizationOption` — the things a body can be asked about, and whose body it is.",
+        "Keeps its id **inside** the row."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": ["\"Skin Color\", \"Hair Style\", \"Ears\" — what the screen calls the question."]
+        },
+        { "rust": "MODEL", "index": 4, "field": "ChrModelID" },
+        {
+          "rust": "ORDER",
+          "index": 5,
+          "field": "OrderIndex",
+          "doc": ["Where the question sits among this body's, in the order the screen lists them."]
+        }
+      ]
+    },
+    {
+      "table": "ChrCustomizationChoice",
+      "rust": "CHR_CUSTOMIZATION_CHOICE",
+      "ts": "chrCustomizationChoice",
+      "module": "chr_customization_choice",
+      "fileDataId": 3450554,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_customization" },
+      "doc": [
+        "`ChrCustomizationChoice` — the swatches of one option. Keeps its id inside the row as",
+        "well."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": [
+            "Empty for most swatches: a skin colour is a square of colour on the character",
+            "creation screen and has nothing to be called."
+          ]
+        },
+        { "rust": "OPTION", "index": 2, "field": "ChrCustomizationOptionID" },
+        {
+          "rust": "ORDER",
+          "index": 5,
+          "field": "OrderIndex",
+          "doc": ["Which swatch this is, in the order the character creation screen lists them."]
+        }
+      ]
+    },
+    {
+      "table": "ChrCustomizationElement",
+      "rust": "CHR_CUSTOMIZATION_ELEMENT",
+      "ts": "chrCustomizationElement",
+      "module": "chr_customization_element",
+      "fileDataId": 3512765,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_customization" },
+      "doc": [
+        "`ChrCustomizationElement` — what one customization choice does to a character. Its id is",
+        "kept beside the rows rather than in them.",
+        "",
+        "The eight columns past the material are the rest of what a choice can do — a skinned",
+        "model, a bone set, a voice — and none of them is a picture or a geoset."
+      ],
+      "columns": [
+        {
+          "rust": "CHOICE",
+          "index": 0,
+          "field": "ChrCustomizationChoiceID",
+          "doc": ["Not a relationship block: an ordinary column."]
+        },
+        {
+          "rust": "RELATED",
+          "index": 1,
+          "field": "RelatedChrCustomizationChoiceID",
+          "doc": [
+            "A second choice that must be chosen too, or zero where the element is unconditional."
+          ]
+        },
+        { "rust": "GEOSET", "index": 2, "field": "ChrCustomizationGeosetID" },
+        { "rust": "MATERIAL", "index": 4, "field": "ChrCustomizationMaterialID" }
+      ]
+    },
+    {
+      "table": "ChrCustomizationMaterial",
+      "rust": "CHR_CUSTOMIZATION_MATERIAL",
+      "ts": "chrCustomizationMaterial",
+      "module": "chr_customization_material",
+      "fileDataId": 3459652,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_customization" },
+      "doc": [
+        "`ChrCustomizationMaterial` — which target a customization paints, and with what. Its id",
+        "is also kept beside the rows."
+      ],
+      "columns": [
+        { "rust": "TEXTURE_TARGET", "index": 0, "field": "ChrModelTextureTargetID" },
+        { "rust": "MATERIAL_RESOURCES_ID", "index": 1, "field": "MaterialResourcesID" }
+      ]
+    },
+    {
+      "table": "ChrCustomizationGeoset",
+      "rust": "CHR_CUSTOMIZATION_GEOSET",
+      "ts": "chrCustomizationGeoset",
+      "module": "chr_customization_geoset",
+      "fileDataId": 3456171,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_customization" },
+      "doc": [
+        "`ChrCustomizationGeoset` — the group and value a customization switches on. Its id is",
+        "kept beside the rows."
+      ],
+      "columns": [
+        { "rust": "TYPE", "index": 0, "field": "GeosetType" },
+        { "rust": "VALUE", "index": 1, "field": "GeosetID" }
+      ]
+    },
+    {
+      "table": "Achievement",
+      "rust": "ACHIEVEMENT",
+      "ts": "achievement",
+      "module": "achievement",
+      "fileDataId": 1260179,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_achievements" },
+      "doc": [
+        "`Achievement` — every achievement the game has, read for two different questions: what a",
+        "player earned, and the picture a faction borrows from its own Exalted achievement."
+      ],
+      "columns": [
+        { "rust": "DESCRIPTION", "index": 0, "field": "Description_lang" },
+        { "rust": "TITLE", "index": 1, "field": "Title_lang" },
+        { "rust": "REWARD", "index": 2, "field": "Reward_lang" },
+        { "rust": "FACTION", "index": 5, "field": "Faction" },
+        { "rust": "CATEGORY", "index": 7, "field": "Category" },
+        {
+          "rust": "POINTS",
+          "index": 9,
+          "field": "Points",
+          "doc": ["Not the number of points on its own — see `achievements::points_of`."]
+        },
+        { "rust": "ICON_FILE_ID", "index": 12, "field": "IconFileID" },
+        {
+          "rust": "CRITERIA_TREE",
+          "index": 14,
+          "field": "Criteria_tree",
+          "doc": [
+            "The root of the tree of criteria that earns it, into `CriteriaTree`. How",
+            "[`crate::reputations`] gets from a faction back to an achievement."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "Achievement_Category",
+      "rust": "ACHIEVEMENT_CATEGORY",
+      "ts": "achievementCategory",
+      "module": "achievement_category",
+      "fileDataId": 1324299,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_achievements" },
+      "doc": [
+        "`Achievement_Category` — a category names its parent and nothing else, which is what",
+        "makes the tree something to walk rather than something to read."
+      ],
+      "columns": [
+        { "rust": "NAME", "index": 0, "field": "Name_lang" },
+        { "rust": "PARENT", "index": 2, "field": "Parent" }
+      ]
+    },
+    {
+      "table": "Faction",
+      "rust": "FACTION",
+      "ts": "faction",
+      "module": "faction",
+      "fileDataId": 1361972,
+      "records": "fixed",
+      "readable": "yes, **columns read**, name in col1",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_achievements" },
+      "doc": [
+        "`Faction` — every faction the game has a standing for, and what it is called. Its id sits",
+        "in a list beside the rows.",
+        "",
+        "Column 0 is 256 bits wide — the four race masks the real table opens with, stored as one",
+        "column — which is what puts the name at column 1 rather than at column 0 the way every",
+        "other table in this app has it."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 1,
+          "field": "Name_lang",
+          "doc": [
+            "The only column read, and the join: a segment carries this string and nothing else",
+            "about the faction."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "Criteria",
+      "rust": "CRITERIA",
+      "ts": "criteria",
+      "module": "criteria",
+      "fileDataId": 1263817,
+      "records": "fixed",
+      "readable": "yes, **columns read**, id in col0",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_achievements" },
+      "doc": ["`Criteria` — one row per thing that can be required of a player."],
+      "columns": [
+        {
+          "rust": "TYPE",
+          "index": 1,
+          "field": "Type",
+          "doc": [
+            "What kind of thing is being asked for. `reputations::REPUTATION_CRITERIA` is the one",
+            "that matters; the table has a hundred-odd others."
+          ]
+        },
+        {
+          "rust": "ASSET",
+          "index": 2,
+          "field": "Asset",
+          "doc": [
+            "What the requirement is about, whose meaning depends entirely on the type beside it.",
+            "For a type-46 row it is a faction id; for the row next to it, a map or an item."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "CriteriaTree",
+      "rust": "CRITERIA_TREE",
+      "ts": "criteriaTree",
+      "module": "criteria_tree",
+      "fileDataId": 1263818,
+      "records": "fixed",
+      "readable": "yes, **columns read**",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_achievements" },
+      "doc": [
+        "`CriteriaTree` — how criteria are grouped into what an achievement actually asks for. Its",
+        "id sits in a list beside the rows."
+      ],
+      "columns": [
+        {
+          "rust": "PARENT",
+          "index": 1,
+          "field": "Parent",
+          "doc": [
+            "The node this one hangs off, and zero on a root. Every one of the 92,387 rows that",
+            "name a parent name a row that exists, which is what says this is the column."
+          ]
+        },
+        {
+          "rust": "CRITERIA_ID",
+          "index": 4,
+          "field": "CriteriaID",
+          "doc": ["The criterion this node is, when it is a leaf rather than a grouping."]
+        }
+      ]
+    },
+    {
+      "table": "Item",
+      "rust": "ITEM",
+      "ts": "item",
+      "module": "item",
+      "fileDataId": 841626,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_item_facts" },
+      "doc": [
+        "`Item` — the two megabytes of what-kind-of-thing-an-item-is, beside the sixty-three of",
+        "`ItemSparse`. Its ids sit in a list of their own rather than in a column.",
+        "",
+        "[`INVENTORY_TYPE`] agrees with the `ItemSparse` column `dump_inventory_types` found on",
+        "100.00% of the 171,898 items both tables hold, and every piece of armour in the game",
+        "reads as `items::ARMOR` with one of the five armour subclasses."
+      ],
+      "columns": [
+        {
+          "rust": "CLASS",
+          "index": 0,
+          "field": "ClassID",
+          "doc": [
+            "What kind of thing it is: 2 weapon, 4 armour, and a dozen kinds nothing is worn from."
+          ]
+        },
+        {
+          "rust": "SUBCLASS",
+          "index": 1,
+          "field": "SubclassID",
+          "doc": [
+            "Which kind of that kind: for armour, 1 cloth, 2 leather, 3 mail, 4 plate, 5 cosmetic."
+          ]
+        },
+        {
+          "rust": "INVENTORY_TYPE",
+          "index": 3,
+          "field": "InventoryType",
+          "doc": [
+            "Where it is worn, in the same numbering `ItemSparse` uses. Kept in both tables; this",
+            "is the copy in the small one, and the reason `ItemSparse` is opened only for names."
+          ]
+        },
+        {
+          "rust": "ICON_FILE_ID",
+          "index": 6,
+          "field": "IconFileDataID",
+          "doc": ["The picture the game draws beside it, decoded through [`crate::icons`]."]
+        }
+      ]
+    },
+    {
+      "table": "ItemSparse",
+      "rust": "ITEM_SPARSE",
+      "ts": "itemSparse",
+      "module": "item_sparse",
+      "fileDataId": 1572924,
+      "records": "offset map",
+      "readable": "yes, needs `parse_with_text_columns()`",
+      "provenance": { "build": "12.0.5.67", "tool": "examples/dump_items" },
+      "doc": [
+        "`ItemSparse` — every item in the game and what it is called. 63 MB of it, and the only",
+        "table here whose records vary in length.",
+        "",
+        "A column of such a table is only findable by walking the ones in front of it, and a",
+        "string column is as long as the text in it — so the reader has to be told which columns",
+        "those are before it can find any of them. The table opens with five."
+      ],
+      "columns": [
+        {
+          "rust": "TEXT",
+          "indices": [1, 2, 3, 4, 5],
+          "field": "Description_lang, Display3_lang, Display2_lang, Display1_lang, Display_lang",
+          "provenance": { "note": "the community's table definitions; not read off an install" },
+          "doc": [
+            "Every column of the table that holds text, in the order it holds them.",
+            "",
+            "**These positions are the community's and were not read off an install**, unlike the",
+            "chain around them. A patch that reorders the table shows empty names rather than",
+            "wrong ones, because the view falls back to the item's id."
+          ]
+        },
+        {
+          "rust": "NAME",
+          "index": 5,
+          "field": "Display_lang",
+          "provenance": { "note": "the community's table definitions; not read off an install" },
+          "doc": ["What the item is called."]
+        },
+        {
+          "rust": "ALLOWABLE_CLASS",
+          "index": 52,
+          "field": "AllowableClass",
+          "provenance": { "build": "12.0.5.67", "tool": "examples/dump_item_facts" },
+          "doc": [
+            "A bit per class, or `items::ANY_CLASS` for anybody — which is what nearly every item",
+            "carries. `0xFFFF` on all but 29,455 items, and those are the class sets, the rogue",
+            "poisons and the warlock grimoires."
+          ]
+        },
+        {
+          "rust": "REQUIRED_LEVEL",
+          "index": 65,
+          "field": "RequiredLevel",
+          "provenance": { "build": "12.0.5.67", "tool": "examples/dump_item_facts" },
+          "doc": [
+            "The level a character has to have reached to equip it. Zero for most things, and",
+            "never above the cap."
+          ]
+        },
+        {
+          "rust": "INVENTORY_TYPE",
+          "index": 66,
+          "field": "InventoryType",
+          "provenance": { "build": "12.0.5.67", "tool": "examples/dump_inventory_types" },
+          "doc": [
+            "Where the item is worn, which is the one thing `ItemAppearance.DisplayType` will not",
+            "say about a weapon: a one-hander is 13, a two-hander 17, a shield 14, an off-hand 22.",
+            "",
+            "Found rather than trusted: every armour slot has exactly one `InventoryType` it can",
+            "be, and this column is the one that agrees with all eleven of them on 99.8% of the",
+            "77,356 pieces of armour in the game. Nothing else comes within 13%."
+          ]
+        },
+        {
+          "rust": "QUALITY",
+          "index": 67,
+          "field": "OverallQualityID",
+          "provenance": { "build": "12.0.5.67", "tool": "examples/dump_item_facts" },
+          "doc": [
+            "The colour the game writes the name in: 0 poor, 2 uncommon, 4 epic, 5 legendary. It",
+            "spans exactly 0..8, with 771 legendaries and 478 heirlooms in the whole game."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "JournalInstance",
+      "rust": "JOURNAL_INSTANCE",
+      "ts": "journalInstance",
+      "module": "journal_instance",
+      "fileDataId": 1237438,
+      "records": "fixed",
+      "readable": "yes, **columns read**",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_journal" },
+      "doc": [
+        "`JournalInstance` — the Encounter Journal's dungeons and raids. An ordinary table of",
+        "fixed-size records whose id sits in a list beside the rows.",
+        "",
+        "It holds four FileDataIDs side by side and only one of them is an icon — the others are",
+        "a 512×512 background, a 256×128 button banner and a 512×512 lore illustration — so",
+        "taking the wrong one of the four hands the window a picture far too large for the space."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": ["What the instance is called, in the locale the install is running in."]
+        },
+        {
+          "rust": "BUTTON_SMALL_FILE_DATA_ID",
+          "index": 5,
+          "field": "ButtonSmallFileDataID",
+          "doc": [
+            "The picture beside it, decoded through [`crate::icons`]. Every one of the 209 the",
+            "table names decodes at 128×128, which is what makes this the one of the four files",
+            "an icon can be."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "LFGDungeons",
+      "rust": "LFG_DUNGEONS",
+      "ts": "lfgDungeons",
+      "module": "lfg_dungeons",
+      "fileDataId": 1361033,
+      "records": "fixed",
+      "readable": "yes, **columns read**, only through col8",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_journal" },
+      "doc": [
+        "`LFGDungeons` — everything the group finder can put a player in, delves included. The",
+        "same shape of table: fixed-size records, ids in a list beside them, strings in a block",
+        "of their own."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": ["What the group finder calls the place, in the locale the install is running in."]
+        },
+        {
+          "rust": "ICON_TEXTURE_FILE_ID",
+          "index": 5,
+          "field": "IconTextureFileID",
+          "doc": ["The picture beside it in the finder's list, as a FileDataID."]
+        }
+      ]
+    },
+    {
+      "table": "JournalEncounter",
+      "rust": "JOURNAL_ENCOUNTER",
+      "ts": "journalEncounter",
+      "module": "journal_encounter",
+      "fileDataId": 1240336,
+      "records": "fixed",
+      "readable": "yes, **columns read**, id in col3",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_journal" },
+      "doc": [
+        "`JournalEncounter` — the Adventure Guide's bosses, one row per fight per difficulty tier.",
+        "Holds no picture and is the way to the table that does.",
+        "",
+        "Its id sits in a column of its own rather than in a list beside the rows — column 3,",
+        "which [`crate::db2::Row::id`] reads — and that id is what `JournalEncounterCreature`",
+        "hangs off."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": [
+            "What the fight is called: \"Glubtok\", \"Queen Ansurek\". Not read to answer anything —",
+            "the addon already caught the name off the client — but it is what says a run of this",
+            "table landed on the right rows."
+          ]
+        },
+        {
+          "rust": "JOURNAL_INSTANCE_ID",
+          "index": 4,
+          "field": "JournalInstanceID",
+          "doc": [
+            "The instance the fight is in, joining back to `JournalInstance`'s own id. Not part of",
+            "the portrait hop; it is what the dumper checks the table against, because a Deadmines",
+            "boss reading 63 is the same 63 the place icons are already keyed by."
+          ]
+        },
+        {
+          "rust": "DUNGEON_ENCOUNTER_ID",
+          "index": 5,
+          "field": "DungeonEncounterID",
+          "doc": [
+            "The id the *client* knows this fight by, and the one thing here a segment already",
+            "carries: `ENCOUNTER_END`'s first argument is a `DungeonEncounterID`."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "JournalEncounterCreature",
+      "rust": "JOURNAL_ENCOUNTER_CREATURE",
+      "ts": "journalEncounterCreature",
+      "module": "journal_encounter_creature",
+      "fileDataId": 1301155,
+      "records": "fixed",
+      "readable": "yes, **columns read**, id in col2",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_journal" },
+      "doc": [
+        "`JournalEncounterCreature` — the creatures shown for a fight, and their portraits.",
+        "",
+        "Its id is in column 2, and the row it belongs to is named in a column rather than through",
+        "the relationship map — so this is an ordinary join on a number, not a",
+        "[`crate::db2::Row::foreign_id`]."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": [
+            "The creature's own name, which is not always the fight's: the Ascendant Council is",
+            "four rows called Feludius, Ignacious, Arion and Terrastra. Only the dumper reads it."
+          ]
+        },
+        {
+          "rust": "JOURNAL_ENCOUNTER_ID",
+          "index": 3,
+          "field": "JournalEncounterID",
+          "doc": ["The `JournalEncounter` row this creature belongs to, by that table's id."]
+        },
+        {
+          "rust": "PORTRAIT_FILE_DATA_ID",
+          "index": 5,
+          "field": "ModelFileDataID",
+          "doc": [
+            "The portrait, decoded through [`crate::icons`]. Every one of the 1,172 the table",
+            "names decodes at 128×64, which is what makes it a portrait rather than one of the",
+            "banners and backgrounds this chain could otherwise have landed on."
+          ]
+        },
+        {
+          "rust": "ORDER_INDEX",
+          "index": 6,
+          "field": "OrderIndex",
+          "doc": [
+            "Where the guide puts this creature among the fight's others, counting from zero. The",
+            "rows are **not** stored in this order."
+          ]
+        }
+      ]
+    },
+    {
+      "table": "CurrencyTypes",
+      "rust": "CURRENCY_TYPES",
+      "ts": "currencyTypes",
+      "module": "currency_types",
+      "fileDataId": 1095531,
+      "records": "fixed",
+      "readable": "yes, **columns read**",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_currencies" },
+      "doc": [
+        "`CurrencyTypes` — every currency the game has, with the picture each is drawn with. An",
+        "ordinary table of fixed-size records: its two strings sit in a block of their own, so",
+        "nothing past them moves and no column has to be walked to.",
+        "",
+        "Column 3 is the only one of the table's first ten that holds FileDataIDs at all — 574",
+        "rows hold something there and every one of the 574 resolves to a texture this install",
+        "can decode."
+      ],
+      "columns": [
+        {
+          "rust": "NAME",
+          "index": 0,
+          "field": "Name_lang",
+          "doc": [
+            "What the currency is called — \"Honor\", \"Valorstones\". Read by the dumper, not by the",
+            "app: the addon already sends the name the client showed the player."
+          ]
+        },
+        {
+          "rust": "ICON_FILE_DATA_ID",
+          "index": 3,
+          "field": "InventoryIconFileID",
+          "doc": ["The picture beside it, decoded through [`crate::icons`]."]
+        }
+      ]
+    }
+  ]
+}

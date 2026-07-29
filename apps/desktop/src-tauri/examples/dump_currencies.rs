@@ -25,9 +25,9 @@
 //!   eyeballed.
 
 use chronie_desktop_lib::casc::{self, GameFiles};
-use chronie_desktop_lib::currencies;
 use chronie_desktop_lib::db2::Db2;
 use chronie_desktop_lib::icons;
+use chronie_desktop_lib::tables;
 
 /// How many rows to print in full, which is enough to see the shape of the table.
 const SHOWN: usize = 24;
@@ -62,7 +62,7 @@ fn main() {
         }
     };
 
-    let table = match files.read(currencies::CURRENCY_TYPES).and_then(Db2::parse) {
+    let table = match files.read(tables::CURRENCY_TYPES).and_then(Db2::parse) {
         Ok(table) => table,
         Err(error) => {
             eprintln!("Could not read CurrencyTypes: {error}");
@@ -84,7 +84,7 @@ fn main() {
     // column at once — which says nothing about any of them.
     let named: Vec<_> = table
         .rows()
-        .filter(|row| !row.text(currencies::column::NAME).is_empty())
+        .filter(|row| !row.text(tables::currency_types::NAME).is_empty())
         .collect();
     println!(
         "of the {} named rows, how many hold something in each column, and how many of those \n\
@@ -116,7 +116,7 @@ fn main() {
     );
     let mut shown = 0usize;
     for row in table.rows() {
-        let name = row.text(currencies::column::NAME);
+        let name = row.text(tables::currency_types::NAME);
         if name.is_empty() {
             continue;
         }
@@ -135,7 +135,7 @@ fn main() {
             .map(|column| format!("col{column}={}", row.number(column)))
             .collect();
         println!("  {:>6} {name} — {}", row.id(), values.join(" "));
-        let icon = row.number(currencies::column::ICON_FILE_DATA_ID);
+        let icon = row.number(tables::currency_types::ICON_FILE_DATA_ID);
         match files
             .read(icon)
             .and_then(|bytes| icons::png_of(&bytes, LARGEST_ICON))
