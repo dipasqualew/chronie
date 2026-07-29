@@ -246,7 +246,7 @@ function fake.newFrame(options)
         fontStrings = {},
         textures = {},
         points = {},
-        shown = false,
+        shown = true,
     }
 
     function frame:SetScript(name, handler)
@@ -335,12 +335,32 @@ function fake.newFrame(options)
         self.maxBytes = bytes
     end
 
+    -- Visibility is the client's, not a flag: CreateFrame hands back a frame that is
+    -- already shown, and Show and Hide run OnShow and OnHide on the transition and only on
+    -- the transition. Both halves are load-bearing. A frame that started hidden let a build
+    -- function install OnHide and then hide itself with half its widgets still unbuilt, and
+    -- nothing noticed until the game ran it (#214); a Hide that fired unconditionally would
+    -- report handlers the client never runs.
     function frame:Show()
+        if self.shown then
+            return
+        end
         self.shown = true
+        local onShow = self.scripts.OnShow
+        if onShow then
+            onShow(self)
+        end
     end
 
     function frame:Hide()
+        if not self.shown then
+            return
+        end
         self.shown = false
+        local onHide = self.scripts.OnHide
+        if onHide then
+            onHide(self)
+        end
     end
 
     function frame:IsShown()

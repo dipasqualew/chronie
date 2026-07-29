@@ -109,12 +109,6 @@ function ns.newEntryToast(deps)
         frame:SetScript("OnUpdate", function()
             deps.tick()
         end)
-        -- Every way the toast can go away arrives here, including the Escape that
-        -- UISpecialFrames handles without telling the addon anything.
-        frame:SetScript("OnHide", function()
-            reset()
-            deps.onDismiss()
-        end)
         frame:Hide()
 
         title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -150,6 +144,20 @@ function ns.newEntryToast(deps)
             deps.onRelease()
         end)
         box:Hide()
+
+        -- Every way the toast can go away arrives here, including the Escape that
+        -- UISpecialFrames handles without telling the addon anything.
+        --
+        -- Installed last on purpose, and the last thing in the function for the same reason.
+        -- CreateFrame hands back a frame that is already shown, so the `frame:Hide()` above
+        -- is a real hide and runs whatever OnHide is installed by then. Installed any
+        -- earlier, that hide reaches `reset` before there is a box to reset — the error in
+        -- #214 — and reports a dismissal for an offer the player has not been shown yet,
+        -- which for a memory nobody photographed throws the entry away.
+        frame:SetScript("OnHide", function()
+            reset()
+            deps.onDismiss()
+        end)
 
         table.insert(deps.specialFrames, name)
     end
