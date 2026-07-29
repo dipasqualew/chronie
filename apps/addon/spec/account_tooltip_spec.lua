@@ -378,6 +378,207 @@ describe("the account's answer to a hovered row", function()
         end)
     end)
 
+    ---The same crown the tooltip's "Best" line is drawn from, lifted out so the panel's own
+    ---line can state it without opening a tooltip to find it. Everything the tooltip already
+    ---obeys about who leads is what this has to obey too, which is why the cases below read
+    ---like the ones above them.
+    describe("ns.bestStanding", function()
+        ---@param overrides table?
+        ---@return table
+        local function gain(overrides)
+            local base = {
+                faction = "Dream Wardens",
+                amount = 250,
+                standing = "Renown 8",
+                current = 500,
+                max = 2500,
+                rank = 8,
+                system = "renown",
+            }
+            for key, value in pairs(overrides or {}) do
+                base[key] = given(value, value)
+            end
+            return base
+        end
+
+        ---@param characters table[]?
+        ---@param best table?
+        ---@return table?
+        local function rollup(characters, best)
+            if not characters then
+                return nil
+            end
+            return { faction = "Dream Wardens", best = best or characters[1], characters = characters }
+        end
+
+        ---@param options table?
+        ---@return table?
+        local function crown(options)
+            options = options or {}
+            return ns.bestStanding({
+                faction = given(options.faction, "Dream Wardens"),
+                gain = given(options.gain, gain()),
+                rollup = options.rollup,
+                character = given(options.character, PLAYING),
+                now = given(options.now, NOW),
+            })
+        end
+
+        it("is exported by the addon files", function()
+            assert.is_function(ns.bestStanding)
+        end)
+
+        it("crowns whoever on the account has got furthest, and dates the reading", function()
+            local row = crown({
+                rollup = rollup({
+                    {
+                        character = "Alt-Ravencrest",
+                        standing = "Renown 22",
+                        rank = 22,
+                        system = "renown",
+                        at = NOW - 3 * DAY,
+                    },
+                }),
+            })
+
+            assert.equal("Alt-Ravencrest", row.character)
+            assert.equal("Alt", row.name)
+            assert.equal("Renown 22", row.standing)
+            assert.equal(22, row.rank)
+            assert.equal("renown", row.system)
+            assert.equal(NOW - 3 * DAY, row.at)
+            assert.is_not_true(row.you)
+        end)
+
+        -- The stored row for this character was written at its last logout; the gain is what
+        -- the client answered a moment ago. The two are one character, so the fresh reading
+        -- replaces the stale one rather than standing beside it as a second contender.
+        it("crowns the character being played from the client rather than from its own file", function()
+            local row = crown({
+                rollup = rollup({
+                    { character = "Alt-Ravencrest", standing = "Renown 4", rank = 4, system = "renown", at = NOW },
+                    {
+                        character = PLAYING,
+                        standing = "Renown 5",
+                        current = 100,
+                        max = 2500,
+                        rank = 5,
+                        system = "renown",
+                        at = NOW - 7 * DAY,
+                    },
+                }),
+            })
+
+            assert.equal(PLAYING, row.character)
+            assert.is_true(row.you)
+            assert.equal("Renown 8", row.standing)
+            assert.equal(500, row.current)
+            assert.equal(2500, row.max)
+            assert.equal(8, row.rank)
+            assert.equal(NOW, row.at)
+        end)
+
+        -- The store's `best` is computed over stored rows only. A character that overtook the
+        -- account's best during this very session holds the crown from the moment it did.
+        it("crowns a standing earned this session over the one the store had filed", function()
+            local row = crown({
+                gain = gain({ standing = "Renown 23", rank = 23 }),
+                rollup = rollup(
+                    {
+                        {
+                            character = "Alt-Ravencrest",
+                            standing = "Renown 22",
+                            rank = 22,
+                            system = "renown",
+                            at = NOW - DAY,
+                        },
+                        { character = PLAYING, standing = "Renown 21", rank = 21, system = "renown", at = NOW - DAY },
+                    },
+                    { character = "Alt-Ravencrest", standing = "Renown 22", rank = 22, system = "renown" }
+                ),
+            })
+
+            assert.equal(PLAYING, row.character)
+            assert.is_true(row.you)
+            assert.equal("Renown 23", row.standing)
+        end)
+
+        -- A roster of one is still a roster, and the one reading in it is still the account's
+        -- highest: "nobody else has been here" is not the same answer as "nothing is known".
+        it("crowns the character being played when nobody else has been seen with the faction", function()
+            local row = crown({ rollup = nil })
+
+            assert.equal(PLAYING, row.character)
+            assert.equal("Main", row.name)
+            assert.is_true(row.you)
+            assert.equal("Renown 8", row.standing)
+        end)
+
+        it("has nothing to crown when the row names no faction", function()
+            assert.is_nil(crown({ faction = false }))
+            assert.is_nil(crown({ faction = "" }))
+        end)
+
+        it("has nothing to crown for a faction nobody has been placed with", function()
+            assert.is_nil(crown({ gain = { faction = "Dream Wardens", amount = 250 }, rollup = nil }))
+        end)
+
+        -- A standing with no rank cannot be ranked, so there is nobody to put in front. The
+        -- row is known and simply not comparable, which is a different answer from silence
+        -- only the caller can tell apart.
+        it("crowns nobody when no standing can be placed on a ladder at all", function()
+            assert.is_nil(crown({
+                gain = gain({ rank = false, system = false }),
+                rollup = rollup({
+                    { character = "Alt-Ravencrest", standing = "Honored", at = NOW },
+                }),
+            }))
+        end)
+
+        -- A rank read off the reaction ladder runs 1 to 8 where a friendship's runs into the
+        -- thousands, so a row off the ladder being ranked is never the one crowned however
+        -- large its number reads.
+        it("never crowns a standing read off another ladder", function()
+            local row = crown({
+                gain = false,
+                character = false,
+                rollup = rollup(
+                    {
+                        {
+                            character = "Alt-Ravencrest",
+                            standing = "Best Friend",
+                            rank = 42000,
+                            system = "friendship",
+                            at = NOW,
+                        },
+                        { character = "Zed-Ravencrest", standing = "Revered", rank = 7, system = "reaction", at = NOW },
+                    },
+                    { character = "Zed-Ravencrest", standing = "Revered", rank = 7, system = "reaction" }
+                ),
+            })
+
+            assert.equal("Zed-Ravencrest", row.character)
+            assert.equal("Zed", row.name)
+        end)
+
+        -- Shortening both of two same-named alts would name the crown something two characters
+        -- answer to, so the realm goes back on every row the moment one short name is claimed
+        -- twice — the same rule the roster in the tooltip is named by.
+        it("keeps the realm on the name once two characters share one", function()
+            local row = crown({
+                gain = false,
+                character = false,
+                rollup = rollup({
+                    { character = "Alt-Ravencrest", standing = "Renown 4", rank = 4, system = "renown", at = NOW },
+                    { character = "Alt-Draenor", standing = "Renown 26", rank = 26, system = "renown", at = NOW },
+                }, { character = "Alt-Draenor", standing = "Renown 26", rank = 26, system = "renown" }),
+            })
+
+            assert.equal("Alt-Draenor", row.character)
+            assert.equal("Alt-Draenor", row.name)
+        end)
+    end)
+
     describe("ns.currencyTooltip", function()
         ---@param options table?
         ---@return table?

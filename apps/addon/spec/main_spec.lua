@@ -4271,6 +4271,121 @@ describe("addon integration", function()
             assert.is_nil(visible["Deadmines"])
         end)
 
+        -- Every part of this answer is already covered on its own and already green: the
+        -- store knows which character stands furthest, `ns.bestStanding` crowns one of them,
+        -- and `ResultsWindow` draws the line when it is handed the account. What nothing
+        -- below this level can see is that the panel the segment table opens is built without
+        -- the account at all, so the line is unreachable there — that is a fact about how
+        -- Main.lua wires the two together, and only booting the addon and opening a filed
+        -- segment the way a player does can show it.
+        it("shows the account's highest standing when a segment is opened from the table", function()
+            local NOW = 1700000000
+            local THREE_DAYS = 3 * 24 * 60 * 60
+            local db = {
+                segments = {
+                    {
+                        id = "a",
+                        character = "Thrall-Ragnaros",
+                        classFile = "WARRIOR",
+                        day = "2026-07-25",
+                        instance = "Ulduar",
+                        difficulty = "25 Player",
+                        endedAt = NOW - 60,
+                        lootValue = 0,
+                        goldDiff = 0,
+                        transmogs = {},
+                        currencies = {},
+                        reputationTotal = 250,
+                        reputation = {
+                            {
+                                faction = "Dream Wardens",
+                                amount = 250,
+                                standing = "Renown 8",
+                                current = 500,
+                                max = 2500,
+                                rank = 8,
+                                system = "renown",
+                            },
+                        },
+                    },
+                },
+                holdings = {
+                    ["Alt-Ravencrest"] = {
+                        currencies = {},
+                        factions = {
+                            ["Dream Wardens"] = {
+                                standing = "Renown 22",
+                                current = 300,
+                                max = 2500,
+                                rank = 22,
+                                system = "renown",
+                                at = NOW - THREE_DAYS,
+                            },
+                        },
+                        updatedAt = NOW - THREE_DAYS,
+                    },
+                },
+            }
+            local _, recorded = boot({ db = db, now = NOW })
+
+            recorded.slashRegistrations[1].handler("segments")
+
+            -- A row of the table is a holder frame carrying the cells, with a button over the
+            -- whole of it that runs the row's action — so the row saying "Ulduar" is reached
+            -- by the button whose holder says it, the way the pointer reaches it.
+            local clicked = false
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameType == "Button" and frame.parent and frame.parent.fontStrings then
+                    for _, cell in ipairs(frame.parent.fontStrings) do
+                        if (cell.text or "") == "Ulduar" then
+                            frame:run("OnClick")
+                            clicked = true
+                            break
+                        end
+                    end
+                end
+                if clicked then
+                    break
+                end
+            end
+            assert.is_true(clicked)
+
+            local panel
+            for _, frame in ipairs(recorded.frames) do
+                if frame.frameName == "ChronieSegmentDetailWindow" then
+                    panel = frame
+                end
+            end
+            assert.is_table(panel)
+
+            for _, fontString in ipairs(panel.fontStrings) do
+                if fontString.shown and (fontString.text or ""):find("Reputation", 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            -- Labels and values are told apart by justification and paired in drawn order,
+            -- which is how every other reading of this panel reconstructs a line.
+            local labels, values = {}, {}
+            for _, fontString in ipairs(panel.fontStrings) do
+                local row = fontString.shown and fontString.template == "GameFontHighlightSmall"
+                if row and fontString.justify == "LEFT" then
+                    labels[#labels + 1] = fontString.text
+                elseif row and fontString.justify == "RIGHT" then
+                    values[#values + 1] = fontString.text
+                end
+            end
+            local best
+            for index, label in ipairs(labels) do
+                if label == "    best Renown 22" then
+                    best = values[index]
+                end
+            end
+
+            assert.equal("Alt, 3d ago", best)
+        end)
+
         it("names every subcommand there is in the usage text", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
