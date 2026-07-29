@@ -26,37 +26,16 @@ import {
   type Paint,
   type TableSpec,
 } from "./db2-fixtures";
+import { FILE_DATA_ID } from "./tables";
 
-/** What the game calls each table; the reader asks for them by these numbers. */
-const FILE_DATA_ID = {
-  transmogSet: 1376213,
-  transmogSetItem: 1376212,
-  transmogSetGroup: 1576116,
-  itemModifiedAppearance: 982457,
-  itemAppearance: 982462,
-  item: 841626,
-  itemDisplayInfo: 1266429,
-  itemDisplayInfoMaterialRes: 1280614,
-  itemSparse: 1572924,
-  modelFileData: 1337833,
-  textureFileData: 982459,
-  componentTextureFileData: 1278239,
-  componentModelFileData: 1349053,
-  helmetGeosetData: 2821752,
-  chrCustomizationChoice: 3450554,
-  chrCustomizationOption: 3384247,
-  chrCustomizationElement: 3512765,
-  chrCustomizationMaterial: 3459652,
-  chrCustomizationGeoset: 3456171,
-  chrModelTextureLayer: 3548976,
-  chrModel: 3384313,
-  charComponentTextureSections: 1360263,
-  chrModelMaterial: 3566562,
-  chrRaces: 1305311,
-  chrRaceXChrModel: 3490304,
-  creatureDisplayInfo: 1108759,
-  creatureModelData: 1365368,
-} as const;
+/**
+ * What the game calls each table, out of `docs/game-tables.json`.
+ *
+ * Only the FileDataIDs are shared with the reader. Every column position, storage and bit offset
+ * below is decided here and nowhere else, deliberately: a fixture that took its layout from the
+ * same registry the reader reads would move both halves together when a number in that registry
+ * was wrong, and the suite would prove only that two generated halves agree.
+ */
 
 /* ---------- the tables ---------- */
 

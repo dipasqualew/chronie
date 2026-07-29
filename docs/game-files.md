@@ -113,48 +113,58 @@ which is how the transmog view can say how many sets it could not show.
 
 ## Tables
 
-FileDataIDs from the [community listfile](https://github.com/wowdev/wow-listfile). All
-of these were confirmed readable on 12.0.5.67 except where noted.
+FileDataIDs from the [community listfile](https://github.com/wowdev/wow-listfile). The build
+in the last column is the one the table was last confirmed readable on; `community` means the
+number is the listfile's and this repository has not held it against an install.
 
-| Table | FileDataID | Records | Readable |
-|---|---|---|---|
-| `TransmogSet` | 1376213 | fixed | yes |
-| `TransmogSetItem` | 1376212 | fixed | yes |
-| `TransmogSetGroup` | 1576116 | fixed | yes |
-| `ItemModifiedAppearance` | 982457 | fixed | yes |
-| `ItemAppearance` | 982462 | fixed | yes |
-| `ItemDisplayInfo` | 1266429 | fixed | yes |
-| `ItemDisplayInfoMaterialRes` | 1280614 | fixed | yes, needs `foreign_id()` |
-| `ModelFileData` | 1337833 | fixed | yes |
-| `TextureFileData` | 982459 | fixed | yes |
-| `ComponentTextureFileData` | 1278239 | fixed | yes |
-| `ComponentModelFileData` | 1349053 | fixed | yes |
-| `CharComponentTextureSections` | 1360263 | fixed | yes |
-| `CharComponentTextureLayouts` | 1360262 | fixed | yes |
-| `ChrModelMaterial` | 3566562 | fixed | yes |
-| `ChrModelTextureLayer` | 3548976 | fixed | yes |
-| `ChrModel` | 3384313 | fixed | yes, **columns read** |
-| `ChrRaces` | 1305311 | fixed | yes, **columns read** |
-| `ChrRaceXChrModel` | 3490304 | fixed | yes |
-| `CreatureDisplayInfo` | 1108759 | fixed | yes, 119,028 rows |
-| `CreatureModelData` | 1365368 | fixed | yes, id beside the rows |
-| `ChrCustomizationChoice` | 3450554 | fixed | yes |
-| `ChrCustomizationOption` | 3384247 | fixed | yes |
-| `ChrCustomizationElement` | 3512765 | fixed | yes |
-| `ChrCustomizationMaterial` | 3459652 | fixed | yes |
-| `ChrCustomizationGeoset` | 3456171 | fixed | yes |
-| `HelmetGeosetData` | 2821752 | fixed | yes, needs `foreign_id()` |
-| `Achievement` | 1260179 | fixed | yes |
-| `Achievement_Category` | 1324299 | fixed | yes |
-| `Item` | 841626 | fixed | yes |
-| `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` |
-| `JournalInstance` | 1237438 | fixed | yes, **columns read** |
-| `LFGDungeons` | 1361033 | fixed | yes, **columns read**, only through col8 |
-| `JournalEncounter` | 1240336 | fixed | yes, **columns read**, id in col3 |
-| `JournalEncounterCreature` | 1301155 | fixed | yes, **columns read**, id in col2 |
-| `Faction` | 1361972 | fixed | yes, **columns read**, name in col1 |
-| `Criteria` | 1263817 | fixed | yes, **columns read**, id in col0 |
-| `CriteriaTree` | 1263818 | fixed | yes, **columns read** |
+The table below and the FileDataID constants in `apps/desktop/src-tauri/src/tables.rs` are both
+written out of `docs/game-tables.json` — see [Verifying a patch](#verifying-a-patch). Editing it
+here does nothing.
+
+<!-- generated from docs/game-tables.json: tables -->
+
+| Table | FileDataID | Records | Readable | Verified |
+|---|---|---|---|---|
+| `TransmogSet` | 1376213 | fixed | yes | 12.0.5.67 |
+| `TransmogSetItem` | 1376212 | fixed | yes | 12.0.5.67 |
+| `TransmogSetGroup` | 1576116 | fixed | yes | 12.0.5.67 |
+| `ItemModifiedAppearance` | 982457 | fixed | yes | 12.0.5.67 |
+| `ItemAppearance` | 982462 | fixed | yes | 12.0.5.67 |
+| `ItemDisplayInfo` | 1266429 | fixed | yes | 12.0.5.67, `examples/dump_display_columns` |
+| `ItemDisplayInfoMaterialRes` | 1280614 | fixed | yes, needs `foreign_id()` | 12.0.5.67 |
+| `ModelFileData` | 1337833 | fixed | yes | 12.0.5.67 |
+| `TextureFileData` | 982459 | fixed | yes | 12.0.5.67 |
+| `ComponentTextureFileData` | 1278239 | fixed | yes | 12.0.5.67 |
+| `ComponentModelFileData` | 1349053 | fixed | yes | 12.0.5.67 |
+| `HelmetGeosetData` | 2821752 | fixed | yes, needs `foreign_id()` | 12.0.5.67 |
+| `CharComponentTextureSections` | 1360263 | fixed | yes | 12.0.5.67 |
+| `CharComponentTextureLayouts` | 1360262 | fixed | yes | 12.0.5.67 |
+| `ChrModelMaterial` | 3566562 | fixed | yes | 12.0.5.67 |
+| `ChrModelTextureLayer` | 3548976 | fixed | yes | 12.0.5.67 |
+| `ChrModel` | 3384313 | fixed | yes, **columns read** | 12.0.5.67, `examples/dump_bodies` |
+| `ChrRaces` | 1305311 | fixed | yes, **columns read** | 12.0.5.67, `examples/dump_bodies` |
+| `ChrRaceXChrModel` | 3490304 | fixed | yes | 12.0.5.67 |
+| `CreatureDisplayInfo` | 1108759 | fixed | yes, 119,028 rows | 12.0.5.67, `examples/dump_bodies` |
+| `CreatureModelData` | 1365368 | fixed | yes, id beside the rows | 12.0.5.67, `examples/dump_bodies` |
+| `ChrCustomizationOption` | 3384247 | fixed | yes | 12.0.5.67, `examples/dump_customization` |
+| `ChrCustomizationChoice` | 3450554 | fixed | yes | 12.0.5.67, `examples/dump_customization` |
+| `ChrCustomizationElement` | 3512765 | fixed | yes | 12.0.5.67, `examples/dump_customization` |
+| `ChrCustomizationMaterial` | 3459652 | fixed | yes | 12.0.5.67, `examples/dump_customization` |
+| `ChrCustomizationGeoset` | 3456171 | fixed | yes | 12.0.5.67, `examples/dump_customization` |
+| `Achievement` | 1260179 | fixed | yes | 12.0.5.67, `examples/dump_achievements` |
+| `Achievement_Category` | 1324299 | fixed | yes | 12.0.5.67, `examples/dump_achievements` |
+| `Faction` | 1361972 | fixed | yes, **columns read**, name in col1 | 12.0.5.67823, `examples/dump_achievements` |
+| `Criteria` | 1263817 | fixed | yes, **columns read**, id in col0 | 12.0.5.67823, `examples/dump_achievements` |
+| `CriteriaTree` | 1263818 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_achievements` |
+| `Item` | 841626 | fixed | yes | 12.0.5.67, `examples/dump_item_facts` |
+| `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` | 12.0.5.67, `examples/dump_items` |
+| `JournalInstance` | 1237438 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_journal` |
+| `LFGDungeons` | 1361033 | fixed | yes, **columns read**, only through col8 | 12.0.5.67823, `examples/dump_journal` |
+| `JournalEncounter` | 1240336 | fixed | yes, **columns read**, id in col3 | 12.0.5.67823, `examples/dump_journal` |
+| `JournalEncounterCreature` | 1301155 | fixed | yes, **columns read**, id in col2 | 12.0.5.67823, `examples/dump_journal` |
+| `CurrencyTypes` | 1095531 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_currencies` |
+
+<!-- /generated -->
 
 ### ItemSparse
 
@@ -1280,6 +1290,48 @@ cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --example dump_model
 Every fixture table carries an encrypted section, because that is where the edge cases
 live. Nothing in `apps/desktop/fixtures/` is derived from game assets, which is what
 keeps the committed tests distributable.
+
+## Verifying a patch
+
+A game patch can invalidate exactly two kinds of fact in this document: which FileDataID a
+table is, and which column a field sits in. Both live in **`docs/game-tables.json`** with the
+build each was last confirmed on, and both reach the rest of the tree from there:
+
+```
+docs/game-tables.json ──▶ apps/desktop/src-tauri/src/tables.rs   ids, columns, array widths
+                      ├─▶ scripts/tables.ts                      ids only, for the fixtures
+                      └─▶ the Tables section above               ids and provenance
+```
+
+```sh
+bun run tables:generate      # after editing the registry
+bun run test:scripts         # what fails when the registry was edited and this was not
+```
+
+So a verified-build update is one change: run the dumper the table's `Verified` column names,
+edit the entry it is about — the `build`, the `tool`, an `index` that moved — regenerate, and
+if a column really moved, move the fixture that writes those bytes and regenerate that too.
+The registry entry, the constants, the document's table and the fixtures then all say the same
+thing in one reviewable diff, and `./scripts/check.sh` fails on any of them left behind.
+
+Two things deliberately do **not** come out of the registry, and both are load-bearing.
+
+**The fixture generators take only the FileDataIDs.** Where a column sits inside an invented
+table, in which storage and at which bit offset, is decided in the `make-*-fixtures.ts` script
+that writes it. If the writer read its positions out of the registry the reader reads, one wrong
+index would move both halves together and every test over them would pass — the suite would be
+proving that two generated files agree. Identity is bookkeeping and is safe to share; layout is
+the thing under test.
+
+**`db2.rs`'s test module keeps its own literals.** It states, in numbers written down nowhere
+else, which column of which committed fixture holds which value, and reads the bytes to check.
+That is what can still catch a wrong number in the registry now that every reader takes its
+columns from one place, and it is why that module must not be refactored to import
+`crate::tables`.
+
+The prose in this document is not generated and is where the evidence stays: what a wrong column
+looks like when it fails, which run settled a position, what the dumper counted. Only the table
+of ids under [Tables](#tables) is written out.
 
 ## Sources
 

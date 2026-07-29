@@ -12,14 +12,24 @@
  */
 
 import { emit, Storage, type TableSpec } from "./db2-fixtures";
+import { FILE_DATA_ID } from "./tables";
 
-/** What the game calls each table; the reader asks for them by these numbers. */
-const FILE_DATA_ID = {
-  item: 841626,
-  itemSparse: 1572924,
-} as const;
+/**
+ * What the game calls each table, out of `docs/game-tables.json`.
+ *
+ * Only the FileDataIDs are shared with the reader. Every column position, storage and bit offset
+ * below is decided here and nowhere else, deliberately: a fixture that took its layout from the
+ * same registry the reader reads would move both halves together when a number in that registry
+ * was wrong, and the suite would prove only that two generated halves agree.
+ */
 
-/** Where the columns this app reads sit in `ItemSparse`, as the install keeps them. */
+/**
+ * Where the columns this app reads sit in `ItemSparse`, as the install keeps them.
+ *
+ * The fixture's own decision, held here rather than taken from `docs/game-tables.json`, and that
+ * is the point: the reader's positions come out of the registry, these lay the bytes out, and a
+ * wrong number in the registry therefore moves one of the two and not both.
+ */
 const SPARSE = {
   name: 5,
   allowableClass: 52,

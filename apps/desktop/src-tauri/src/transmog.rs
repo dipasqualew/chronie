@@ -10,11 +10,11 @@
 //! table, `ItemSparse`, asked what each item ended up being called. That chain is written
 //! down in `docs/game-files.md`, verified against a real install.
 //!
-//! The column numbers below are the layout the game has used since patch 12.0.0, and they
-//! are the one thing here that a game patch can invalidate. They come from the community's
-//! table definitions rather than from guesswork, and a build that reorders them will show
-//! wrong values rather than fail, so [`sets`] checks the row count it ends up with against
-//! the count the file declares.
+//! The column numbers this module reads are the layout the game has used since patch 12.0.0,
+//! and they are the one thing here that a game patch can invalidate. They live in
+//! `docs/game-tables.json` with the build each was confirmed on, and reach this module through
+//! [`crate::tables`]. A build that reorders them will show wrong values rather than fail, so
+//! [`sets`] checks the row count it ends up with against the count the file declares.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -23,128 +23,18 @@ use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-
-/// What the game calls each table. These are stable across patches.
-const TRANSMOG_SET: u32 = 1376213;
-const TRANSMOG_SET_ITEM: u32 = 1376212;
-const TRANSMOG_SET_GROUP: u32 = 1576116;
-/// Shared with `wardrobe`, which walks the same two hops from the other end: this module
-/// asks what a named set is made of, that one asks what fills a place on the body.
-pub const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
-pub const ITEM_APPEARANCE: u32 = 982462;
-/// Shared with `models`, which reaches the same table by a different question: this module
-/// asks whether a display has geometry, that one asks what it is.
-pub const ITEM_DISPLAY_INFO: u32 = 1266429;
-/// Every item in the game and what it is called. 63 MB of it, and the only table here whose
-/// records vary in length.
-///
-/// Public for `examples/dump_items`, which is how the column positions below get checked
-/// against a real install after a patch.
-pub const ITEM_SPARSE: u32 = 1572924;
-
-/// Columns of `TransmogSet`, in the order the file stores them.
-mod set_column {
-    pub const NAME: usize = 0;
-    pub const CLASS_MASK: usize = 2;
-    pub const FLAGS: usize = 4;
-    pub const GROUP_ID: usize = 5;
-    pub const PARENT_ID: usize = 7;
-    pub const EXPANSION_ID: usize = 9;
-    pub const PATCH_INTRODUCED: usize = 10;
-    pub const UI_ORDER: usize = 11;
-}
-
-/// The one column of `TransmogSetGroup` that is not the row id.
-const GROUP_NAME: usize = 0;
-
-/// Columns of `TransmogSetItem`. The set id is a relationship the game duplicates into the
-/// record, which is why it reads as an ordinary column.
-mod set_item_column {
-    pub const SET_ID: usize = 0;
-    pub const MODIFIED_APPEARANCE_ID: usize = 1;
-}
-
-/// Columns of `ItemModifiedAppearance`, which is what ties an appearance to an item.
-pub mod modified_appearance_column {
-    pub const ITEM_ID: usize = 1;
-    pub const APPEARANCE_ID: usize = 3;
-}
-
-/// Columns of `ItemAppearance`.
-pub mod appearance_column {
-    /// Which slot the appearance fills; the game's own numbering, tabulated in the docs.
-    pub const DISPLAY_TYPE: usize = 0;
-    pub const DISPLAY_INFO_ID: usize = 1;
-    pub const ICON_FILE_DATA_ID: usize = 2;
-}
-
-/// Columns of `ItemSparse`, whose records vary in length.
-///
-/// A column of such a table is only findable by walking the ones in front of it, and a string
-/// column is as long as the text in it — so the reader has to be told which columns those are
-/// before it can find any of them. `ItemSparse` opens with five.
-///
-/// **These positions are the community's and were not read off an install**, unlike the chain
-/// above them. A patch that reorders the table shows empty names rather than wrong ones,
-/// because the view falls back to the item's id.
-pub mod item_column {
-    /// What the item is called.
-    pub const NAME: usize = 5;
-    /// Every column of the table that holds text, in the order it holds them: the item's
-    /// description, its three alternate display names, and its name.
-    pub const TEXT: [usize; 5] = [1, 2, 3, 4, 5];
-    /// Where the item is worn, which is the one thing `ItemAppearance.DisplayType` will not
-    /// say about a weapon: a one-hander is 13, a two-hander 17, a shield 14, an off-hand 22.
-    ///
-    /// **Unlike the rest of this module, this position was read off an install** — 12.0.5.67,
-    /// with `examples/dump_inventory_types`, which finds it rather than trusting it: every
-    /// armour slot has exactly one `InventoryType` it can be, and column 66 is the one that
-    /// agrees with all eleven of them on 99.8% of the 77,356 pieces of armour in the game.
-    /// Nothing else in the table comes within 13%.
-    pub const INVENTORY_TYPE: usize = 66;
-    /// A bit per class, or [`crate::items::ANY_CLASS`] for anybody — which is what nearly
-    /// every item carries.
-    ///
-    /// Read off the same install as the three below it, by `examples/dump_item_facts`. This
-    /// is the column that says an appearance a class set locks away is also sold to everyone
-    /// by something else, which happens to 30.8% of the appearances in the game that more
-    /// than one item reaches.
-    pub const ALLOWABLE_CLASS: usize = 52;
-    /// The level a character has to have reached to equip it. Zero for most things.
-    pub const REQUIRED_LEVEL: usize = 65;
-    /// The colour the game writes the name in: 0 poor, 2 uncommon, 4 epic, 5 legendary.
-    pub const QUALITY: usize = 67;
-}
-
-/// Columns of `ItemDisplayInfo`.
-pub mod display_column {
-    /// A fixed-size array of two, not a scalar. Shoulders keep a model in each slot, and a
-    /// reader that stops at the first element reports half of them as having no geometry.
-    pub const MODEL_RESOURCES_ID: usize = 10;
-    /// The same shape, and parallel to it: slot `i`'s model is painted with slot `i`'s
-    /// material. This is the texture an item's own model uses, and not the one armour is
-    /// drawn on the body with — that comes out of `ItemDisplayInfoMaterialRes`.
-    pub const MATERIAL_RESOURCES_ID: usize = 11;
-    /// What kind of model each of the two slots holds. Nothing reads it; it is named because
-    /// it is what sits between the materials and the geoset groups, and reading it *as* the
-    /// geoset groups is the mistake this table invites — see `examples/dump_display_columns`.
-    pub const MODEL_TYPE: usize = 12;
-    /// Which variant of each geoset group the display switches on: an array of six, read one
-    /// element at a time like the two above.
-    ///
-    /// Verified on 12.0.5.67, like 10 and 11: this column holds six values where 12 holds two,
-    /// and a robe puts a 1 in its third while leaving its second at 0. `docs/game-files.md`
-    /// has the whole tail of array columns and what told them apart.
-    pub const GEOSET_GROUP: usize = 13;
-    /// Which rows of `HelmetGeosetData` say what a helm hides: an array of two, one per
-    /// gender. Column 14 between them is `AttachmentGeosetGroup[6]`, which nothing reads.
-    pub const HELMET_GEOSET_VIS: usize = 15;
-}
-
-/// How many model slots `ModelResourcesID` holds, and how wide one of them is. The file
-/// records only the column's total width, so the caller supplies the element size.
-pub const MODEL_SLOTS: usize = 2;
-pub const MODEL_SLOT_BITS: u32 = 32;
+use crate::tables::item_display_info::{MODEL_RESOURCES_ID_BITS, MODEL_RESOURCES_ID_ELEMENTS};
+use crate::tables::item_sparse as item_column;
+use crate::tables::transmog_set as set_column;
+use crate::tables::transmog_set_item as set_item_column;
+use crate::tables::{
+    item_appearance as appearance_column, item_display_info as display_column,
+    item_modified_appearance as modified_appearance_column, transmog_set_group,
+};
+use crate::tables::{
+    ITEM_APPEARANCE, ITEM_DISPLAY_INFO, ITEM_MODIFIED_APPEARANCE, ITEM_SPARSE, TRANSMOG_SET,
+    TRANSMOG_SET_GROUP, TRANSMOG_SET_ITEM,
+};
 
 /// Why two sets that look identical are two sets at all.
 ///
@@ -223,7 +113,7 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
     let groups = Db2::parse(files.read(TRANSMOG_SET_GROUP)?)?;
     let group_names: HashMap<u32, String> = groups
         .rows()
-        .map(|row| (row.id(), row.text(GROUP_NAME)))
+        .map(|row| (row.id(), row.text(transmog_set_group::NAME)))
         .collect();
 
     // `TransmogSetItem` keys each appearance to its set through the game's relationship
@@ -682,8 +572,12 @@ pub fn appearances_of(
     let has_model: HashMap<u32, bool> = displays
         .rows()
         .map(|row| {
-            let modelled = (0..MODEL_SLOTS).any(|slot| {
-                row.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS) != 0
+            let modelled = (0..MODEL_RESOURCES_ID_ELEMENTS).any(|slot| {
+                row.element(
+                    display_column::MODEL_RESOURCES_ID,
+                    slot,
+                    MODEL_RESOURCES_ID_BITS,
+                ) != 0
             });
             (row.id(), modelled)
         })

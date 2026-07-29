@@ -68,51 +68,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-
-/// `ChrModel` — every playable body the game has, and which texture layout each composites in.
-const CHR_MODEL: u32 = 3384313;
-/// `CharComponentTextureSections` — where each part of a body lands in that layout's atlas.
-const CHAR_COMPONENT_TEXTURE_SECTIONS: u32 = 1360263;
-/// `ChrModelMaterial` — how large each of a layout's atlases is, texture type by texture type.
-const CHR_MODEL_MATERIAL: u32 = 3566562;
-/// `ChrRaces` — every race the game ships, with the name to show and whether anybody can be one.
-const CHR_RACES: u32 = 1305311;
-/// `ChrRaceXChrModel` — which bodies a race is made of.
-const CHR_RACE_X_CHR_MODEL: u32 = 3490304;
-/// `CreatureDisplayInfo` — what a `ChrModel`'s display id actually displays.
-const CREATURE_DISPLAY_INFO: u32 = 1108759;
-/// `CreatureModelData` — and the mesh behind that.
-const CREATURE_MODEL_DATA: u32 = 1365368;
-
-/// Columns of `ChrModel`, which keeps its id **inside** the row, in column 2.
-mod model_column {
-    pub const SEX: usize = 3;
-    pub const DISPLAY: usize = 4;
-    pub const LAYOUT: usize = 5;
-}
-
-/// Columns of `ChrRaces`. The name is the one a reader is shown — column 1 beside it is the
-/// client's own word for the race, and it is the one that calls the Undead "Scourge" and the
-/// Haranir "Harronir".
-mod race_column {
-    pub const NAME: usize = 2;
-    pub const FLAGS: usize = 15;
-}
-
-/// Columns of `ChrRaceXChrModel`. It states a sex of its own in column 2, and it is not the one
-/// used: a Dracthyr's single body is listed twice there, once under each, while the body itself
-/// says it belongs to neither. What a body *is* comes from `ChrModel`.
-mod race_model_column {
-    pub const RACE: usize = 0;
-    pub const MODEL: usize = 1;
-}
-
-/// The column of `CreatureDisplayInfo` that names the model, and the column of
-/// `CreatureModelData` that names the file it is.
-mod creature_column {
-    pub const MODEL: usize = 1;
-    pub const FILE: usize = 2;
-}
+use crate::tables::char_component_texture_sections as section_column;
+use crate::tables::chr_model as model_column;
+use crate::tables::chr_model_material as material_column;
+use crate::tables::chr_race_x_chr_model as race_model_column;
+use crate::tables::chr_races as race_column;
+use crate::tables::{creature_display_info, creature_model_data};
+use crate::tables::{
+    CHAR_COMPONENT_TEXTURE_SECTIONS, CHR_MODEL, CHR_MODEL_MATERIAL, CHR_RACES,
+    CHR_RACE_X_CHR_MODEL, CREATURE_DISPLAY_INFO, CREATURE_MODEL_DATA,
+};
 
 /// `ChrRaces`'s first flag bit, which is set on every race nobody can make.
 ///
@@ -122,25 +87,6 @@ mod creature_column {
 /// Gilnean a Worgen was, the "ThinHuman" the game keeps for cutscenes, and the visage a Dracthyr
 /// wears, which is a form of a race rather than a race to be.
 const NOT_PLAYABLE: u32 = 0x1;
-
-/// Columns of `CharComponentTextureSections`. The layout is an ordinary column here rather than
-/// a relationship block, unlike `ChrModelTextureLayer`'s.
-mod section_column {
-    pub const LAYOUT: usize = 0;
-    pub const SECTION: usize = 1;
-    pub const X: usize = 2;
-    pub const Y: usize = 3;
-    pub const WIDTH: usize = 4;
-    pub const HEIGHT: usize = 5;
-}
-
-/// Columns of `ChrModelMaterial`, whose id is its own first column.
-mod material_column {
-    pub const LAYOUT: usize = 1;
-    pub const TEXTURE_TYPE: usize = 2;
-    pub const WIDTH: usize = 3;
-    pub const HEIGHT: usize = 4;
-}
 
 /// The M2 texture type the composited body atlas is bound as, which is the one sized here.
 ///
@@ -457,7 +403,7 @@ fn meshes(files: &dyn GameFiles, displays: &HashSet<u32>) -> Result<HashMap<u32,
     let creatures: HashMap<u32, u32> = table
         .rows()
         .filter(|row| displays.contains(&row.id()))
-        .map(|row| (row.id(), row.number(creature_column::MODEL)))
+        .map(|row| (row.id(), row.number(creature_display_info::MODEL)))
         .collect();
 
     let table = Db2::parse(files.read(CREATURE_MODEL_DATA)?)?;
@@ -465,7 +411,7 @@ fn meshes(files: &dyn GameFiles, displays: &HashSet<u32>) -> Result<HashMap<u32,
     let files_of: HashMap<u32, u32> = table
         .rows()
         .filter(|row| wanted.contains(&row.id()))
-        .map(|row| (row.id(), row.number(creature_column::FILE)))
+        .map(|row| (row.id(), row.number(creature_model_data::FILE)))
         .collect();
 
     Ok(creatures

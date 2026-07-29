@@ -940,10 +940,10 @@ mod tests {
     fn counts_a_file_read_twice_as_one_repeat() {
         let files = fixture_files();
         let (_, work) = counting(&files, |files| {
-            let table = transmog::ITEM_APPEARANCE;
+            let table = crate::tables::ITEM_APPEARANCE;
             files.read(table).unwrap();
             files.read(table).unwrap();
-            files.read(transmog::ITEM_DISPLAY_INFO).unwrap();
+            files.read(crate::tables::ITEM_DISPLAY_INFO).unwrap();
         });
         assert_eq!(work.reads, 3);
         assert_eq!(work.repeated, 1);
@@ -965,8 +965,8 @@ mod tests {
     fn counts_the_rows_a_table_walk_materialised() {
         let files = fixture_files();
         let (walked, work) = counting(&files, |files| {
-            let table =
-                crate::db2::Db2::parse(files.read(transmog::ITEM_APPEARANCE).unwrap()).unwrap();
+            let table = crate::db2::Db2::parse(files.read(crate::tables::ITEM_APPEARANCE).unwrap())
+                .unwrap();
             table.rows().count()
         });
         assert!(walked > 0, "the fixture table has rows");
@@ -979,7 +979,7 @@ mod tests {
     fn starts_each_run_from_zero() {
         let files = fixture_files();
         let count = |files: &dyn GameFiles| {
-            crate::db2::Db2::parse(files.read(transmog::ITEM_APPEARANCE).unwrap())
+            crate::db2::Db2::parse(files.read(crate::tables::ITEM_APPEARANCE).unwrap())
                 .unwrap()
                 .rows()
                 .count()

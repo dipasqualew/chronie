@@ -100,84 +100,20 @@ use specta::Type;
 use crate::body::Body;
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-use crate::models::{MATERIAL_RESOURCES_ID, TEXTURE_FILE_DATA};
+use crate::tables::chr_customization_choice as choice_column;
+use crate::tables::chr_customization_element as element_column;
+use crate::tables::chr_customization_geoset as geoset_column;
+use crate::tables::chr_customization_material as material_column;
+use crate::tables::chr_customization_option as option_column;
+use crate::tables::chr_model_texture_layer as layer_column;
+use crate::tables::chr_model_texture_layer::TEXTURE_TARGET_BITS;
+use crate::tables::texture_file_data::MATERIAL_RESOURCES_ID;
+use crate::tables::{
+    CHR_CUSTOMIZATION_CHOICE, CHR_CUSTOMIZATION_ELEMENT, CHR_CUSTOMIZATION_GEOSET,
+    CHR_CUSTOMIZATION_MATERIAL, CHR_CUSTOMIZATION_OPTION, CHR_MODEL_TEXTURE_LAYER,
+    TEXTURE_FILE_DATA,
+};
 use crate::worn::{ComponentTexture, Geoset};
-
-/// `ChrCustomizationOption` — the things a body can be asked about, and whose body it is.
-const CHR_CUSTOMIZATION_OPTION: u32 = 3384247;
-/// `ChrCustomizationChoice` — the swatches of one option.
-const CHR_CUSTOMIZATION_CHOICE: u32 = 3450554;
-/// `ChrCustomizationElement` — what one customization choice does to a character.
-const CHR_CUSTOMIZATION_ELEMENT: u32 = 3512765;
-/// `ChrCustomizationMaterial` — which target a customization paints, and with what.
-const CHR_CUSTOMIZATION_MATERIAL: u32 = 3459652;
-/// `ChrCustomizationGeoset` — the group and value a customization switches on.
-const CHR_CUSTOMIZATION_GEOSET: u32 = 3456171;
-/// `ChrModelTextureLayer` — how one texture layout is composited, a layer at a time.
-const CHR_MODEL_TEXTURE_LAYER: u32 = 3548976;
-
-/// Columns of `ChrCustomizationOption`, which keeps its id **inside** the row.
-mod option_column {
-    /// `Name_lang`: "Skin Color", "Hair Style", "Ears" — what the screen calls the question.
-    pub const NAME: usize = 0;
-    /// `ChrModelID`: whose body this option belongs to.
-    pub const MODEL: usize = 4;
-    /// Where the question sits among this body's, in the order the screen lists them.
-    pub const ORDER: usize = 5;
-}
-
-/// Columns of `ChrCustomizationChoice`, which keeps its id inside the row as well.
-mod choice_column {
-    /// `Name_lang`, which is empty for most swatches: a skin colour is a square of colour on
-    /// the character creation screen and has nothing to be called. [`Swatch::name`] carries
-    /// whatever is there and the window numbers the rest.
-    pub const NAME: usize = 0;
-    pub const OPTION: usize = 2;
-    /// Which swatch this is, in the order the character creation screen lists them.
-    pub const ORDER: usize = 5;
-}
-
-/// Columns of `ChrCustomizationElement`, whose id is kept beside the rows rather than in them.
-///
-/// The eight columns past the material are the rest of what a choice can do — a skinned model,
-/// a bone set, a voice — and none of them is a picture or a geoset.
-mod element_column {
-    /// The choice this row belongs to. Not a relationship block: an ordinary column.
-    pub const CHOICE: usize = 0;
-    /// A second choice that must be chosen too, or zero where the element is unconditional.
-    pub const RELATED: usize = 1;
-    pub const GEOSET: usize = 2;
-    pub const MATERIAL: usize = 4;
-}
-
-/// Columns of `ChrCustomizationMaterial`, whose id is also kept beside the rows.
-mod material_column {
-    pub const TEXTURE_TARGET: usize = 0;
-    pub const MATERIAL_RESOURCES_ID: usize = 1;
-}
-
-/// Columns of `ChrCustomizationGeoset`, whose id is kept beside the rows.
-mod geoset_column {
-    pub const TYPE: usize = 0;
-    pub const VALUE: usize = 1;
-}
-
-/// Columns of `ChrModelTextureLayer`.
-///
-/// Its id is beside the rows and the layout it belongs to is in the relationship block, so
-/// neither is a column — which is what puts `TextureType` at 0 rather than at 1 or 2.
-mod layer_column {
-    pub const TEXTURE_TYPE: usize = 0;
-    pub const LAYER: usize = 1;
-    pub const BLEND_MODE: usize = 3;
-    /// Which of the layout's rectangles the layer paints, as one bit per `SectionType`.
-    pub const SECTION_MASK: usize = 4;
-    /// `ChrModelTextureTargetID[2]`, an array; the second element is unused on this layout.
-    pub const TEXTURE_TARGET: usize = 7;
-}
-
-/// How wide one element of that array is. The file records only the column's total.
-const TARGET_BITS: u32 = 32;
 
 /// The M2 texture type the composited body atlas is bound as, as against 6 hair, 19 eyes and
 /// 20 jewelry — which have buffers of their own and no armour on them.
@@ -638,7 +574,7 @@ fn layers_of(files: &dyn GameFiles, layout: u32) -> Result<Vec<Layer>, String> {
                 row.number(layer_column::LAYER),
                 Layer {
                     texture_type: row.number(layer_column::TEXTURE_TYPE),
-                    target: row.element(layer_column::TEXTURE_TARGET, 0, TARGET_BITS),
+                    target: row.element(layer_column::TEXTURE_TARGET, 0, TEXTURE_TARGET_BITS),
                     section_mask: row.number(layer_column::SECTION_MASK),
                     copied: row.number(layer_column::BLEND_MODE) == BLIT,
                 },
@@ -927,7 +863,7 @@ mod tests {
         let elsewhere: Vec<u32> = table
             .rows()
             .filter(|row| row.foreign_id() != hers().layout)
-            .map(|row| row.element(layer_column::TEXTURE_TARGET, 0, TARGET_BITS))
+            .map(|row| row.element(layer_column::TEXTURE_TARGET, 0, TEXTURE_TARGET_BITS))
             .collect();
         assert!(
             elsewhere.contains(&40),

@@ -34,7 +34,7 @@ use std::collections::HashMap;
 
 use chronie_desktop_lib::db2::Db2;
 use chronie_desktop_lib::items::{self, ARMOR, WEAPON};
-use chronie_desktop_lib::{casc, transmog};
+use chronie_desktop_lib::{casc, tables};
 
 /// Items whose facts are common knowledge, so a wrong column is visible by eye.
 const KNOWN: [u32; 4] = [
@@ -80,7 +80,7 @@ fn main() {
         })
     };
 
-    let item = Db2::parse(read(items::ITEM)).unwrap_or_else(|error| {
+    let item = Db2::parse(read(tables::ITEM)).unwrap_or_else(|error| {
         eprintln!("Could not parse Item: {error}");
         std::process::exit(1);
     });
@@ -90,7 +90,7 @@ fn main() {
         item.rows().count()
     );
     let sparse =
-        Db2::parse_with_text_columns(read(transmog::ITEM_SPARSE), &transmog::item_column::TEXT)
+        Db2::parse_with_text_columns(read(tables::ITEM_SPARSE), &tables::item_sparse::TEXT)
             .unwrap_or_else(|error| {
                 eprintln!("Could not parse ItemSparse: {error}");
                 std::process::exit(1);
@@ -116,7 +116,7 @@ fn main() {
 
     let slots: HashMap<u32, u32> = sparse
         .rows()
-        .map(|row| (row.id(), row.number(transmog::item_column::INVENTORY_TYPE)))
+        .map(|row| (row.id(), row.number(tables::item_sparse::INVENTORY_TYPE)))
         .collect();
     let mut agreed = vec![0usize; item.column_count()];
     let mut both = 0usize;
@@ -148,10 +148,10 @@ fn main() {
     let armour: Vec<u32> = item
         .rows()
         .filter(|row| {
-            let slot = row.number(items::column::INVENTORY_TYPE);
-            row.number(items::column::CLASS) == ARMOR && (1..=10).contains(&slot)
+            let slot = row.number(tables::item::INVENTORY_TYPE);
+            row.number(tables::item::CLASS) == ARMOR && (1..=10).contains(&slot)
         })
-        .map(|row| row.number(items::column::SUBCLASS))
+        .map(|row| row.number(tables::item::SUBCLASS))
         .collect();
     let filed = armour
         .iter()
@@ -164,9 +164,7 @@ fn main() {
     );
     let mut by_class: HashMap<u32, usize> = HashMap::new();
     for row in item.rows() {
-        *by_class
-            .entry(row.number(items::column::CLASS))
-            .or_default() += 1;
+        *by_class.entry(row.number(tables::item::CLASS)).or_default() += 1;
     }
     let mut classes: Vec<(u32, usize)> = by_class.into_iter().collect();
     classes.sort();
@@ -185,7 +183,7 @@ fn main() {
     let mut by_quality: HashMap<u32, usize> = HashMap::new();
     for row in sparse.rows() {
         *by_quality
-            .entry(row.number(items::sparse_column::QUALITY))
+            .entry(row.number(tables::item_sparse::QUALITY))
             .or_default() += 1;
     }
     let mut qualities: Vec<(u32, usize)> = by_quality.into_iter().collect();
@@ -200,14 +198,14 @@ fn main() {
     let restricted: Vec<(u32, u32, String)> = sparse
         .rows()
         .filter(|row| {
-            let allowed = row.number(items::sparse_column::ALLOWABLE_CLASS);
+            let allowed = row.number(tables::item_sparse::ALLOWABLE_CLASS);
             allowed != items::ANY_CLASS && allowed != 0
         })
         .map(|row| {
             (
                 row.id(),
-                row.number(items::sparse_column::ALLOWABLE_CLASS),
-                row.text(transmog::item_column::NAME),
+                row.number(tables::item_sparse::ALLOWABLE_CLASS),
+                row.text(tables::item_sparse::NAME),
             )
         })
         .collect();
@@ -233,24 +231,24 @@ fn main() {
              level {:>3} classes {:>6} icon {}",
             sparse_row
                 .as_ref()
-                .map(|row| row.text(transmog::item_column::NAME))
+                .map(|row| row.text(tables::item_sparse::NAME))
                 .unwrap_or_default(),
-            row.number(items::column::CLASS),
-            row.number(items::column::SUBCLASS),
-            row.number(items::column::INVENTORY_TYPE),
+            row.number(tables::item::CLASS),
+            row.number(tables::item::SUBCLASS),
+            row.number(tables::item::INVENTORY_TYPE),
             sparse_row
                 .as_ref()
-                .map(|row| row.number(items::sparse_column::QUALITY))
-                .unwrap_or_default(),
-            sparse_row
-                .as_ref()
-                .map(|row| row.number(items::sparse_column::REQUIRED_LEVEL))
+                .map(|row| row.number(tables::item_sparse::QUALITY))
                 .unwrap_or_default(),
             sparse_row
                 .as_ref()
-                .map(|row| row.number(items::sparse_column::ALLOWABLE_CLASS))
+                .map(|row| row.number(tables::item_sparse::REQUIRED_LEVEL))
                 .unwrap_or_default(),
-            row.number(items::column::ICON_FILE_ID),
+            sparse_row
+                .as_ref()
+                .map(|row| row.number(tables::item_sparse::ALLOWABLE_CLASS))
+                .unwrap_or_default(),
+            row.number(tables::item::ICON_FILE_ID),
         );
     }
 }

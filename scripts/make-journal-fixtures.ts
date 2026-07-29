@@ -30,12 +30,20 @@ import {
   type IconSpec,
   type TableSpec,
 } from "./db2-fixtures";
+import { FILE_DATA_ID } from "./tables";
 
-/** What the game calls the tables; the reader asks for them by these numbers. */
-const JOURNAL_INSTANCE = 1237438;
-const LFG_DUNGEONS = 1361033;
-const JOURNAL_ENCOUNTER = 1240336;
-const JOURNAL_ENCOUNTER_CREATURE = 1301155;
+/**
+ * What the game calls each table, out of `docs/game-tables.json`.
+ *
+ * Only the FileDataIDs are shared with the reader. Every column position, storage and bit offset
+ * below is decided here and nowhere else, deliberately: a fixture that took its layout from the
+ * same registry the reader reads would move both halves together when a number in that registry
+ * was wrong, and the suite would prove only that two generated halves agree.
+ */
+const JOURNAL_INSTANCE = FILE_DATA_ID.journalInstance;
+const LFG_DUNGEONS = FILE_DATA_ID.lfgDungeons;
+const JOURNAL_ENCOUNTER = FILE_DATA_ID.journalEncounter;
+const JOURNAL_ENCOUNTER_CREATURE = FILE_DATA_ID.journalEncounterCreature;
 
 /**
  * Ten plain 32-bit columns in a row, which is the front of both real tables: two strings, a few

@@ -18,7 +18,7 @@
 //! instead of names, and `item_column::NAME` is what to change.
 
 use chronie_desktop_lib::db2::Db2;
-use chronie_desktop_lib::{casc, transmog};
+use chronie_desktop_lib::{casc, tables};
 
 /// How many rows to print when nothing in particular was asked for.
 const A_FEW: usize = 8;
@@ -48,7 +48,7 @@ fn main() {
 
     let wanted: Vec<u32> = args.filter_map(|id| id.parse().ok()).collect();
 
-    let bytes = match files.read(transmog::ITEM_SPARSE) {
+    let bytes = match files.read(tables::ITEM_SPARSE) {
         Ok(bytes) => bytes,
         Err(error) => {
             eprintln!("Could not read ItemSparse: {error}");
@@ -57,7 +57,7 @@ fn main() {
     };
     println!("ItemSparse: {} bytes", bytes.len());
 
-    let table = match Db2::parse_with_text_columns(bytes, &transmog::item_column::TEXT) {
+    let table = match Db2::parse_with_text_columns(bytes, &tables::item_sparse::TEXT) {
         Ok(table) => table,
         Err(error) => {
             eprintln!("Could not parse ItemSparse: {error}");
@@ -82,9 +82,9 @@ fn main() {
         }
         printed += 1;
         println!("{id}:");
-        for column in transmog::item_column::TEXT {
+        for column in tables::item_sparse::TEXT {
             let text = row.text(column);
-            let mark = if column == transmog::item_column::NAME {
+            let mark = if column == tables::item_sparse::NAME {
                 " ← read as the name"
             } else {
                 ""

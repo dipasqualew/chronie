@@ -22,9 +22,10 @@ use serde_json::{json, Value};
 
 use crate::casc::GameFiles;
 use crate::db2::Db2;
-use crate::items::{column, ITEM};
-use crate::transmog::{
-    appearance_column, modified_appearance_column, ITEM_APPEARANCE, ITEM_MODIFIED_APPEARANCE,
+use crate::tables::{
+    item as column, item_appearance as appearance_column,
+    item_modified_appearance as modified_appearance_column, ITEM, ITEM_APPEARANCE,
+    ITEM_MODIFIED_APPEARANCE,
 };
 
 /// The look each item carries, keyed by the id it was asked for by.
@@ -222,7 +223,7 @@ mod tests {
             asked: RefCell::new(Vec::new()),
         };
         of_items(&files, &[HELM_ITEM]).expect("the fixture helm resolves");
-        assert!(!files.asked.borrow().contains(&crate::transmog::ITEM_SPARSE));
+        assert!(!files.asked.borrow().contains(&crate::tables::ITEM_SPARSE));
     }
 
     // Each table once for the batch, however many items are in it — the same claim the gallery

@@ -22,9 +22,17 @@ import {
   type IconSpec,
   type TableSpec,
 } from "./db2-fixtures";
+import { FILE_DATA_ID } from "./tables";
 
-/** What the game calls the table; the reader asks for it by this number. */
-const CURRENCY_TYPES = 1095531;
+/**
+ * What the game calls each table, out of `docs/game-tables.json`.
+ *
+ * Only the FileDataIDs are shared with the reader. Every column position, storage and bit offset
+ * below is decided here and nowhere else, deliberately: a fixture that took its layout from the
+ * same registry the reader reads would move both halves together when a number in that registry
+ * was wrong, and the suite would prove only that two generated halves agree.
+ */
+const CURRENCY_TYPES = FILE_DATA_ID.currencyTypes;
 
 /**
  * `CurrencyTypes` — every currency the game has, with the picture each is drawn with.

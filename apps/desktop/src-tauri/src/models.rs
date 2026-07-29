@@ -25,23 +25,11 @@ use crate::db2::Db2;
 use crate::glb;
 use crate::icons::png_of;
 use crate::m2::{Model, Paint};
-use crate::transmog::{display_column, ITEM_DISPLAY_INFO, MODEL_SLOTS, MODEL_SLOT_BITS};
-
-/// `ModelFileData` — every `.m2` the client owns, keyed by the resource that names it.
-///
-/// Shared with `worn`, which asks it the same question for a model that goes on a body.
-pub const MODEL_FILE_DATA: u32 = 1337833;
-/// `TextureFileData` — the same for `.blp`s.
-///
-/// Shared with `worn`, which asks it a wider question: an item's model wants the one file its
-/// material names, and a body texture wants every file it names so that another table can say
-/// which of them was painted for the character being drawn.
-pub const TEXTURE_FILE_DATA: u32 = 982459;
-
-/// The one column of `ModelFileData` that is not the row id: which model resource the file is.
-pub const MODEL_RESOURCES_ID: usize = 4;
-/// The same for `TextureFileData`.
-pub const MATERIAL_RESOURCES_ID: usize = 2;
+use crate::tables::item_display_info as display_column;
+use crate::tables::item_display_info::{
+    MATERIAL_RESOURCES_ID_BITS, MODEL_RESOURCES_ID_BITS, MODEL_RESOURCES_ID_ELEMENTS,
+};
+use crate::tables::ITEM_DISPLAY_INFO;
 
 /// The largest texture worth re-encoding for a model.
 ///
@@ -189,15 +177,19 @@ fn resources(files: &dyn GameFiles, wanted: &[u32]) -> Result<Vec<Option<Drawn>>
         .rows()
         .filter(|row| asked.contains(&row.id()))
         .filter_map(|display| {
-            let found = (0..MODEL_SLOTS)
+            let found = (0..MODEL_RESOURCES_ID_ELEMENTS)
                 .map(|slot| {
                     (
                         slot,
-                        display.element(display_column::MODEL_RESOURCES_ID, slot, MODEL_SLOT_BITS),
+                        display.element(
+                            display_column::MODEL_RESOURCES_ID,
+                            slot,
+                            MODEL_RESOURCES_ID_BITS,
+                        ),
                         display.element(
                             display_column::MATERIAL_RESOURCES_ID,
                             slot,
-                            MODEL_SLOT_BITS,
+                            MATERIAL_RESOURCES_ID_BITS,
                         ),
                     )
                 })
@@ -217,6 +209,9 @@ mod tests {
 
     use super::*;
     use crate::casc::{fixture_files, DirFiles};
+    // The two tables a read reaches through `worn`, named here because which files a read opens
+    // is the behaviour these tests are about.
+    use crate::tables::{MODEL_FILE_DATA, TEXTURE_FILE_DATA};
 
     /// The body a model is being shown for, which decides which of a resource's files is the
     /// one to draw — a helm is modelled per body.

@@ -22,12 +22,12 @@
 //! ranged weapons; 13 → shields and the things held in an off hand; 15 → held in off hand.
 //!
 //! If the column has moved, the detail view names weapon slots wrongly and `worn.rs` puts a
-//! sword in the wrong hand: `transmog::item_column::INVENTORY_TYPE` is what to change.
+//! sword in the wrong hand: `tables::item_sparse::INVENTORY_TYPE` is what to change.
 
 use std::collections::HashMap;
 
 use chronie_desktop_lib::db2::Db2;
-use chronie_desktop_lib::{casc, transmog};
+use chronie_desktop_lib::{casc, tables};
 
 /// `ItemModifiedAppearance` and `ItemAppearance`, the two hops from an item to its slot.
 const ITEM_MODIFIED_APPEARANCE: u32 = 982457;
@@ -150,12 +150,11 @@ fn main() {
         display_type.len()
     );
 
-    let items =
-        Db2::parse_with_text_columns(read(transmog::ITEM_SPARSE), &transmog::item_column::TEXT)
-            .unwrap_or_else(|error| {
-                eprintln!("Could not parse ItemSparse: {error}");
-                std::process::exit(1);
-            });
+    let items = Db2::parse_with_text_columns(read(tables::ITEM_SPARSE), &tables::item_sparse::TEXT)
+        .unwrap_or_else(|error| {
+            eprintln!("Could not parse ItemSparse: {error}");
+            std::process::exit(1);
+        });
     println!(
         "ItemSparse: {} columns, {} rows readable\n",
         items.column_count(),

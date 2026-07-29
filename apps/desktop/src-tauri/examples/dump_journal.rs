@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use chronie_desktop_lib::casc::{self, GameFiles};
 use chronie_desktop_lib::db2::{Db2, Row};
 use chronie_desktop_lib::icons;
-use chronie_desktop_lib::journal;
+use chronie_desktop_lib::tables;
 
 /// How many rows to print in full, which is enough to see the shape of a table.
 const SHOWN: usize = 8;
@@ -82,17 +82,17 @@ fn main() {
     let journal = report(
         files.as_ref(),
         "JournalInstance",
-        journal::JOURNAL_INSTANCE,
-        journal::journal_column::NAME,
-        journal::journal_column::BUTTON_SMALL_FILE_DATA_ID,
+        tables::JOURNAL_INSTANCE,
+        tables::journal_instance::NAME,
+        tables::journal_instance::BUTTON_SMALL_FILE_DATA_ID,
         &wanted,
     );
     let finder = report(
         files.as_ref(),
         "LFGDungeons",
-        journal::LFG_DUNGEONS,
-        journal::lfg_column::NAME,
-        journal::lfg_column::ICON_TEXTURE_FILE_ID,
+        tables::LFG_DUNGEONS,
+        tables::lfg_dungeons::NAME,
+        tables::lfg_dungeons::ICON_TEXTURE_FILE_ID,
         &wanted,
     );
 
@@ -128,7 +128,7 @@ fn main() {
 /// `JournalEncounter` col5 is the `DungeonEncounterID` is that the fight it reaches sits in the
 /// instance the fight is actually in.
 fn bosses(files: &dyn GameFiles, wanted: &[String]) {
-    let encounters = match files.read(journal::JOURNAL_ENCOUNTER).and_then(Db2::parse) {
+    let encounters = match files.read(tables::JOURNAL_ENCOUNTER).and_then(Db2::parse) {
         Ok(table) => table,
         Err(error) => {
             eprintln!("Could not read JournalEncounter: {error}");
@@ -136,7 +136,7 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
         }
     };
     let creatures = match files
-        .read(journal::JOURNAL_ENCOUNTER_CREATURE)
+        .read(tables::JOURNAL_ENCOUNTER_CREATURE)
         .and_then(Db2::parse)
     {
         Ok(table) => table,
@@ -187,12 +187,12 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
     let mut unreadable = 0usize;
     let mut portraits: HashMap<u32, (u32, u32)> = HashMap::new();
     for row in creatures.rows() {
-        let portrait = row.number(journal::creature_column::PORTRAIT_FILE_DATA_ID);
+        let portrait = row.number(tables::journal_encounter_creature::PORTRAIT_FILE_DATA_ID);
         if portrait == 0 {
             continue;
         }
-        let order = row.number(journal::creature_column::ORDER_INDEX);
-        let encounter = row.number(journal::creature_column::JOURNAL_ENCOUNTER_ID);
+        let order = row.number(tables::journal_encounter_creature::ORDER_INDEX);
+        let encounter = row.number(tables::journal_encounter_creature::JOURNAL_ENCOUNTER_ID);
         if portraits
             .get(&encounter)
             .is_none_or(|(had, _)| order < *had)
@@ -211,7 +211,7 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
     sizes.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     println!(
         "\nevery portrait col{} names, by the size it decodes to:",
-        journal::creature_column::PORTRAIT_FILE_DATA_ID
+        tables::journal_encounter_creature::PORTRAIT_FILE_DATA_ID
     );
     for ((width, height), count) in sizes {
         println!("  {width}×{height}  {count}");
@@ -223,16 +223,16 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
     // the wrong member of a council fight.
     let mut per_encounter: HashMap<u32, Vec<(u32, u32, String)>> = HashMap::new();
     for row in creatures.rows() {
-        if row.number(journal::creature_column::PORTRAIT_FILE_DATA_ID) == 0 {
+        if row.number(tables::journal_encounter_creature::PORTRAIT_FILE_DATA_ID) == 0 {
             continue;
         }
         per_encounter
-            .entry(row.number(journal::creature_column::JOURNAL_ENCOUNTER_ID))
+            .entry(row.number(tables::journal_encounter_creature::JOURNAL_ENCOUNTER_ID))
             .or_default()
             .push((
-                row.number(journal::creature_column::ORDER_INDEX),
-                row.number(journal::creature_column::PORTRAIT_FILE_DATA_ID),
-                row.text(journal::creature_column::NAME),
+                row.number(tables::journal_encounter_creature::ORDER_INDEX),
+                row.number(tables::journal_encounter_creature::PORTRAIT_FILE_DATA_ID),
+                row.text(tables::journal_encounter_creature::NAME),
             ));
     }
     let mut several: Vec<_> = per_encounter
@@ -253,13 +253,13 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
         "\n{} fights show more than one creature, and {out_of_order} of them store the rows out \
          of col{} order — which is what the reader has to sort by:",
         several.len(),
-        journal::creature_column::ORDER_INDEX
+        tables::journal_encounter_creature::ORDER_INDEX
     );
     for (encounter, rows) in several.iter().take(SHOWN) {
         let fight = encounters
             .rows()
             .find(|row| row.id() == **encounter)
-            .map(|row| row.text(journal::encounter_column::NAME))
+            .map(|row| row.text(tables::journal_encounter::NAME))
             .unwrap_or_default();
         let listed: Vec<String> = rows
             .iter()
@@ -271,7 +271,7 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
     // And the chain end to end, from the id a segment carries. The instance column is what holds
     // this to account: a fight reached through the wrong column lands in the wrong dungeon.
     let instances = files
-        .read(journal::JOURNAL_INSTANCE)
+        .read(tables::JOURNAL_INSTANCE)
         .and_then(Db2::parse)
         .ok();
     let mut shown = 0usize;
@@ -286,7 +286,7 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
         }
     );
     for row in encounters.rows() {
-        let dungeon = row.number(journal::encounter_column::DUNGEON_ENCOUNTER_ID);
+        let dungeon = row.number(tables::journal_encounter::DUNGEON_ENCOUNTER_ID);
         if dungeon == 0 {
             continue;
         }
@@ -295,7 +295,7 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
         if portrait.is_some() {
             with_portrait += 1;
         }
-        let name = row.text(journal::encounter_column::NAME);
+        let name = row.text(tables::journal_encounter::NAME);
         if !wanted.is_empty()
             && !wanted
                 .iter()
@@ -307,14 +307,14 @@ fn bosses(files: &dyn GameFiles, wanted: &[String]) {
             continue;
         }
         shown += 1;
-        let instance_id = row.number(journal::encounter_column::JOURNAL_INSTANCE_ID);
+        let instance_id = row.number(tables::journal_encounter::JOURNAL_INSTANCE_ID);
         let instance = instances
             .as_ref()
             .and_then(|table| {
                 table
                     .rows()
                     .find(|instance| instance.id() == instance_id)
-                    .map(|instance| instance.text(journal::journal_column::NAME))
+                    .map(|instance| instance.text(tables::journal_instance::NAME))
             })
             .unwrap_or_default();
         println!(

@@ -31,6 +31,7 @@ pub mod query;
 pub mod reputations;
 pub mod retention;
 mod saved_variables;
+pub mod tables;
 pub mod transmog;
 pub mod wardrobe;
 pub mod wifi;

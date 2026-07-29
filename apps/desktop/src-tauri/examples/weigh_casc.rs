@@ -25,9 +25,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use chronie_desktop_lib::casc::{CascFiles, GameFiles};
-
 /// `ItemSparse` — a table every outfit reads, so the read after the open is a real one.
-const ITEM_SPARSE: u32 = 1572924;
+use chronie_desktop_lib::tables::ITEM_SPARSE;
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
