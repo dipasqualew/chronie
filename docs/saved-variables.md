@@ -85,7 +85,52 @@ driven by `taintLog`, values 0–4.
 `C_EncodingUtil.SerializeJSON` and `SerializeCBOR` are also registered, if structured records
 are ever wanted.
 
-**Which file any of these reaches, and whether they are no-ops on retail, is not answerable
-from the binary** — it is control flow, not strings. `/chronie logprobe` asks the running
-client instead; see issue #209 for what it writes and how to read the result. Until that
-returns, nothing in the addon may depend on any of these.
+Which file any of these reaches is not answerable from the binary — it is control flow, not
+strings — so `/chronie logprobe` asked the running client instead.
+
+### What the client answered, on 12.0.5.67823
+
+`C_Log` writes, and it writes to `Logs\General.log`:
+
+```
+7/29 14:58:04.773  [N][Lua] CHRONIE_PROBE_1785333484_c_log_message
+7/29 14:58:04.773  [E][Lua] CHRONIE_PROBE_1785333484_c_log_error
+7/29 14:58:04.773  [W][Lua] CHRONIE_PROBE_1785333484_c_log_warning
+7/29 14:58:04.773  [W][Lua] CHRONIE_PROBE_1785333484_c_log_priority_warning
+```
+
+`[N]`, `[E]` and `[W]` are the severity of the call that made them; `[Lua]` is the source tag
+the `LoggingSystem`'s `[%s] %s` format puts in front. So a reader can pick Chronie's lines out
+of a file the client is also writing to, and the timestamps are the client's own.
+
+The rest of what it answered:
+
+- **`LogPriority.Spam` writes nothing.** It is under the client's threshold and is dropped —
+  the fifth token never appeared. Nothing real may be written at that priority.
+- **`SendSystemMessage` reaches `Logs\WoWChatLog.txt`; `print` and `AddMessage` do not.** Chat
+  logging records chat *events*, not what was drawn in a chat frame. That kills the idea of
+  quietly journalling through a chat frame, and it is why the probe's chat channels are now
+  opt-in behind `/chronie logprobe chat`.
+- **`C_CombatLogSecure` is not defined for addon code at all**, despite being in the binary.
+
+### The open question, and why nothing is built on this yet
+
+**The tokens were in neither log while the client was running, and were still not there after
+`/reload`. They were in both the moment the game exited.**
+
+Two things produce that, and they have opposite consequences:
+
+1. The client buffers log writes in its own memory and flushes at shutdown. Then `C_Log` is no
+   better than SavedVariables for the case that matters and the journal idea is dead.
+2. The client holds the file open without sharing reads, so the search could not see content
+   that was already on disk. Then a journal works fine.
+
+A `/reload` distinguishes neither, because it closes no file handle. **Killing the process
+does**: run the probe, end the task from Task Manager, restart and read `General.log`. A token
+that survives means the write reached the OS and a crash keeps it. Nothing here gets built
+until that comes back — see issue #209.
+
+Note for whoever does build it: `General.log` almost certainly rotates per launch, the way
+`EditMode.log` and `QuestCache.log` keep a single `.old` beside them. A crashed session's log
+is likely `General.log` at the moment of death and `General.log.old` after the next start, so
+a reader has to look at both.

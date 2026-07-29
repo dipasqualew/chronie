@@ -864,9 +864,14 @@ function ns.main(env)
     -- question about this client build — which of its logging APIs put a string in a file —
     -- and it answers it by writing marked lines the player then goes and greps for. Nothing
     -- else in the addon calls it, and nothing should until the answer is in.
-    router.add("logprobe", function()
+    -- `/chronie logprobe chat` opts into the three channels that go through the chat frame.
+    -- They are worth keeping and not worth running by default: on 12.0.5 two of them reach no
+    -- file at all, and the third is a line in the player's chat and a flipped /chatlog for a
+    -- log C_Log already writes to more cheaply and in silence.
+    router.add("logprobe", function(argument)
         local probe = ns.newLogProbe(env.logChannels())
-        for _, line in ipairs(probe.run().lines) do
+        local includeChat = (argument or ""):lower() == "chat"
+        for _, line in ipairs(probe.run({ includeChat = includeChat }).lines) do
             logger.info(line)
         end
     end)

@@ -11,21 +11,31 @@ local _, ns = ...
 ---@field nonce string Ties one run's tokens together; what the player greps for.
 ---@field attempts LogProbeAttempt[]
 ---@field chatLoggingWasOn boolean Whether `/chatlog` was already on before the probe touched it.
+---@field chatLoggingTouched boolean Whether the probe turned `/chatlog` on itself.
 ---@field lines string[] What to say in chat, in order.
+
+---@class LogProbeOptions
+---@field includeChat boolean? Also probe the channels that write through the chat frame.
 
 ---Writes one uniquely tagged string down every channel this client build exposes, so the
 ---files it lands in can be read afterwards and the channel identified from the line itself.
 ---
----This exists because the question it answers cannot be settled from outside the game.
----`C_Log`, `SendSystemMessage` and `C_CombatLogSecure.CreateCombatLogMessage` are all
----registered in the 12.0.5 client binary and none of them is documented anywhere; whether
----they reach a file on a retail build, and which file, is control flow rather than anything
----a reader of the binary can see. One tagged write per channel turns that into a grep.
+---What 12.0.5.67823 answered, from a real client (issue #209):
 ---
----Every call is wrapped: these are undocumented APIs and two of them sit in namespaces the
----client protects, so raising is an expected outcome to be recorded rather than a fault.
+---  * `C_Log` reaches `Logs\General.log`, tagged `[N]`, `[E]` or `[W]` by severity and sourced
+---    `[Lua]` — `7/29 14:58:04.773  [N][Lua] CHRONIE_PROBE_…`.
+---  * `LogPriority.Spam` writes nothing. It is under the client's threshold and is dropped, so
+---    it stays probed but must never be the priority anything real is written at.
+---  * `SendSystemMessage` reaches `Logs\WoWChatLog.txt`, and `print` and `AddMessage` do not.
+---    Chat logging records chat *events*, not whatever was drawn in a chat frame.
+---  * `C_CombatLogSecure` is not defined for addon code at all, despite being in the binary.
+---
+---The chat channels are opt-in because of that shape: the two silent ones write nothing to
+---any file, and the one that does write is visible in the player's chat and flips `/chatlog`
+---to get there. None of that is a price worth paying by default, and `C_Log` — which costs
+---neither — is the channel anything real would use.
 ---@class LogProbe
----@field run fun(): LogProbeResult
+---@field run fun(options: LogProbeOptions?): LogProbeResult
 
 ---@class LogProbeDeps
 ---@field now fun(): integer Seeds the nonce.
@@ -56,8 +66,10 @@ function ns.newLogProbe(deps)
     local now = deps.now
 
     return {
+        ---@param options LogProbeOptions?
         ---@return LogProbeResult
-        run = function()
+        run = function(options)
+            local includeChat = options ~= nil and options.includeChat == true
             local nonce = tostring(now())
             ---@type LogProbeAttempt[]
             local attempts = {}
@@ -88,18 +100,6 @@ function ns.newLogProbe(deps)
                 }
             end
 
-            -- Chat logging first, and before any of the chat channels are touched: the client
-            -- writes WoWChatLog.txt as it goes rather than backfilling it, so a line printed
-            -- while the switch was off is a line that was never a candidate for the file.
-            local chatLoggingWasOn = false
-            if deps.chatLoggingEnabled then
-                local ok, state = pcall(deps.chatLoggingEnabled)
-                chatLoggingWasOn = ok and state == true
-            end
-            if not chatLoggingWasOn and deps.setChatLogging then
-                pcall(deps.setChatLogging, true)
-            end
-
             attempt("c_log_message", deps.logMessage)
             attempt("c_log_error", deps.logErrorMessage)
             attempt("c_log_warning", deps.logWarningMessage)
@@ -116,12 +116,26 @@ function ns.newLogProbe(deps)
                 attempt("c_log_priority_" .. name:lower(), call)
             end
 
-            -- The control. If chat logging is on and this one does not turn up in a file, the
-            -- grep itself is wrong and nothing else the run says can be trusted.
-            attempt("chat_print", deps.print)
-            attempt("chat_addmessage", deps.addChatMessage)
-            attempt("chat_system", deps.sendSystemMessage)
             attempt("combat_secure", deps.createCombatLogMessage)
+
+            -- Everything below here is visible to the player, which is why it is opt-in.
+            local chatLoggingWasOn, chatLoggingTouched = false, false
+            if includeChat then
+                -- Read and set before any chat channel is touched: the client writes
+                -- WoWChatLog.txt as it goes rather than backfilling it, so a line sent while
+                -- the switch was off was never a candidate for the file.
+                if deps.chatLoggingEnabled then
+                    local ok, state = pcall(deps.chatLoggingEnabled)
+                    chatLoggingWasOn = ok and state == true
+                end
+                if not chatLoggingWasOn and deps.setChatLogging then
+                    chatLoggingTouched = pcall(deps.setChatLogging, true)
+                end
+
+                attempt("chat_print", deps.print)
+                attempt("chat_addmessage", deps.addChatMessage)
+                attempt("chat_system", deps.sendSystemMessage)
+            end
 
             local written, failed, absent = 0, 0, 0
             for _, entry in ipairs(attempts) do
@@ -134,26 +148,30 @@ function ns.newLogProbe(deps)
                 end
             end
 
+            -- Only the channels that did not run are named. A run where everything worked has
+            -- nothing to say about any individual channel, and the point of this pass is that
+            -- the probe stops shouting: the files are the result, not the chat frame.
             local lines = {
                 ("log probe %s: %d called, %d raised, %d missing."):format(nonce, written, failed, absent),
             }
             for _, entry in ipairs(attempts) do
-                if entry.status == "written" then
-                    lines[#lines + 1] = ("  %s: called"):format(entry.id)
-                else
+                if entry.status ~= "written" then
                     lines[#lines + 1] = ("  %s: %s (%s)"):format(entry.id, entry.status, entry.detail or "")
                 end
             end
-            if not chatLoggingWasOn then
+            if chatLoggingTouched then
                 lines[#lines + 1] = "chat logging was off and is now on; /chatlog turns it back off."
             end
-            lines[#lines + 1] = "now /reload, then search the Logs folder for: " .. PREFIX .. "_" .. nonce
-            lines[#lines + 1] = "each line ends in the channel that wrote it."
+            -- Verified on 12.0.5.67823: the tokens were in neither log while the client was
+            -- running, nor after /reload, and were in both the moment it exited.
+            lines[#lines + 1] = "quit the game fully — /reload does not flush the logs — then search"
+            lines[#lines + 1] = "the Logs folder for: " .. PREFIX .. "_" .. nonce
 
             return {
                 nonce = nonce,
                 attempts = attempts,
                 chatLoggingWasOn = chatLoggingWasOn,
+                chatLoggingTouched = chatLoggingTouched,
                 lines = lines,
             }
         end,
