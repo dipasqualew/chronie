@@ -166,10 +166,9 @@ function BossPortrait({
   bosses?: BossPortraits;
 }): ReactNode {
   // The book is a cache outside React, so a portrait landing changes nothing React would notice.
-  // This is what turns an arrival into a redraw. Each row asks for its own fight, and the book
-  // sends one request for whatever asked in that turn.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-  useEffect(() => bosses?.learn([encounter], redraw), [bosses, encounter]);
+  // `useBook` is what turns an arrival into a redraw — see `book.ts`. Each row asks for its own
+  // fight, and the book sends one request for whatever asked in that turn.
+  useBook(bosses, [encounter]);
 
   if (!bosses) return null;
   const picture = bosses.icon(encounter);
