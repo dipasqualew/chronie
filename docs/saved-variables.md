@@ -36,7 +36,7 @@ Historical omissions are normalized explicitly:
 - `instance` defaults to `Unknown`; `difficulty` and `instanceType` default to an empty string.
 - Numeric tallies default to zero and event lists default to empty.
 - Optional scalar values remain optional. Missing is not rewritten as zero or false.
-- `keystone` and `experience` remain absent when the wire record omitted them.
+- `keystone`, `delve` and `experience` remain absent when the wire record omitted them.
 
 Every event list is deserialized entry by entry. A malformed optional event is discarded while
 the rest of the list and its segment survive. An event that lacks the identifier its SQL row

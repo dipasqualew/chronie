@@ -248,6 +248,8 @@ pub struct RawSegment {
     #[serde(deserialize_with = "tolerant_option")]
     keystone: Option<RawKeystone>,
     #[serde(deserialize_with = "tolerant_option")]
+    delve: Option<RawDelve>,
+    #[serde(deserialize_with = "tolerant_option")]
     experience: Option<RawExperience>,
 }
 
@@ -344,6 +346,7 @@ impl RawSegment {
                 .filter_map(RawEquipsetChange::normalize)
                 .collect(),
             keystone: self.keystone.map(RawKeystone::normalize),
+            delve: self.delve.map(RawDelve::normalize),
             experience: self.experience.map(RawExperience::normalize),
         })
     }
@@ -384,6 +387,7 @@ pub struct Segment {
     pub encounters: Vec<EncounterEvent>,
     pub equipset_changes: Vec<EquipsetChange>,
     pub keystone: Option<Keystone>,
+    pub delve: Option<Delve>,
     pub experience: Option<Experience>,
 }
 
@@ -817,6 +821,38 @@ pub struct Keystone {
     pub duration_ms: Option<i64>,
     pub on_time: Option<bool>,
     pub upgrades: Option<i64>,
+}
+
+optional_fields!(RawDelve {
+    tier: i64,
+    scenario_id: i64,
+    started_at: i64,
+    completed_at: i64,
+    completed: bool,
+});
+
+impl RawDelve {
+    fn normalize(self) -> Delve {
+        Delve {
+            tier: self.tier,
+            scenario_id: self.scenario_id,
+            started_at: self.started_at,
+            completed_at: self.completed_at,
+            completed: self.completed.unwrap_or(false),
+        }
+    }
+}
+
+/// One delve, as the addon watched it. The delve's name is the segment's own instance name —
+/// a delve is an instance — so what is kept here is only what a segment cannot otherwise say:
+/// the tier it was run at, and which of the delve's stories the client rolled.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Delve {
+    pub tier: Option<i64>,
+    pub scenario_id: Option<i64>,
+    pub started_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub completed: bool,
 }
 
 optional_fields!(RawExperience {

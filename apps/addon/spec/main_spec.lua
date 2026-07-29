@@ -3290,6 +3290,8 @@ describe("addon integration", function()
             assert.equal(1, recorded.frame.registered.CHALLENGE_MODE_START)
             assert.equal(1, recorded.frame.registered.CHALLENGE_MODE_COMPLETED)
             assert.equal(1, recorded.frame.registered.CHALLENGE_MODE_RESET)
+            assert.equal(1, recorded.frame.registered.SCENARIO_UPDATE)
+            assert.equal(1, recorded.frame.registered.SCENARIO_COMPLETED)
         end)
     end)
 
@@ -3438,6 +3440,54 @@ describe("addon integration", function()
             assert.equal(14, record.keystone.level)
             assert.is_true(record.keystone.completed)
             assert.same({ 9, 6 }, record.keystone.affixes)
+        end)
+
+        -- A delve is a scenario, so the only events that announce one are the scenario's own,
+        -- and neither of them carries a payload: both go and read the client. The update is
+        -- where the tier and the story turn up, the completion is where the end does.
+        it("carries a delve all the way onto the filed segment", function()
+            local app, recorded = zonedIn({
+                instanceName = "Fungal Folly",
+                instanceType = "scenario",
+                delveState = { inProgress = true, completed = false, tier = 8, scenarioId = 2680 },
+            })
+            recorded.frame:fire("SCENARIO_UPDATE")
+
+            recorded.setDelveState({
+                inProgress = false, completed = true, tier = 8, scenarioId = 2680,
+            })
+            recorded.frame:fire("SCENARIO_COMPLETED")
+
+            recorded.setInstance({ name = "Dornogal", kind = "none" })
+            recorded.frame:fire("ZONE_CHANGED_NEW_AREA")
+
+            local record = app.segmentLog.all()[1]
+            assert.equal("Fungal Folly", record.instance)
+            assert.equal(8, record.delve.tier)
+            assert.equal(2680, record.delve.scenarioId)
+            assert.is_true(record.delve.completed)
+        end)
+
+        -- Horrific Visions, the boost tutorial and every other scenario fire exactly these
+        -- events, and the client answers "no delve" for all of them. Recording one anyway
+        -- would file a scenario the player never delved as a delve run.
+        it("files no delve for an ordinary scenario", function()
+            local app, recorded = zonedIn({
+                instanceName = "Horrific Vision of Orgrimmar",
+                instanceType = "scenario",
+                delveState = nil,
+            })
+            recorded.frame:fire("ENCOUNTER_END", 745, "Thrall", 4, 5, 1)
+
+            recorded.frame:fire("SCENARIO_UPDATE")
+            recorded.frame:fire("SCENARIO_COMPLETED")
+
+            recorded.setInstance({ name = "Orgrimmar", kind = "none" })
+            recorded.frame:fire("ZONE_CHANGED_NEW_AREA")
+
+            local record = app.segmentLog.all()[1]
+            assert.equal("Horrific Vision of Orgrimmar", record.instance)
+            assert.is_nil(record.delve)
         end)
     end)
 

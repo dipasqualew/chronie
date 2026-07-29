@@ -47,6 +47,7 @@ ns.segmentDetailSpecs = {
         "level", "mapId", "affixes", "startedAt", "completedAt",
         "completed", "durationMs", "onTime", "upgrades",
     },
+    delve      = { "tier", "scenarioId", "startedAt", "completedAt", "completed" },
     experience = { "gained", "percent", "startLevel", "endLevel" },
 }
 

@@ -27,6 +27,7 @@ src/CurrencyWindow.lua
 src/CustomSetRequests.lua
 src/CustomSetSnapshot.lua
 src/CustomSetWriter.lua
+src/DelveRun.lua
 src/DetailWindow.lua
 src/EntryLog.lua
 src/EntryPrompt.lua

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activityFields,
+  activityIcon,
   activityLabel,
   activitySummary,
   fieldValue,
@@ -25,6 +26,13 @@ const activity = (
 describe("activityLabel", () => {
   it("names a kind the app knows", () => {
     expect(activityLabel("mythic_plus")).toBe("Mythic+ run");
+  });
+
+  // A kind the app has not registered falls back to "Activity" and a bullet, so registering
+  // one is exactly what buys it a name and a mark of its own in the history.
+  it("names and marks a delve rather than falling back", () => {
+    expect(activityLabel("delve")).toBe("Delve");
+    expect(activityIcon("delve")).toBe("🕳️");
   });
 
   it.each<[string | undefined, string]>([
@@ -103,6 +111,25 @@ describe("activitySummary", () => {
   it("counts a segment's hunts only once there was more than one", () => {
     expect(activitySummary(activity("prey", { title: "Gorgetusk", huntsCompleted: 3 })))
       .toBe("Gorgetusk · 3 hunts");
+  });
+
+  it("leads a delve with the delve's own name and the tier it was run at", () => {
+    expect(
+      activitySummary(activity("delve", { delve: "Fungal Folly", tier: 8, completed: true })),
+    ).toBe("Fungal Folly · tier 8");
+  });
+
+  // The tier is the whole of how hard a delve was — a tier 1 and a tier 11 Fungal Folly are
+  // the same instance and nothing alike — so a missing one is said out loud rather than left
+  // off, the same reading a keystone of unknown level gets.
+  it("says the tier is unknown rather than leaving it off", () => {
+    expect(activitySummary(activity("delve", { delve: "Kriegval's Rest" })))
+      .toBe("Kriegval's Rest · tier unknown");
+  });
+
+  it("calls out a delve the player left part way through", () => {
+    expect(activitySummary(activity("delve", { delve: "Fungal Folly", tier: 8, completed: false })))
+      .toBe("Fungal Folly · tier 8 · left unfinished");
   });
 
   it("falls back to the raw metadata for a kind the app does not know", () => {
