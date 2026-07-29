@@ -25,6 +25,7 @@
  * exactly what this app drew before there were any, and an apology in its place would be worse.
  */
 
+import type { Book } from "./book";
 import type { IconsPayload } from "./types";
 
 /** What a book can be keyed by: whatever the payload's own string keys can be read back as. */
@@ -40,13 +41,13 @@ export interface IconBookOptions<K extends IconKey> {
   schedule?: (run: () => void) => void;
 }
 
-export interface IconBook<K extends IconKey> {
+export interface IconBook<K extends IconKey> extends Book<K> {
   /**
    * Puts `keys` in the next request and watches for what comes back, until the function it hands
    * back is called.
    *
    * The unsubscribe shape is React's own: an effect returns it, and whatever was watching stops
-   * when it leaves the screen.
+   * when it leaves the screen. `useBook` in `book.ts` is what every row reaches it through.
    */
   learn: (keys: K[], changed: () => void) => () => void;
   /** The picture for a key, once it has arrived, and nothing until then. */
@@ -75,6 +76,8 @@ export function createIconBook<K extends IconKey>({
   let pending = new Map<string, K>();
   let sending = false;
   const listeners = new Set<() => void>();
+  /** How many times anything has arrived, which is the snapshot React compares. See `book.ts`. */
+  let version = 0;
 
   async function send(keys: K[]): Promise<void> {
     try {
@@ -88,6 +91,7 @@ export function createIconBook<K extends IconKey>({
     }
     // To everything on screen rather than to whoever asked: the same currency is on two
     // characters, and only the first of them put it in the request.
+    version += 1;
     for (const listener of [...listeners]) listener();
   }
 
@@ -112,6 +116,7 @@ export function createIconBook<K extends IconKey>({
       }
       return () => listeners.delete(changed);
     },
+    version: () => version,
     icon: (key) => icons.get(String(key)),
   };
 }

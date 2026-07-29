@@ -13,10 +13,10 @@
 
 import "./ui.css";
 
-import { useEffect, useReducer } from "react";
 import type { ReactNode } from "react";
 
 import { activityIcon, activityLabel, activitySummary, isUncertain } from "./activities";
+import { useBook } from "./book";
 import type { PartialActivity } from "./activities";
 import { clock, duration, escapeHtml, initials, plural, signed, signedGold } from "./format";
 import { GameItem } from "./item";
@@ -264,18 +264,15 @@ export function HighlightPanel({
   items?: ItemBook;
   onOpenSegment?: (segmentId: number) => void;
 }): ReactNode {
-  // The book is a cache outside React, so an answer landing changes nothing React would
-  // notice. The rows redraw themselves; this is here for the one thing they cannot — the name
-  // in each button's own label, which has to say what the row ended up showing.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-  const named = entry.items.map((item) => item.itemId).filter((id): id is number => !!id);
+  // The book is a cache outside React, so an answer landing changes nothing React would notice —
+  // `useBook` is the subscription that tells it. The rows redraw themselves; this is here for the
+  // one thing they cannot — the name in each button's own label, which has to say what the row
+  // ended up showing.
+  //
   // The whole panel in one request rather than one per row: the rows would each ask for
   // themselves anyway, and asking here means the answer is already in hand when they draw.
-  const wanted = named.join(",");
-  useEffect(
-    () => items?.learn(wanted ? wanted.split(",").map(Number) : [], redraw),
-    [items, wanted],
-  );
+  const named = entry.items.map((item) => item.itemId).filter((id): id is number => !!id);
+  useBook(items, named);
 
   return (
     <ul className="hl-panel" id={panelId(scope, entry.kind)}>
@@ -466,18 +463,14 @@ export function HighlightList({
   onUnfold,
   onOpenSegment,
 }: HighlightListProps): ReactNode {
-  // The book is a cache outside React, so an answer landing changes nothing React would
-  // notice on its own. The panel asks for the rows it is about to draw; this asks for the
-  // pieces the chips above it are named after, which are wanted whether or not anything is
-  // ever unfolded — a mark drawn as its icon alone says the name and nothing else.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-  const wanted = entries
-    .map((entry) => namedPiece(entry)?.id)
-    .filter(Boolean)
-    .join(",");
-  useEffect(
-    () => items?.learn(wanted ? wanted.split(",").map(Number) : [], redraw),
-    [items, wanted],
+  // The book is a cache outside React, so an answer landing changes nothing React would notice on
+  // its own — `useBook` is the subscription that tells it. The panel asks for the rows it is about
+  // to draw; this asks for the pieces the chips above it are named after, which are wanted whether
+  // or not anything is ever unfolded — a mark drawn as its icon alone says the name and nothing
+  // else.
+  useBook(
+    items,
+    entries.map((entry) => namedPiece(entry)?.id).filter((id): id is number => !!id),
   );
 
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
@@ -711,10 +704,9 @@ export function PlaceIcon({
   places?: PlaceIcons;
 }): ReactNode {
   // The book is a cache outside React, so a picture landing changes nothing React would notice.
-  // This is what turns an arrival into a redraw. Each row asks for its own place, and the book
-  // sends one request for whatever asked in that turn.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-  useEffect(() => places?.learn([place], redraw), [places, place]);
+  // `useBook` is what turns an arrival into a redraw. Each row asks for its own place, and the
+  // book sends one request for whatever asked in that turn.
+  useBook(places, [place]);
 
   const picture = places?.icon(place);
   if (!picture) return null;

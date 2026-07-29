@@ -14,9 +14,11 @@
 
 import "./retentionPanel.css";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { usePoll } from "./resource";
+import type { StillWanted } from "./resource";
 import { MAX_DAYS, MIN_DAYS, pileFiles, sweepDetail, sweepSentence, windowDays } from "./retention";
 import type { LogRetention } from "./types";
 
@@ -51,31 +53,24 @@ export function RetentionPanel({ actions, days, visible }: RetentionPanelProps):
   /** Set while a write is on its way. The poll's answer is the older of the two. */
   const writing = useRef(false);
 
-  useEffect(() => {
-    let alive = true;
-    const refresh = async (): Promise<void> => {
+  // The same two guards the combat log panel keeps, for the same two reasons: a write in flight
+  // is newer than the poll's answer, and an answer the poll no longer wants is not drawn at all.
+  const refresh = useCallback(
+    async (live: StillWanted): Promise<void> => {
       if (writing.current) return;
       try {
         const answer = await actions.status();
-        if (alive && !writing.current) {
+        if (live() && !writing.current) {
           setStatus(answer);
           setSaying("");
         }
       } catch (error) {
-        if (alive) setSaying(actions.onError(error));
+        if (live()) setSaying(actions.onError(error));
       }
-    };
-    void refresh();
-    if (!visible)
-      return () => {
-        alive = false;
-      };
-    const timer = setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [actions, visible]);
+    },
+    [actions],
+  );
+  usePoll(refresh, { active: visible, every: POLL_MS });
 
   function change(wanted: number | null): void {
     writing.current = true;

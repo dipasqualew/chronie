@@ -8,11 +8,13 @@
 
 import "./segmentModal.css";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { achievementIds, achievementLine } from "./achievements";
 import type { AchievementBook } from "./achievements";
+import { useBook } from "./book";
+import { useModalDialog } from "./dialog";
 import { CaptureGallery } from "./captureGallery";
 import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
@@ -164,10 +166,9 @@ function BossPortrait({
   bosses?: BossPortraits;
 }): ReactNode {
   // The book is a cache outside React, so a portrait landing changes nothing React would notice.
-  // This is what turns an arrival into a redraw. Each row asks for its own fight, and the book
-  // sends one request for whatever asked in that turn.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-  useEffect(() => bosses?.learn([encounter], redraw), [bosses, encounter]);
+  // `useBook` is what turns an arrival into a redraw — see `book.ts`. Each row asks for its own
+  // fight, and the book sends one request for whatever asked in that turn.
+  useBook(bosses, [encounter]);
 
   if (!bosses) return null;
   const picture = bosses.icon(encounter);
@@ -727,6 +728,9 @@ export interface SegmentModalProps {
   onShowAppearance?: (showing: AppearanceModalState) => void;
 }
 
+/** No segment on screen is nothing to look up, and the same empty list every time it happens. */
+const NOTHING_WANTED: number[] = [];
+
 export function SegmentModal({
   showing,
   onStep,
@@ -741,35 +745,27 @@ export function SegmentModal({
   captures,
   onShowAppearance,
 }: SegmentModalProps): ReactNode {
-  const dialog = useRef<HTMLDialogElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  // The book is not state — it is a cache outside React, shared with every other segment the
-  // reader opens — so a lookup landing has nothing to change that React would notice. This is
-  // what draws the words and then the pictures as each of them arrives.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-
   const segment = showing?.order[showing.index];
 
   // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
-  // element is driven here — opened when there is a segment to show, and closed when there is
-  // not. The reverse direction is `onClose`: Escape closes a dialog without asking anybody.
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    if (segment && !element.open) element.showModal();
-    if (!segment && element.open) element.close();
-  }, [segment]);
+  // element is driven from an effect — opened when there is a segment to show, and closed when
+  // there is not. See `dialog.ts`. The reverse direction is `onClose` below: Escape closes a
+  // dialog without asking anybody.
+  const dialog = useModalDialog(segment !== undefined);
 
   // The lookup runs after the segment is on screen, because reading the game's own files takes
   // about a second and everything else about the segment is already in hand. Each half of it —
   // the words, then the pictures — redraws when it lands.
-  useEffect(() => {
-    if (!segment) return;
-    const wanted = achievementIds(segment);
-    // Asking again costs nothing: the book keeps what it has already been told and what it has
-    // already asked about, so a repeat is filtered down to nothing before it reaches a backend.
-    if (wanted.length) void book.learn(wanted, redraw);
-  }, [segment, book]);
+  //
+  // The book is not state: it is a cache outside React, shared with every other segment the reader
+  // opens, so a lookup landing has nothing to change that React would notice. `useBook` is the
+  // subscription that tells it, and it is what makes closing the modal inside that second the end
+  // of the matter rather than a redraw of something that has gone. See `book.ts`.
+  //
+  // Asking again costs nothing: the book keeps what it has already been told and what it has
+  // already asked about, so a repeat is filtered down to nothing before it reaches a backend.
+  useBook(book, segment ? achievementIds(segment) : NOTHING_WANTED);
 
   const step = useCallback(
     (by: number) => {

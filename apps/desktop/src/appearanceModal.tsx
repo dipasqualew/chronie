@@ -22,9 +22,11 @@ import "./appearanceModal.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useModalDialog } from "./dialog";
 import { focusOf } from "./gallery";
 import { REASONS, glbBytes } from "./modelPreview";
-import type { ModelStage } from "./modelViewer";
+import { usePaneStage } from "./stage";
+import type { MakeStage } from "./stage";
 import type { GalleryPayload, ItemAppearancesPayload } from "./types";
 
 /** What the modal is showing, or nothing at all when it is closed. */
@@ -48,7 +50,7 @@ export interface AppearanceModalProps {
    * Makes the 3D pane. Passed in because it is the one thing here that needs a graphics card:
    * a machine without working 3D throws, and the reader is told so rather than shown nothing.
    */
-  createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
+  createStage?: MakeStage;
 }
 
 /** What the pane is saying, which is what its `data-state` says and what the note reads. */
@@ -66,39 +68,22 @@ export function AppearanceModal({
   loadGallery,
   createStage = lazyStage,
 }: AppearanceModalProps): ReactNode {
-  const dialog = useRef<HTMLDialogElement>(null);
+  // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
+  // element is driven from an effect — see `dialog.ts`, which is also where the reason it is safe
+  // to run that effect twice lives.
+  const dialog = useModalDialog(showing !== null);
   const pane = useRef<HTMLDivElement>(null);
   const [said, setSaid] = useState<PaneState>({ state: "loading", note: READING });
 
-  // One stage for as long as the modal is mounted, made the first time something is drawn on
-  // it. Each is a graphics context of its own, and a browser hands out only so many — so a
-  // reader opening one appearance after another gets the one that is already there.
-  const stage = useRef<ModelStage | null>(null);
-  const starting = useRef<Promise<ModelStage> | null>(null);
+  // One stage for as long as the modal is mounted, made the first time something is drawn on it,
+  // and given back when the modal unmounts rather than when it closes. A reader stepping through a
+  // segment's transmog opens several in a row, and building a renderer for each of them is the cost
+  // this is arranged to avoid. `stage.ts` is where that arrangement lives, along with the reason a
+  // picture is never drawn on one that has been given back.
+  const stage = usePaneStage(createStage);
   // Which item the pane is currently answering. A reader clicking through rows faster than the
   // models arrive would otherwise be left looking at whichever finished last.
   const asked = useRef(0);
-
-  // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
-  // element is driven here. The reverse direction is `onClose`: Escape closes a dialog without
-  // asking anybody, and the browser fires the event either way.
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    if (showing && !element.open) element.showModal();
-    if (!showing && element.open) element.close();
-  }, [showing]);
-
-  // The context is given back when the modal unmounts and not when it closes. A reader
-  // stepping through a segment's transmog opens several in a row, and building a renderer for
-  // each of them is the cost this is arranged to avoid.
-  useEffect(
-    () => () => {
-      stage.current?.dispose();
-      stage.current = null;
-    },
-    [],
-  );
 
   const draw = useCallback(
     async (itemId: number, mine: number): Promise<void> => {
@@ -128,23 +113,24 @@ export function AppearanceModal({
           return;
         }
 
-        // One stage, and one attempt to make one: two quick clicks would otherwise each start a
-        // renderer and the second would be left running with nothing pointing at it.
-        starting.current ??= Promise.resolve(createStage(container));
-        stage.current = await starting.current;
         // Framed on the part of her the slot is on, out of the same table the thumbnails use.
         // What comes back for a chestpiece is a whole two-metre character with the appearance
         // painted somewhere on her, so a pane that framed all of it showed the reader a woman
         // when they had asked about a helm — and orbited her pelvis while they tried to turn it.
-        await stage.current.show(glbBytes(glb), focusOf(look.displayType, drawn.kind));
-        if (mine === asked.current) setSaid({ state: "shown", note: "" });
+        const drew = await stage.show(
+          container,
+          glbBytes(glb),
+          focusOf(look.displayType, drawn.kind),
+        );
+        // `drew` is false for a modal that has gone away since, which has no note to be written.
+        if (drew && mine === asked.current) setSaid({ state: "shown", note: "" });
       } catch (error: unknown) {
         // A machine with no working 3D — a remote desktop, a virtual machine, a driver the
         // browser has blocklisted — falls back to a sentence, the same as the outfit pane.
         if (mine === asked.current) setSaid({ state: "empty", note: message(error) });
       }
     },
-    [loadAppearance, loadGallery, createStage],
+    [loadAppearance, loadGallery, stage],
   );
 
   useEffect(() => {
@@ -197,7 +183,7 @@ export function AppearanceModal({
  * makes: a reader who never clicks through to a picture never downloads it, and one who has
  * already opened the wardrobe pays nothing here because the module is already in memory.
  */
-const lazyStage = (container: HTMLElement): Promise<ModelStage> =>
+const lazyStage: MakeStage = (container) =>
   import("./modelViewer").then((viewer) =>
     viewer.createModelStage(container, { label: "The appearance, drawn" }),
   );

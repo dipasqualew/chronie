@@ -22,9 +22,17 @@ export interface ClickLike {
   preventDefault(): void;
 }
 
-/** What clicks are heard on. The document in the window; something smaller in a test. */
+/**
+ * What clicks are heard on. The document in the window; something smaller in a test.
+ *
+ * Both halves, because a listener that can only be added is a listener the window is stuck
+ * with: React sets an effect up, tears it down and sets it up again to find exactly that, and
+ * the second install would answer every click twice — two calls to the operating system, two
+ * browser tabs on one click.
+ */
 export interface ClickSource {
   addEventListener(type: "click", listener: (event: ClickLike) => void): void;
+  removeEventListener(type: "click", listener: (event: ClickLike) => void): void;
 }
 
 /** The url a click should leave the window with, or nothing when it stays inside. */
@@ -52,15 +60,21 @@ export interface ExternalLinkOptions {
  * Answers every click on an external link, wherever in the window it happens — including in
  * markup that has not been written yet, which is why it listens at the root rather than
  * binding each anchor as it is drawn.
+ *
+ * Answers with the way to stop: the shape React's effects take, and the reason they can be
+ * trusted to. One click on one link has to reach the operating system exactly once, and the
+ * only thing that can promise that is an installer that can be uninstalled.
  */
-export function installExternalLinks(options: ExternalLinkOptions): void {
+export function installExternalLinks(options: ExternalLinkOptions): () => void {
   const { root, open, linkOf = closestLink, onFailure } = options;
-  root.addEventListener("click", (event) => {
+  const answer = (event: ClickLike): void => {
     const url = externalUrl(linkOf(event.target));
     if (!url) return;
     // The click is answered here or nowhere: left alone it either does nothing at all, or
     // takes the whole app to the page.
     event.preventDefault();
     void Promise.resolve(open(url)).catch((error: unknown) => onFailure?.(url, error));
-  });
+  };
+  root.addEventListener("click", answer);
+  return () => root.removeEventListener("click", answer);
 }

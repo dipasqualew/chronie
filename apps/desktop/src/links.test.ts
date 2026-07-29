@@ -54,35 +54,57 @@ const clickOn = (href: string | null): Click => ({
 });
 
 /**
+ * Something clicks are heard on, as a real one behaves: a set of listeners rather than the one
+ * slot this test used to keep.
+ *
+ * The difference is what makes an installer that cannot be uninstalled visible at all. With one
+ * slot, a second install simply replaced the first and every click was answered once whatever
+ * the code did about removal; with a set, a listener nothing took off is a click answered twice.
+ */
+function clickSource() {
+  const listeners = new Set<(event: ClickLike) => void>();
+  return {
+    /** How many are still attached, which is the whole question. */
+    get listening(): number {
+      return listeners.size;
+    },
+    root: {
+      addEventListener: (_type: "click", given: (event: ClickLike) => void): void => {
+        listeners.add(given);
+      },
+      removeEventListener: (_type: "click", given: (event: ClickLike) => void): void => {
+        listeners.delete(given);
+      },
+    },
+    /** One click, offered to everything attached the way a document offers it. */
+    click(href: string | null): Click {
+      const event = clickOn(href);
+      for (const listener of [...listeners]) listener(event);
+      return event;
+    },
+  };
+}
+
+/**
  * The window's link handling, installed over a click source a test can drive, with what it
  * asked the operating system for and what the operating system refused kept beside it.
  */
 function installed(open: (url: string) => Promise<unknown>) {
   const opened: string[] = [];
   const failures: Array<[string, unknown]> = [];
-  let listener: ((event: ClickLike) => void) | undefined;
-  installExternalLinks({
-    root: {
-      addEventListener: (_type, given) => {
-        listener = given;
+  const source = clickSource();
+  const install = (): (() => void) =>
+    installExternalLinks({
+      root: source.root,
+      open: (url) => {
+        opened.push(url);
+        return open(url);
       },
-    },
-    open: (url) => {
-      opened.push(url);
-      return open(url);
-    },
-    linkOf: (target) => (typeof target === "string" ? link(target) : null),
-    onFailure: (url, error) => failures.push([url, error]),
-  });
-  return {
-    opened,
-    failures,
-    click(href: string | null): Click {
-      const event = clickOn(href);
-      listener?.(event);
-      return event;
-    },
-  };
+      linkOf: (target) => (typeof target === "string" ? link(target) : null),
+      onFailure: (url, error) => failures.push([url, error]),
+    });
+  const stop = install();
+  return { opened, failures, click: source.click, source, install, stop };
 }
 
 const accepts = (): Promise<void> => Promise.resolve();
@@ -122,5 +144,37 @@ describe("installExternalLinks", () => {
     expect(window.failures).toHaveLength(1);
     expect(window.failures[0]?.[0]).toBe("https://example.test/nope");
     expect(String(window.failures[0]?.[1])).toContain("not allowed");
+  });
+
+  // What the window has no other way of arranging. The handler lives on the document rather than
+  // on any anchor, so nothing goes away on its own when the app that installed it does.
+  it("stops answering clicks once it has been stopped", () => {
+    const window = installed(accepts);
+
+    window.stop();
+    const event = window.click("https://www.wowhead.com/item=222446");
+
+    expect(window.source.listening).toBe(0);
+    expect(window.opened).toEqual([]);
+    expect(event.prevented).toBe(false);
+  });
+
+  /*
+   * Set up, torn down, set up again — which is what React does to every effect in development to
+   * prove the teardown is real, and what the window used to have no answer to. One click reaching
+   * the operating system twice is two browser tabs on one link.
+   */
+  it("answers a click once after being set up, torn down and set up again", () => {
+    const window = installed(accepts);
+
+    window.stop();
+    const stop = window.install();
+    window.click("https://www.wowhead.com/quest=12345");
+
+    expect(window.source.listening).toBe(1);
+    expect(window.opened).toEqual(["https://www.wowhead.com/quest=12345"]);
+
+    stop();
+    expect(window.source.listening).toBe(0);
   });
 });

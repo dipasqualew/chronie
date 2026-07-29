@@ -216,11 +216,12 @@ describe("the appearance modal", () => {
   });
 
   // And it is given back when the modal goes away, rather than left running with nothing
-  // pointing at it.
+  // pointing at it. Awaited rather than asserted outright: what the modal holds is the *promise* of
+  // a stage, so that one still being made when the modal goes is given back too — see `stage.ts`.
   it("gives the context back when it unmounts", async () => {
     const { rendered, made, shown } = view();
     await waitFor(() => expect(shown).toHaveLength(1));
     rendered.unmount();
-    expect(made.disposed).toBe(1);
+    await waitFor(() => expect(made.disposed).toBe(1));
   });
 });

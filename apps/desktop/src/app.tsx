@@ -14,7 +14,7 @@
 
 import "./app.css";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ActivityEditor } from "./activityEditor";
@@ -32,6 +32,8 @@ import { desktop, message } from "./desktop";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
 import { QueryView } from "./queryView";
+import { useAsyncResource, usePoll } from "./resource";
+import type { StillWanted } from "./resource";
 import { AppearanceModal } from "./appearanceModal";
 import type { AppearanceModalState } from "./appearanceModal";
 import { SegmentModal } from "./segmentModal";
@@ -42,17 +44,7 @@ import { Timeline } from "./timeline";
 import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
 import { VersionTag } from "./versionTag";
-import type {
-  CustomSetsPayload,
-  DashboardPayload,
-  InGameSetsPayload,
-  Release,
-  Segment,
-  SessionGap,
-  Settings,
-  TransmogMarksPayload,
-  TransmogPayload,
-} from "./types";
+import type { DashboardPayload, Release, Segment, SessionGap, Settings } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
 type View = (typeof VIEWS)[number];
@@ -87,15 +79,32 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // until they do: the tables behind it are the game's largest and are opened on that click.
   const [drawing, setDrawing] = useState<AppearanceModalState | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
-  const [transmog, setTransmog] = useState<TransmogPayload | null>(null);
-  const [transmogStatus, setTransmogStatus] = useState("");
+
+  // The four things the transmog screen is drawn from, each asked for the first time somebody
+  // opens a view that wants it and kept for the life of the window. `resource.ts` is what says
+  // when — and, more to the point, what says an answer arriving after the reader has gone
+  // somewhere else is not written to the screen, and that a torn-down and re-established effect
+  // is one read of the game's files rather than two.
+  //
+  // The sets come out of the game's own files, which costs a second and a few hundred megabytes.
+  const sets = useAsyncResource({ when: view === "transmog", load: desktop.transmogSets });
   // What the reader has said about the game's wardrobe, which is the only thing on that screen
-  // that comes out of Chronie's own database rather than out of the installed game.
-  const [marks, setMarks] = useState<TransmogMarksPayload | null>(null);
-  // And the sets they put together out of it themselves, which come from the same place and
-  // are read in the same breath.
-  const [customSets, setCustomSets] = useState<CustomSetsPayload | null>(null);
-  const [inGameSets, setInGameSets] = useState<InGameSetsPayload | null>(null);
+  // that comes out of Chronie's own database rather than out of the installed game. Read
+  // alongside the sets rather than with them: it answers in a millisecond where they take a
+  // second. A failure here is left silent on purpose — the screen simply has nothing marked on
+  // it, and the first attempt to mark something says why it will not.
+  const marks = useAsyncResource({ when: view === "transmog", load: desktop.transmogMarks });
+  // And the sets the reader saved, on the same terms, and silent about a failure for the same
+  // reason: the browser it feeds is one of three and the two beside it are the game's.
+  const customSets = useAsyncResource({ when: view === "transmog", load: desktop.customSets });
+  // And the sets the player saved in the game. Also Chronie's own database — the addon put them
+  // there and the collector filed them — so this is a millisecond and not the second the game's
+  // files cost. Wanted by two views rather than one, and one read serves whichever is opened
+  // first.
+  const inGameSets = useAsyncResource({
+    when: view === "transmog" || view === "characters",
+    load: desktop.inGameSets,
+  });
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
@@ -180,62 +189,18 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
   // Every link the window draws is a link out of it, and the window is the wrong place for a
   // web page. A url the backend will not open is a dead link on screen, so it is worth saying.
-  useEffect(() => {
-    installExternalLinks({
-      root: document,
-      open: desktop.openUrl,
-      onFailure: (url, error) => console.error(`Chronie could not open ${url}: ${message(error)}`),
-    });
-  }, []);
-
-  // The sets come out of the game's own files, which costs a second and a few hundred
-  // megabytes to read, so the view asks for them the first time it is opened and keeps them.
-  useEffect(() => {
-    if (view !== "transmog" || transmog || transmogStatus === LOADING) return;
-    setTransmogStatus(LOADING);
-    void desktop
-      .transmogSets()
-      .then(setTransmog)
-      .catch((error: unknown) => setTransmogStatus(message(error)));
-  }, [view, transmog, transmogStatus]);
-
-  // And what the reader has already said about them, read alongside rather than with them: it
-  // is Chronie's own database and answers in a millisecond, where the sets are the game's
-  // files and take a second. A failure here is left silent on purpose — the screen simply has
-  // nothing marked on it, and the first attempt to mark something says why it will not.
-  useEffect(() => {
-    if (view !== "transmog" || marks) return;
-    void desktop
-      .transmogMarks()
-      .then(setMarks)
-      .catch(() => undefined);
-  }, [view, marks]);
-
-  // The sets the reader saved, on the same terms: Chronie's own database, read when the view is
-  // first opened, and silent about a failure because the browser it feeds is one of three and
-  // the two beside it are the game's.
-  useEffect(() => {
-    if (view !== "transmog" || customSets) return;
-    void desktop
-      .customSets()
-      .then(setCustomSets)
-      .catch(() => undefined);
-  }, [view, customSets]);
-
-  // And the sets the player saved in the game, on the same terms. Also Chronie's own database —
-  // the addon put them there and the collector filed them — so this is a millisecond and not the
-  // second the game's files cost. Silent about a failure for the reason above.
-  //
-  // Wanted by two views rather than one, which is why this asks about both: the transmog view
-  // browses them and the characters view says what each character has got. One read serves
-  // whichever is opened first.
-  useEffect(() => {
-    if ((view !== "transmog" && view !== "characters") || inGameSets) return;
-    void desktop
-      .inGameSets()
-      .then(setInGameSets)
-      .catch(() => undefined);
-  }, [view, inGameSets]);
+  // The installer answers with the way to stop, and this returns it: one click on one link has
+  // to reach the operating system once, and two live listeners is two browser tabs.
+  useEffect(
+    () =>
+      installExternalLinks({
+        root: document,
+        open: desktop.openUrl,
+        onFailure: (url, error) =>
+          console.error(`Chronie could not open ${url}: ${message(error)}`),
+      }),
+    [],
+  );
 
   // Whether an evening was played that never reached the file. Asked on the same beat the
   // segments are, and for the same reason: the answer changes underneath the window, as the
@@ -243,30 +208,22 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // failure leaves the last answer alone rather than clearing it — the notice is about data
   // that is already gone, and a backend that is briefly not answering is not news that it
   // came back.
-  useEffect(() => {
-    let alive = true;
-    const ask = (): void => {
-      void desktop
-        .sessionGap()
-        .then((answer) => {
-          if (alive) setGap(answer);
-        })
-        .catch(() => undefined);
-    };
-    ask();
-    if (!desktop.pollDashboard)
-      return () => {
-        alive = false;
-      };
-    const timer = setInterval(ask, DASHBOARD_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
+  const askGap = useCallback(async (live: StillWanted): Promise<void> => {
+    try {
+      const answer = await desktop.sessionGap();
+      if (live()) setGap(answer);
+    } catch {
+      // See above: the last answer is left where it is.
+    }
   }, []);
+  usePoll(askGap, { active: Boolean(desktop.pollDashboard), every: DASHBOARD_POLL_MS });
 
   // Somebody may be playing while this window is open, and the collector picks up what the
   // game wrote within half a minute. Anything new means every view is out of date at once.
+  //
+  // An effect of its own rather than a `usePoll`, and the difference is the first ask: this one
+  // deliberately has none. What it does with an answer is reload the window, and the answer it
+  // would get on the beat it mounted is the dashboard the window was just built from.
   useEffect(() => {
     if (!desktop.pollDashboard) return;
     const signature = (list: Segment[]): string =>
@@ -334,6 +291,13 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     : "Nothing collected yet.";
 
   const missing = gapSentence(gap);
+
+  // What the transmog view says instead of a wardrobe, which is nothing at all once there is
+  // one. Derived from where the read has got to rather than kept beside it in a second piece of
+  // state — the pair used to be able to disagree, and a screen saying it was still reading over
+  // a wardrobe that had arrived was what that looked like.
+  const setsStatus =
+    sets.state === "loading" ? READING_SETS : sets.state === "failed" ? message(sets.error) : "";
 
   const rosterMeta = profiles.length
     ? [
@@ -428,7 +392,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           profiles={profiles}
           onOpenSegment={openSegment}
           items={items}
-          inGameSets={inGameSets}
+          inGameSets={inGameSets.value}
           currencyIcons={currencyIcons}
           places={placeIcons}
           loadSetAppearances={desktop.inGameSetAppearances}
@@ -459,8 +423,8 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
       <section id="transmog-view" aria-label={TAB_LABELS.transmog} hidden={view !== "transmog"}>
         <TransmogView
-          payload={transmog}
-          status={transmogStatus}
+          payload={sets.value}
+          status={setsStatus}
           loadSet={desktop.transmogSetItems}
           loadAppearances={desktop.transmogAppearances}
           loadIcons={desktop.gameIcons}
@@ -474,26 +438,28 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             onError: message,
           }}
           marks={{
-            payload: marks,
+            payload: marks.value,
             setFavourite: desktop.setTransmogFavourite,
             setTag: desktop.setTransmogTag,
             deleteTag: desktop.deleteTransmogTag,
             // Every write answers with every mark, so the browsers repaint from what was
-            // stored — the same rule the activity and capture edits follow.
-            onApply: setMarks,
+            // stored — the same rule the activity and capture edits follow. `put` rather than a
+            // setter, so the resource counts the write as its own answer and nothing goes back
+            // to the database for a version of it from before the edit.
+            onApply: marks.put,
             onError: message,
           }}
           custom={{
-            payload: customSets,
+            payload: customSets.value,
             save: desktop.saveCustomSet,
             remove: desktop.deleteCustomSet,
             // Every write answers with every saved set, for the reason above it.
-            onApply: setCustomSets,
+            onApply: customSets.put,
             onError: message,
             sendToGame: desktop.sendSetToGame,
           }}
           inGame={{
-            payload: inGameSets,
+            payload: inGameSets.value,
             loadAppearances: desktop.inGameSetAppearances,
           }}
         />
@@ -593,7 +559,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 }
 
 /** What the transmog view says while the game's tables are being read. */
-const LOADING = "Reading the game's transmog tables…";
+const READING_SETS = "Reading the game's transmog tables…";
 
 /**
  * Starting the window again, a moment later.

@@ -12,6 +12,7 @@
  * which is the most user-supplied string in the application, is escaped here on the way in.
  */
 
+import type { Book } from "./book";
 import { clock, escapeHtml, plural } from "./format";
 import type { Capture, CaptureThumbnailsPayload, Segment } from "./types";
 
@@ -197,12 +198,16 @@ export function deleteWarning(capture: Capture): string {
 
 /* ---------- the pictures the window has been handed ---------- */
 
-export interface CaptureAlbum {
+export interface CaptureAlbum extends Book<number> {
   /**
-   * Fetches the thumbnails among `ids` that have not been fetched already, calling `changed`
-   * when they land. Never called for a request that turned up nothing new.
+   * Fetches the thumbnails among `ids` that have not been fetched already, calling `changed` when
+   * they land, and watches until the function it hands back is called.
+   *
+   * `changed` is never called for a request that turned up nothing new, and never after the caller
+   * has stopped listening — a grid inside a modal the reader has closed is not told about the
+   * pictures it was waiting for.
    */
-  learn: (ids: number[], changed: () => void) => Promise<void>;
+  learn: (ids: number[], changed: () => void) => () => void;
   thumbnail: (id: number) => string | undefined;
   /**
    * Drops what is held for one capture, which the delete path calls.
@@ -232,23 +237,37 @@ export function createCaptureAlbum(
 ): CaptureAlbum {
   const known = new Map<number, string>();
   const asked = new Set<number>();
+  /** Every grid on screen that is waiting to hear about any of this. */
+  const listeners = new Set<() => void>();
+  /** How many times anything has arrived, which is the snapshot React compares. See `book.ts`. */
+  let version = 0;
+
+  async function fetch(ids: number[]): Promise<void> {
+    const fresh = [...new Set(ids)].filter((id) => id > 0 && !asked.has(id));
+    if (!fresh.length) return;
+    for (const id of fresh) asked.add(id);
+    try {
+      const payload = await load(fresh);
+      for (const [id, url] of Object.entries(payload.thumbnails ?? {})) {
+        if (url) known.set(Number(id), url);
+      }
+    } catch {
+      for (const id of fresh) asked.delete(id);
+      return;
+    }
+    // To every grid on screen rather than to whoever asked: the same evening is unfolded on its
+    // card and open in the modal over it, and only the first of them put it in the request.
+    version += 1;
+    for (const listener of [...listeners]) listener();
+  }
 
   return {
-    learn: async (ids, changed) => {
-      const fresh = [...new Set(ids)].filter((id) => id > 0 && !asked.has(id));
-      if (!fresh.length) return;
-      for (const id of fresh) asked.add(id);
-      try {
-        const payload = await load(fresh);
-        for (const [id, url] of Object.entries(payload.thumbnails ?? {})) {
-          if (url) known.set(Number(id), url);
-        }
-      } catch {
-        for (const id of fresh) asked.delete(id);
-        return;
-      }
-      changed();
+    learn(ids, changed) {
+      listeners.add(changed);
+      void fetch(ids);
+      return () => listeners.delete(changed);
     },
+    version: () => version,
     thumbnail: (id) => known.get(id),
     forget: (id) => {
       known.delete(id);
