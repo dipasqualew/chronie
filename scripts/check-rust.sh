@@ -24,6 +24,12 @@ cargo fmt --manifest-path "$MANIFEST" --check
 # sixteen were worth fixing, so there is no baseline to carry and nothing for a new warning to
 # hide behind. A lint this repository genuinely disagrees with belongs in an `#[allow]` at the
 # item it is about, with the reason written beside it, rather than switched off for the tree.
+#
+# Worth knowing before it surprises somebody: clippy's lint set travels with the toolchain, so
+# the runner having a newer rustc than a laptop means CI can find things a clean local run did
+# not. That is how this arrived — five findings on the runner's 1.97 that 1.89 does not have,
+# on code neither of them had changed. It is a red build on the pull request rather than a
+# surprise on main, which is the trade `-D warnings` is making, and the fix is to fix them.
 echo "==> clippy"
 cargo clippy --manifest-path "$MANIFEST" --all-targets -- -D warnings
 

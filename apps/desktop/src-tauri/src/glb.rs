@@ -387,7 +387,7 @@ impl Binary {
         bytes: Vec<u8>,
         target: Option<gltf_json::buffer::Target>,
     ) -> gltf_json::Index<gltf_json::buffer::View> {
-        while self.bytes.len() % 4 != 0 {
+        while !self.bytes.len().is_multiple_of(4) {
             self.bytes.push(0);
         }
         let offset = self.bytes.len();
@@ -463,10 +463,10 @@ fn floats<const N: usize>(values: &[[f32; N]]) -> Vec<u8> {
 /// Both chunks are padded to a multiple of four — the JSON with spaces so it stays parseable,
 /// the binary with zeroes.
 fn container(mut json: Vec<u8>, mut bin: Vec<u8>) -> Vec<u8> {
-    while json.len() % 4 != 0 {
+    while !json.len().is_multiple_of(4) {
         json.push(b' ');
     }
-    while bin.len() % 4 != 0 {
+    while !bin.len().is_multiple_of(4) {
         bin.push(0);
     }
 

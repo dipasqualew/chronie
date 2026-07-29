@@ -395,7 +395,7 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
         if !hers.iter().any(|(_, swatch, _)| doing.contains(swatch)) {
             continue;
         }
-        hers.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+        hers.sort_by_key(|entry| (entry.0, entry.1));
         found.push((
             order,
             id,
@@ -409,7 +409,7 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
             },
         ));
     }
-    found.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+    found.sort_by_key(|entry| (entry.0, entry.1));
     Ok(found.into_iter().map(|(_, _, question)| question).collect())
 }
 
