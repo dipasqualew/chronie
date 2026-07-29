@@ -18,8 +18,8 @@
     "test:fixtures": "bun run scripts/check-fixtures.ts",
     "typecheck": "tsc -p apps/desktop && tsc -p scripts",
     "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx}\"",
     "ci:wait": "bun run scripts/wait-for-ci.ts"
   },
   "devDependencies": {

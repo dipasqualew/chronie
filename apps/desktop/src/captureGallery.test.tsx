@@ -52,9 +52,9 @@ function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
     Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, THUMBNAIL])) }),
   );
   const album = createCaptureAlbum(thumbnails);
-  const view = render(
+  const grid = (shown: Capture[]) => (
     <CaptureGallery
-      segments={[segment(captures)]}
+      segments={[segment(shown)]}
       album={album}
       actions={{
         loadImage: (captureId) =>
@@ -65,9 +65,13 @@ function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
         onError: said,
         ...actions,
       }}
-    />,
+    />
   );
-  return Object.assign(view, { thumbnails });
+  const view = render(grid(captures));
+  // The whole window redrawn from a dashboard the backend answered with, which is what every
+  // write in this app causes and is the only way to hand the open viewer a changed note.
+  const repaint = (shown: Capture[]): void => view.rerender(grid(shown));
+  return Object.assign(view, { thumbnails, repaint });
 }
 
 /**
@@ -336,6 +340,21 @@ describe("CaptureGallery", () => {
 
   // A note somebody abandoned by stepping to the next picture must not follow them onto it,
   // which is the whole reason the field is reset on the capture rather than on the note.
+  // The other half of keying the field on which capture is open rather than on its note. Every
+  // write in this app answers with the whole dashboard and repaints from it, so the viewer is
+  // handed a changed `note` for the capture it is already showing as an ordinary event — and
+  // reaching in to overwrite the field then would take away a sentence somebody is still
+  // writing. Watching `stored`, which is what the lint rule asks for, is exactly that bug.
+  it("leaves a half-typed note alone when the window repaints under it", async () => {
+    const { repaint } = gallery([capture({ note: "first Yogg kill" })]);
+    await open();
+
+    fireEvent.change(noteField(), { target: { value: "first Yogg kill, second try" } });
+    repaint([capture({ note: "something the backend now says" })]);
+
+    expect(noteField().value).toBe("first Yogg kill, second try");
+  });
+
   it("puts the next picture's own note in the field when the reader steps on", async () => {
     gallery([
       capture({ note: "first Yogg kill" }),

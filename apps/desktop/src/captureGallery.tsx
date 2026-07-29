@@ -220,6 +220,8 @@ function CaptureViewer({
     setConfirming(false);
     // Keyed on which capture is open rather than on the note: a repaint carrying the note that
     // was just written must not reach in and rewrite what somebody has started typing since.
+    // Listing `stored` is that bug, and "leaves a half-typed note alone when the window
+    // repaints under it" is what fails when it is listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId]);
 

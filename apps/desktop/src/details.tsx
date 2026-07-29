@@ -399,6 +399,10 @@ export function Details({ segments, onOpenSegment, items }: DetailsProps): React
     // this view hands to the modal are its own.
     return named.length ? sorted.map((segment) => withItemNames(segment, items)) : sorted;
     // `learned` is what puts the names in: the book answered, and the rows are rebuilt from it.
+    // The rule reads it as unnecessary because nothing in here mentions it, which is true and
+    // is the point — the book is a cache outside React, so its answer changes no identity the
+    // rule can see and this counter is the only thing that can ask for another look. Dropping
+    // it fails "names a transmog the addon could not, once the item book answers".
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments, columns, term, character, day, sortKey, ascending, items, named, learned]);
 

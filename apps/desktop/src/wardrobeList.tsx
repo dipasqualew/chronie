@@ -264,12 +264,16 @@ export function WardrobeList({
 
   // The pictures for what is actually on screen, and nothing else: a kind holds thousands of
   // rows and decoding a texture for each would be a minute of work nobody asked for.
-  const waiting = drawn.map((row) => row.iconFileDataId).filter((id) => id > 0);
-  const waitingKey = waiting.join(",");
+  // The ids rather than the array, which is new on every render and would ask every time — and
+  // read back out of the key inside the effect, the arrangement `captureGallery` uses, so that
+  // "the key is the identity" is something the code does rather than something a comment says.
+  const waitingKey = drawn
+    .map((row) => row.iconFileDataId)
+    .filter((id) => id > 0)
+    .join(",");
   useEffect(() => {
-    if (waiting.length) wantIcons(waiting);
-    // The ids rather than the array, which is new on every render and would ask every time.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const ids = waitingKey ? waitingKey.split(",").map(Number) : [];
+    if (ids.length) wantIcons(ids);
   }, [waitingKey, wantIcons]);
 
   // The bodies, by the display each is drawn from. Kept outside React for the reason the answers
@@ -310,7 +314,10 @@ export function WardrobeList({
         }
       })
       .finally(redraw);
-    // The display ids rather than the array, which is new on every render.
+    // The display ids rather than the array, which is new on every render. Not readable back
+    // out of the key the way the icon request above is — the effect needs the pieces — so this
+    // stays a suppression, and what holds it is the exact call counts `transmogView.test.tsx`
+    // asserts on `loadGallery` as the reader pages, switches body and comes back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedKey, look, loadGallery, bodies]);
 

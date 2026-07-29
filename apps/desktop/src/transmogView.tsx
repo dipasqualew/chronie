@@ -471,6 +471,9 @@ export function TransmogView({
       })
       .finally(redraw);
     // The ids rather than the array, which is new on every render and would ask every time.
+    // `wantedSets` cannot be read back out of the key the way the icon requests below are —
+    // the effect needs the rows themselves — so this stays a suppression, and what holds it is
+    // the exact call counts `transmogView.test.tsx` asserts on `loadSetGallery`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedKey, look, loadSetGallery, bodies]);
 

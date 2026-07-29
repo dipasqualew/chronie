@@ -259,7 +259,9 @@ export function OutfitPanel({
   useEffect(() => {
     dress(pieces, key);
     // `pieces` is what `key` names, and the key is the identity that matters: two lists holding
-    // the same appearances are the same outfit and must not be read twice.
+    // the same appearances are the same outfit and must not be read twice. Held by "does not
+    // read the same outfit out of the game twice" in `transmogView.test.tsx`, which puts a helm
+    // on, takes it off and puts it back, and asks how many times the game was read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, dress]);
 

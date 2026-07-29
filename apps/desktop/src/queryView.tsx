@@ -93,7 +93,9 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
     asked.current = true;
     void ask(sql, opening);
     // Deliberately the first render's `sql` — this runs once, and what it runs is the recipe
-    // the view opened with.
+    // the view opened with. Listing `sql` would re-run the query on every keystroke in the
+    // editor. Held by "opens already answered, with both a chart and its rows on screen" and
+    // "asks the backend nothing at all while nobody is looking at it".
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 

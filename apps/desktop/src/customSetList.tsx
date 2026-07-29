@@ -205,12 +205,16 @@ function Card({
   const pieces = piecesInOrder(set).map((piece) => ({ place: piece.place, row: rowOf(piece) }));
   // The pictures those rows are waiting on. Most are already in the cache above — every look in
   // a saved set was on screen when it was saved — and the call ignores what it holds already.
-  const wanted = pieces.map(({ row }) => row.iconFileDataId).filter((id) => id > 0);
-  const wantedKey = wanted.join(",");
+  // The ids rather than the array, which is new on every render and would ask every time — and
+  // read back out of the key inside the effect, the arrangement `captureGallery` uses, so that
+  // "the key is the identity" is something the code does rather than something a comment says.
+  const wantedKey = pieces
+    .map(({ row }) => row.iconFileDataId)
+    .filter((id) => id > 0)
+    .join(",");
   useEffect(() => {
-    if (wanted.length) wantIcons(wanted);
-    // The ids rather than the array, which is new on every render and would ask every time.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const ids = wantedKey ? wantedKey.split(",").map(Number) : [];
+    if (ids.length) wantIcons(ids);
   }, [wantedKey, wantIcons]);
 
   return (
