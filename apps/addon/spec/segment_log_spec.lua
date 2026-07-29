@@ -81,6 +81,12 @@ describe("ns.newSegmentLog", function()
         assert.is_function(ns.newSegmentLog)
     end)
 
+    it("versions the segment feed independently of the rest of SavedVariables", function()
+        local _, db = newLog()
+
+        assert.equal(1, db.segmentSchemaVersion)
+    end)
+
     describe("recording a visit", function()
         it("writes every field of the record into db.segments", function()
             local log, db = newLog()
