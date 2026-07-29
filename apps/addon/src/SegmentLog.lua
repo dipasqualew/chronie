@@ -93,6 +93,7 @@ function ns.newSegmentLog(deps)
     local formatDate = deps.formatDate
     local retainSeconds = (deps.retainDays or DEFAULT_RETAIN_DAYS) * DAY
 
+    db.segmentSchemaVersion = ns.SEGMENT_SCHEMA_VERSION
     db.segments = db.segments or {}
 
     ---Drops everything that fell out of the retention window. Called on every read

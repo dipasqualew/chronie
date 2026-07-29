@@ -1,5 +1,10 @@
 local _, ns = ...
 
+---Version of the SavedVariables segment feed. Increment before shipping an incompatible
+---change; additive fields do not need a new version because readers ignore what they do not
+---know. The collector documents the compatibility policy in docs/saved-variables.md.
+ns.SEGMENT_SCHEMA_VERSION = 1
+
 ---The shape of every list-valued field a segment carries, in one place. Both the tally
 ---(when it builds a summary) and the log (when it files a record) copy these lists out of
 ---live state into fresh tables, and every event type used to mean editing the copy logic

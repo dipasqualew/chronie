@@ -27,6 +27,7 @@ pub mod placement;
 pub mod qualities;
 pub mod query;
 pub mod retention;
+mod saved_variables;
 pub mod transmog;
 pub mod wardrobe;
 pub mod wifi;

@@ -1,22 +1,26 @@
 use crate::activity;
 use crate::captures::{self, Marker, Stored, Wanted};
 use crate::combatlog;
+use crate::customization;
 use crate::customsets;
 use crate::icons;
 use crate::ingamesets;
 use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
-use crate::customization;
 use crate::look;
 use crate::marks;
 use crate::placement;
 use crate::retention;
+use crate::saved_variables::{
+    self, EncounterEvent, Experience, Keystone, LevelUpEvent, RawHoldingSnapshot, RawLockout,
+    RawLockoutActivity, RawRosterEntry, RawWarband, Segment,
+};
 use chrono::{DateTime, Datelike, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use serde_json::{Map, Value};
+use specta::Type;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -395,64 +399,6 @@ pub fn account_files(wow_path: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn normalized(mut segment: Value) -> Option<Value> {
-    let object = segment.as_object_mut()?;
-    if !object.get("id").is_some_and(Value::is_string)
-        || !object.get("character").is_some_and(Value::is_string)
-        || !object.get("endedAt").is_some_and(Value::is_number)
-    {
-        return None;
-    }
-    let ended = object["endedAt"].as_i64()?;
-    object.entry("startedAt").or_insert(Value::from(ended));
-    object.entry("day").or_insert_with(|| {
-        DateTime::from_timestamp(ended, 0)
-            .map(|date| Value::String(date.with_timezone(&Local).format("%Y-%m-%d").to_string()))
-            .unwrap_or(Value::String("Unknown".into()))
-    });
-    for (key, default) in [
-        ("instance", Value::String("Unknown".into())),
-        ("difficulty", Value::String(String::new())),
-        ("instanceType", Value::String(String::new())),
-        ("seconds", Value::from(0)),
-        ("lootValue", Value::from(0)),
-        ("goldDiff", Value::from(0)),
-        ("currencyTotal", Value::from(0)),
-        ("reputationTotal", Value::from(0)),
-        ("housingXP", Value::from(0)),
-    ] {
-        object.entry(key).or_insert(default);
-    }
-    for key in [
-        "transmogs",
-        "currencies",
-        "reputation",
-        "achievements",
-        "levelUps",
-        "mounts",
-        "pets",
-        "quests",
-        "toys",
-        "housingItems",
-        "housingLevelUps",
-        "encounters",
-        "equipsetChanges",
-    ] {
-        if !object.get(key).is_some_and(Value::is_array) {
-            object.insert(key.into(), Value::Array(Vec::new()));
-        }
-    }
-    // `keystone` and `experience` are deliberately left absent when the segment carried
-    // none: the inference reads the absence of a keystone as "this was not a Mythic+ run",
-    // which an empty stand-in would destroy.
-    for key in ["keystone", "experience"] {
-        if !object.get(key).is_some_and(Value::is_object) {
-            object.remove(key);
-        }
-    }
-    Some(segment)
-}
-
 fn open_database(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -735,22 +681,6 @@ fn split_character(source_key: &str) -> (&str, &str) {
     source_key.split_once('-').unwrap_or((source_key, ""))
 }
 
-fn integer(value: &Value, key: &str) -> i64 {
-    value.get(key).and_then(Value::as_i64).unwrap_or(0)
-}
-
-fn optional_integer(value: &Value, key: &str) -> Option<i64> {
-    value.get(key).and_then(Value::as_i64)
-}
-
-fn optional_text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
-}
-
-fn optional_boolean(value: &Value, key: &str) -> Option<i64> {
-    value.get(key).and_then(Value::as_bool).map(i64::from)
-}
-
 fn upsert_account(
     transaction: &Transaction<'_>,
     source_key: &str,
@@ -782,16 +712,15 @@ fn upsert_account(
 fn upsert_character(
     transaction: &Transaction<'_>,
     account_id: i64,
-    segment: &Value,
+    segment: &Segment,
     now: i64,
 ) -> Result<i64, String> {
-    let source_key = segment["character"].as_str().expect("normalized character");
     upsert_character_key(
         transaction,
         account_id,
-        source_key,
-        optional_text(segment, "classFile"),
-        optional_integer(segment, "level"),
+        &segment.character,
+        segment.class_file.as_deref(),
+        segment.level,
         now,
     )
 }
@@ -840,43 +769,38 @@ fn upsert_character_key(
 /// which are precisely the ones worth knowing are still free.
 #[derive(Debug, Default)]
 struct LockoutFeed {
-    activities: Value,
-    characters: Value,
-    roster: Value,
+    activities: BTreeMap<String, RawLockoutActivity>,
+    characters: BTreeMap<String, BTreeMap<String, RawLockout>>,
+    roster: BTreeMap<String, RawRosterEntry>,
 }
 
 impl LockoutFeed {
-    fn read(saved: &Value) -> Self {
-        let table = |key: &str| saved.get(key).cloned().unwrap_or(Value::Null);
+    fn take(saved: &mut saved_variables::RawSavedVariables) -> Self {
         Self {
-            activities: table("activities"),
-            characters: table("characters"),
-            roster: table("roster"),
+            activities: std::mem::take(&mut saved.activities),
+            characters: std::mem::take(&mut saved.characters),
+            roster: std::mem::take(&mut saved.roster),
         }
     }
-}
-
-/// The entries of a Lua table that was written with string keys. An empty Lua table is
-/// indistinguishable from an empty list, so anything that is not an object is simply no
-/// entries rather than an error.
-fn entries(value: &Value) -> impl Iterator<Item = (&String, &Value)> {
-    value.as_object().into_iter().flat_map(Map::iter)
 }
 
 /// The kind of thing an activity is, from the activity record when the addon wrote one and
 /// from the lockout itself for saves that predate the activity table. Anything unrecognised
 /// falls back to the one distinction every save has always carried, because the column is
 /// constrained and a stray kind would fail the whole sync rather than one row.
-fn lockout_kind(record: &Value, fallback: &Value) -> &'static str {
-    match optional_text(record, "kind").or_else(|| optional_text(fallback, "kind")) {
+fn lockout_kind(record: &RawLockoutActivity, fallback: Option<&RawLockout>) -> &'static str {
+    match record
+        .kind
+        .as_deref()
+        .or_else(|| fallback.and_then(|value| value.kind.as_deref()))
+    {
         Some("raid") => "raid",
         Some("dungeon") => "dungeon",
         Some("world_boss") => "world_boss",
         _ => {
             let is_raid = record
-                .get("isRaid")
-                .or_else(|| fallback.get("isRaid"))
-                .and_then(Value::as_bool)
+                .is_raid
+                .or_else(|| fallback.and_then(|value| value.is_raid))
                 .unwrap_or(false);
             if is_raid {
                 "raid"
@@ -890,8 +814,8 @@ fn lockout_kind(record: &Value, fallback: &Value) -> &'static str {
 /// How often the activity resets, as the addon recorded it. A save written before the addon
 /// stated a cadence falls back to the kind, which is the same flat rule the addon applies:
 /// raids weekly, dungeons daily, world bosses weekly.
-fn lockout_period(record: &Value, kind: &str) -> &'static str {
-    match optional_text(record, "period") {
+fn lockout_period(record: &RawLockoutActivity, kind: &str) -> &'static str {
+    match record.period.as_deref() {
         Some("daily") => "daily",
         Some("weekly") => "weekly",
         _ => match kind {
@@ -906,13 +830,15 @@ fn upsert_lockout_activity(
     transaction: &Transaction<'_>,
     account_id: i64,
     source_key: &str,
-    record: &Value,
-    fallback: &Value,
+    record: &RawLockoutActivity,
+    fallback: Option<&RawLockout>,
     now: i64,
 ) -> Result<i64, String> {
-    let name = optional_text(record, "activity")
-        .or_else(|| optional_text(fallback, "activity"))
-        .or_else(|| optional_text(fallback, "instance"))
+    let name = record
+        .activity
+        .as_deref()
+        .or_else(|| fallback.and_then(|value| value.activity.as_deref()))
+        .or_else(|| fallback.and_then(|value| value.instance.as_deref()))
         .unwrap_or(source_key);
     let kind = lockout_kind(record, fallback);
     transaction
@@ -954,7 +880,7 @@ fn insert_lockout(
     transaction: &Transaction<'_>,
     activity_id: i64,
     character_id: i64,
-    lockout: &Value,
+    lockout: &RawLockout,
     expires_at: i64,
     now: i64,
 ) -> Result<(), String> {
@@ -967,9 +893,9 @@ fn insert_lockout(
             params![
                 activity_id,
                 character_id,
-                optional_integer(lockout, "difficultyId").unwrap_or(0),
-                optional_text(lockout, "difficulty").unwrap_or(""),
-                optional_integer(lockout, "maxPlayers").unwrap_or(0),
+                lockout.difficulty_id.unwrap_or(0),
+                lockout.difficulty.as_deref().unwrap_or(""),
+                lockout.max_players.unwrap_or(0),
                 expires_at,
                 now
             ],
@@ -977,15 +903,8 @@ fn insert_lockout(
         .map_err(|error| error.to_string())?;
     let lockout_id = transaction.last_insert_rowid();
 
-    for (position, encounter) in lockout
-        .get("encounters")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-    {
-        let Some(name) = optional_text(encounter, "name") else {
+    for (position, encounter) in lockout.encounters.iter().enumerate() {
+        let Some(name) = encounter.name.as_deref() else {
             continue;
         };
         transaction
@@ -996,7 +915,7 @@ fn insert_lockout(
                     lockout_id,
                     position as i64,
                     name,
-                    optional_boolean(encounter, "killed").unwrap_or(0)
+                    i64::from(encounter.killed.unwrap_or(false))
                 ],
             )
             .map_err(|error| error.to_string())?;
@@ -1016,24 +935,24 @@ fn sync_lockouts(
     feed: &LockoutFeed,
     now: i64,
 ) -> Result<(), String> {
-    for (character, info) in entries(&feed.roster) {
+    for (character, info) in &feed.roster {
         upsert_character_key(
             transaction,
             account_id,
             character,
-            optional_text(info, "classFile"),
-            optional_integer(info, "level"),
+            info.class_file.as_deref(),
+            info.level,
             now,
         )?;
     }
 
     let mut activity_ids: HashMap<String, i64> = HashMap::new();
-    for (key, record) in entries(&feed.activities) {
-        let id = upsert_lockout_activity(transaction, account_id, key, record, &Value::Null, now)?;
+    for (key, record) in &feed.activities {
+        let id = upsert_lockout_activity(transaction, account_id, key, record, None, now)?;
         activity_ids.insert(key.clone(), id);
     }
 
-    for (character, lockouts) in entries(&feed.characters) {
+    for (character, lockouts) in &feed.characters {
         let character_id =
             upsert_character_key(transaction, account_id, character, None, None, now)?;
         transaction
@@ -1043,20 +962,17 @@ fn sync_lockouts(
             )
             .map_err(|error| error.to_string())?;
 
-        for (slot, lockout) in entries(lockouts) {
-            let Some(expires_at) = optional_integer(lockout, "expiry") else {
+        for (slot, lockout) in lockouts {
+            let Some(expires_at) = lockout.expiry else {
                 continue;
             };
             // The map key is the slot a save is filed under — activity plus difficulty —
             // while the activity it belongs to is named on the lockout itself. A save
             // written before activities existed has no key, and rebuilding it the way the
             // addon does is what stops one raid becoming two activities here.
-            let key = match optional_text(lockout, "key") {
+            let key = match lockout.key.as_deref() {
                 Some(key) => key.to_string(),
-                None => format!(
-                    "instance\0{}",
-                    optional_text(lockout, "instance").unwrap_or(slot)
-                ),
+                None => format!("instance\0{}", lockout.instance.as_deref().unwrap_or(slot)),
             };
             let activity_id = match activity_ids.get(&key) {
                 Some(id) => *id,
@@ -1067,15 +983,22 @@ fn sync_lockouts(
                         transaction,
                         account_id,
                         &key,
-                        &Value::Null,
-                        lockout,
+                        &RawLockoutActivity::default(),
+                        Some(lockout),
                         now,
                     )?;
                     activity_ids.insert(key, id);
                     id
                 }
             };
-            insert_lockout(transaction, activity_id, character_id, lockout, expires_at, now)?;
+            insert_lockout(
+                transaction,
+                activity_id,
+                character_id,
+                lockout,
+                expires_at,
+                now,
+            )?;
         }
     }
 
@@ -1119,7 +1042,7 @@ fn clear_outcomes(transaction: &Transaction<'_>, segment_id: i64) -> Result<(), 
 fn refresh_activities(
     transaction: &Transaction<'_>,
     segment_id: i64,
-    segment: &Value,
+    segment: &Segment,
     now: i64,
 ) -> Result<(), String> {
     transaction
@@ -1160,27 +1083,16 @@ fn refresh_activities(
     Ok(())
 }
 
-fn events<'a>(segment: &'a Value, key: &str) -> &'a [Value] {
-    segment
-        .get(key)
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-}
-
 fn insert_outcomes(
     transaction: &Transaction<'_>,
     character_id: i64,
     segment_id: i64,
-    segment: &Value,
+    segment: &Segment,
 ) -> Result<(), String> {
     clear_outcomes(transaction, segment_id)?;
 
-    for (position, event) in events(segment, "transmogs").iter().enumerate() {
-        let Some(item_id) = optional_integer(event, "id") else {
-            continue;
-        };
-        let acquisition_kind = match event.get("newAppearance").and_then(Value::as_bool) {
+    for (position, event) in segment.transmogs.iter().enumerate() {
+        let acquisition_kind = match event.new_appearance {
             Some(true) => "appearance",
             Some(false) => "source",
             None => "unknown",
@@ -1194,20 +1106,17 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    item_id,
-                    optional_integer(event, "sourceID"),
-                    optional_integer(event, "appearanceID"),
-                    optional_integer(event, "at"),
+                    event.id,
+                    event.source_id,
+                    event.appearance_id,
+                    event.at,
                     acquisition_kind
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "achievements").iter().enumerate() {
-        let Some(achievement_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.achievements.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO achievements (
@@ -1216,19 +1125,16 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    achievement_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at"),
-                    optional_boolean(event, "accountFirst")
+                    event.id,
+                    event.name.as_deref(),
+                    event.at,
+                    event.account_first.map(i64::from)
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "quests").iter().enumerate() {
-        let Some(quest_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.quests.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO quests (
@@ -1238,39 +1144,27 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    quest_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at"),
-                    optional_boolean(event, "characterFirst"),
-                    optional_boolean(event, "accountFirst")
+                    event.id,
+                    event.name.as_deref(),
+                    event.at,
+                    event.character_first.map(i64::from),
+                    event.account_first.map(i64::from)
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for event in events(segment, "currencies") {
-        let Some(currency_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for event in &segment.currencies {
         transaction
             .execute(
                 "INSERT INTO currency_gains (segment_id, currency_id, name, amount, total)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    segment_id,
-                    currency_id,
-                    optional_text(event, "name").unwrap_or("Unknown"),
-                    integer(event, "amount"),
-                    optional_integer(event, "total")
-                ],
+                params![segment_id, event.id, event.name, event.amount, event.total],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for event in events(segment, "reputation") {
-        let Some(faction) = optional_text(event, "faction") else {
-            continue;
-        };
+    for event in &segment.reputation {
         transaction
             .execute(
                 "INSERT INTO reputation_gains (
@@ -1278,38 +1172,27 @@ fn insert_outcomes(
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     segment_id,
-                    faction,
-                    integer(event, "amount"),
-                    optional_text(event, "standing"),
-                    optional_integer(event, "current"),
-                    optional_integer(event, "max")
+                    event.faction,
+                    event.amount,
+                    event.standing.as_deref(),
+                    event.current,
+                    event.max
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "levelUps").iter().enumerate() {
-        let Some(level) = optional_integer(event, "level") else {
-            continue;
-        };
+    for (position, event) in segment.level_ups.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO level_ups (segment_id, position, level, reached_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    segment_id,
-                    position as i64,
-                    level,
-                    optional_integer(event, "at")
-                ],
+                params![segment_id, position as i64, event.level, event.at],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "mounts").iter().enumerate() {
-        let Some(mount_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.mounts.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO mounts (segment_id, position, mount_id, name, collected_at)
@@ -1317,18 +1200,15 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    mount_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at")
+                    event.id,
+                    event.name.as_deref(),
+                    event.at
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "pets").iter().enumerate() {
-        let Some(species_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.pets.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO pets (
@@ -1338,20 +1218,17 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    species_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at"),
-                    optional_text(event, "guid"),
-                    optional_boolean(event, "speciesFirst")
+                    event.id,
+                    event.name.as_deref(),
+                    event.at,
+                    event.guid.as_deref(),
+                    event.species_first.map(i64::from)
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "toys").iter().enumerate() {
-        let Some(item_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.toys.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO toys (segment_id, position, item_id, name, collected_at)
@@ -1359,18 +1236,15 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    item_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at")
+                    event.id,
+                    event.name.as_deref(),
+                    event.at
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "housingItems").iter().enumerate() {
-        let Some(decor_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.housing_items.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO housing_items (
@@ -1379,37 +1253,26 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    decor_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at"),
-                    optional_boolean(event, "warbandFirst")
+                    event.id,
+                    event.name.as_deref(),
+                    event.at,
+                    event.warband_first.map(i64::from)
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "housingLevelUps").iter().enumerate() {
-        let Some(level) = optional_integer(event, "level") else {
-            continue;
-        };
+    for (position, event) in segment.housing_level_ups.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO housing_level_ups (segment_id, position, level, reached_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    segment_id,
-                    position as i64,
-                    level,
-                    optional_integer(event, "at")
-                ],
+                params![segment_id, position as i64, event.level, event.at],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    for (position, event) in events(segment, "encounters").iter().enumerate() {
-        let Some(encounter_id) = optional_integer(event, "id") else {
-            continue;
-        };
+    for (position, event) in segment.encounters.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO encounters (
@@ -1419,26 +1282,21 @@ fn insert_outcomes(
                 params![
                     segment_id,
                     position as i64,
-                    encounter_id,
-                    optional_text(event, "name"),
-                    optional_integer(event, "at"),
-                    optional_integer(event, "difficultyId"),
-                    optional_integer(event, "groupSize"),
-                    optional_boolean(event, "success").unwrap_or(0)
+                    event.id,
+                    event.name.as_deref(),
+                    event.at,
+                    event.difficulty_id,
+                    event.group_size,
+                    i64::from(event.success)
                 ],
             )
             .map_err(|error| error.to_string())?;
     }
 
-    if let Some(keystone) = segment.get("keystone").filter(|value| value.is_object()) {
+    if let Some(keystone) = &segment.keystone {
         // A run with no level is not one the app can say anything useful about, and the
         // column is NOT NULL for exactly that reason.
-        if let Some(level) = optional_integer(keystone, "level") {
-            let affixes = keystone
-                .get("affixes")
-                .filter(|value| value.is_array())
-                .cloned()
-                .unwrap_or_else(|| Value::Array(Vec::new()));
+        if let Some(level) = keystone.level {
             transaction
                 .execute(
                     "INSERT INTO keystone_runs (
@@ -1448,14 +1306,15 @@ fn insert_outcomes(
                     params![
                         segment_id,
                         level,
-                        optional_integer(keystone, "mapId"),
-                        affixes.to_string(),
-                        optional_integer(keystone, "startedAt"),
-                        optional_integer(keystone, "completedAt"),
-                        optional_boolean(keystone, "completed").unwrap_or(0),
-                        optional_integer(keystone, "durationMs"),
-                        optional_boolean(keystone, "onTime"),
-                        optional_integer(keystone, "upgrades")
+                        keystone.map_id,
+                        serde_json::to_string(&keystone.affixes)
+                            .map_err(|error| error.to_string())?,
+                        keystone.started_at,
+                        keystone.completed_at,
+                        i64::from(keystone.completed),
+                        keystone.duration_ms,
+                        keystone.on_time.map(i64::from),
+                        keystone.upgrades
                     ],
                 )
                 .map_err(|error| error.to_string())?;
@@ -1478,19 +1337,10 @@ fn insert_equipset_changes(
     transaction: &Transaction<'_>,
     character_id: i64,
     segment_id: i64,
-    segment: &Value,
+    segment: &Segment,
 ) -> Result<(), String> {
-    for (position, event) in events(segment, "equipsetChanges").iter().enumerate() {
-        let Some(set_id) = optional_integer(event, "setId") else {
-            continue;
-        };
-        // An unknown kind is not something the ledger can file, and the column's CHECK would
-        // refuse it anyway; dropping it here keeps a bad row from failing the whole sync.
-        let kind = match optional_text(event, "kind") {
-            Some(kind @ ("created" | "deleted" | "updated")) => kind,
-            _ => continue,
-        };
-        let changed_at = optional_integer(event, "at");
+    for (position, event) in segment.equipset_changes.iter().enumerate() {
+        let changed_at = event.at;
         transaction
             .execute(
                 "INSERT INTO equipset_changes (
@@ -1500,19 +1350,16 @@ fn insert_equipset_changes(
                     segment_id,
                     position as i64,
                     character_id,
-                    set_id,
-                    optional_text(event, "name").unwrap_or(""),
-                    kind,
+                    event.set_id,
+                    event.name,
+                    event.kind.as_str(),
                     changed_at
                 ],
             )
             .map_err(|error| error.to_string())?;
         let change_id = transaction.last_insert_rowid();
 
-        for item in events(event, "items") {
-            let Some(slot) = optional_integer(item, "slot") else {
-                continue;
-            };
+        for item in &event.items {
             transaction
                 .execute(
                     "INSERT INTO equipset_slots (
@@ -1523,11 +1370,11 @@ fn insert_equipset_changes(
                     params![
                         change_id,
                         character_id,
-                        set_id,
-                        slot,
-                        optional_integer(item, "itemId"),
-                        optional_integer(item, "itemLevel"),
-                        optional_text(item, "itemName"),
+                        event.set_id,
+                        item.slot,
+                        item.item_id,
+                        item.item_level,
+                        item.item_name.as_deref(),
                         changed_at
                     ],
                 )
@@ -1540,10 +1387,10 @@ fn insert_equipset_changes(
 fn upsert_segment(
     transaction: &Transaction<'_>,
     character_id: i64,
-    segment: &Value,
+    segment: &Segment,
     now: i64,
 ) -> Result<bool, String> {
-    let source_id = segment["id"].as_str().expect("normalized segment id");
+    let source_id = &segment.id;
     let existing: Option<i64> = transaction
         .query_row(
             "SELECT id FROM segments WHERE character_id = ?1 AND source_id = ?2",
@@ -1552,8 +1399,7 @@ fn upsert_segment(
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let ended_at = integer(segment, "endedAt");
-    let experience = segment.get("experience").filter(|value| value.is_object());
+    let experience = segment.experience.as_ref();
     transaction
         .execute(
             "INSERT INTO segments (
@@ -1593,30 +1439,27 @@ fn upsert_segment(
             params![
                 character_id,
                 source_id,
-                segment["day"].as_str().unwrap_or("Unknown"),
-                segment["instance"].as_str().unwrap_or("Unknown"),
-                segment["instanceType"].as_str().unwrap_or(""),
-                segment["difficulty"].as_str().unwrap_or(""),
-                optional_integer(segment, "difficultyId"),
-                integer(segment, "startedAt"),
-                ended_at,
-                integer(segment, "seconds"),
-                optional_integer(segment, "level"),
-                integer(segment, "lootValue"),
-                integer(segment, "goldDiff"),
-                integer(segment, "currencyTotal"),
-                integer(segment, "reputationTotal"),
-                integer(segment, "housingXP"),
+                segment.day,
+                segment.instance,
+                segment.instance_type,
+                segment.difficulty,
+                segment.difficulty_id,
+                segment.started_at,
+                segment.ended_at,
+                segment.seconds,
+                segment.level,
+                segment.loot_value,
+                segment.gold_diff,
+                segment.currency_total,
+                segment.reputation_total,
+                segment.housing_xp,
                 now,
-                optional_integer(segment, "expansionTier"),
-                optional_integer(segment, "latestExpansionTier"),
-                experience.map(|value| integer(value, "gained")).unwrap_or(0),
-                experience
-                    .and_then(|value| value.get("percent"))
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0),
-                experience.and_then(|value| optional_integer(value, "startLevel")),
-                experience.and_then(|value| optional_integer(value, "endLevel")),
+                segment.expansion_tier,
+                segment.latest_expansion_tier,
+                experience.map(|value| value.gained).unwrap_or(0),
+                experience.map(|value| value.percent).unwrap_or(0.0),
+                experience.and_then(|value| value.start_level),
+                experience.and_then(|value| value.end_level),
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -2684,10 +2527,10 @@ struct Incoming {
     source_key: String,
     source_modified_ns: Option<i64>,
     source_size: Option<i64>,
-    segments: Vec<Value>,
+    segments: Vec<Segment>,
     lockouts: LockoutFeed,
-    holdings: Value,
-    warband: Value,
+    holdings: BTreeMap<String, RawHoldingSnapshot>,
+    warband: RawWarband,
     in_game_sets: Vec<ingamesets::CharacterSets>,
     /// Who each character of this account is: their race, and what they were last seen made of.
     looks: Vec<look::Look>,
@@ -2707,10 +2550,10 @@ struct Incoming {
 fn sync_holdings(
     transaction: &Transaction<'_>,
     account_id: i64,
-    holdings: &Value,
+    holdings: &BTreeMap<String, RawHoldingSnapshot>,
     now: i64,
 ) -> Result<(), String> {
-    for (character, snapshot) in entries(holdings) {
+    for (character, snapshot) in holdings {
         let character_id =
             upsert_character_key(transaction, account_id, character, None, None, now)?;
         transaction
@@ -2726,14 +2569,13 @@ fn sync_holdings(
             )
             .map_err(|error| error.to_string())?;
 
-        let currencies = snapshot.get("currencies").cloned().unwrap_or(Value::Null);
-        for (key, held) in entries(&currencies) {
+        for (key, held) in &snapshot.currencies {
             // The addon keys these by the client's own currency id, which arrives as a Lua
             // table key and so as a string. One that is not a number is not a currency.
             let Ok(currency_id) = key.parse::<i64>() else {
                 continue;
             };
-            let Some(total) = optional_integer(held, "total") else {
+            let Some(total) = held.total else {
                 continue;
             };
             transaction
@@ -2744,13 +2586,13 @@ fn sync_holdings(
                     params![
                         character_id,
                         currency_id,
-                        optional_text(held, "name"),
+                        held.name.as_deref(),
                         total,
-                        optional_integer(held, "at"),
+                        held.at,
                         // The addon writes the flag only when it is set, so an absent one is
                         // a currency this character's own — which is what the column's
                         // default already says for every row written before it existed.
-                        optional_boolean(held, "accountWide").unwrap_or(0)
+                        i64::from(held.account_wide.unwrap_or(false))
                     ],
                 )
                 .map_err(|error| error.to_string())?;
@@ -2758,25 +2600,19 @@ fn sync_holdings(
 
         // Absent rather than zero when the character has never reported one: a row saying a
         // character holds nothing is a claim, and an old history has simply never been asked.
-        if let Some(total) = snapshot.get("gold").and_then(|gold| optional_integer(gold, "total"))
-        {
-            transaction
-                .execute(
-                    "INSERT OR REPLACE INTO character_gold (character_id, total, observed_at)
-                     VALUES (?1, ?2, ?3)",
-                    params![
-                        character_id,
-                        total,
-                        snapshot
-                            .get("gold")
-                            .and_then(|gold| optional_integer(gold, "at"))
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+        if let Some(gold) = &snapshot.gold {
+            if let Some(total) = gold.total {
+                transaction
+                    .execute(
+                        "INSERT OR REPLACE INTO character_gold (character_id, total, observed_at)
+                         VALUES (?1, ?2, ?3)",
+                        params![character_id, total, gold.at],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
         }
 
-        let factions = snapshot.get("factions").cloned().unwrap_or(Value::Null);
-        for (faction, held) in entries(&factions) {
+        for (faction, held) in &snapshot.factions {
             transaction
                 .execute(
                     "INSERT INTO character_standings (
@@ -2786,12 +2622,12 @@ fn sync_holdings(
                     params![
                         character_id,
                         faction,
-                        optional_text(held, "standing"),
-                        optional_integer(held, "current"),
-                        optional_integer(held, "max"),
-                        optional_integer(held, "rank"),
-                        optional_text(held, "system"),
-                        optional_integer(held, "at")
+                        held.standing.as_deref(),
+                        held.current,
+                        held.max,
+                        held.rank,
+                        held.system.as_deref(),
+                        held.at
                     ],
                 )
                 .map_err(|error| error.to_string())?;
@@ -2808,16 +2644,16 @@ fn sync_holdings(
 fn sync_warband(
     transaction: &Transaction<'_>,
     account_id: i64,
-    warband: &Value,
+    warband: &RawWarband,
 ) -> Result<(), String> {
-    let Some(gold) = optional_integer(warband, "gold") else {
+    let Some(gold) = warband.gold else {
         return Ok(());
     };
     transaction
         .execute(
             "INSERT OR REPLACE INTO account_gold (account_id, warband, observed_at)
              VALUES (?1, ?2, ?3)",
-            params![account_id, gold, optional_integer(warband, "at")],
+            params![account_id, gold, warband.at],
         )
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -2841,8 +2677,14 @@ fn sync_in_game_sets(
     now: i64,
 ) -> Result<(), String> {
     for reported in characters {
-        let character_id =
-            upsert_character_key(transaction, account_id, &reported.character, None, None, now)?;
+        let character_id = upsert_character_key(
+            transaction,
+            account_id,
+            &reported.character,
+            None,
+            None,
+            now,
+        )?;
         // The slots go with the sets by way of the cascade the migration declares, so deleting
         // the sets is the whole of the clearing out.
         transaction
@@ -3267,45 +3109,39 @@ pub fn collect(
         }
         let text = fs::read_to_string(&path)
             .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-        let saved = read_saved_variable(&text, "ChronieDB")?.unwrap_or_default();
-        let segments = saved
-            .get("segments")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
+        let mut saved =
+            saved_variables::read(read_saved_variable(&text, "ChronieDB")?.unwrap_or_default());
+        let segments = saved.take_segments();
+        let lockouts = LockoutFeed::take(&mut saved);
+        let holdings = std::mem::take(&mut saved.holdings);
+        let warband = std::mem::take(&mut saved.warband);
+        let in_game_sets = ingamesets::read(&saved.custom_sets);
+        let set_request_outcomes = ingamesets::outcomes(&saved.custom_set_requests);
+        let looks = look::read(&saved.character_look);
+        let markers = captures::markers_from_entries(&saved.entries);
         incoming.push(Incoming {
             source_key,
             source_modified_ns,
             source_size,
-            segments: segments
-                .iter()
-                .cloned()
-                .filter_map(normalized)
-                .collect::<Vec<_>>(),
-            lockouts: LockoutFeed::read(&saved),
-            holdings: saved.get("holdings").cloned().unwrap_or(Value::Null),
+            segments,
+            lockouts,
+            holdings,
             // Beside the per-character snapshots rather than inside them: the addon keys
             // `holdings` by character, and a warband entry in there would arrive here as a
             // character named "warband".
-            warband: saved.get("warband").cloned().unwrap_or(Value::Null),
+            warband,
             // `customSets` is the addon's word, because the addon is talking to the game and
             // that is what the game calls them. In here they are in-game sets, so that the
             // reader's own saved sets can keep the name they have had since before the game
             // had any. See `ingamesets.rs`.
-            in_game_sets: saved
-                .get("customSets")
-                .map(ingamesets::read)
-                .unwrap_or_default(),
+            in_game_sets,
             // The other half of the two-way sync, coming back. The addon writes what it did
             // under the request's own id, which is how the app knows to stop asking.
-            set_request_outcomes: saved
-                .get("customSetRequests")
-                .map(ingamesets::outcomes)
-                .unwrap_or_default(),
+            set_request_outcomes,
             // Who the reader's own characters are, which is what lets the transmog view draw
             // one of them rather than a body assembled from selects. See `look.rs`.
-            looks: saved.get("characterLook").map(look::read).unwrap_or_default(),
-            markers: captures::markers(&saved),
+            looks,
+            markers,
         });
     }
 
@@ -3821,15 +3657,17 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
                     "kind": row.get::<_, String>(4)?,
                     "at": row.get::<_, Option<i64>>(5)?,
                 }),
-                row.get::<_, Option<i64>>(6)?.map(|slot| serde_json::json!({
-                    "slot": slot,
-                    "itemId": row.get::<_, Option<i64>>(7).unwrap_or(None),
-                    "itemLevel": row.get::<_, Option<i64>>(8).unwrap_or(None),
-                    "itemName": row.get::<_, Option<String>>(9).unwrap_or(None),
-                    "previousItemId": row.get::<_, Option<i64>>(10).unwrap_or(None),
-                    "previousItemLevel": row.get::<_, Option<i64>>(11).unwrap_or(None),
-                    "previousItemName": row.get::<_, Option<String>>(12).unwrap_or(None),
-                })),
+                row.get::<_, Option<i64>>(6)?.map(|slot| {
+                    serde_json::json!({
+                        "slot": slot,
+                        "itemId": row.get::<_, Option<i64>>(7).unwrap_or(None),
+                        "itemLevel": row.get::<_, Option<i64>>(8).unwrap_or(None),
+                        "itemName": row.get::<_, Option<String>>(9).unwrap_or(None),
+                        "previousItemId": row.get::<_, Option<i64>>(10).unwrap_or(None),
+                        "previousItemLevel": row.get::<_, Option<i64>>(11).unwrap_or(None),
+                        "previousItemName": row.get::<_, Option<String>>(12).unwrap_or(None),
+                    })
+                }),
             ))
         })
         .map_err(|error| error.to_string())?;
@@ -4329,7 +4167,7 @@ pub fn reset_activities(database_path: &Path, segment_id: i64, now: i64) -> Resu
     transaction
         .execute("DELETE FROM activities WHERE segment_id = ?1", [segment_id])
         .map_err(|error| error.to_string())?;
-    let segment = segment_value(&transaction, segment_id)?;
+    let segment = segment_for_inference(&transaction, segment_id)?;
     refresh_activities(&transaction, segment_id, &segment, now)?;
     transaction.commit().map_err(|error| error.to_string())
 }
@@ -4908,7 +4746,10 @@ fn suppress(
 /// Rebuilds just enough of a stored segment for the inference to read, so a reset can
 /// re-guess without the SavedVariables file the segment originally came from — which may be
 /// long gone, since the addon only keeps a rolling week.
-fn segment_value(transaction: &Transaction<'_>, segment_id: i64) -> Result<Value, String> {
+fn segment_for_inference(
+    transaction: &Transaction<'_>,
+    segment_id: i64,
+) -> Result<Segment, String> {
     let mut segment = transaction
         .query_row(
             "SELECT instance_name, instance_type, difficulty_name, difficulty_id,
@@ -4919,21 +4760,22 @@ fn segment_value(transaction: &Transaction<'_>, segment_id: i64) -> Result<Value
             [segment_id],
             |row| {
                 let gained: i64 = row.get(7)?;
-                Ok(serde_json::json!({
-                    "instance": row.get::<_, String>(0)?,
-                    "instanceType": row.get::<_, String>(1)?,
-                    "difficulty": row.get::<_, String>(2)?,
-                    "difficultyId": row.get::<_, Option<i64>>(3)?,
-                    "seconds": row.get::<_, i64>(4)?,
-                    "expansionTier": row.get::<_, Option<i64>>(5)?,
-                    "latestExpansionTier": row.get::<_, Option<i64>>(6)?,
-                    "experience": (gained != 0).then(|| serde_json::json!({
-                        "gained": gained,
-                        "percent": row.get::<_, f64>(8).unwrap_or(0.0),
-                        "startLevel": row.get::<_, Option<i64>>(9).unwrap_or(None),
-                        "endLevel": row.get::<_, Option<i64>>(10).unwrap_or(None),
-                    })),
-                }))
+                Ok(Segment {
+                    instance: row.get(0)?,
+                    instance_type: row.get(1)?,
+                    difficulty: row.get(2)?,
+                    difficulty_id: row.get(3)?,
+                    seconds: row.get(4)?,
+                    expansion_tier: row.get(5)?,
+                    latest_expansion_tier: row.get(6)?,
+                    experience: (gained != 0).then(|| Experience {
+                        gained,
+                        percent: row.get::<_, f64>(8).unwrap_or(0.0),
+                        start_level: row.get::<_, Option<i64>>(9).unwrap_or(None),
+                        end_level: row.get::<_, Option<i64>>(10).unwrap_or(None),
+                    }),
+                    ..Segment::default()
+                })
             },
         )
         .optional()
@@ -4941,20 +4783,23 @@ fn segment_value(transaction: &Transaction<'_>, segment_id: i64) -> Result<Value
         .ok_or_else(|| "That segment no longer exists.".to_string())?;
 
     let mut statement = transaction
-        .prepare(
-            "SELECT success FROM encounters WHERE segment_id = ?1 ORDER BY position",
-        )
+        .prepare("SELECT success FROM encounters WHERE segment_id = ?1 ORDER BY position")
         .map_err(|error| error.to_string())?;
-    let encounters = statement
+    segment.encounters = statement
         .query_map([segment_id], |row| {
-            Ok(serde_json::json!({ "id": 0, "success": row.get::<_, i64>(0)? != 0 }))
+            Ok(EncounterEvent {
+                id: 0,
+                success: row.get::<_, i64>(0)? != 0,
+                name: None,
+                at: None,
+                difficulty_id: None,
+                group_size: None,
+            })
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     drop(statement);
-    segment["encounters"] = Value::Array(encounters);
-
     let levels: i64 = transaction
         .query_row(
             "SELECT COUNT(*) FROM level_ups WHERE segment_id = ?1",
@@ -4962,32 +4807,29 @@ fn segment_value(transaction: &Transaction<'_>, segment_id: i64) -> Result<Value
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
-    segment["levelUps"] = Value::Array(vec![serde_json::json!({}); levels as usize]);
+    segment.level_ups = vec![LevelUpEvent { level: 0, at: None }; levels as usize];
 
-    let keystone: Option<Value> = transaction
+    segment.keystone = transaction
         .query_row(
             "SELECT level, map_id, affixes_json, completed, duration_ms, on_time, upgrades
              FROM keystone_runs WHERE segment_id = ?1",
             [segment_id],
             |row| {
                 let affixes: String = row.get(2)?;
-                Ok(serde_json::json!({
-                    "level": row.get::<_, i64>(0)?,
-                    "mapId": row.get::<_, Option<i64>>(1)?,
-                    "affixes": serde_json::from_str::<Value>(&affixes)
-                        .unwrap_or_else(|_| Value::Array(Vec::new())),
-                    "completed": row.get::<_, i64>(3)? != 0,
-                    "durationMs": row.get::<_, Option<i64>>(4)?,
-                    "onTime": row.get::<_, Option<i64>>(5)?.map(|value| value != 0),
-                    "upgrades": row.get::<_, Option<i64>>(6)?,
-                }))
+                Ok(Keystone {
+                    level: Some(row.get(0)?),
+                    map_id: row.get(1)?,
+                    affixes: serde_json::from_str(&affixes).unwrap_or_default(),
+                    completed: row.get::<_, i64>(3)? != 0,
+                    duration_ms: row.get(4)?,
+                    on_time: row.get::<_, Option<i64>>(5)?.map(|value| value != 0),
+                    upgrades: row.get(6)?,
+                    ..Keystone::default()
+                })
             },
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    if let Some(keystone) = keystone {
-        segment["keystone"] = keystone;
-    }
     Ok(segment)
 }
 
@@ -5041,10 +4883,36 @@ mod tests {
             r#"Other = { 1 }
 ChronieDB = { ["segments"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["score"] = -2.5 } } }"#,
             "ChronieDB",
-        ).unwrap().unwrap();
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(parsed["segments"][0]["id"], "synthetic-1");
         assert_eq!(parsed["segments"][0]["enabled"], true);
         assert_eq!(parsed["segments"][0]["score"], -2.5);
+    }
+
+    #[test]
+    fn imports_an_independently_written_historical_saved_variables_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let wow = temp.path().join("_retail_");
+        let saved = wow.join("WTF/Account/TEST/SavedVariables");
+        fs::create_dir_all(&saved).unwrap();
+        fs::write(
+            saved.join("chronie.lua"),
+            include_str!("../fixtures/savedvariables/legacy.lua"),
+        )
+        .unwrap();
+        let database = temp.path().join("chronie.db");
+
+        collect(&wow, &database, 1_700_000_100, Options::default()).unwrap();
+
+        assert_eq!(count_of(&database, "segments"), 1);
+        assert_eq!(count_of(&database, "transmogs"), 1);
+        assert_eq!(count_of(&database, "achievements"), 0);
+        let payload = dashboard(&database).unwrap();
+        assert_eq!(payload["segments"][0]["id"], "old-1");
+        assert_eq!(payload["segments"][0]["instance"], "Unknown");
+        assert_eq!(payload["segments"][0]["lootValue"], 0);
     }
 
     #[test]
@@ -5386,7 +5254,9 @@ ChronieDB = {{ ["segments"] = {{
 
         let connection = open_database(&database).unwrap();
         let changes: i64 = connection
-            .query_row("SELECT COUNT(*) FROM equipset_changes", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM equipset_changes", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let slots: i64 = connection
             .query_row("SELECT COUNT(*) FROM equipset_slots", [], |row| row.get(0))
