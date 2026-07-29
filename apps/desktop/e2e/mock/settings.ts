@@ -35,6 +35,11 @@ export const combatLog: E2EMock["combatLog"] = {
   state: "off",
 };
 
+// The ordinary answer, which is the one every test that is not about this gets: the client's
+// log and the history agree, so the timeline says nothing about holes and the notice is not in
+// the page at all. A test that wants the unhappy shape overwrites this key.
+export const sessionGap: E2EMock["sessionGap"] = { kind: "complete" };
+
 // A folder in the state that makes retention worth having and worth being careful with: two
 // old logs Chronie has read to the end of, and one older still that it has never read — the
 // raid night somebody logged before Chronie was watching, which must survive any sweep and

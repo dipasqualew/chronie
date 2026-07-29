@@ -41,7 +41,7 @@ pub use logs::retention_report;
 pub use looks::character_looks;
 pub use lua::{read_saved_variable, resolve_wow_path};
 pub use marks::{delete_transmog_tag, set_transmog_favourite, set_transmog_tag, transmog_marks};
-pub use read_model::dashboard;
+pub use read_model::{dashboard, newest_segment_end};
 
 use crate::captures::Marker;
 use crate::ingamesets;

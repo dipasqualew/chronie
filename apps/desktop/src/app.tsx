@@ -25,6 +25,7 @@ import { createCurrencyIcons } from "./currencies";
 import { createPlaceIcons } from "./places";
 import { Details } from "./details";
 import { duration, plural } from "./format";
+import { gapEvidence, gapSentence } from "./gap";
 import { createAchievementBook } from "./achievements";
 import { desktop, message } from "./desktop";
 import { createItemBook } from "./items";
@@ -41,7 +42,7 @@ import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
 import { VersionTag } from "./versionTag";
 import type {
-  CustomSetsPayload, DashboardPayload, InGameSetsPayload, Release, Segment, Settings,
+  CustomSetsPayload, DashboardPayload, InGameSetsPayload, Release, Segment, SessionGap, Settings,
   TransmogMarksPayload,
   TransmogPayload,
 } from "./types";
@@ -74,6 +75,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // screen that can do anything about it rather than on an empty timeline.
   const [view, setView] = useState<View>(settings.wowPath ? "timeline" : "settings");
   const [showing, setShowing] = useState<SegmentModalState | null>(null);
+  const [gap, setGap] = useState<SessionGap | null>(null);
   // The one transmog source a reader has clicked through to a picture of, which is nothing
   // until they do: the tables behind it are the game's largest and are opened on that click.
   const [drawing, setDrawing] = useState<AppearanceModalState | null>(null);
@@ -196,6 +198,28 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     void desktop.inGameSets().then(setInGameSets).catch(() => undefined);
   }, [view, inGameSets]);
 
+  // Whether an evening was played that never reached the file. Asked on the same beat the
+  // segments are, and for the same reason: the answer changes underneath the window, as the
+  // client writes its combat log and as a sync brings the history level with it again. A
+  // failure leaves the last answer alone rather than clearing it — the notice is about data
+  // that is already gone, and a backend that is briefly not answering is not news that it
+  // came back.
+  useEffect(() => {
+    let alive = true;
+    const ask = (): void => {
+      void desktop.sessionGap()
+        .then((answer) => { if (alive) setGap(answer); })
+        .catch(() => undefined);
+    };
+    ask();
+    if (!desktop.pollDashboard) return () => { alive = false; };
+    const timer = setInterval(ask, DASHBOARD_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
   // Somebody may be playing while this window is open, and the collector picks up what the
   // game wrote within half a minute. Anything new means every view is out of date at once.
   useEffect(() => {
@@ -257,6 +281,8 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     ].join(" · ")
     : "Nothing collected yet.";
 
+  const missing = gapSentence(gap);
+
   const rosterMeta = profiles.length
     ? [
       plural(profiles.length, "character"),
@@ -292,6 +318,15 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           <div className="sub" id="timeline-meta" role="status" aria-label="What the timeline holds">
             {meta}
           </div>
+          {/* Only ever drawn when there is a hole, and an alert rather than a status because
+              it is not a description of the page — it is the page admitting it is incomplete.
+              A reader who never sees this has never lost a session. */}
+          {missing && (
+            <div className="notice" id="timeline-gap" role="alert" aria-label="Missing play">
+              <p>{missing}</p>
+              {gapEvidence(gap).map((line) => <p className="sub" key={line}>{line}</p>)}
+            </div>
+          )}
         </header>
         <div id="timeline">
           <Timeline

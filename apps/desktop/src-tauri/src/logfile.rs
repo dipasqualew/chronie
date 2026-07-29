@@ -1159,6 +1159,51 @@ fn read_position(event: &str, parts: &[&str], at: i64) -> Option<Found> {
     })
 }
 
+/* ---------- the last moment a file proves the client was alive ---------- */
+
+/// How much of a file's end is read to find the last line that carries a timestamp.
+///
+/// A combat log line is a few hundred bytes and the longest — `COMBATANT_INFO` for a
+/// twenty-player raid — is a few thousand. Sixty-four kilobytes is far more than one line and
+/// far less than one read anybody would notice, and it is read from the end rather than from
+/// wherever ingestion happened to stop, because the question here is not what happened but
+/// only *when the writing stopped*.
+pub const TAIL_BYTES: u64 = 64 * 1024;
+
+/// The instant of the last complete, stamped line in `path`, in epoch milliseconds.
+///
+/// This is the strongest available evidence that the client was alive at a given moment, and
+/// it costs one seek and one read however large the file is. `None` means the file could not
+/// be read, or holds no line this parser recognises as a record — an empty log that a session
+/// only just started, most often.
+///
+/// The stamps of older clients carry no year, so one is supplied the way ingestion supplies
+/// it: from the file's name or its modification time. [`Clock`]'s rollover cannot help here —
+/// it works by watching December turn into January on the way past, and nothing walks past a
+/// tail — so a yearless log read across a New Year boundary is out by a year. Every current
+/// client states the year on the line, which is what makes that acceptable rather than a trap.
+pub fn tail_at(path: &Path, year: i32, zone: Zone) -> Option<i64> {
+    let mut file = File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let start = size.saturating_sub(TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut tail = Vec::new();
+    file.read_to_end(&mut tail).ok()?;
+    let text = String::from_utf8_lossy(&tail);
+
+    // Backwards, and the first stamped line wins. Both ends of this window are allowed to be
+    // half a line — the front because the seek lands mid-record, the back because the client
+    // may be part-way through writing one — and neither needs handling by position.
+    // `split_line` takes a line only when it opens with a date and a time, so the severed
+    // front of a record is refused; and a record severed at the *end* still opens with the
+    // stamp that is the only thing being asked for.
+    let mut clock = Clock::new(year, zone);
+    text.lines()
+        .rev()
+        .find_map(|line| split_line(line).map(|(stamp, _)| stamp))
+        .and_then(|stamp| clock.resolve(&stamp))
+}
+
 /* ---------- recognising a file again ---------- */
 
 /// A digest of the first `bytes` of a file.
@@ -1854,6 +1899,78 @@ mod tests {
         assert_eq!(facts.fights[0].success, Some(true));
         assert_eq!(facts.fights[0].duration_ms, None);
         assert_eq!(facts.fights[0].name, "Gnarlroot's Understudy, the Second");
+    }
+
+    /* ---------- the last moment a file proves the client was alive ---------- */
+
+    #[test]
+    fn takes_the_instant_of_the_last_line_of_a_log() {
+        assert_eq!(
+            tail_at(&fixture("raid-night.txt"), 2023, Zone::East(0)),
+            Some(moment((2023, 11, 14), (20, 24, 0), -5)),
+        );
+    }
+
+    /// The client can be part-way through writing a record when it is asked, and that record
+    /// is the newest thing in the file. Its stamp is at the front of it and is complete
+    /// whatever happened to the rest, so it counts.
+    #[test]
+    fn takes_the_instant_of_a_record_the_client_had_not_finished_writing() {
+        assert_eq!(
+            tail_at(&fixture("partial-tail.txt"), 2024, Zone::East(0)),
+            Some(moment((2024, 5, 1), (22, 10, 5), 0)),
+        );
+    }
+
+    /// A log whose stamps carry no year is read with the one supplied — which is the year the
+    /// file's name or its date claims, i.e. the year the session *started*. A session that ran
+    /// past midnight on New Year's Eve therefore reads a year early. [`Clock`] fixes that
+    /// while walking a file forwards and cannot help here, and every current client states the
+    /// year on the line; this pins the cost of that rather than leaving it to be discovered.
+    #[test]
+    fn reads_a_yearless_tail_with_the_year_it_was_handed() {
+        assert_eq!(
+            tail_at(&fixture("legacy-stamps.txt"), 2019, Zone::East(0)),
+            Some(moment((2019, 1, 1), (0, 31, 40), 0)),
+        );
+    }
+
+    #[test]
+    fn says_nothing_about_a_file_with_no_record_in_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("WoWCombatLog.txt");
+        fs::write(&path, "not a log line at all\n").unwrap();
+
+        assert_eq!(tail_at(&path, 2026, Zone::East(0)), None);
+    }
+
+    #[test]
+    fn says_nothing_about_a_file_that_is_not_there() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            tail_at(&temp.path().join("nothing.txt"), 2026, Zone::East(0)),
+            None
+        );
+    }
+
+    /// The read is a fixed window off the end, so the answer has to be the same whether the
+    /// last line is the whole file or the last of a great many.
+    #[test]
+    fn reads_the_end_of_a_file_longer_than_the_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("WoWCombatLog.txt");
+        let mut text = String::new();
+        while text.len() < (TAIL_BYTES as usize) * 2 {
+            text.push_str("11/14/2023 20:15:30.000+0  SPELL_DAMAGE,filler,filler,filler\n");
+        }
+        text.push_str("11/14/2023 21:00:00.000+0  ENCOUNTER_END,2820\n");
+        fs::write(&path, &text).unwrap();
+
+        assert_eq!(
+            tail_at(&path, 2023, Zone::East(0)),
+            Some(moment((2023, 11, 14), (21, 0, 0), 0)),
+        );
     }
 
     /* ---------- reading a file that is still growing ---------- */

@@ -14,6 +14,7 @@ pub mod customsets;
 pub mod db2;
 mod dto;
 pub mod gallery;
+pub mod gap;
 pub mod glb;
 pub mod icons;
 pub mod ingamesets;
@@ -1069,6 +1070,46 @@ fn set_combat_logging(
     combat_log_status(&state)
 }
 
+/* ---------- what the last session cost, if it was lost ---------- */
+
+/// Whether the client was playing after the last thing Chronie has a record of.
+///
+/// The reading itself is [`gap::verdict`], which is pure; this is the three files it needs
+/// read out of the install — the newest combat log, the last stamped line in it, and how far
+/// the database reaches — and nothing else. An install with no game folder chosen has nothing
+/// to look at and says so rather than failing: the timeline is drawn before Setup is finished,
+/// and a view that errors because a folder is missing is worse than one that stays quiet.
+fn session_gap_now(state: &AppState) -> Result<gap::Verdict, String> {
+    let wow_path = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        configured_wow_path(&settings).ok()
+    };
+    let Some(wow_path) = wow_path else {
+        return Ok(gap::Verdict::Unknown);
+    };
+    let Some(found) = combatlog::newest_found(&wow_path) else {
+        return Ok(gap::Verdict::Unknown);
+    };
+    // Milliseconds out of the log, seconds everywhere else: the addon's clock and the
+    // database's are both `time()`, which is whole seconds, and a rule comparing the two has
+    // no use for the third decimal place.
+    let played_to = logfile::tail_at(&found.path, combatlog::year_of(&found), logfile::Zone::Local)
+        .map(|millis| millis.div_euclid(1000));
+    let recorded_to = collector::newest_segment_end(&state.database_path())?;
+    Ok(gap::verdict(
+        Some(&found.file),
+        played_to,
+        recorded_to,
+        Utc::now().timestamp(),
+    ))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn session_gap(state: State<'_, AppState>) -> Result<gap::Verdict, String> {
+    session_gap_now(&state)
+}
+
 /* ---------- clearing the logs up again ---------- */
 
 /// What a sweep would delete right now, what it will not touch, and what it has already taken.
@@ -1810,6 +1851,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         save_custom_set,
         save_wow_path,
         send_set_to_game,
+        session_gap,
         set_capture_note,
         set_capture_storage,
         set_capture_triggers,

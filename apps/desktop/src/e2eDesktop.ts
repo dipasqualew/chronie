@@ -38,6 +38,7 @@ import type {
   QuerySchema,
   Release,
   Segment,
+  SessionGap,
   SetGalleryPayload,
   SetRequest,
   Settings,
@@ -383,6 +384,11 @@ export const e2eDesktop = {
     }
     return missingMock();
   },
+  // Whether an evening was played that the game never wrote out. A fixture, because the rule
+  // behind it reads two files and a database and is tested where it lives; what a browser
+  // test asks is what the timeline does when the answer comes back missing.
+  sessionGap: (): Promise<SessionGap> =>
+    mock ? Promise.resolve(structuredClone(mock.sessionGap)) : missingMock(),
   // What a sweep of the game's Logs folder would delete, what it will not touch, and what it
   // already has. Asked for rather than assumed, because all three change under the app.
   logRetention: (): Promise<LogRetention> =>

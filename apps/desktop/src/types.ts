@@ -95,6 +95,8 @@ export type {
   Pile as LogPile,
   Gone as LogDeletion,
   Report as LogRetention,
+  Verdict as SessionGap,
+  Gap as LostSession,
   Peer as WifiPeer,
   Offer as WifiOffer,
   Waiting as WifiWaiting,
@@ -130,6 +132,7 @@ import type {
   TransmogPayload,
   TransmogMarksPayload,
   TransmogSetItemsPayload,
+  Verdict,
   Waiting,
   WardrobePayload,
 } from "./bindings";
@@ -206,6 +209,11 @@ export interface E2EMock {
   settings: SettingsPayload;
   release: Release;
   combatLog: Status;
+  /** What the backend makes of the install's combat log against the history it holds. A
+   * fixture rather than something the mock derives, because the rule that produces it is
+   * `gap.rs` and is tested there — what a browser test is for is what the window does with
+   * each answer. */
+  sessionGap: Verdict;
   logRetention: Report;
   query: E2EQuery;
   chosenPath: string;
