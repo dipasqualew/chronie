@@ -396,6 +396,25 @@ async placeIcons(places: string[]) : Promise<Result<IconsPayload, string>> {
 }
 },
 /**
+ * The portraits the Adventure Guide draws a list of bosses with, keyed by the encounter id.
+ *
+ * The same errand as [`place_icons`] over a different key, and an easier one: a fight arrives from
+ * the addon as the `DungeonEncounterID` the client handed `ENCOUNTER_END`, which is a number the
+ * game itself assigned rather than a localised name, so the join needs no massaging and lands on
+ * nearly every fight the journal knows.
+ *
+ * A raid night is the same eight or ten bosses over and over, so this and the cache behind it are
+ * what stop a modal opened twice reading the game's storage twice. See [`journal::portraits_of`].
+ */
+async bossPortraits(encounters: number[]) : Promise<Result<IconsPayload, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("boss_portraits", { encounters }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What is in the history, so that a query can be written without reading the migrations.
  */
 async querySchema() : Promise<Result<QuerySchema, string>> {

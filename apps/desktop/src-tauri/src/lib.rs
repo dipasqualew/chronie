@@ -873,6 +873,45 @@ async fn place_icons(
     dto::convert(serde_json::json!({ "icons": icons }))
 }
 
+/// The portraits the Adventure Guide draws a list of bosses with, keyed by the encounter id.
+///
+/// The same errand as [`place_icons`] over a different key, and an easier one: a fight arrives from
+/// the addon as the `DungeonEncounterID` the client handed `ENCOUNTER_END`, which is a number the
+/// game itself assigned rather than a localised name, so the join needs no massaging and lands on
+/// nearly every fight the journal knows.
+///
+/// A raid night is the same eight or ten bosses over and over, so this and the cache behind it are
+/// what stop a modal opened twice reading the game's storage twice. See [`journal::portraits_of`].
+#[tauri::command]
+#[specta::specta]
+async fn boss_portraits(
+    encounters: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<dto::IconsPayload, String> {
+    let cache = Arc::clone(&state.icons);
+    let named = read_game_files(&state, move |files| {
+        journal::portraits_of(files, &encounters)
+    })
+    .await?;
+    let wanted: Vec<u32> = named.values().copied().collect();
+    let missing = cache.missing(&wanted);
+    if !missing.is_empty() {
+        let decoded =
+            read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        cache.store(decoded);
+    }
+    // Re-keyed by the fight rather than by the file, and a fan-out rather than a rename: two
+    // creatures can share a portrait, so two fights can too.
+    let by_file = cache.answer(&wanted);
+    let mut icons = serde_json::Map::new();
+    for (encounter, file) in named {
+        if let Some(url) = by_file["icons"].get(file.to_string()) {
+            icons.insert(encounter.to_string(), url.clone());
+        }
+    }
+    dto::convert(serde_json::json!({ "icons": icons }))
+}
+
 /// A page of the wardrobe, every appearance on it worn on a body of its own.
 ///
 /// The same three numbers per row as [`worn_set`], and a very different question: that one is
@@ -1858,6 +1897,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         item_details,
         log_retention,
         place_icons,
+        boss_portraits,
         query_schema,
         release,
         reset_activities,

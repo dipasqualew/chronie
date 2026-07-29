@@ -150,6 +150,8 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` |
 | `JournalInstance` | 1237438 | fixed | yes, **columns read** |
 | `LFGDungeons` | 1361033 | fixed | yes, **columns read**, only through col8 |
+| `JournalEncounter` | 1240336 | fixed | yes, **columns read**, id in col3 |
+| `JournalEncounterCreature` | 1301155 | fixed | yes, **columns read**, id in col2 |
 
 ### ItemSparse
 
@@ -955,11 +957,10 @@ a name neither table has heard of. That is not a gap in the reader:
 |---|---|
 | `JournalTier` — the expansions | none |
 | `UiMap` — the zones | none |
-| `Faction` — the reputations | none |
-| `JournalEncounter` — the bosses | none |
+| `Faction` — the reputations | none, though two indirect routes exist — see #213 |
 
-Whatever draws those in another addon is an editorial mapping somebody maintains by hand, not a
-column read out of the game.
+`JournalEncounter` was listed here as having none, and that was **wrong**: it holds no picture
+itself, but the table hanging off it does. See "Bosses, verified" below.
 
 **What each column was checked against**, since a reordered table shows wrong values rather than
 failing:
@@ -977,9 +978,82 @@ company after column 8.** Column 9 should be `MapID` and reads a seven-digit num
 nothing this app reads, but a warning against extending the column list by counting. Columns 0
 through 8 line up exactly.
 
-`cargo run --example dump_journal -- "<install>"` prints both tables, decodes every icon each
-names and reports the sizes they came out at, and is what to run after a patch; pass names to
-reach a modern row or a delve.
+## Bosses, verified
+
+Two more tables, and a join rather than a lookup. A segment carries the fights that ended in it,
+and a fight arrives as the id the client handed `ENCOUNTER_END` — a `DungeonEncounterID`, a number
+the game assigned rather than a localised name. `JournalEncounter` turns that into its own id and
+`JournalEncounterCreature` hangs the portrait off it. `journal.rs` walks it for the fights one
+modal is showing.
+
+```
+JournalEncounter                  (id in col3, not in a list)
+  col0 = Name_lang                 "Glubtok", "Queen Ansurek"
+  col1 = Description_lang
+  col2 = Map                       float[2], where the guide pins the fight; 64 bits wide
+  col3 = ID                      ◀── what JournalEncounterCreature hangs off
+  col4 = JournalInstanceID       ──▶ JournalInstance's own id, the same 63 = Deadmines above
+  col5 = DungeonEncounterID      ◀── what the client hands ENCOUNTER_END
+  col6 = OrderIndex                where the fight sits in the instance
+  col7 = FirstSectionID
+  col8 = UiMapID
+  col9 = MapDisplayConditionID
+  col10 = Flags
+  col11 = DifficultyMask           sparse
+
+JournalEncounterCreature          (id in col2, not in a list)
+  col0 = Name_lang                 the creature's, which is not always the fight's
+  col1 = Description_lang          set on 25 rows of 1,906
+  col2 = ID
+  col3 = JournalEncounterID      ──▶ JournalEncounter col3
+  col4 = CreatureDisplayInfoID
+  col5 = FileDataID              ──▶ the portrait, 128×64, stored as a palette
+  col6 = OrderIndex                where the creature sits among the fight's others
+  col7 = (unread)                  sparse
+```
+
+So the chain is `encounters[].id → JournalEncounter col5 → its col3 → JournalEncounterCreature
+col3 → col5`. It lands on **1,088 of the 1,089** fights `JournalEncounter` gives a
+`DungeonEncounterID` to, and every one of the 1,172 files col5 names decodes — all of them at
+**128×64**. That size is the check that says the column is right: a square would be an icon and a
+512 would be a background, and both of those live in neighbouring tables this chain could have
+landed on. It is also why the frontend gives a portrait its own two-to-one frame rather than
+reusing the square `.place-icon`.
+
+**Two turns of the chain are a wrong answer rather than a missing one if they are skipped.**
+
+- **A fight can be several creatures, and the rows are not stored in the order the guide shows
+  them.** 20 fights have more than one portrait and **11 of those store their rows out of
+  `OrderIndex` order** — the Ascendant Council lists Terrastra first and Feludius fourth, Theralion
+  and Valiona lists Valiona first. So the lowest order index wins rather than the first row met,
+  which is what makes the Omnotron Defense System come back as Magmatron.
+- **One `DungeonEncounterID` can be on several `JournalEncounter` rows.** 12 of the 1,072 distinct
+  ids are, a fight the guide describes once per difficulty tier, and there is no saying which of
+  those rows carries the creatures. So every row naming a wanted id is followed.
+
+Also worth knowing: **58 `JournalEncounter` rows carry no `DungeonEncounterID` at all**, so they
+are named in the guide and are not something the client ever reports.
+
+**What each column was checked against:**
+
+| Column | Checked against |
+|---|---|
+| `JournalEncounter` col0 | reads "Glubtok", "Helix Gearbreaker", "Foe Reaper 5000" in order — the Deadmines, in the order it is fought |
+| `JournalEncounter` col4 | Deadmines bosses read 63 and Shadowfang Keep's read 64, the same ids `JournalInstance` files those two under |
+| `JournalEncounter` col5 | Glubtok reads 2976 and `DungeonEncounter` row 2976 is named Glubtok, `MapID` 36, `DifficultyID` 1. Its second row, 2624, reads 2981 — `DungeonEncounter` 2981, Glubtok again at `DifficultyID` 2, which is why the boss has two journal rows |
+| `JournalEncounterCreature` col3 | creature 358 reads 89, and journal row 89 is Glubtok |
+| `JournalEncounterCreature` col5 | all 1,172 decode, every one 128×64. Ulgrax reads 5907286, The Bloodbound Horror 5907281, Queen Ansurek 5907274, Nexus-King Salhadaar 6980557 — so it is not a legacy-only column |
+| `JournalEncounterCreature` col6 | never leaves 0–9, and naming the lowest of a council fight's rows gives the creature the fight is named after in all 20 cases |
+
+**A route not taken.** `DungeonEncounter` has a `SpellIconFileID` column of its own, which would be
+one table instead of two — but only **88 of its 1,301 rows** hold anything, against 1,088 through
+the journal. Not worth reading.
+
+`cargo run --example dump_journal -- "<install>"` prints all four tables — the two place tables
+with every icon decoded and their sizes reported, then the column census of these two, the portrait
+decode sweep, the fights that store their creatures out of order, and the chain walked end to end
+with the instance each fight was filed under. That is what to run after a patch; pass names to
+reach a modern row, a delve or a modern boss.
 
 ## Regenerating the fixtures
 
@@ -1032,13 +1106,25 @@ The currency fixture is one table and three textures, and it holds each way a cu
 to have a picture: one the game names and draws nothing for, one naming an icon this install has
 no file for, and one whose whole row is encrypted.
 
-The journal fixture is the two place tables and six textures, and it holds each way the pair has
-to be read together: a delve only the group finder lists, a place both tables draw and draw
-differently, an instance the journal lists and draws nothing for, a dungeon the finder repeats
-once per difficulty, a name on two journal rows, and a row whose section is encrypted. The
-backgrounds and banners beside each icon are given plausible FileDataIDs that no file is written
-for, so a reader that took the column next to the right one comes back with nothing rather than
-with something that happens to decode.
+The journal fixture is four tables and eleven textures. The place half holds each way the two
+place tables have to be read together: a delve only the group finder lists, a place both tables
+draw and draw differently, an instance the journal lists and draws nothing for, a dungeon the
+finder repeats once per difficulty, a name on two journal rows, and a row whose section is
+encrypted. The backgrounds and banners beside each icon are given plausible FileDataIDs that no
+file is written for, so a reader that took the column next to the right one comes back with
+nothing rather than with something that happens to decode.
+
+The boss half holds each way the join can go wrong, and the two that produce a *wrong* answer
+rather than none are the point of it: a council fight whose three creatures are stored in neither
+`OrderIndex` nor id order, so a reader taking the first row it met would draw the wrong member; and
+one `DungeonEncounterID` on two journal rows where only the second carries a creature, so a reader
+stopping at the first match would draw nothing. Beside them, the ways a fight legitimately reaches
+no picture — a journal row with no creature at all, a creature naming no portrait, a creature whose
+section is encrypted, a journal row with no `DungeonEncounterID`, a portrait whose file this install
+has no bytes for, and a creature belonging to a fight no journal row describes. Unlike the two
+place tables, both boss tables keep their ids **in a column** rather than in a list, and every
+column is in the storage the real table keeps it in — the portrait as a palette, the order index
+bitpacked — so the reader walks the same shape of record it walks in the game.
 
 The `ItemSparse` fixture is the only one with variable-length records, and it is where that
 half of the reader is exercised: strings written into the record, records addressed through

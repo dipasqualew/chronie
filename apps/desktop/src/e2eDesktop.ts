@@ -269,6 +269,10 @@ export const e2eDesktop = {
   // is keyed by the name the segment already carries rather than by the file behind it.
   placeIcons: (places: string[]): Promise<IconsPayload> =>
     mock ? Promise.resolve({ icons: mockPlaceIcons(places) }) : missingMock(),
+  // And the bosses inside them, on the same terms: the encounter id the addon recorded needs the
+  // same two backend-only hops before it is a texture, so the command is keyed by the id.
+  bossPortraits: (encounters: number[]): Promise<IconsPayload> =>
+    mock ? Promise.resolve({ icons: mockBossPortraits(encounters) }) : missingMock(),
   // The body every appearance is worn on. One model for the whole app, so the window asks the
   // first time a set is opened and keeps it for every set after.
   characterModel: (): Promise<CharacterModelPayload> =>
@@ -751,6 +755,17 @@ function mockPlaceIcons(wanted: string[]): Record<string, string> {
   for (const place of wanted) {
     const url = mock.placeIcons[place];
     if (url) found[place] = url;
+  }
+  return found;
+}
+
+/** The boss portraits held by the e2e mock, keyed by the encounter id the segment recorded. */
+function mockBossPortraits(wanted: number[]): Record<string, string> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, string> = {};
+  for (const encounter of wanted) {
+    const url = mock.bossPortraits[encounter];
+    if (url) found[String(encounter)] = url;
   }
   return found;
 }

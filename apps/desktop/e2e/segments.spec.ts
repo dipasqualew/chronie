@@ -42,6 +42,24 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(detail.dialog).toContainText("+14");
   });
 
+  // A fight arrives as the id the client handed `ENCOUNTER_END` and the name it was called at
+  // the time. The portrait beside it is two table hops off that id, made after the segment is
+  // already on screen — and the game has one for nearly every fight it knows, which is why the
+  // frame is held on the one it does not rather than left out the way a place's is.
+  await test.step("a boss fills in with the portrait the game draws it with", async () => {
+    const fought = detail.rowsIn("Encounters");
+    await expect(fought).toHaveCount(2);
+    await expect(fought.first()).toContainText("The Curator");
+    await expect(fought.first()).toContainText("killed");
+    await expect(fought.nth(1)).toContainText("Sand-Wrought Colossus");
+    await expect(fought.nth(1)).toContainText("wipe");
+
+    // One picture across the two rows: the portrait arrives from the backend after the words, so
+    // this is the whole hop — the id the addon recorded, two of the game's tables, and a texture
+    // decoded into something the window can put in an `<img>`.
+    await expect(detail.iconsIn("Encounters")).toHaveCount(1);
+  });
+
   // The segment carries an id and a name; everything else about an achievement is read out
   // of the installed game after the segment is already on screen.
   await test.step("an achievement fills in with what the game says about it", async () => {
