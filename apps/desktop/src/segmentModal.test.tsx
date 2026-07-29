@@ -14,8 +14,10 @@ import { createAchievementBook } from "./achievements";
 import { createBossPortraits } from "./bosses";
 import { createCaptureAlbum } from "./captures";
 import { createItemBook } from "./items";
+import { createPlaceHeroes } from "./places";
 import { SegmentModal } from "./segmentModal";
 import type { BossPortraits } from "./bosses";
+import type { PlaceHeroes } from "./places";
 import type { EncounterEvent, IconsPayload, Segment } from "./types";
 
 afterEach(cleanup);
@@ -76,11 +78,16 @@ function bossBook(held: Record<number, string>): BossPortraits {
 }
 
 /** The modal open on one segment, with everything it needs and nothing it does not. */
-function draw(showing: Segment, bosses?: BossPortraits) {
+function draw(
+  showing: Segment,
+  bosses?: BossPortraits,
+  { heroes, onClose = (): void => {} }: { heroes?: PlaceHeroes; onClose?: () => void } = {},
+) {
   return render(
     <SegmentModal
       showing={{ order: [showing], index: 0 }}
       bosses={bosses}
+      heroes={heroes}
       achievements={createAchievementBook({
         load: () => Promise.resolve({ achievements: {} }),
         loadIcons: () => Promise.resolve({ icons: {} }),
@@ -98,7 +105,7 @@ function draw(showing: Segment, bosses?: BossPortraits) {
         onError: String,
       }}
       onStep={() => {}}
-      onClose={() => {}}
+      onClose={onClose}
       onEditActivities={() => {}}
     />,
   );
@@ -170,5 +177,120 @@ describe("the portraits on the encounter list", () => {
 
     expect(screen.getByText("Glubtok")).toBeTruthy();
     expect(frames(view)).toBe(0);
+  });
+});
+
+/* ---------- the header ---------- */
+
+const BANNER = "data:image/png;base64,deadmines";
+
+/** A book of place banners over an install that draws whatever `held` names. */
+function heroBook(held: Record<string, string>): PlaceHeroes {
+  const load = (places: string[]): Promise<IconsPayload> =>
+    Promise.resolve({
+      icons: Object.fromEntries(
+        places.filter((place) => held[place]).map((place) => [place, held[place] as string]),
+      ),
+    });
+  return createPlaceHeroes({ load });
+}
+
+const hero = (view: ReturnType<typeof draw>): HTMLImageElement | null =>
+  view.container.querySelector<HTMLImageElement>(".detail-hero img");
+
+describe("the header the modal opens with", () => {
+  /**
+   * The place is named in the heading under the band, so the picture is decorative — a reader who
+   * heard both would hear the place twice. What says the right one arrived is the source.
+   */
+  it("draws the banner the game gives the place the segment happened in", async () => {
+    const view = draw(segment([]), undefined, {
+      heroes: heroBook({ "The Deadmines": BANNER }),
+    });
+
+    await waitFor(() => expect(hero(view)).not.toBeNull());
+    expect(hero(view)?.getAttribute("src")).toBe(BANNER);
+    expect(hero(view)?.getAttribute("alt")).toBe("");
+    expect(screen.getByRole("heading", { name: "The Deadmines" })).toBeTruthy();
+  });
+
+  /**
+   * Nothing is drawn while the picture is still crossing the bridge, and nothing is drawn at all
+   * on a window with no game install behind it: an empty band the height of a header would be a
+   * hole in the modal rather than a header, which is the opposite bargain from the boss frames
+   * above — those are held because a fight nearly always has a portrait, and this is the only
+   * picture in the modal that is a block rather than an inline frame.
+   */
+  it("opens on the heading alone when nothing can look a banner up", () => {
+    const view = draw(segment([]));
+
+    expect(hero(view)).toBeNull();
+    expect(screen.getByRole("heading", { name: "The Deadmines" })).toBeTruthy();
+  });
+
+  /** A place the book answers nothing for leaves the modal as it was rather than an empty band. */
+  it("opens on the heading alone for a place the book cannot draw", async () => {
+    const view = draw(segment([]), undefined, { heroes: heroBook({ Elsewhere: BANNER }) });
+
+    await waitFor(() => expect(hero(view)).toBeNull());
+  });
+});
+
+/* ---------- clicking away ---------- */
+
+/**
+ * A click at a point, which is what light dismissal is decided on: the backdrop is not an element
+ * and a click on it arrives with the dialog as its target, so where the pointer was is the only
+ * thing that tells one from a click on the modal itself. jsdom reports every box as zero, so the
+ * dialog is given one — the box a real modal has, offset from the corner of the window.
+ */
+function clickAt(dialog: HTMLDialogElement, x: number, y: number): void {
+  dialog.getBoundingClientRect = (): DOMRect =>
+    ({ left: 100, right: 500, top: 80, bottom: 600 }) as DOMRect;
+  dialog.dispatchEvent(
+    new MouseEvent("click", { bubbles: true, clientX: x, clientY: y, detail: 1 }),
+  );
+}
+
+const dialogOf = (view: ReturnType<typeof draw>): HTMLDialogElement =>
+  view.container.querySelector("dialog") as HTMLDialogElement;
+
+describe("clicking outside the modal", () => {
+  /** What a reader who opened it by clicking expects, and what `showModal` does not give. */
+  it("closes when the click landed on the backdrop", () => {
+    const onClose = vi.fn();
+    const view = draw(segment([]), undefined, { onClose });
+
+    clickAt(dialogOf(view), 40, 300);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The case `event.target === dialog` gets wrong: the modal's own padding and the gaps between
+   * its sections are the dialog element, and a reader releasing the mouse there is reading rather
+   * than dismissing.
+   */
+  it("stays open when the click landed inside it", () => {
+    const onClose = vi.fn();
+    const view = draw(segment([]), undefined, { onClose });
+
+    clickAt(dialogOf(view), 300, 90);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A `<button>` activated from the keyboard fires a click with no coordinates at all, which
+   * reports as 0,0 — outside every box there is. Closing on that would have Enter on "Next
+   * segment" shut the modal instead of stepping it.
+   */
+  it("stays open for a click the keyboard fired", () => {
+    const onClose = vi.fn();
+    const view = draw(segment([]), undefined, { onClose });
+
+    dialogOf(view).dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

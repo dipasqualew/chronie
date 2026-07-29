@@ -32,6 +32,15 @@ test("digs from a session down into a single segment and back out again", async 
     await detail.close();
   });
 
+  // What the reader who opened it that way expects to get out of it. `showModal` paints the page
+  // behind the modal and swallows the click, so this is the app's own doing rather than the
+  // browser's — and the click has to land where no part of the modal is.
+  await test.step("and clicking away from it closes it again", async () => {
+    await timeline.activities(first).first().click();
+    await expect(detail.dialog).toBeVisible();
+    await detail.clickAway();
+  });
+
   await test.step("and so does the segment row underneath it", async () => {
     await timeline.fold(first, "2 segments").click();
     await detail.openFor("Aster-Vale", "Glass Caverns");
@@ -40,6 +49,13 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(detail.position()).toHaveText("1 of 2");
     await expect(detail.dialog).toContainText("The Curator");
     await expect(detail.dialog).toContainText("+14");
+  });
+
+  // The header, which is two table hops off the name the segment was filed under and arrives
+  // after the words do — so it is polled rather than asserted outright. Every place has one: the
+  // scenario its own, and a zone the stand-in the game keeps for a dungeon it will not name.
+  await test.step("the place it happened in is drawn across the top of it", async () => {
+    await expect(detail.hero("Glass Caverns")).toBeVisible();
   });
 
   // A fight arrives as the id the client handed `ENCOUNTER_END` and the name it was called at

@@ -396,6 +396,27 @@ async placeIcons(places: string[]) : Promise<Result<IconsPayload, string>> {
 }
 },
 /**
+ * The wide banner each of a list of places is drawn across, keyed by the name rather than the
+ * file.
+ *
+ * The same errand as [`place_icons`] one column over, and the reason it is a second command
+ * rather than more of that one is what each is for: an icon goes beside every row of the
+ * timeline, a banner above the one segment somebody opened. Asking for hundreds of headers to
+ * draw one would decode a picture per evening on screen.
+ *
+ * Nothing comes back empty here. Most places are zones the game draws no art for at all, and
+ * those are answered with the banner the group finder shows when it will not say which dungeon —
+ * see [`journal::heroes_of`], which is where that choice is made and explained.
+ */
+async placeHeroes(places: string[]) : Promise<Result<IconsPayload, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("place_heroes", { places }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The portraits the Adventure Guide draws a list of bosses with, keyed by the encounter id.
  *
  * The same errand as [`place_icons`] over a different key, and an easier one: a fight arrives from

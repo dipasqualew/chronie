@@ -23,6 +23,7 @@ import {
   itemAppearances,
   itemDetails,
   placeIcons,
+  placeHeroes,
 } from "./game";
 import { query } from "./query";
 import {
@@ -86,6 +87,7 @@ export const mockDesktop: E2EMock = {
   gameIcons,
   currencyIcons,
   placeIcons,
+  placeHeroes,
   bossPortraits,
   factionIcons,
   achievementDetails,

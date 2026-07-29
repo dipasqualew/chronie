@@ -85,9 +85,29 @@ export interface Table {
   columns: Column[];
 }
 
+/**
+ * One file of the client's storage that this app names on its own rather than through a table.
+ *
+ * A table is looked up because a row in it points somewhere; these are the few files the app
+ * points at itself — art it draws where the game's own tables have nothing to offer. They are
+ * here for the same reason the tables are: a FileDataID is a fact a patch can invalidate, and
+ * it must be written down once, with the build it was last seen on and the path it belongs to.
+ */
+export interface Art {
+  /** The constant's name in the generated Rust module. */
+  rust: string;
+  /** The path the listfile gives it, which is how it was found and how it is checked again. */
+  path: string;
+  fileDataId: number;
+  provenance: Provenance;
+  doc: string[];
+}
+
 export interface Registry {
   version: number;
   listfile: string;
+  /** Absent in a registry that names no single files, which is what this started as. */
+  files?: Art[];
   tables: Table[];
 }
 
@@ -119,6 +139,18 @@ export function registry(path: string = REGISTRY_PATH): Registry {
 
   const byFileDataId = new Map<number, string>();
   const byModule = new Map<string, string>();
+  for (const art of parsed.files ?? []) {
+    const seen = byFileDataId.get(art.fileDataId);
+    if (seen) complaints.push(`${art.path} and ${seen} are both ${art.fileDataId}`);
+    byFileDataId.set(art.fileDataId, art.path);
+
+    if (!/^[A-Z][A-Z0-9_]*$/.test(art.rust)) {
+      complaints.push(`${art.path}'s Rust name ${art.rust} is not a constant's name`);
+    }
+    if (!art.provenance.build && !art.provenance.note) {
+      complaints.push(`${art.path} states no build and no reason for having none`);
+    }
+  }
   for (const table of parsed.tables) {
     const seen = byFileDataId.get(table.fileDataId);
     if (seen) complaints.push(`${table.table} and ${seen} are both ${table.fileDataId}`);
@@ -217,6 +249,9 @@ export function rustModule(from: Registry = registry()): string {
     `//! registry and run that, which rewrites this, the FileDataIDs the fixture generators use`,
     `//! and the table in \`docs/game-files.md\` together.`,
     `//!`,
+    `//! The few single files the app names outright rather than through a table are here too, for`,
+    `//! the same reason: a FileDataID is a fact a patch can invalidate.`,
+    `//!`,
     `//! Nothing here is an opinion about what a value means. A column's position is mechanical`,
     `//! and a game patch can invalidate it, which is why it is recorded once with the build it`,
     `//! was read off; what a class mask, a geoset group or a points column *is* stays in the`,
@@ -231,6 +266,14 @@ export function rustModule(from: Registry = registry()): string {
   for (const table of from.tables) {
     out.push(...rustDoc([...table.doc, "", provenanceLine(table.provenance)], ""));
     out.push(`pub const ${table.rust}: u32 = ${table.fileDataId};`);
+    out.push(``);
+  }
+
+  for (const art of from.files ?? []) {
+    out.push(
+      ...rustDoc([...art.doc, "", `\`${art.path}\``, "", provenanceLine(art.provenance)], ""),
+    );
+    out.push(`pub const ${art.rust}: u32 = ${art.fileDataId};`);
     out.push(``);
   }
 

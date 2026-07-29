@@ -23,7 +23,7 @@ import { buildCharacters } from "./characters";
 import { Characters } from "./charactersView";
 import { createCurrencyIcons } from "./currencies";
 import { createBossPortraits } from "./bosses";
-import { createPlaceIcons } from "./places";
+import { createPlaceHeroes, createPlaceIcons } from "./places";
 import { createFactionIcons } from "./reputations";
 import { Details } from "./details";
 import { duration, plural } from "./format";
@@ -155,6 +155,11 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // the same forty evenings on every screen, and most of what it is asked about — the open world
   // — comes back with nothing at all and is remembered as such.
   const placeIcons = useMemo(() => createPlaceIcons({ load: desktop.placeIcons }), []);
+
+  // And the wide banner one of those places is drawn across, which only the segment modal asks
+  // for: it is the header a reader opens a segment onto, and it is a picture per evening rather
+  // than per row. Its own book for that reason — see `places.ts`.
+  const placeHeroes = useMemo(() => createPlaceHeroes({ load: desktop.placeHeroes }), []);
 
   // And the portraits the game draws a boss with, which only the segment modal names. One book
   // regardless, because a raid night is the same eight bosses across every segment of it and a
@@ -522,7 +527,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         showing={walking}
         achievements={achievements}
         items={items}
-        places={placeIcons}
+        heroes={placeHeroes}
         bosses={bossPortraits}
         factions={factionIcons}
         holdings={payload.holdings}

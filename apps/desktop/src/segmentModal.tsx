@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 import { achievementIds, achievementLine } from "./achievements";
 import type { AchievementBook } from "./achievements";
 import { useBook } from "./book";
-import { useModalDialog } from "./dialog";
+import { lightDismiss, useModalDialog } from "./dialog";
 import { CaptureGallery } from "./captureGallery";
 import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
@@ -25,7 +25,7 @@ import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import type { BossPortraits } from "./bosses";
 import type { FactionIcons } from "./reputations";
-import type { PlaceIcons } from "./places";
+import type { PlaceHeroes } from "./places";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
 import { eventsOf } from "./types";
@@ -41,12 +41,14 @@ import {
   ClassDot,
   FactionIcon,
   HighlightList,
-  PlaceIcon,
   StandingBar,
   className,
   locationType,
   shownHighlights,
 } from "./ui";
+
+/** No place on screen is nothing to look a picture up for, and the same empty list every time. */
+const NOTHING_NAMED: string[] = [];
 
 /** Everything the modal is showing, or nothing at all when it is closed. */
 export interface SegmentModalState {
@@ -175,6 +177,44 @@ function BossPortrait({
   if (!bosses) return null;
   const picture = bosses.icon(encounter);
   return <span className="boss-portrait">{picture ? <img src={picture} alt="" /> : null}</span>;
+}
+
+/**
+ * The picture the game draws the place across, as the header the modal opens with.
+ *
+ * A band rather than the 20-pixel icon that used to sit beside the heading, because the picture
+ * is the one thing on this screen that says where the reader is at a glance — the difference
+ * between Naxxramas and Nerub-ar Palace is a colour and a shape long before it is a word. The
+ * game's own art for a place is 256×128, so the band is drawn at that ratio and cropped rather
+ * than stretched: a banner that filled the modal's width by squashing its own art would be
+ * worse than a small one.
+ *
+ * Every place gets one. Where the game draws none — which is most places, because most places
+ * are open-world zones — the backend answers with the banner the group finder shows for a
+ * dungeon it will not name, so the modal opens the same way whatever the segment was. See
+ * `journal::heroes_of`.
+ *
+ * Named after the place it is of, the same way the icon beside a segment row is: the band is a
+ * picture and nothing else, so "Banner for Naxxramas" is the whole of what there is to say about
+ * it — and it is what lets a reader who cannot see it know the header is there, and a test ask
+ * for it. The `<img>` inside says nothing, because the band has already said it.
+ *
+ * Nothing at all is drawn before the picture lands or where there is no game install behind the
+ * window — an empty 132-pixel band would be a hole in the modal rather than a header.
+ */
+function PlaceHero({ place, heroes }: { place: string; heroes?: PlaceHeroes }): ReactNode {
+  // The book is a cache outside React, so a picture landing changes nothing React would notice.
+  // `useBook` is what turns an arrival into a redraw — see `book.ts`. Asked for by the modal
+  // rather than by the window, because it is one picture per segment somebody opens.
+  useBook(heroes, place ? [place] : NOTHING_NAMED);
+
+  const picture = place ? heroes?.icon(place) : undefined;
+  if (!picture) return null;
+  return (
+    <div className="detail-hero" role="img" aria-label={`Banner for ${place}`}>
+      <img src={picture} alt="" />
+    </div>
+  );
 }
 
 /**
@@ -485,17 +525,22 @@ function Lists({
             {encounters.map((event, index) => (
               <li key={`${event.id}-${index}`}>
                 <BossPortrait encounter={event.id} bosses={bosses} />
-                {event.name || `Encounter ${event.id}`}{" "}
-                <span className={event.success ? "ok" : "loss"}>
-                  {event.success ? "killed" : "wipe"}
+                {/* The sentence in one span rather than loose beside the portrait: the row is a
+                    flex line, and a bare run of words in one would be broken into an item per
+                    word with a gap opened up between each of them. */}
+                <span>
+                  {event.name || `Encounter ${event.id}`}{" "}
+                  <span className={event.success ? "ok" : "loss"}>
+                    {event.success ? "killed" : "wipe"}
+                  </span>
+                  {event.groupSize ? (
+                    <>
+                      {" "}
+                      <span className="muted">{plural(event.groupSize, "player")}</span>
+                    </>
+                  ) : null}{" "}
+                  <At event={event} />
                 </span>
-                {event.groupSize ? (
-                  <>
-                    {" "}
-                    <span className="muted">{plural(event.groupSize, "player")}</span>
-                  </>
-                ) : null}{" "}
-                <At event={event} />
               </li>
             ))}
           </ul>
@@ -706,8 +751,12 @@ export interface SegmentModalProps {
    * draws one. Each row asks for its own item, so nothing here has to collect ids first.
    */
   items: ItemBook;
-  /** The pictures the game draws a place with, shared with every other view that names one. */
-  places?: PlaceIcons;
+  /**
+   * The wide banner the game draws a place across, which is this modal's header and nothing
+   * else's. Absent where nothing can draw one — a window with no game install behind it — which
+   * leaves the modal opening on its heading, the way it did before there were any pictures.
+   */
+  heroes?: PlaceHeroes;
   /**
    * The pictures a faction borrows from its own Exalted achievement, shared with the roster —
    * where the same standings are listed again, and where a reader meets the same factions.
@@ -748,7 +797,7 @@ export function SegmentModal({
   onEditActivities,
   achievements: book,
   items,
-  places,
+  heroes,
   bosses,
   factions,
   holdings,
@@ -808,13 +857,17 @@ export function SegmentModal({
         if (event.key === "ArrowLeft") step(-1);
         if (event.key === "ArrowRight") step(1);
       }}
+      // Clicking away closes it, which is what a reader who opened it by clicking expects and
+      // what `showModal` does not give: the backdrop swallows the click and nothing happens.
+      // `lightDismiss` is what tells a click on the backdrop from one on the modal's own
+      // padding — see `dialog.ts`. Nothing is being edited here, so there is nothing to lose.
+      onClick={(event) => {
+        if (lightDismiss(event)) onClose();
+      }}
     >
+      {segment ? <PlaceHero place={segment.instance} heroes={heroes} /> : null}
       <div className="detail-head">
         <div>
-          {/* Beside the heading rather than inside it. The dialog is named after the heading,
-              and a picture within it would have every reader hear the place twice — once as
-              the picture of it and once as the words. */}
-          {segment ? <PlaceIcon place={segment.instance} places={places} /> : null}
           <h2 className="detail-title" id="segment-detail-title">
             {segment?.instance ?? ""}
           </h2>
