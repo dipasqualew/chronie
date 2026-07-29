@@ -19,8 +19,8 @@ import {
 } from "./game";
 import { query } from "./query";
 import {
-  appUpdate, chosenPath, combatLog, installResult, logRetention, openedUrls, release, settings,
-  syncResult,
+  appUpdate, chosenPath, combatLog, installResult, logRetention, openedUrls, release, sessionGap,
+  settings, syncResult,
 } from "./settings";
 import {
   characterLook, characterModel, characterQuestions, customSets, inGameSetAppearances, inGameSets,
@@ -67,6 +67,7 @@ export const mockDesktop: E2EMock = {
   wornSetsAskedFor,
   settings,
   combatLog,
+  sessionGap,
   logRetention,
   query,
   chosenPath,

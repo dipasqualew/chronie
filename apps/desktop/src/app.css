@@ -22,3 +22,19 @@
 .appbar button { border-radius: 999px; padding: 6px 14px; }
 
 header.view-head { margin-bottom: 18px; }
+
+/* The one thing a view says about itself rather than about the game: that what is below it is
+   not all of what happened. Drawn in the colour of a problem and set apart from the counts
+   above it, because it contradicts them — and never present at all when there is nothing
+   missing, so the space it takes costs nothing on an ordinary day. */
+.notice {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--bad);
+  border-radius: 8px;
+  background: var(--surface-1);
+  max-width: 78ch;
+}
+.notice p { margin: 0; }
+.notice p + p { margin-top: 6px; }
+.notice > p:first-child { color: var(--bad); font-weight: 550; }

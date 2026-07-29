@@ -127,10 +127,33 @@ Two things produce that, and they have opposite consequences:
 
 A `/reload` distinguishes neither, because it closes no file handle. **Killing the process
 does**: run the probe, end the task from Task Manager, restart and read `General.log`. A token
-that survives means the write reached the OS and a crash keeps it. Nothing here gets built
-until that comes back — see issue #209.
+that survives means the write reached the OS and a crash keeps it. **No journal gets built
+until that comes back** — see issue #209.
 
 Note for whoever does build it: `General.log` almost certainly rotates per launch, the way
 `EditMode.log` and `QuestCache.log` keep a single `.old` beside them. A crashed session's log
 is likely `General.log` at the moment of death and `General.log.old` after the next start, so
 a reader has to look at both.
+
+### What is built: saying the session is gone
+
+Recovering a lost session needs a journal and the journal needs that answer. *Noticing* one
+needs neither, and it is the half that is wanted whichever way the other goes — a journal that
+worked would still only be replayed for a session the app could see had ended badly, so this
+is its precondition as much as it is its fallback.
+
+The client writes two files and only one of them at logout. The combat log is written line by
+line as it goes, so its last stamped line is the last moment the client can be *proved* to have
+been alive; the newest `endedAt` in the database is how far the record reaches. When the log
+has been quiet for an hour — long enough that an evening spent in a city cannot be mistaken for
+a dead client — and its last line is meaningfully later than that, a session ended without the
+client writing it out.
+
+- `logfile::tail_at` reads the last 64KB of a log and resolves the last stamp in it. One seek,
+  whatever the file's size.
+- `gap::verdict` is the rule, and is pure: `Unknown`, `Live`, `Complete` or `Missing`. `Unknown`
+  and `Complete` are kept apart deliberately — "nothing to compare" is not a reassurance.
+- The `session_gap` command reads the install, and the timeline draws the notice.
+
+It reports the loss and cannot undo it. What is lost is lost; the point is that the window
+stops presenting a stale file as a complete history.

@@ -498,6 +498,14 @@ async sendSetToGame(name: string, icon: number | null, slots: InGameSetSlot[]) :
     else return { status: "error", error: e  as any };
 }
 },
+async sessionGap() : Promise<Result<Verdict, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("session_gap") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * The two ways somebody changes a capture, answering with the whole dashboard for the same
  * reason the activity edits do: what ends up on screen is what was stored, never what the
@@ -871,6 +879,23 @@ export type ExperienceGain = { gained: number; percent: number; startLevel?: num
 export type GalleryKind = "worn" | "held"
 export type GalleryModel = { displayInfoId: number; kind: GalleryKind; model: string | null }
 export type GalleryPayload = { models: GalleryModel[] }
+/**
+ * A session the combat log proves was played and the history does not contain.
+ */
+export type Gap = {
+/**
+ * The newest segment Chronie holds, in epoch seconds. Where the hole starts.
+ */
+recordedTo: number;
+/**
+ * The last line of the combat log, in epoch seconds. Where the hole ends.
+ */
+playedTo: number;
+/**
+ * The log that proved it, so a reader can go and look at the file rather than take this
+ * on trust.
+ */
+log: string }
 export type GoldHolder = { character: string; total: number; at?: number | null }
 /**
  * One log that is gone, as the record of its going.
@@ -1179,6 +1204,31 @@ export type TransmogPayload = { sets: TransmogSet[]; readCount: number; declared
 export type TransmogSet = { id: number; name: string; group: string; groupId: number; classMask: number; expansionId: number; parentId: number; flags: number; uiOrder: number; patchIntroduced: number; itemCount: number; alternates?: Alternate[] | null; sameLookAs?: number | null }
 export type TransmogSetItemsPayload = { setId: number; appearances: TransmogAppearance[]; readCount: number; withheldCount: number }
 export type TransmogTag = { key: string; value: string | null }
+/**
+ * What can be said about whether the history is complete.
+ */
+export type Verdict =
+/**
+ * Nothing was comparable, so nothing is claimed. No combat log, no readable line in the
+ * one there is, or no segments to hold it against. Kept apart from [`Verdict::Complete`]
+ * on purpose: "there is no hole" and "nobody looked" are not the same sentence, and a
+ * window that draws them the same way is lying about the second one.
+ */
+{ kind: "unknown" } |
+/**
+ * The client was writing to its log recently enough that it may still be running. Nothing
+ * is missing until a session has ended, and a session that has not ended cannot have been
+ * lost.
+ */
+{ kind: "live" } |
+/**
+ * Everything the combat log proves was played is in the history.
+ */
+{ kind: "complete" } |
+/**
+ * Play the history does not contain.
+ */
+{ kind: "missing"; gap: Gap }
 /**
  * An offer sitting on this machine's screen, waiting for somebody to answer it.
  */

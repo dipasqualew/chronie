@@ -522,3 +522,16 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
         "holdings": holdings,
     }))
 }
+
+/// The end of the newest segment in the history, in epoch seconds.
+///
+/// One column of one row, kept apart from [`dashboard`] because the caller is not drawing a
+/// window: it is [`crate::gap`], asking how far the record reaches so it can be held against
+/// how far the client's own combat log reaches. `None` is an empty history, which that rule
+/// treats as nothing to compare rather than as a hole.
+pub fn newest_segment_end(database_path: &Path) -> Result<Option<i64>, String> {
+    let connection = open_database(database_path)?;
+    connection
+        .query_row("SELECT MAX(ended_at) FROM segments", [], |row| row.get(0))
+        .map_err(|error| error.to_string())
+}

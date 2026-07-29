@@ -12,6 +12,7 @@
 //! Nothing here watches the filesystem or holds a handle. The app already polls every 30
 //! seconds; this is called on that beat and compares what it sees with what it saw last time.
 
+use chrono::{DateTime, Datelike, Local};
 use serde::Serialize;
 use specta::Type;
 use std::{
@@ -238,6 +239,40 @@ pub fn newest_log(wow_path: &Path) -> Option<LogFile> {
     logs(wow_path).pop().map(|found| found.file)
 }
 
+/// The newest combat log, and where it is.
+///
+/// [`newest_log`] answers what the window is told; this answers what a reader of the file
+/// needs, which is the path as well.
+pub fn newest_found(wow_path: &Path) -> Option<Found> {
+    logs(wow_path).pop()
+}
+
+/// The year to read a log's stamps with when its lines do not carry one.
+///
+/// The client names its files with the day it opened them — `WoWCombatLog-070926_182310.txt`
+/// — which is the best answer available and is the file's own claim rather than a guess. When
+/// the name does not say, the filesystem's date does, and after that there is only now.
+pub fn year_of(found: &Found) -> i32 {
+    stamped_year(&found.file.name)
+        .or_else(|| {
+            found
+                .file
+                .modified
+                .and_then(|at| DateTime::from_timestamp(at, 0))
+                .map(|moment| moment.with_timezone(&Local).year())
+        })
+        .unwrap_or_else(|| Local::now().year())
+}
+
+/// The `MMDDYY_HHMMSS` in a log's name, as a year.
+fn stamped_year(name: &str) -> Option<i32> {
+    let stamp = name.split(['-', '.', '_']).collect::<Vec<_>>().join("_");
+    let stamp = stamp.split('_').find(|part| {
+        part.len() == 6 && part.bytes().all(|byte| byte.is_ascii_digit())
+    })?;
+    stamp[4..6].parse::<i32>().ok().map(|year| 2000 + year)
+}
+
 /// Whether the newest log is one somebody is writing to right now.
 ///
 /// Three ways to be sure, and one look is not always enough for any of them: it is bigger
@@ -312,6 +347,16 @@ mod tests {
             .unwrap()
             .set_modified(when)
             .unwrap();
+    }
+
+    /// The name the client gives a file is the only thing that says which year its stamps are
+    /// in, for a log old enough not to state one.
+    #[test]
+    fn reads_the_year_out_of_the_name_the_client_gave_the_file() {
+        assert_eq!(stamped_year("WoWCombatLog-070926_182310.txt"), Some(2026));
+        assert_eq!(stamped_year("WoWCombatLog-111423_201500.txt"), Some(2023));
+        assert_eq!(stamped_year("WoWCombatLog.txt"), None);
+        assert_eq!(stamped_year("WoWCombatLog-notadate.txt"), None);
     }
 
     #[test]

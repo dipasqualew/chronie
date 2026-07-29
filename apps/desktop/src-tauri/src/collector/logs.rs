@@ -15,7 +15,6 @@ use crate::combatlog;
 use crate::logfile::{self, Fight, Fought, MapBounds, Position, Reading, Resume, Sampled};
 use crate::placement;
 use crate::retention;
-use chrono::{DateTime, Datelike, Local};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
@@ -27,32 +26,6 @@ use std::{collections::HashMap, fs, path::Path};
 /// thirty seconds: nothing is skipped, nothing is read twice, and a backlog of a hundred
 /// gigabytes clears in half an hour of the app simply being open.
 const LOG_BYTES_PER_SYNC: u64 = 64 * 1024 * 1024;
-
-/// The year to read a log's stamps with when its lines do not carry one.
-///
-/// The client names its files with the day it opened them — `WoWCombatLog-070926_182310.txt`
-/// — which is the best answer available and is the file's own claim rather than a guess. When
-/// the name does not say, the filesystem's date does, and after that there is only now.
-fn log_year(found: &combatlog::Found) -> i32 {
-    stamped_year(&found.file.name)
-        .or_else(|| {
-            found
-                .file
-                .modified
-                .and_then(|at| DateTime::from_timestamp(at, 0))
-                .map(|moment| moment.with_timezone(&Local).year())
-        })
-        .unwrap_or_else(|| Local::now().year())
-}
-
-/// The `MMDDYY_HHMMSS` in a log's name, as a year.
-fn stamped_year(name: &str) -> Option<i32> {
-    let stamp = name.split(['-', '.', '_']).collect::<Vec<_>>().join("_");
-    let stamp = stamp.split('_').find(|part| {
-        part.len() == 6 && part.bytes().all(|byte| byte.is_ascii_digit())
-    })?;
-    stamp[4..6].parse::<i32>().ok().map(|year| 2000 + year)
-}
 
 /// Where the last read of this log got to, and the state it needs to carry on.
 ///
@@ -538,7 +511,7 @@ pub(super) fn ingest_logs(connection: &mut Connection, wow_path: &Path, now: i64
             break;
         }
         let (_, resume) = log_resume(connection, &found.file.name)?;
-        let mut reader = logfile::Reader::new(log_year(&found), logfile::Zone::Local);
+        let mut reader = logfile::Reader::new(combatlog::year_of(&found), logfile::Zone::Local);
         reader.budget = budget;
         let Ok(reading) = reader.read(&found.path, &resume) else {
             continue;
@@ -1211,16 +1184,6 @@ mod tests {
              ORDER BY f.started_at",
         );
         assert_eq!(placed, ["late", "late"]);
-    }
-
-    /// The name the client gives a file is the only thing that says which year its stamps are
-    /// in, for a log old enough not to state one.
-    #[test]
-    fn reads_the_year_out_of_the_name_the_client_gave_the_file() {
-        assert_eq!(stamped_year("WoWCombatLog-070926_182310.txt"), Some(2026));
-        assert_eq!(stamped_year("WoWCombatLog-111423_201500.txt"), Some(2023));
-        assert_eq!(stamped_year("WoWCombatLog.txt"), None);
-        assert_eq!(stamped_year("WoWCombatLog-notadate.txt"), None);
     }
 
     /// A database holding one log's worth of track and whatever captures a test wants to remember
