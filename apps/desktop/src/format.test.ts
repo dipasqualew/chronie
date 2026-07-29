@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  ago, dayLabel, duration, escapeHtml, fileSize, gold, initials, plural, signed, signedGold,
+  ago,
+  dayLabel,
+  duration,
+  escapeHtml,
+  fileSize,
+  gold,
+  initials,
+  plural,
+  signed,
+  signedGold,
 } from "./format";
 
 describe("gold", () => {

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ASKED_NOTHING, asksAnything, matchesTerms, matchesWords, parseQuery, termText, withTerm,
+  ASKED_NOTHING,
+  asksAnything,
+  matchesTerms,
+  matchesWords,
+  parseQuery,
+  termText,
+  withTerm,
 } from "./terms";
 import type { Facet, Term } from "./terms";
 
@@ -33,8 +39,10 @@ describe("reading a search box", () => {
   });
 
   it("holds a quoted value together and keeps the quotation marks out of it", () => {
-    expect(parseQuery("colour:\"dark red\""))
-      .toEqual({ words: [], terms: [term("colour", "dark red")] });
+    expect(parseQuery('colour:"dark red"')).toEqual({
+      words: [],
+      terms: [term("colour", "dark red")],
+    });
   });
 
   // A key of nothing is not a question, and a colon is a character somebody may well be typing
@@ -46,8 +54,10 @@ describe("reading a search box", () => {
   // Once, here, rather than at every comparison downstream: a page of rows is filtered again on
   // every keystroke and the query is the one thing in that loop that does not change.
   it("folds the case of a key and of a value alike", () => {
-    expect(parseQuery("Colour:Dark Plate"))
-      .toEqual({ words: ["plate"], terms: [term("colour", "dark")] });
+    expect(parseQuery("Colour:Dark Plate")).toEqual({
+      words: ["plate"],
+      terms: [term("colour", "dark")],
+    });
   });
 
   it("makes nothing at all out of an empty box", () => {
@@ -151,8 +161,8 @@ describe("matching what a row says under a name", () => {
 describe("what a clicked chip types into the box", () => {
   it.each<[string, string, string | null, string]>([
     ["a plain pair", "colour", "brown", "colour:brown"],
-    ["a value with a space in it", "colour", "dark red", "colour:\"dark red\""],
-    ["a key with a space in it", "worn by", "the alt", "\"worn by\":\"the alt\""],
+    ["a value with a space in it", "colour", "dark red", 'colour:"dark red"'],
+    ["a key with a space in it", "worn by", "the alt", '"worn by":"the alt"'],
     ["a label, which has no value at all", "wishlist", null, "wishlist:"],
   ])("writes %s", (_what, key, value, expected) => {
     expect(termText(key, value)).toBe(expected);
@@ -161,10 +171,8 @@ describe("what a clicked chip types into the box", () => {
   // The whole point of the quoting: a reader clicked "dark red", and what appears in the box has
   // to be a thing that finds it again.
   it("writes a term that reads back as the pair it was given", () => {
-    expect(parseQuery(termText("colour", "dark red")).terms)
-      .toEqual([term("colour", "dark red")]);
-    expect(parseQuery(termText("worn by", "the alt")).terms)
-      .toEqual([term("worn by", "the alt")]);
+    expect(parseQuery(termText("colour", "dark red")).terms).toEqual([term("colour", "dark red")]);
+    expect(parseQuery(termText("worn by", "the alt")).terms).toEqual([term("worn by", "the alt")]);
   });
 });
 

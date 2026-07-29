@@ -32,8 +32,9 @@ test("finds another Chronie on the network and offers this history to it", async
   await test.step("and the second click is what hands the history over", async () => {
     await wifi.button("sending", "Send history").click();
 
-    await expect(wifi.sendStatus())
-      .toHaveText("Sent to 192.168.1.20:51571: it now holds 1204 segments.");
+    await expect(wifi.sendStatus()).toHaveText(
+      "Sent to 192.168.1.20:51571: it now holds 1204 segments.",
+    );
     await expect(wifi.sentTo()).resolves.toEqual(["192.168.1.20:51571"]);
   });
 });
@@ -64,8 +65,9 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
     await wifi.offer().getByRole("button", { name: "Decline" }).click();
 
     await expect(wifi.offer()).toBeHidden();
-    await expect(wifi.receiveStatus())
-      .toContainText("Turned down the database from Study desktop.");
+    await expect(wifi.receiveStatus()).toContainText(
+      "Turned down the database from Study desktop.",
+    );
   });
 
   await test.step("accepting says what replaced what", async () => {
@@ -78,7 +80,8 @@ test("takes a history from another Chronie only once somebody agrees", async ({ 
     await wifi.offer().getByRole("button", { name: "Accept and replace" }).click();
 
     await expect(wifi.offer()).toBeHidden();
-    await expect(wifi.receiveStatus())
-      .toContainText("Replaced this history with Study desktop's: 1204 segments");
+    await expect(wifi.receiveStatus()).toContainText(
+      "Replaced this history with Study desktop's: 1204 segments",
+    );
   });
 });

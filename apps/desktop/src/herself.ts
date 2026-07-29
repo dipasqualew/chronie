@@ -25,7 +25,10 @@
  */
 
 import type {
-  CharacterLookPayload, CharacterPick, CharacterQuestion, PlayedCharacter,
+  CharacterLookPayload,
+  CharacterPick,
+  CharacterQuestion,
+  PlayedCharacter,
 } from "./types";
 
 /** Nobody has been asked anything yet, which is the payload's own empty state. */
@@ -50,7 +53,7 @@ export const NOBODY_ASKED: CharacterLookPayload = {
 export function answerOf(question: CharacterQuestion, picked: CharacterPick[]): number {
   const said = picked.find((answer) => answer.question === question.id)?.swatch ?? 0;
   const hers = question.swatches.some((swatch) => swatch.id === said);
-  return hers ? said : question.swatches[0]?.id ?? 0;
+  return hers ? said : (question.swatches[0]?.id ?? 0);
 }
 
 /**
@@ -75,7 +78,9 @@ export function swatchLabel(question: CharacterQuestion, swatchId: number): stri
  * a swatch out from under one of them.
  */
 export function withAnswer(
-  payload: CharacterLookPayload, question: number, swatch: number,
+  payload: CharacterLookPayload,
+  question: number,
+  swatch: number,
 ): CharacterPick[] {
   const asked = payload.questions.map((question) => question.id);
   // The other body's answers, untouched. They are in the same list and this form cannot see
@@ -109,7 +114,8 @@ export function withAnswer(
  * them is the body, which the caller sends alongside this.
  */
 export function withCharacter(
-  payload: CharacterLookPayload, character: PlayedCharacter,
+  payload: CharacterLookPayload,
+  character: PlayedCharacter,
 ): CharacterPick[] {
   const theirs = character.picked.map((answer) => answer.question);
   return [
@@ -135,12 +141,19 @@ export function withCharacter(
  * The first is named, because a select has to show one and either is true.
  */
 export function shownAs(
-  body: number, picked: CharacterPick[], characters: PlayedCharacter[],
+  body: number,
+  picked: CharacterPick[],
+  characters: PlayedCharacter[],
 ): string {
-  const found = characters.find((character) => character.body === body
-    && character.picked.every((theirs) => picked.some(
-      (answer) => answer.question === theirs.question && answer.swatch === theirs.swatch,
-    )));
+  const found = characters.find(
+    (character) =>
+      character.body === body &&
+      character.picked.every((theirs) =>
+        picked.some(
+          (answer) => answer.question === theirs.question && answer.swatch === theirs.swatch,
+        ),
+      ),
+  );
   return found?.character ?? "";
 }
 

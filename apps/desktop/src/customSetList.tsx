@@ -58,25 +58,40 @@ export interface CustomSetListProps {
   onWearAll: (set: CustomSet) => void;
 }
 
-export function CustomSetList(
-  {
-    hidden, payload, onDelete, onSaved, onError, icons, wantIcons, outfit, marks, index, onWear,
-    onWearAll,
-  }: CustomSetListProps,
-): ReactNode {
+export function CustomSetList({
+  hidden,
+  payload,
+  onDelete,
+  onSaved,
+  onError,
+  icons,
+  wantIcons,
+  outfit,
+  marks,
+  index,
+  onWear,
+  onWearAll,
+}: CustomSetListProps): ReactNode {
   const [search, setSearch] = useState("");
   const [marked, setMarked] = useState(NO_MARK_FILTER);
   const [failure, setFailure] = useState("");
 
   const saved = payload?.sets ?? [];
   const sets = filterCustomSets(saved, {
-    search, marks: { filter: marked, of: (id) => index.of("custom", id) },
+    search,
+    marks: { filter: marked, of: (id) => index.of("custom", id) },
   });
-  const tags = tagChoices(index, "custom", saved.map((set) => set.id));
+  const tags = tagChoices(
+    index,
+    "custom",
+    saved.map((set) => set.id),
+  );
 
   return (
     <section
-      className="panel mog-browser" id="custom-sets" hidden={hidden}
+      className="panel mog-browser"
+      id="custom-sets"
+      hidden={hidden}
       aria-label="The sets you saved here"
     >
       <div className="table-head">
@@ -85,12 +100,18 @@ export function CustomSetList(
               here it is `piece:` and whatever the reader tagged, a saved set having no colour of
               its own to be measured. See `terms.ts`. */}
           <input
-            id="custom-search" type="search" placeholder="Filter by name, or piece:mantle…"
-            aria-label="Filter your sets" value={search}
+            id="custom-search"
+            type="search"
+            placeholder="Filter by name, or piece:mantle…"
+            aria-label="Filter your sets"
+            value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <MarkFilters
-            scope="custom" favourite={marked.favourite} tag={marked.tag} choices={tags}
+            scope="custom"
+            favourite={marked.favourite}
+            tag={marked.tag}
+            choices={tags}
             onFavourite={(only) => setMarked((was) => ({ ...was, favourite: only }))}
             onTag={(tag) => setMarked((was) => ({ ...was, tag }))}
           />
@@ -99,15 +120,26 @@ export function CustomSetList(
           </span>
         </div>
       </div>
-      {failure ? <p className="mark-failure" role="alert">{failure}</p> : null}
+      {failure ? (
+        <p className="mark-failure" role="alert">
+          {failure}
+        </p>
+      ) : null}
       <div className="mog-list" id="custom-list">
         <div className="mog-grid">
           {sets.map((set) => (
             <Card
-              key={set.id} set={set} icons={icons} wantIcons={wantIcons} outfit={outfit}
-              marks={marks} mark={index.of("custom", set.id)} index={index}
+              key={set.id}
+              set={set}
+              icons={icons}
+              wantIcons={wantIcons}
+              outfit={outfit}
+              marks={marks}
+              mark={index.of("custom", set.id)}
+              index={index}
               onFilter={(term) => setSearch((was) => withTerm(was, term))}
-              onWear={onWear} onWearAll={() => onWearAll(set)}
+              onWear={onWear}
+              onWearAll={() => onWearAll(set)}
               onDelete={() => {
                 setFailure("");
                 void onDelete(set.id)
@@ -139,25 +171,33 @@ export function CustomSetList(
  * Open from the start, unlike a Blizzard set. There is nothing behind the click — the pieces
  * arrived with the card — so a card that had to be opened would be a click that only hid things.
  */
-function Card(
-  {
-    set, icons, wantIcons, outfit, marks, mark, index, onFilter, onWear, onWearAll, onDelete,
-  }: {
-    set: CustomSet;
-    icons: Map<number, string>;
-    wantIcons: (iconFileDataIds: number[]) => void;
-    outfit: Outfit;
-    marks: MarkActions;
-    mark: TransmogMark | undefined;
-    index: MarkIndex;
-    /** What a tag on the set asks of this list when it is clicked — see `terms.ts`. The pieces
-     * inside are looks and the box filters sets, so their own tags are given none of it. */
-    onFilter: (term: string) => void;
-    onWear: (row: AppearanceRow) => void;
-    onWearAll: () => void;
-    onDelete: () => void;
-  },
-): ReactNode {
+function Card({
+  set,
+  icons,
+  wantIcons,
+  outfit,
+  marks,
+  mark,
+  index,
+  onFilter,
+  onWear,
+  onWearAll,
+  onDelete,
+}: {
+  set: CustomSet;
+  icons: Map<number, string>;
+  wantIcons: (iconFileDataIds: number[]) => void;
+  outfit: Outfit;
+  marks: MarkActions;
+  mark: TransmogMark | undefined;
+  index: MarkIndex;
+  /** What a tag on the set asks of this list when it is clicked — see `terms.ts`. The pieces
+   * inside are looks and the box filters sets, so their own tags are given none of it. */
+  onFilter: (term: string) => void;
+  onWear: (row: AppearanceRow) => void;
+  onWearAll: () => void;
+  onDelete: () => void;
+}): ReactNode {
   const [confirming, setConfirming] = useState(false);
   // The place is kept beside the row because it is what makes a piece unique within a set —
   // two of the game's own one-handers can be the same look in two hands, and `appearanceId`
@@ -180,38 +220,55 @@ function Card(
           could go there — that it is the reader's own — is what the browser it is in says. */}
       <h4>{set.name}</h4>
       <MarkControls
-        kind="custom" id={set.id} mark={mark} name={set.name} actions={marks} onFilter={onFilter}
+        kind="custom"
+        id={set.id}
+        mark={mark}
+        name={set.name}
+        actions={marks}
+        onFilter={onFilter}
       />
       <div className="mog-foot">
         <span>{savedSummary(set)}</span>
       </div>
       <div className="mog-contents">
         <div className="mog-contents-head">
-          {pieces.length
-            ? <button type="button" className="mog-wear-all" onClick={onWearAll}>
+          {pieces.length ? (
+            <button type="button" className="mog-wear-all" onClick={onWearAll}>
               {`Wear all of ${set.name}`}
             </button>
-            : null}
+          ) : null}
           {/* Behind a second click, because it is the one thing in this view that destroys
               something the reader made and no other click here is undoable. */}
-          {confirming
-            ? <span className="mog-confirm">
+          {confirming ? (
+            <span className="mog-confirm">
               <button type="button" className="mog-delete" onClick={onDelete}>
                 {`Delete ${set.name}`}
               </button>
-              <button type="button" onClick={() => setConfirming(false)}>Keep it</button>
+              <button type="button" onClick={() => setConfirming(false)}>
+                Keep it
+              </button>
             </span>
-            : <button
-              type="button" className="mog-delete" aria-label={`Delete ${set.name}`}
+          ) : (
+            <button
+              type="button"
+              className="mog-delete"
+              aria-label={`Delete ${set.name}`}
               onClick={() => setConfirming(true)}
-            >Delete</button>}
+            >
+              Delete
+            </button>
+          )}
         </div>
         <ul className="mog-items" aria-label={`Pieces of ${set.name}`}>
           {pieces.map(({ place, row }) => (
             <Piece
-              key={place} row={row} worn={isWorn(outfit, row)}
-              icon={icons.get(row.iconFileDataId)} marks={marks}
-              mark={index.of("appearance", row.appearanceId)} onWear={() => onWear(row)}
+              key={place}
+              row={row}
+              worn={isWorn(outfit, row)}
+              icon={icons.get(row.iconFileDataId)}
+              marks={marks}
+              mark={index.of("appearance", row.appearanceId)}
+              onWear={() => onWear(row)}
             />
           ))}
         </ul>
@@ -228,21 +285,29 @@ function Card(
  * about the items that sell one. The star is the same star, because the look is the same look —
  * a piece starred here is starred in both browsers beside this one.
  */
-function Piece(
-  { row, worn, icon, marks, mark, onWear }: {
-    row: AppearanceRow;
-    worn: boolean;
-    icon?: string;
-    marks: MarkActions;
-    mark: TransmogMark | undefined;
-    onWear: () => void;
-  },
-): ReactNode {
+function Piece({
+  row,
+  worn,
+  icon,
+  marks,
+  mark,
+  onWear,
+}: {
+  row: AppearanceRow;
+  worn: boolean;
+  icon?: string;
+  marks: MarkActions;
+  mark: TransmogMark | undefined;
+  onWear: () => void;
+}): ReactNode {
   return (
     <li className="mog-item" data-worn={worn}>
       <button
-        type="button" className="mog-pick" aria-pressed={worn}
-        aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
+        type="button"
+        className="mog-pick"
+        aria-pressed={worn}
+        aria-label={`Wear ${row.slot}: ${row.label}`}
+        onClick={onWear}
       >
         <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
           {icon ? <img src={icon} alt="" /> : null}
@@ -252,13 +317,22 @@ function Piece(
       </button>
       {worn ? <span className="chip">worn</span> : null}
       <MarkControls
-        kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
+        kind="appearance"
+        id={row.appearanceId}
+        mark={mark}
+        name={row.label}
+        actions={marks}
       />
       <a
-        className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
-        target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
+        className="mog-wowhead"
+        href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${row.label} on Wowhead`}
         aria-label={`${row.label} on Wowhead`}
-      ><LinkOut /></a>
+      >
+        <LinkOut />
+      </a>
     </li>
   );
 }

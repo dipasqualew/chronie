@@ -64,9 +64,10 @@ function worthAsking(key: IconKey): boolean {
   return typeof key === "number" ? key > 0 : key.trim() !== "";
 }
 
-export function createIconBook<K extends IconKey>(
-  { load, schedule = queueMicrotask }: IconBookOptions<K>,
-): IconBook<K> {
+export function createIconBook<K extends IconKey>({
+  load,
+  schedule = queueMicrotask,
+}: IconBookOptions<K>): IconBook<K> {
   const icons = new Map<string, string>();
   /** Keys a request has already been made for, whatever it came back with. */
   const asked = new Set<string>();

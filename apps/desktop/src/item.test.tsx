@@ -33,14 +33,18 @@ function draw(
   children: (book: ReturnType<typeof createItemBook>) => React.ReactNode,
   known: Record<number, ItemDetail> = { 201: MANTLE },
 ) {
-  const load = vi.fn((ids: number[]): Promise<ItemDetailsPayload> => Promise.resolve({
-    items: Object.fromEntries(
-      ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
-    ),
-  }));
-  const loadIcons = vi.fn((fdids: number[]): Promise<IconsPayload> => Promise.resolve({
-    icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), ICON])),
-  }));
+  const load = vi.fn((ids: number[]): Promise<ItemDetailsPayload> =>
+    Promise.resolve({
+      items: Object.fromEntries(
+        ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
+      ),
+    }),
+  );
+  const loadIcons = vi.fn((fdids: number[]): Promise<IconsPayload> =>
+    Promise.resolve({
+      icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), ICON])),
+    }),
+  );
   const book = createItemBook({ load, loadIcons });
   return Object.assign(render(<>{children(book)}</>), { load, loadIcons });
 }
@@ -60,7 +64,9 @@ describe("GameItem", () => {
     expect(screen.getByRole("link", { name: "Item 201" })).toBeTruthy();
     expect(picture()).toBeNull();
 
-    await waitFor(() => expect(screen.getByRole("link", { name: "Wanderer's Mantle" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Wanderer's Mantle" })).toBeTruthy(),
+    );
     expect(facts()).toEqual(["Leather", "Shoulders", "Level 25"]);
     await waitFor(() => expect(picture()?.src).toBe(ICON));
   });
@@ -71,9 +77,12 @@ describe("GameItem", () => {
   it("marks the name and the frame with the quality the game gives it", async () => {
     draw((book) => <GameItem id={201} book={book} />);
 
-    await waitFor(() => expect(screen.getByRole("link", { name: "Wanderer's Mantle" })).toBeTruthy());
-    expect(screen.getByRole("link", { name: "Wanderer's Mantle" }).getAttribute("data-quality"))
-      .toBe("3");
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Wanderer's Mantle" })).toBeTruthy(),
+    );
+    expect(
+      screen.getByRole("link", { name: "Wanderer's Mantle" }).getAttribute("data-quality"),
+    ).toBe("3");
     expect(document.querySelector(".item-icon")?.getAttribute("data-quality")).toBe("3");
   });
 
@@ -91,12 +100,16 @@ describe("GameItem", () => {
   // The reason the book batches: a segment's worth of rows each ask for themselves, and the
   // read behind the request opens the game's largest table once per request.
   it("asks once for an item that is on the screen twice, and fills in both", async () => {
-    const shown = draw((book) => <>
-      <GameItem id={201} book={book} />
-      <GameItem id={201} book={book} />
-    </>);
+    const shown = draw((book) => (
+      <>
+        <GameItem id={201} book={book} />
+        <GameItem id={201} book={book} />
+      </>
+    ));
 
-    await waitFor(() => expect(screen.getAllByRole("link", { name: "Wanderer's Mantle" })).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByRole("link", { name: "Wanderer's Mantle" })).toHaveLength(2),
+    );
     expect(shown.load).toHaveBeenCalledTimes(1);
     expect(shown.load).toHaveBeenCalledWith([201]);
   });
@@ -107,9 +120,12 @@ describe("GameItem", () => {
   it("links out to the item, by the id the segment recorded", async () => {
     draw((book) => <GameItem id={201} book={book} />);
 
-    await waitFor(() => expect(screen.getByRole("link", { name: "Wanderer's Mantle" })).toBeTruthy());
-    expect(screen.getByRole("link", { name: "Wanderer's Mantle" }).getAttribute("href"))
-      .toBe("https://www.wowhead.com/item=201");
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Wanderer's Mantle" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("link", { name: "Wanderer's Mantle" }).getAttribute("href")).toBe(
+      "https://www.wowhead.com/item=201",
+    );
   });
 
   // Inside something that is itself a control — an unfolded summary, where the row is a button
@@ -121,17 +137,28 @@ describe("GameItem", () => {
       </button>
     ));
 
-    await waitFor(() => expect(screen.getByRole("button").textContent).toContain("Wanderer's Mantle"));
+    await waitFor(() =>
+      expect(screen.getByRole("button").textContent).toContain("Wanderer's Mantle"),
+    );
     expect(screen.queryByRole("link")).toBeNull();
     // What is left out of the row is still said, where a reader can ask for it.
-    expect(document.querySelector(".item-name")?.getAttribute("title"))
-      .toBe("Wanderer's Mantle · Rare · Leather · Shoulders · Level 25");
+    expect(document.querySelector(".item-name")?.getAttribute("title")).toBe(
+      "Wanderer's Mantle · Rare · Leather · Shoulders · Level 25",
+    );
   });
 
   it("says who may wear an item that is not for everybody", async () => {
     draw((book) => <GameItem id={202} book={book} />, {
-      202: { ...MANTLE, id: 202, name: "Bulwark Helm", subclassId: 4, inventoryType: 1,
-        quality: 4, requiredLevel: 60, allowableClass: 0b10_0011 },
+      202: {
+        ...MANTLE,
+        id: 202,
+        name: "Bulwark Helm",
+        subclassId: 4,
+        inventoryType: 1,
+        quality: 4,
+        requiredLevel: 60,
+        allowableClass: 0b10_0011,
+      },
     });
 
     await waitFor(() => expect(screen.getByRole("link", { name: "Bulwark Helm" })).toBeTruthy());
@@ -142,7 +169,9 @@ describe("GameItem", () => {
   // the time it happened — belongs to whoever is drawing it rather than to the item.
   it("draws what the view puts beside the name", async () => {
     draw((book) => (
-      <GameItem id={201} book={book}><span className="appearance-new">new appearance</span></GameItem>
+      <GameItem id={201} book={book}>
+        <span className="appearance-new">new appearance</span>
+      </GameItem>
     ));
 
     const line = document.querySelector(".item-line") as HTMLElement;

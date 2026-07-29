@@ -34,12 +34,12 @@ const TAURI_DIR = join(ROOT, "apps/desktop/src-tauri");
  * so that — not the repository root — is what a relative value is relative to.
  */
 const TARGET_DIR = process.env.CARGO_TARGET_DIR
-    ? resolve(TAURI_DIR, process.env.CARGO_TARGET_DIR)
-    : join(TAURI_DIR, "target");
+  ? resolve(TAURI_DIR, process.env.CARGO_TARGET_DIR)
+  : join(TAURI_DIR, "target");
 
 /** The bundle is named after `productName`, so read it rather than hardcode "Chronie". */
 const config = JSON.parse(readFileSync(join(TAURI_DIR, "tauri.conf.json"), "utf8")) as {
-    productName: string;
+  productName: string;
 };
 
 /**
@@ -50,8 +50,8 @@ const config = JSON.parse(readFileSync(join(TAURI_DIR, "tauri.conf.json"), "utf8
  * `updater_configured` in `lib.rs` already knows how to start against.
  */
 const UNSIGNED = JSON.stringify({
-    bundle: { createUpdaterArtifacts: false },
-    plugins: { updater: null },
+  bundle: { createUpdaterArtifacts: false },
+  plugins: { updater: null },
 });
 
 /**
@@ -61,9 +61,9 @@ const UNSIGNED = JSON.stringify({
  * there is the single executable cargo has already written.
  */
 function build(bundles?: string): void {
-    const format = bundles ? ["--bundles", bundles] : ["--no-bundle"];
-    const args = ["run", "--cwd", "apps/desktop", "tauri", "build", ...format];
-    execFileSync("bun", [...args, "--config", UNSIGNED], { cwd: ROOT, stdio: "inherit" });
+  const format = bundles ? ["--bundles", bundles] : ["--no-bundle"];
+  const args = ["run", "--cwd", "apps/desktop", "tauri", "build", ...format];
+  execFileSync("bun", [...args, "--config", UNSIGNED], { cwd: ROOT, stdio: "inherit" });
 }
 
 /**
@@ -77,67 +77,80 @@ function build(bundles?: string): void {
  * `%LOCALAPPDATA%`.
  */
 function cargoPackageName(): string {
-    const metadata = JSON.parse(
-        execFileSync(
-            "cargo",
-            ["metadata", "--format-version", "1", "--no-deps", "--manifest-path", join(TAURI_DIR, "Cargo.toml")],
-            { encoding: "utf8" },
-        ),
-    ) as { packages: { name: string; targets: { kind: string[]; name: string }[] }[] };
-    const crate = metadata.packages[0];
-    const binary = crate?.targets.find(
-        (target) => target.kind.includes("bin") && target.name === crate.name,
-    );
-    if (!binary) {
-        throw new Error(`The desktop crate has no binary target named ${crate?.name}.`);
-    }
-    return binary.name;
+  const metadata = JSON.parse(
+    execFileSync(
+      "cargo",
+      [
+        "metadata",
+        "--format-version",
+        "1",
+        "--no-deps",
+        "--manifest-path",
+        join(TAURI_DIR, "Cargo.toml"),
+      ],
+      { encoding: "utf8" },
+    ),
+  ) as { packages: { name: string; targets: { kind: string[]; name: string }[] }[] };
+  const crate = metadata.packages[0];
+  const binary = crate?.targets.find(
+    (target) => target.kind.includes("bin") && target.name === crate.name,
+  );
+  if (!binary) {
+    throw new Error(`The desktop crate has no binary target named ${crate?.name}.`);
+  }
+  return binary.name;
 }
 
 function installOnMac(): string {
-    build("app");
-    const app = `${config.productName}.app`;
-    const built = join(TARGET_DIR, "release/bundle/macos", app);
-    if (!existsSync(built)) {
-        throw new Error(`The build did not produce ${built}.`);
-    }
-    // A macOS install is a copy, and copying onto a half-replaced bundle is how you get an
-    // app that launches into a signature error, so the old one goes first.
-    const installed = join("/Applications", app);
-    rmSync(installed, { recursive: true, force: true });
-    cpSync(built, installed, { recursive: true, verbatimSymlinks: true });
-    return installed;
+  build("app");
+  const app = `${config.productName}.app`;
+  const built = join(TARGET_DIR, "release/bundle/macos", app);
+  if (!existsSync(built)) {
+    throw new Error(`The build did not produce ${built}.`);
+  }
+  // A macOS install is a copy, and copying onto a half-replaced bundle is how you get an
+  // app that launches into a signature error, so the old one goes first.
+  const installed = join("/Applications", app);
+  rmSync(installed, { recursive: true, force: true });
+  cpSync(built, installed, { recursive: true, verbatimSymlinks: true });
+  return installed;
 }
 
 function installOnWindows(): string {
-    // Nothing needs bundling: the payload is the one executable, and skipping NSIS skips
-    // both the minute it takes and the installer nothing is allowed to run.
-    build();
-    // Cargo names it after the Cargo package, and it is the bundler — skipped here — that
-    // renames it to `productName`. So this reads `chronie-desktop.exe` and writes `Chronie.exe`,
-    // which is the name the shortcut, `debug-desktop.ps1` and `install.ps1` all expect.
-    const built = join(TARGET_DIR, `release/${cargoPackageName()}.exe`);
-    if (!existsSync(built)) {
-        throw new Error(`The build did not produce ${built}.`);
-    }
-    // The running copy holds this file open, and Windows will not write over one that is
-    // open. `taskkill` is fine with there being nothing to kill, hence the swallowed error.
-    try {
-        execFileSync("taskkill", ["/IM", `${config.productName}.exe`, "/F"], { stdio: "ignore" });
-    } catch {
-        // Not running. Nothing to close.
-    }
-    const installed = join(process.env.LOCALAPPDATA ?? "", config.productName, `${config.productName}.exe`);
-    mkdirSync(dirname(installed), { recursive: true });
-    cpSync(built, installed);
-    return installed;
+  // Nothing needs bundling: the payload is the one executable, and skipping NSIS skips
+  // both the minute it takes and the installer nothing is allowed to run.
+  build();
+  // Cargo names it after the Cargo package, and it is the bundler — skipped here — that
+  // renames it to `productName`. So this reads `chronie-desktop.exe` and writes `Chronie.exe`,
+  // which is the name the shortcut, `debug-desktop.ps1` and `install.ps1` all expect.
+  const built = join(TARGET_DIR, `release/${cargoPackageName()}.exe`);
+  if (!existsSync(built)) {
+    throw new Error(`The build did not produce ${built}.`);
+  }
+  // The running copy holds this file open, and Windows will not write over one that is
+  // open. `taskkill` is fine with there being nothing to kill, hence the swallowed error.
+  try {
+    execFileSync("taskkill", ["/IM", `${config.productName}.exe`, "/F"], { stdio: "ignore" });
+  } catch {
+    // Not running. Nothing to close.
+  }
+  const installed = join(
+    process.env.LOCALAPPDATA ?? "",
+    config.productName,
+    `${config.productName}.exe`,
+  );
+  mkdirSync(dirname(installed), { recursive: true });
+  cpSync(built, installed);
+  return installed;
 }
 
 if (process.platform === "darwin") {
-    console.log(`Installed ${installOnMac()}`);
+  console.log(`Installed ${installOnMac()}`);
 } else if (process.platform === "win32") {
-    console.log(`Installed ${installOnWindows()}; open Chronie from the Start menu.`);
+  console.log(`Installed ${installOnWindows()}; open Chronie from the Start menu.`);
 } else {
-    console.error(`No local install for ${process.platform}: Chronie bundles for macOS and Windows only.`);
-    process.exit(1);
+  console.error(
+    `No local install for ${process.platform}: Chronie bundles for macOS and Windows only.`,
+  );
+  process.exit(1);
 }

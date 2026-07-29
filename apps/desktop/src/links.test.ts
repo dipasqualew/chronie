@@ -32,7 +32,9 @@ describe("externalUrl", () => {
 
   // Markup wraps hrefs across lines, and the surrounding whitespace comes with them.
   it("ignores the whitespace a wrapped attribute carries", () => {
-    expect(externalUrl(link("\n  https://www.wowhead.com/quest=1  "))).toBe("https://www.wowhead.com/quest=1");
+    expect(externalUrl(link("\n  https://www.wowhead.com/quest=1  "))).toBe(
+      "https://www.wowhead.com/quest=1",
+    );
   });
 });
 
@@ -60,7 +62,11 @@ function installed(open: (url: string) => Promise<unknown>) {
   const failures: Array<[string, unknown]> = [];
   let listener: ((event: ClickLike) => void) | undefined;
   installExternalLinks({
-    root: { addEventListener: (_type, given) => { listener = given; } },
+    root: {
+      addEventListener: (_type, given) => {
+        listener = given;
+      },
+    },
     open: (url) => {
       opened.push(url);
       return open(url);
@@ -106,7 +112,9 @@ describe("installExternalLinks", () => {
   // A url the backend refuses — one outside the capability's scope, say — is a link that
   // does nothing when clicked, which is the whole bug this exists to fix.
   it("reports a link the operating system would not take", async () => {
-    const window = installed(() => Promise.reject(new Error("url not allowed on the configured scope")));
+    const window = installed(() =>
+      Promise.reject(new Error("url not allowed on the configured scope")),
+    );
 
     window.click("https://example.test/nope");
     await Promise.resolve();

@@ -10,10 +10,26 @@ import type { Focus } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
 import type {
-  CharacterModelPayload, CharacterPick, CustomSet, CustomSetPiece, CustomSetsPayload, GalleryKind,
-  MarkSubjectKind, QualitiesFile, SetGalleryPayload, SetQualitiesFile, TransmogAppearance,
-  TransmogMark, TransmogMarksPayload, TransmogPayload, TransmogSet, TransmogSetItemsPayload,
-  WardrobeAppearance, WardrobePayload, WornPiece, WornSetPayload,
+  CharacterModelPayload,
+  CharacterPick,
+  CustomSet,
+  CustomSetPiece,
+  CustomSetsPayload,
+  GalleryKind,
+  MarkSubjectKind,
+  QualitiesFile,
+  SetGalleryPayload,
+  SetQualitiesFile,
+  TransmogAppearance,
+  TransmogMark,
+  TransmogMarksPayload,
+  TransmogPayload,
+  TransmogSet,
+  TransmogSetItemsPayload,
+  WardrobeAppearance,
+  WardrobePayload,
+  WornPiece,
+  WornSetPayload,
 } from "./types";
 
 afterEach(cleanup);
@@ -48,32 +64,58 @@ const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearanc
 });
 
 const HELM = appearance({
-  appearanceId: 1, itemId: 1, name: "Crown of Tides",
-  displayType: 0, displayInfoId: 900_001, hasModel: true,
+  appearanceId: 1,
+  itemId: 1,
+  name: "Crown of Tides",
+  displayType: 0,
+  displayInfoId: 900_001,
+  hasModel: true,
 });
 const ROBE = appearance({
-  appearanceId: 2, itemId: 2, name: "Robe of Tides", displayType: 3, displayInfoId: 900_012,
+  appearanceId: 2,
+  itemId: 2,
+  name: "Robe of Tides",
+  displayType: 3,
+  displayInfoId: 900_012,
 });
 const OTHER_HELM = appearance({
-  appearanceId: 3, itemId: 3, name: "Emberforge Helm",
-  displayType: 0, displayInfoId: 900_099, hasModel: true,
+  appearanceId: 3,
+  itemId: 3,
+  name: "Emberforge Helm",
+  displayType: 0,
+  displayInfoId: 900_099,
+  hasModel: true,
 });
 /** Arrows: the game files them under a weapon slot and nobody holds them. */
 const ARROWS = appearance({
-  appearanceId: 4, itemId: 4, name: "A quiver of arrows", displayType: 11, inventoryType: 24,
+  appearanceId: 4,
+  itemId: 4,
+  name: "A quiver of arrows",
+  displayType: 11,
+  inventoryType: 24,
 });
 /**
  * An appearance the game encrypts: no item behind it, so no name, no slot and nothing to look
  * up. The other way there is nowhere on her to put a row, and the only one with no id to link.
  */
 const WITHHELD = appearance({
-  appearanceId: 0, itemId: 0, name: "", displayType: 0, displayInfoId: 0,
+  appearanceId: 0,
+  itemId: 0,
+  name: "",
+  displayType: 0,
+  displayInfoId: 0,
 });
 
 const SETS: TransmogPayload = {
   sets: [
     set({ id: 201, name: "Tideglass Regalia", classMask: 0x0190 }),
-    set({ id: 203, name: "Emberforge Plate", group: "Emberforge Armory", classMask: 0x0023, expansionId: 4 }),
+    set({
+      id: 203,
+      name: "Emberforge Plate",
+      group: "Emberforge Armory",
+      classMask: 0x0023,
+      expansionId: 4,
+    }),
   ],
   readCount: 2,
   declaredCount: 2,
@@ -88,11 +130,13 @@ const SETS: TransmogPayload = {
  * nothing here turns on how the groups happen to fall.
  */
 const MANY_SETS: TransmogPayload = {
-  sets: Array.from({ length: 16 }, (_, index) => set({
-    id: 301 + index,
-    name: `Wardrobe of the Deep ${String(index).padStart(2, "0")}`,
-    group: "Deepwater Collection",
-  })),
+  sets: Array.from({ length: 16 }, (_, index) =>
+    set({
+      id: 301 + index,
+      name: `Wardrobe of the Deep ${String(index).padStart(2, "0")}`,
+      group: "Deepwater Collection",
+    }),
+  ),
   readCount: 16,
   declaredCount: 16,
   withheldCount: 0,
@@ -134,7 +178,13 @@ const WARDROBE: Record<string, WardrobePayload> = {
     appearances: [
       look({ appearanceId: 40, name: "Coif of the Drowned Star", displayInfoId: 900_040 }),
       // The same look set 203 holds, which is what says both halves dress one character.
-      look({ appearanceId: 3, name: "Emberforge Helm", displayInfoId: 900_099, itemCount: 3, liftsRestriction: true }),
+      look({
+        appearanceId: 3,
+        name: "Emberforge Helm",
+        displayInfoId: 900_099,
+        itemCount: 3,
+        liftsRestriction: true,
+      }),
     ],
   },
   // A kind the size a real one is: 5,111 heads on a shipping install, and a list that drew
@@ -143,15 +193,17 @@ const WARDROBE: Record<string, WardrobePayload> = {
     displayTypes: [3],
     readCount: 120,
     withheldCount: 0,
-    appearances: Array.from({ length: 120 }, (_, index) => look({
-      appearanceId: 500 + index,
-      // Numbered so the order is legible: the backend sorts by name and this is what that
-      // looks like when a kind holds more than a page of them.
-      name: `Robe ${String(index).padStart(3, "0")}`,
-      displayType: 3,
-      inventoryType: 5,
-      displayInfoId: 901_000 + index,
-    })),
+    appearances: Array.from({ length: 120 }, (_, index) =>
+      look({
+        appearanceId: 500 + index,
+        // Numbered so the order is legible: the backend sorts by name and this is what that
+        // looks like when a kind holds more than a page of them.
+        name: `Robe ${String(index).padStart(3, "0")}`,
+        displayType: 3,
+        inventoryType: 5,
+        displayInfoId: 901_000 + index,
+      }),
+    ),
   },
   "11,12,13,14,15": {
     displayTypes: [11, 12, 13, 14, 15],
@@ -159,18 +211,33 @@ const WARDROBE: Record<string, WardrobePayload> = {
     withheldCount: 0,
     appearances: [
       look({
-        appearanceId: 41, name: "Emberforge Blade", displayType: 11, inventoryType: 13,
-        classId: 2, subclassId: 7, displayInfoId: 900_007,
+        appearanceId: 41,
+        name: "Emberforge Blade",
+        displayType: 11,
+        inventoryType: 13,
+        classId: 2,
+        subclassId: 7,
+        displayInfoId: 900_007,
       }),
       look({
-        appearanceId: 42, name: "Staff of the Quiet Tide", displayType: 11, inventoryType: 17,
-        classId: 2, subclassId: 10, displayInfoId: 900_014,
+        appearanceId: 42,
+        name: "Staff of the Quiet Tide",
+        displayType: 11,
+        inventoryType: 17,
+        classId: 2,
+        subclassId: 10,
+        displayInfoId: 900_014,
       }),
       // Filed as armour rather than as a weapon, so a picker reading the display type alone
       // would have put it among the swords.
       look({
-        appearanceId: 43, name: "Emberforge Aegis", displayType: 13, inventoryType: 14,
-        classId: 4, subclassId: 6, displayInfoId: 900_015,
+        appearanceId: 43,
+        name: "Emberforge Aegis",
+        displayType: 13,
+        inventoryType: 14,
+        classId: 4,
+        subclassId: 6,
+        displayInfoId: 900_015,
       }),
     ],
   },
@@ -207,7 +274,9 @@ function fakeStage() {
       shown.push(bytes.byteLength);
       return Promise.resolve();
     },
-    resetCamera: () => { resets.count += 1; },
+    resetCamera: () => {
+      resets.count += 1;
+    },
     dispose: () => {},
   } as ModelStage;
   return { stage, shown, resets };
@@ -230,7 +299,10 @@ function fakeGalleryStage() {
   const stage: GalleryStage = {
     paint: (target: HTMLCanvasElement, glb: Uint8Array, focus: Focus, turn = 0) => {
       painted.push({
-        label: target.getAttribute("aria-label") ?? "", holds: focus.holds, turn, glb,
+        label: target.getAttribute("aria-label") ?? "",
+        holds: focus.holds,
+        turn,
+        glb,
       });
       return Promise.resolve();
     },
@@ -296,7 +368,9 @@ function fakeMarks(starting: TransmogMark[] = []) {
   let marks = structuredClone(starting);
   const answer = (): TransmogMarksPayload => ({ marks: structuredClone(marks) });
   const edit = (
-    kind: MarkSubjectKind, id: number, apply: (mark: TransmogMark) => void,
+    kind: MarkSubjectKind,
+    id: number,
+    apply: (mark: TransmogMark) => void,
   ): Promise<TransmogMarksPayload> => {
     let mark = marks.find((one) => one.kind === kind && one.id === id);
     if (!mark) {
@@ -313,7 +387,10 @@ function fakeMarks(starting: TransmogMark[] = []) {
     starting: answer(),
     stored: (): TransmogMark[] => structuredClone(marks),
     setFavourite: vi.fn((kind: MarkSubjectKind, id: number, favourite: boolean) =>
-      edit(kind, id, (mark) => { mark.favourite = favourite; })),
+      edit(kind, id, (mark) => {
+        mark.favourite = favourite;
+      }),
+    ),
     setTag: vi.fn((kind: MarkSubjectKind, id: number, key: string, value: string | null) => {
       const cleaned = key.trim();
       if (!cleaned) return Promise.reject(new Error("A tag needs a name."));
@@ -328,7 +405,8 @@ function fakeMarks(starting: TransmogMark[] = []) {
     deleteTag: vi.fn((kind: MarkSubjectKind, id: number, key: string) =>
       edit(kind, id, (mark) => {
         mark.tags = mark.tags.filter((tag) => !same(tag.key, key));
-      })),
+      }),
+    ),
   };
 }
 
@@ -387,15 +465,18 @@ type FakeCustomSets = ReturnType<typeof fakeCustomSets>;
  * sets — as props and never edits either itself, so a test driving a star or a save needs the
  * piece above it that holds the payloads. This is that piece and nothing else.
  */
-function Marked(
-  { store, saved, ...props }:
-    Omit<TransmogViewProps, "marks" | "custom" | "inGame">
-    & { store: FakeMarks; saved: FakeCustomSets; inGame?: TransmogViewProps["inGame"] },
-): ReactNode {
+function Marked({
+  store,
+  saved,
+  ...props
+}: Omit<TransmogViewProps, "marks" | "custom" | "inGame"> & {
+  store: FakeMarks;
+  saved: FakeCustomSets;
+  inGame?: TransmogViewProps["inGame"];
+}): ReactNode {
   const [payload, setPayload] = useState<TransmogMarksPayload>(store.starting);
   const [sets, setSets] = useState<CustomSetsPayload>(saved.starting);
-  const said = (error: unknown): string =>
-    (error instanceof Error ? error.message : String(error));
+  const said = (error: unknown): string => (error instanceof Error ? error.message : String(error));
   return (
     <TransmogView
       {...props}
@@ -453,26 +534,51 @@ function fakeHerself() {
   let picked: CharacterPick[] = [];
   let body = 2;
   return {
-    load: vi.fn(() => Promise.resolve({
-      bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
-      body,
-      questions: body === 2
-        ? [
-          {
-            id: 16,
-            name: "Hair Style",
-            swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
-          },
-          // Unnamed, as most of the game's are: a skin tone is a square of colour.
-          { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
-        ]
-        // The other body is asked its own questions, which is what changing body means.
-        : [{ id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] }],
-      picked: [...picked],
-      // The reader's own roster, which the panel's other tests are about — these are about
-      // what changing her does to the pictures above, and a roster does not change that.
-      characters: [],
-    })),
+    load: vi.fn(() =>
+      Promise.resolve({
+        bodies: [
+          { id: 1, name: "Human Male" },
+          { id: 2, name: "Human Female" },
+        ],
+        body,
+        questions:
+          body === 2
+            ? [
+                {
+                  id: 16,
+                  name: "Hair Style",
+                  swatches: [
+                    { id: 132, name: "Loose" },
+                    { id: 133, name: "Braided" },
+                  ],
+                },
+                // Unnamed, as most of the game's are: a skin tone is a square of colour.
+                {
+                  id: 14,
+                  name: "Skin Color",
+                  swatches: [
+                    { id: 85, name: "" },
+                    { id: 86, name: "" },
+                  ],
+                },
+              ]
+            : // The other body is asked its own questions, which is what changing body means.
+              [
+                {
+                  id: 13,
+                  name: "Beard",
+                  swatches: [
+                    { id: 70, name: "Clean" },
+                    { id: 71, name: "Full" },
+                  ],
+                },
+              ],
+        picked: [...picked],
+        // The reader's own roster, which the panel's other tests are about — these are about
+        // what changing her does to the pictures above, and a roster does not change that.
+        characters: [],
+      }),
+    ),
     save: vi.fn((chosen: number, answers: CharacterPick[]) => {
       body = chosen;
       picked = answers;
@@ -530,7 +636,9 @@ const SET_QUALITIES: SetQualitiesFile = {
  */
 function view(
   options: {
-    payload?: TransmogPayload | null; marks?: FakeMarks; saved?: FakeCustomSets;
+    payload?: TransmogPayload | null;
+    marks?: FakeMarks;
+    saved?: FakeCustomSets;
     herself?: FakeHerself;
     /** Reads the test answers by hand, for the moments that only exist while one is in flight. */
     bodies?: HeldBodies;
@@ -540,41 +648,55 @@ function view(
   const { createGalleryStage, painted } = fakeGalleryStage();
   // Recorded rather than merely answered: "the same outfit is not read out of the game twice"
   // is a statement about what crossed the bridge, and only the request itself can say it.
-  const loadWorn = options.bodies?.loadWorn
-    ?? vi.fn((_pieces: WornPiece[]): Promise<WornSetPayload> =>
-      Promise.resolve({ model: model("a dressed body") }));
-  const loadCharacter = options.bodies?.loadCharacter
-    ?? vi.fn((): Promise<CharacterModelPayload> =>
-      Promise.resolve({ model: model("a bare body") }));
+  const loadWorn =
+    options.bodies?.loadWorn ??
+    vi.fn((_pieces: WornPiece[]): Promise<WornSetPayload> =>
+      Promise.resolve({ model: model("a dressed body") }),
+    );
+  const loadCharacter =
+    options.bodies?.loadCharacter ??
+    vi.fn((): Promise<CharacterModelPayload> => Promise.resolve({ model: model("a bare body") }));
   const loadSet = vi.fn((setId: number) =>
-    Promise.resolve(CONTENTS[setId] ?? { setId, appearances: [], readCount: 0, withheldCount: 0 }));
+    Promise.resolve(CONTENTS[setId] ?? { setId, appearances: [], readCount: 0, withheldCount: 0 }),
+  );
   // The wardrobe half of the browser, which is not read at all until a reader asks for it —
   // recorded rather than answered, because that is the statement worth making about it.
   const loadAppearances = vi.fn((displayTypes: number[]) =>
-    Promise.resolve(WARDROBE[displayTypes.join(",")]
-      ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 }));
+    Promise.resolve(
+      WARDROBE[displayTypes.join(",")] ?? {
+        displayTypes,
+        appearances: [],
+        readCount: 0,
+        withheldCount: 0,
+      },
+    ),
+  );
   // The gallery half of the wardrobe, recorded for the same reason the outfit is: what matters
   // about it is which page the window asked the backend for, and only the request can say.
-  const loadGallery = vi.fn((pieces: WornPiece[]) => Promise.resolve({
-    models: pieces.map((piece) => ({
-      displayInfoId: piece.displayInfoId,
-      kind: (piece.displayType >= 11 ? "held" : "worn") as GalleryKind,
-      model: model(`${piece.displayInfoId} worn`),
-    })),
-  }));
+  const loadGallery = vi.fn((pieces: WornPiece[]) =>
+    Promise.resolve({
+      models: pieces.map((piece) => ({
+        displayInfoId: piece.displayInfoId,
+        kind: (piece.displayType >= 11 ? "held" : "worn") as GalleryKind,
+        model: model(`${piece.displayInfoId} worn`),
+      })),
+    }),
+  );
   // And the set grid drawn as characters, recorded for the reason the wardrobe's page is: what
   // matters about it is which cards the window asked the backend for, and only the request can
   // say. Ids rather than clothes, because a card holds nothing else until somebody opens it.
   const loadSetGallery = vi.fn((setIds: number[]): Promise<SetGalleryPayload> =>
     Promise.resolve({
       models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
-    }));
+    }),
+  );
   const marks = options.marks ?? fakeMarks();
   const saved = options.saved ?? fakeCustomSets();
   // Recorded as well as answered: "a slot's file is not downloaded until somebody browses that
   // slot" is a statement about what was asked for, and only the request can say it.
   const loadQualities = vi.fn((displayType: number) =>
-    Promise.resolve(MEASURED[displayType] ?? null));
+    Promise.resolve(MEASURED[displayType] ?? null),
+  );
   const loadSetQualities = vi.fn(() => Promise.resolve(SET_QUALITIES));
   const herself = options.herself ?? fakeHerself();
   const rendered = render(
@@ -598,8 +720,21 @@ function view(
     />,
   );
   return {
-    rendered, loadWorn, loadCharacter, loadSet, loadAppearances, loadGallery, loadSetGallery,
-    marks, saved, herself, shown, resets, painted, loadQualities, loadSetQualities,
+    rendered,
+    loadWorn,
+    loadCharacter,
+    loadSet,
+    loadAppearances,
+    loadGallery,
+    loadSetGallery,
+    marks,
+    saved,
+    herself,
+    shown,
+    resets,
+    painted,
+    loadQualities,
+    loadSetQualities,
   };
 }
 
@@ -616,9 +751,7 @@ async function open(name: string): Promise<HTMLElement> {
  * Switches the browser to the game's whole wardrobe, which is what a reader does when the
  * sets are not where the look they want lives.
  */
-async function browseItems(
-  already?: ReturnType<typeof view>,
-): Promise<ReturnType<typeof view>> {
+async function browseItems(already?: ReturnType<typeof view>): Promise<ReturnType<typeof view>> {
   const shown = already ?? view();
   fireEvent.click(screen.getByRole("button", { name: "Items" }));
   await waitFor(() => expect(screen.getByLabelText("Kind of appearance")).toBeTruthy());
@@ -653,7 +786,11 @@ function wornTips(): { item: string; place: string; from: string }[] {
     const tip = document.createElement("div");
     tip.innerHTML = tile.dataset.tip ?? "";
     const [place, from] = (tip.querySelector(".tip-line")?.textContent ?? "").split(" · ");
-    return { item: tip.querySelector("b")?.textContent ?? "", place: place ?? "", from: from ?? "" };
+    return {
+      item: tip.querySelector("b")?.textContent ?? "",
+      place: place ?? "",
+      from: from ?? "",
+    };
   });
 }
 
@@ -670,8 +807,9 @@ describe("TransmogView", () => {
     await waitFor(() => expect(shown).toHaveLength(1));
     expect(loadCharacter).toHaveBeenCalledTimes(1);
     expect(loadWorn).not.toHaveBeenCalled();
-    expect(document.querySelector("#outfit-summary")?.textContent)
-      .toBe("Nothing on yet. Pick an appearance from any set.");
+    expect(document.querySelector("#outfit-summary")?.textContent).toBe(
+      "Nothing on yet. Pick an appearance from any set.",
+    );
   });
 
   // The way back from a drag that went too far. It is only offered over a stage with
@@ -899,8 +1037,9 @@ describe("TransmogView", () => {
     view();
     fireEvent.click(hideBox());
     const card = await open("Tideglass Regalia");
-    expect(within(card).getByRole("button", { name: "Wear Ammo: A quiver of arrows" }))
-      .toBeTruthy();
+    expect(
+      within(card).getByRole("button", { name: "Wear Ammo: A quiver of arrows" }),
+    ).toBeTruthy();
   });
 
   // An appearance the body has nowhere to put says so, rather than being a button that does
@@ -961,7 +1100,8 @@ describe("TransmogView", () => {
         status=""
         loadSet={() => Promise.reject(new Error("The game keeps that one encrypted."))}
         loadAppearances={(displayTypes) =>
-          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })
+        }
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
@@ -987,7 +1127,8 @@ describe("TransmogView", () => {
         status=""
         loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
         loadAppearances={(displayTypes) =>
-          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })
+        }
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
@@ -997,7 +1138,9 @@ describe("TransmogView", () => {
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
-        createStage={() => { throw new Error("This machine cannot draw 3D."); }}
+        createStage={() => {
+          throw new Error("This machine cannot draw 3D.");
+        }}
       />,
     );
     await screen.findByText("This machine cannot draw 3D.");
@@ -1009,7 +1152,9 @@ describe("TransmogView", () => {
   it("narrows the sets by everything the game says about them", async () => {
     view();
     fireEvent.change(screen.getByLabelText("Filter transmog sets"), { target: { value: "plate" } });
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull(),
+    );
     expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
   });
 
@@ -1039,7 +1184,9 @@ describe("TransmogView", () => {
   // leaves the sets should never pay it.
   it("reads nothing of the wardrobe until the reader asks to see it", async () => {
     const shown = view();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy(),
+    );
     expect(shown.loadAppearances).not.toHaveBeenCalled();
 
     await browseItems(shown);
@@ -1060,7 +1207,9 @@ describe("TransmogView", () => {
   // opens the wardrobe should download none of it — the same claim the payload above makes.
   it("reads nothing of the store until the reader asks to see a slot", async () => {
     const shown = view();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy(),
+    );
     expect(shown.loadQualities).not.toHaveBeenCalled();
 
     await browseItems(shown);
@@ -1115,13 +1264,18 @@ describe("TransmogView", () => {
     await screen.findByText("Coif of the Drowned Star");
     // Still on her, and the list says so: the look is the same display however it was reached.
     expect(worn()).toEqual(["Head Emberforge Helm"]);
-    expect(screen.getByRole("button", { name: "Wear Head: Emberforge Helm" })
-      .getAttribute("aria-pressed")).toBe("true");
+    expect(
+      screen
+        .getByRole("button", { name: "Wear Head: Emberforge Helm" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("puts a look picked out of the wardrobe on the character", async () => {
     const { loadWorn } = await browseItems();
-    fireEvent.click(await screen.findByRole("button", { name: "Wear Head: Coif of the Drowned Star" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Wear Head: Coif of the Drowned Star" }),
+    );
 
     await waitFor(() => expect(worn()).toEqual(["Head Coif of the Drowned Star"]));
     expect(loadWorn).toHaveBeenLastCalledWith([
@@ -1137,7 +1291,9 @@ describe("TransmogView", () => {
   // neither of them.
   it("picks one kind of weapon out of everything held in a hand", async () => {
     const { loadAppearances } = await browseItems();
-    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "weapon-10" } });
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), {
+      target: { value: "weapon-10" },
+    });
 
     expect(await screen.findByText("Staff of the Quiet Tide")).toBeTruthy();
     expect(screen.queryByText("Emberforge Blade")).toBeNull();
@@ -1145,7 +1301,9 @@ describe("TransmogView", () => {
 
     // And the seventeen kinds of weapon are that one answer: going from staves to swords is a
     // filter over what is already here rather than another second of the game's storage.
-    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "weapon-7" } });
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), {
+      target: { value: "weapon-7" },
+    });
     expect(await screen.findByText("Emberforge Blade")).toBeTruthy();
     expect(loadAppearances).toHaveBeenCalledTimes(2);
   });
@@ -1163,7 +1321,9 @@ describe("TransmogView", () => {
   // of an endless scroll: it says how many more there are before it draws any of them.
   it("draws a kind a page at a time and says how much of it is left", async () => {
     await browseItems();
-    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-3" } });
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), {
+      target: { value: "armour-3" },
+    });
 
     await screen.findByText("Robe 000");
     expect(screen.getByText("100 of 120 appearances")).toBeTruthy();
@@ -1206,22 +1366,27 @@ describe("the wardrobe as models", () => {
   it("asks for a whole page of bodies in one request", async () => {
     const { loadGallery } = await showWorn();
     expect(loadGallery).toHaveBeenCalledTimes(1);
-    expect(loadGallery.mock.calls[0]?.[0].map((piece) => piece.displayInfoId))
-      .toEqual([900_040, 900_099]);
+    expect(loadGallery.mock.calls[0]?.[0].map((piece) => piece.displayInfoId)).toEqual([
+      900_040, 900_099,
+    ]);
   });
 
   // And the page is a fifth of what the same list draws as names, because a row of names is a
   // string and a row of models is a character read out of the game's own files.
   it("draws fewer looks at a time than the same list of names does", async () => {
     const { loadGallery } = await showWorn();
-    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-3" } });
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), {
+      target: { value: "armour-3" },
+    });
     await screen.findByText("Robe 000");
 
     expect(screen.getByText("20 of 120 appearances")).toBeTruthy();
     expect(screen.queryByText("Robe 020")).toBeNull();
-    await waitFor(() => expect(loadGallery).toHaveBeenLastCalledWith(
-      expect.arrayContaining([expect.objectContaining({ displayInfoId: 901_019 })]),
-    ));
+    await waitFor(() =>
+      expect(loadGallery).toHaveBeenLastCalledWith(
+        expect.arrayContaining([expect.objectContaining({ displayInfoId: 901_019 })]),
+      ),
+    );
     expect(loadGallery.mock.calls.at(-1)?.[0]).toHaveLength(20);
 
     // And the button under them goes on in pages of twenty rather than of a hundred.
@@ -1235,8 +1400,10 @@ describe("the wardrobe as models", () => {
   it("frames each look on the part of her its slot is on", async () => {
     const { painted } = await showWorn();
     await waitFor(() => expect(painted).toHaveLength(2));
-    expect(painted.map((one) => one.label))
-      .toEqual(["Coif of the Drowned Star, drawn", "Emberforge Helm, drawn"]);
+    expect(painted.map((one) => one.label)).toEqual([
+      "Coif of the Drowned Star, drawn",
+      "Emberforge Helm, drawn",
+    ]);
     for (const one of painted) expect(one.holds).toBeLessThan(1);
   });
 
@@ -1245,11 +1412,15 @@ describe("the wardrobe as models", () => {
   // be free rather than another page of the game's tables.
   it("does not ask twice for a look it already holds", async () => {
     const { loadGallery } = await showWorn();
-    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-3" } });
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), {
+      target: { value: "armour-3" },
+    });
     await screen.findByText("Robe 000");
     await waitFor(() => expect(loadGallery).toHaveBeenCalledTimes(2));
 
-    fireEvent.change(screen.getByLabelText("Kind of appearance"), { target: { value: "armour-0" } });
+    fireEvent.change(screen.getByLabelText("Kind of appearance"), {
+      target: { value: "armour-0" },
+    });
     await screen.findByText("Coif of the Drowned Star");
     await waitFor(() => expect(screen.getAllByLabelText(/, drawn$/)).toHaveLength(2));
     expect(loadGallery).toHaveBeenCalledTimes(2);
@@ -1260,7 +1431,12 @@ describe("the wardrobe as models", () => {
   // reader is looking at pictures.
   it("goes back to the icons, and gives the context back", async () => {
     const disposals = { count: 0 };
-    const stage: GalleryStage = { paint: () => Promise.resolve(), dispose: () => { disposals.count += 1; } };
+    const stage: GalleryStage = {
+      paint: () => Promise.resolve(),
+      dispose: () => {
+        disposals.count += 1;
+      },
+    };
     await browseItems(view());
     cleanup();
 
@@ -1270,22 +1446,33 @@ describe("the wardrobe as models", () => {
         status=""
         loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
         loadAppearances={(displayTypes) =>
-          Promise.resolve(WARDROBE[displayTypes.join(",")]
-            ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+          Promise.resolve(
+            WARDROBE[displayTypes.join(",")] ?? {
+              displayTypes,
+              appearances: [],
+              readCount: 0,
+              withheldCount: 0,
+            },
+          )
+        }
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         herself={NOT_ASKED}
-        loadGallery={(pieces) => Promise.resolve({
-          models: pieces.map((piece) => ({
-            displayInfoId: piece.displayInfoId,
-            kind: "worn" as GalleryKind,
-            model: model("worn"),
-          })),
-        })}
-        loadSetGallery={(setIds) => Promise.resolve({
-          models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
-        })}
+        loadGallery={(pieces) =>
+          Promise.resolve({
+            models: pieces.map((piece) => ({
+              displayInfoId: piece.displayInfoId,
+              kind: "worn" as GalleryKind,
+              model: model("worn"),
+            })),
+          })
+        }
+        loadSetGallery={(setIds) =>
+          Promise.resolve({
+            models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+          })
+        }
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
@@ -1412,7 +1599,9 @@ describe("the wardrobe as models", () => {
     // Never settles on its own, which is the window held open: the reader gets to the switch
     // before the renderer exists.
     let arrive = (_: GalleryStage) => {};
-    const coming = new Promise<GalleryStage>((resolve) => { arrive = resolve; });
+    const coming = new Promise<GalleryStage>((resolve) => {
+      arrive = resolve;
+    });
     await browseItems(view());
     cleanup();
 
@@ -1422,22 +1611,33 @@ describe("the wardrobe as models", () => {
         status=""
         loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
         loadAppearances={(displayTypes) =>
-          Promise.resolve(WARDROBE[displayTypes.join(",")]
-            ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+          Promise.resolve(
+            WARDROBE[displayTypes.join(",")] ?? {
+              displayTypes,
+              appearances: [],
+              readCount: 0,
+              withheldCount: 0,
+            },
+          )
+        }
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         herself={NOT_ASKED}
-        loadGallery={(pieces) => Promise.resolve({
-          models: pieces.map((piece) => ({
-            displayInfoId: piece.displayInfoId,
-            kind: "worn" as GalleryKind,
-            model: model("worn"),
-          })),
-        })}
-        loadSetGallery={(setIds) => Promise.resolve({
-          models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
-        })}
+        loadGallery={(pieces) =>
+          Promise.resolve({
+            models: pieces.map((piece) => ({
+              displayInfoId: piece.displayInfoId,
+              kind: "worn" as GalleryKind,
+              model: model("worn"),
+            })),
+          })
+        }
+        loadSetGallery={(setIds) =>
+          Promise.resolve({
+            models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+          })
+        }
         marks={UNMARKED}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
@@ -1456,7 +1656,12 @@ describe("the wardrobe as models", () => {
     expect(disposals.count).toBe(0);
 
     // And now it finishes being made, into a window that no longer wants it.
-    arrive({ paint: () => Promise.resolve(), dispose: () => { disposals.count += 1; } });
+    arrive({
+      paint: () => Promise.resolve(),
+      dispose: () => {
+        disposals.count += 1;
+      },
+    });
     await waitFor(() => expect(disposals.count).toBe(1));
   });
 
@@ -1470,8 +1675,15 @@ describe("the wardrobe as models", () => {
         status=""
         loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
         loadAppearances={(displayTypes) =>
-          Promise.resolve(WARDROBE[displayTypes.join(",")]
-            ?? { displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+          Promise.resolve(
+            WARDROBE[displayTypes.join(",")] ?? {
+              displayTypes,
+              appearances: [],
+              readCount: 0,
+              withheldCount: 0,
+            },
+          )
+        }
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
@@ -1534,8 +1746,10 @@ describe("the sets as models", () => {
   it("draws every card as the whole of the character wearing that set", async () => {
     const { painted } = await showSets();
     await waitFor(() => expect(painted).toHaveLength(2));
-    expect(painted.map((one) => one.label))
-      .toEqual(["Tideglass Regalia, drawn", "Emberforge Plate, drawn"]);
+    expect(painted.map((one) => one.label)).toEqual([
+      "Tideglass Regalia, drawn",
+      "Emberforge Plate, drawn",
+    ]);
     for (const one of painted) expect(one.holds).toBe(1);
   });
 
@@ -1546,8 +1760,9 @@ describe("the sets as models", () => {
     await showSets();
     const picture = shot("Tideglass Regalia");
     expect(picture.closest("button")).toBeNull();
-    expect(screen.getByRole("button", { name: "Tideglass Regalia" }).getAttribute("aria-expanded"))
-      .toBe("false");
+    expect(
+      screen.getByRole("button", { name: "Tideglass Regalia" }).getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 
   // A card this install can put nothing on her for keeps everything it had. The name, the
@@ -1555,9 +1770,11 @@ describe("the sets as models", () => {
   // answer to what the set is.
   it("keeps a card the install can draw nothing for", async () => {
     const shown = view();
-    shown.loadSetGallery.mockImplementation((setIds: number[]) => Promise.resolve({
-      models: setIds.map((setId) => ({ setId, model: setId === 201 ? null : model("worn") })),
-    }));
+    shown.loadSetGallery.mockImplementation((setIds: number[]) =>
+      Promise.resolve({
+        models: setIds.map((setId) => ({ setId, model: setId === 201 ? null : model("worn") })),
+      }),
+    );
     await showSets(shown);
     await waitFor(() => expect(shot("Emberforge Plate")).toBeTruthy());
     expect(screen.queryByLabelText("Tideglass Regalia, drawn")).toBeNull();
@@ -1569,7 +1786,8 @@ describe("the sets as models", () => {
   it("keeps the grid when a page of sets will not come", async () => {
     const shown = view();
     shown.loadSetGallery.mockImplementation(() =>
-      Promise.reject(new Error("The game's files are not readable.")));
+      Promise.reject(new Error("The game's files are not readable.")),
+    );
     await showSets(shown);
     await waitFor(() => expect(shown.loadSetGallery).toHaveBeenCalledTimes(1));
     expect(screen.queryByLabelText(/, drawn$/)).toBeNull();
@@ -1613,7 +1831,10 @@ describe("the sets as models", () => {
   it("goes back to the plain cards, and gives the context back", async () => {
     const disposals = { count: 0 };
     const stage: GalleryStage = {
-      paint: () => Promise.resolve(), dispose: () => { disposals.count += 1; },
+      paint: () => Promise.resolve(),
+      dispose: () => {
+        disposals.count += 1;
+      },
     };
     render(
       <TransmogView
@@ -1621,14 +1842,17 @@ describe("the sets as models", () => {
         status=""
         loadSet={(setId) => Promise.resolve(CONTENTS[setId] as TransmogSetItemsPayload)}
         loadAppearances={(displayTypes) =>
-          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })}
+          Promise.resolve({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 })
+        }
         loadIcons={() => Promise.resolve({ icons: {} })}
         loadCharacter={() => Promise.resolve({ model: model("a bare body") })}
         loadWorn={() => Promise.resolve({ model: model("a dressed body") })}
         loadGallery={() => Promise.resolve({ models: [] })}
-        loadSetGallery={(setIds) => Promise.resolve({
-          models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
-        })}
+        loadSetGallery={(setIds) =>
+          Promise.resolve({
+            models: setIds.map((setId) => ({ setId, model: model(`set ${setId} worn`) })),
+          })
+        }
         herself={NOT_ASKED}
         marks={UNMARKED}
         custom={NO_SETS}
@@ -1739,8 +1963,9 @@ describe("who the character is", () => {
     });
 
     await waitFor(() => expect(shown.loadGallery).toHaveBeenCalledTimes(2));
-    expect(shown.loadGallery.mock.calls[1]?.[0].map((piece) => piece.displayInfoId))
-      .toEqual([900_040, 900_099]);
+    expect(shown.loadGallery.mock.calls[1]?.[0].map((piece) => piece.displayInfoId)).toEqual([
+      900_040, 900_099,
+    ]);
   });
 
   // The other half of it, and the coarser one: another body entirely. Every picture in the
@@ -1841,16 +2066,20 @@ describe("what the reader says about the wardrobe", () => {
 
     fireEvent.click(star(card, "Tideglass Regalia"));
 
-    await waitFor(() => expect(marks.stored())
-      .toEqual([{ kind: "set", id: 201, favourite: true, tags: [] }]));
     await waitFor(() =>
-      expect(star(card, "Tideglass Regalia").getAttribute("aria-pressed")).toBe("true"));
+      expect(marks.stored()).toEqual([{ kind: "set", id: 201, favourite: true, tags: [] }]),
+    );
+    await waitFor(() =>
+      expect(star(card, "Tideglass Regalia").getAttribute("aria-pressed")).toBe("true"),
+    );
   });
 
   // Un-starring deletes the row rather than storing a `false`, which is the migration's own
   // rule and the reason a mark saying nothing is no mark at all.
   it("takes a star off again and leaves nothing behind", async () => {
-    const { marks } = view({ marks: fakeMarks([{ kind: "set", id: 201, favourite: true, tags: [] }]) });
+    const { marks } = view({
+      marks: fakeMarks([{ kind: "set", id: 201, favourite: true, tags: [] }]),
+    });
     const card = cardFor("Tideglass Regalia");
     expect(star(card, "Tideglass Regalia").getAttribute("aria-pressed")).toBe("true");
 
@@ -1864,13 +2093,17 @@ describe("what the reader says about the wardrobe", () => {
     const card = cardFor("Tideglass Regalia");
 
     tagIt(card, "Tideglass Regalia", "faction", "horde");
-    await waitFor(() => expect(marks.stored()[0]?.tags).toEqual([{ key: "faction", value: "horde" }]));
+    await waitFor(() =>
+      expect(marks.stored()[0]?.tags).toEqual([{ key: "faction", value: "horde" }]),
+    );
 
     tagIt(card, "Tideglass Regalia", "wishlist");
-    await waitFor(() => expect(marks.stored()[0]?.tags).toEqual([
-      { key: "faction", value: "horde" },
-      { key: "wishlist", value: null },
-    ]));
+    await waitFor(() =>
+      expect(marks.stored()[0]?.tags).toEqual([
+        { key: "faction", value: "horde" },
+        { key: "wishlist", value: null },
+      ]),
+    );
     // The label reads as the key alone; the property reads as the pair.
     expect(within(card).getByText("faction: horde")).toBeTruthy();
     expect(within(card).getByText("wishlist")).toBeTruthy();
@@ -1884,9 +2117,11 @@ describe("what the reader says about the wardrobe", () => {
     });
     const card = cardFor("Tideglass Regalia");
 
-    fireEvent.click(within(card).getByRole("button", {
-      name: "Remove the tag faction: horde from Tideglass Regalia",
-    }));
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: "Remove the tag faction: horde from Tideglass Regalia",
+      }),
+    );
 
     await waitFor(() => expect(marks.stored()).toEqual([]));
   });
@@ -1898,12 +2133,15 @@ describe("what the reader says about the wardrobe", () => {
     const { marks } = view();
     const card = cardFor("Tideglass Regalia");
     marks.setTag.mockImplementationOnce(() =>
-      Promise.reject(new Error("A tag's name has to fit in 48 characters.")));
+      Promise.reject(new Error("A tag's name has to fit in 48 characters.")),
+    );
 
     tagIt(card, "Tideglass Regalia", "a".repeat(60));
 
-    expect(await within(card).findByRole("alert"))
-      .toHaveProperty("textContent", "A tag's name has to fit in 48 characters.");
+    expect(await within(card).findByRole("alert")).toHaveProperty(
+      "textContent",
+      "A tag's name has to fit in 48 characters.",
+    );
     expect(marks.stored()).toEqual([]);
   });
 
@@ -1923,7 +2161,9 @@ describe("what the reader says about the wardrobe", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Favourites only" }));
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Emberforge Plate" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Emberforge Plate" })).toBeNull(),
+    );
     expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy();
   });
 
@@ -1934,12 +2174,16 @@ describe("what the reader says about the wardrobe", () => {
       ]),
     });
     const picker = screen.getByLabelText("Tag");
-    expect([...picker.querySelectorAll("option")].map((one) => one.textContent))
-      .toEqual(["Any tag", "wishlist"]);
+    expect([...picker.querySelectorAll("option")].map((one) => one.textContent)).toEqual([
+      "Any tag",
+      "wishlist",
+    ]);
 
     fireEvent.change(picker, { target: { value: "wishlist" } });
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull(),
+    );
     expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
   });
 
@@ -1959,7 +2203,9 @@ describe("what the reader says about the wardrobe", () => {
 
     fireEvent.change(screen.getByLabelText("Filter transmog sets"), { target: { value: "horde" } });
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull(),
+    );
     expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
   });
 
@@ -1969,14 +2215,20 @@ describe("what the reader says about the wardrobe", () => {
     const already = view();
     const card = await open("Emberforge Plate");
     fireEvent.click(star(card, "Emberforge Helm"));
-    await waitFor(() => expect(already.marks.stored())
-      .toEqual([{ kind: "appearance", id: 3, favourite: true, tags: [] }]));
+    await waitFor(() =>
+      expect(already.marks.stored()).toEqual([
+        { kind: "appearance", id: 3, favourite: true, tags: [] },
+      ]),
+    );
 
     await browseItems(already);
 
     const row = screen.getByRole("button", { name: "Wear Head: Emberforge Helm" }).closest("li");
-    expect(within(row as HTMLElement).getByRole("button", { name: "Favourite Emberforge Helm" })
-      .getAttribute("aria-pressed")).toBe("true");
+    expect(
+      within(row as HTMLElement)
+        .getByRole("button", { name: "Favourite Emberforge Helm" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("stars a look out of the game's whole wardrobe", async () => {
@@ -1985,14 +2237,17 @@ describe("what the reader says about the wardrobe", () => {
 
     fireEvent.click(star(row, "Coif of the Drowned Star"));
 
-    await waitFor(() => expect(marks.stored())
-      .toEqual([{ kind: "appearance", id: 40, favourite: true, tags: [] }]));
+    await waitFor(() =>
+      expect(marks.stored()).toEqual([{ kind: "appearance", id: 40, favourite: true, tags: [] }]),
+    );
   });
 
   it("narrows a kind to the starred looks", async () => {
-    await browseItems(view({
-      marks: fakeMarks([{ kind: "appearance", id: 40, favourite: true, tags: [] }]),
-    }));
+    await browseItems(
+      view({
+        marks: fakeMarks([{ kind: "appearance", id: 40, favourite: true, tags: [] }]),
+      }),
+    );
     await screen.findByText("Emberforge Helm");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Favourites only" }));
@@ -2088,13 +2343,13 @@ describe("narrowing a list by clicking what is written on it", () => {
   // only way to the colour and has to stay a control.
   it("offers one way to ask for a colour rather than two", async () => {
     const shown = view();
-    const card = screen.getByRole("button", { name: "Tideglass Regalia" })
+    const card = screen
+      .getByRole("button", { name: "Tideglass Regalia" })
       .closest("article") as HTMLElement;
     await within(card).findByTitle(/blue and white/);
 
     // The word says blue and the swatch beside it is blue, and between them there is one button.
-    expect(within(card).getAllByRole("button", { name: "Filter by colour: blue" }))
-      .toHaveLength(1);
+    expect(within(card).getAllByRole("button", { name: "Filter by colour: blue" })).toHaveLength(1);
     // The accent is the colour the word does not say, so that square is still a way to ask.
     expect(within(card).getByRole("button", { name: "Filter by colour: white" })).toBeTruthy();
 
@@ -2110,14 +2365,18 @@ describe("narrowing a list by clicking what is written on it", () => {
   // The reader's own half of it: "I filed six of these under horde" to seeing the six, without
   // going to the picker for it or remembering what they called it.
   it("finds what the reader filed a look under from the tag written on it", async () => {
-    await browseItems(view({
-      marks: fakeMarks([
-        {
-          kind: "appearance", id: 40, favourite: false,
-          tags: [{ key: "faction", value: "horde" }],
-        },
-      ]),
-    }));
+    await browseItems(
+      view({
+        marks: fakeMarks([
+          {
+            kind: "appearance",
+            id: 40,
+            favourite: false,
+            tags: [{ key: "faction", value: "horde" }],
+          },
+        ]),
+      }),
+    );
     await screen.findByText("Emberforge Helm");
 
     fireEvent.click(tagChip("Coif of the Drowned Star", "faction: horde"));
@@ -2131,15 +2390,22 @@ describe("narrowing a list by clicking what is written on it", () => {
   // than put in its place. Both looks carry the label, so a box that replaced would hand the
   // helm back — which is what nobody who clicked two chips is asking for.
   it("asks for both when a second chip is clicked, rather than for the second one", async () => {
-    await browseItems(view({
-      marks: fakeMarks([
-        {
-          kind: "appearance", id: 40, favourite: false,
-          tags: [{ key: "faction", value: "horde" }, { key: "wishlist", value: null }],
-        },
-        { kind: "appearance", id: 3, favourite: false, tags: [{ key: "wishlist", value: null }] },
-      ]),
-    }));
+    await browseItems(
+      view({
+        marks: fakeMarks([
+          {
+            kind: "appearance",
+            id: 40,
+            favourite: false,
+            tags: [
+              { key: "faction", value: "horde" },
+              { key: "wishlist", value: null },
+            ],
+          },
+          { kind: "appearance", id: 3, favourite: false, tags: [{ key: "wishlist", value: null }] },
+        ]),
+      }),
+    );
     await screen.findByText("Emberforge Helm");
 
     fireEvent.click(tagChip("Coif of the Drowned Star", "faction: horde"));
@@ -2179,7 +2445,9 @@ describe("narrowing a list by clicking what is written on it", () => {
     expect(within(row).queryByRole("button", { name: "Filter by the tag wishlist" })).toBeNull();
     // The set's own chip on the card above it is a button, so what the row is missing is about
     // the row rather than about the feature.
-    expect(within(card).getByRole("button", { name: "Filter by the tag faction: horde" })).toBeTruthy();
+    expect(
+      within(card).getByRole("button", { name: "Filter by the tag faction: horde" }),
+    ).toBeTruthy();
   });
 });
 
@@ -2196,8 +2464,7 @@ describe("narrowing a list by clicking what is written on it", () => {
 describe("the sets the reader puts together themselves", () => {
   /** The name box under the character, and the button that acts on what is typed in it. */
   const name = (): HTMLElement => screen.getByLabelText("Name for this set");
-  const keep = (): HTMLElement =>
-    screen.getByRole("button", { name: /^(Save as a set|Replace )/ });
+  const keep = (): HTMLElement => screen.getByRole("button", { name: /^(Save as a set|Replace )/ });
 
   /** Dresses her out of one of the game's sets, which is where an outfit comes from. */
   const dress = async (): Promise<void> => {
@@ -2225,7 +2492,9 @@ describe("the sets the reader puts together themselves", () => {
 
   it("offers nothing to save while she is wearing nothing", async () => {
     view();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Tideglass Regalia" })).toBeTruthy(),
+    );
     // A form that could only ever be refused is worse than no form.
     expect(screen.queryByLabelText("Name for this set")).toBeNull();
   });
@@ -2264,8 +2533,9 @@ describe("the sets the reader puts together themselves", () => {
     await waitFor(() => expect(worn()).toEqual([]));
 
     browseYours();
-    fireEvent.click(within(savedCard("Horde look"))
-      .getByRole("button", { name: "Wear all of Horde look" }));
+    fireEvent.click(
+      within(savedCard("Horde look")).getByRole("button", { name: "Wear all of Horde look" }),
+    );
 
     await waitFor(() => expect(worn()).toEqual(["Head Crown of Tides", "Chest Robe of Tides"]));
     // The same body the game's own set asked for, which is what says nothing was lost on the
@@ -2285,8 +2555,9 @@ describe("the sets the reader puts together themselves", () => {
     await waitFor(() => expect(worn()).toEqual([]));
 
     browseYours();
-    fireEvent.click(within(savedCard("Horde look"))
-      .getByRole("button", { name: "Wear Head: Crown of Tides" }));
+    fireEvent.click(
+      within(savedCard("Horde look")).getByRole("button", { name: "Wear Head: Crown of Tides" }),
+    );
 
     await waitFor(() => expect(worn()).toEqual(["Head Crown of Tides"]));
   });
@@ -2318,12 +2589,15 @@ describe("the sets the reader puts together themselves", () => {
     const { saved } = view();
     await dress();
     saved.save.mockImplementationOnce(() =>
-      Promise.reject(new Error("A set's name has to fit in 64 characters.")));
+      Promise.reject(new Error("A set's name has to fit in 64 characters.")),
+    );
 
     saveAs("a".repeat(80));
 
-    expect(await screen.findByRole("alert"))
-      .toHaveProperty("textContent", "A set's name has to fit in 64 characters.");
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "A set's name has to fit in 64 characters.",
+    );
     expect(saved.stored()).toEqual([]);
   });
 
@@ -2348,23 +2622,28 @@ describe("the sets the reader puts together themselves", () => {
   });
 
   /** A set already saved, for the tests that are about what happens to one afterwards. */
-  const already = (): FakeCustomSets => fakeCustomSets([{
-    id: 7,
-    name: "Horde look",
-    createdAt: SAVED_AT,
-    updatedAt: SAVED_AT,
-    pieces: [{
-      place: "armour-0",
-      appearanceId: 1,
-      itemId: 1,
-      name: "Crown of Tides",
-      displayType: 0,
-      inventoryType: 0,
-      displayInfoId: 900_001,
-      iconFileDataId: 0,
-      hasModel: true,
-    }],
-  }]);
+  const already = (): FakeCustomSets =>
+    fakeCustomSets([
+      {
+        id: 7,
+        name: "Horde look",
+        createdAt: SAVED_AT,
+        updatedAt: SAVED_AT,
+        pieces: [
+          {
+            place: "armour-0",
+            appearanceId: 1,
+            itemId: 1,
+            name: "Crown of Tides",
+            displayType: 0,
+            inventoryType: 0,
+            displayInfoId: 900_001,
+            iconFileDataId: 0,
+            hasModel: true,
+          },
+        ],
+      },
+    ]);
 
   // The issue's other half: a set of the reader's own takes any mark a Blizzard set takes, by
   // being a third kind of subject rather than a second feature.
@@ -2375,29 +2654,44 @@ describe("the sets the reader puts together themselves", () => {
 
     fireEvent.click(within(card).getByRole("button", { name: "Favourite Horde look" }));
 
-    await waitFor(() => expect(marks.stored())
-      .toEqual([{ kind: "custom", id: 7, favourite: true, tags: [] }]));
+    await waitFor(() =>
+      expect(marks.stored()).toEqual([{ kind: "custom", id: 7, favourite: true, tags: [] }]),
+    );
 
     tagIt(card, "Horde look", "faction", "horde");
-    await waitFor(() => expect(marks.stored()[0]?.tags)
-      .toEqual([{ key: "faction", value: "horde" }]));
+    await waitFor(() =>
+      expect(marks.stored()[0]?.tags).toEqual([{ key: "faction", value: "horde" }]),
+    );
     expect(within(card).getByText("faction: horde")).toBeTruthy();
   });
 
   it("narrows the saved sets to the starred ones", async () => {
     const saved = already();
     const store = fakeMarks([{ kind: "custom", id: 7, favourite: true, tags: [] }]);
-    view({ saved: fakeCustomSets([...saved.stored(), {
-      id: 8, name: "Alliance look", createdAt: SAVED_AT, updatedAt: SAVED_AT,
-      pieces: saved.stored()[0]!.pieces,
-    }]), marks: store });
+    view({
+      saved: fakeCustomSets([
+        ...saved.stored(),
+        {
+          id: 8,
+          name: "Alliance look",
+          createdAt: SAVED_AT,
+          updatedAt: SAVED_AT,
+          pieces: saved.stored()[0]!.pieces,
+        },
+      ]),
+      marks: store,
+    });
     browseYours();
 
-    fireEvent.click(within(document.querySelector("#custom-sets") as HTMLElement)
-      .getByRole("checkbox", { name: "Favourites only" }));
+    fireEvent.click(
+      within(document.querySelector("#custom-sets") as HTMLElement).getByRole("checkbox", {
+        name: "Favourites only",
+      }),
+    );
 
     await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "Alliance look", level: 4 })).toBeNull());
+      expect(screen.queryByRole("heading", { name: "Alliance look", level: 4 })).toBeNull(),
+    );
     expect(screen.getByRole("heading", { name: "Horde look", level: 4 })).toBeTruthy();
   });
 
@@ -2409,11 +2703,13 @@ describe("the sets the reader puts together themselves", () => {
 
     fireEvent.change(screen.getByLabelText("Filter your sets"), { target: { value: "crown" } });
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Horde look", level: 4 })).toBeTruthy());
+      expect(screen.getByRole("heading", { name: "Horde look", level: 4 })).toBeTruthy(),
+    );
 
     fireEvent.change(screen.getByLabelText("Filter your sets"), { target: { value: "aegis" } });
     await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "Horde look", level: 4 })).toBeNull());
+      expect(screen.queryByRole("heading", { name: "Horde look", level: 4 })).toBeNull(),
+    );
   });
 
   // The one control in this view that destroys something the reader made.
@@ -2430,7 +2726,8 @@ describe("the sets the reader puts together themselves", () => {
 
     await waitFor(() => expect(saved.stored()).toEqual([]));
     await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "Horde look", level: 4 })).toBeNull());
+      expect(screen.queryByRole("heading", { name: "Horde look", level: 4 })).toBeNull(),
+    );
   });
 
   it("says how to make one when there are none", async () => {

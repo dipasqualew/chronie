@@ -48,7 +48,7 @@ describe("sweepSentence", () => {
   it("says what turning it on would delete while it is still off", () => {
     expect(sweepSentence(status())).toBe(
       "Chronie deletes no combat logs. Turning this on at 7 days would delete 2 logs, " +
-      "384.0 MB on the next sync.",
+        "384.0 MB on the next sync.",
     );
   });
 
@@ -59,19 +59,21 @@ describe("sweepSentence", () => {
   it("says what is going once it is on", () => {
     expect(sweepSentence(status({ enabled: true, days: 30 }))).toBe(
       "Deleting combat logs Chronie has read once they are older than 30 days. " +
-      "2 logs, 384.0 MB go on the next sync.",
+        "2 logs, 384.0 MB go on the next sync.",
     );
   });
 
   it("says nothing is waiting when the folder is already clear", () => {
-    expect(sweepSentence(status({ enabled: true, doomed: empty() })))
-      .toContain("Nothing is waiting to be deleted.");
+    expect(sweepSentence(status({ enabled: true, doomed: empty() }))).toContain(
+      "Nothing is waiting to be deleted.",
+    );
   });
 
   it("counts one log as one log", () => {
     const one = pile({ count: 1, bytes: 1024, files: [] });
-    expect(sweepSentence(status({ enabled: true, days: 1, doomed: one })))
-      .toContain("older than 1 day. 1 log, 1.0 KB go");
+    expect(sweepSentence(status({ enabled: true, days: 1, doomed: one }))).toContain(
+      "older than 1 day. 1 log, 1.0 KB go",
+    );
   });
 });
 
@@ -100,21 +102,23 @@ describe("sweepDetail", () => {
   it("says what it last deleted, when, and how much of it had been read", () => {
     const lines = sweepDetail(
       status({
-        removed: [{
-          name: "WoWCombatLog-071026_201500.txt",
-          bytes: 268_435_456,
-          modified: NOW - 30 * DAY,
-          linesRead: 412_009,
-          retainDays: 7,
-          deletedAt: NOW - 2 * DAY,
-        }],
+        removed: [
+          {
+            name: "WoWCombatLog-071026_201500.txt",
+            bytes: 268_435_456,
+            modified: NOW - 30 * DAY,
+            linesRead: 412_009,
+            retainDays: 7,
+            deletedAt: NOW - 2 * DAY,
+          },
+        ],
       }),
       NOW,
     );
 
     expect(lines[0]).toBe(
       "Last deleted: WoWCombatLog-071026_201500.txt — 256.0 MB, 2 days ago, " +
-      "after 412009 lines of it had been read.",
+        "after 412009 lines of it had been read.",
     );
   });
 

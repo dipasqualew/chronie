@@ -81,16 +81,18 @@ export function rowOf(piece: CustomSetPiece): AppearanceRow {
     iconFileDataId: piece.iconFileDataId,
     hasModel: piece.hasModel,
     withheld: false,
-    sources: [{
-      label: itemName(piece.itemId, piece.name),
-      itemId: piece.itemId,
-      modifiedAppearanceId: piece.appearanceId,
-      inventoryType: piece.inventoryType,
-      allowableClass: ANY_CLASS,
-      requiredLevel: 0,
-      quality: 0,
-      itemCount: 1,
-    }],
+    sources: [
+      {
+        label: itemName(piece.itemId, piece.name),
+        itemId: piece.itemId,
+        modifiedAppearanceId: piece.appearanceId,
+        inventoryType: piece.inventoryType,
+        allowableClass: ANY_CLASS,
+        requiredLevel: 0,
+        quality: 0,
+        itemCount: 1,
+      },
+    ],
     liftsRestriction: false,
   };
 }
@@ -115,11 +117,9 @@ export function rowsOf(set: CustomSet): AppearanceRow[] {
  * this view — a word on the row is a word they will type into the box.
  */
 function searchable(set: CustomSet, mark: TransmogMark | undefined): string {
-  return [
-    set.name,
-    ...set.pieces.map((piece) => piece.name),
-    markWords(mark),
-  ].join(" ").toLowerCase();
+  return [set.name, ...set.pieces.map((piece) => piece.name), markWords(mark)]
+    .join(" ")
+    .toLowerCase();
 }
 
 /**

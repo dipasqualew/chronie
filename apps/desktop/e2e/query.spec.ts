@@ -18,8 +18,9 @@ test("asks the history a question and draws the answer", async ({ page }) => {
     await expect(workbench.summary()).toHaveText("3 rows · 2 columns · 3 ms");
     // The chart says what it is drawing in the name it is announced by, which is the only
     // thing a reader who cannot see it would be given.
-    await expect(workbench.chart())
-      .toHaveAccessibleName("hours by character, as a bar chart of 3 values");
+    await expect(workbench.chart()).toHaveAccessibleName(
+      "hours by character, as a bar chart of 3 values",
+    );
     await expect(workbench.rows()).toHaveCount(3);
     await expect(workbench.rows().first()).toContainText("Aster-Vale");
     await expect(workbench.rows().first()).toContainText("41.5");
@@ -27,8 +28,9 @@ test("asks the history a question and draws the answer", async ({ page }) => {
 
   await test.step("redraws the same answer as another shape", async () => {
     await workbench.choice("Chart shape").selectOption("line");
-    await expect(workbench.chart())
-      .toHaveAccessibleName("hours by character, as a line chart of 3 values");
+    await expect(workbench.chart()).toHaveAccessibleName(
+      "hours by character, as a line chart of 3 values",
+    );
   });
 
   await test.step("takes another question from the ones offered", async () => {
@@ -38,8 +40,9 @@ test("asks the history a question and draws the answer", async ({ page }) => {
     await expect(workbench.summary()).toHaveText("4 rows · 2 columns · 5 ms");
     // The recipe says what to plot and how, so a question about days over time arrives as a
     // line rather than as whatever the column order happened to suggest.
-    await expect(workbench.chart())
-      .toHaveAccessibleName("hours by day, as a line chart of 4 values");
+    await expect(workbench.chart()).toHaveAccessibleName(
+      "hours by day, as a line chart of 4 values",
+    );
     await expect(workbench.rows()).toHaveCount(4);
   });
 
@@ -53,8 +56,7 @@ test("asks the history a question and draws the answer", async ({ page }) => {
     await expect(workbench.rows()).toHaveCount(3);
     // Nothing said what to plot, so the convention did: the first column that names things
     // along the bottom, the first that counts them up the side.
-    await expect(workbench.chart())
-      .toHaveAccessibleName("id by name, as a bar chart of 3 values");
+    await expect(workbench.chart()).toHaveAccessibleName("id by name, as a bar chart of 3 values");
     // The character with no class recorded. An empty cell and a cell holding nothing look
     // identical on screen, and only one of them is what the database said.
     await expect(workbench.rows().last()).toContainText("—");

@@ -77,31 +77,43 @@ export const e2eDesktop = {
     mock ? Promise.resolve(structuredClone(mock.transmog)) : missingMock(),
   // Opening a set walks four more of the game's tables, so it is asked for per set rather
   // than loaded with the grid — a wardrobe's worth of joins nobody has clicked on is waste.
-  transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> => mock
-    ? Promise.resolve(structuredClone(mock.transmogItems[setId] ?? emptySet(setId)))
-    : missingMock(),
+  transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> =>
+    mock
+      ? Promise.resolve(structuredClone(mock.transmogItems[setId] ?? emptySet(setId)))
+      : missingMock(),
   // Every look filling one kind of place, which is the other way of browsing the game: asked
   // for a kind at a time, because the whole wardrobe is fifty-five thousand rows and fourteen
   // megabytes. Kept by the caller once it arrives — what the game holds cannot change under a
   // running window — so a reader going back and forth between two kinds pays for each once.
-  transmogAppearances: (displayTypes: number[]): Promise<WardrobePayload> => mock
-    ? Promise.resolve(structuredClone(mock.wardrobe[wardrobeKey(displayTypes)]
-      ?? emptyWardrobe(displayTypes)))
-    : missingMock(),
+  transmogAppearances: (displayTypes: number[]): Promise<WardrobePayload> =>
+    mock
+      ? Promise.resolve(
+          structuredClone(mock.wardrobe[wardrobeKey(displayTypes)] ?? emptyWardrobe(displayTypes)),
+        )
+      : missingMock(),
   // Everything anybody has said about the game's wardrobe with their own hands: a star and a
   // set of tags, against a set or a look. Read whole, because it is the size of what one person
   // typed rather than the size of the game — and re-read after every write below, so what the
   // browser draws is what the database holds.
-  transmogMarks: (): Promise<TransmogMarksPayload> => mock
-    ? Promise.resolve(structuredClone(mock.transmogMarks))
-    : missingMock(),
+  transmogMarks: (): Promise<TransmogMarksPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.transmogMarks)) : missingMock(),
   setTransmogFavourite: (
-    kind: MarkSubjectKind, id: number, favourite: boolean,
-  ): Promise<TransmogMarksPayload> => mock
-    ? Promise.resolve(mockMark(kind, id, (mark) => { mark.favourite = favourite; }))
-    : missingMock(),
+    kind: MarkSubjectKind,
+    id: number,
+    favourite: boolean,
+  ): Promise<TransmogMarksPayload> =>
+    mock
+      ? Promise.resolve(
+          mockMark(kind, id, (mark) => {
+            mark.favourite = favourite;
+          }),
+        )
+      : missingMock(),
   setTransmogTag: (
-    kind: MarkSubjectKind, id: number, key: string, value: string | null,
+    kind: MarkSubjectKind,
+    id: number,
+    key: string,
+    value: string | null,
   ): Promise<TransmogMarksPayload> => {
     if (!mock) return missingMock();
     // The half of `marks::clean_key` and `clean_value` a test can tell apart from a working
@@ -109,26 +121,32 @@ export const e2eDesktop = {
     const cleaned = key.trim().replace(/\s+/g, " ");
     const said = (value ?? "").trim().replace(/\s+/g, " ") || null;
     if (!cleaned) return Promise.reject(new Error("A tag needs a name."));
-    return Promise.resolve(mockMark(kind, id, (mark) => {
-      const at = mark.tags.findIndex((tag) => sameKey(tag.key, cleaned));
-      if (at >= 0) mark.tags[at] = { key: cleaned, value: said };
-      else mark.tags.push({ key: cleaned, value: said });
-      mark.tags.sort((left, right) => left.key.localeCompare(right.key));
-    }));
+    return Promise.resolve(
+      mockMark(kind, id, (mark) => {
+        const at = mark.tags.findIndex((tag) => sameKey(tag.key, cleaned));
+        if (at >= 0) mark.tags[at] = { key: cleaned, value: said };
+        else mark.tags.push({ key: cleaned, value: said });
+        mark.tags.sort((left, right) => left.key.localeCompare(right.key));
+      }),
+    );
   },
   deleteTransmogTag: (
-    kind: MarkSubjectKind, id: number, key: string,
-  ): Promise<TransmogMarksPayload> => mock
-    ? Promise.resolve(mockMark(kind, id, (mark) => {
-      mark.tags = mark.tags.filter((tag) => !sameKey(tag.key, key));
-    }))
-    : missingMock(),
+    kind: MarkSubjectKind,
+    id: number,
+    key: string,
+  ): Promise<TransmogMarksPayload> =>
+    mock
+      ? Promise.resolve(
+          mockMark(kind, id, (mark) => {
+            mark.tags = mark.tags.filter((tag) => !sameKey(tag.key, key));
+          }),
+        )
+      : missingMock(),
   // The sets the reader put together on the character themselves. Read whole and re-read after
   // every write, for the reason the marks are: tens of sets somebody saved by hand, against the
   // several thousand the game ships, and what the browser draws should be what was stored.
-  customSets: (): Promise<CustomSetsPayload> => mock
-    ? Promise.resolve(structuredClone(mock.customSets))
-    : missingMock(),
+  customSets: (): Promise<CustomSetsPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.customSets)) : missingMock(),
   saveCustomSet: (name: string, pieces: CustomSetPiece[]): Promise<CustomSetsPayload> => {
     if (!mock) return missingMock();
     // The half of `customsets::clean_name` and `clean_pieces` a test can tell apart from a
@@ -160,17 +178,17 @@ export const e2eDesktop = {
     mock.customSets.sets = mock.customSets.sets.filter((set) => set.id !== id);
     // And everything said about it, which the backend deletes in the same breath: the ids are
     // Chronie's own, so a mark left behind is one the next set saved could find itself wearing.
-    mock.transmogMarks.marks = mock.transmogMarks.marks
-      .filter((mark) => !(mark.kind === "custom" && mark.id === id));
+    mock.transmogMarks.marks = mock.transmogMarks.marks.filter(
+      (mark) => !(mark.kind === "custom" && mark.id === id),
+    );
     return Promise.resolve(structuredClone(mock.customSets));
   },
   // The sets the player saved in the *game*, which the addon reports and nothing here writes.
   // Read once with the rest of the transmog screen: this is a snapshot of what the last sync
   // found, and it changes when the player changes it in game rather than when anything here
   // does.
-  inGameSets: (): Promise<InGameSetsPayload> => mock
-    ? Promise.resolve(structuredClone(mock.inGameSets))
-    : missingMock(),
+  inGameSets: (): Promise<InGameSetsPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.inGameSets)) : missingMock(),
   // And what one of them is made of, which costs the game's files. An in-game set names its
   // appearances and nothing else — see `0018_in_game_sets.sql` — so this is the hop from ids to
   // rows, and it is why a set can be listed on a machine without the game and only opened on
@@ -180,15 +198,19 @@ export const e2eDesktop = {
     // Keyed the way the worn sets are, so a test can say which set the window asked to open
     // rather than only that it asked for something.
     const key = [...appearanceIds].sort((left, right) => left - right).join(",");
-    return Promise.resolve(structuredClone(
-      mock.inGameSetAppearances[key] ?? { appearances: [], readCount: 0, withheldCount: 0 },
-    ));
+    return Promise.resolve(
+      structuredClone(
+        mock.inGameSetAppearances[key] ?? { appearances: [], readCount: 0, withheldCount: 0 },
+      ),
+    );
   },
   // The one thing Chronie writes into a WoW account, and it is deliberately two steps: this
   // records the request, and the *addon* saves the set the next time the player logs in. See
   // `docs/transmog-sets.md` — nothing in a desktop app can reach a running game.
   sendSetToGame: (
-    name: string, icon: number | null, slots: InGameSetSlot[],
+    name: string,
+    icon: number | null,
+    slots: InGameSetSlot[],
   ): Promise<SetRequest[]> => {
     if (!mock) return missingMock();
     // The half of the backend's own refusals a test can tell apart from a working form, the
@@ -207,61 +229,56 @@ export const e2eDesktop = {
     // is in the state the window actually has to draw rather than the one it ends in.
     const id = mock.setRequests.reduce((highest, one) => Math.max(highest, one.id), 0) + 1;
     mock.setRequests.unshift({
-      id, name: cleaned, icon, createdAt: Math.floor(Date.now() / 1000), slots,
+      id,
+      name: cleaned,
+      icon,
+      createdAt: Math.floor(Date.now() / 1000),
+      slots,
     });
     return Promise.resolve(structuredClone(mock.setRequests));
   },
-  setRequests: (): Promise<SetRequest[]> => mock
-    ? Promise.resolve(structuredClone(mock.setRequests))
-    : missingMock(),
+  setRequests: (): Promise<SetRequest[]> =>
+    mock ? Promise.resolve(structuredClone(mock.setRequests)) : missingMock(),
   // What the game says about a list of achievements the segments named. The backend keeps
   // every one it has looked up, so a reader walking a history of them pays for each once.
-  achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> => mock
-    ? Promise.resolve({ achievements: mockAchievements(ids) })
-    : missingMock(),
+  achievementDetails: (ids: number[]): Promise<AchievementDetailsPayload> =>
+    mock ? Promise.resolve({ achievements: mockAchievements(ids) }) : missingMock(),
   // What the game says about a list of items the segments named — the transmog collected, the
   // pieces an equipment set holds. Batched by the caller rather than asked one item at a time,
   // because the read behind it opens the game's largest table once per request however many
   // ids that request carries.
-  itemDetails: (ids: number[]): Promise<ItemDetailsPayload> => mock
-    ? Promise.resolve({ items: mockItems(ids) })
-    : missingMock(),
+  itemDetails: (ids: number[]): Promise<ItemDetailsPayload> =>
+    mock ? Promise.resolve({ items: mockItems(ids) }) : missingMock(),
   // The look an item carries, which a segment has no other way to reach: it holds item ids, and
   // drawing an appearance takes the display it resolves to. Asked when a reader clicks a row
   // rather than when the segment is drawn — the three tables behind it are hundreds of thousands
   // of rows, and a modal listing thirty sources would walk them to fill in pictures nobody
   // asked to see.
-  itemAppearances: (itemIds: number[]): Promise<ItemAppearancesPayload> => mock
-    ? Promise.resolve({ appearances: mockItemAppearances(itemIds) })
-    : missingMock(),
+  itemAppearances: (itemIds: number[]): Promise<ItemAppearancesPayload> =>
+    mock ? Promise.resolve({ appearances: mockItemAppearances(itemIds) }) : missingMock(),
   // The pictures a list of rows needs, asked for once the rows are drawn. The backend keeps
   // every texture it has decoded, so this is answered from memory for everything a
   // neighbouring set or an earlier segment already showed.
-  gameIcons: (iconFileDataIds: number[]): Promise<IconsPayload> => mock
-    ? Promise.resolve({ icons: mockIcons(iconFileDataIds) })
-    : missingMock(),
+  gameIcons: (iconFileDataIds: number[]): Promise<IconsPayload> =>
+    mock ? Promise.resolve({ icons: mockIcons(iconFileDataIds) }) : missingMock(),
   // Currency ids need one backend-only table hop before they become texture ids, so this
   // command is keyed by the currency the view already has rather than by the file behind it.
-  currencyIcons: (currencyIds: number[]): Promise<IconsPayload> => mock
-    ? Promise.resolve({ icons: mockCurrencyIcons(currencyIds) })
-    : missingMock(),
+  currencyIcons: (currencyIds: number[]): Promise<IconsPayload> =>
+    mock ? Promise.resolve({ icons: mockCurrencyIcons(currencyIds) }) : missingMock(),
   // Place names need two backend-only table hops before they become texture ids, so this command
   // is keyed by the name the segment already carries rather than by the file behind it.
-  placeIcons: (places: string[]): Promise<IconsPayload> => mock
-    ? Promise.resolve({ icons: mockPlaceIcons(places) })
-    : missingMock(),
+  placeIcons: (places: string[]): Promise<IconsPayload> =>
+    mock ? Promise.resolve({ icons: mockPlaceIcons(places) }) : missingMock(),
   // The body every appearance is worn on. One model for the whole app, so the window asks the
   // first time a set is opened and keeps it for every set after.
-  characterModel: (): Promise<CharacterModelPayload> => mock
-    ? Promise.resolve({ model: mock.characterModel })
-    : missingMock(),
+  characterModel: (): Promise<CharacterModelPayload> =>
+    mock ? Promise.resolve({ model: mock.characterModel }) : missingMock(),
   // Who that body is: everything the game's own character creation screen asks about her, and
   // what this reader has answered. Asked for only when somebody opens the panel that shows it —
   // it walks five of the game's tables, and every body drawn above already has the answers
   // applied whether or not anybody ever looks at them.
-  characterLook: (): Promise<CharacterLookPayload> => mock
-    ? Promise.resolve(structuredClone(mock.characterLook))
-    : missingMock(),
+  characterLook: (): Promise<CharacterLookPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.characterLook)) : missingMock(),
   // And says who she is from now on, answering with what was stored. Nothing is drawn by this:
   // the window redraws her by asking for the bodies again, which is the errand it already runs
   // whenever what she is wearing changes.
@@ -275,7 +292,9 @@ export const e2eDesktop = {
     const cleaned: CharacterPick[] = [];
     for (const answer of picked) {
       if (!answer.question || !answer.swatch) {
-        return Promise.reject(new Error("That choice names no question of hers, or no swatch of it."));
+        return Promise.reject(
+          new Error("That choice names no question of hers, or no swatch of it."),
+        );
       }
       const held = cleaned.find((one) => one.question === answer.question);
       if (held) held.swatch = answer.swatch;
@@ -294,9 +313,8 @@ export const e2eDesktop = {
   // textures painting the same rectangle goes on top — and neither can be asked one piece at a
   // time. Each piece carries the slot, which says which geoset groups it drives and where it
   // sits in the stack, and where the item is worn, which says which hand a weapon is in.
-  wornSet: (pieces: WornPiece[]): Promise<WornSetPayload> => mock
-    ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null })
-    : missingMock(),
+  wornSet: (pieces: WornPiece[]): Promise<WornSetPayload> =>
+    mock ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null }) : missingMock(),
   // The same outfit on a named character's body. The fixture holds one model, so it records
   // whose body was requested and answers the picture for the clothes.
   characterWornSet: (character: string, pieces: WornPiece[]): Promise<WornSetPayload> => {
@@ -309,15 +327,16 @@ export const e2eDesktop = {
   // are read once for whatever is asked for, and a row adds only its own textures and geometry.
   // The stub answers each row out of the same map `wornSet` reads, because a gallery row *is* an
   // outfit of one and gets the same key.
-  galleryModels: (pieces: WornPiece[]): Promise<GalleryPayload> => mock
-    ? Promise.resolve({
-      models: pieces.map((piece) => ({
-        displayInfoId: piece.displayInfoId,
-        kind: mockGalleryKind(piece.displayType),
-        model: mock.wornSets[wornSetKey([piece])] ?? null,
-      })),
-    })
-    : missingMock(),
+  galleryModels: (pieces: WornPiece[]): Promise<GalleryPayload> =>
+    mock
+      ? Promise.resolve({
+          models: pieces.map((piece) => ({
+            displayInfoId: piece.displayInfoId,
+            kind: mockGalleryKind(piece.displayType),
+            model: mock.wornSets[wornSetKey([piece])] ?? null,
+          })),
+        })
+      : missingMock(),
   // And a page of the *set* grid, each card worn whole. Ids rather than pieces, because a card
   // is a name and a count until somebody opens it: what the set is wearing is read by the
   // backend for the whole page rather than by the window opening a dozen sets to draw one.
@@ -325,14 +344,15 @@ export const e2eDesktop = {
   // The stub answers each card out of the same map `wornSet` reads, keyed by what the set is
   // wearing — because that is exactly what a card's picture is, and a fixture that answered
   // some other body would let a card showing the wrong clothes pass.
-  gallerySets: (setIds: number[]): Promise<SetGalleryPayload> => mock
-    ? Promise.resolve({
-      models: setIds.map((setId) => ({
-        setId,
-        model: mock.wornSets[wornSetKey(mockSetPieces(setId))] ?? null,
-      })),
-    })
-    : missingMock(),
+  gallerySets: (setIds: number[]): Promise<SetGalleryPayload> =>
+    mock
+      ? Promise.resolve({
+          models: setIds.map((setId) => ({
+            setId,
+            model: mock.wornSets[wornSetKey(mockSetPieces(setId))] ?? null,
+          })),
+        })
+      : missingMock(),
   // One question, typed by the reader, asked of their own history. The backend refuses
   // anything that is not a read and stops anything that will not finish, so what can come
   // back from here is rows or a sentence about why there are none.
@@ -366,8 +386,7 @@ export const e2eDesktop = {
     }
     return missingMock();
   },
-  syncNow: (): Promise<SyncResult> =>
-    mock ? Promise.resolve(mock.syncResult) : missingMock(),
+  syncNow: (): Promise<SyncResult> => (mock ? Promise.resolve(mock.syncResult) : missingMock()),
   // What the install is really doing about combat logs — read from the game's own config and
   // its Logs folder, not from the setting, which is why it is worth asking repeatedly.
   combatLogging: (): Promise<CombatLogStatus> =>
@@ -429,57 +448,82 @@ export const e2eDesktop = {
   // Every activity command answers with the whole dashboard, so the window repaints from
   // what was actually stored rather than from what the page hoped the write did. Under the
   // e2e mock the same shape is produced by editing the mock's dashboard in place.
-  addActivity: (segmentId: number, kind: string, metadata: ActivityMetadata): Promise<DashboardPayload> => mock
-    ? Promise.resolve(mockEdit(bySegment(segmentId), (activities, nextId) => {
-      dropInferred(activities, kind);
-      activities.push({ id: nextId, kind, source: "manual", confidence: 1, metadata });
-    }))
-    : missingMock(),
-  updateActivity: (activityId: number, kind: string, metadata: ActivityMetadata): Promise<DashboardPayload> => mock
-    ? Promise.resolve(mockEdit(byActivity(activityId), (activities) => {
-      const found = activities.find((entry) => entry.id === activityId);
-      if (found) Object.assign(found, { kind, source: "manual", confidence: 1, metadata });
-    }))
-    : missingMock(),
-  deleteActivity: (activityId: number): Promise<DashboardPayload> => mock
-    ? Promise.resolve(mockEdit(byActivity(activityId), (activities) => {
-      const at = activities.findIndex((entry) => entry.id === activityId);
-      if (at >= 0) activities.splice(at, 1);
-    }))
-    : missingMock(),
-  resetActivities: (segmentId: number): Promise<DashboardPayload> => mock
-    ? Promise.resolve(mockEdit(bySegment(segmentId), (activities) => activities.splice(0)))
-    : missingMock(),
+  addActivity: (
+    segmentId: number,
+    kind: string,
+    metadata: ActivityMetadata,
+  ): Promise<DashboardPayload> =>
+    mock
+      ? Promise.resolve(
+          mockEdit(bySegment(segmentId), (activities, nextId) => {
+            dropInferred(activities, kind);
+            activities.push({ id: nextId, kind, source: "manual", confidence: 1, metadata });
+          }),
+        )
+      : missingMock(),
+  updateActivity: (
+    activityId: number,
+    kind: string,
+    metadata: ActivityMetadata,
+  ): Promise<DashboardPayload> =>
+    mock
+      ? Promise.resolve(
+          mockEdit(byActivity(activityId), (activities) => {
+            const found = activities.find((entry) => entry.id === activityId);
+            if (found) Object.assign(found, { kind, source: "manual", confidence: 1, metadata });
+          }),
+        )
+      : missingMock(),
+  deleteActivity: (activityId: number): Promise<DashboardPayload> =>
+    mock
+      ? Promise.resolve(
+          mockEdit(byActivity(activityId), (activities) => {
+            const at = activities.findIndex((entry) => entry.id === activityId);
+            if (at >= 0) activities.splice(at, 1);
+          }),
+        )
+      : missingMock(),
+  resetActivities: (segmentId: number): Promise<DashboardPayload> =>
+    mock
+      ? Promise.resolve(mockEdit(bySegment(segmentId), (activities) => activities.splice(0)))
+      : missingMock(),
   // The two ways a capture changes, answering with the whole dashboard the way the activity
   // edits do — so a note that looked saved and was not cannot happen. The mock edits its own
   // stored dashboard, which is the same "write, then repaint from storage" flow.
-  setCaptureNote: (captureId: number, note: string): Promise<DashboardPayload> => mock
-    ? Promise.resolve(mockCaptureEdit(captureId, (captures, at) => {
-      const found = captures[at];
-      // The backend cleans a note by the addon's own rules; the mock does the half of that a
-      // test can tell apart from a working field — trimming, and no note at all for nothing.
-      if (found) found.note = note.trim() || null;
-    }))
-    : missingMock(),
-  deleteCapture: (captureId: number): Promise<DashboardPayload> => mock
-    ? Promise.resolve(mockCaptureEdit(captureId, (captures, at) => {
-      captures.splice(at, 1);
-      if (mock) delete mock.captureImages[captureId];
-    }))
-    : missingMock(),
+  setCaptureNote: (captureId: number, note: string): Promise<DashboardPayload> =>
+    mock
+      ? Promise.resolve(
+          mockCaptureEdit(captureId, (captures, at) => {
+            const found = captures[at];
+            // The backend cleans a note by the addon's own rules; the mock does the half of that a
+            // test can tell apart from a working field — trimming, and no note at all for nothing.
+            if (found) found.note = note.trim() || null;
+          }),
+        )
+      : missingMock(),
+  deleteCapture: (captureId: number): Promise<DashboardPayload> =>
+    mock
+      ? Promise.resolve(
+          mockCaptureEdit(captureId, (captures, at) => {
+            captures.splice(at, 1);
+            if (mock) delete mock.captureImages[captureId];
+          }),
+        )
+      : missingMock(),
   // The pictures a grid needs, asked for once the tiles are drawn. Answered from a cache on
   // disk after the first look at an evening, which is why asking for a whole grid is cheap.
-  captureThumbnails: (captureIds: number[]): Promise<CaptureThumbnailsPayload> => mock
-    ? Promise.resolve({ thumbnails: mockThumbnails(captureIds) })
-    : missingMock(),
+  captureThumbnails: (captureIds: number[]): Promise<CaptureThumbnailsPayload> =>
+    mock ? Promise.resolve({ thumbnails: mockThumbnails(captureIds) }) : missingMock(),
   // One capture at the size it was taken, which is a few megabytes and is therefore asked for
   // only when somebody opens it.
   captureImage: (captureId: number): Promise<CaptureImagePayload> => {
     if (mock) {
       const held = mock.captureImages[captureId];
-      return Promise.resolve(held
-        ? { id: captureId, image: held.full, byteSize: held.byteSize }
-        : { id: captureId, image: null });
+      return Promise.resolve(
+        held
+          ? { id: captureId, image: held.full, byteSize: held.byteSize }
+          : { id: captureId, image: null },
+      );
     }
     return missingMock();
   },
@@ -500,38 +544,51 @@ export const e2eDesktop = {
     }
     return missingMock();
   },
-  wifiReceiveStart: (): Promise<WifiReceiveStatus> => mock
-    ? Promise.resolve(mockReceive((status) => {
-      status.listening = true;
-      status.outcome = null;
-      // The fixture's sender is already knocking, which is what a test needs to reach the
-      // one screen in this feature that matters.
-      status.offer = mock.wifi.incoming ? structuredClone(mock.wifi.incoming) : null;
-    }))
-    : missingMock(),
-  wifiReceiveStop: (): Promise<WifiReceiveStatus> => mock
-    ? Promise.resolve(mockReceive((status) => {
-      status.listening = false;
-      status.offer = null;
-      status.addresses = [];
-    }))
-    : missingMock(),
+  wifiReceiveStart: (): Promise<WifiReceiveStatus> =>
+    mock
+      ? Promise.resolve(
+          mockReceive((status) => {
+            status.listening = true;
+            status.outcome = null;
+            // The fixture's sender is already knocking, which is what a test needs to reach the
+            // one screen in this feature that matters.
+            status.offer = mock.wifi.incoming ? structuredClone(mock.wifi.incoming) : null;
+          }),
+        )
+      : missingMock(),
+  wifiReceiveStop: (): Promise<WifiReceiveStatus> =>
+    mock
+      ? Promise.resolve(
+          mockReceive((status) => {
+            status.listening = false;
+            status.offer = null;
+            status.addresses = [];
+          }),
+        )
+      : missingMock(),
   wifiReceiveStatus: (): Promise<WifiReceiveStatus> =>
     mock ? Promise.resolve(mockReceive(() => {})) : missingMock(),
-  wifiAnswerOffer: (accepted: boolean): Promise<WifiReceiveStatus> => mock
-    ? Promise.resolve(mockReceive((status) => {
-      const waiting = status.offer;
-      if (!waiting) throw new Error("There is no database waiting to be accepted.");
-      status.offer = null;
-      status.outcome = accepted
-        ? {
-          stored: true,
-          message: `Replaced this history with ${waiting.offer.device}'s: ` +
-            `${waiting.offer.segmentCount} segments across ${waiting.offer.characterCount} characters.`,
-        }
-        : { stored: false, message: `Turned down the database from ${waiting.offer.device}.` };
-    }))
-    : missingMock(),
+  wifiAnswerOffer: (accepted: boolean): Promise<WifiReceiveStatus> =>
+    mock
+      ? Promise.resolve(
+          mockReceive((status) => {
+            const waiting = status.offer;
+            if (!waiting) throw new Error("There is no database waiting to be accepted.");
+            status.offer = null;
+            status.outcome = accepted
+              ? {
+                  stored: true,
+                  message:
+                    `Replaced this history with ${waiting.offer.device}'s: ` +
+                    `${waiting.offer.segmentCount} segments across ${waiting.offer.characterCount} characters.`,
+                }
+              : {
+                  stored: false,
+                  message: `Turned down the database from ${waiting.offer.device}.`,
+                };
+          }),
+        )
+      : missingMock(),
 };
 
 /**
@@ -573,8 +630,12 @@ function mockReceive(advance: (status: WifiReceiveStatus) => void): WifiReceiveS
 }
 
 /** A set the e2e mock says nothing about, which the real backend would answer for. */
-const emptySet = (setId: number): TransmogSetItemsPayload =>
-  ({ setId, appearances: [], readCount: 0, withheldCount: 0 });
+const emptySet = (setId: number): TransmogSetItemsPayload => ({
+  setId,
+  appearances: [],
+  readCount: 0,
+  withheldCount: 0,
+});
 
 /**
  * What the e2e mock's version of one set is wearing, by the backend's own two rules.
@@ -602,10 +663,12 @@ function mockSetPieces(setId: number): WornPiece[] {
       displayType: row.displayType,
       inventoryType: row.inventoryType,
     };
-    const already = worn.some((one) =>
-      one.displayInfoId === piece.displayInfoId
-      && one.displayType === piece.displayType
-      && one.inventoryType === piece.inventoryType);
+    const already = worn.some(
+      (one) =>
+        one.displayInfoId === piece.displayInfoId &&
+        one.displayType === piece.displayType &&
+        one.inventoryType === piece.inventoryType,
+    );
     if (!already) worn.push(piece);
   }
   return worn;
@@ -616,8 +679,12 @@ const wardrobeKey = (displayTypes: number[]): string =>
   [...displayTypes].sort((left, right) => left - right).join(",");
 
 /** A kind the mock holds nothing for, which the real backend answers with an empty list. */
-const emptyWardrobe = (displayTypes: number[]): WardrobePayload =>
-  ({ displayTypes, appearances: [], readCount: 0, withheldCount: 0 });
+const emptyWardrobe = (displayTypes: number[]): WardrobePayload => ({
+  displayTypes,
+  appearances: [],
+  readCount: 0,
+  withheldCount: 0,
+});
 
 /** Two tag keys the store would treat as one, which is `COLLATE NOCASE` in the migration. */
 const sameKey = (left: string, right: string): boolean =>
@@ -770,9 +837,14 @@ function dropInferred(activities: Activity[], kind: string): void {
   if (at >= 0) activities.splice(at, 1);
 }
 
-const bySegment = (segmentId: number): Locate => (segment) => segment.segmentId === segmentId;
-const byActivity = (activityId: number): Locate => (segment) =>
-  (segment.activities || []).some((entry) => entry.id === activityId);
+const bySegment =
+  (segmentId: number): Locate =>
+  (segment) =>
+    segment.segmentId === segmentId;
+const byActivity =
+  (activityId: number): Locate =>
+  (segment) =>
+    (segment.activities || []).some((entry) => entry.id === activityId);
 
 /**
  * Applies an edit to the e2e mock's stored dashboard and hands back a fresh copy, so the
@@ -783,10 +855,14 @@ function mockEdit(locate: Locate, apply: Apply): DashboardPayload {
   if (!mock) throw new Error("The end-to-end mock is not installed.");
   const segments = mock.dashboard.segments || [];
   for (const segment of segments) segment.activities ??= [];
-  const nextId = 1 + Math.max(0, ...segments.flatMap((segment) =>
-    (segment.activities || []).map((entry) => entry.id || 0)));
+  const nextId =
+    1 +
+    Math.max(
+      0,
+      ...segments.flatMap((segment) => (segment.activities || []).map((entry) => entry.id || 0)),
+    );
   const target = segments.find(locate);
-  if (target) apply(target.activities ??= [], nextId);
+  if (target) apply((target.activities ??= []), nextId);
   return structuredClone(mock.dashboard);
 }
 

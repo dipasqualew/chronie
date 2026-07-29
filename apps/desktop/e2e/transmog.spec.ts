@@ -73,13 +73,14 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(sets.sets()).not.toContainText(["Deepglass Hide"]);
     // The name and nothing else: a faction pair is the same armour for the same classes out of
     // the same patch, so a qualifier here would repeat the chip directly above it.
-    await expect(sets.card("Tideglass Hide"))
-      .toContainText("the other faction's Deepglass Hide");
-    await expect(sets.card("Tideglass Hide"))
-      .not.toContainText("the other faction's Deepglass Hide · ");
+    await expect(sets.card("Tideglass Hide")).toContainText("the other faction's Deepglass Hide");
+    await expect(sets.card("Tideglass Hide")).not.toContainText(
+      "the other faction's Deepglass Hide · ",
+    );
     // And the grid says why it is shorter than the count above it.
-    await expect(transmog.saying(/1 set shown under another holding the same appearances/))
-      .toBeVisible();
+    await expect(
+      transmog.saying(/1 set shown under another holding the same appearances/),
+    ).toBeVisible();
   });
 
   // The whole risk of folding a set away: a reader who types its name has to find it. The
@@ -106,8 +107,9 @@ test("browses the game's transmog sets and dresses the character in them", async
     // card it always was rather than becoming an empty frame with an apology in it.
     await expect(sets.bodies()).toHaveCount(3);
     await expect(sets.body("Emberforge Plate")).toBeVisible();
-    await expect(sets.card("Duskwoven Shroud").getByRole("img", { name: /, drawn$/ }))
-      .toHaveCount(0);
+    await expect(sets.card("Duskwoven Shroud").getByRole("img", { name: /, drawn$/ })).toHaveCount(
+      0,
+    );
     await expect(sets.card("Duskwoven Shroud")).toContainText("2 items");
     await expect.poll(() => sets.painted(), { timeout: PATIENCE_MS }).toBe(3);
   });
@@ -126,7 +128,8 @@ test("browses the game's transmog sets and dresses the character in them", async
     await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 8 });
     await page.mouse.up();
 
-    await expect.poll(async () => await pixelsOf(picture) !== before, { timeout: PATIENCE_MS })
+    await expect
+      .poll(async () => (await pixelsOf(picture)) !== before, { timeout: PATIENCE_MS })
       .toBe(true);
     await expect(sets.rows("Emberforge Plate")).toHaveCount(0);
     // And the rest of the grid is untouched: one card turned, not the page redrawn.
@@ -146,8 +149,9 @@ test("browses the game's transmog sets and dresses the character in them", async
   // view: the body is the view, rather than something a dialog opens over it.
   await test.step("the character is on screen before anything has been picked", async () => {
     await expect(outfit.summary()).toHaveText("Nothing on yet. Pick an appearance from any set.");
-    await expect(outfit.note())
-      .toHaveText("Nothing is worn. Drag to turn it, right-drag to move it.");
+    await expect(outfit.note()).toHaveText(
+      "Nothing is worn. Drag to turn it, right-drag to move it.",
+    );
     await expect(outfit.canvas()).toBeVisible();
 
     // 12 × 96: the fixture body holds twenty-five geosets and a bare one draws thirteen of
@@ -243,8 +247,11 @@ test("browses the game's transmog sets and dresses the character in them", async
   // about it in a single change — "show me this hat on my warrior" rather than the dozen selects
   // above it, arranged until they approximate her.
   await test.step("one of the reader's own characters can be worn instead", async () => {
-    await expect(outfit.swatches("Who you play"))
-      .toHaveText(["Someone else", "Aster-Vale", "Brin-Ravencrest"]);
+    await expect(outfit.swatches("Who you play")).toHaveText([
+      "Someone else",
+      "Aster-Vale",
+      "Brin-Ravencrest",
+    ]);
     // And she already is one of them, without anybody having said so: the answer given two
     // steps up is the one Aster carries, and the control reads the form rather than remembering
     // a click. That is what lets it go back to nobody when a swatch is changed by hand.
@@ -332,10 +339,14 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("every appearance says which slot it fills and leads to the item", async () => {
     await expect(sets.rows("Tideglass Regalia")).toContainText(["Head", "Shoulder", "Chest"]);
     await expect(sets.rows("Tideglass Regalia")).toContainText([
-      "Tideglass Crown", "Tideglass Mantle", "Tideglass Robe",
+      "Tideglass Crown",
+      "Tideglass Mantle",
+      "Tideglass Robe",
     ]);
-    await expect(sets.link("Tideglass Regalia", "Tideglass Mantle"))
-      .toHaveAttribute("href", "https://www.wowhead.com/item=30002");
+    await expect(sets.link("Tideglass Regalia", "Tideglass Mantle")).toHaveAttribute(
+      "href",
+      "https://www.wowhead.com/item=30002",
+    );
 
     // A link out of the window has to reach the reader's browser the way every other one does.
     await sets.link("Tideglass Regalia", "Tideglass Mantle").click();
@@ -358,13 +369,17 @@ test("browses the game's transmog sets and dresses the character in them", async
       /Robe of the Tideglass Court/,
     ]);
     // Only the facts that differ between them, and here all three do.
-    await expect(sets.sources("Tideglass Regalia", "Tideglass Robe").last())
-      .toContainText("Priest");
-    await expect(sets.sources("Tideglass Regalia", "Tideglass Robe").nth(1))
-      .toContainText("Level 45");
+    await expect(sets.sources("Tideglass Regalia", "Tideglass Robe").last()).toContainText(
+      "Priest",
+    );
+    await expect(sets.sources("Tideglass Regalia", "Tideglass Robe").nth(1)).toContainText(
+      "Level 45",
+    );
     // And each is still its own item, with its own way out of the app.
-    await expect(sets.link("Tideglass Regalia", "Sea-Touched Vestment"))
-      .toHaveAttribute("href", "https://www.wowhead.com/item=30031");
+    await expect(sets.link("Tideglass Regalia", "Sea-Touched Vestment")).toHaveAttribute(
+      "href",
+      "https://www.wowhead.com/item=30031",
+    );
 
     // Collapsing a look does not put it on or take it off: the row above is still the button.
     await expect(sets.rows("Tideglass Regalia")).toHaveCount(3);
@@ -387,17 +402,17 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(sets.icons("Tideglass Regalia")).toHaveCount(3);
     // One per look now, and three different ones: the pictures were the clearest sign of the
     // old shape, where a set naming one appearance twice drew the same texture twice.
-    const sources = await sets.icons("Tideglass Regalia").evaluateAll(
-      (images) => images.map((image) => (image as HTMLImageElement).currentSrc),
-    );
+    const sources = await sets
+      .icons("Tideglass Regalia")
+      .evaluateAll((images) => images.map((image) => (image as HTMLImageElement).currentSrc));
     expect(new Set(sources).size).toBe(3);
     for (const source of sources) expect(source).toContain("data:image/png;base64,");
 
     // Decoded, not merely fetched: a data url the browser could not read would leave the
     // element with no intrinsic size at all.
-    const widths = await sets.icons("Tideglass Regalia").evaluateAll(
-      (images) => images.map((image) => (image as HTMLImageElement).naturalWidth),
-    );
+    const widths = await sets
+      .icons("Tideglass Regalia")
+      .evaluateAll((images) => images.map((image) => (image as HTMLImageElement).naturalWidth));
     expect(widths).toEqual([8, 8, 8]);
   });
 
@@ -408,11 +423,11 @@ test("browses the game's transmog sets and dresses the character in them", async
     // reader aims at — and which used to be the link out, so that the one part of the row
     // anybody would click was the one part that did not dress her.
     await sets.name("Tideglass Regalia", "Chest", "Tideglass Robe").click();
-    await expect.poll(() => outfit.worn())
-      .toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
+    await expect.poll(() => outfit.worn()).toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
     await expect(outfit.summary()).toHaveText("1 of 13 slots filled");
-    await expect(outfit.note())
-      .toHaveText("Worn on the character. Drag to turn it, right-drag to move it.");
+    await expect(outfit.note()).toHaveText(
+      "Worn on the character. Drag to turn it, right-drag to move it.",
+    );
 
     // A body, not the item: 12 × 96, the same one part per geoset group a bare character
     // draws, out of the vertices those parts share. A robe that arrived as geometry of its
@@ -446,8 +461,7 @@ test("browses the game's transmog sets and dresses the character in them", async
     // their own, which the step above followed.
     await sets.link("Tideglass Regalia", "Tideglass Mantle").click();
     await expect.poll(() => shell.openedUrls()).toContain("https://www.wowhead.com/item=30002");
-    await expect.poll(() => outfit.worn())
-      .toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
+    await expect.poll(() => outfit.worn()).toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
   });
 
   // And the acceptance for the redesign itself: a piece out of one set and a piece out of
@@ -456,10 +470,12 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("pieces from two different sets go on at the same time", async () => {
     await sets.openSet("Emberforge Plate");
     await sets.wear("Emberforge Plate", "Head", "Emberforge Helm").click();
-    await expect.poll(() => outfit.worn()).toEqual([
-      "Emberforge Helm · Head · Emberforge Plate",
-      "Tideglass Robe · Chest · Tideglass Regalia",
-    ]);
+    await expect
+      .poll(() => outfit.worn())
+      .toEqual([
+        "Emberforge Helm · Head · Emberforge Plate",
+        "Tideglass Robe · Chest · Tideglass Regalia",
+      ]);
     await expect(sets.rows("Tideglass Regalia")).toHaveCount(3);
     // Five of that set's six: the sixth is filed under a weapon slot with nothing saying a
     // hand, so it has nowhere on her to go and is left out until somebody asks for it.
@@ -518,11 +534,13 @@ test("browses the game's transmog sets and dresses the character in them", async
     await sets.wear("Tideglass Regalia", "Shoulder", "Tideglass Mantle").click();
     await expect(outfit.slots()).toHaveCount(3);
     await sets.wear("Emberforge Plate", "Shoulder", "Emberforge Pauldrons").click();
-    await expect.poll(() => outfit.worn()).toEqual([
-      "Emberforge Helm · Head · Emberforge Plate",
-      "Emberforge Pauldrons · Shoulder · Emberforge Plate",
-      "Tideglass Robe · Chest · Tideglass Regalia",
-    ]);
+    await expect
+      .poll(() => outfit.worn())
+      .toEqual([
+        "Emberforge Helm · Head · Emberforge Plate",
+        "Emberforge Pauldrons · Shoulder · Emberforge Plate",
+        "Tideglass Robe · Chest · Tideglass Regalia",
+      ]);
   });
 
   // And clicking the row that put a piece on takes it off again, which is how one comes off
@@ -539,13 +557,15 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("a whole set goes on in one go", async () => {
     await sets.wearAll("Emberforge Plate").click();
     // Five of its six rows: the sixth is an item the game withholds, so nothing says a hand.
-    await expect.poll(() => outfit.worn()).toEqual([
-      "Emberforge Helm · Head · Emberforge Plate",
-      "Emberforge Pauldrons · Shoulder · Emberforge Plate",
-      "Emberforge Breastplate · Chest · Emberforge Plate",
-      "Emberforge Greaves · Legs · Emberforge Plate",
-      "Emberforge Blade · Main hand · Emberforge Plate",
-    ]);
+    await expect
+      .poll(() => outfit.worn())
+      .toEqual([
+        "Emberforge Helm · Head · Emberforge Plate",
+        "Emberforge Pauldrons · Shoulder · Emberforge Plate",
+        "Emberforge Breastplate · Chest · Emberforge Plate",
+        "Emberforge Greaves · Legs · Emberforge Plate",
+        "Emberforge Blade · Main hand · Emberforge Plate",
+      ]);
     await expect(outfit.summary()).toHaveText("5 of 13 slots filled");
     await expect.poll(() => outfit.drew("vertices")).toBe("976");
   });
@@ -590,10 +610,12 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("an appearance the game withholds is left out, and counted", async () => {
     await sets.openSet("Duskwoven Shroud");
     await expect(sets.rows("Duskwoven Shroud")).toHaveCount(1);
-    await expect(sets.card("Duskwoven Shroud"))
-      .toContainText("2 appearances · 1 the game keeps encrypted");
-    await expect(sets.card("Duskwoven Shroud"))
-      .toContainText("1 appearance hidden, with nowhere on her to go");
+    await expect(sets.card("Duskwoven Shroud")).toContainText(
+      "2 appearances · 1 the game keeps encrypted",
+    );
+    await expect(sets.card("Duskwoven Shroud")).toContainText(
+      "1 appearance hidden, with nowhere on her to go",
+    );
   });
 
   // And the box is for the reader who wants to see what a set is really made of: the row it
@@ -601,12 +623,15 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("unticking the box hands back the rows a set really holds", async () => {
     await sets.hideUnwearable().uncheck();
     await expect(sets.rows("Duskwoven Shroud")).toHaveCount(2);
-    await expect(sets.card("Duskwoven Shroud"))
-      .toContainText("The game keeps this appearance encrypted");
+    await expect(sets.card("Duskwoven Shroud")).toContainText(
+      "The game keeps this appearance encrypted",
+    );
     // The other row got as far as an item and no further: the game encrypts that item's own
     // row too, so it is named by its id rather than left as a blank beside a slot.
-    await expect(sets.link("Duskwoven Shroud", "Item 30011"))
-      .toHaveAttribute("href", "https://www.wowhead.com/item=30011");
+    await expect(sets.link("Duskwoven Shroud", "Item 30011")).toHaveAttribute(
+      "href",
+      "https://www.wowhead.com/item=30011",
+    );
 
     // One row names a texture this install does not hold and the other names none at all,
     // so neither has a picture to show — and both still keep the frame, so the list reads as
@@ -621,8 +646,9 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("an outfit this install can show nothing for says so", async () => {
     await sets.wear("Duskwoven Shroud", "Chest", "Item 30011").click();
     await expect(outfit.slots()).toHaveCount(1);
-    await expect(outfit.note())
-      .toHaveText("This install holds nothing to put on the character for these.");
+    await expect(outfit.note()).toHaveText(
+      "This install holds nothing to put on the character for these.",
+    );
     await expect(outfit.canvas()).toBeHidden();
     await sets.closeSet("Duskwoven Shroud");
     await outfit.clear();
@@ -635,8 +661,9 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("an appearance there is nowhere to put says so instead of going on", async () => {
     await sets.openSet("Emberforge Plate");
     await expect(sets.rows("Emberforge Plate")).toHaveCount(6);
-    await expect(sets.card("Emberforge Plate"))
-      .toContainText("The game gives this appearance no place on a character.");
+    await expect(sets.card("Emberforge Plate")).toContainText(
+      "The game gives this appearance no place on a character.",
+    );
     await expect(sets.wear("Emberforge Plate", "Weapon or shield", "Item 30017")).toBeDisabled();
   });
 
@@ -646,7 +673,8 @@ test("browses the game's transmog sets and dresses the character in them", async
     await sets.hideUnwearable().check();
     await expect(sets.rows("Emberforge Plate")).toHaveCount(5);
     await expect(sets.wear("Emberforge Plate", "Weapon or shield", "Item 30017")).toHaveCount(0);
-    await expect(sets.card("Emberforge Plate"))
-      .toContainText("1 appearance hidden, with nowhere on her to go");
+    await expect(sets.card("Emberforge Plate")).toContainText(
+      "1 appearance hidden, with nowhere on her to go",
+    );
   });
 });

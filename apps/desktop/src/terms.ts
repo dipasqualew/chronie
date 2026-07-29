@@ -93,7 +93,7 @@ function tokens(search: string): string[] {
   let current = "";
   let quoting = false;
   for (const char of search) {
-    if (char === "\"") {
+    if (char === '"') {
       quoting = !quoting;
       continue;
     }
@@ -131,8 +131,12 @@ export function matchesWords(words: string[], said: string): boolean {
  * colours — and one of them answering is the key answering.
  */
 export function matchesTerms(terms: Term[], facets: Facet[]): boolean {
-  return terms.every((term) => facets.some((facet) =>
-    facet.key.toLowerCase() === term.key && facet.value.toLowerCase().includes(term.value)));
+  return terms.every((term) =>
+    facets.some(
+      (facet) =>
+        facet.key.toLowerCase() === term.key && facet.value.toLowerCase().includes(term.value),
+    ),
+  );
 }
 
 /**

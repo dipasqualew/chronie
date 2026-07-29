@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { AppearanceRow } from "./transmogModal";
 import {
-  ANY_CLASS, appearanceRows, appearanceSummary, heldIn, iconIds, isHeld, itemsBehind, qualityLabel,
-  slotName, varyingFacts, wearerLabel,
+  ANY_CLASS,
+  appearanceRows,
+  appearanceSummary,
+  heldIn,
+  iconIds,
+  isHeld,
+  itemsBehind,
+  qualityLabel,
+  slotName,
+  varyingFacts,
+  wearerLabel,
 } from "./transmogModal";
 import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
 
@@ -46,12 +55,16 @@ const payload = (
  * source distinct by, and an item id of its own, because that is what the link out uses.
  */
 const oneLook = (items: Array<Partial<TransmogAppearance>>): TransmogSetItemsPayload =>
-  payload(items.map((fields, index) => appearance({
-    modifiedAppearanceId: 71001 + index,
-    itemId: 30001 + index,
-    appearanceId: 80001,
-    ...fields,
-  })));
+  payload(
+    items.map((fields, index) =>
+      appearance({
+        modifiedAppearanceId: 71001 + index,
+        itemId: 30001 + index,
+        appearanceId: 80001,
+        ...fields,
+      }),
+    ),
+  );
 
 /** The single row a set of items reaching one look comes to. */
 const lookRow = (items: Array<Partial<TransmogAppearance>>, setName = ""): AppearanceRow =>
@@ -136,63 +149,87 @@ describe("heldIn", () => {
 
 describe("appearanceRows", () => {
   it("names the slot an appearance fills and the item it came from", () => {
-    expect(appearanceRows(payload([
-      appearance({
-        modifiedAppearanceId: 71007, displayType: 1, inventoryType: 3, itemId: 30007,
-        name: "Emberforge Pauldrons", hasModel: true,
-      }),
-    ])))
-      .toEqual([
-        {
-          slot: "Shoulder",
-          label: "Emberforge Pauldrons",
-          itemId: 30007,
-          appearanceId: 80001,
-          displayType: 1,
-          inventoryType: 3,
-          displayInfoId: 900001,
-          iconFileDataId: 130001,
-          hasModel: true,
-          withheld: false,
-          sources: [
-            {
-              label: "Emberforge Pauldrons",
-              itemId: 30007,
-              modifiedAppearanceId: 71007,
-              inventoryType: 3,
-              allowableClass: ANY_CLASS,
-              requiredLevel: 0,
-              quality: 4,
-              itemCount: 1,
-            },
-          ],
-          liftsRestriction: false,
-        },
-      ]);
+    expect(
+      appearanceRows(
+        payload([
+          appearance({
+            modifiedAppearanceId: 71007,
+            displayType: 1,
+            inventoryType: 3,
+            itemId: 30007,
+            name: "Emberforge Pauldrons",
+            hasModel: true,
+          }),
+        ]),
+      ),
+    ).toEqual([
+      {
+        slot: "Shoulder",
+        label: "Emberforge Pauldrons",
+        itemId: 30007,
+        appearanceId: 80001,
+        displayType: 1,
+        inventoryType: 3,
+        displayInfoId: 900001,
+        iconFileDataId: 130001,
+        hasModel: true,
+        withheld: false,
+        sources: [
+          {
+            label: "Emberforge Pauldrons",
+            itemId: 30007,
+            modifiedAppearanceId: 71007,
+            inventoryType: 3,
+            allowableClass: ANY_CLASS,
+            requiredLevel: 0,
+            quality: 4,
+            itemCount: 1,
+          },
+        ],
+        liftsRestriction: false,
+      },
+    ]);
   });
 
   // The whole point of the module: the game sells one look through as many items as it likes,
   // `TransmogSetItem` names every one of them, and a row is a look. A set of 126 rows is a set
   // of 11 looks, and the items are not lost by it — they are the sources one click further in.
   it("draws one row per look however many items reach it", () => {
-    const rows = appearanceRows(payload([
-      appearance({
-        modifiedAppearanceId: 71020, itemId: 30020, name: "Stormforged Helm",
-        appearanceId: 80020, allowableClass: 0b1, requiredLevel: 60,
-      }),
-      appearance({
-        modifiedAppearanceId: 71021, itemId: 30021, name: "Stormforged Greathelm",
-        appearanceId: 80020, requiredLevel: 60,
-      }),
-      appearance({
-        modifiedAppearanceId: 71022, itemId: 30022, name: "Helm of the Tempest",
-        appearanceId: 80020, requiredLevel: 45, quality: 3,
-      }),
-      appearance({
-        modifiedAppearanceId: 71023, itemId: 30023, name: "Stormforged Breastplate",
-        appearanceId: 80023, displayType: 3, inventoryType: 5,
-      }),
-    ]));
+    const rows = appearanceRows(
+      payload([
+        appearance({
+          modifiedAppearanceId: 71020,
+          itemId: 30020,
+          name: "Stormforged Helm",
+          appearanceId: 80020,
+          allowableClass: 0b1,
+          requiredLevel: 60,
+        }),
+        appearance({
+          modifiedAppearanceId: 71021,
+          itemId: 30021,
+          name: "Stormforged Greathelm",
+          appearanceId: 80020,
+          requiredLevel: 60,
+        }),
+        appearance({
+          modifiedAppearanceId: 71022,
+          itemId: 30022,
+          name: "Helm of the Tempest",
+          appearanceId: 80020,
+          requiredLevel: 45,
+          quality: 3,
+        }),
+        appearance({
+          modifiedAppearanceId: 71023,
+          itemId: 30023,
+          name: "Stormforged Breastplate",
+          appearanceId: 80023,
+          displayType: 3,
+          inventoryType: 5,
+        }),
+      ]),
+    );
 
     expect(rows.map((row) => row.appearanceId)).toEqual([80020, 80023]);
     expect(rows[0]!.sources.map((source) => source.itemId)).toEqual([30022, 30021, 30020]);
@@ -203,11 +240,13 @@ describe("appearanceRows", () => {
   // answers the same `ItemModifiedAppearance` twice — but one item named twice is one item,
   // and listing it twice under the look would be the app inventing a way to get it.
   it("counts an item the set names twice as one source", () => {
-    const rows = appearanceRows(payload([
-      appearance({ modifiedAppearanceId: 71001, itemId: 30001 }),
-      appearance({ modifiedAppearanceId: 71001, itemId: 30001 }),
-      appearance({ modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle" }),
-    ]));
+    const rows = appearanceRows(
+      payload([
+        appearance({ modifiedAppearanceId: 71001, itemId: 30001 }),
+        appearance({ modifiedAppearanceId: 71001, itemId: 30001 }),
+        appearance({ modifiedAppearanceId: 71002, itemId: 30002, name: "Tideglass Mantle" }),
+      ]),
+    );
 
     expect(rows).toHaveLength(1);
     expect(rows[0]!.sources.map((source) => source.modifiedAppearanceId)).toEqual([71001, 71002]);
@@ -216,17 +255,25 @@ describe("appearanceRows", () => {
   // The backend sorted the set into the order it did for a reason, and a look that turns up
   // again later belongs where it was first seen rather than at the bottom.
   it("keeps the rows in the order the backend sorted them into", () => {
-    const rows = appearanceRows(payload([
-      appearance({
-        modifiedAppearanceId: 71005, itemId: 30005, appearanceId: 80005, displayType: 5,
-        name: "Tideglass Leggings",
-      }),
-      appearance({ modifiedAppearanceId: 71000, itemId: 30000, appearanceId: 80000 }),
-      appearance({
-        modifiedAppearanceId: 71015, itemId: 30015, appearanceId: 80005, displayType: 5,
-        name: "Leggings of the Tide",
-      }),
-    ]));
+    const rows = appearanceRows(
+      payload([
+        appearance({
+          modifiedAppearanceId: 71005,
+          itemId: 30005,
+          appearanceId: 80005,
+          displayType: 5,
+          name: "Tideglass Leggings",
+        }),
+        appearance({ modifiedAppearanceId: 71000, itemId: 30000, appearanceId: 80000 }),
+        appearance({
+          modifiedAppearanceId: 71015,
+          itemId: 30015,
+          appearanceId: 80005,
+          displayType: 5,
+          name: "Leggings of the Tide",
+        }),
+      ]),
+    );
 
     expect(rows.map((row) => row.appearanceId)).toEqual([80005, 80000]);
     expect(rows[0]!.sources).toHaveLength(2);
@@ -237,54 +284,63 @@ describe("appearanceRows", () => {
   // labelling it by slot would be inventing one.
   it("says nothing it cannot know about an appearance the game withholds", () => {
     const withheld = appearance({
-      modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0, iconFileDataId: 0,
-      inventoryType: 0, allowableClass: 0, quality: 0,
+      modifiedAppearanceId: 71012,
+      itemId: 0,
+      name: "",
+      appearanceId: 0,
+      iconFileDataId: 0,
+      inventoryType: 0,
+      allowableClass: 0,
+      quality: 0,
     });
-    expect(appearanceRows(payload([withheld])))
-      .toEqual([
-        {
-          slot: "Unknown slot",
-          label: "The game keeps this appearance encrypted",
-          itemId: 0,
-          appearanceId: 0,
-          displayType: 0,
-          inventoryType: 0,
-          displayInfoId: 900001,
-          iconFileDataId: 0,
-          hasModel: false,
-          withheld: true,
-          sources: [
-            {
-              label: "Item 0",
-              itemId: 0,
-              modifiedAppearanceId: 71012,
-              inventoryType: 0,
-              allowableClass: 0,
-              requiredLevel: 0,
-              quality: 0,
-              itemCount: 1,
-            },
-          ],
-          liftsRestriction: false,
-        },
-      ]);
+    expect(appearanceRows(payload([withheld]))).toEqual([
+      {
+        slot: "Unknown slot",
+        label: "The game keeps this appearance encrypted",
+        itemId: 0,
+        appearanceId: 0,
+        displayType: 0,
+        inventoryType: 0,
+        displayInfoId: 900001,
+        iconFileDataId: 0,
+        hasModel: false,
+        withheld: true,
+        sources: [
+          {
+            label: "Item 0",
+            itemId: 0,
+            modifiedAppearanceId: 71012,
+            inventoryType: 0,
+            allowableClass: 0,
+            requiredLevel: 0,
+            quality: 0,
+            itemCount: 1,
+          },
+        ],
+        liftsRestriction: false,
+      },
+    ]);
   });
 
   // Two withheld appearances share an appearance id of zero and are not thereby the same look
   // — nothing is known about either. Collapsing them would hide one behind the other, and the
   // set's count includes both, so the list would be shorter than the card promised.
   it("does not collapse two withheld appearances into one row", () => {
-    const rows = appearanceRows(payload(
-      [
-        appearance({ modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0 }),
-        appearance({ modifiedAppearanceId: 71014, itemId: 0, name: "", appearanceId: 0 }),
-      ],
-      { readCount: 0, withheldCount: 2 },
-    ));
+    const rows = appearanceRows(
+      payload(
+        [
+          appearance({ modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0 }),
+          appearance({ modifiedAppearanceId: 71014, itemId: 0, name: "", appearanceId: 0 }),
+        ],
+        { readCount: 0, withheldCount: 2 },
+      ),
+    );
 
     expect(rows).toHaveLength(2);
-    expect(rows.map((row) => row.label))
-      .toEqual(["The game keeps this appearance encrypted", "The game keeps this appearance encrypted"]);
+    expect(rows.map((row) => row.label)).toEqual([
+      "The game keeps this appearance encrypted",
+      "The game keeps this appearance encrypted",
+    ]);
     expect(rows.map((row) => row.withheld)).toEqual([true, true]);
   });
 
@@ -298,7 +354,13 @@ describe("appearanceRows", () => {
       [
         // Listed first and withheld, so its slot reads as nothing at all.
         { modifiedAppearanceId: 71030, itemId: 30030, name: "", displayType: 11, inventoryType: 0 },
-        { modifiedAppearanceId: 71031, itemId: 30031, name: "Tideglass Edge", displayType: 11, inventoryType: 17 },
+        {
+          modifiedAppearanceId: 71031,
+          itemId: 30031,
+          name: "Tideglass Edge",
+          displayType: 11,
+          inventoryType: 17,
+        },
       ],
       "Tideglass Regalia",
     );
@@ -312,13 +374,15 @@ describe("appearanceRows", () => {
   // The card counts every appearance the set names, so the withheld one keeps its place in
   // the list rather than being dropped for being unnameable.
   it("keeps a withheld appearance in the order the backend sorted it into", () => {
-    const rows = appearanceRows(payload(
-      [
-        appearance({ modifiedAppearanceId: 71011, displayType: 2, itemId: 30011 }),
-        appearance({ modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0 }),
-      ],
-      { readCount: 1, withheldCount: 1 },
-    ));
+    const rows = appearanceRows(
+      payload(
+        [
+          appearance({ modifiedAppearanceId: 71011, displayType: 2, itemId: 30011 }),
+          appearance({ modifiedAppearanceId: 71012, itemId: 0, name: "", appearanceId: 0 }),
+        ],
+        { readCount: 1, withheldCount: 1 },
+      ),
+    );
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.withheld)).toEqual([false, true]);
   });
@@ -344,20 +408,29 @@ describe("appearanceRows naming", () => {
     [
       "the set's own piece over a world drop wearing its slot",
       "Regalia of Celestial Harmony",
-      [[30001, "Headpiece of Celestial Harmony"], [30002, "Crown of Tragic Truth"]],
+      [
+        [30001, "Headpiece of Celestial Harmony"],
+        [30002, "Crown of Tragic Truth"],
+      ],
       "Headpiece of Celestial Harmony",
     ],
     [
       // "of" and "the" are in every second name in the game and so tell two items apart never.
       "the one word that is not in every name in the game",
       "Vestments of the Fallen",
-      [[30003, "Robes of the Sun"], [30009, "Fallen Shoulderpads"]],
+      [
+        [30003, "Robes of the Sun"],
+        [30009, "Fallen Shoulderpads"],
+      ],
       "Fallen Shoulderpads",
     ],
     [
       "the oldest item where two names are equally close",
       "Tideglass Regalia",
-      [[30005, "Tideglass Crown"], [30002, "Tideglass Cowl"]],
+      [
+        [30005, "Tideglass Crown"],
+        [30002, "Tideglass Cowl"],
+      ],
       "Tideglass Cowl",
     ],
     [
@@ -365,7 +438,10 @@ describe("appearanceRows naming", () => {
       // oldest item — the piece the set was built around rather than what was hung off it.
       "the oldest item where the set has no name to match",
       "",
-      [[30008, "Cowl of the Tempest"], [30004, "Stormforged Helm"]],
+      [
+        [30008, "Cowl of the Tempest"],
+        [30004, "Stormforged Helm"],
+      ],
       "Stormforged Helm",
     ],
   ])("names a row after %s", (_what, setName, items, expected) => {
@@ -459,12 +535,11 @@ describe("appearanceRows folding", () => {
       { itemId: 30054, name: "Stormforged Helm", allowableClass: 0b1, requiredLevel: 60 },
     ]);
 
-    expect(row.sources.map((source) => [source.label, source.itemId, source.itemCount]))
-      .toEqual([
-        ["Helm of the Tempest", 30051, 2],
-        ["Stormforged Greathelm", 30052, 1],
-        ["Stormforged Helm", 30050, 2],
-      ]);
+    expect(row.sources.map((source) => [source.label, source.itemId, source.itemCount])).toEqual([
+      ["Helm of the Tempest", 30051, 2],
+      ["Stormforged Greathelm", 30052, 1],
+      ["Stormforged Helm", 30050, 2],
+    ]);
     expect(itemsBehind(row)).toBe(5);
   });
 
@@ -560,8 +635,11 @@ describe("varyingFacts", () => {
   // A little under half of the game's appearances are reached by one item, and one item
   // disagrees with nothing.
   it("draws no columns for a look only one item reaches", () => {
-    expect(varyingFacts(lookRow([{}])))
-      .toEqual({ allowableClass: false, requiredLevel: false, quality: false });
+    expect(varyingFacts(lookRow([{}]))).toEqual({
+      allowableClass: false,
+      requiredLevel: false,
+      quality: false,
+    });
   });
 
   // Folding only ever merges items that already agreed about all three facts, so the columns
@@ -650,8 +728,9 @@ describe("appearanceSummary", () => {
   // A set with nothing under it is the one case the count is not worth printing at all.
   it("says the game lists nothing rather than counting to zero", () => {
     const empty = payload([]);
-    expect(appearanceSummary(appearanceRows(empty), empty))
-      .toBe("The game lists no appearances for this set.");
+    expect(appearanceSummary(appearanceRows(empty), empty)).toBe(
+      "The game lists no appearances for this set.",
+    );
   });
 });
 

@@ -5,7 +5,11 @@ import { CharacterFigure } from "./characterFigure";
 import type { GalleryStage } from "./galleryStage";
 import { ANY_CLASS } from "./transmogModal";
 import type {
-  InGameSet, InGameSetAppearancesPayload, TransmogAppearance, WornPiece, WornSetPayload,
+  InGameSet,
+  InGameSetAppearancesPayload,
+  TransmogAppearance,
+  WornPiece,
+  WornSetPayload,
 } from "./types";
 
 afterEach(cleanup);
@@ -28,13 +32,25 @@ const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearanc
 
 const CROWN = appearance();
 const MANTLE = appearance({
-  modifiedAppearanceId: 71_002, itemId: 30_002, name: "Tideglass Mantle", appearanceId: 80_002,
-  displayType: 1, inventoryType: 3, displayInfoId: 900_002,
+  modifiedAppearanceId: 71_002,
+  itemId: 30_002,
+  name: "Tideglass Mantle",
+  appearanceId: 80_002,
+  displayType: 1,
+  inventoryType: 3,
+  displayInfoId: 900_002,
 });
 /** A row the game encrypts, which has no place on a body and nothing to draw. */
 const WITHHELD = appearance({
-  modifiedAppearanceId: 71_009, itemId: 0, name: "", appearanceId: 0,
-  displayType: 0, inventoryType: 0, displayInfoId: 0, iconFileDataId: 0, hasModel: false,
+  modifiedAppearanceId: 71_009,
+  itemId: 0,
+  name: "",
+  appearanceId: 0,
+  displayType: 0,
+  inventoryType: 0,
+  displayInfoId: 0,
+  iconFileDataId: 0,
+  hasModel: false,
 });
 
 const TIDEGLASS: InGameSet = {
@@ -42,7 +58,10 @@ const TIDEGLASS: InGameSet = {
   name: "Tideglass",
   icon: 130_001,
   observedAt: null,
-  slots: [{ slot: 0, appearanceId: 71_001 }, { slot: 1, appearanceId: 71_002 }],
+  slots: [
+    { slot: 0, appearanceId: 71_001 },
+    { slot: 1, appearanceId: 71_002 },
+  ],
 };
 const EMBERFORGE: InGameSet = {
   id: 6,
@@ -62,10 +81,11 @@ const CONTENTS: Record<string, InGameSetAppearancesPayload> = {
 const GLB = "data:model/gltf-binary;base64,AAAA";
 
 /** A stage that paints nothing, so the tests need no WebGL and no `.glb` to parse. */
-const stage = (): GalleryStage => ({
-  paint: () => Promise.resolve(),
-  dispose: () => {},
-}) as unknown as GalleryStage;
+const stage = (): GalleryStage =>
+  ({
+    paint: () => Promise.resolve(),
+    dispose: () => {},
+  }) as unknown as GalleryStage;
 
 interface Shown {
   loadAppearances: ReturnType<typeof vi.fn>;
@@ -84,15 +104,21 @@ function show(
     failWith?: string;
   } = {},
 ): Shown {
-  const loadAppearances = vi.fn((ids: number[]) => (failWith
-    ? Promise.reject(new Error(failWith))
-    : Promise.resolve(appearances[ids.join(",")]
-      ?? { appearances: [], readCount: 0, withheldCount: 0 })));
+  const loadAppearances = vi.fn((ids: number[]) =>
+    failWith
+      ? Promise.reject(new Error(failWith))
+      : Promise.resolve(
+          appearances[ids.join(",")] ?? { appearances: [], readCount: 0, withheldCount: 0 },
+        ),
+  );
   const loadWorn = vi.fn((_character: string, _pieces: WornPiece[]) => Promise.resolve(drawn));
   render(
     <CharacterFigure
-      character="Aster-Vale" sets={sets}
-      loadAppearances={loadAppearances} loadWorn={loadWorn} createGalleryStage={stage}
+      character="Aster-Vale"
+      sets={sets}
+      loadAppearances={loadAppearances}
+      loadWorn={loadWorn}
+      createGalleryStage={stage}
     />,
   );
   return { loadAppearances, loadWorn };
@@ -185,9 +211,7 @@ describe("CharacterFigure", () => {
   it("says so where the install can draw the set on nobody", async () => {
     show([TIDEGLASS], { drawn: { model: null } });
 
-    await expect(
-      screen.findByText(/holds nothing to draw this set/),
-    ).resolves.toBeTruthy();
+    await expect(screen.findByText(/holds nothing to draw this set/)).resolves.toBeTruthy();
   });
 
   /**
@@ -197,8 +221,6 @@ describe("CharacterFigure", () => {
   it("says why out loud when the game's files cannot be reached", async () => {
     show([TIDEGLASS], { failWith: "The game folder has not been chosen." });
 
-    await expect(
-      screen.findByText("The game folder has not been chosen."),
-    ).resolves.toBeTruthy();
+    await expect(screen.findByText("The game folder has not been chosen.")).resolves.toBeTruthy();
   });
 });

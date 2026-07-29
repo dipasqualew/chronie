@@ -35,7 +35,11 @@ interface EditorRow {
 
 export interface ActivityEditorActions {
   add: (segmentId: number, kind: string, metadata: ActivityMetadata) => Promise<DashboardPayload>;
-  update: (activityId: number, kind: string, metadata: ActivityMetadata) => Promise<DashboardPayload>;
+  update: (
+    activityId: number,
+    kind: string,
+    metadata: ActivityMetadata,
+  ) => Promise<DashboardPayload>;
   remove: (activityId: number) => Promise<DashboardPayload>;
   reset: (segmentId: number) => Promise<DashboardPayload>;
   /** Anything that went wrong, in the words the backend used. */
@@ -58,8 +62,12 @@ export interface ActivityEditorProps {
 
 /** What a stored activity's metadata looks like in the boxes. */
 function rawValues(metadata: ActivityMetadata): Record<string, string> {
-  return Object.fromEntries(Object.entries(metadata).map(([key, value]) =>
-    [key, typeof value === "boolean" ? (value ? "yes" : "no") : String(value)]));
+  return Object.fromEntries(
+    Object.entries(metadata).map(([key, value]) => [
+      key,
+      typeof value === "boolean" ? (value ? "yes" : "no") : String(value),
+    ]),
+  );
 }
 
 const rowsOf = (segment: Segment | null): EditorRow[] =>
@@ -71,9 +79,13 @@ const rowsOf = (segment: Segment | null): EditorRow[] =>
     dirty: false,
   }));
 
-export function ActivityEditor(
-  { segment, knownKinds, actions, onApply, onClose }: ActivityEditorProps,
-): ReactNode {
+export function ActivityEditor({
+  segment,
+  knownKinds,
+  actions,
+  onApply,
+  onClose,
+}: ActivityEditorProps): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
 
   // `showModal` rather than the `open` attribute, and not only for the backdrop: this dialog
@@ -88,21 +100,32 @@ export function ActivityEditor(
   }, [segment]);
 
   return (
-    <dialog id="activity-editor" aria-labelledby="activity-editor-title" ref={dialog} onClose={onClose}>
-      {segment
-        ? <EditorBody
-          segment={segment} knownKinds={knownKinds} actions={actions}
-          onApply={onApply} onClose={onClose}
+    <dialog
+      id="activity-editor"
+      aria-labelledby="activity-editor-title"
+      ref={dialog}
+      onClose={onClose}
+    >
+      {segment ? (
+        <EditorBody
+          segment={segment}
+          knownKinds={knownKinds}
+          actions={actions}
+          onApply={onApply}
+          onClose={onClose}
         />
-        : null}
+      ) : null}
     </dialog>
   );
 }
 
-function EditorBody(
-  { segment, knownKinds, actions, onApply, onClose }:
-  ActivityEditorProps & { segment: Segment },
-): ReactNode {
+function EditorBody({
+  segment,
+  knownKinds,
+  actions,
+  onApply,
+  onClose,
+}: ActivityEditorProps & { segment: Segment }): ReactNode {
   const [rows, setRows] = useState<EditorRow[]>([]);
   const [saying, setSaying] = useState("");
   const [draftSequence, setDraftSequence] = useState(0);
@@ -142,9 +165,11 @@ function EditorBody(
     for (const row of rows) {
       if (!row.dirty) continue;
       const metadata = parseMetadata(row.kind, row.values);
-      onApply(row.id === undefined
-        ? await actions.add(segment.segmentId, row.kind, metadata)
-        : await actions.update(row.id, row.kind, metadata));
+      onApply(
+        row.id === undefined
+          ? await actions.add(segment.segmentId, row.kind, metadata)
+          : await actions.update(row.id, row.kind, metadata),
+      );
     }
   }
 
@@ -158,65 +183,103 @@ function EditorBody(
         {segment.character} · {segment.day} · {duration(segment.seconds)}
       </div>
       <div className="editor-list" id="activity-editor-list">
-        {rows.length
-          ? rows.map((row) => (
+        {rows.length ? (
+          rows.map((row) => (
             <div className="editor-row" key={row.rowId}>
               <div className="row-head">
                 <select
-                  aria-label="Activity kind" value={row.kind}
+                  aria-label="Activity kind"
+                  value={row.kind}
                   onChange={(event) =>
-                    edit(row.rowId, (was) => ({ ...was, kind: event.target.value, dirty: true }))}
+                    edit(row.rowId, (was) => ({ ...was, kind: event.target.value, dirty: true }))
+                  }
                 >
-                  {kinds(row.kind).map((kind) =>
-                    <option key={kind} value={kind}>{activityLabel(kind)}</option>)}
+                  {kinds(row.kind).map((kind) => (
+                    <option key={kind} value={kind}>
+                      {activityLabel(kind)}
+                    </option>
+                  ))}
                 </select>
                 <button
-                  type="button" aria-label={`Remove ${activityLabel(row.kind)}`}
+                  type="button"
+                  aria-label={`Remove ${activityLabel(row.kind)}`}
                   onClick={() => removeRow(row)}
-                >Remove</button>
+                >
+                  Remove
+                </button>
               </div>
               <div className="editor-fields">
-                {activityFields(row.kind).length
-                  ? activityFields(row.kind).map((field) => (
+                {activityFields(row.kind).length ? (
+                  activityFields(row.kind).map((field) => (
                     <Field
-                      key={field.key} row={row} field={field}
-                      onChange={(value) => edit(row.rowId, (was) => ({
-                        ...was, values: { ...was.values, [field.key]: value }, dirty: true,
-                      }))}
+                      key={field.key}
+                      row={row}
+                      field={field}
+                      onChange={(value) =>
+                        edit(row.rowId, (was) => ({
+                          ...was,
+                          values: { ...was.values, [field.key]: value },
+                          dirty: true,
+                        }))
+                      }
                     />
                   ))
-                  : <span className="muted">
+                ) : (
+                  <span className="muted">
                     Chronie has no fields for this kind; it will be saved by name.
-                  </span>}
+                  </span>
+                )}
               </div>
             </div>
           ))
-          : <div className="muted">No activities on this segment yet.</div>}
+        ) : (
+          <div className="muted">No activities on this segment yet.</div>
+        )}
       </div>
-      <p className="status" id="activity-editor-status" role="status">{saying}</p>
+      <p className="status" id="activity-editor-status" role="status">
+        {saying}
+      </p>
       <div className="dialog-actions">
         <button
-          type="button" id="activity-add"
+          type="button"
+          id="activity-add"
           onClick={() => {
             const rowId = draftSequence - 1;
             setDraftSequence(rowId);
-            setRows((was) => [...was, {
-              rowId, kind: knownKinds[0] || "mythic_plus", values: {}, dirty: true,
-            }]);
+            setRows((was) => [
+              ...was,
+              {
+                rowId,
+                kind: knownKinds[0] || "mythic_plus",
+                values: {},
+                dirty: true,
+              },
+            ]);
           }}
-        >Add activity</button>
+        >
+          Add activity
+        </button>
         <button
-          type="button" id="activity-reset"
+          type="button"
+          id="activity-reset"
           onClick={() => void run(async () => onApply(await actions.reset(segment.segmentId)))}
-        >Reset to guesses</button>
+        >
+          Reset to guesses
+        </button>
         <button
-          type="button" id="activity-close" className="primary spacer"
-          onClick={() => void run(async () => {
-            await save();
-            onClose();
-          })}
-      >Done</button>
-    </div>
+          type="button"
+          id="activity-close"
+          className="primary spacer"
+          onClick={() =>
+            void run(async () => {
+              await save();
+              onClose();
+            })
+          }
+        >
+          Done
+        </button>
+      </div>
     </form>
   );
 }
@@ -231,25 +294,34 @@ function EditorBody(
  * Booleans use a three-way select — yes, no, and an empty "unknown" — so an unset flag stays
  * unset instead of defaulting to false.
  */
-function Field(
-  { row, field, onChange }:
-  { row: EditorRow; field: ActivityField; onChange: (value: string) => void },
-): ReactNode {
+function Field({
+  row,
+  field,
+  onChange,
+}: {
+  row: EditorRow;
+  field: ActivityField;
+  onChange: (value: string) => void;
+}): ReactNode {
   const id = `field-${row.rowId}-${field.key}`;
   const value = row.values[field.key] ?? "";
   return (
     <div className="field">
       <label htmlFor={id}>{field.label}</label>
-      {field.type === "boolean"
-        ? <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+      {field.type === "boolean" ? (
+        <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
           <option value="">Unknown</option>
           <option value="yes">Yes</option>
           <option value="no">No</option>
         </select>
-        : <input
-          id={id} type={field.type === "number" ? "number" : "text"}
-          value={value} onChange={(event) => onChange(event.target.value)}
-        />}
+      ) : (
+        <input
+          id={id}
+          type={field.type === "number" ? "number" : "text"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
     </div>
   );
 }

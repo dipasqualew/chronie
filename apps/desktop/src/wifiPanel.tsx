@@ -91,7 +91,10 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
     void refresh();
     // Only while somebody could act on the answer — or while this machine is waiting, because
     // then the answer arrives from elsewhere and replaces everything on screen.
-    if (!visible && !listening) return () => { alive = false; };
+    if (!visible && !listening)
+      return () => {
+        alive = false;
+      };
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => {
       alive = false;
@@ -104,7 +107,9 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
    * button belongs to — a refused offer is not news about sending, and the reverse.
    */
   async function run(
-    name: string, say: (message: string) => void, action: () => Promise<void>,
+    name: string,
+    say: (message: string) => void,
+    action: () => Promise<void>,
   ): Promise<void> {
     setBusy(name);
     try {
@@ -116,30 +121,35 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
     }
   }
 
-  const find = (): Promise<void> => run("find", setSendStatus, async () => {
-    setSendStatus("Looking for other Chronies…");
-    const found = await actions.discover();
-    setPeers(found);
-    setSendStatus(found.length
-      ? `Found ${plural(found.length, "Chronie", "Chronies")} waiting.`
-      : "No Chronie on this network is waiting for a database. Start one waiting on the " +
-        "other machine, then look again.");
-  });
+  const find = (): Promise<void> =>
+    run("find", setSendStatus, async () => {
+      setSendStatus("Looking for other Chronies…");
+      const found = await actions.discover();
+      setPeers(found);
+      setSendStatus(
+        found.length
+          ? `Found ${plural(found.length, "Chronie", "Chronies")} waiting.`
+          : "No Chronie on this network is waiting for a database. Start one waiting on the " +
+              "other machine, then look again.",
+      );
+    });
 
-  const send = (): Promise<void> => run("send", setSendStatus, async () => {
-    const to = address.trim();
-    if (!to) {
-      setSendStatus("Choose a Chronie to send to, or type its address.");
-      return;
-    }
-    setSendStatus(`Offering this history to ${to}…`);
-    setSendStatus(receiptSentence(await actions.send(to), to));
-  });
+  const send = (): Promise<void> =>
+    run("send", setSendStatus, async () => {
+      const to = address.trim();
+      if (!to) {
+        setSendStatus("Choose a Chronie to send to, or type its address.");
+        return;
+      }
+      setSendStatus(`Offering this history to ${to}…`);
+      setSendStatus(receiptSentence(await actions.send(to), to));
+    });
 
-  const waitOrStop = (): Promise<void> => run("wait", setReceiveSaying, async () => {
-    replaced.current = false;
-    took(listening ? await actions.stopWaiting() : await actions.startWaiting());
-  });
+  const waitOrStop = (): Promise<void> =>
+    run("wait", setReceiveSaying, async () => {
+      replaced.current = false;
+      took(listening ? await actions.stopWaiting() : await actions.startWaiting());
+    });
 
   const answer = (accepted: boolean): Promise<void> =>
     run(accepted ? "accept" : "decline", setReceiveSaying, async () => {
@@ -154,9 +164,11 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
   return (
     <div className="panel setup">
       <h2>Sync over WiFi</h2>
-      <p className="sub">Chronie can hand its whole history to another Chronie on this network —
-        a desktop&apos;s collection onto a laptop, or a spare machine kept as a copy. The one
-        receiving it loses what it had, so somebody there has to agree first.</p>
+      <p className="sub">
+        Chronie can hand its whole history to another Chronie on this network — a desktop&apos;s
+        collection onto a laptop, or a spare machine kept as a copy. The one receiving it loses what
+        it had, so somebody there has to agree first.
+      </p>
       <div className="wifi-halves">
         <section className="wifi-half" aria-labelledby="wifi-send-heading">
           <h3 id="wifi-send-heading">Send this history</h3>
@@ -169,7 +181,9 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
           <div id="wifi-peers" className="wifi-peers">
             {peers.map((peer) => (
               <button
-                key={peer.address} type="button" className="wifi-peer"
+                key={peer.address}
+                type="button"
+                className="wifi-peer"
                 // Choosing one fills the address in rather than sending to it. A click that
                 // both picks a machine and hands it a history is a click nobody can take back.
                 onClick={() => {
@@ -183,11 +197,16 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
             ))}
           </div>
           <div className="setup-grid">
-            <label htmlFor="wifi-address">Address
+            <label htmlFor="wifi-address">
+              Address
               <span className="path-row">
                 <input
-                  id="wifi-address" type="text" placeholder="192.168.1.20" ref={addressBox}
-                  value={address} onChange={(event) => setAddress(event.target.value)}
+                  id="wifi-address"
+                  type="text"
+                  placeholder="192.168.1.20"
+                  ref={addressBox}
+                  value={address}
+                  onChange={(event) => setAddress(event.target.value)}
                 />
               </span>
             </label>
@@ -195,36 +214,55 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
               Send history
             </button>
           </div>
-          <p id="wifi-send-status" className="status" role="status">{sendStatus}</p>
+          <p id="wifi-send-status" className="status" role="status">
+            {sendStatus}
+          </p>
         </section>
 
         <section className="wifi-half" aria-labelledby="wifi-receive-heading">
           <h3 id="wifi-receive-heading">Receive a history</h3>
-          <p className="sub">Nothing can be sent to this Chronie unless it is waiting, and
-            nothing is replaced until the offer below is accepted.</p>
+          <p className="sub">
+            Nothing can be sent to this Chronie unless it is waiting, and nothing is replaced until
+            the offer below is accepted.
+          </p>
           <div className="actions">
             <button
-              type="button" className={listening ? undefined : "primary"}
-              disabled={busy === "wait"} onClick={() => void waitOrStop()}
-            >{listening ? "Stop waiting" : "Wait for a database"}</button>
+              type="button"
+              className={listening ? undefined : "primary"}
+              disabled={busy === "wait"}
+              onClick={() => void waitOrStop()}
+            >
+              {listening ? "Stop waiting" : "Wait for a database"}
+            </button>
           </div>
           <p id="wifi-receive-status" className="status" role="status">
             {receiveSaying || (receiveStatus ? receiveSentence(receiveStatus) : "")}
           </p>
           {/* The one screen in the app that destroys data if it is answered without reading. */}
           <div
-            id="wifi-offer" className="wifi-offer" role="group"
-            aria-labelledby="wifi-offer-text" hidden={!asking}
+            id="wifi-offer"
+            className="wifi-offer"
+            role="group"
+            aria-labelledby="wifi-offer-text"
+            hidden={!asking}
           >
             <p id="wifi-offer-text">{asking ? offerSentence(asking.offer, asking.from) : ""}</p>
             <div className="actions">
               <button
-                type="button" className="primary" disabled={busy === "accept"}
+                type="button"
+                className="primary"
+                disabled={busy === "accept"}
                 onClick={() => void answer(true)}
-              >Accept and replace</button>
+              >
+                Accept and replace
+              </button>
               <button
-                type="button" disabled={busy === "decline"} onClick={() => void answer(false)}
-              >Decline</button>
+                type="button"
+                disabled={busy === "decline"}
+                onClick={() => void answer(false)}
+              >
+                Decline
+              </button>
             </div>
           </div>
         </section>

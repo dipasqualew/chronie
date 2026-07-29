@@ -1,9 +1,10 @@
 import type { commands } from "./bindings";
 
-type CommandResult<T> =
-  T extends { status: "ok"; data: infer Value } ? Value
-    : T extends { status: "error"; error: unknown } ? never
-      : T;
+type CommandResult<T> = T extends { status: "ok"; data: infer Value }
+  ? Value
+  : T extends { status: "error"; error: unknown }
+    ? never
+    : T;
 
 export type DesktopCommands = {
   [Name in keyof typeof commands]: (

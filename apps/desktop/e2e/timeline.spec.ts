@@ -9,7 +9,11 @@
 
 import { expect, test } from "./harness";
 import {
-  borderColours, fillColours, inkColours, overlapFractions, railColours,
+  borderColours,
+  fillColours,
+  inkColours,
+  overlapFractions,
+  railColours,
 } from "./pages/paint";
 import { SegmentDetail } from "./pages/segment";
 import { Timeline } from "./pages/timeline";
@@ -37,8 +41,10 @@ test("stitches segments into play sessions and leads with what happened", async 
   // says it in the colour the game uses. A ring drawn in the fallback grey is the failure
   // this catches: everyone the same colour is the same as nobody named.
   await test.step("each character is drawn in their own class colour", async () => {
-    await expect(borderColours(timeline.cast(first)))
-      .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+    await expect(borderColours(timeline.cast(first))).resolves.toEqual([
+      "rgb(63, 199, 235)",
+      "rgb(255, 124, 10)",
+    ]);
   });
 
   // The version of the step above that only read the border was green for as long as the
@@ -240,7 +246,9 @@ test("stitches segments into play sessions and leads with what happened", async 
   // is what it does if a row forgets to name its own class, since the property is inherited
   // — would come out cyan twice and say nothing about who played what.
   await test.step("and each row wears the class colour of whoever played it", async () => {
-    await expect(railColours(timeline.segments(first)))
-      .resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+    await expect(railColours(timeline.segments(first))).resolves.toEqual([
+      "rgb(63, 199, 235)",
+      "rgb(255, 124, 10)",
+    ]);
   });
 });

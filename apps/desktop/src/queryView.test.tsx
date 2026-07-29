@@ -18,10 +18,22 @@ function answer(
 }
 
 /** What the first recipe asks for, so the view opens on a chart it can actually name. */
-const HOURS = answer(["character", "hours"], [["Aster-Vale", 12.5], ["Brin-Hearth", 4]]);
+const HOURS = answer(
+  ["character", "hours"],
+  [
+    ["Aster-Vale", 12.5],
+    ["Brin-Hearth", 4],
+  ],
+);
 
 /** Two number columns, so there is something for the vertical axis dropdown to move between. */
-const BOSSES = answer(["boss", "kills", "wipes"], [["Onyxia", 3, 7], ["Ragnaros", 1, 12]]);
+const BOSSES = answer(
+  ["boss", "kills", "wipes"],
+  [
+    ["Onyxia", 3, 7],
+    ["Ragnaros", 1, 12],
+  ],
+);
 
 const SCHEMA: QuerySchema = {
   tables: [
@@ -67,7 +79,9 @@ const dropdown = (name: string): HTMLElement => screen.getByRole("combobox", { n
 const bodyRows = (): HTMLElement[] => screen.getAllByRole("row").slice(1);
 
 const textOf = (row: HTMLElement): string[] =>
-  within(row).getAllByRole("cell").map((cell) => cell.textContent ?? "");
+  within(row)
+    .getAllByRole("cell")
+    .map((cell) => cell.textContent ?? "");
 
 /** A run that answers differently each time it is asked, so a second Run can fail. */
 const answering = (...replies: (QueryAnswer | Error)[]) => {
@@ -91,8 +105,9 @@ describe("QueryView", () => {
     expect(editor().value).toBe(RECIPES[0]?.sql);
     // The recipe named its own two columns, so the chart is of those rather than of whichever
     // pair the convention would have picked.
-    expect(chart().getAttribute("aria-label"))
-      .toBe("hours by character, as a bar chart of 2 values");
+    expect(chart().getAttribute("aria-label")).toBe(
+      "hours by character, as a bar chart of 2 values",
+    );
     expect(bodyRows()).toHaveLength(2);
     expect(textOf(bodyRows()[0]!)).toEqual(["Aster-Vale", "12.5"]);
     expect(textOf(bodyRows()[1]!)).toEqual(["Brin-Hearth", "4"]);
@@ -120,8 +135,10 @@ describe("QueryView", () => {
     fireEvent.click(runButton());
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent)
-        .toContain("The database said: Error: no such column: hors"));
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The database said: Error: no such column: hors",
+      ),
+    );
     expect(bodyRows()).toHaveLength(2);
     expect(textOf(bodyRows()[0]!)).toEqual(["Aster-Vale", "12.5"]);
   });
@@ -145,8 +162,9 @@ describe("QueryView", () => {
     await waitFor(() => expect(chart()).toBeTruthy());
     fireEvent.change(dropdown("Chart shape"), { target: { value: "line" } });
 
-    expect(chart().getAttribute("aria-label"))
-      .toBe("hours by character, as a line chart of 2 values");
+    expect(chart().getAttribute("aria-label")).toBe(
+      "hours by character, as a line chart of 2 values",
+    );
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -155,12 +173,12 @@ describe("QueryView", () => {
 
     // The opening recipe names columns this answer does not have, so the convention picks the
     // axes: the first column that names things, and the first that counts them.
-    await waitFor(() => expect(chart().getAttribute("aria-label"))
-      .toBe("kills by boss, as a bar chart of 2 values"));
+    await waitFor(() =>
+      expect(chart().getAttribute("aria-label")).toBe("kills by boss, as a bar chart of 2 values"),
+    );
     fireEvent.change(dropdown("Vertical axis"), { target: { value: "2" } });
 
-    expect(chart().getAttribute("aria-label"))
-      .toBe("wipes by boss, as a bar chart of 2 values");
+    expect(chart().getAttribute("aria-label")).toBe("wipes by boss, as a bar chart of 2 values");
   });
 
   // Only the columns holding numbers, because a chart of a column of names against anything
@@ -246,9 +264,14 @@ describe("QueryView", () => {
   // A chart of the first five hundred rows of a year, presented as a chart of the year, is
   // the one way this view can be quietly wrong. It says so instead.
   it("says so when the answer was cut short", async () => {
-    view({ run: () => Promise.resolve(answer(["character", "hours"], [["Aster", 12]], {
-      truncated: true,
-    })) });
+    view({
+      run: () =>
+        Promise.resolve(
+          answer(["character", "hours"], [["Aster", 12]], {
+            truncated: true,
+          }),
+        ),
+    });
 
     await waitFor(() => expect(screen.getByText(/Stopped at 1 row\./)).toBeTruthy());
   });
@@ -256,10 +279,19 @@ describe("QueryView", () => {
   // The rows that had nothing to plot are not on the chart, so the only place a reader can
   // learn they existed is a line beside it.
   it("counts the rows the chart had to leave out", async () => {
-    view({ run: () => Promise.resolve(answer(
-      ["place", "gold_per_hour"],
-      [["Vale", 120], ["Caverns", null], ["Hearth", null]],
-    )) });
+    view({
+      run: () =>
+        Promise.resolve(
+          answer(
+            ["place", "gold_per_hour"],
+            [
+              ["Vale", 120],
+              ["Caverns", null],
+              ["Hearth", null],
+            ],
+          ),
+        ),
+    });
 
     await waitFor(() => expect(chart()).toBeTruthy());
     expect(screen.getByLabelText("Chart").textContent).toContain("2 rows had no number to plot");

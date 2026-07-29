@@ -3,7 +3,13 @@ import { NO_MARK_FILTER, indexMarks, tokenOf } from "./marks";
 import type { MarkFilter } from "./marks";
 import { indexQualities } from "./qualities";
 import {
-  alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
+  alternateLabel,
+  classLabel,
+  classNames,
+  expansionName,
+  filterSets,
+  groupSets,
+  patchName,
 } from "./transmog";
 import type { Alternate, TransmogSet } from "./types";
 
@@ -102,20 +108,45 @@ describe("patchName", () => {
 describe("filterSets", () => {
   const SETS = [
     set({ id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire", expansionId: 5 }),
-    set({ id: 203, name: "Emberforge Plate", group: "Emberforge Armory", classMask: 0x0023, expansionId: 4 }),
-    set({ id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe", classMask: 0x0190, expansionId: 3 }),
-    set({ id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe", classMask: 0x0e08, expansionId: 3 }),
+    set({
+      id: 203,
+      name: "Emberforge Plate",
+      group: "Emberforge Armory",
+      classMask: 0x0023,
+      expansionId: 4,
+    }),
+    set({
+      id: 201,
+      name: "Tideglass Regalia",
+      group: "Tideglass Wardrobe",
+      classMask: 0x0190,
+      expansionId: 3,
+    }),
+    set({
+      id: 202,
+      name: "Tideglass Hide",
+      group: "Tideglass Wardrobe",
+      classMask: 0x0e08,
+      expansionId: 3,
+    }),
   ];
   /** The same sets with the metadata a search now reads filled in. */
   const WITH_METADATA = [
     set({ id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire", expansionId: 5 }),
     set({
-      id: 203, name: "Emberforge Plate", group: "Emberforge Armory",
-      classMask: 0x0023, expansionId: 3, patchIntroduced: 40001,
+      id: 203,
+      name: "Emberforge Plate",
+      group: "Emberforge Armory",
+      classMask: 0x0023,
+      expansionId: 3,
+      patchIntroduced: 40001,
     }),
     set({
-      id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe",
-      classMask: 0x0190, expansionId: 4,
+      id: 201,
+      name: "Tideglass Regalia",
+      group: "Tideglass Wardrobe",
+      classMask: 0x0190,
+      expansionId: 4,
     }),
   ];
   const none = { search: "", expansion: "", klass: "" };
@@ -144,7 +175,9 @@ describe("filterSets", () => {
   });
 
   it("applies search, expansion and class together", () => {
-    expect(ids(filterSets(SETS, { search: "tideglass", expansion: "3", klass: "9" }))).toEqual([202]);
+    expect(ids(filterSets(SETS, { search: "tideglass", expansion: "3", klass: "9" }))).toEqual([
+      202,
+    ]);
     expect(filterSets(SETS, { search: "tideglass", expansion: "4", klass: "" })).toEqual([]);
   });
 
@@ -179,44 +212,89 @@ describe("filterSets", () => {
    */
   const CLUSTERS: TransmogSet[] = [
     set({
-      id: 301, name: "Wild Combatant's Plate Armor", group: "Wild Gladiator",
-      classMask: 0x0023, expansionId: 5, patchIntroduced: 60200,
-      alternates: [alternate({
-        id: 302, name: "Warmongering Combatant's Plate Armor", group: "Warmongering Gladiator",
-        classMask: 0x0023, expansionId: 5, patchIntroduced: 60200, reason: "faction",
-      })],
+      id: 301,
+      name: "Wild Combatant's Plate Armor",
+      group: "Wild Gladiator",
+      classMask: 0x0023,
+      expansionId: 5,
+      patchIntroduced: 60200,
+      alternates: [
+        alternate({
+          id: 302,
+          name: "Warmongering Combatant's Plate Armor",
+          group: "Warmongering Gladiator",
+          classMask: 0x0023,
+          expansionId: 5,
+          patchIntroduced: 60200,
+          reason: "faction",
+        }),
+      ],
     }),
     set({
-      id: 302, name: "Warmongering Combatant's Plate Armor", group: "Warmongering Gladiator",
-      classMask: 0x0023, expansionId: 5, patchIntroduced: 60200, sameLookAs: 301,
+      id: 302,
+      name: "Warmongering Combatant's Plate Armor",
+      group: "Warmongering Gladiator",
+      classMask: 0x0023,
+      expansionId: 5,
+      patchIntroduced: 60200,
+      sameLookAs: 301,
     }),
     set({
-      id: 311, name: "Vestments of the Eternal", group: "Eternal Regalia",
-      classMask: 0x0190, expansionId: 6,
-      alternates: [alternate({
-        id: 312, name: "Ebon Blade Battlegear", group: "Knightly Vanguard",
-        classMask: 1 << 9, expansionId: 6, reason: "class",
-      })],
+      id: 311,
+      name: "Vestments of the Eternal",
+      group: "Eternal Regalia",
+      classMask: 0x0190,
+      expansionId: 6,
+      alternates: [
+        alternate({
+          id: 312,
+          name: "Ebon Blade Battlegear",
+          group: "Knightly Vanguard",
+          classMask: 1 << 9,
+          expansionId: 6,
+          reason: "class",
+        }),
+      ],
     }),
     set({
-      id: 312, name: "Ebon Blade Battlegear", group: "Knightly Vanguard",
-      classMask: 1 << 9, expansionId: 6, sameLookAs: 311,
+      id: 312,
+      name: "Ebon Blade Battlegear",
+      group: "Knightly Vanguard",
+      classMask: 1 << 9,
+      expansionId: 6,
+      sameLookAs: 311,
     }),
     set({
-      id: 321, name: "Sunwarmed Finery", group: "Sunwarmed Attire",
-      classMask: 0x0023, expansionId: 5,
-      alternates: [alternate({
-        id: 322, name: "Sunwarmed Finery", group: "Timerunning Wardrobe",
-        classMask: 0, expansionId: 9, reason: "reissue",
-      })],
+      id: 321,
+      name: "Sunwarmed Finery",
+      group: "Sunwarmed Attire",
+      classMask: 0x0023,
+      expansionId: 5,
+      alternates: [
+        alternate({
+          id: 322,
+          name: "Sunwarmed Finery",
+          group: "Timerunning Wardrobe",
+          classMask: 0,
+          expansionId: 9,
+          reason: "reissue",
+        }),
+      ],
     }),
     set({
-      id: 322, name: "Sunwarmed Finery", group: "Timerunning Wardrobe",
-      classMask: 0, expansionId: 9, sameLookAs: 321,
+      id: 322,
+      name: "Sunwarmed Finery",
+      group: "Timerunning Wardrobe",
+      classMask: 0,
+      expansionId: 9,
+      sameLookAs: 321,
     }),
     set({
-      id: 331, name: "Duskwoven Shroud", group: "Duskwoven Attire",
-      classMask: 0x0190, expansionId: 3,
+      id: 331,
+      name: "Duskwoven Shroud",
+      group: "Duskwoven Attire",
+      classMask: 0x0190,
+      expansionId: 3,
     }),
   ];
 
@@ -279,12 +357,21 @@ describe("filterSets", () => {
   // Four thousand of the game's sets are in no cluster at all, and the fields the backend
   // simply leaves off have to read as "no cluster" rather than as an empty one.
   it("filters a set with neither field exactly as it always did", () => {
-    const plain = [set({
-      id: 331, name: "Duskwoven Shroud", group: "Duskwoven Attire",
-      classMask: 0x0190, expansionId: 3, alternates: undefined, sameLookAs: undefined,
-    })];
+    const plain = [
+      set({
+        id: 331,
+        name: "Duskwoven Shroud",
+        group: "Duskwoven Attire",
+        classMask: 0x0190,
+        expansionId: 3,
+        alternates: undefined,
+        sameLookAs: undefined,
+      }),
+    ];
     expect(ids(filterSets(plain, none))).toEqual([331]);
-    expect(ids(filterSets(plain, { search: "duskwoven", expansion: "3", klass: "4" }))).toEqual([331]);
+    expect(ids(filterSets(plain, { search: "duskwoven", expansion: "3", klass: "4" }))).toEqual([
+      331,
+    ]);
     expect(filterSets(plain, { ...none, search: "warmongering" })).toEqual([]);
     expect(filterSets(plain, { ...none, expansion: "9" })).toEqual([]);
     expect(filterSets(plain, { ...none, klass: "9" })).toEqual([]);
@@ -294,7 +381,10 @@ describe("filterSets", () => {
 describe("alternateLabel", () => {
   /** The card the folded sets below are written under: plate, Warlords, patch 6.2.0. */
   const shown = set({
-    id: 301, name: "Wild Combatant's Plate Armor", classMask: 0x0023, expansionId: 5,
+    id: 301,
+    name: "Wild Combatant's Plate Armor",
+    classMask: 0x0023,
+    expansionId: 5,
     patchIntroduced: 60200,
   });
 
@@ -307,16 +397,24 @@ describe("alternateLabel", () => {
     [
       "reissue a whole expansion later",
       alternate({
-        id: 322, name: "Sunwarmed Finery", classMask: 0x0023, expansionId: 9,
-        patchIntroduced: 100200, reason: "reissue",
+        id: 322,
+        name: "Sunwarmed Finery",
+        classMask: 0x0023,
+        expansionId: 9,
+        patchIntroduced: 100200,
+        reason: "reissue",
       }),
       "released again as Sunwarmed Finery · Dragonflight",
     ],
     [
       "reissue a patch later",
       alternate({
-        id: 332, name: "Warmongering Combatant's Plate Armor", classMask: 0x0023, expansionId: 5,
-        patchIntroduced: 60201, reason: "reissue",
+        id: 332,
+        name: "Warmongering Combatant's Plate Armor",
+        classMask: 0x0023,
+        expansionId: 5,
+        patchIntroduced: 60201,
+        reason: "reissue",
       }),
       "released again as Warmongering Combatant's Plate Armor · Patch 6.2.1",
     ],
@@ -329,11 +427,16 @@ describe("alternateLabel", () => {
   // it a pair — so naming any of those spends the line repeating the chip directly above it.
   it("names nothing about a set that differs from its card only by faction", () => {
     const folded = alternate({
-      id: 302, name: "Warmongering Combatant's Plate Armor", classMask: 0x0023, expansionId: 5,
-      patchIntroduced: 60200, reason: "faction",
+      id: 302,
+      name: "Warmongering Combatant's Plate Armor",
+      classMask: 0x0023,
+      expansionId: 5,
+      patchIntroduced: 60200,
+      reason: "faction",
     });
-    expect(alternateLabel(folded, shown))
-      .toBe("the other faction's Warmongering Combatant's Plate Armor");
+    expect(alternateLabel(folded, shown)).toBe(
+      "the other faction's Warmongering Combatant's Plate Armor",
+    );
   });
 
   // The game writes "anyone" as a mask of zero and as every bit at once, and a card for one of
@@ -345,10 +448,16 @@ describe("alternateLabel", () => {
   ])("treats %s as the same audience", (_what, shownMask, foldedMask) => {
     const anyone = set({ id: 340, name: "Sunwarmed Finery", classMask: shownMask, expansionId: 5 });
     const folded = alternate({
-      id: 341, name: "Sunwarmed Regalia", classMask: foldedMask, expansionId: 9, reason: "reissue",
+      id: 341,
+      name: "Sunwarmed Regalia",
+      classMask: foldedMask,
+      expansionId: 9,
+      reason: "reissue",
     });
     // The masks differ as numbers, so this is the label reading them rather than comparing them.
-    expect(alternateLabel(folded, anyone)).toBe("released again as Sunwarmed Regalia · Dragonflight");
+    expect(alternateLabel(folded, anyone)).toBe(
+      "released again as Sunwarmed Regalia · Dragonflight",
+    );
   });
 });
 
@@ -389,9 +498,13 @@ describe("narrowing the grid to what the reader said about it", () => {
     ],
   });
   const marked = (filter: MarkFilter) => ({ filter, of: (id: number) => marks.of("set", id) });
-  const shown = (filter: MarkFilter): number[] => filterSets(sets, {
-    search: "", expansion: "", klass: "", marks: marked(filter),
-  }).map((one) => one.id);
+  const shown = (filter: MarkFilter): number[] =>
+    filterSets(sets, {
+      search: "",
+      expansion: "",
+      klass: "",
+      marks: marked(filter),
+    }).map((one) => one.id);
 
   it("leaves the grid alone until it is asked something", () => {
     expect(shown(NO_MARK_FILTER)).toEqual([201, 202, 203]);
@@ -416,14 +529,20 @@ describe("narrowing the grid to what the reader said about it", () => {
   // chip saying "horde" types the word rather than hunting for the picker beside the box.
   it("finds a set by a word the reader filed it under", () => {
     const found = filterSets(sets, {
-      search: "horde", expansion: "", klass: "", marks: marked(NO_MARK_FILTER),
+      search: "horde",
+      expansion: "",
+      klass: "",
+      marks: marked(NO_MARK_FILTER),
     });
     expect(found.map((one) => one.id)).toEqual([201]);
   });
 
   it("finds the starred sets by the word for them", () => {
     const found = filterSets(sets, {
-      search: "favourite", expansion: "", klass: "", marks: marked(NO_MARK_FILTER),
+      search: "favourite",
+      expansion: "",
+      klass: "",
+      marks: marked(NO_MARK_FILTER),
     });
     expect(found.map((one) => one.id)).toEqual([201]);
   });
@@ -438,35 +557,60 @@ describe("narrowing the grid to what the reader said about it", () => {
 describe("asking the grid for one thing a set says", () => {
   const sets = [
     set({
-      id: 301, name: "Wild Combatant's Plate Armor", group: "Wild Gladiator",
-      classMask: 0x0023, expansionId: 5, patchIntroduced: 60200,
-      alternates: [alternate({
-        id: 312, name: "Ebon Blade Battlegear", group: "Knightly Vanguard",
-        classMask: 1 << 9, expansionId: 9, reason: "class",
-      })],
+      id: 301,
+      name: "Wild Combatant's Plate Armor",
+      group: "Wild Gladiator",
+      classMask: 0x0023,
+      expansionId: 5,
+      patchIntroduced: 60200,
+      alternates: [
+        alternate({
+          id: 312,
+          name: "Ebon Blade Battlegear",
+          group: "Knightly Vanguard",
+          classMask: 1 << 9,
+          expansionId: 9,
+          reason: "class",
+        }),
+      ],
     }),
     set({
-      id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe",
-      classMask: 0x0190, expansionId: 3, patchIntroduced: 40001,
+      id: 201,
+      name: "Tideglass Regalia",
+      group: "Tideglass Wardrobe",
+      classMask: 0x0190,
+      expansionId: 3,
+      patchIntroduced: 40001,
     }),
   ];
   const marks = indexMarks({
-    marks: [{
-      kind: "set", id: 201, favourite: false,
-      tags: [{ key: "faction", value: "horde" }, { key: "wishlist", value: null }],
-    }],
+    marks: [
+      {
+        kind: "set",
+        id: 201,
+        favourite: false,
+        tags: [
+          { key: "faction", value: "horde" },
+          { key: "wishlist", value: null },
+        ],
+      },
+    ],
   });
   const measured = indexQualities({
     build: "12.0.5.67823",
-    sets: [{ id: 301, primary: "#4a3b2c" }, { id: 201, primary: "#2060e0", accent: "#f6f6f6" }],
+    sets: [
+      { id: 301, primary: "#4a3b2c" },
+      { id: 201, primary: "#2060e0", accent: "#f6f6f6" },
+    ],
   });
-  const found = (search: string): number[] => filterSets(sets, {
-    search,
-    expansion: "",
-    klass: "",
-    marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("set", id) },
-    qualities: (id) => measured.of(id),
-  }).map((one) => one.id);
+  const found = (search: string): number[] =>
+    filterSets(sets, {
+      search,
+      expansion: "",
+      klass: "",
+      marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("set", id) },
+      qualities: (id) => measured.of(id),
+    }).map((one) => one.id);
 
   // Everything the card already shows, asked for one at a time: a reader looking at "Plate ·
   // Warlords of Draenor · Patch 6.2.0" can now say which of the three they meant.

@@ -7,7 +7,10 @@ import { NOTHING_ON, wear } from "./outfit";
 import type { Outfit } from "./outfit";
 import { ANY_CLASS } from "./transmogModal";
 import type {
-  CharacterInGameSets, InGameSet, InGameSetAppearancesPayload, InGameSetsPayload,
+  CharacterInGameSets,
+  InGameSet,
+  InGameSetAppearancesPayload,
+  InGameSetsPayload,
   TransmogAppearance,
 } from "./types";
 
@@ -31,8 +34,14 @@ const appearance = (fields: Partial<TransmogAppearance> = {}): TransmogAppearanc
 
 const CROWN = appearance();
 const MANTLE = appearance({
-  modifiedAppearanceId: 71_002, itemId: 30_002, name: "Tideglass Mantle", appearanceId: 80_002,
-  displayType: 1, inventoryType: 3, displayInfoId: 900_002, iconFileDataId: 130_002,
+  modifiedAppearanceId: 71_002,
+  itemId: 30_002,
+  name: "Tideglass Mantle",
+  appearanceId: 80_002,
+  displayType: 1,
+  inventoryType: 3,
+  displayInfoId: 900_002,
+  iconFileDataId: 130_002,
 });
 /**
  * The same one-handed sword, which a rogue wears in both hands at once.
@@ -43,13 +52,23 @@ const MANTLE = appearance({
  * because the set named the slots.
  */
 const SWORD = appearance({
-  modifiedAppearanceId: 71_004, itemId: 30_004, name: "Tideglass Edge", appearanceId: 80_004,
-  displayType: 11, inventoryType: 13, displayInfoId: 900_004, iconFileDataId: 130_004,
+  modifiedAppearanceId: 71_004,
+  itemId: 30_004,
+  name: "Tideglass Edge",
+  appearanceId: 80_004,
+  displayType: 11,
+  inventoryType: 13,
+  displayInfoId: 900_004,
+  iconFileDataId: 130_004,
 });
 
 const HELM = appearance({
-  modifiedAppearanceId: 71_003, itemId: 30_003, name: "Emberforge Helm", appearanceId: 80_003,
-  displayInfoId: 900_003, iconFileDataId: 0,
+  modifiedAppearanceId: 71_003,
+  itemId: 30_003,
+  name: "Emberforge Helm",
+  appearanceId: 80_003,
+  displayInfoId: 900_003,
+  iconFileDataId: 0,
 });
 
 /**
@@ -70,7 +89,10 @@ const SETS: InGameSetsPayload = {
           name: "Tideglass",
           icon: 130_001,
           observedAt: null,
-          slots: [{ slot: 0, appearanceId: 71_001 }, { slot: 1, appearanceId: 71_002 }],
+          slots: [
+            { slot: 0, appearanceId: 71_001 },
+            { slot: 1, appearanceId: 71_002 },
+          ],
         },
         { id: 5, name: "", icon: null, observedAt: null, slots: [] },
       ],
@@ -87,16 +109,23 @@ const CONTENTS: Record<string, InGameSetAppearancesPayload> = {
 
 /** A character wearing one sword in each hand, which is what only the set can say. */
 const DUAL_WIELD: InGameSetsPayload = {
-  characters: [{
-    character: "Aster-Ravencrest",
-    sets: [{
-      id: 6,
-      name: "Both hands",
-      icon: 130_004,
-      observedAt: null,
-      slots: [{ slot: 11, appearanceId: 71_004 }, { slot: 12, appearanceId: 71_004 }],
-    }],
-  }],
+  characters: [
+    {
+      character: "Aster-Ravencrest",
+      sets: [
+        {
+          id: 6,
+          name: "Both hands",
+          icon: 130_004,
+          observedAt: null,
+          slots: [
+            { slot: 11, appearanceId: 71_004 },
+            { slot: 12, appearanceId: 71_004 },
+          ],
+        },
+      ],
+    },
+  ],
 };
 
 /**
@@ -116,8 +145,13 @@ function view(
 ) {
   const loadAppearances = vi.fn((ids: number[]): Promise<InGameSetAppearancesPayload> => {
     if (options.refuses) return Promise.reject(new Error(options.refuses));
-    return Promise.resolve((options.contents ?? CONTENTS)[ids.join(",")]
-      ?? { appearances: [], readCount: 0, withheldCount: 0 });
+    return Promise.resolve(
+      (options.contents ?? CONTENTS)[ids.join(",")] ?? {
+        appearances: [],
+        readCount: 0,
+        withheldCount: 0,
+      },
+    );
   });
   const wantIcons = vi.fn();
   const onWear = vi.fn();
@@ -217,8 +251,10 @@ describe("the sets the player saved in the game", () => {
     view({ refuses: "The game's files are not readable on this machine." });
     fireEvent.click(screen.getByRole("button", { name: "Tideglass" }));
 
-    expect(await screen.findByRole("alert"))
-      .toHaveProperty("textContent", "The game's files are not readable on this machine.");
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "The game's files are not readable on this machine.",
+    );
     // The set beside it is untouched: one card failed, not the browser.
     expect(screen.getByRole("button", { name: "Unnamed set" })).toBeTruthy();
   });
@@ -236,15 +272,17 @@ describe("the sets the player saved in the game", () => {
   // kept by character and set together. Keyed by the set id alone, one alt's clothes would be
   // drawn under another alt's set of the same number — which the game hands out freely.
   it("keeps one character's answer out of another's set of the same number", async () => {
-    const same = (
-      character: string, name: string, appearanceId: number,
-    ): CharacterInGameSets => ({
+    const same = (character: string, name: string, appearanceId: number): CharacterInGameSets => ({
       character,
       sets: [{ id: 4, name, icon: null, observedAt: null, slots: [{ slot: 0, appearanceId }] }],
     });
     view({
-      payload: { characters: [same("Aster-Ravencrest", "Tideglass", 71_001),
-        same("Nerine-Ravencrest", "Emberforge", 71_003)] },
+      payload: {
+        characters: [
+          same("Aster-Ravencrest", "Tideglass", 71_001),
+          same("Nerine-Ravencrest", "Emberforge", 71_003),
+        ],
+      },
       contents: {
         "71001": { appearances: [CROWN], readCount: 1, withheldCount: 0 },
         "71003": { appearances: [HELM], readCount: 1, withheldCount: 0 },
@@ -269,7 +307,9 @@ describe("the sets the player saved in the game", () => {
     // one-hander says nothing about which hand holds it, and this list has the slot.
     expect(onWear.mock.calls[0]?.[0]).toBe("armour-0");
     expect(onWear.mock.calls[0]?.[1]).toMatchObject({
-      slot: "Head", label: "Tideglass Crown", displayInfoId: 900_001,
+      slot: "Head",
+      label: "Tideglass Crown",
+      displayInfoId: 900_001,
     });
   });
 
@@ -284,8 +324,10 @@ describe("the sets the player saved in the game", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Wear all of Tideglass" }));
 
     expect(onWearAll).toHaveBeenCalledTimes(1);
-    const [set, pieces] = onWearAll.mock.calls[0] as
-      [InGameSet, { place: string; row: { label: string } }[]];
+    const [set, pieces] = onWearAll.mock.calls[0] as [
+      InGameSet,
+      { place: string; row: { label: string } }[],
+    ];
     expect(set.id).toBe(4);
     expect(pieces.map(({ place, row }) => [place, row.label])).toEqual([
       ["armour-0", "Tideglass Crown"],
@@ -303,8 +345,10 @@ describe("the sets the player saved in the game", () => {
 
     fireEvent.click(within(card).getByRole("button", { name: "Wear all of Both hands" }));
 
-    const [, pieces] = onWearAll.mock.calls[0] as
-      [InGameSet, { place: string; row: { label: string } }[]];
+    const [, pieces] = onWearAll.mock.calls[0] as [
+      InGameSet,
+      { place: string; row: { label: string } }[],
+    ];
     expect(pieces.map(({ place }) => place)).toEqual(["hand-right", "hand-left"]);
   });
 
@@ -314,10 +358,16 @@ describe("the sets the player saved in the game", () => {
     view({ outfit: wear(NOTHING_ON, rowOf(CROWN)) });
     const card = await open("Tideglass");
 
-    expect(within(card).getByRole("button", { name: "Wear Head: Tideglass Crown" })
-      .getAttribute("aria-pressed")).toBe("true");
-    expect(within(card).getByRole("button", { name: "Wear Shoulder: Tideglass Mantle" })
-      .getAttribute("aria-pressed")).toBe("false");
+    expect(
+      within(card)
+        .getByRole("button", { name: "Wear Head: Tideglass Crown" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      within(card)
+        .getByRole("button", { name: "Wear Shoulder: Tideglass Mantle" })
+        .getAttribute("aria-pressed"),
+    ).toBe("false");
   });
 
   /* ---------- the three silences ---------- */

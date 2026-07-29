@@ -70,8 +70,10 @@ describe("wearable", () => {
     ["an item the game withholds", 11, 0],
     ["ammunition", 14, 24],
   ])("gives %s no place on the character", (_, displayType, inventoryType) => {
-    expect(wearable(appearance({ displayType, inventoryType })))
-      .toEqual({ kind: "nowhere", note: REASONS.nowhere });
+    expect(wearable(appearance({ displayType, inventoryType }))).toEqual({
+      kind: "nowhere",
+      note: REASONS.nowhere,
+    });
   });
 
   // Having no model of its own says nothing either way. Eight of the eleven armour slots have
@@ -79,15 +81,19 @@ describe("wearable", () => {
   // always did, which is that nothing says a hand.
   it("does not read a missing model as a reason not to wear something", () => {
     expect(wearable(appearance({ displayType: 3, hasModel: false })).kind).toBe("worn");
-    expect(wearable(appearance({ displayType: 11, inventoryType: 0, hasModel: false })))
-      .toEqual({ kind: "nowhere", note: REASONS.nowhere });
+    expect(wearable(appearance({ displayType: 11, inventoryType: 0, hasModel: false }))).toEqual({
+      kind: "nowhere",
+      note: REASONS.nowhere,
+    });
   });
 
   // Withheld wins: a row the game encrypts can still carry a display id from an earlier hop,
   // and asking the backend to put it on her would be asking about something unknowable.
   it("says nothing rather than guessing about a withheld row that looks modelled", () => {
-    expect(wearable(appearance({ withheld: true })))
-      .toEqual({ kind: "nowhere", note: REASONS.withheld });
+    expect(wearable(appearance({ withheld: true }))).toEqual({
+      kind: "nowhere",
+      note: REASONS.withheld,
+    });
   });
 });
 
@@ -120,7 +126,9 @@ describe("wornSetKey", () => {
   // Two lists of the same pieces are the same outfit and get the same body back, so a reader
   // who takes a piece off and puts it on again pays for the read once.
   it("names an outfit by its pieces rather than by the order they arrived in", () => {
-    expect(wornSetKey([piece(3), piece(1), piece(2)])).toBe(wornSetKey([piece(1), piece(2), piece(3)]));
+    expect(wornSetKey([piece(3), piece(1), piece(2)])).toBe(
+      wornSetKey([piece(1), piece(2), piece(3)]),
+    );
   });
 
   // And two different outfits are two different names, including the one that differs only by
@@ -224,8 +232,9 @@ describe("framingDistance", () => {
   // Twice the model, twice the distance, same picture. What makes a set of renders comparable.
   it("backs off in proportion to the model", () => {
     const twice: [number, number, number] = [0.8, 4, 2.4];
-    expect(framingDistance(onScreen(twice, "default"), FOV, 1))
-      .toBeCloseTo(framingDistance(onScreen(BODY, "default"), FOV, 1) * 2);
+    expect(framingDistance(onScreen(twice, "default"), FOV, 1)).toBeCloseTo(
+      framingDistance(onScreen(BODY, "default"), FOV, 1) * 2,
+    );
   });
 
   // A cloak is a sheet and a dagger is nearly a line; framing either by its own size exactly
@@ -297,8 +306,9 @@ describe("frameOn", () => {
     expect(feet.distance).toBeLessThan(all.distance / 2);
     // A cloak is most of her, so its framing is nearly the whole-body one — the table says so
     // and the arithmetic has to carry that through rather than flatten every slot to one.
-    expect(frameOn(FEET, SCALP, focusOf(9), "default", FOV, 0.75).distance)
-      .toBeGreaterThan(head.distance * 2);
+    expect(frameOn(FEET, SCALP, focusOf(9), "default", FOV, 0.75).distance).toBeGreaterThan(
+      head.distance * 2,
+    );
   });
 
   // The character pane frames whatever it is given and has no slot to point at, so this is the
@@ -319,8 +329,7 @@ describe("frameOn", () => {
   // one case where framing a slice of the model would put the camera inside it.
   it("holds all of something wider than it is tall", () => {
     const long = frameOn([-3, -0.2, -0.2], [3, 0.2, 0.2], WHOLE, "front", FOV, 0.75);
-    expect(long.distance)
-      .toBeCloseTo(framingDistance(onScreen([6, 0.4, 0.4], "front"), FOV, 0.75));
+    expect(long.distance).toBeCloseTo(framingDistance(onScreen([6, 0.4, 0.4], "front"), FOV, 0.75));
   });
 
   // The leash is what stops a pan carrying the model off the pane, and it is about what is in

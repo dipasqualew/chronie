@@ -61,13 +61,14 @@ function segment(overrides: Partial<Segment> = {}): Segment {
  * mixed evening would split into a chip and a mark rather than into the one summary these
  * tests are about. Which sort goes where is `sessions.ts`' rule and is held to there.
  */
-const three = (): Segment => segment({
-  achievements: [
-    { id: 1, name: "Warband First", accountFirst: true, at: BASE + 60 },
-    { id: 2, name: "Another First", accountFirst: true, at: BASE + 120 },
-    { id: 3, name: "A Third First", accountFirst: true },
-  ],
-});
+const three = (): Segment =>
+  segment({
+    achievements: [
+      { id: 1, name: "Warband First", accountFirst: true, at: BASE + 60 },
+      { id: 2, name: "Another First", accountFirst: true, at: BASE + 120 },
+      { id: 3, name: "A Third First", accountFirst: true },
+    ],
+  });
 
 /** A piece of gear as the game's own tables answer for it; only the name is read here. */
 const piece = (id: number, name: string): ItemDetail => ({
@@ -94,14 +95,16 @@ const WARDROBE: Record<number, ItemDetail> = {
  * lookup is the app's own and only its far end is fake, injected rather than patched.
  */
 function itemBook(known: Record<number, ItemDetail> = WARDROBE): ItemBook {
-  const load = (ids: number[]): Promise<ItemDetailsPayload> => Promise.resolve({
-    items: Object.fromEntries(
-      ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
-    ),
-  });
-  const loadIcons = (fdids: number[]): Promise<IconsPayload> => Promise.resolve({
-    icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), "data:image/png;base64,icon"])),
-  });
+  const load = (ids: number[]): Promise<ItemDetailsPayload> =>
+    Promise.resolve({
+      items: Object.fromEntries(
+        ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
+      ),
+    });
+  const loadIcons = (fdids: number[]): Promise<IconsPayload> =>
+    Promise.resolve({
+      icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), "data:image/png;base64,icon"])),
+    });
   return createItemBook({ load, loadIcons });
 }
 
@@ -117,11 +120,13 @@ async function answered(ids: number[]): Promise<ItemBook> {
 }
 
 /** However many pieces of the addon's commonest catch: an id, a variant, and no name at all. */
-const variants = (count: number): Segment => segment({
-  transmogs: Array.from({ length: count }, (_unused, index) => ({
-    id: 4200 + index, newAppearance: false,
-  })),
-});
+const variants = (count: number): Segment =>
+  segment({
+    transmogs: Array.from({ length: count }, (_unused, index) => ({
+      id: 4200 + index,
+      newAppearance: false,
+    })),
+  });
 
 /**
  * Draws a set of highlights and hands back what a reader could do with them.
@@ -134,7 +139,8 @@ function draw(segments: Segment[], options: Partial<HighlightListProps> = {}) {
   const opened: number[] = [];
   const view = render(
     <HighlightList
-      entries={highlights(segments)} scope="session-1"
+      entries={highlights(segments)}
+      scope="session-1"
       onOpenSegment={(segmentId) => opened.push(segmentId)}
       {...options}
     />,
@@ -169,8 +175,9 @@ describe("HighlightList", () => {
   it("lists what a summary counted once it is the one unfolded", () => {
     draw([three()], { expanded: "achievement" });
 
-    expect(screen.getByRole("button", { name: /3 achievements/ }).getAttribute("aria-expanded"))
-      .toBe("true");
+    expect(
+      screen.getByRole("button", { name: /3 achievements/ }).getAttribute("aria-expanded"),
+    ).toBe("true");
     for (const name of ["Warband First", "Another First", "A Third First"]) {
       expect(screen.getByText(name)).toBeTruthy();
     }
@@ -181,18 +188,20 @@ describe("HighlightList", () => {
   it("names the panel after the session it belongs to", () => {
     const view = draw([three()], { expanded: "achievement", scope: "session-42" });
 
-    expect(screen.getByRole("button", { name: /3 achievements/ }).getAttribute("aria-controls"))
-      .toBe("hl-session-42-achievement");
+    expect(
+      screen.getByRole("button", { name: /3 achievements/ }).getAttribute("aria-controls"),
+    ).toBe("hl-session-42-achievement");
     expect(view.container.querySelector("#hl-session-42-achievement")).toBeTruthy();
   });
 
   it("leaves the other summaries folded when one is opened", () => {
-    const view = draw(
-      [three(), segment({ quests: [{ id: 1 }, { id: 2 }] })], { expanded: "achievement" },
-    );
+    const view = draw([three(), segment({ quests: [{ id: 1 }, { id: 2 }] })], {
+      expanded: "achievement",
+    });
 
-    expect(screen.getByRole("button", { name: /2 quests/ }).getAttribute("aria-expanded"))
-      .toBe("false");
+    expect(screen.getByRole("button", { name: /2 quests/ }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
     expect(view.container.querySelectorAll(".hl-panel")).toHaveLength(1);
   });
 
@@ -204,7 +213,9 @@ describe("HighlightList", () => {
 
     const view = draw([first, second], { expanded: "mount" });
     for (const name of ["Clockwork Glider", "Dust Strider"]) {
-      fireEvent.click(screen.getByRole("button", { name: `Open the segment ${name} was recorded in` }));
+      fireEvent.click(
+        screen.getByRole("button", { name: `Open the segment ${name} was recorded in` }),
+      );
     }
 
     expect(view.opened).toEqual([first.segmentId, second.segmentId]);
@@ -224,7 +235,9 @@ describe("HighlightList", () => {
   // rather than numbers — a quest handed in on that run belongs to that run.
   it("leaves the running totals off where they were not asked for", () => {
     const rich = segment({
-      goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }], quests: [{ id: 81 }],
+      goldDiff: 4200,
+      mounts: [{ id: 11, name: "Clockwork Glider" }],
+      quests: [{ id: 81 }],
     });
 
     expect(draw([rich]).container.querySelectorAll(".tally")).toHaveLength(1);
@@ -242,14 +255,15 @@ describe("HighlightList", () => {
    * the hover — which is also the only shape in which several of them read as one fact.
    */
   describe("the running totals", () => {
-    const earned = (): Segment => segment({
-      goldDiff: 4200,
-      currencies: [
-        { id: 7, name: "Glass Token", amount: 4 },
-        { id: 10, name: "Warband Chit", amount: 100 },
-      ],
-      reputation: [{ faction: "Cavern Cartographers", amount: 25 }],
-    });
+    const earned = (): Segment =>
+      segment({
+        goldDiff: 4200,
+        currencies: [
+          { id: 7, name: "Glass Token", amount: 4 },
+          { id: 10, name: "Warband Chit", amount: 100 },
+        ],
+        reputation: [{ faction: "Cavern Cartographers", amount: 25 }],
+      });
 
     it("draws one mark per kind, however many things it counted", () => {
       const view = draw([earned()]);
@@ -295,21 +309,38 @@ describe("HighlightList", () => {
    */
   describe("the quiet milestones", () => {
     const raid = {
-      setId: 3, name: "Raid", kind: "updated" as const,
-      items: [{ slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 }],
+      setId: 3,
+      name: "Raid",
+      kind: "updated" as const,
+      items: [
+        { slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 },
+      ],
     };
 
     /** Each quiet kind: what turns it up, the class it draws under, its icon, and its sentence. */
     const quiet: Array<[string, Partial<Segment>, string, string, string]> = [
-      ["an achievement that only caught this character up",
+      [
+        "an achievement that only caught this character up",
         { achievements: [{ id: 9, name: "Into the Light", accountFirst: false }] },
-        "hl-achievementCharacter", "🏆", "Into the Light · character first"],
-      ["another colour of a piece already owned",
+        "hl-achievementCharacter",
+        "🏆",
+        "Into the Light · character first",
+      ],
+      [
+        "another colour of a piece already owned",
         { transmogs: [{ id: 4200, name: "Storm Cloak", newAppearance: false }] },
-        "hl-transmogVariant", "👘", "Storm Cloak · variant of one owned"],
+        "hl-transmogVariant",
+        "👘",
+        "Storm Cloak · variant of one owned",
+      ],
       ["a quest handed in", { quests: [{ id: 81 }] }, "hl-quest", "📜", "Quest 81"],
-      ["a set of gear saved", { equipsetChanges: [raid] },
-        "hl-equipset", "🎽", "Raid updated · 1 slot, +16 ilvl"],
+      [
+        "a set of gear saved",
+        { equipsetChanges: [raid] },
+        "hl-equipset",
+        "🎽",
+        "Raid updated · 1 slot, +16 ilvl",
+      ],
     ];
 
     it.each(quiet)("draws %s as its icon, down in the strip", (_case, happened, style, icon) => {
@@ -324,13 +355,15 @@ describe("HighlightList", () => {
     // A chip with no words on it still has to say what it is to anybody not looking at it,
     // and still has to be readable by whoever does look — which is the whole bargain that
     // made drawing it quietly acceptable in the first place.
-    it.each(quiet)("moves the sentence of %s into the hover and the name",
+    it.each(quiet)(
+      "moves the sentence of %s into the hover and the name",
       (_case, happened, style, _icon, said) => {
         const view = draw([segment(happened)]);
 
         expect(view.container.querySelector(`.${style}`)?.getAttribute("data-tip")).toBe(said);
         expect(screen.getByRole("button", { name: said })).toBeTruthy();
-      });
+      },
+    );
 
     /**
      * A mark about a piece of gear has to call it what the game calls it.
@@ -352,10 +385,12 @@ describe("HighlightList", () => {
 
         expect(mark()?.getAttribute("data-tip")).toBe("Item 4200 · variant of one owned");
 
-        await waitFor(() => expect(mark()?.getAttribute("data-tip"))
-          .toBe("Insanity's Grip · variant of one owned"));
-        expect(screen.getByRole("button", { name: "Insanity's Grip · variant of one owned" }))
-          .toBeTruthy();
+        await waitFor(() =>
+          expect(mark()?.getAttribute("data-tip")).toBe("Insanity's Grip · variant of one owned"),
+        );
+        expect(
+          screen.getByRole("button", { name: "Insanity's Grip · variant of one owned" }),
+        ).toBeTruthy();
       });
 
       // The count is what a mark of several is for, and naming the first of three would be a
@@ -363,8 +398,9 @@ describe("HighlightList", () => {
       it("still counts where the mark stands for several", async () => {
         const view = draw([variants(3)], { items: await answered([4200, 4201, 4202]) });
 
-        expect(view.container.querySelector(".hl-transmogVariant")?.getAttribute("data-tip"))
-          .toBe("3 variants");
+        expect(view.container.querySelector(".hl-transmogVariant")?.getAttribute("data-tip")).toBe(
+          "3 variants",
+        );
       });
     });
 
@@ -379,12 +415,13 @@ describe("HighlightList", () => {
     // it counted, and gets them under the strip they pressed rather than above it — a list that
     // opens somewhere other than where it was asked for is a list nobody sees arrive.
     it("unfolds a mark of several into its entries, underneath the strip", () => {
-      const view = draw(
-        [segment({ goldDiff: 4200, quests: [{ id: 81 }, { id: 82 }] })], { expanded: "quest" },
-      );
+      const view = draw([segment({ goldDiff: 4200, quests: [{ id: 81 }, { id: 82 }] })], {
+        expanded: "quest",
+      });
 
-      expect(screen.getByRole("button", { name: "2 quests" }).getAttribute("aria-expanded"))
-        .toBe("true");
+      expect(screen.getByRole("button", { name: "2 quests" }).getAttribute("aria-expanded")).toBe(
+        "true",
+      );
       expect(screen.getByText("Quest 81")).toBeTruthy();
       expect(screen.getByText("Quest 82")).toBeTruthy();
 
@@ -395,10 +432,9 @@ describe("HighlightList", () => {
 
     // A loud chip's list goes the other way, above the strip, for exactly the same reason.
     it("leaves a chip's list above the strip, where that is where it was asked for", () => {
-      const view = draw(
-        [segment({ goldDiff: 4200, achievements: three().achievements })],
-        { expanded: "achievement" },
-      );
+      const view = draw([segment({ goldDiff: 4200, achievements: three().achievements })], {
+        expanded: "achievement",
+      });
 
       const strip = view.container.querySelector(".tally-row")!;
       const panel = view.container.querySelector(".hl-panel")!;
@@ -419,7 +455,9 @@ describe("HighlightList", () => {
   // so repeating any of them as marks first would only make the same page longer.
   it("keeps only the totals for the detail modal, which lists the rest in full below", () => {
     const rich = segment({
-      goldDiff: 4200, mounts: [{ id: 11, name: "Clockwork Glider" }], quests: [{ id: 81 }],
+      goldDiff: 4200,
+      mounts: [{ id: 11, name: "Clockwork Glider" }],
+      quests: [{ id: 81 }],
     });
 
     const view = draw([rich], { milestones: false });
@@ -448,8 +486,11 @@ describe("SegmentButton", () => {
       <SegmentButton segment={variants(1)} items={itemBook()} onOpen={() => {}} />,
     );
 
-    await waitFor(() => expect(view.container.querySelector(".hl-transmogVariant")
-      ?.getAttribute("data-tip")).toBe("Insanity's Grip · variant of one owned"));
+    await waitFor(() =>
+      expect(view.container.querySelector(".hl-transmogVariant")?.getAttribute("data-tip")).toBe(
+        "Insanity's Grip · variant of one owned",
+      ),
+    );
     expect(screen.getByLabelText("Insanity's Grip · variant of one owned")).toBeTruthy();
   });
 
@@ -460,14 +501,17 @@ describe("SegmentButton", () => {
    */
   it("draws the picture the game gives the place it happened in", async () => {
     const places = createPlaceIcons({
-      load: (asked) => Promise.resolve({
-        icons: Object.fromEntries(asked.map((place) => [place, PLACE_PICTURE])),
-      }),
+      load: (asked) =>
+        Promise.resolve({
+          icons: Object.fromEntries(asked.map((place) => [place, PLACE_PICTURE])),
+        }),
     });
 
     render(
       <SegmentButton
-        segment={segment({ instance: "Deadmines" })} places={places} onOpen={() => {}}
+        segment={segment({ instance: "Deadmines" })}
+        places={places}
+        onOpen={() => {}}
       />,
     );
 
@@ -485,7 +529,9 @@ describe("SegmentButton", () => {
 
     const view = render(
       <SegmentButton
-        segment={segment({ instance: "Durotar" })} places={places} onOpen={() => {}}
+        segment={segment({ instance: "Durotar" })}
+        places={places}
+        onOpen={() => {}}
       />,
     );
 
@@ -597,9 +643,13 @@ const palette = ((): Record<string, { fill: string; ink: string }> => {
   // was handed: `./ui.css` there comes out as `http://localhost:3000/src/ui.css`.
   const here = dirname(fileURLToPath(import.meta.url));
   const stylesheet = readFileSync(join(here, "ui.css"), "utf8");
-  const rule = /\[data-class="(\w+)"\]\s*{\s*--class-color:\s*(#[0-9a-f]{6});\s*--class-ink:\s*(#[0-9a-f]{6});/g;
+  const rule =
+    /\[data-class="(\w+)"\]\s*{\s*--class-color:\s*(#[0-9a-f]{6});\s*--class-ink:\s*(#[0-9a-f]{6});/g;
   return Object.fromEntries(
-    [...stylesheet.matchAll(rule)].map(([, classFile, fill, ink]) => [classFile, { fill: fill!, ink: ink! }]),
+    [...stylesheet.matchAll(rule)].map(([, classFile, fill, ink]) => [
+      classFile,
+      { fill: fill!, ink: ink! },
+    ]),
   );
 })();
 
@@ -619,7 +669,9 @@ function contrastRatio(one: string, other: string): number {
       return total + weights[index]! * linear;
     }, 0);
   };
-  const [dimmer, brighter] = [relativeLuminance(one), relativeLuminance(other)].sort((a, b) => a - b);
+  const [dimmer, brighter] = [relativeLuminance(one), relativeLuminance(other)].sort(
+    (a, b) => a - b,
+  );
   return (brighter! + 0.05) / (dimmer! + 0.05);
 }
 
@@ -646,10 +698,13 @@ describe("the class palette", () => {
   // and rogue's near-yellow want the dark one, death knight red and shaman blue the white one.
   // So each is measured against its own fill rather than asserted as a literal — a colour that
   // is retuned, or a class that is added, has to keep clearing the bar readable text is held to.
-  it.each(Object.keys(palette))("writes a %s's initials in an ink that reaches 4.5:1", (classFile) => {
-    const { fill, ink } = palette[classFile]!;
+  it.each(Object.keys(palette))(
+    "writes a %s's initials in an ink that reaches 4.5:1",
+    (classFile) => {
+      const { fill, ink } = palette[classFile]!;
 
-    expect([INK_DARK, INK_LIGHT]).toContain(ink);
-    expect(contrastRatio(ink, fill)).toBeGreaterThanOrEqual(4.5);
-  });
+      expect([INK_DARK, INK_LIGHT]).toContain(ink);
+      expect(contrastRatio(ink, fill)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
 });

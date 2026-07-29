@@ -178,8 +178,11 @@ export function survivesMarks(mark: TransmogMark | undefined, filter: MarkFilter
   if (filter.favourite && !mark?.favourite) return false;
   const wanted = choiceOf(filter.tag);
   if (!wanted) return true;
-  return (mark?.tags ?? []).some((tag) => sameKey(tag.key, wanted.key)
-    && (wanted.value === null || tag.value?.toLowerCase() === wanted.value.toLowerCase()));
+  return (mark?.tags ?? []).some(
+    (tag) =>
+      sameKey(tag.key, wanted.key) &&
+      (wanted.value === null || tag.value?.toLowerCase() === wanted.value.toLowerCase()),
+  );
 }
 
 /**

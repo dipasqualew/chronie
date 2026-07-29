@@ -134,7 +134,8 @@ export function buildCharacters(
 
 function profile(name: string, list: Segment[], holdings?: AccountHoldings): CharacterProfile {
   const segments = [...list].sort(
-    (left, right) => (right.startedAt || 0) - (left.startedAt || 0) || (right.endedAt || 0) - (left.endedAt || 0),
+    (left, right) =>
+      (right.startedAt || 0) - (left.startedAt || 0) || (right.endedAt || 0) - (left.endedAt || 0),
   );
   // Time spent per place, so the busiest is the one named first. A character's home is where
   // the hours went, not where the most separate visits happen to have been recorded.
@@ -160,7 +161,9 @@ function profile(name: string, list: Segment[], holdings?: AccountHoldings): Cha
     lastSeen: Math.max(...segments.map((segment) => segment.endedAt || 0)),
     lootValue: segments.reduce((total, segment) => total + (segment.lootValue || 0), 0),
     goldDiff: segments.reduce((total, segment) => total + (segment.goldDiff || 0), 0),
-    places: [...byPlace.entries()].sort((left, right) => right[1] - left[1]).map(([place]) => place),
+    places: [...byPlace.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .map(([place]) => place),
     segments,
     gold: goldOf(name, holdings),
     currencies: currenciesOf(name, holdings),
@@ -195,14 +198,16 @@ function currenciesOf(name: string, holdings?: AccountHoldings): CharacterCurren
     .flatMap((currency) => {
       const held = currency.characters.find((holder) => holder.character === name);
       if (!held) return [];
-      return [{
-        id: currency.id,
-        name: currency.name || `Currency ${currency.id}`,
-        total: held.total,
-        accountTotal: currency.total,
-        accountWide: currency.accountWide === true,
-        at: held.at,
-      }];
+      return [
+        {
+          id: currency.id,
+          name: currency.name || `Currency ${currency.id}`,
+          total: held.total,
+          accountTotal: currency.total,
+          accountWide: currency.accountWide === true,
+          at: held.at,
+        },
+      ];
     })
     .sort((left, right) => right.total - left.total || (left.name < right.name ? -1 : 1));
 }
@@ -218,14 +223,19 @@ function factionsOf(name: string, holdings?: AccountHoldings): CharacterFaction[
     .flatMap((faction) => {
       const standing = faction.characters.find((entry) => entry.character === name);
       if (!standing) return [];
-      return [{
-        ...standing,
-        faction: faction.faction,
-        leads: faction.best?.character === name,
-        best: faction.best ?? null,
-      }];
+      return [
+        {
+          ...standing,
+          faction: faction.faction,
+          leads: faction.best?.character === name,
+          best: faction.best ?? null,
+        },
+      ];
     })
-    .sort((left, right) => (right.rank ?? -1) - (left.rank ?? -1) || (left.faction < right.faction ? -1 : 1));
+    .sort(
+      (left, right) =>
+        (right.rank ?? -1) - (left.rank ?? -1) || (left.faction < right.faction ? -1 : 1),
+    );
 }
 
 /** The day a moment falls on, in the `YYYY-MM-DD` a segment writes its own day as. */

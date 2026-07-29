@@ -50,15 +50,15 @@ export function sweepSentence(status: LogRetention): string {
   if (!status.enabled) {
     return status.doomed.count === 0
       ? `Chronie deletes no combat logs. Turning this on at ${window} would delete nothing ` +
-        "today — there is nothing old enough that Chronie has finished reading."
+          "today — there is nothing old enough that Chronie has finished reading."
       : `Chronie deletes no combat logs. Turning this on at ${window} would delete ` +
-        `${pileSize(status.doomed)} on the next sync.`;
+          `${pileSize(status.doomed)} on the next sync.`;
   }
   return status.doomed.count === 0
     ? `Deleting combat logs Chronie has read once they are older than ${window}. ` +
-      "Nothing is waiting to be deleted."
+        "Nothing is waiting to be deleted."
     : `Deleting combat logs Chronie has read once they are older than ${window}. ` +
-      `${pileSize(status.doomed)} go on the next sync.`;
+        `${pileSize(status.doomed)} go on the next sync.`;
 }
 
 /**
@@ -73,21 +73,21 @@ export function sweepDetail(status: LogRetention, now?: number): string[] {
   if (status.unread.count > 0) {
     lines.push(
       `${pileSize(status.unread)} are older than the window and have never been read by ` +
-      "Chronie — logs from before it was watching, most likely. These are never deleted. " +
-      "Removing them is yours to do.",
+        "Chronie — logs from before it was watching, most likely. These are never deleted. " +
+        "Removing them is yours to do.",
     );
   }
   if (status.unfinished.count > 0) {
     lines.push(
       `${pileSize(status.unfinished)} are older than the window and only partly read. ` +
-      "Chronie is still working through them and will not delete one until it has finished.",
+        "Chronie is still working through them and will not delete one until it has finished.",
     );
   }
   if (status.removed.length > 0) {
     const last = status.removed[0];
     lines.push(
       `Last deleted: ${last.name} — ${fileSize(last.bytes)}, ${ago(last.deletedAt, now)}, ` +
-      `after ${plural(last.linesRead, "line", "lines")} of it had been read.`,
+        `after ${plural(last.linesRead, "line", "lines")} of it had been read.`,
     );
   }
   return lines;

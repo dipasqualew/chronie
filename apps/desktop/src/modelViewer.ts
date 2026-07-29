@@ -273,7 +273,10 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
     const { offset, distance, leash } = frameOn(
       [box.min.x, box.min.y, box.min.z],
       [box.max.x, box.max.y, box.max.z],
-      focus, view, FIELD_OF_VIEW, camera.aspect,
+      focus,
+      view,
+      FIELD_OF_VIEW,
+      camera.aspect,
     );
     loaded.position.set(...offset);
 
@@ -320,9 +323,7 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
     loaded.traverse((object) => {
       const mesh = object as Partial<Mesh>;
       if (!mesh.material) return;
-      mesh.material = Array.isArray(mesh.material)
-        ? mesh.material.map(swap)
-        : swap(mesh.material);
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
     });
   }
 
@@ -352,17 +353,22 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
         // A copy, because the loader takes ownership of the buffer it parses and the caller's
         // array may be a view into a longer one.
         const bytes = glb.slice().buffer as ArrayBuffer;
-        new GLTFLoader().parse(bytes, "", (loaded) => {
-          if (model) discard(model);
-          model = loaded.scene;
-          if (unlit) flatten(model);
-          frameModel(model, focus);
-          scene.add(model);
-          announce(model);
-          resolve();
-        }, (error: unknown) => {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        });
+        new GLTFLoader().parse(
+          bytes,
+          "",
+          (loaded) => {
+            if (model) discard(model);
+            model = loaded.scene;
+            if (unlit) flatten(model);
+            frameModel(model, focus);
+            scene.add(model);
+            announce(model);
+            resolve();
+          },
+          (error: unknown) => {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
       });
     },
     /**

@@ -12,8 +12,15 @@
  */
 
 import {
-  AlphaType, bgraPixels, dxtBlocks, emit, Encoding, palettePixels, Storage,
-  type IconSpec, type TableSpec,
+  AlphaType,
+  bgraPixels,
+  dxtBlocks,
+  emit,
+  Encoding,
+  palettePixels,
+  Storage,
+  type IconSpec,
+  type TableSpec,
 } from "./db2-fixtures";
 
 /** What the game calls the table; the reader asks for it by this number. */
@@ -81,10 +88,19 @@ const currencyTypes: TableSpec = {
  * is what a currency added by a newer patch looks like from here.
  */
 const icons: IconSpec[] = [
-  { fileDataId: 160001, encoding: Encoding.palette, alphaBits: 8, alphaType: 0, body: palettePixels(8) },
   {
-    fileDataId: 160002, encoding: Encoding.dxt, alphaBits: 8,
-    alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
+    fileDataId: 160001,
+    encoding: Encoding.palette,
+    alphaBits: 8,
+    alphaType: 0,
+    body: palettePixels(8),
+  },
+  {
+    fileDataId: 160002,
+    encoding: Encoding.dxt,
+    alphaBits: 8,
+    alphaType: AlphaType.dxt5,
+    body: dxtBlocks(AlphaType.dxt5),
   },
   { fileDataId: 160004, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
 ];

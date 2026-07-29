@@ -20,11 +20,13 @@ test("says what combat logging would cost, and what deleting old logs would take
 
   await test.step("combat logging is off, and says what turning it on would cost", async () => {
     await expect(combat.toggle()).not.toBeChecked();
-    await expect(combat.state())
-      .toHaveText("Combat logging is off. Nothing is being written and nothing is using disk.");
+    await expect(combat.state()).toHaveText(
+      "Combat logging is off. Nothing is being written and nothing is using disk.",
+    );
     await expect(combat.panel).toContainText("a raid night is hundreds of megabytes");
-    await expect(combat.panel)
-      .toContainText("Chronie deletes nothing out of the game's Logs folder unless the panel");
+    await expect(combat.panel).toContainText(
+      "Chronie deletes nothing out of the game's Logs folder unless the panel",
+    );
     await expect(combat.stored()).resolves.toBe(false);
   });
 
@@ -45,8 +47,9 @@ test("says what combat logging would cost, and what deleting old logs would take
   // The sentence is a claim about this install, so the panel shows what it read it from.
   await test.step("and shows the evidence it read that from", async () => {
     await expect(combat.panel).toContainText("No combat log found in the game's Logs folder.");
-    await expect(combat.panel)
-      .toContainText("Advanced logging reads on in WTF/Account/EXAMPLE/config-cache.wtf.");
+    await expect(combat.panel).toContainText(
+      "Advanced logging reads on in WTF/Account/EXAMPLE/config-cache.wtf.",
+    );
   });
 
   // A summary printed after the first sweep would be a report of a decision nobody was given
@@ -67,8 +70,9 @@ test("says what combat logging would cost, and what deleting old logs would take
   await test.step("and says which old logs it will never delete by itself", async () => {
     await expect(retention.panel).toContainText("1 log, 1.0 GB");
     await expect(retention.panel).toContainText("never been read by Chronie");
-    await expect(retention.panel)
-      .toContainText("These are never deleted. Removing them is yours to do.");
+    await expect(retention.panel).toContainText(
+      "These are never deleted. Removing them is yours to do.",
+    );
     await expect(retention.panel).toContainText("Never deleted by Chronie:");
     await expect(retention.panel).toContainText("WoWCombatLog-032526_204500.txt");
   });

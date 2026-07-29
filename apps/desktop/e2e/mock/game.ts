@@ -14,20 +14,26 @@ import type { E2EMock } from "../../src/types";
 // survive rather than break on. So is the icon the tables give appearance 71012, which is
 // no icon at all.
 export const gameIcons: E2EMock["gameIcons"] = {
-  130001: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
-    + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
-  130002: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
-    + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
-  130003: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mP4z9"
-    + "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
-  130006: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj"
-    + "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+  130001:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj" +
+    "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+  130002:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u" +
+    "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+  130003:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mP4z9" +
+    "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
+  130006:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mNwaj" +
+    "r2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
   // The gloves, which are the one row that both has a picture and cannot be put on the
   // character — so the picture is what the reader is left looking at.
-  130005: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mP4z9"
-    + "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
-  250001: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
-    + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+  130005:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mP4z9" +
+    "DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
+  250001:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u" +
+    "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
 // The picture each currency is drawn with, keyed by the currency's own id rather than by the
@@ -35,8 +41,9 @@ export const gameIcons: E2EMock["gameIcons"] = {
 // other happens in the backend. The warband's shared pot is deliberately absent: the game names
 // a picture for most currencies and not all of them, and a row without one still has to draw.
 export const currencyIcons: E2EMock["currencyIcons"] = {
-  7: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u"
-    + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+  7:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklEQVR42mM45u" +
+    "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
 // The picture each place is drawn with, keyed by the name the addon filed the segment under —
@@ -45,8 +52,9 @@ export const currencyIcons: E2EMock["currencyIcons"] = {
 // game draws a picture for a dungeon, a raid and a delve, and none at all for the open world, so
 // the two zone segments beside it are what a row with nothing to show has to look like.
 export const placeIcons: E2EMock["placeIcons"] = {
-  "Glass Caverns": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE"
-    + "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+  "Glass Caverns":
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
+    "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
 // What the game says about the achievements those segments name. 77 is deliberately absent:
@@ -80,17 +88,38 @@ export const itemDetails: E2EMock["itemDetails"] = {
   // The transmog source, which the addon recorded as a number and nothing else: this is the
   // whole of what the reader ends up seeing about it.
   101: {
-    id: 101, name: "Wanderer's Mantle", classId: 4, subclassId: 2, inventoryType: 3,
-    quality: 3, requiredLevel: 25, allowableClass: 0xffff, iconFileDataId: 130002,
+    id: 101,
+    name: "Wanderer's Mantle",
+    classId: 4,
+    subclassId: 2,
+    inventoryType: 3,
+    quality: 3,
+    requiredLevel: 25,
+    allowableClass: 0xffff,
+    iconFileDataId: 130002,
   },
   // The plate helm the set took on, and the one it replaced. The helm is the only item in
   // the fixture some classes may not wear.
   4101: {
-    id: 4101, name: "Deepwater Crown", classId: 4, subclassId: 4, inventoryType: 1,
-    quality: 4, requiredLevel: 80, allowableClass: 0b10_0011, iconFileDataId: 130001,
+    id: 4101,
+    name: "Deepwater Crown",
+    classId: 4,
+    subclassId: 4,
+    inventoryType: 1,
+    quality: 4,
+    requiredLevel: 80,
+    allowableClass: 0b10_0011,
+    iconFileDataId: 130001,
   },
   4100: {
-    id: 4100, name: "Tideglass Crown", classId: 4, subclassId: 4, inventoryType: 1,
-    quality: 3, requiredLevel: 80, allowableClass: 0b10_0011, iconFileDataId: 130001,
+    id: 4100,
+    name: "Tideglass Crown",
+    classId: 4,
+    subclassId: 4,
+    inventoryType: 1,
+    quality: 3,
+    requiredLevel: 80,
+    allowableClass: 0b10_0011,
+    iconFileDataId: 130001,
   },
 };

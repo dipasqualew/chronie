@@ -34,20 +34,22 @@ test("browses every look the game holds, as names and as characters", async ({ p
     await transmog.browseBy("Items");
 
     await expect(wardrobe.rows()).toContainText([
-      "Coif of the Drowned Star", "Emberforge Helm", "Tideglass Crown",
+      "Coif of the Drowned Star",
+      "Emberforge Helm",
+      "Tideglass Crown",
     ]);
-    await expect(wardrobe.count())
-      .toHaveText("3 appearances · 1 look the game keeps encrypted");
+    await expect(wardrobe.count()).toHaveText("3 appearances · 1 look the game keeps encrypted");
   });
 
   // And what the switch does not do: she keeps what she has on. The helm went on out of a
   // set and the rail says so too — one look, however it was reached.
   await test.step("what she has on survives the switch, and the rail knows it", async () => {
-    await expect.poll(() => outfit.worn())
-      .toEqual(["Emberforge Helm · Head · Emberforge Plate"]);
+    await expect.poll(() => outfit.worn()).toEqual(["Emberforge Helm · Head · Emberforge Plate"]);
     await expect(wardrobe.wear("Head", "Emberforge Helm")).toHaveAttribute("aria-pressed", "true");
-    await expect(wardrobe.wear("Head", "Coif of the Drowned Star"))
-      .toHaveAttribute("aria-pressed", "false");
+    await expect(wardrobe.wear("Head", "Coif of the Drowned Star")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   await test.step("a look out of the wardrobe goes on her, and names no set", async () => {
@@ -77,10 +79,9 @@ test("browses every look the game holds, as names and as characters", async ({ p
   await test.step("a look out of one kind and a look out of another go on at once", async () => {
     await wardrobe.kind().selectOption({ label: "Staff" });
     await wardrobe.wear("Two-hand", "Staff of the Quiet Tide").click();
-    await expect.poll(() => outfit.worn()).toEqual([
-      "Coif of the Drowned Star · Head",
-      "Staff of the Quiet Tide · Main hand",
-    ]);
+    await expect
+      .poll(() => outfit.worn())
+      .toEqual(["Coif of the Drowned Star · Head", "Staff of the Quiet Tide · Main hand"]);
   });
 
   await test.step("a kind narrows by name and by class like the sets do", async () => {
@@ -91,8 +92,7 @@ test("browses every look the game holds, as names and as characters", async ({ p
     await wardrobe.search().fill("");
     // The Tideglass Crown is the one head of the three that any class may not wear.
     await wardrobe.klass().selectOption({ label: "Warrior" });
-    await expect(wardrobe.rows())
-      .toContainText(["Coif of the Drowned Star", "Emberforge Helm"]);
+    await expect(wardrobe.rows()).toContainText(["Coif of the Drowned Star", "Emberforge Helm"]);
     await wardrobe.klass().selectOption("");
   });
 
@@ -145,7 +145,8 @@ test("browses every look the game holds, as names and as characters", async ({ p
     await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 8 });
     await page.mouse.up();
 
-    await expect.poll(async () => await pixelsOf(picture) !== before, { timeout: PATIENCE_MS })
+    await expect
+      .poll(async () => (await pixelsOf(picture)) !== before, { timeout: PATIENCE_MS })
       .toBe(true);
     // And the rest of the grid is untouched: one tile turned, not the page redrawn.
     await expect.poll(() => wardrobe.painted(), { timeout: PATIENCE_MS }).toBe(GALLERY_PAGE);
@@ -154,8 +155,9 @@ test("browses every look the game holds, as names and as characters", async ({ p
   // The page shrinks to a fifth when the pictures come on, and grows back when they go off.
   // Twenty bodies is what the backend draws in about the time one takes; a hundred is not.
   await test.step("the page is smaller when it is drawn as characters", async () => {
-    await expect(wardrobe.count())
-      .toHaveText(`${GALLERY_PAGE} of ${GALLERY_LOOKS.length} appearances`);
+    await expect(wardrobe.count()).toHaveText(
+      `${GALLERY_PAGE} of ${GALLERY_LOOKS.length} appearances`,
+    );
     await wardrobe.asModels().uncheck();
     await expect(wardrobe.bodies()).toHaveCount(0);
     await expect(wardrobe.count()).toHaveText(`${GALLERY_LOOKS.length} appearances`);

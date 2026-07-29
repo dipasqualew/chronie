@@ -49,7 +49,8 @@ function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
   // Recorded rather than merely answered: "a note is never asked for a thumbnail" is a
   // statement about what crossed the bridge, and only the request itself can say it.
   const thumbnails = vi.fn((ids: number[]) =>
-    Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, THUMBNAIL])) }));
+    Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, THUMBNAIL])) }),
+  );
   const album = createCaptureAlbum(thumbnails);
   const view = render(
     <CaptureGallery
@@ -107,7 +108,9 @@ beforeAll(() => {
   // Typed as always present and absent at runtime, which is exactly what "jsdom implements
   // the element and not its modality" looks like from here.
   if (!dialog || typeof dialog.showModal === "function") return;
-  dialog.showModal = function showModal(this: HTMLDialogElement): void { this.open = true; };
+  dialog.showModal = function showModal(this: HTMLDialogElement): void {
+    this.open = true;
+  };
   dialog.close = function close(this: HTMLDialogElement): void {
     this.open = false;
     this.dispatchEvent(new Event("close"));
@@ -121,10 +124,8 @@ describe("CaptureGallery", () => {
     gallery([capture(), capture({ id: 12, sourceId: "TEST|1|12", at: EVENING + 1500 })]);
 
     expect(tiles()).toHaveLength(2);
-    await waitFor(() =>
-      expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(2));
-    expect(document.querySelector<HTMLImageElement>(".capture-thumb img")?.src)
-      .toBe(THUMBNAIL);
+    await waitFor(() => expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(2));
+    expect(document.querySelector<HTMLImageElement>(".capture-thumb img")?.src).toBe(THUMBNAIL);
   });
 
   // Three different things to be told, and none of them is a broken image: a picture that has
@@ -161,16 +162,18 @@ describe("CaptureGallery", () => {
     it("offers a note to be opened rather than a screenshot", () => {
       gallery([memory()]);
 
-      expect(screen.getByRole("button", { name: /^Open the note from Glass Caverns/ }))
-        .toBe(tiles()[0]);
+      expect(screen.getByRole("button", { name: /^Open the note from Glass Caverns/ })).toBe(
+        tiles()[0],
+      );
       expect(screen.queryByRole("button", { name: /^Open the screenshot/ })).toBeNull();
     });
 
     it("shows what somebody wrote instead of the reason there is no picture", () => {
       gallery([memory({ note: "Killed Ragnaros at last" })]);
 
-      expect(tiles()[0].querySelector(".capture-note")?.textContent)
-        .toBe("Killed Ragnaros at last");
+      expect(tiles()[0].querySelector(".capture-note")?.textContent).toBe(
+        "Killed Ragnaros at last",
+      );
       expect(tiles()[0].textContent).not.toContain("A note, with no picture taken.");
     });
 
@@ -203,19 +206,20 @@ describe("CaptureGallery", () => {
   // image that never loads.
   it("says so when the file has gone from under a row that says it is there", async () => {
     gallery([capture()], {
-      loadImage: (captureId) => Promise.resolve<CaptureImagePayload>({ id: captureId, image: null }),
+      loadImage: (captureId) =>
+        Promise.resolve<CaptureImagePayload>({ id: captureId, image: null }),
     });
 
     fireEvent.click(tiles()[0]);
 
-    await waitFor(() =>
-      expect(viewer().textContent).toContain("no longer on disk"));
+    await waitFor(() => expect(viewer().textContent).toContain("no longer on disk"));
     expect(viewer().querySelector("img")).toBeNull();
   });
 
   it("asks for the full-size picture only once one is opened", async () => {
     const loadImage = vi.fn((captureId: number) =>
-      Promise.resolve<CaptureImagePayload>({ id: captureId, image: FULL_SIZE, byteSize: 12 }));
+      Promise.resolve<CaptureImagePayload>({ id: captureId, image: FULL_SIZE, byteSize: 12 }),
+    );
     gallery([capture()], { loadImage });
 
     expect(loadImage).not.toHaveBeenCalled();
@@ -293,7 +297,8 @@ describe("CaptureGallery", () => {
     fireEvent.click(within(viewer()).getByRole("button", { name: "Save note" }));
 
     await waitFor(() =>
-      expect(viewer().textContent).toContain("Chronie said: Error: the database is locked"));
+      expect(viewer().textContent).toContain("Chronie said: Error: the database is locked"),
+    );
     expect(onApply).not.toHaveBeenCalled();
     // And the sentence is still in the field, so it can be tried again rather than retyped.
     expect(noteField().value).toBe("first Yogg kill");
@@ -309,8 +314,9 @@ describe("CaptureGallery", () => {
     fireEvent.click(within(viewer()).getByRole("button", { name: "Delete" }));
 
     expect(remove).not.toHaveBeenCalled();
-    expect(within(viewer()).getByRole("alert").textContent)
-      .toContain("deleted from Chronie's storage");
+    expect(within(viewer()).getByRole("alert").textContent).toContain(
+      "deleted from Chronie's storage",
+    );
 
     fireEvent.click(within(viewer()).getByRole("button", { name: "Yes, delete it" }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith(11));

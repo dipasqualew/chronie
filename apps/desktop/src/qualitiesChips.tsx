@@ -40,13 +40,14 @@ import type { Quality } from "./types";
 /** How large a swatch is drawn, in the units its own viewBox counts in. */
 const SWATCH = 10;
 
-export function Qualities(
-  { quality, onFilter }: {
-    quality: Quality | undefined;
-    /** What the list wants asked of it when part of this chip is clicked, where it takes terms. */
-    onFilter?: (term: string) => void;
-  },
-): ReactNode {
+export function Qualities({
+  quality,
+  onFilter,
+}: {
+  quality: Quality | undefined;
+  /** What the list wants asked of it when part of this chip is clicked, where it takes terms. */
+  onFilter?: (term: string) => void;
+}): ReactNode {
   // A look the store says nothing about draws exactly as it drew before any of this existed,
   // which is what lets a store regenerated one patch late still be worth having.
   if (!quality) return null;
@@ -73,9 +74,11 @@ export function Qualities(
     <span className="chip quality" title={`${qualitySummary(quality)} · ${BUILT_IN}`}>
       {swatch(quality.primary)}
       {quality.accent ? swatch(quality.accent) : null}
-      {onFilter
-        ? <Pick facet={key} said={said} onFilter={onFilter} className="quality-said" />
-        : <span className="quality-said">{said}</span>}
+      {onFilter ? (
+        <Pick facet={key} said={said} onFilter={onFilter} className="quality-said" />
+      ) : (
+        <span className="quality-said">{said}</span>
+      )}
     </span>
   );
 }
@@ -88,13 +91,20 @@ export function Qualities(
  * nothing else. Once it is a way of narrowing the list it is a control rather than a decoration,
  * and it says which colour it would ask for.
  */
-function Swatch(
-  { colour, onFilter }: { colour: string; onFilter?: (term: string) => void },
-): ReactNode {
+function Swatch({
+  colour,
+  onFilter,
+}: {
+  colour: string;
+  onFilter?: (term: string) => void;
+}): ReactNode {
   const square = (
     <svg
-      className="quality-swatch" viewBox={`0 0 ${SWATCH} ${SWATCH}`}
-      width={SWATCH} height={SWATCH} aria-hidden="true"
+      className="quality-swatch"
+      viewBox={`0 0 ${SWATCH} ${SWATCH}`}
+      width={SWATCH}
+      height={SWATCH}
+      aria-hidden="true"
     >
       <rect width={SWATCH} height={SWATCH} rx="3" fill={colour} />
     </svg>
@@ -114,21 +124,29 @@ function Swatch(
  * of a hundred rows is not a button anybody can act on — and the key is in there, so a reader
  * hears the difference between asking for the size and asking for the colour.
  */
-function Pick(
-  { facet, said, onFilter, className, children }: {
-    /** The key the term is asked under — `colour` or `size`, and never React's own `key`. */
-    facet: string;
-    said: string;
-    onFilter: (term: string) => void;
-    className: string;
-    children?: ReactNode;
-  },
-): ReactNode {
+function Pick({
+  facet,
+  said,
+  onFilter,
+  className,
+  children,
+}: {
+  /** The key the term is asked under — `colour` or `size`, and never React's own `key`. */
+  facet: string;
+  said: string;
+  onFilter: (term: string) => void;
+  className: string;
+  children?: ReactNode;
+}): ReactNode {
   return (
     <button
-      type="button" className={`${className} quality-ask`}
-      aria-label={`Filter by ${facet}: ${said}`} title={`Filter by ${facet}: ${said}`}
+      type="button"
+      className={`${className} quality-ask`}
+      aria-label={`Filter by ${facet}: ${said}`}
+      title={`Filter by ${facet}: ${said}`}
       onClick={() => onFilter(termText(facet, said))}
-    >{children ?? said}</button>
+    >
+      {children ?? said}
+    </button>
   );
 }

@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NO_MARK_FILTER, choiceOf, indexMarks, markFacets, markWords, marksNarrow, sameKey,
-  survivesMarks, tagChoices, tagLabel, tokenOf,
+  NO_MARK_FILTER,
+  choiceOf,
+  indexMarks,
+  markFacets,
+  markWords,
+  marksNarrow,
+  sameKey,
+  survivesMarks,
+  tagChoices,
+  tagLabel,
+  tokenOf,
 } from "./marks";
 import type { MarkSubjectKind, TransmogMark, TransmogTag } from "./types";
 
@@ -96,7 +105,10 @@ describe("the tags a picker offers", () => {
     const choices = tagChoices(indexOf(marks), "set", [1, 2, 3]);
 
     expect(choices.map((one) => one.label)).toEqual([
-      "faction", "faction: alliance", "faction: horde", "wishlist",
+      "faction",
+      "faction: alliance",
+      "faction: horde",
+      "wishlist",
     ]);
   });
 
@@ -187,17 +199,20 @@ describe("what a mark filter leaves", () => {
 
     expect(survivesMarks(starred, filter)).toBe(false);
     expect(survivesMarks(tagged, filter)).toBe(false);
-    expect(survivesMarks(
-      mark("set", 4, { favourite: true, tags: [tag("faction", "alliance")] }),
-      filter,
-    )).toBe(true);
+    expect(
+      survivesMarks(
+        mark("set", 4, { favourite: true, tags: [tag("faction", "alliance")] }),
+        filter,
+      ),
+    ).toBe(true);
   });
 });
 
 describe("what a mark adds to the search box", () => {
   it("gives up both halves of a property and the key of a label", () => {
-    expect(markWords(mark("set", 1, { tags: [tag("Faction", "Horde"), tag("Wishlist")] })))
-      .toBe("faction horde wishlist");
+    expect(markWords(mark("set", 1, { tags: [tag("Faction", "Horde"), tag("Wishlist")] }))).toBe(
+      "faction horde wishlist",
+    );
   });
 
   it("gives a starred thing a word somebody could actually type", () => {
@@ -214,15 +229,20 @@ describe("what a mark adds to the terms the search box reads", () => {
   // The reason a tag was ever a key and a value: "horde" typed as a word finds the Horde's own
   // collections too, and `faction:horde` is the reader saying they meant the thing they filed.
   it("gives a property its value and a label none", () => {
-    expect(markFacets(mark("set", 1, { tags: [tag("faction", "horde"), tag("wishlist")] })))
-      .toEqual([{ key: "faction", value: "horde" }, { key: "wishlist", value: "" }]);
+    expect(
+      markFacets(mark("set", 1, { tags: [tag("faction", "horde"), tag("wishlist")] })),
+    ).toEqual([
+      { key: "faction", value: "horde" },
+      { key: "wishlist", value: "" },
+    ]);
   });
 
   // The reader's own spelling, because it is theirs and it is what the chip prints. Whether
   // "Faction" answers `faction:` is settled where the term is matched, not here.
   it("keeps a key exactly as it was typed", () => {
-    expect(markFacets(mark("set", 1, { tags: [tag("Faction", "Horde")] })))
-      .toEqual([{ key: "Faction", value: "Horde" }]);
+    expect(markFacets(mark("set", 1, { tags: [tag("Faction", "Horde")] }))).toEqual([
+      { key: "Faction", value: "Horde" },
+    ]);
   });
 
   // A star is a checkbox above the list rather than a word under a key, and the box beside it

@@ -23,10 +23,12 @@ import type { SessionGap } from "./types";
 export function gapSentence(gap: SessionGap | null, now?: number): string | null {
   if (!gap || gap.kind !== "missing") return null;
   const lost = duration(gap.gap.playedTo - gap.gap.recordedTo);
-  return `Chronie is missing up to ${lost} of play. The game was still writing its combat ` +
+  return (
+    `Chronie is missing up to ${lost} of play. The game was still writing its combat ` +
     `log ${ago(gap.gap.playedTo, now)}, but the last session it saved ended ` +
     `${ago(gap.gap.recordedTo, now)} — so a session ended without the game writing it out, ` +
-    "which is what a crash or a force-quit does.";
+    "which is what a crash or a force-quit does."
+  );
 }
 
 /**

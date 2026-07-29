@@ -33,7 +33,11 @@ describe("the ranges on offer", () => {
   /** Every one of them is a phrase somebody would say out loud, and each key is used once. */
   it("names each of them once, shortest first", () => {
     expect(RANGES.map((range) => range.key)).toEqual([
-      "week", "fortnight", "month", "quarter", "all",
+      "week",
+      "fortnight",
+      "month",
+      "quarter",
+      "all",
     ]);
     expect(new Set(RANGES.map((range) => range.key)).size).toBe(RANGES.length);
   });

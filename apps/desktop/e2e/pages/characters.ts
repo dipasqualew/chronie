@@ -88,8 +88,10 @@ export class Roster {
 
   /** A row of one of the two holdings tables, found by the thing it is about. */
   holding(table: "Currencies" | "Reputation", name: string): Locator {
-    return this.profile.getByRole("table", { name: table })
-      .getByRole("row").filter({ hasText: name });
+    return this.profile
+      .getByRole("table", { name: table })
+      .getByRole("row")
+      .filter({ hasText: name });
   }
 
   /** Where the character stands with a faction, as a screen reader is told it. */
@@ -116,7 +118,8 @@ export class Roster {
 
   /** A summary chip of what the range earned, which behaves the way a session card's chips do. */
   chip(saying: string | RegExp): Locator {
-    return this.profile.getByRole("region", { name: "What it got them" })
+    return this.profile
+      .getByRole("region", { name: "What it got them" })
       .getByRole("button", { name: saying });
   }
 

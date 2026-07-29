@@ -35,7 +35,7 @@ export function externalUrl(anchor: Linkish | null | undefined): string | null {
 
 /** The link a click happened inside, which is rarely the element the click landed on. */
 export const closestLink = (target: unknown): Linkish | null =>
-  (target instanceof Element ? target.closest("a[href]") : null);
+  target instanceof Element ? target.closest("a[href]") : null;
 
 export interface ExternalLinkOptions {
   /** One listener here also covers the dialogs: a click bubbles out of a `<dialog>`. */

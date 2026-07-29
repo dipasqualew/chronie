@@ -4,8 +4,16 @@ import { NO_MARK_FILTER, indexMarks, tokenOf } from "./marks";
 import type { MarkFilter } from "./marks";
 import { indexQualities } from "./qualities";
 import {
-  HELD_IN_HAND, KINDS, PAGE, answerKey, filterAppearances, isKind, kindName, kindOf,
-  shownSummary, wardrobeRow,
+  HELD_IN_HAND,
+  KINDS,
+  PAGE,
+  answerKey,
+  filterAppearances,
+  isKind,
+  kindName,
+  kindOf,
+  shownSummary,
+  wardrobeRow,
 } from "./wardrobe";
 import type { WardrobeAppearance } from "./types";
 
@@ -31,9 +39,7 @@ const look = (
 });
 
 /** A weapon, which is the half of the wardrobe the display type says nothing useful about. */
-const weapon = (
-  subclassId: number, fields: Partial<WardrobeAppearance> = {},
-): WardrobeAppearance =>
+const weapon = (subclassId: number, fields: Partial<WardrobeAppearance> = {}): WardrobeAppearance =>
   look({
     appearanceId: 900 + subclassId,
     displayType: 11,
@@ -49,7 +55,9 @@ describe("the kinds a reader picks between", () => {
   it("cuts one answer up by what the items actually are", () => {
     const held = [weapon(15, { name: "Dagger" }), weapon(10, { name: "Staff" })];
     const daggers = filterAppearances(held, {
-      kind: kindOf("weapon-15"), search: "", klass: "",
+      kind: kindOf("weapon-15"),
+      search: "",
+      klass: "",
     });
     expect(daggers.map((one) => one.name)).toEqual(["Dagger"]);
   });
@@ -57,9 +65,9 @@ describe("the kinds a reader picks between", () => {
   // And the same answer serves every one of them, which is what stops a reader flicking
   // between staves and daggers paying the game's storage a second each time.
   it("asks for one answer for everything held in a hand", () => {
-    const keys = KINDS
-      .filter((kind) => kind.group !== "Worn on the body")
-      .map((kind) => answerKey(kind));
+    const keys = KINDS.filter((kind) => kind.group !== "Worn on the body").map((kind) =>
+      answerKey(kind),
+    );
     expect(new Set(keys).size).toBe(1);
     expect(keys[0]).toBe(HELD_IN_HAND.join(","));
   });
@@ -76,19 +84,20 @@ describe("the kinds a reader picks between", () => {
     ["off-hand", 4, 0],
   ])("keeps %s apart from the weapons beside it", (key, classId, subclassId) => {
     const kind = kindOf(key);
-    const held = [
-      look({ appearanceId: 1, displayType: 13, classId, subclassId }),
-      weapon(7),
-    ];
+    const held = [look({ appearanceId: 1, displayType: 13, classId, subclassId }), weapon(7)];
     expect(filterAppearances(held, { kind, search: "", klass: "" })).toHaveLength(1);
   });
 
   // The catch-all, and the reason it is there: an install holds looks belonging to kinds no
   // player has a word for, and without it they would be fetched and then unshowable.
   it("shows everything held under the kind that filters nothing", () => {
-    const held = [weapon(7), look({ appearanceId: 2, displayType: 11, classId: 19, subclassId: 9 })];
-    expect(filterAppearances(held, { kind: kindOf("held"), search: "", klass: "" }))
-      .toHaveLength(2);
+    const held = [
+      weapon(7),
+      look({ appearanceId: 2, displayType: 11, classId: 19, subclassId: 9 }),
+    ];
+    expect(filterAppearances(held, { kind: kindOf("held"), search: "", klass: "" })).toHaveLength(
+      2,
+    );
   });
 
   it("falls back to the first kind for a key it does not know", () => {
@@ -117,8 +126,7 @@ describe("filtering a kind's looks", () => {
     look({ appearanceId: 3, name: "", itemId: 30011, allowableClass: 0 }),
   ];
   const filter = (search: string, klass = ""): string[] =>
-    filterAppearances(wardrobe, { kind: kindOf("armour-0"), search, klass })
-      .map((one) => one.name);
+    filterAppearances(wardrobe, { kind: kindOf("armour-0"), search, klass }).map((one) => one.name);
 
   it("matches every word of a search rather than the phrase", () => {
     expect(filter("storm helm")).toEqual(["Stormforged Helm"]);
@@ -133,9 +141,13 @@ describe("filtering a kind's looks", () => {
 
   // The one thing a reader has when the game has withheld the name.
   it("finds a look the game will not name by its item id", () => {
-    expect(filterAppearances(wardrobe, {
-      kind: kindOf("armour-0"), search: "30011", klass: "",
-    })).toHaveLength(1);
+    expect(
+      filterAppearances(wardrobe, {
+        kind: kindOf("armour-0"),
+        search: "30011",
+        klass: "",
+      }),
+    ).toHaveLength(1);
   });
 
   it("keeps a look every class may wear whatever class is asked for", () => {
@@ -200,11 +212,16 @@ describe("narrowing a kind to what the reader said about it", () => {
     ],
   });
   const marked = (filter: MarkFilter) => ({
-    filter, of: (id: number) => marks.of("appearance", id),
+    filter,
+    of: (id: number) => marks.of("appearance", id),
   });
-  const shown = (filter: MarkFilter): number[] => filterAppearances(looks, {
-    kind: kindOf("armour-0"), search: "", klass: "", marks: marked(filter),
-  }).map((one) => one.appearanceId);
+  const shown = (filter: MarkFilter): number[] =>
+    filterAppearances(looks, {
+      kind: kindOf("armour-0"),
+      search: "",
+      klass: "",
+      marks: marked(filter),
+    }).map((one) => one.appearanceId);
 
   it("leaves the list alone until it is asked something", () => {
     expect(shown(NO_MARK_FILTER)).toEqual([11, 12, 13]);
@@ -225,15 +242,22 @@ describe("narrowing a kind to what the reader said about it", () => {
 
   it("finds a look by a word the reader filed it under", () => {
     const found = filterAppearances(looks, {
-      kind: kindOf("armour-0"), search: "horde", klass: "", marks: marked(NO_MARK_FILTER),
+      kind: kindOf("armour-0"),
+      search: "horde",
+      klass: "",
+      marks: marked(NO_MARK_FILTER),
     });
     expect(found.map((one) => one.appearanceId)).toEqual([11]);
   });
 
   it("says nothing about marks when it was given none", () => {
-    expect(filterAppearances(looks, {
-      kind: kindOf("armour-0"), search: "", klass: "",
-    })).toHaveLength(3);
+    expect(
+      filterAppearances(looks, {
+        kind: kindOf("armour-0"),
+        search: "",
+        klass: "",
+      }),
+    ).toHaveLength(3);
   });
 });
 
@@ -248,9 +272,13 @@ describe("searching a wardrobe by what the artwork was measured to be", () => {
       { id: 12, primary: "#2060e0", accent: "#f6f6f6", size: "small" },
     ],
   });
-  const found = (search: string): number[] => filterAppearances(looks, {
-    kind: kindOf("armour-0"), search, klass: "", qualities: (id) => measured.of(id),
-  }).map((one) => one.appearanceId);
+  const found = (search: string): number[] =>
+    filterAppearances(looks, {
+      kind: kindOf("armour-0"),
+      search,
+      klass: "",
+      qualities: (id) => measured.of(id),
+    }).map((one) => one.appearanceId);
 
   // The whole reason the colours are named at all: "brown" is in no item's name in the game,
   // and it is how somebody looking at five thousand chestpieces asks for the brown ones.
@@ -274,9 +302,13 @@ describe("searching a wardrobe by what the artwork was measured to be", () => {
   });
 
   it("leaves the list alone where nothing was measured", () => {
-    expect(filterAppearances(looks, {
-      kind: kindOf("armour-0"), search: "brown", klass: "",
-    })).toHaveLength(0);
+    expect(
+      filterAppearances(looks, {
+        kind: kindOf("armour-0"),
+        search: "brown",
+        klass: "",
+      }),
+    ).toHaveLength(0);
     expect(found("")).toEqual([11, 12]);
   });
 });
@@ -292,11 +324,18 @@ describe("asking a wardrobe for one thing a look says", () => {
   const marks = indexMarks({
     marks: [
       {
-        kind: "appearance", id: 11, favourite: false,
-        tags: [{ key: "faction", value: "horde" }, { key: "wishlist", value: null }],
+        kind: "appearance",
+        id: 11,
+        favourite: false,
+        tags: [
+          { key: "faction", value: "horde" },
+          { key: "wishlist", value: null },
+        ],
       },
       {
-        kind: "appearance", id: 12, favourite: false,
+        kind: "appearance",
+        id: 12,
+        favourite: false,
         tags: [{ key: "faction", value: "alliance" }],
       },
     ],
@@ -311,13 +350,14 @@ describe("asking a wardrobe for one thing a look says", () => {
       { id: 13, primary: "#2060e0", size: "small" },
     ],
   });
-  const found = (search: string): number[] => filterAppearances(looks, {
-    kind: kindOf("armour-0"),
-    search,
-    klass: "",
-    marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("appearance", id) },
-    qualities: (id) => measured.of(id),
-  }).map((one) => one.appearanceId);
+  const found = (search: string): number[] =>
+    filterAppearances(looks, {
+      kind: kindOf("armour-0"),
+      search,
+      klass: "",
+      marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("appearance", id) },
+      qualities: (id) => measured.of(id),
+    }).map((one) => one.appearanceId);
 
   // Typing "brown" finds the look measured brown and the Brownhide Cowl beside it, and there
   // was no way at all to say which of the two was being asked about.
@@ -375,9 +415,12 @@ describe("asking a wardrobe for one thing a look says", () => {
 
   it("asks what a thing held is rather than what number the game files it under", () => {
     const held = [weapon(15, { name: "Emberforge Dagger" }), weapon(10, { name: "Ashen Staff" })];
-    const asked = (search: string): string[] => filterAppearances(held, {
-      kind: kindOf("held"), search, klass: "",
-    }).map((one) => one.name);
+    const asked = (search: string): string[] =>
+      filterAppearances(held, {
+        kind: kindOf("held"),
+        search,
+        klass: "",
+      }).map((one) => one.name);
 
     expect(asked("kind:dagger")).toEqual(["Emberforge Dagger"]);
     expect(asked("kind:staff")).toEqual(["Ashen Staff"]);

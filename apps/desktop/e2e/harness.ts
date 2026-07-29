@@ -20,11 +20,14 @@ import { mockDesktop } from "./mock";
 export { expect } from "@playwright/test";
 
 export const test = base.extend<{ chronie: void }>({
-  chronie: [async ({ page }, use) => {
-    await page.addInitScript((mock) => {
-      window.__Chronie_E2E__ = mock;
-    }, mockDesktop);
-    await page.goto("/");
-    await use();
-  }, { auto: true }],
+  chronie: [
+    async ({ page }, use) => {
+      await page.addInitScript((mock) => {
+        window.__Chronie_E2E__ = mock;
+      }, mockDesktop);
+      await page.goto("/");
+      await use();
+    },
+    { auto: true },
+  ],
 });

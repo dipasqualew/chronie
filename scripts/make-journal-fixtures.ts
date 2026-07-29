@@ -14,8 +14,16 @@
  */
 
 import {
-  AlphaType, bgraPixels, dxtBlocks, emit, Encoding, palettePixels, Storage,
-  type ColumnSpec, type IconSpec, type TableSpec,
+  AlphaType,
+  bgraPixels,
+  dxtBlocks,
+  emit,
+  Encoding,
+  palettePixels,
+  Storage,
+  type ColumnSpec,
+  type IconSpec,
+  type TableSpec,
 } from "./db2-fixtures";
 
 /** What the game calls the tables; the reader asks for them by these numbers. */
@@ -57,8 +65,30 @@ const journalInstance: TableSpec = {
       key: 0n,
       // Name, description, map, background, banner, icon, lore, flags, area, covenant.
       rows: [
-        ["The Deadmines", "A mine the brotherhood took.", 36, 180001, 180002, 170001, 180003, 1, 1581, 0],
-        ["Sunken Citadel", "Drowned and still occupied.", 643, 180001, 180002, 170002, 180003, 1, 5382, 0],
+        [
+          "The Deadmines",
+          "A mine the brotherhood took.",
+          36,
+          180001,
+          180002,
+          170001,
+          180003,
+          1,
+          1581,
+          0,
+        ],
+        [
+          "Sunken Citadel",
+          "Drowned and still occupied.",
+          643,
+          180001,
+          180002,
+          170002,
+          180003,
+          1,
+          5382,
+          0,
+        ],
         // A place the group finder knows too, and draws differently. The journal's picture is
         // hand-drawn for this one dungeon and is the one to show.
         ["Tideglass Hollow", "", 645, 180001, 180002, 170004, 180003, 0, 0, 0],
@@ -66,7 +96,18 @@ const journalInstance: TableSpec = {
         ["Zekvir's Lair", "", 2680, 0, 0, 0, 0, 0, 0, 0],
         // The same name on a second row, later. First one wins, so this icon is never answered
         // with — the real table has two such pairs.
-        ["The Deadmines", "The same place, listed twice.", 36, 180001, 180002, 170009, 180003, 1, 1581, 0],
+        [
+          "The Deadmines",
+          "The same place, listed twice.",
+          36,
+          180001,
+          180002,
+          170009,
+          180003,
+          1,
+          1581,
+          0,
+        ],
       ],
       idList: [63, 64, 65, 1310, 2000],
     },
@@ -126,16 +167,34 @@ const lfgDungeons: TableSpec = {
  * 180005 — the backgrounds and banners beside the icons, which nothing is meant to be reading.
  */
 const icons: IconSpec[] = [
-  { fileDataId: 170001, encoding: Encoding.palette, alphaBits: 8, alphaType: 0, body: palettePixels(8) },
   {
-    fileDataId: 170002, encoding: Encoding.dxt, alphaBits: 8,
-    alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
+    fileDataId: 170001,
+    encoding: Encoding.palette,
+    alphaBits: 8,
+    alphaType: 0,
+    body: palettePixels(8),
+  },
+  {
+    fileDataId: 170002,
+    encoding: Encoding.dxt,
+    alphaBits: 8,
+    alphaType: AlphaType.dxt5,
+    body: dxtBlocks(AlphaType.dxt5),
   },
   { fileDataId: 170003, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
-  { fileDataId: 170004, encoding: Encoding.palette, alphaBits: 0, alphaType: 0, body: palettePixels(0) },
   {
-    fileDataId: 170006, encoding: Encoding.dxt, alphaBits: 1,
-    alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
+    fileDataId: 170004,
+    encoding: Encoding.palette,
+    alphaBits: 0,
+    alphaType: 0,
+    body: palettePixels(0),
+  },
+  {
+    fileDataId: 170006,
+    encoding: Encoding.dxt,
+    alphaBits: 1,
+    alphaType: AlphaType.dxt1,
+    body: dxtBlocks(AlphaType.dxt1),
   },
   { fileDataId: 170009, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
 ];

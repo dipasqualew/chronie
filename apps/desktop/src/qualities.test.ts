@@ -1,26 +1,44 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  COLOUR, NO_QUALITIES, SIZE, colourName, indexQualities, qualityFacets, qualitySummary,
+  COLOUR,
+  NO_QUALITIES,
+  SIZE,
+  colourName,
+  indexQualities,
+  qualityFacets,
+  qualitySummary,
   qualityWords,
 } from "./qualities";
 import type { Quality, QualitiesFile } from "./types";
 
-const quality = (id: number, fields: Partial<Omit<Quality, "id">> = {}): Quality =>
-  ({ id, primary: "#808080", ...fields });
+const quality = (id: number, fields: Partial<Omit<Quality, "id">> = {}): Quality => ({
+  id,
+  primary: "#808080",
+  ...fields,
+});
 
-const file = (appearances: Quality[]): QualitiesFile =>
-  ({ displayType: 0, build: "12.0.5.67823", sizeCuts: {}, appearances });
+const file = (appearances: Quality[]): QualitiesFile => ({
+  displayType: 0,
+  build: "12.0.5.67823",
+  sizeCuts: {},
+  appearances,
+});
 
 describe("finding what was measured of one look", () => {
   it("answers by the appearance the row was measured of", () => {
-    const index = indexQualities(file([
-      quality(321, { primary: "#151515", accent: "#545354", size: "small" }),
-      quality(322, { primary: "#a56722" }),
-    ]));
+    const index = indexQualities(
+      file([
+        quality(321, { primary: "#151515", accent: "#545354", size: "small" }),
+        quality(322, { primary: "#a56722" }),
+      ]),
+    );
 
     expect(index.of(321)).toEqual({
-      id: 321, primary: "#151515", accent: "#545354", size: "small",
+      id: 321,
+      primary: "#151515",
+      accent: "#545354",
+      size: "small",
     });
     expect(index.of(322)?.accent).toBeUndefined();
   });
@@ -103,8 +121,9 @@ describe("what a measured look adds to a search", () => {
   // The point of the whole naming exercise: a reader can see "brown" and "large" on the row and
   // will type them into the box above it.
   it("is the words on the row, lowercased", () => {
-    expect(qualityWords(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" })))
-      .toBe("brown yellow large");
+    expect(qualityWords(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" }))).toBe(
+      "brown yellow large",
+    );
   });
 
   it("leaves out what the row does not say", () => {
@@ -124,20 +143,22 @@ describe("what a measured look adds to the terms the search box reads", () => {
   // looking at a thing that is brown and yellow, and which of them the measurement called the
   // fuller is a detail of the measuring rather than a question anybody asks.
   it("puts both colours under the one key, and the size under its own", () => {
-    expect(qualityFacets(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" })))
-      .toEqual([
-        { key: COLOUR, value: "brown" },
-        { key: COLOUR, value: "yellow" },
-        { key: SIZE, value: "large" },
-      ]);
+    expect(
+      qualityFacets(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" })),
+    ).toEqual([
+      { key: COLOUR, value: "brown" },
+      { key: COLOUR, value: "yellow" },
+      { key: SIZE, value: "large" },
+    ]);
   });
 
   // A look that is all one colour has no accent and a slot with no mesh to measure has no size,
   // and neither is a facet with nothing in it — `colour:` is a question about what was measured
   // and would be answered by every row in the store if the gaps were offered as answers.
   it("leaves out what the store could not measure", () => {
-    expect(qualityFacets(quality(1, { primary: "#e02020" })))
-      .toEqual([{ key: COLOUR, value: "red" }]);
+    expect(qualityFacets(quality(1, { primary: "#e02020" }))).toEqual([
+      { key: COLOUR, value: "red" },
+    ]);
   });
 
   it("says nothing at all about a look the store does not hold", () => {
@@ -147,8 +168,9 @@ describe("what a measured look adds to the terms the search box reads", () => {
 
 describe("how a measured look reads on a chip", () => {
   it("names both colours and the size", () => {
-    expect(qualitySummary(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" })))
-      .toBe("large, brown and yellow");
+    expect(
+      qualitySummary(quality(1, { primary: "#4a3b2c", accent: "#e0c060", size: "large" })),
+    ).toBe("large, brown and yellow");
   });
 
   it("names one colour where there is one, and no size where there is none", () => {

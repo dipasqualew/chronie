@@ -38,33 +38,43 @@ export interface CharacterSummaryProps {
   currencyIcons: CurrencyIcons;
 }
 
-export function CharacterSummary(
-  { entry, wardrobe, currencyIcons }: CharacterSummaryProps,
-): ReactNode {
+export function CharacterSummary({
+  entry,
+  wardrobe,
+  currencyIcons,
+}: CharacterSummaryProps): ReactNode {
   const where = entry.places.slice(0, 3).join(", ");
-  return <>
-    <dl className="profile-stats">
-      <Stat label="Played">{duration(entry.seconds)}</Stat>
-      <Stat label="Segments">{entry.segmentCount}</Stat>
-      <Stat label="Days">{entry.dayCount}</Stat>
-      <Stat label="First seen">{dayLabel(dayOf(entry.firstSeen))}</Stat>
-      <Stat label="Looted"><span className="gold">{gold(entry.lootValue)}</span></Stat>
-      {/* The balance and the movement, in that order and never conflated: what the character
+  return (
+    <>
+      <dl className="profile-stats">
+        <Stat label="Played">{duration(entry.seconds)}</Stat>
+        <Stat label="Segments">{entry.segmentCount}</Stat>
+        <Stat label="Days">{entry.dayCount}</Stat>
+        <Stat label="First seen">{dayLabel(dayOf(entry.firstSeen))}</Stat>
+        <Stat label="Looted">
+          <span className="gold">{gold(entry.lootValue)}</span>
+        </Stat>
+        {/* The balance and the movement, in that order and never conflated: what the character
           is carrying now is state the addon read off the client, where the net is the sum of
           what every recorded segment did to it and knows nothing of the gold that was there
           first. The balance is dropped rather than guessed on a character that has not
           reported one. */}
-      {entry.gold ? <Stat label="Wallet"><span className="gold">{gold(entry.gold.total)}</span></Stat> : null}
-      <Stat label="Net">
-        <span className={entry.goldDiff < 0 ? "loss" : "gold"}>{signedGold(entry.goldDiff)}</span>
-      </Stat>
-    </dl>
-    {entry.gold ? <AccountWorth held={entry.gold} /> : null}
-    {where ? <p className="profile-where sub">Mostly in {where}</p> : null}
-    <Currencies entry={entry} icons={currencyIcons} />
-    <Factions entry={entry} />
-    <Wardrobe sets={wardrobe} />
-  </>;
+        {entry.gold ? (
+          <Stat label="Wallet">
+            <span className="gold">{gold(entry.gold.total)}</span>
+          </Stat>
+        ) : null}
+        <Stat label="Net">
+          <span className={entry.goldDiff < 0 ? "loss" : "gold"}>{signedGold(entry.goldDiff)}</span>
+        </Stat>
+      </dl>
+      {entry.gold ? <AccountWorth held={entry.gold} /> : null}
+      {where ? <p className="profile-where sub">Mostly in {where}</p> : null}
+      <Currencies entry={entry} icons={currencyIcons} />
+      <Factions entry={entry} />
+      <Wardrobe sets={wardrobe} />
+    </>
+  );
 }
 
 /**
@@ -74,8 +84,12 @@ export function CharacterSummary(
  * definition takes no name of its own, so nothing outside the grid can ask for "the played
  * figure" without counting from one end of it.
  */
-const Stat = ({ label, children }: { label: string; children: ReactNode }): ReactNode =>
-  <div role="group" aria-label={label}><dt>{label}</dt><dd>{children}</dd></div>;
+const Stat = ({ label, children }: { label: string; children: ReactNode }): ReactNode => (
+  <div role="group" aria-label={label}>
+    <dt>{label}</dt>
+    <dd>{children}</dd>
+  </div>
+);
 
 /**
  * What the account is worth in gold, under the wallet it belongs to.
@@ -91,7 +105,9 @@ function AccountWorth({ held }: { held: CharacterGold }): ReactNode {
   const eldest = held.oldest ? ` · eldest read ${ago(held.oldest)}` : "";
   return (
     <p className="profile-where sub">
-      <span className="account-total">{gold(held.accountTotal)} across the account</span>{pot}{eldest}
+      <span className="account-total">{gold(held.accountTotal)} across the account</span>
+      {pot}
+      {eldest}
     </p>
   );
 }
@@ -112,7 +128,13 @@ function AccountWorth({ held }: { held: CharacterGold }): ReactNode {
  * a currency the game draws nothing for is a row with a blank in that column rather than a row
  * that waits for something.
  */
-function Currencies({ entry, icons }: { entry: CharacterProfile; icons: CurrencyIcons }): ReactNode {
+function Currencies({
+  entry,
+  icons,
+}: {
+  entry: CharacterProfile;
+  icons: CurrencyIcons;
+}): ReactNode {
   // The book is a cache outside React, so a picture landing changes nothing React would notice.
   // This is what turns an arrival into a redraw, and it asks for the whole table at once rather
   // than a row at a time — the rows would each ask for themselves anyway.
@@ -131,8 +153,12 @@ function Currencies({ entry, icons }: { entry: CharacterProfile; icons: Currency
         <thead>
           <tr>
             <th scope="col">Currency</th>
-            <th scope="col" className="number">Held</th>
-            <th scope="col" className="number">Account</th>
+            <th scope="col" className="number">
+              Held
+            </th>
+            <th scope="col" className="number">
+              Account
+            </th>
             <th scope="col">Read</th>
           </tr>
         </thead>
@@ -146,9 +172,9 @@ function Currencies({ entry, icons }: { entry: CharacterProfile; icons: Currency
                     {picture ? <img src={picture} alt="" /> : null}
                   </span>
                   {held.name}
-                  {held.accountWide
-                    ? <span className="chip">shared across the warband</span>
-                    : null}
+                  {held.accountWide ? (
+                    <span className="chip">shared across the warband</span>
+                  ) : null}
                 </th>
                 <td className="number">{held.total.toLocaleString()}</td>
                 <td className="number muted">
@@ -193,7 +219,9 @@ function Factions({ entry }: { entry: CharacterProfile }): ReactNode {
           {entry.factions.map((standing) => (
             <tr key={standing.faction}>
               <th scope="row">{standing.faction}</th>
-              <td><StandingBar standing={standing} faction={standing.faction} /></td>
+              <td>
+                <StandingBar standing={standing} faction={standing.faction} />
+              </td>
               <td className="muted">{leaderOf(standing)}</td>
             </tr>
           ))}

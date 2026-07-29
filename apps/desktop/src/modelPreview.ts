@@ -11,9 +11,7 @@ import { isHeld } from "./transmogModal";
 import type { WornPiece } from "./types";
 
 /** Whether a row of a set is something the character can wear, and what it is if not. */
-export type Wearable =
-  | { kind: "worn"; piece: WornPiece }
-  | { kind: "nowhere"; note: string };
+export type Wearable = { kind: "worn"; piece: WornPiece } | { kind: "nowhere"; note: string };
 
 /**
  * What the pane says about what it is showing, and what a row that cannot be worn says.

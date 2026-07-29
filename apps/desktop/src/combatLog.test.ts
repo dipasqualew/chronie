@@ -41,7 +41,10 @@ describe("stateSentence", () => {
   // A log without the advanced flag has no positions in it, so it is useless for the thing
   // Chronie wants it for — and the fix is a box in the game, named here as the game names it.
   it("names the box to tick when logging is on without the advanced flag", () => {
-    const sentence = stateSentence(status({ state: "basic", advanced: false, growing: false }), NOW);
+    const sentence = stateSentence(
+      status({ state: "basic", advanced: false, growing: false }),
+      NOW,
+    );
 
     expect(sentence).toContain("advanced combat logging is off");
     expect(sentence).toContain("no positions");
@@ -54,7 +57,10 @@ describe("stateSentence", () => {
   // field is nullable at all, and reporting it as "off" would send a reader to tick a box
   // that may well already be ticked.
   it.each<[string, CombatLogStatus]>([
-    ["a config that read back as nothing", status({ state: "basic", advanced: null, growing: false })],
+    [
+      "a config that read back as nothing",
+      status({ state: "basic", advanced: null, growing: false }),
+    ],
     // The same install described by a backend that left the field out altogether.
     ["a status that never mentioned it", { requested: true, growing: false, state: "basic" }],
   ])("admits it cannot confirm the advanced flag given %s", (_case, unknown) => {
@@ -66,15 +72,20 @@ describe("stateSentence", () => {
   });
 
   it("simply confirms an install that is doing it properly", () => {
-    expect(stateSentence(status(), NOW))
-      .toBe("Advanced combat logging is on, and the game is writing to it.");
+    expect(stateSentence(status(), NOW)).toBe(
+      "Advanced combat logging is on, and the game is writing to it.",
+    );
   });
 
   // How long ago is the whole content of this one: "nothing since Tuesday" is a problem and
   // "nothing for ten minutes" is a game that happens to be shut.
   it("carries how long a set-up install has been writing nothing", () => {
     const sentence = stateSentence(
-      status({ state: "stale", growing: false, log: { name: "WoWCombatLog.txt", bytes: 12, modified: NOW - 3 * DAY } }),
+      status({
+        state: "stale",
+        growing: false,
+        log: { name: "WoWCombatLog.txt", bytes: 12, modified: NOW - 3 * DAY },
+      }),
       NOW,
     );
 
@@ -110,20 +121,23 @@ describe("stateSentence", () => {
 
 describe("evidence", () => {
   it("names the newest log, its size and its age, so the sentence above can be checked", () => {
-    expect(evidence(status(), NOW)[0])
-      .toBe("Newest log: WoWCombatLog-072612_183012.txt — 4.2 MB, last written an hour ago.");
+    expect(evidence(status(), NOW)[0]).toBe(
+      "Newest log: WoWCombatLog-072612_183012.txt — 4.2 MB, last written an hour ago.",
+    );
   });
 
   it("says outright when the game's Logs folder holds nothing", () => {
-    expect(evidence(status({ log: null }), NOW)[0])
-      .toBe("No combat log found in the game's Logs folder.");
+    expect(evidence(status({ log: null }), NOW)[0]).toBe(
+      "No combat log found in the game's Logs folder.",
+    );
   });
 
   // A filesystem that will not date a file still has one, and the row is worth keeping: the
   // name and the size are the two things a reader can go and look at.
   it("keeps a log a filesystem will not date, and says the date is what is missing", () => {
-    expect(evidence(status({ log: { name: "WoWCombatLog.txt", bytes: 900, modified: null } }), NOW)[0])
-      .toBe("Newest log: WoWCombatLog.txt — 900 bytes, with no date this machine will report.");
+    expect(
+      evidence(status({ log: { name: "WoWCombatLog.txt", bytes: 900, modified: null } }), NOW)[0],
+    ).toBe("Newest log: WoWCombatLog.txt — 900 bytes, with no date this machine will report.");
   });
 
   it.each<[boolean, string]>([
@@ -134,7 +148,8 @@ describe("evidence", () => {
   });
 
   it("says the advanced flag is unknown when no config could be read", () => {
-    expect(evidence(status({ source: null, advanced: null }), NOW)[1])
-      .toBe("No game config could be read, so the advanced setting is unknown.");
+    expect(evidence(status({ source: null, advanced: null }), NOW)[1]).toBe(
+      "No game config could be read, so the advanced setting is unknown.",
+    );
   });
 });

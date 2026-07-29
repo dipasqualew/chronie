@@ -31,7 +31,16 @@ import type { TransmogAppearance, TransmogSetItemsPayload } from "./types";
  * out — 11 is a sword and a two-hander alike, 15 is a tome and a shield is 13.
  */
 const SLOTS = [
-  "Head", "Shoulder", "Shirt", "Chest", "Waist", "Legs", "Feet", "Wrist", "Hands", "Back",
+  "Head",
+  "Shoulder",
+  "Shirt",
+  "Chest",
+  "Waist",
+  "Legs",
+  "Feet",
+  "Wrist",
+  "Hands",
+  "Back",
   "Tabard",
 ] as const;
 
@@ -201,7 +210,10 @@ export interface AppearanceRow {
 const NOISE = new Set(["of", "the", "a", "and", "for"]);
 
 function distinctive(text: string): Set<string> {
-  const words = text.toLowerCase().replace(/[^a-z ]+/g, " ").split(/\s+/);
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z ]+/g, " ")
+    .split(/\s+/);
   return new Set(words.filter((word) => word.length > 1 && !NOISE.has(word)));
 }
 
@@ -243,9 +255,11 @@ function named(sources: AppearanceSource[], setName: string): AppearanceSource {
  */
 function byUsefulness(left: AppearanceSource, right: AppearanceSource): number {
   const open = (source: AppearanceSource): number => (source.allowableClass === ANY_CLASS ? 0 : 1);
-  return open(left) - open(right)
-    || left.requiredLevel - right.requiredLevel
-    || left.itemId - right.itemId;
+  return (
+    open(left) - open(right) ||
+    left.requiredLevel - right.requiredLevel ||
+    left.itemId - right.itemId
+  );
 }
 
 /**
@@ -263,9 +277,9 @@ function fold(sources: AppearanceSource[]): AppearanceSource[] {
   const folded: AppearanceSource[] = [];
   const seen = new Map<string, AppearanceSource>();
   for (const source of sources) {
-    const key = [
-      source.label, source.allowableClass, source.requiredLevel, source.quality,
-    ].join(" ");
+    const key = [source.label, source.allowableClass, source.requiredLevel, source.quality].join(
+      " ",
+    );
     const already = seen.get(key);
     if (already) {
       already.itemCount += 1;
@@ -305,7 +319,9 @@ export function itemsBehind(row: AppearanceRow): number {
  * saying nothing. This is what the view asks before it draws a column.
  */
 export function varyingFacts(row: AppearanceRow): {
-  allowableClass: boolean; requiredLevel: boolean; quality: boolean;
+  allowableClass: boolean;
+  requiredLevel: boolean;
+  quality: boolean;
 } {
   const many = (pick: (source: AppearanceSource) => number): boolean =>
     new Set(row.sources.map(pick)).size > 1;
@@ -332,7 +348,14 @@ export function wearerLabel(allowableClass: number): string {
 
 /** The colour the game writes an item's name in, as the game's own word for it. */
 const QUALITIES = [
-  "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Artifact", "Heirloom",
+  "Poor",
+  "Common",
+  "Uncommon",
+  "Rare",
+  "Epic",
+  "Legendary",
+  "Artifact",
+  "Heirloom",
 ] as const;
 
 export function qualityLabel(quality: number): string {
@@ -355,10 +378,7 @@ export function qualityLabel(quality: number): string {
  *
  * The set's name is here because the rows are named out of it — see [`named`].
  */
-export function appearanceRows(
-  payload: TransmogSetItemsPayload,
-  setName = "",
-): AppearanceRow[] {
+export function appearanceRows(payload: TransmogSetItemsPayload, setName = ""): AppearanceRow[] {
   const rows: AppearanceRow[] = [];
   const byAppearance = new Map<number, AppearanceRow>();
   const seenSource = new Set<string>();
@@ -412,8 +432,9 @@ export function appearanceRows(
 
   for (const row of rows) {
     row.sources = fold(row.sources.sort(byUsefulness));
-    row.liftsRestriction = row.sources.some((one) => one.allowableClass === ANY_CLASS)
-      && row.sources.some((one) => one.allowableClass !== ANY_CLASS && one.allowableClass !== 0);
+    row.liftsRestriction =
+      row.sources.some((one) => one.allowableClass === ANY_CLASS) &&
+      row.sources.some((one) => one.allowableClass !== ANY_CLASS && one.allowableClass !== 0);
     if (!row.withheld) {
       // The name, the item behind it and the place it is worn all come off the same source.
       // The first two decide what the row says and where its link goes; the third decides
@@ -453,8 +474,7 @@ export function appearanceSummary(rows: AppearanceRow[], payload: TransmogSetIte
   if (!rows.length) return "The game lists no appearances for this set.";
   const items = rows.reduce((total, row) => total + itemsBehind(row), 0);
   const from = items > rows.length ? ` from ${plural(items, "item")}` : "";
-  const withheld = payload.withheldCount > 0
-    ? ` · ${payload.withheldCount} the game keeps encrypted`
-    : "";
+  const withheld =
+    payload.withheldCount > 0 ? ` · ${payload.withheldCount} the game keeps encrypted` : "";
   return `${plural(rows.length, "appearance")}${from}${withheld}`;
 }

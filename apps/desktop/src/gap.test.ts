@@ -63,13 +63,12 @@ describe("gapEvidence", () => {
     expect(lines.join(" ")).toContain("Nothing recovers those segments");
   });
 
-  it.each([
-    ["unknown"],
-    ["live"],
-    ["complete"],
-  ] as const)("has nothing to show for a %s answer", (kind) => {
-    expect(gapEvidence({ kind } as SessionGap)).toEqual([]);
-  });
+  it.each([["unknown"], ["live"], ["complete"]] as const)(
+    "has nothing to show for a %s answer",
+    (kind) => {
+      expect(gapEvidence({ kind } as SessionGap)).toEqual([]);
+    },
+  );
 
   it("has nothing to show before the backend has answered", () => {
     expect(gapEvidence(null)).toEqual([]);

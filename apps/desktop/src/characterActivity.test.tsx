@@ -38,19 +38,25 @@ const segment = (overrides: Partial<Segment> = {}): Segment => {
 };
 
 /** An install that can describe nothing, which is what most of these rows draw against. */
-const book = (): ItemBook => createItemBook({
-  load: () => Promise.resolve({ items: {} }),
-  loadIcons: () => Promise.resolve({ icons: {} }),
-});
+const book = (): ItemBook =>
+  createItemBook({
+    load: () => Promise.resolve({ items: {} }),
+    loadIcons: () => Promise.resolve({ icons: {} }),
+  });
 
 /** Yesterday's evening: one Mythic+ run that also earned a mount. */
 const RECENT = segment({
   day: "2027-01-15",
   endedAt: NOW - DAY,
-  activities: [{
-    id: 1, kind: "mythic_plus", source: "manual", confidence: 1,
-    metadata: { keystoneLevel: 14, dungeon: "Glass Caverns" },
-  }],
+  activities: [
+    {
+      id: 1,
+      kind: "mythic_plus",
+      source: "manual",
+      confidence: 1,
+      metadata: { keystoneLevel: 14, dungeon: "Glass Caverns" },
+    },
+  ],
   mounts: [{ id: 500, name: "Clockwork Glider", at: NOW - DAY }],
 });
 
@@ -60,10 +66,15 @@ const OLD = segment({
   instance: "Copperwood Depths",
   startedAt: NOW - 40 * DAY,
   endedAt: NOW - 40 * DAY + 600,
-  activities: [{
-    id: 2, kind: "progress_raid", source: "manual", confidence: 1,
-    metadata: { raid: "Emberforge" },
-  }],
+  activities: [
+    {
+      id: 2,
+      kind: "progress_raid",
+      source: "manual",
+      confidence: 1,
+      metadata: { raid: "Emberforge" },
+    },
+  ],
 });
 
 function show(segments: Segment[], range = "fortnight") {
@@ -72,7 +83,11 @@ function show(segments: Segment[], range = "fortnight") {
   const onOpenSegment = vi.fn();
   const drawn = render(
     <CharacterActivity
-      entry={entry} range={range} onRange={onRange} now={NOW} items={book()}
+      entry={entry}
+      range={range}
+      onRange={onRange}
+      now={NOW}
+      items={book()}
       onOpenSegment={onOpenSegment}
     />,
   );
@@ -94,17 +109,20 @@ describe("CharacterActivity", () => {
     show([RECENT, OLD]);
 
     expect(screen.queryByText(/Progress raid/)).toBeNull();
-    expect(screen.getByRole("status", { name: "What the range holds" }).textContent)
-      .toContain("1 segment");
+    expect(screen.getByRole("status", { name: "What the range holds" }).textContent).toContain(
+      "1 segment",
+    );
   });
 
   it("takes in the older night once the range is widened", () => {
     show([RECENT, OLD], "all");
 
-    expect(screen.getByRole("list", { name: "What was done" }).textContent)
-      .toContain("Progress raid");
-    expect(screen.getByRole("status", { name: "What the range holds" }).textContent)
-      .toContain("2 segments");
+    expect(screen.getByRole("list", { name: "What was done" }).textContent).toContain(
+      "Progress raid",
+    );
+    expect(screen.getByRole("status", { name: "What the range holds" }).textContent).toContain(
+      "2 segments",
+    );
   });
 
   it("hands the chosen range back rather than keeping it", () => {
@@ -167,8 +185,11 @@ describe("CharacterActivity", () => {
     it("holds only the ones the range holds", () => {
       show([RECENT, OLD]);
 
-      expect(within(screen.getByRole("group", { name: "Every segment in this range" }))
-        .getByText("1 segment")).toBeTruthy();
+      expect(
+        within(screen.getByRole("group", { name: "Every segment in this range" })).getByText(
+          "1 segment",
+        ),
+      ).toBeTruthy();
     });
 
     /**
@@ -180,10 +201,9 @@ describe("CharacterActivity", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /^Open segment:/ }));
 
-      expect(shown.onOpenSegment).toHaveBeenCalledWith(
-        RECENT.segmentId,
-        [expect.objectContaining({ segmentId: RECENT.segmentId })],
-      );
+      expect(shown.onOpenSegment).toHaveBeenCalledWith(RECENT.segmentId, [
+        expect.objectContaining({ segmentId: RECENT.segmentId }),
+      ]);
     });
   });
 });

@@ -37,7 +37,9 @@ describe("buildCharacters", () => {
   it("folds a history into one profile per character", () => {
     const profiles = buildCharacters([
       ...played("Aster-Vale", [{ startedAt: BASE, endedAt: BASE + 600 }]),
-      ...played("Brin-Hearth", [{ startedAt: BASE + 900, endedAt: BASE + 1500, classFile: "DRUID" }]),
+      ...played("Brin-Hearth", [
+        { startedAt: BASE + 900, endedAt: BASE + 1500, classFile: "DRUID" },
+      ]),
       ...played("Aster-Vale", [{ startedAt: BASE + 1800, endedAt: BASE + 2400 }]),
     ]);
 
@@ -58,12 +60,28 @@ describe("buildCharacters", () => {
   });
 
   it("adds up the numbers and remembers when they were first and last seen", () => {
-    const [profile] = buildCharacters(played("Aster-Vale", [
-      { startedAt: BASE, endedAt: BASE + 600, seconds: 600, lootValue: 15_000, goldDiff: 900, day: "2026-07-25" },
-      { startedAt: BASE + 86_400, endedAt: BASE + 87_600, seconds: 1200, lootValue: 5000, goldDiff: -1200, day: "2026-07-26" },
-      // Same day as the one before it, so the day count is three segments over two days.
-      { startedAt: BASE + 90_000, endedAt: BASE + 90_300, seconds: 300, day: "2026-07-26" },
-    ]));
+    const [profile] = buildCharacters(
+      played("Aster-Vale", [
+        {
+          startedAt: BASE,
+          endedAt: BASE + 600,
+          seconds: 600,
+          lootValue: 15_000,
+          goldDiff: 900,
+          day: "2026-07-25",
+        },
+        {
+          startedAt: BASE + 86_400,
+          endedAt: BASE + 87_600,
+          seconds: 1200,
+          lootValue: 5000,
+          goldDiff: -1200,
+          day: "2026-07-26",
+        },
+        // Same day as the one before it, so the day count is three segments over two days.
+        { startedAt: BASE + 90_000, endedAt: BASE + 90_300, seconds: 300, day: "2026-07-26" },
+      ]),
+    );
 
     expect(profile.seconds).toBe(2100);
     expect(profile.segmentCount).toBe(3);
@@ -75,11 +93,13 @@ describe("buildCharacters", () => {
   });
 
   it("keeps the segments newest first, which is the order the modal walks", () => {
-    const [profile] = buildCharacters(played("Aster-Vale", [
-      { startedAt: BASE, instance: "First" },
-      { startedAt: BASE + 600, instance: "Second" },
-      { startedAt: BASE + 1200, instance: "Third" },
-    ]));
+    const [profile] = buildCharacters(
+      played("Aster-Vale", [
+        { startedAt: BASE, instance: "First" },
+        { startedAt: BASE + 600, instance: "Second" },
+        { startedAt: BASE + 1200, instance: "Third" },
+      ]),
+    );
 
     expect(profile.segments.map((entry) => entry.instance)).toEqual(["Third", "Second", "First"]);
   });
@@ -87,11 +107,9 @@ describe("buildCharacters", () => {
   // A level only ever goes up, and a segment recorded before the addon was reading one says
   // nothing rather than saying zero.
   it("takes the highest level ever seen, ignoring the segments that name none", () => {
-    const [profile] = buildCharacters(played("Aster-Vale", [
-      { level: 11 },
-      { level: null },
-      { level: 12 },
-    ]));
+    const [profile] = buildCharacters(
+      played("Aster-Vale", [{ level: 11 }, { level: null }, { level: 12 }]),
+    );
 
     expect(profile.level).toBe(12);
   });
@@ -105,32 +123,38 @@ describe("buildCharacters", () => {
   // A class never changes, but a segment recorded before the addon collected one has none —
   // so the newest segment that names a class is the one to believe.
   it("believes the newest segment that names a class", () => {
-    const [profile] = buildCharacters(played("Aster-Vale", [
-      { startedAt: BASE, classFile: null },
-      { startedAt: BASE + 600, classFile: "MAGE" },
-      { startedAt: BASE + 1200, classFile: null },
-    ]));
+    const [profile] = buildCharacters(
+      played("Aster-Vale", [
+        { startedAt: BASE, classFile: null },
+        { startedAt: BASE + 600, classFile: "MAGE" },
+        { startedAt: BASE + 1200, classFile: null },
+      ]),
+    );
 
     expect(profile.classFile).toBe("MAGE");
   });
 
   // Where the hours went, not where the most separate visits happen to have been recorded.
   it("names the places by the time spent in them", () => {
-    const [profile] = buildCharacters(played("Aster-Vale", [
-      { instance: "Copperwood", seconds: 120 },
-      { instance: "Copperwood", seconds: 120 },
-      { instance: "Copperwood", seconds: 120 },
-      { instance: "Glass Caverns", seconds: 1800 },
-    ]));
+    const [profile] = buildCharacters(
+      played("Aster-Vale", [
+        { instance: "Copperwood", seconds: 120 },
+        { instance: "Copperwood", seconds: 120 },
+        { instance: "Copperwood", seconds: 120 },
+        { instance: "Glass Caverns", seconds: 1800 },
+      ]),
+    );
 
     expect(profile.places).toEqual(["Glass Caverns", "Copperwood"]);
   });
 
   it("summarises everything the character ever earned", () => {
-    const [profile] = buildCharacters(played("Aster-Vale", [
-      { mounts: [{ id: 11, name: "Clockwork Glider" }] },
-      { levelUps: [{ level: 12 }] },
-    ]));
+    const [profile] = buildCharacters(
+      played("Aster-Vale", [
+        { mounts: [{ id: 11, name: "Clockwork Glider" }] },
+        { levelUps: [{ level: 12 }] },
+      ]),
+    );
 
     expect(profile.highlights.map((entry) => entry.label)).toContain("Clockwork Glider");
     expect(profile.highlights.map((entry) => entry.label)).toContain("Level 12");
@@ -197,8 +221,22 @@ describe("buildCharacters against what the account holds", () => {
         faction: "Cavern Cartographers",
         best: { character: "Brin-Hearth", standing: "Revered", rank: 7, system: "reaction" },
         characters: [
-          { character: "Aster-Vale", standing: "Honored", current: 4200, max: 12_000, rank: 6, system: "reaction" },
-          { character: "Brin-Hearth", standing: "Revered", current: 3000, max: 21_000, rank: 7, system: "reaction" },
+          {
+            character: "Aster-Vale",
+            standing: "Honored",
+            current: 4200,
+            max: 12_000,
+            rank: 6,
+            system: "reaction",
+          },
+          {
+            character: "Brin-Hearth",
+            standing: "Revered",
+            current: 3000,
+            max: 21_000,
+            rank: 7,
+            system: "reaction",
+          },
         ],
       },
       {
@@ -215,14 +253,34 @@ describe("buildCharacters against what the account holds", () => {
     ],
   };
 
-  const profileFor = (name: string) =>
-    buildCharacters(played(name, [{}]), holdings)[0];
+  const profileFor = (name: string) => buildCharacters(played(name, [{}]), holdings)[0];
 
   it("gives a character only what they are holding themselves, biggest first", () => {
     expect(profileFor("Aster-Vale").currencies).toEqual([
-      { id: 8, name: "Rustward Scrip", total: 20_000, accountTotal: 20_000, at: BASE + 100, accountWide: false },
-      { id: 7, name: "Glass Token", total: 12_450, accountTotal: 30_000, at: BASE + 100, accountWide: false },
-      { id: 10, name: "Warband Chit", total: 6_000, accountTotal: 6_000, at: BASE + 100, accountWide: true },
+      {
+        id: 8,
+        name: "Rustward Scrip",
+        total: 20_000,
+        accountTotal: 20_000,
+        at: BASE + 100,
+        accountWide: false,
+      },
+      {
+        id: 7,
+        name: "Glass Token",
+        total: 12_450,
+        accountTotal: 30_000,
+        at: BASE + 100,
+        accountWide: false,
+      },
+      {
+        id: 10,
+        name: "Warband Chit",
+        total: 6_000,
+        accountTotal: 6_000,
+        at: BASE + 100,
+        accountWide: true,
+      },
     ]);
   });
 
@@ -271,8 +329,11 @@ describe("buildCharacters against what the account holds", () => {
   it("gives them the standings they have, furthest along first", () => {
     const factions = profileFor("Aster-Vale").factions;
 
-    expect(factions.map((entry) => entry.faction))
-      .toEqual(["Deepwater Wardens", "Cavern Cartographers", "Lamplighters"]);
+    expect(factions.map((entry) => entry.faction)).toEqual([
+      "Deepwater Wardens",
+      "Cavern Cartographers",
+      "Lamplighters",
+    ]);
     expect(factions[1].standing).toBe("Honored");
   });
 
@@ -292,17 +353,26 @@ describe("buildCharacters against what the account holds", () => {
   it("carries the furthest anybody on the account has got, whoever that is", () => {
     const factions = profileFor("Aster-Vale").factions;
 
-    expect(factions.find((entry) => entry.faction === "Cavern Cartographers")?.best)
-      .toEqual({ character: "Brin-Hearth", standing: "Revered", rank: 7, system: "reaction" });
-    expect(factions.find((entry) => entry.faction === "Deepwater Wardens")?.best)
-      .toEqual({ character: "Aster-Vale", standing: "Exalted", rank: 8, system: "reaction" });
+    expect(factions.find((entry) => entry.faction === "Cavern Cartographers")?.best).toEqual({
+      character: "Brin-Hearth",
+      standing: "Revered",
+      rank: 7,
+      system: "reaction",
+    });
+    expect(factions.find((entry) => entry.faction === "Deepwater Wardens")?.best).toEqual({
+      character: "Aster-Vale",
+      standing: "Exalted",
+      rank: 8,
+      system: "reaction",
+    });
   });
 
   // Nobody's standing with it could be placed on a ladder at all, which is a different thing
   // from nobody being ahead — and a column that invented a leader would be inventing one.
   it("has no account leader for a faction no standing could be placed on", () => {
-    const lamplighters = profileFor("Aster-Vale").factions
-      .find((entry) => entry.faction === "Lamplighters");
+    const lamplighters = profileFor("Aster-Vale").factions.find(
+      (entry) => entry.faction === "Lamplighters",
+    );
 
     expect(lamplighters?.best).toBeNull();
     expect(lamplighters?.leads).toBe(false);

@@ -27,8 +27,9 @@ const ALLIANCE = 1;
 
 /** The ids a segment names, without the repeats and without the ones that are not ids. */
 export function achievementIds(segment: Segment): number[] {
-  return [...new Set(eventsOf(segment, "achievements").map((event) => event.id))]
-    .filter((id) => id > 0);
+  return [...new Set(eventsOf(segment, "achievements").map((event) => event.id))].filter(
+    (id) => id > 0,
+  );
 }
 
 /** One achievement as a row reads it, with everything the markup needs already decided. */
@@ -110,7 +111,10 @@ export interface AchievementBook {
  * never reported, because a row that says what the addon recorded is what the app showed
  * before any of this, and an apology in its place would be worse.
  */
-export function createAchievementBook({ load, loadIcons }: AchievementBookOptions): AchievementBook {
+export function createAchievementBook({
+  load,
+  loadIcons,
+}: AchievementBookOptions): AchievementBook {
   const known = new Map<number, AchievementDetail>();
   const icons = new Map<number, string>();
   /** Ids a request has already been made for, whatever it came back with. */
@@ -134,8 +138,9 @@ export function createAchievementBook({ load, loadIcons }: AchievementBookOption
       changed();
     }
 
-    const pictures = [...new Set(ids.map((id) => known.get(id)?.iconFileDataId ?? 0))]
-      .filter((fdid) => fdid > 0 && !askedIcons.has(fdid));
+    const pictures = [...new Set(ids.map((id) => known.get(id)?.iconFileDataId ?? 0))].filter(
+      (fdid) => fdid > 0 && !askedIcons.has(fdid),
+    );
     if (!pictures.length) return;
     for (const fdid of pictures) askedIcons.add(fdid);
     try {

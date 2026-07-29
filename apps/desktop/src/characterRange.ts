@@ -51,8 +51,10 @@ const DAY_SECONDS = 86_400;
 
 /** The range a key names, falling back to the default rather than to nothing. */
 export function rangeOf(key: string): Range {
-  return RANGES.find((range) => range.key === key)
-    ?? RANGES.find((range) => range.key === DEFAULT_RANGE)!;
+  return (
+    RANGES.find((range) => range.key === key) ??
+    RANGES.find((range) => range.key === DEFAULT_RANGE)!
+  );
 }
 
 /**

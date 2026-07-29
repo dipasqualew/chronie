@@ -51,19 +51,19 @@ export interface CharacterFigureProps {
 
 /** What one set turned out to be worth drawing: the model, or the reason there is none. */
 type Portrait =
-  | { kind: "reading" }
-  | { kind: "drawn"; glb: string }
-  | { kind: "nothing"; note: string };
+  { kind: "reading" } | { kind: "drawn"; glb: string } | { kind: "nothing"; note: string };
 
 /** A set with nothing in it is a set the player made and has not filled, and cannot be worn. */
 const filled = (sets: InGameSet[] | null): InGameSet[] =>
   (sets ?? []).filter((set) => set.slots.length > 0);
 
-export function CharacterFigure(
-  {
-    character, sets, loadAppearances, loadWorn, createGalleryStage = lazyGalleryStage,
-  }: CharacterFigureProps,
-): ReactNode {
+export function CharacterFigure({
+  character,
+  sets,
+  loadAppearances,
+  loadWorn,
+  createGalleryStage = lazyGalleryStage,
+}: CharacterFigureProps): ReactNode {
   const wearable = filled(sets);
   // Held by set id rather than by position, so a sync that adds a set does not silently move
   // the reader onto somebody else's clothes. Null means "whichever is first", which is what a
@@ -81,30 +81,36 @@ export function CharacterFigure(
 
   const paint = useGalleryPaint(true, createGalleryStage);
 
-  const read = useCallback(async (key: string, set: InGameSet): Promise<void> => {
-    try {
-      const opened = await loadAppearances(appearanceIds(set));
-      const pieces = wornFrom(opened.appearances);
-      if (!pieces.length) {
-        known.set(key, { kind: "nothing", note: NOTHING_TO_WEAR });
-        return;
+  const read = useCallback(
+    async (key: string, set: InGameSet): Promise<void> => {
+      try {
+        const opened = await loadAppearances(appearanceIds(set));
+        const pieces = wornFrom(opened.appearances);
+        if (!pieces.length) {
+          known.set(key, { kind: "nothing", note: NOTHING_TO_WEAR });
+          return;
+        }
+        const worn = await loadWorn(character, pieces);
+        known.set(
+          key,
+          worn.model
+            ? { kind: "drawn", glb: worn.model }
+            : { kind: "nothing", note: NOTHING_TO_DRAW },
+        );
+      } catch (error: unknown) {
+        // Worth saying, because on a machine with no game installed this is the failure a reader
+        // meets on every character — and a blank frame would look like a bug in Chronie rather
+        // than like an app that cannot reach the game's files.
+        known.set(key, {
+          kind: "nothing",
+          note: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        redraw((count) => count + 1);
       }
-      const worn = await loadWorn(character, pieces);
-      known.set(key, worn.model
-        ? { kind: "drawn", glb: worn.model }
-        : { kind: "nothing", note: NOTHING_TO_DRAW });
-    } catch (error: unknown) {
-      // Worth saying, because on a machine with no game installed this is the failure a reader
-      // meets on every character — and a blank frame would look like a bug in Chronie rather
-      // than like an app that cannot reach the game's files.
-      known.set(key, {
-        kind: "nothing",
-        note: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      redraw((count) => count + 1);
-    }
-  }, [character, loadAppearances, loadWorn, known]);
+    },
+    [character, loadAppearances, loadWorn, known],
+  );
 
   const key = showing ? `${character}:${showing.id}` : "";
   useEffect(() => {
@@ -124,41 +130,49 @@ export function CharacterFigure(
   return (
     <figure className="figure" aria-label={`${character}, drawn`}>
       <div className="figure-stage">
-        {portrait?.kind === "drawn"
-          ? <Turnable
+        {portrait?.kind === "drawn" ? (
+          <Turnable
             // Keyed by the outfit, so moving to another set starts a fresh canvas rather than
             // repainting one that is still holding the last body's bitmap.
-            key={key} glb={portrait.glb} focus={WHOLE}
-            label={`${character} wearing ${name}`} paint={paint}
+            key={key}
+            glb={portrait.glb}
+            focus={WHOLE}
+            label={`${character} wearing ${name}`}
+            paint={paint}
           />
-          : <p className="figure-note muted">
+        ) : (
+          <p className="figure-note muted">
             {portrait?.kind === "nothing" ? portrait.note : figureWait(wearable.length)}
-          </p>}
+          </p>
+        )}
       </div>
-      {wearable.length > 1
-        ? <figcaption className="figure-pick">
+      {wearable.length > 1 ? (
+        <figcaption className="figure-pick">
           <label htmlFor={`figure-set-${character}`}>Wearing</label>
           <select
-            id={`figure-set-${character}`} value={showing?.id ?? ""}
+            id={`figure-set-${character}`}
+            value={showing?.id ?? ""}
             onChange={(event) => setChosen(Number(event.target.value))}
           >
             {wearable.map((set) => (
-              <option key={set.id} value={set.id}>{setLabel(set)}</option>
+              <option key={set.id} value={set.id}>
+                {setLabel(set)}
+              </option>
             ))}
           </select>
         </figcaption>
-        : wearable.length === 1
-          ? <figcaption className="figure-pick muted">Wearing {name}</figcaption>
-          : null}
+      ) : wearable.length === 1 ? (
+        <figcaption className="figure-pick muted">Wearing {name}</figcaption>
+      ) : null}
     </figure>
   );
 }
 
 /** What the frame says while there is nothing in it yet, which is two different silences. */
 const figureWait = (count: number): string =>
-  (count
+  count
     ? "Dressing the character…"
-    : "No transmog sets saved in game, so there is nothing to dress this character in.");
+    : "No transmog sets saved in game, so there is nothing to dress this character in.";
 
 /** Every piece of the set is one the game gives no place on a body. */
 const NOTHING_TO_WEAR = "Nothing in this set can be worn on a character.";

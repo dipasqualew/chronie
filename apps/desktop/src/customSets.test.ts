@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  filterCustomSets, piecesFrom, piecesInOrder, rowOf, rowsOf, savedSummary, setNamed,
+  filterCustomSets,
+  piecesFrom,
+  piecesInOrder,
+  rowOf,
+  rowsOf,
+  savedSummary,
+  setNamed,
 } from "./customSets";
 import { NO_MARK_FILTER } from "./marks";
 import { NOTHING_ON, wear } from "./outfit";
@@ -19,22 +25,41 @@ const row = (fields: Partial<AppearanceRow> = {}): AppearanceRow => ({
   displayInfoId: 900_012,
   iconFileDataId: 130_001,
   hasModel: false,
-  sources: [{
-    label: "Robe of Tides", itemId: 2, modifiedAppearanceId: 22, inventoryType: 0,
-    allowableClass: 0xffff, requiredLevel: 0, quality: 4, itemCount: 1,
-  }],
+  sources: [
+    {
+      label: "Robe of Tides",
+      itemId: 2,
+      modifiedAppearanceId: 22,
+      inventoryType: 0,
+      allowableClass: 0xffff,
+      requiredLevel: 0,
+      quality: 4,
+      itemCount: 1,
+    },
+  ],
   liftsRestriction: false,
   withheld: false,
   ...fields,
 });
 
 const HELM = row({
-  slot: "Head", label: "Crown of Tides", itemId: 1, appearanceId: 11,
-  displayType: 0, displayInfoId: 900_001, hasModel: true,
+  slot: "Head",
+  label: "Crown of Tides",
+  itemId: 1,
+  appearanceId: 11,
+  displayType: 0,
+  displayInfoId: 900_001,
+  hasModel: true,
 });
 const SWORD = row({
-  slot: "One-hand", label: "Emberforge Blade", itemId: 3, appearanceId: 33,
-  displayType: 11, inventoryType: 13, displayInfoId: 900_007, hasModel: true,
+  slot: "One-hand",
+  label: "Emberforge Blade",
+  itemId: 3,
+  appearanceId: 33,
+  displayType: 11,
+  inventoryType: 13,
+  displayInfoId: 900_007,
+  hasModel: true,
 });
 
 /** A stored piece with only what a test cares about spelled out. */
@@ -64,17 +89,19 @@ describe("piecesFrom", () => {
   it("writes down every number the row it came from carried", () => {
     const outfit = wear(NOTHING_ON, HELM, "Tideglass Regalia");
 
-    expect(piecesFrom(outfit)).toEqual([{
-      place: "armour-0",
-      appearanceId: 11,
-      itemId: 1,
-      name: "Crown of Tides",
-      displayType: 0,
-      inventoryType: 0,
-      displayInfoId: 900_001,
-      iconFileDataId: 130_001,
-      hasModel: true,
-    }]);
+    expect(piecesFrom(outfit)).toEqual([
+      {
+        place: "armour-0",
+        appearanceId: 11,
+        itemId: 1,
+        name: "Crown of Tides",
+        displayType: 0,
+        inventoryType: 0,
+        displayInfoId: 900_001,
+        iconFileDataId: 130_001,
+        hasModel: true,
+      },
+    ]);
   });
 
   // The place is the answer `outfit.ts` worked out and not the display type, which is the
@@ -86,8 +113,11 @@ describe("piecesFrom", () => {
   it("lists what she has on head downwards, whatever order it went on in", () => {
     const outfit = wear(wear(wear(NOTHING_ON, SWORD), row()), HELM);
 
-    expect(piecesFrom(outfit).map((one) => one.place))
-      .toEqual(["armour-0", "armour-3", "hand-right"]);
+    expect(piecesFrom(outfit).map((one) => one.place)).toEqual([
+      "armour-0",
+      "armour-3",
+      "hand-right",
+    ]);
   });
 
   it("has nothing to say about a character wearing nothing", () => {
@@ -153,8 +183,11 @@ describe("piecesInOrder", () => {
       ],
     });
 
-    expect(piecesInOrder(saved).map((one) => one.place))
-      .toEqual(["armour-0", "armour-6", "hand-right"]);
+    expect(piecesInOrder(saved).map((one) => one.place)).toEqual([
+      "armour-0",
+      "armour-6",
+      "hand-right",
+    ]);
   });
 
   // A set saved by a later Chronie that knew about a place this one does not: listed last
@@ -195,7 +228,8 @@ describe("filterCustomSets", () => {
 
   it("leaves every set alone when nothing is asked of it", () => {
     expect(names(filterCustomSets([HORDE, ALLIANCE], { search: "" }))).toEqual([
-      "Horde look", "Alliance look",
+      "Horde look",
+      "Alliance look",
     ]);
   });
 
@@ -206,19 +240,24 @@ describe("filterCustomSets", () => {
   // The thing neither browser beside this one can offer: somebody who remembers the piece and
   // not which of their sets it went into.
   it("matches what is in the set", () => {
-    expect(names(filterCustomSets([HORDE, ALLIANCE], { search: "crown" })))
-      .toEqual(["Alliance look"]);
+    expect(names(filterCustomSets([HORDE, ALLIANCE], { search: "crown" }))).toEqual([
+      "Alliance look",
+    ]);
   });
 
   it("wants every word rather than the whole phrase", () => {
-    expect(names(filterCustomSets([HORDE, ALLIANCE], { search: "alliance crown" })))
-      .toEqual(["Alliance look"]);
+    expect(names(filterCustomSets([HORDE, ALLIANCE], { search: "alliance crown" }))).toEqual([
+      "Alliance look",
+    ]);
     expect(filterCustomSets([HORDE, ALLIANCE], { search: "horde crown" })).toEqual([]);
   });
 
   const starred: TransmogMark = { kind: "custom", id: 1, favourite: true, tags: [] };
   const tagged: TransmogMark = {
-    kind: "custom", id: 2, favourite: false, tags: [{ key: "faction", value: "alliance" }],
+    kind: "custom",
+    id: 2,
+    favourite: false,
+    tags: [{ key: "faction", value: "alliance" }],
   };
   const marks = (filter = NO_MARK_FILTER) => ({
     filter,
@@ -226,38 +265,57 @@ describe("filterCustomSets", () => {
   });
 
   it("narrows to what the reader starred", () => {
-    expect(names(filterCustomSets([HORDE, ALLIANCE], {
-      search: "", marks: marks({ favourite: true, tag: "" }),
-    }))).toEqual(["Horde look"]);
+    expect(
+      names(
+        filterCustomSets([HORDE, ALLIANCE], {
+          search: "",
+          marks: marks({ favourite: true, tag: "" }),
+        }),
+      ),
+    ).toEqual(["Horde look"]);
   });
 
   it("narrows to one tag", () => {
-    expect(names(filterCustomSets([HORDE, ALLIANCE], {
-      search: "", marks: marks({ favourite: false, tag: "faction" }),
-    }))).toEqual(["Alliance look"]);
+    expect(
+      names(
+        filterCustomSets([HORDE, ALLIANCE], {
+          search: "",
+          marks: marks({ favourite: false, tag: "faction" }),
+        }),
+      ),
+    ).toEqual(["Alliance look"]);
   });
 
   // The same argument every search in this view makes: a word on the card is a word the reader
   // will type into the box, whether the game wrote it or they did.
   it("matches a word the reader filed it under", () => {
-    expect(names(filterCustomSets([HORDE, ALLIANCE], { search: "alliance", marks: marks() })))
-      .toEqual(["Alliance look"]);
+    expect(
+      names(filterCustomSets([HORDE, ALLIANCE], { search: "alliance", marks: marks() })),
+    ).toEqual(["Alliance look"]);
   });
 });
 
 describe("asking a saved set for one thing it says", () => {
   const HORDE = set({ id: 1, name: "Horde look" });
   const ALLIANCE = set({
-    id: 2, name: "Alliance look", pieces: [piece({ name: "Crown of Tides" })],
+    id: 2,
+    name: "Alliance look",
+    pieces: [piece({ name: "Crown of Tides" })],
   });
   const tagged: TransmogMark = {
-    kind: "custom", id: 2, favourite: false,
-    tags: [{ key: "faction", value: "alliance" }, { key: "wishlist", value: null }],
+    kind: "custom",
+    id: 2,
+    favourite: false,
+    tags: [
+      { key: "faction", value: "alliance" },
+      { key: "wishlist", value: null },
+    ],
   };
-  const found = (search: string): string[] => filterCustomSets([HORDE, ALLIANCE], {
-    search,
-    marks: { filter: NO_MARK_FILTER, of: (id) => (id === tagged.id ? tagged : undefined) },
-  }).map((one) => one.name);
+  const found = (search: string): string[] =>
+    filterCustomSets([HORDE, ALLIANCE], {
+      search,
+      marks: { filter: NO_MARK_FILTER, of: (id) => (id === tagged.id ? tagged : undefined) },
+    }).map((one) => one.name);
 
   // Two kinds of name on one card — the one the reader chose and the ones the game gave the
   // pieces — which the one flattened string this used to search could not tell apart.
@@ -311,8 +369,9 @@ describe("savedSummary", () => {
   // The last save rather than the first: a set saved over three times is three outfits, and
   // the reader is looking at the third.
   it("dates a set by when it was last saved over", () => {
-    expect(savedSummary(set({ createdAt: NOW - 864_000, updatedAt: NOW - 86_400 }), NOW))
-      .toBe("1 piece · saved yesterday");
+    expect(savedSummary(set({ createdAt: NOW - 864_000, updatedAt: NOW - 86_400 }), NOW)).toBe(
+      "1 piece · saved yesterday",
+    );
   });
 });
 

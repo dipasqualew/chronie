@@ -122,8 +122,19 @@ const QUALITIES: Record<number, string> = {
  * bits that happen to be set.
  */
 const CLASSES = [
-  "Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Death Knight", "Shaman", "Mage",
-  "Warlock", "Monk", "Druid", "Demon Hunter", "Evoker",
+  "Warrior",
+  "Paladin",
+  "Hunter",
+  "Rogue",
+  "Priest",
+  "Death Knight",
+  "Shaman",
+  "Mage",
+  "Warlock",
+  "Monk",
+  "Druid",
+  "Demon Hunter",
+  "Evoker",
 ];
 
 /** One item as a row reads it, with everything the markup needs already decided. */
@@ -172,18 +183,14 @@ export const itemName = (id: number, recorded?: string | null, detail?: ItemDeta
 /**
  * How a row reads, out of what the addon recorded and what the game could be asked.
  */
-export function itemLine(
-  id: number,
-  recorded?: string | null,
-  detail?: ItemDetail,
-): ItemLine {
+export function itemLine(id: number, recorded?: string | null, detail?: ItemDetail): ItemLine {
   const quality = detail && detail.name ? detail.quality : null;
   return {
     name: itemName(id, recorded, detail),
     quality,
-    qualityName: quality == null ? "" : QUALITIES[quality] ?? "",
+    qualityName: quality == null ? "" : (QUALITIES[quality] ?? ""),
     kind: kindOf(detail),
-    slot: detail ? SLOTS[detail.inventoryType] ?? "" : "",
+    slot: detail ? (SLOTS[detail.inventoryType] ?? "") : "",
     restriction: restrictionOf(detail),
     requirement: detail && detail.requiredLevel > 0 ? `Level ${detail.requiredLevel}` : "",
     iconFileDataId: detail?.iconFileDataId ?? 0,
@@ -262,9 +269,11 @@ export interface ItemBook {
  * never reported, because a row that says what the addon recorded is what the app showed
  * before any of this, and an apology in its place would be worse.
  */
-export function createItemBook(
-  { load, loadIcons, schedule = queueMicrotask }: ItemBookOptions,
-): ItemBook {
+export function createItemBook({
+  load,
+  loadIcons,
+  schedule = queueMicrotask,
+}: ItemBookOptions): ItemBook {
   const known = new Map<number, ItemDetail>();
   const icons = new Map<number, string>();
   /** Ids a request has already been made for, whatever it came back with. */
@@ -300,8 +309,9 @@ export function createItemBook(
     }
     tell();
 
-    const pictures = [...new Set(ids.map((id) => known.get(id)?.iconFileDataId ?? 0))]
-      .filter((fdid) => fdid > 0 && !askedIcons.has(fdid));
+    const pictures = [...new Set(ids.map((id) => known.get(id)?.iconFileDataId ?? 0))].filter(
+      (fdid) => fdid > 0 && !askedIcons.has(fdid),
+    );
     if (!pictures.length) return;
     for (const fdid of pictures) askedIcons.add(fdid);
     try {

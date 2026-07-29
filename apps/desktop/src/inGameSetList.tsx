@@ -26,7 +26,13 @@ import type { ReactNode } from "react";
 
 import { plural } from "./format";
 import {
-  appearanceIds, charactersWithSets, filterInGameSets, placeOfSlot, rowsOf, setLabel, setSummary,
+  appearanceIds,
+  charactersWithSets,
+  filterInGameSets,
+  placeOfSlot,
+  rowsOf,
+  setLabel,
+  setSummary,
 } from "./inGameSets";
 import type { Outfit } from "./outfit";
 import type { AppearanceRow } from "./transmogModal";
@@ -58,11 +64,16 @@ export interface InGameSetListProps {
 /** What an opened set turned out to be, or the sentence saying why it could not be opened. */
 type Opened = InGameSetAppearancesPayload | string;
 
-export function InGameSetList(
-  {
-    hidden, payload, loadAppearances, icons, wantIcons, outfit, onWear, onWearAll,
-  }: InGameSetListProps,
-): ReactNode {
+export function InGameSetList({
+  hidden,
+  payload,
+  loadAppearances,
+  icons,
+  wantIcons,
+  outfit,
+  onWear,
+  onWearAll,
+}: InGameSetListProps): ReactNode {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   // What each set turned out to be. Kept outside React for the reason the transmog view keeps
@@ -73,50 +84,63 @@ export function InGameSetList(
   const asked = useRef(new Set<string>()).current;
   const [, redraw] = useState(0);
 
-  const read = useCallback((key: string, set: InGameSet): void => {
-    if (asked.has(key)) return;
-    asked.add(key);
-    void loadAppearances(appearanceIds(set))
-      .then((answer) => {
-        known.set(key, answer);
-        redraw((count) => count + 1);
-        wantIcons(answer.appearances.map((one) => one.iconFileDataId).filter((id) => id > 0));
-      })
-      // Worth saying out loud, because the reader clicked to see what was in it — and on a
-      // machine with no game installed this is the failure they will meet every time.
-      .catch((error: unknown) => {
-        known.set(key, error instanceof Error ? error.message : String(error));
-        redraw((count) => count + 1);
+  const read = useCallback(
+    (key: string, set: InGameSet): void => {
+      if (asked.has(key)) return;
+      asked.add(key);
+      void loadAppearances(appearanceIds(set))
+        .then((answer) => {
+          known.set(key, answer);
+          redraw((count) => count + 1);
+          wantIcons(answer.appearances.map((one) => one.iconFileDataId).filter((id) => id > 0));
+        })
+        // Worth saying out loud, because the reader clicked to see what was in it — and on a
+        // machine with no game installed this is the failure they will meet every time.
+        .catch((error: unknown) => {
+          known.set(key, error instanceof Error ? error.message : String(error));
+          redraw((count) => count + 1);
+        });
+    },
+    [loadAppearances, wantIcons, known, asked],
+  );
+
+  const toggle = useCallback(
+    (key: string, set: InGameSet): void => {
+      setOpen((was) => {
+        const next = new Set(was);
+        if (next.has(key)) next.delete(key);
+        else {
+          next.add(key);
+          read(key, set);
+        }
+        return next;
       });
-  }, [loadAppearances, wantIcons, known, asked]);
+    },
+    [read],
+  );
 
-  const toggle = useCallback((key: string, set: InGameSet): void => {
-    setOpen((was) => {
-      const next = new Set(was);
-      if (next.has(key)) next.delete(key);
-      else {
-        next.add(key);
-        read(key, set);
-      }
-      return next;
-    });
-  }, [read]);
-
-  const characters = charactersWithSets(payload)
-    .map((entry) => ({ ...entry, sets: filterInGameSets(entry.sets, search) }));
+  const characters = charactersWithSets(payload).map((entry) => ({
+    ...entry,
+    sets: filterInGameSets(entry.sets, search),
+  }));
   const shown = characters.reduce((total, entry) => total + entry.sets.length, 0);
   const held = charactersWithSets(payload).reduce((total, one) => total + one.sets.length, 0);
 
   return (
     <section
-      className="panel mog-browser" id="ingame-sets" hidden={hidden}
+      className="panel mog-browser"
+      id="ingame-sets"
+      hidden={hidden}
       aria-label="The sets you saved in the game"
     >
       <div className="table-head">
         <div className="controls">
           <input
-            id="ingame-search" type="search" placeholder="Filter by name…"
-            aria-label="Filter the sets you saved in game" value={search}
+            id="ingame-search"
+            type="search"
+            placeholder="Filter by name…"
+            aria-label="Filter the sets you saved in game"
+            value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <span className="count" id="ingame-count">
@@ -133,8 +157,14 @@ export function InGameSetList(
                 const key = `${entry.character}:${set.id}`;
                 return (
                   <Card
-                    key={key} set={set} opened={known.get(key)} open={open.has(key)}
-                    icons={icons} outfit={outfit} onWear={onWear} onWearAll={onWearAll}
+                    key={key}
+                    set={set}
+                    opened={known.get(key)}
+                    open={open.has(key)}
+                    icons={icons}
+                    outfit={outfit}
+                    onWear={onWear}
+                    onWearAll={onWearAll}
                     onToggle={() => toggle(key, set)}
                   />
                 );
@@ -149,7 +179,9 @@ export function InGameSetList(
           is being told to try another. */}
       <div className="empty" hidden={!payload || characters.length > 0}>
         <p className="empty-title">No wardrobes read yet</p>
-        <p>Log a character in with the addon installed, and the sets they saved in game appear here.</p>
+        <p>
+          Log a character in with the addon installed, and the sets they saved in game appear here.
+        </p>
       </div>
       <div className="empty" hidden={!payload || characters.length === 0 || held > 0}>
         <p className="empty-title">No sets saved in game</p>
@@ -170,18 +202,25 @@ export function InGameSetList(
  * The head says how many pieces without opening anything, since the slots came out of Chronie's
  * database with the name — it is only what those slots *are* that costs.
  */
-function Card(
-  { set, opened, open, icons, outfit, onWear, onWearAll, onToggle }: {
-    set: InGameSet;
-    opened: Opened | undefined;
-    open: boolean;
-    icons: Map<number, string>;
-    outfit: Outfit;
-    onWear: (place: string, row: AppearanceRow) => void;
-    onWearAll: (set: InGameSet, pieces: { place: string; row: AppearanceRow }[]) => void;
-    onToggle: () => void;
-  },
-): ReactNode {
+function Card({
+  set,
+  opened,
+  open,
+  icons,
+  outfit,
+  onWear,
+  onWearAll,
+  onToggle,
+}: {
+  set: InGameSet;
+  opened: Opened | undefined;
+  open: boolean;
+  icons: Map<number, string>;
+  outfit: Outfit;
+  onWear: (place: string, row: AppearanceRow) => void;
+  onWearAll: (set: InGameSet, pieces: { place: string; row: AppearanceRow }[]) => void;
+  onToggle: () => void;
+}): ReactNode {
   const name = setLabel(set);
   // The rows come back in the order the appearances were asked for, which is slot order — see
   // `appearanceIds` — so the set's own slots line up with them one for one, and that is what
@@ -200,22 +239,23 @@ function Card(
       <div className="mog-foot">
         <span>{setSummary(set)}</span>
       </div>
-      {open
-        ? <div className="mog-contents">
-          {opened === undefined
-            ? <p className="mog-reading">Reading what is in it…</p>
-            : null}
-          {typeof opened === "string"
-            ? <p className="mark-failure" role="alert">{opened}</p>
-            : null}
-          {pieces.length
-            ? <div className="mog-contents-head">
+      {open ? (
+        <div className="mog-contents">
+          {opened === undefined ? <p className="mog-reading">Reading what is in it…</p> : null}
+          {typeof opened === "string" ? (
+            <p className="mark-failure" role="alert">
+              {opened}
+            </p>
+          ) : null}
+          {pieces.length ? (
+            <div className="mog-contents-head">
               <button
-                type="button" className="mog-wear-all"
+                type="button"
+                className="mog-wear-all"
                 onClick={() => onWearAll(set, wearablePieces(pieces))}
               >{`Wear all of ${name}`}</button>
             </div>
-            : null}
+          ) : null}
           <ul className="mog-items" aria-label={`Pieces of ${name}`}>
             {pieces.map(({ place, slot, row }, at) => (
               <Piece
@@ -225,7 +265,8 @@ function Card(
                 // By the look rather than by the row object, because the rows are rebuilt on every
                 // draw — and by the *set's* place rather than the row's, so an off-hand sword
                 // reads as worn in the hand the set put it in.
-                key={slot ?? at} row={row}
+                key={slot ?? at}
+                row={row}
                 worn={!!place && outfit[place]?.row.appearanceId === row.appearanceId}
                 icon={icons.get(row.iconFileDataId)}
                 onWear={place ? () => onWear(place, row) : undefined}
@@ -233,7 +274,7 @@ function Card(
             ))}
           </ul>
         </div>
-        : null}
+      ) : null}
     </article>
   );
 }
@@ -246,20 +287,26 @@ function wearablePieces(
 }
 
 /** One piece of an in-game set, as something to put on the character. */
-function Piece(
-  { row, worn, icon, onWear }: {
-    row: AppearanceRow;
-    worn: boolean;
-    icon?: string;
-    /** Absent for a piece the character has nowhere to put, which is what disables the row. */
-    onWear?: () => void;
-  },
-): ReactNode {
+function Piece({
+  row,
+  worn,
+  icon,
+  onWear,
+}: {
+  row: AppearanceRow;
+  worn: boolean;
+  icon?: string;
+  /** Absent for a piece the character has nowhere to put, which is what disables the row. */
+  onWear?: () => void;
+}): ReactNode {
   return (
     <li className="mog-item" data-worn={worn}>
       <button
-        type="button" className="mog-pick" aria-pressed={worn}
-        aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
+        type="button"
+        className="mog-pick"
+        aria-pressed={worn}
+        aria-label={`Wear ${row.slot}: ${row.label}`}
+        onClick={onWear}
         disabled={!onWear}
       >
         <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
@@ -269,14 +316,18 @@ function Piece(
         <span className="mog-name">{row.label}</span>
       </button>
       {worn ? <span className="chip">worn</span> : null}
-      {row.withheld
-        ? null
-        : <a
+      {row.withheld ? null : (
+        <a
           className="mog-wowhead"
           href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
-          target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`${row.label} on Wowhead`}
           aria-label={`${row.label} on Wowhead`}
-        ><LinkOut /></a>}
+        >
+          <LinkOut />
+        </a>
+      )}
     </li>
   );
 }

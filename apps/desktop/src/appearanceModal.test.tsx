@@ -11,12 +11,19 @@ afterEach(cleanup);
 // jsdom has no `showModal`, and the component drives the element rather than a prop — so
 // without these a dialog is never open and nothing inside it is reachable.
 beforeEach(() => {
-  HTMLDialogElement.prototype.showModal = function showModal(): void { this.open = true; };
-  HTMLDialogElement.prototype.close = function close(): void { this.open = false; };
+  HTMLDialogElement.prototype.showModal = function showModal(): void {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close(): void {
+    this.open = false;
+  };
 });
 
 const SHOULDERS: ItemAppearance = {
-  appearanceId: 80012, displayInfoId: 900012, displayType: 3, inventoryType: 3,
+  appearanceId: 80012,
+  displayInfoId: 900012,
+  displayType: 3,
+  inventoryType: 3,
 };
 
 const model = (body: string): string => `data:model/gltf-binary;base64,${btoa(body)}`;
@@ -37,12 +44,17 @@ function fakeStage() {
       return Promise.resolve();
     },
     resetCamera: () => {},
-    dispose: () => { made.disposed += 1; },
+    dispose: () => {
+      made.disposed += 1;
+    },
   };
   return {
     shown,
     made,
-    createStage: () => { made.count += 1; return stage; },
+    createStage: () => {
+      made.count += 1;
+      return stage;
+    },
   };
 }
 
@@ -62,19 +74,22 @@ function view(
     return Promise.resolve({ appearances: found });
   });
   const loadGallery = vi.fn((pieces: WornPiece[]): Promise<GalleryPayload> =>
-    Promise.resolve(options.models?.(pieces) ?? {
-      models: pieces.map((piece) => ({
-        displayInfoId: piece.displayInfoId,
-        kind: "worn" as const,
-        model: model("a body wearing it"),
-      })),
-    }));
+    Promise.resolve(
+      options.models?.(pieces) ?? {
+        models: pieces.map((piece) => ({
+          displayInfoId: piece.displayInfoId,
+          kind: "worn" as const,
+          model: model("a body wearing it"),
+        })),
+      },
+    ),
+  );
   const stage = fakeStage();
   const rendered = render(
     <AppearanceModal
-      showing={options.showing === undefined
-        ? { itemId: 101, name: "Wanderer's Mantle" }
-        : options.showing}
+      showing={
+        options.showing === undefined ? { itemId: 101, name: "Wanderer's Mantle" } : options.showing
+      }
       onClose={() => {}}
       loadAppearance={loadAppearance}
       loadGallery={loadGallery}
@@ -125,8 +140,7 @@ describe("the appearance modal", () => {
   it("says so for an item that resolves to no look", async () => {
     view({ appearances: {} });
     await waitFor(() => expect(screen.queryByText(/Drag to turn it/)).toBeNull());
-    expect(document.querySelector(".appearance-stage")?.getAttribute("data-state"))
-      .toBe("empty");
+    expect(document.querySelector(".appearance-stage")?.getAttribute("data-state")).toBe("empty");
   });
 
   // The same for a look this install can draw nothing for, which is the other half of the
@@ -135,13 +149,15 @@ describe("the appearance modal", () => {
     view({
       models: (pieces) => ({
         models: pieces.map((piece) => ({
-          displayInfoId: piece.displayInfoId, kind: "worn" as const, model: null,
+          displayInfoId: piece.displayInfoId,
+          kind: "worn" as const,
+          model: null,
         })),
       }),
     });
-    await waitFor(() => expect(
-      document.querySelector(".appearance-stage")?.getAttribute("data-state"),
-    ).toBe("empty"));
+    await waitFor(() =>
+      expect(document.querySelector(".appearance-stage")?.getAttribute("data-state")).toBe("empty"),
+    );
   });
 
   // A machine with no working 3D — a remote desktop, a virtual machine, a driver the browser
@@ -152,12 +168,18 @@ describe("the appearance modal", () => {
         showing={{ itemId: 101, name: "Wanderer's Mantle" }}
         onClose={() => {}}
         loadAppearance={() => Promise.resolve({ appearances: { 101: SHOULDERS } })}
-        loadGallery={(pieces) => Promise.resolve({
-          models: pieces.map((piece) => ({
-            displayInfoId: piece.displayInfoId, kind: "worn" as const, model: model("a body"),
-          })),
-        })}
-        createStage={() => { throw new Error("WebGL is not available."); }}
+        loadGallery={(pieces) =>
+          Promise.resolve({
+            models: pieces.map((piece) => ({
+              displayInfoId: piece.displayInfoId,
+              kind: "worn" as const,
+              model: model("a body"),
+            })),
+          })
+        }
+        createStage={() => {
+          throw new Error("WebGL is not available.");
+        }}
       />,
     );
     expect(await screen.findByText("WebGL is not available.")).toBeTruthy();
@@ -176,11 +198,15 @@ describe("the appearance modal", () => {
           showing={{ itemId, name: `Item ${itemId}` }}
           onClose={() => {}}
           loadAppearance={() => Promise.resolve({ appearances: { [itemId]: SHOULDERS } })}
-          loadGallery={(pieces) => Promise.resolve({
-            models: pieces.map((piece) => ({
-              displayInfoId: piece.displayInfoId, kind: "worn" as const, model: model("another"),
-            })),
-          })}
+          loadGallery={(pieces) =>
+            Promise.resolve({
+              models: pieces.map((piece) => ({
+                displayInfoId: piece.displayInfoId,
+                kind: "worn" as const,
+                model: model("another"),
+              })),
+            })
+          }
           createStage={rest.createStage}
         />,
       );

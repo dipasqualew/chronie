@@ -65,7 +65,11 @@ export const TRIGGER_GROUPS: TriggerGroup[] = [
     title: "Collections",
     triggers: [
       { name: "mount", label: "A mount added to the collection", detail: "One per new mount." },
-      { name: "pet", label: "A battle pet added to the collection", detail: "One per new species." },
+      {
+        name: "pet",
+        label: "A battle pet added to the collection",
+        detail: "One per new species.",
+      },
       { name: "toy", label: "A toy added to the collection", detail: "One per new toy." },
       {
         name: "newAppearance",
@@ -83,7 +87,11 @@ export const TRIGGER_GROUPS: TriggerGroup[] = [
   {
     title: "Milestones",
     triggers: [
-      { name: "levelUp", label: "A level gained", detail: "Including every level of a levelling run." },
+      {
+        name: "levelUp",
+        label: "A level gained",
+        detail: "Including every level of a levelling run.",
+      },
       {
         name: "keystoneOnTime",
         label: "A keystone run that beat the timer",
@@ -127,8 +135,9 @@ export function toggleTrigger(chosen: string[], name: string, on: boolean): stri
   } else {
     wanted.delete(name);
   }
-  const known = ALL_TRIGGERS.filter((trigger) => wanted.has(trigger.name))
-    .map((trigger) => trigger.name);
+  const known = ALL_TRIGGERS.filter((trigger) => wanted.has(trigger.name)).map(
+    (trigger) => trigger.name,
+  );
   const unknown = [...wanted].filter((held) => !BY_NAME.has(held));
   return [...known, ...unknown];
 }
@@ -177,7 +186,8 @@ export const CAPTURE_QUALITIES: QualityChoice[] = [
   {
     value: "high",
     label: "Full size, compressed",
-    detail: "Every pixel, re-encoded as a JPEG. Roughly a tenth of the disk, and hard to tell apart.",
+    detail:
+      "Every pixel, re-encoded as a JPEG. Roughly a tenth of the disk, and hard to tell apart.",
   },
   {
     value: "balanced",
@@ -211,5 +221,6 @@ export function originalsSentence(keep: boolean): string {
  * What the two storage settings mean together, which is the thing worth knowing before either
  * is changed: neither of them touches a picture Chronie already has.
  */
-export const STORAGE_APPLIES = "Both apply to the next screenshot Chronie takes custody of. " +
+export const STORAGE_APPLIES =
+  "Both apply to the next screenshot Chronie takes custody of. " +
   "Nothing already in the store is re-compressed or given back.";

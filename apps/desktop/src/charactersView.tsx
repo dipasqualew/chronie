@@ -39,12 +39,16 @@ import type { PlaceIcons } from "./places";
 import { classProps, className } from "./ui";
 import type { OpenSegment } from "./ui";
 import type {
-  InGameSet, InGameSetAppearancesPayload, InGameSetsPayload, WornPiece, WornSetPayload,
+  InGameSet,
+  InGameSetAppearancesPayload,
+  InGameSetsPayload,
+  WornPiece,
+  WornSetPayload,
 } from "./types";
 
 /** The two pages the pane holds, in the order a reader meets them. */
 const PAGES = ["summary", "activity"] as const;
-type Page = typeof PAGES[number];
+type Page = (typeof PAGES)[number];
 
 const PAGE_LABELS: Record<Page, string> = {
   summary: "Summary",
@@ -74,12 +78,16 @@ export interface CharactersProps {
   loadWorn: (character: string, pieces: WornPiece[]) => Promise<WornSetPayload>;
 }
 
-export function Characters(
-  {
-    profiles, onOpenSegment, items, currencyIcons, places, inGameSets, loadSetAppearances,
-    loadWorn,
-  }: CharactersProps,
-): ReactNode {
+export function Characters({
+  profiles,
+  onOpenSegment,
+  items,
+  currencyIcons,
+  places,
+  inGameSets,
+  loadSetAppearances,
+  loadWorn,
+}: CharactersProps): ReactNode {
   // Held by name rather than by index: an activity edit repaints the whole view, and the
   // reader should come back to the character they were reading, wherever they have moved to
   // in the roster since.
@@ -105,32 +113,47 @@ export function Characters(
   return (
     <div className="roster">
       <nav className="panel roster-panel" id="characters-list" aria-label="Character roster">
-        {profiles.length
-          ? <ul className="roster-list">
+        {profiles.length ? (
+          <ul className="roster-list">
             {profiles.map((entry) => (
               <li key={entry.name}>
                 <RosterEntry
-                  entry={entry} chosen={entry.name === showing?.name}
+                  entry={entry}
+                  chosen={entry.name === showing?.name}
                   onPick={() => pick(entry.name)}
                 />
               </li>
             ))}
           </ul>
-          : <p className="empty">No characters yet. Play for a bit and Chronie will fill this in.</p>}
+        ) : (
+          <p className="empty">No characters yet. Play for a bit and Chronie will fill this in.</p>
+        )}
       </nav>
       <section
-        className="panel roster-detail" id="character-detail" aria-live="polite"
+        className="panel roster-detail"
+        id="character-detail"
+        aria-live="polite"
         aria-label="The character"
       >
-        {showing
-          ? <Profile
-            entry={showing} page={page} onPage={setPage} range={range} onRange={setRange}
-            now={now} items={items} currencyIcons={currencyIcons} places={places}
+        {showing ? (
+          <Profile
+            entry={showing}
+            page={page}
+            onPage={setPage}
+            range={range}
+            onRange={setRange}
+            now={now}
+            items={items}
+            currencyIcons={currencyIcons}
+            places={places}
             wardrobe={setsFor(inGameSets, showing.name)}
-            loadSetAppearances={loadSetAppearances} loadWorn={loadWorn}
+            loadSetAppearances={loadSetAppearances}
+            loadWorn={loadWorn}
             onOpenSegment={onOpenSegment}
           />
-          : <p className="empty">Nothing to show until a character has been played.</p>}
+        ) : (
+          <p className="empty">Nothing to show until a character has been played.</p>
+        )}
       </section>
     </div>
   );
@@ -144,9 +167,15 @@ export function Characters(
  * out beside it, and a focusable thing inside a button is a thing a keyboard cannot reach
  * past. The whole entry is the button instead, named with everything the eye gets.
  */
-function RosterEntry(
-  { entry, chosen, onPick }: { entry: CharacterProfile; chosen: boolean; onPick: () => void },
-): ReactNode {
+function RosterEntry({
+  entry,
+  chosen,
+  onPick,
+}: {
+  entry: CharacterProfile;
+  chosen: boolean;
+  onPick: () => void;
+}): ReactNode {
   const facts = [
     `${className(entry.classFile)}${entry.level == null ? "" : ` · level ${entry.level}`}`,
     `${duration(entry.seconds)} played`,
@@ -155,10 +184,16 @@ function RosterEntry(
   ];
   return (
     <button
-      type="button" className="roster-entry" {...classProps(entry.classFile)}
-      aria-pressed={chosen} aria-label={`${entry.name}, ${facts.join(", ")}`} onClick={onPick}
+      type="button"
+      className="roster-entry"
+      {...classProps(entry.classFile)}
+      aria-pressed={chosen}
+      aria-label={`${entry.name}, ${facts.join(", ")}`}
+      onClick={onPick}
     >
-      <span className="circle" aria-hidden="true">{initials(entry.name)}</span>
+      <span className="circle" aria-hidden="true">
+        {initials(entry.name)}
+      </span>
       <span className="roster-who">
         <span className="roster-name">{entry.name}</span>
         <span className="roster-class muted">{facts[0]}</span>
@@ -196,55 +231,86 @@ interface ProfileProps {
  * halves are long, only one is being read, and neither is somewhere a reader should have to
  * arrive at by scrolling — the same argument the window's own view tabs make one level up.
  */
-function Profile(
-  {
-    entry, page, onPage, range, onRange, now, items, currencyIcons, places, wardrobe,
-    loadSetAppearances, loadWorn, onOpenSegment,
-  }: ProfileProps,
-): ReactNode {
-  return <>
-    <header className="profile-head" {...classProps(entry.classFile)}>
-      <span className="circle" aria-hidden="true">{initials(entry.name)}</span>
-      <div>
-        <h2>{entry.name}</h2>
-        <p className="sub">
-          {className(entry.classFile)}{entry.level == null ? "" : ` · level ${entry.level}`}
-          {` · last played ${ago(entry.lastSeen)}`}
-        </p>
-      </div>
-    </header>
+function Profile({
+  entry,
+  page,
+  onPage,
+  range,
+  onRange,
+  now,
+  items,
+  currencyIcons,
+  places,
+  wardrobe,
+  loadSetAppearances,
+  loadWorn,
+  onOpenSegment,
+}: ProfileProps): ReactNode {
+  return (
+    <>
+      <header className="profile-head" {...classProps(entry.classFile)}>
+        <span className="circle" aria-hidden="true">
+          {initials(entry.name)}
+        </span>
+        <div>
+          <h2>{entry.name}</h2>
+          <p className="sub">
+            {className(entry.classFile)}
+            {entry.level == null ? "" : ` · level ${entry.level}`}
+            {` · last played ${ago(entry.lastSeen)}`}
+          </p>
+        </div>
+      </header>
 
-    <CharacterFigure
-      // Keyed by the character, so moving to somebody else starts a fresh portrait rather than
-      // leaving the last one's body on screen while the next is being dressed.
-      key={entry.name} character={entry.name} sets={wardrobe}
-      loadAppearances={loadSetAppearances} loadWorn={loadWorn}
-    />
+      <CharacterFigure
+        // Keyed by the character, so moving to somebody else starts a fresh portrait rather than
+        // leaving the last one's body on screen while the next is being dressed.
+        key={entry.name}
+        character={entry.name}
+        sets={wardrobe}
+        loadAppearances={loadSetAppearances}
+        loadWorn={loadWorn}
+      />
 
-    {/* Named for what it switches rather than for what it is: a screen reader arriving here is
+      {/* Named for what it switches rather than for what it is: a screen reader arriving here is
         told these are the two halves of this character, which is the whole of the idea. */}
-    <div className="profile-pages" role="tablist" aria-label="What to show about this character">
-      {PAGES.map((name) => (
-        <button
-          key={name} type="button" role="tab" id={`character-${name}-tab`}
-          className={name === page ? "primary" : undefined}
-          aria-selected={name === page} aria-controls={`character-${name}-page`}
-          onClick={() => onPage(name)}
-        >{PAGE_LABELS[name]}</button>
-      ))}
-    </div>
+      <div className="profile-pages" role="tablist" aria-label="What to show about this character">
+        {PAGES.map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            id={`character-${name}-tab`}
+            className={name === page ? "primary" : undefined}
+            aria-selected={name === page}
+            aria-controls={`character-${name}-page`}
+            onClick={() => onPage(name)}
+          >
+            {PAGE_LABELS[name]}
+          </button>
+        ))}
+      </div>
 
-    <div
-      className="profile-page" role="tabpanel" id={`character-${page}-page`}
-      aria-labelledby={`character-${page}-tab`}
-    >
-      {page === "summary"
-        ? <CharacterSummary entry={entry} wardrobe={wardrobe} currencyIcons={currencyIcons} />
-        : <CharacterActivity
-          entry={entry} range={range} onRange={onRange} now={now} items={items}
-          places={places}
-          onOpenSegment={onOpenSegment}
-        />}
-    </div>
-  </>;
+      <div
+        className="profile-page"
+        role="tabpanel"
+        id={`character-${page}-page`}
+        aria-labelledby={`character-${page}-tab`}
+      >
+        {page === "summary" ? (
+          <CharacterSummary entry={entry} wardrobe={wardrobe} currencyIcons={currencyIcons} />
+        ) : (
+          <CharacterActivity
+            entry={entry}
+            range={range}
+            onRange={onRange}
+            now={now}
+            items={items}
+            places={places}
+            onOpenSegment={onOpenSegment}
+          />
+        )}
+      </div>
+    </>
+  );
 }

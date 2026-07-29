@@ -36,44 +36,62 @@ export const dashboard: E2EMock["dashboard"] = {
       total: 1725000,
       oldest: EVENING - 3 * 86400,
     },
-    currencies: [{
-      id: 7,
-      name: "Glass Token",
-      total: 30000,
-      oldest: EVENING - 3 * 86400,
-      characters: [
-        { character: "Aster-Vale", total: 12450, at: EVENING },
-        { character: "Brin-Hearth", total: 17550, at: EVENING - 3 * 86400 },
-      ],
-    }, {
-      // The warband's one pot: the game hands every character the same balance, so both
-      // rows are that balance seen from somewhere else rather than two holdings, the total
-      // is the freshest of them rather than their sum, and the wording has to say so.
-      id: 10,
-      name: "Warband Chit",
-      total: 6000,
-      accountWide: true,
-      oldest: EVENING,
-      characters: [
-        { character: "Aster-Vale", total: 6000, at: EVENING },
-        { character: "Brin-Hearth", total: 6000, at: EVENING - 3 * 86400 },
-      ],
-    }],
+    currencies: [
+      {
+        id: 7,
+        name: "Glass Token",
+        total: 30000,
+        oldest: EVENING - 3 * 86400,
+        characters: [
+          { character: "Aster-Vale", total: 12450, at: EVENING },
+          { character: "Brin-Hearth", total: 17550, at: EVENING - 3 * 86400 },
+        ],
+      },
+      {
+        // The warband's one pot: the game hands every character the same balance, so both
+        // rows are that balance seen from somewhere else rather than two holdings, the total
+        // is the freshest of them rather than their sum, and the wording has to say so.
+        id: 10,
+        name: "Warband Chit",
+        total: 6000,
+        accountWide: true,
+        oldest: EVENING,
+        characters: [
+          { character: "Aster-Vale", total: 6000, at: EVENING },
+          { character: "Brin-Hearth", total: 6000, at: EVENING - 3 * 86400 },
+        ],
+      },
+    ],
     factions: [
       {
         faction: "Cavern Cartographers",
         best: {
-          character: "Brin-Hearth", standing: "Revered", current: 3000, max: 21000,
-          rank: 7, system: "reaction", at: EVENING - 3 * 86400,
+          character: "Brin-Hearth",
+          standing: "Revered",
+          current: 3000,
+          max: 21000,
+          rank: 7,
+          system: "reaction",
+          at: EVENING - 3 * 86400,
         },
         characters: [
           {
-            character: "Aster-Vale", standing: "Honored", current: 4200, max: 12000,
-            rank: 6, system: "reaction", at: EVENING,
+            character: "Aster-Vale",
+            standing: "Honored",
+            current: 4200,
+            max: 12000,
+            rank: 6,
+            system: "reaction",
+            at: EVENING,
           },
           {
-            character: "Brin-Hearth", standing: "Revered", current: 3000, max: 21000,
-            rank: 7, system: "reaction", at: EVENING - 3 * 86400,
+            character: "Brin-Hearth",
+            standing: "Revered",
+            current: 3000,
+            max: 21000,
+            rank: 7,
+            system: "reaction",
+            at: EVENING - 3 * 86400,
           },
         ],
       },
@@ -82,13 +100,21 @@ export const dashboard: E2EMock["dashboard"] = {
       {
         faction: "Deepwater Wardens",
         best: {
-          character: "Brin-Hearth", standing: "Exalted", rank: 8, system: "reaction",
+          character: "Brin-Hearth",
+          standing: "Exalted",
+          rank: 8,
+          system: "reaction",
           at: EVENING,
         },
-        characters: [{
-          character: "Brin-Hearth", standing: "Exalted", rank: 8, system: "reaction",
-          at: EVENING,
-        }],
+        characters: [
+          {
+            character: "Brin-Hearth",
+            standing: "Exalted",
+            rank: 8,
+            system: "reaction",
+            at: EVENING,
+          },
+        ],
       },
     ],
   },
@@ -132,10 +158,16 @@ export const dashboard: E2EMock["dashboard"] = {
       // bar at zero would announce the character as nowhere in a level they are inside.
       // The alt's own picture, so an evening's fold has captures from more than one of its
       // segments and the grid is a session's rather than a segment's.
-      captures: [{
-        id: 33, sourceId: "TEST|3|33", at: EVENING + 2000, imageState: "stored",
-        byteSize: 2_411_902, sourceName: "WoWScrnShot_072626_190000.jpg",
-      }],
+      captures: [
+        {
+          id: 33,
+          sourceId: "TEST|3|33",
+          at: EVENING + 2000,
+          imageState: "stored",
+          byteSize: 2_411_902,
+          sourceName: "WoWScrnShot_072626_190000.jpg",
+        },
+      ],
       currencies: [{ id: 8, name: "Rustward Scrip", amount: 2 }],
       reputation: [
         { faction: "Lamplighters", amount: 10 },
@@ -167,12 +199,22 @@ export const dashboard: E2EMock["dashboard"] = {
       // file was never found — which is a row to explain rather than a blank tile.
       captures: [
         {
-          id: 11, sourceId: "TEST|1|11", at: EVENING + 1400, imageState: "stored",
-          note: NOTED, byteSize: 3_204_112, sourceName: "WoWScrnShot_072626_183020.jpg",
+          id: 11,
+          sourceId: "TEST|1|11",
+          at: EVENING + 1400,
+          imageState: "stored",
+          note: NOTED,
+          byteSize: 3_204_112,
+          sourceName: "WoWScrnShot_072626_183020.jpg",
         },
         {
-          id: 12, sourceId: "TEST|1|12", at: EVENING + 1450, imageState: "stored",
-          trigger: "accountFirstAchievement", achievementId: 77, byteSize: 3_100_000,
+          id: 12,
+          sourceId: "TEST|1|12",
+          at: EVENING + 1450,
+          imageState: "stored",
+          trigger: "accountFirstAchievement",
+          achievementId: 77,
+          byteSize: 3_100_000,
         },
         { id: 13, sourceId: "TEST|1|13", at: EVENING + 1500, imageState: "missing" },
       ],
@@ -202,12 +244,21 @@ export const dashboard: E2EMock["dashboard"] = {
           items: [
             {
               slot: 1,
-              itemId: 4101, itemLevel: 639, itemName: "Deepwater Crown",
-              previousItemId: 4100, previousItemLevel: 623, previousItemName: "Tideglass Crown",
+              itemId: 4101,
+              itemLevel: 639,
+              itemName: "Deepwater Crown",
+              previousItemId: 4100,
+              previousItemLevel: 623,
+              previousItemName: "Tideglass Crown",
             },
             // A slot the edit cleared, which has to draw as an emptied slot rather than as
             // a row with nothing in it.
-            { slot: 15, previousItemId: 4200, previousItemLevel: 620, previousItemName: "Storm Cloak" },
+            {
+              slot: 15,
+              previousItemId: 4200,
+              previousItemLevel: 620,
+              previousItemName: "Storm Cloak",
+            },
           ],
         },
       ],
@@ -220,10 +271,15 @@ export const dashboard: E2EMock["dashboard"] = {
         { id: 7, name: "Glass Token", amount: 4, total: 12450 },
         { id: 10, name: "Warband Chit", amount: 100, total: 6000 },
       ],
-      reputation: [{
-        faction: "Cavern Cartographers", amount: 25,
-        standing: "Honored", current: 4200, max: 12000,
-      }],
+      reputation: [
+        {
+          faction: "Cavern Cartographers",
+          amount: 25,
+          standing: "Honored",
+          current: 4200,
+          max: 12000,
+        },
+      ],
       achievements: [
         { id: 9, name: "Into the Light", at: EVENING + 1400, accountFirst: false },
         // One the install can say nothing about, which is what an achievement earned on a
@@ -277,7 +333,9 @@ export const dashboard: E2EMock["dashboard"] = {
       ],
       quests: [],
       toys: [{ id: 13, name: "Pocket Orrery", at: NIGHT_BEFORE + 850 }],
-      housingItems: [{ id: 14, name: "Carved Reading Chair", at: NIGHT_BEFORE + 860, warbandFirst: true }],
+      housingItems: [
+        { id: 14, name: "Carved Reading Chair", at: NIGHT_BEFORE + 860, warbandFirst: true },
+      ],
       housingLevelUps: [{ level: 2, at: NIGHT_BEFORE + 870 }],
     },
   ],

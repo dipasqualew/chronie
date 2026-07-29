@@ -61,8 +61,17 @@ export interface Kind {
 
 /** The armour slots, in the order they are worn down the body. */
 const ARMOUR: Array<[number, string]> = [
-  [0, "Head"], [1, "Shoulder"], [9, "Back"], [2, "Shirt"], [3, "Chest"], [10, "Tabard"],
-  [4, "Waist"], [5, "Legs"], [6, "Feet"], [7, "Wrist"], [8, "Hands"],
+  [0, "Head"],
+  [1, "Shoulder"],
+  [9, "Back"],
+  [2, "Shirt"],
+  [3, "Chest"],
+  [10, "Tabard"],
+  [4, "Waist"],
+  [5, "Legs"],
+  [6, "Feet"],
+  [7, "Wrist"],
+  [8, "Hands"],
 ];
 
 /**
@@ -75,10 +84,23 @@ const ARMOUR: Array<[number, string]> = [
  * absent for the same reason: the game gives them no transmog appearance at all.
  */
 const WEAPONS: Array<[number, string]> = [
-  [0, "One-handed axe"], [1, "Two-handed axe"], [4, "One-handed mace"], [5, "Two-handed mace"],
-  [7, "One-handed sword"], [8, "Two-handed sword"], [15, "Dagger"], [13, "Fist weapon"],
-  [9, "Warglaive"], [10, "Staff"], [6, "Polearm"], [2, "Bow"], [3, "Gun"], [18, "Crossbow"],
-  [19, "Wand"], [16, "Thrown"], [14, "Miscellaneous"],
+  [0, "One-handed axe"],
+  [1, "Two-handed axe"],
+  [4, "One-handed mace"],
+  [5, "Two-handed mace"],
+  [7, "One-handed sword"],
+  [8, "Two-handed sword"],
+  [15, "Dagger"],
+  [13, "Fist weapon"],
+  [9, "Warglaive"],
+  [10, "Staff"],
+  [6, "Polearm"],
+  [2, "Bow"],
+  [3, "Gun"],
+  [18, "Crossbow"],
+  [19, "Wand"],
+  [16, "Thrown"],
+  [14, "Miscellaneous"],
 ];
 
 /**
@@ -169,19 +191,21 @@ export function wardrobeRow(appearance: WardrobeAppearance): AppearanceRow {
     // Nothing here is withheld: a look the install could say nothing whatever about never
     // reaches the window, having been counted and left behind by the backend.
     withheld: false,
-    sources: [{
-      label,
-      itemId: appearance.itemId,
-      // A wardrobe row is reached from the appearance rather than from one set's naming of
-      // it, so there is no `ItemModifiedAppearance` in the story: the appearance is what
-      // makes the row unique, and is what a list keys on.
-      modifiedAppearanceId: appearance.appearanceId,
-      inventoryType: appearance.inventoryType,
-      allowableClass: appearance.allowableClass,
-      requiredLevel: appearance.requiredLevel,
-      quality: appearance.quality,
-      itemCount: appearance.itemCount,
-    }],
+    sources: [
+      {
+        label,
+        itemId: appearance.itemId,
+        // A wardrobe row is reached from the appearance rather than from one set's naming of
+        // it, so there is no `ItemModifiedAppearance` in the story: the appearance is what
+        // makes the row unique, and is what a list keys on.
+        modifiedAppearanceId: appearance.appearanceId,
+        inventoryType: appearance.inventoryType,
+        allowableClass: appearance.allowableClass,
+        requiredLevel: appearance.requiredLevel,
+        quality: appearance.quality,
+        itemCount: appearance.itemCount,
+      },
+    ],
     liftsRestriction: appearance.liftsRestriction,
   };
 }
@@ -219,7 +243,9 @@ function searchable(
     // thing no other word here can do: "brown" is not in any item's name and is the only way
     // a reader ever asks a wardrobe of five thousand chestpieces for the brown ones.
     qualityWords(quality),
-  ].join(" ").toLowerCase();
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 /**
@@ -287,10 +313,13 @@ export function filterAppearances(
   const klass = filters.klass === "" ? null : Number(filters.klass);
   return appearances.filter((appearance) => {
     if (!isKind(appearance, filters.kind)) return false;
-    if (klass !== null
-      && appearance.allowableClass !== ANY_CLASS
-      && appearance.allowableClass !== 0
-      && (appearance.allowableClass & (1 << klass)) === 0) return false;
+    if (
+      klass !== null &&
+      appearance.allowableClass !== ANY_CLASS &&
+      appearance.allowableClass !== 0 &&
+      (appearance.allowableClass & (1 << klass)) === 0
+    )
+      return false;
     const mark = filters.marks?.of(appearance.appearanceId);
     if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
     if (!asked) return true;
@@ -314,9 +343,7 @@ export const PAGE = 100;
 
 /** How the list says what it is showing, and whether there is more of it behind the button. */
 export function shownSummary(shown: number, total: number, withheld: number): string {
-  const kept = withheld > 0
-    ? ` · ${plural(withheld, "look")} the game keeps encrypted`
-    : "";
+  const kept = withheld > 0 ? ` · ${plural(withheld, "look")} the game keeps encrypted` : "";
   if (shown >= total) return `${plural(total, "appearance")}${kept}`;
   return `${shown} of ${plural(total, "appearance")}${kept}`;
 }

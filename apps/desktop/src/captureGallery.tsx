@@ -17,8 +17,17 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
-  captureFacts, captureLabel, capturePlaceholder, captureSummary, captureTip, captureTitle,
-  capturedMoments, deleteWarning, missingReason, noteChanged, thumbnailIds,
+  captureFacts,
+  captureLabel,
+  capturePlaceholder,
+  captureSummary,
+  captureTip,
+  captureTitle,
+  capturedMoments,
+  deleteWarning,
+  missingReason,
+  noteChanged,
+  thumbnailIds,
 } from "./captures";
 import type { CaptureAlbum, CapturedMoment } from "./captures";
 import type { CaptureImagePayload, DashboardPayload, Segment } from "./types";
@@ -85,21 +94,23 @@ export function CaptureGallery({ segments, album, actions }: CaptureGalleryProps
       {/* Mounted only while something is open, because more than one grid can be on screen at
           once — an evening unfolded on its card, and a segment's own in the modal over it —
           and two dialogs answering to one id is one id too many. */}
-      {index >= 0 ? <CaptureViewer
-        moment={moments[index]}
-        index={index}
-        count={moments.length}
-        actions={actions}
-        onStep={(by) => {
-          const next = moments[index + by];
-          if (next) setOpen(next.capture.sourceId);
-        }}
-        onClose={() => setOpen(null)}
-        onDeleted={(captureId) => {
-          album.forget(captureId);
-          setOpen(null);
-        }}
-      /> : null}
+      {index >= 0 ? (
+        <CaptureViewer
+          moment={moments[index]}
+          index={index}
+          count={moments.length}
+          actions={actions}
+          onStep={(by) => {
+            const next = moments[index + by];
+            if (next) setOpen(next.capture.sourceId);
+          }}
+          onClose={() => setOpen(null)}
+          onDeleted={(captureId) => {
+            album.forget(captureId);
+            setOpen(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -124,24 +135,30 @@ function CaptureTile({ moment, thumbnail, onOpen }: TileProps): ReactNode {
   const note = capture.note || "";
   return (
     <button
-      type="button" className="capture-tile" onClick={onOpen}
+      type="button"
+      className="capture-tile"
+      onClick={onOpen}
       aria-label={captureLabel(moment)}
       data-tip={captureTip(moment)}
     >
       {/* The row's own three states rather than a has-picture boolean: a note took no picture
           on purpose and must not be drawn as a screenshot that went astray. */}
       <span className="capture-thumb" data-state={capture.imageState}>
-        {thumbnail
-          ? <img src={thumbnail} alt="" />
-          : <span className="capture-placeholder" aria-hidden="true">
+        {thumbnail ? (
+          <img src={thumbnail} alt="" />
+        ) : (
+          <span className="capture-placeholder" aria-hidden="true">
             {capturePlaceholder(capture)}
-          </span>}
+          </span>
+        )}
       </span>
       <span className="capture-caption">
         <span className="capture-when">{captureTitle(moment)}</span>
-        {note
-          ? <span className="capture-note">{note}</span>
-          : <span className="capture-where muted">{missing ?? segment.instance}</span>}
+        {note ? (
+          <span className="capture-note">{note}</span>
+        ) : (
+          <span className="capture-where muted">{missing ?? segment.instance}</span>
+        )}
       </span>
     </button>
   );
@@ -171,9 +188,15 @@ interface ViewerProps {
  * capture whenever a different picture is opened — so an edit somebody abandoned by stepping
  * away does not follow them onto the next one.
  */
-function CaptureViewer(
-  { moment, index, count, actions, onStep, onClose, onDeleted }: ViewerProps,
-): ReactNode {
+function CaptureViewer({
+  moment,
+  index,
+  count,
+  actions,
+  onStep,
+  onClose,
+  onDeleted,
+}: ViewerProps): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
   const capture = moment.capture;
   const [image, setImage] = useState<CaptureImagePayload | null>(null);
@@ -195,33 +218,43 @@ function CaptureViewer(
     setTyped(stored || "");
     setStatus("");
     setConfirming(false);
-  // Keyed on which capture is open rather than on the note: a repaint carrying the note that
-  // was just written must not reach in and rewrite what somebody has started typing since.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Keyed on which capture is open rather than on the note: a repaint carrying the note that
+    // was just written must not reach in and rewrite what somebody has started typing since.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId]);
 
   useEffect(() => {
     setImage(null);
     let current = true;
-    void actions.loadImage(captureId)
-      .then((payload) => { if (current) setImage(payload); })
-      .catch((error: unknown) => { if (current) setStatus(actions.onError(error)); });
-    return () => { current = false; };
+    void actions
+      .loadImage(captureId)
+      .then((payload) => {
+        if (current) setImage(payload);
+      })
+      .catch((error: unknown) => {
+        if (current) setStatus(actions.onError(error));
+      });
+    return () => {
+      current = false;
+    };
   }, [captureId, actions]);
 
-  const write = useCallback(async (run: () => Promise<DashboardPayload>): Promise<boolean> => {
-    setBusy(true);
-    setStatus("");
-    try {
-      actions.onApply(await run());
-      return true;
-    } catch (error) {
-      setStatus(actions.onError(error));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [actions]);
+  const write = useCallback(
+    async (run: () => Promise<DashboardPayload>): Promise<boolean> => {
+      setBusy(true);
+      setStatus("");
+      try {
+        actions.onApply(await run());
+        return true;
+      } catch (error) {
+        setStatus(actions.onError(error));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [actions],
+  );
 
   const missing = missingReason(capture);
   const shown = image?.image ?? null;
@@ -233,7 +266,10 @@ function CaptureViewer(
 
   return (
     <dialog
-      id="capture-viewer" aria-labelledby="capture-viewer-title" ref={dialog} onClose={onClose}
+      id="capture-viewer"
+      aria-labelledby="capture-viewer-title"
+      ref={dialog}
+      onClose={onClose}
       onKeyDown={(event) => {
         // Only while nothing is being typed into: the arrow keys belong to the field the
         // moment somebody is in it, and stepping away mid-sentence would lose the sentence.
@@ -244,74 +280,119 @@ function CaptureViewer(
     >
       <div className="detail-head">
         <div>
-          <h2 className="detail-title" id="capture-viewer-title">{moment.segment.instance}</h2>
+          <h2 className="detail-title" id="capture-viewer-title">
+            {moment.segment.instance}
+          </h2>
           <span className="detail-position" role="status" aria-label="Which screenshot">
             {index + 1} of {count}
           </span>
         </div>
         <div className="detail-nav">
           <button
-            type="button" aria-label="Previous screenshot"
-            disabled={index === 0} onClick={() => onStep(-1)}
-          >‹</button>
+            type="button"
+            aria-label="Previous screenshot"
+            disabled={index === 0}
+            onClick={() => onStep(-1)}
+          >
+            ‹
+          </button>
           <button
-            type="button" aria-label="Next screenshot"
-            disabled={index >= count - 1} onClick={() => onStep(1)}
-          >›</button>
-          <button type="button" aria-label="Close screenshot" onClick={onClose}>Close</button>
+            type="button"
+            aria-label="Next screenshot"
+            disabled={index >= count - 1}
+            onClick={() => onStep(1)}
+          >
+            ›
+          </button>
+          <button type="button" aria-label="Close screenshot" onClick={onClose}>
+            Close
+          </button>
         </div>
       </div>
       <div className="detail-body">
-        <div className="capture-full" data-state={shown ? "shown" : missing ? "missing" : "loading"}>
-          {shown
-            ? <img src={shown} alt={`Screenshot from ${moment.segment.instance}`} />
-            : <p className="muted">
-              {missing ?? (image
-                // A row that says the file is there and a file that is not: the row carries a
-                // hash and a size precisely so this is detectable and can be said out loud
-                // rather than appearing as a picture that never loads.
-                ? "Chronie's copy of this picture is no longer on disk."
-                : "Opening the picture…")}
-            </p>}
+        <div
+          className="capture-full"
+          data-state={shown ? "shown" : missing ? "missing" : "loading"}
+        >
+          {shown ? (
+            <img src={shown} alt={`Screenshot from ${moment.segment.instance}`} />
+          ) : (
+            <p className="muted">
+              {missing ??
+                (image
+                  ? // A row that says the file is there and a file that is not: the row carries a
+                    // hash and a size precisely so this is detectable and can be said out loud
+                    // rather than appearing as a picture that never loads.
+                    "Chronie's copy of this picture is no longer on disk."
+                  : "Opening the picture…")}
+            </p>
+          )}
         </div>
         <p className="detail-facts">{facts.join(" · ")}</p>
         <div className="capture-note-edit">
           <label htmlFor="capture-note">Note</label>
           <textarea
-            id="capture-note" rows={2} value={typed} disabled={busy}
+            id="capture-note"
+            rows={2}
+            value={typed}
+            disabled={busy}
             placeholder="What was happening?"
             onChange={(event) => setTyped(event.target.value)}
           />
           <div className="dialog-actions">
             <button
-              type="button" className="primary" disabled={busy || !noteChanged(capture, typed)}
+              type="button"
+              className="primary"
+              disabled={busy || !noteChanged(capture, typed)}
               onClick={() => void write(() => actions.setNote(capture.id, typed))}
-            >Save note</button>
+            >
+              Save note
+            </button>
             <button
-              type="button" disabled={busy || !capture.note}
+              type="button"
+              disabled={busy || !capture.note}
               onClick={() => {
                 setTyped("");
                 void write(() => actions.setNote(capture.id, ""));
               }}
-            >Clear note</button>
+            >
+              Clear note
+            </button>
             <span className="spacer" />
-            {confirming
-              ? <>
+            {confirming ? (
+              <>
                 <button
-                  type="button" className="danger" disabled={busy}
-                  onClick={() => void write(() => actions.remove(capture.id))
-                    .then((done) => { if (done) onDeleted(capture.id); })}
-                >Yes, delete it</button>
+                  type="button"
+                  className="danger"
+                  disabled={busy}
+                  onClick={() =>
+                    void write(() => actions.remove(capture.id)).then((done) => {
+                      if (done) onDeleted(capture.id);
+                    })
+                  }
+                >
+                  Yes, delete it
+                </button>
                 <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
                   Keep it
                 </button>
               </>
-              : <button type="button" className="danger" onClick={() => setConfirming(true)}>
+            ) : (
+              <button type="button" className="danger" onClick={() => setConfirming(true)}>
                 Delete
-              </button>}
+              </button>
+            )}
           </div>
-          {confirming ? <p className="capture-warning" role="alert">{deleteWarning(capture)}</p> : null}
-          {status ? <p className="capture-status" role="status">{status}</p> : null}
+          {confirming ? (
+            <p className="capture-warning" role="alert">
+              {deleteWarning(capture)}
+            </p>
+          ) : null}
+          {status ? (
+            <p className="capture-status" role="status">
+              {status}
+            </p>
+          ) : null}
         </div>
       </div>
     </dialog>
@@ -324,17 +405,24 @@ function CaptureViewer(
  * The timeline's own idiom: nothing on that page is a list until somebody has asked for a
  * list, and an evening's screenshots are the largest thing a session card could grow.
  */
-export function CaptureFold(
-  { segments, album, actions, open, onToggle }:
-  CaptureGalleryProps & { open: boolean; onToggle: () => void },
-): ReactNode {
+export function CaptureFold({
+  segments,
+  album,
+  actions,
+  open,
+  onToggle,
+}: CaptureGalleryProps & { open: boolean; onToggle: () => void }): ReactNode {
   const moments = capturedMoments(segments);
   if (!moments.length) return null;
-  return <>
-    <button type="button" className="session-toggle" aria-expanded={open} onClick={onToggle}>
-      <span className="caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
-      📷 {captureSummary(moments)}
-    </button>
-    {open ? <CaptureGallery segments={segments} album={album} actions={actions} /> : null}
-  </>;
+  return (
+    <>
+      <button type="button" className="session-toggle" aria-expanded={open} onClick={onToggle}>
+        <span className="caret" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+        📷 {captureSummary(moments)}
+      </button>
+      {open ? <CaptureGallery segments={segments} album={album} actions={actions} /> : null}
+    </>
+  );
 }

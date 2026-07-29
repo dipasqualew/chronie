@@ -204,16 +204,17 @@ export function plot(answer: QueryAnswer, axes: Axes): Plot | null {
 
   const xSpan = numericX
     ? niceScale(
-      Math.min(...drawn.map((entry) => entry.key as number)),
-      Math.max(...drawn.map((entry) => entry.key as number)),
-    )
+        Math.min(...drawn.map((entry) => entry.key as number)),
+        Math.max(...drawn.map((entry) => entry.key as number)),
+      )
     : null;
   // A category axis puts each row in the middle of its own band, which is what leaves a bar
   // room to be a bar. A numeric axis puts it where its value says.
   const band = plotWidth / drawn.length;
-  const xOf = (entry: { key: QueryCell }, index: number): number => xSpan
-    ? FRAME.left + plotWidth * (((entry.key as number) - xSpan.lo) / (xSpan.hi - xSpan.lo))
-    : FRAME.left + band * (index + 0.5);
+  const xOf = (entry: { key: QueryCell }, index: number): number =>
+    xSpan
+      ? FRAME.left + plotWidth * (((entry.key as number) - xSpan.lo) / (xSpan.hi - xSpan.lo))
+      : FRAME.left + band * (index + 0.5);
 
   const xLabel = answer.columns[xAt] ?? "";
   const yLabel = answer.columns[yAt] ?? "";
@@ -229,20 +230,21 @@ export function plot(answer: QueryAnswer, axes: Axes): Plot | null {
 
   const base = yOf(Math.min(Math.max(0, span.lo), span.hi));
   const barWidth = Math.max(Math.min(band * 0.72, 64), 1);
-  const bars = shape === "bar"
-    ? drawn.map((entry, index) => {
-      const top = yOf(entry.value);
-      return {
-        row: entry.row,
-        x: xOf(entry, index) - barWidth / 2,
-        // A bar for a value of zero would be invisible and unhoverable, so it keeps a hairline.
-        y: Math.min(top, base),
-        width: barWidth,
-        height: Math.max(Math.abs(base - top), 1),
-        tip: tipOf(entry),
-      };
-    })
-    : [];
+  const bars =
+    shape === "bar"
+      ? drawn.map((entry, index) => {
+          const top = yOf(entry.value);
+          return {
+            row: entry.row,
+            x: xOf(entry, index) - barWidth / 2,
+            // A bar for a value of zero would be invisible and unhoverable, so it keeps a hairline.
+            y: Math.min(top, base),
+            width: barWidth,
+            height: Math.max(Math.abs(base - top), 1),
+            tip: tipOf(entry),
+          };
+        })
+      : [];
 
   return {
     shape,
@@ -254,13 +256,15 @@ export function plot(answer: QueryAnswer, axes: Axes): Plot | null {
     path: shape === "line" ? line(points) : "",
     xTicks: xSpan
       ? xSpan.ticks.map((value) => ({
-        at: FRAME.left + plotWidth * ((value - xSpan.lo) / (xSpan.hi - xSpan.lo)),
-        label: axisNumber(value),
-      }))
-      : thinned(drawn.map((entry, index) => ({
-        at: xOf(entry, index),
-        label: clip(entry.label),
-      }))),
+          at: FRAME.left + plotWidth * ((value - xSpan.lo) / (xSpan.hi - xSpan.lo)),
+          label: axisNumber(value),
+        }))
+      : thinned(
+          drawn.map((entry, index) => ({
+            at: xOf(entry, index),
+            label: clip(entry.label),
+          })),
+        ),
     yTicks,
     xLabel,
     yLabel,
@@ -269,9 +273,8 @@ export function plot(answer: QueryAnswer, axes: Axes): Plot | null {
 }
 
 /** The line through a set of points, in the order they are given. */
-const line = (points: Point[]): string => points
-  .map((point, index) => `${index ? "L" : "M"}${round(point.x)} ${round(point.y)}`)
-  .join(" ");
+const line = (points: Point[]): string =>
+  points.map((point, index) => `${index ? "L" : "M"}${round(point.x)} ${round(point.y)}`).join(" ");
 
 const round = (value: number): number => Math.round(value * 100) / 100;
 
@@ -298,7 +301,11 @@ const clip = (label: string): string =>
  * the intervals people divide by in their heads. A single repeated value gets a range
  * invented around it — an axis of zero width has no positions on it at all.
  */
-export function niceScale(low: number, high: number, count = 5): {
+export function niceScale(
+  low: number,
+  high: number,
+  count = 5,
+): {
   lo: number;
   hi: number;
   ticks: number[];

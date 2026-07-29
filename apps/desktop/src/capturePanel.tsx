@@ -19,8 +19,15 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import {
-  CAPTURE_QUALITIES, DEFAULT_QUALITY, STORAGE_APPLIES, TRIGGER_GROUPS,
-  originalsSentence, supersededBy, toggleTrigger, triggerSentence, unknownTriggers,
+  CAPTURE_QUALITIES,
+  DEFAULT_QUALITY,
+  STORAGE_APPLIES,
+  TRIGGER_GROUPS,
+  originalsSentence,
+  supersededBy,
+  toggleTrigger,
+  triggerSentence,
+  unknownTriggers,
 } from "./captureSettings";
 import type { CaptureQuality, Settings } from "./types";
 
@@ -43,7 +50,9 @@ export function CapturePanel({ actions, settings }: CapturePanelProps): ReactNod
   // Held here rather than read off the prop, because every write answers with the whole of the
   // settings and this is where that answer lands. The prop is the opening position only.
   const [chosen, setChosen] = useState<string[]>(settings.captureTriggers ?? []);
-  const [quality, setQuality] = useState<CaptureQuality>(settings.captureQuality ?? DEFAULT_QUALITY);
+  const [quality, setQuality] = useState<CaptureQuality>(
+    settings.captureQuality ?? DEFAULT_QUALITY,
+  );
   const [keeping, setKeeping] = useState(settings.keepOriginalScreenshots === true);
   const [saying, setSaying] = useState("");
   const [busy, setBusy] = useState(false);
@@ -88,15 +97,17 @@ export function CapturePanel({ actions, settings }: CapturePanelProps): ReactNod
   return (
     <section className="panel setup" aria-labelledby="captures-heading">
       <h2 id="captures-heading">Screenshots</h2>
-      <p className="sub">Chronie can press the game’s own screenshot key when something worth
-        remembering happens, then take custody of the file: it copies the picture into its own
-        store, proves the copy, and files it against the segment it was taken in.</p>
+      <p className="sub">
+        Chronie can press the game’s own screenshot key when something worth remembering happens,
+        then take custody of the file: it copies the picture into its own store, proves the copy,
+        and files it against the segment it was taken in.
+      </p>
 
       <h3 className="setup-subhead">What photographs itself</h3>
       <p className="sub">
         These reach the addon, so a change takes effect at the next login or <code>/reload</code>.
-        Whatever is ticked, no more than one automatic screenshot is taken a minute — a raid
-        clear is one photograph, not thirty.
+        Whatever is ticked, no more than one automatic screenshot is taken a minute — a raid clear
+        is one photograph, not thirty.
       </p>
 
       {TRIGGER_GROUPS.map((group) => (
@@ -107,7 +118,8 @@ export function CapturePanel({ actions, settings }: CapturePanelProps): ReactNod
             return (
               <label className="capture-choice" key={trigger.name}>
                 <input
-                  type="checkbox" disabled={busy}
+                  type="checkbox"
+                  disabled={busy}
                   checked={chosen.includes(trigger.name)}
                   onChange={(event) => toggle(trigger.name, event.target.checked)}
                 />
@@ -146,7 +158,10 @@ export function CapturePanel({ actions, settings }: CapturePanelProps): ReactNod
         {CAPTURE_QUALITIES.map((choice) => (
           <label className="capture-choice" key={choice.value}>
             <input
-              type="radio" name="capture-quality" value={choice.value} disabled={busy}
+              type="radio"
+              name="capture-quality"
+              value={choice.value}
+              disabled={busy}
               checked={quality === choice.value}
               onChange={() => storage(choice.value, keeping)}
             />
@@ -160,12 +175,17 @@ export function CapturePanel({ actions, settings }: CapturePanelProps): ReactNod
 
       <label className="check">
         <input
-          id="keep-originals" type="checkbox" disabled={busy} checked={keeping}
+          id="keep-originals"
+          type="checkbox"
+          disabled={busy}
+          checked={keeping}
           onChange={(event) => storage(quality, event.target.checked)}
         />
         Leave the game’s own copy where it is
       </label>
-      <p id="capture-storage-state" className="sub">{originalsSentence(keeping)}</p>
+      <p id="capture-storage-state" className="sub">
+        {originalsSentence(keeping)}
+      </p>
     </section>
   );
 }

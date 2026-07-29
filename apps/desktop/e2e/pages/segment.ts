@@ -17,7 +17,8 @@ export class SegmentDetail {
 
   constructor(page: Page) {
     this.page = page;
-    this.dialog = page.getByRole("dialog")
+    this.dialog = page
+      .getByRole("dialog")
       .filter({ has: page.getByRole("button", { name: "Close segment" }) });
   }
 
@@ -132,13 +133,15 @@ export class ActivityEditor {
 
   constructor(page: Page) {
     this.page = page;
-    this.dialog = page.getByRole("dialog")
+    this.dialog = page
+      .getByRole("dialog")
       .filter({ has: page.getByRole("button", { name: "Add activity" }) });
   }
 
   async open(): Promise<void> {
     await new SegmentDetail(this.page).dialog
-      .getByRole("button", { name: "Edit activities" }).click();
+      .getByRole("button", { name: "Edit activities" })
+      .click();
     await expect(this.dialog).toBeVisible();
   }
 
@@ -179,14 +182,17 @@ export class AppearancePicture {
 
   constructor(page: Page) {
     this.page = page;
-    this.dialog = page.getByRole("dialog")
+    this.dialog = page
+      .getByRole("dialog")
       .filter({ has: page.getByRole("figure", { name: "Where the appearance is drawn" }) });
   }
 
   /** Opens it from the row of a segment's transmog source, which is what the button is for. */
   async open(): Promise<void> {
-    await new SegmentDetail(this.page).section("Transmog")
-      .getByRole("button", { name: /^Show .* drawn$/ }).click();
+    await new SegmentDetail(this.page)
+      .section("Transmog")
+      .getByRole("button", { name: /^Show .* drawn$/ })
+      .click();
     await expect(this.dialog).toBeVisible();
   }
 

@@ -36,8 +36,10 @@ test("keeps what the reader said about the game's wardrobe", async ({ page }) =>
 
     await transmog.browseBy("Sets");
     await sets.openSet("Emberforge Plate");
-    await expect(sets.rowStar("Emberforge Plate", "Emberforge Helm"))
-      .toHaveAttribute("aria-pressed", "true");
+    await expect(sets.rowStar("Emberforge Plate", "Emberforge Helm")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     // The set it sits in was not starred by starring what is in it.
     await expect(sets.star("Emberforge Plate")).toHaveAttribute("aria-pressed", "false");
     await sets.closeSet("Emberforge Plate");
@@ -53,7 +55,10 @@ test("keeps what the reader said about the game's wardrobe", async ({ page }) =>
 
   await test.step("the grid narrows to one tag, and offers only the tags in use", async () => {
     await expect(sets.tagFilter().getByRole("option")).toHaveText([
-      "Any tag", "faction", "faction: horde", "wishlist",
+      "Any tag",
+      "faction",
+      "faction: horde",
+      "wishlist",
     ]);
 
     await sets.tagFilter().selectOption("faction\thorde");
@@ -100,7 +105,9 @@ test("keeps what the reader said about the game's wardrobe", async ({ page }) =>
     await expect(sets.tags("Emberforge Plate")).toHaveText(["faction: horde"]);
     // And the picker forgets the choice nothing carries any more.
     await expect(sets.tagFilter().getByRole("option")).toHaveText([
-      "Any tag", "faction", "faction: horde",
+      "Any tag",
+      "faction",
+      "faction: horde",
     ]);
   });
 
