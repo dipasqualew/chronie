@@ -415,6 +415,25 @@ async bossPortraits(encounters: number[]) : Promise<Result<IconsPayload, string>
 }
 },
 /**
+ * The pictures a list of factions is drawn with, keyed by the name rather than the file.
+ *
+ * Keyed by the name for the same reason [`place_icons`] is: a reputation arrives from the addon
+ * under the name the client gave the faction, and that name is the only thing the window holds.
+ *
+ * The hop behind it is four tables rather than two, and the picture is borrowed rather than the
+ * faction's own — `Faction` has no icon column, so what this answers with is the icon of the
+ * achievement for reaching Exalted with that faction. Most of what it is asked about comes back
+ * with nothing: the modern renown factions have no such achievement. See [`reputations::icons_of`].
+ */
+async reputationIcons(factions: string[]) : Promise<Result<IconsPayload, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reputation_icons", { factions }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What is in the history, so that a query can be written without reading the migrations.
  */
 async querySchema() : Promise<Result<QuerySchema, string>> {

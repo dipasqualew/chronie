@@ -23,6 +23,7 @@ import { GameItem } from "./item";
 import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import type { PlaceIcons } from "./places";
+import type { FactionIcons } from "./reputations";
 import { highlights } from "./sessions";
 import type { Highlight, HighlightKind, SessionActivity, SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
@@ -712,6 +713,52 @@ export function PlaceIcon({
   if (!picture) return null;
   return (
     <span className="place-icon" role="img" aria-label={`Icon for ${place}`}>
+      <img src={picture} alt="" />
+    </span>
+  );
+}
+
+/**
+ * The one mark on a reputation line: the picture the game gives the faction, or the glyph that was
+ * there before there were any pictures.
+ *
+ * A faction has no icon of its own anywhere in the game, so what arrives is borrowed — the icon of
+ * the achievement for reaching Exalted with it, which is real per-faction artwork. 138 factions have
+ * one. **The modern renown factions do not**, because renown has no Exalted tier to earn an
+ * achievement for, so a current history is mostly lines with nothing to draw.
+ *
+ * Which is why this is one slot rather than a picture *and* a glyph. Two marks on a line that has a
+ * picture and one on a line that has not would make the pictures read as extra decoration on some
+ * rows; one slot makes them read as what they are, which is a better answer than the glyph where
+ * the game has one. The fallback is the caller's because only the caller knows what its rows looked
+ * like before: the modal's lines carried a medal, and the roster's table carried nothing.
+ *
+ * The name is beside it either way, so the picture says nothing: it carries the faction in its own
+ * label only so that something can be asked for by name, and the `<img>` inside it is marked
+ * decorative so no reader hears the faction twice.
+ */
+export function FactionIcon({
+  faction,
+  factions,
+  fallback = null,
+}: {
+  faction: string;
+  /**
+   * The pictures the window has been handed, shared between the modal and the roster. Absent where
+   * nothing can draw one — a window with no game install behind it — which leaves the row as it was.
+   */
+  factions?: FactionIcons;
+  /** What to draw where the game has no picture, which is most rows. */
+  fallback?: ReactNode;
+}): ReactNode {
+  // The same argument as `PlaceIcon`: the book is a cache outside React, and `useBook` is what
+  // turns a picture landing into a redraw of the row that asked for it — see `book.ts`.
+  useBook(factions, [faction]);
+
+  const picture = factions?.icon(faction);
+  if (!picture) return fallback;
+  return (
+    <span className="faction-icon" role="img" aria-label={`Icon for ${faction}`}>
       <img src={picture} alt="" />
     </span>
   );

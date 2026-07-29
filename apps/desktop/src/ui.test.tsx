@@ -5,8 +5,16 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CLASS_FILES, CharacterCircle, ClassDot, HighlightList, SegmentButton } from "./ui";
+import {
+  CLASS_FILES,
+  CharacterCircle,
+  ClassDot,
+  FactionIcon,
+  HighlightList,
+  SegmentButton,
+} from "./ui";
 import { createPlaceIcons } from "./places";
+import { createFactionIcons } from "./reputations";
 import type { HighlightListProps } from "./ui";
 import { createItemBook } from "./items";
 import type { ItemBook } from "./items";
@@ -550,8 +558,77 @@ describe("SegmentButton", () => {
   });
 });
 
+/**
+ * The mark on a reputation line, which is one slot rather than two: the picture the faction
+ * borrows from its own Exalted achievement where there is one, and whatever the line carried
+ * before there were any pictures where there is not.
+ */
+describe("the picture on a reputation line", () => {
+  /** A faction the game has an Exalted achievement for, and one it never will. */
+  const EXALTED = "Argent Dawn";
+  const RENOWN = "Council of Dornogal";
+
+  const book = (held: Record<string, string>) =>
+    createFactionIcons({
+      load: (asked) =>
+        Promise.resolve({
+          icons: Object.fromEntries(
+            asked.filter((name) => held[name]).map((name) => [name, held[name] as string]),
+          ),
+        }),
+    });
+
+  it("draws the icon of the achievement the faction is earned through", async () => {
+    render(<FactionIcon faction={EXALTED} factions={book({ [EXALTED]: FACTION_PICTURE })} />);
+
+    const icon = await screen.findByRole("img", { name: `Icon for ${EXALTED}` });
+    expect(icon.querySelector("img")?.getAttribute("src")).toBe(FACTION_PICTURE);
+    expect(icon.querySelector("img")?.getAttribute("alt")).toBe("");
+  });
+
+  /**
+   * Which is most of a modern history: renown has no Exalted tier, so no renown faction has an
+   * achievement to borrow a picture from. Those lines keep the glyph they always had rather than
+   * losing their mark or holding an empty box for one that is never coming.
+   */
+  it("falls back to what the line carried before, for a faction the game cannot draw", async () => {
+    const view = render(
+      <FactionIcon
+        faction={RENOWN}
+        factions={book({ [EXALTED]: FACTION_PICTURE })}
+        fallback="🎖️"
+      />,
+    );
+
+    await waitFor(() => expect(view.container.textContent).toBe("🎖️"));
+    expect(view.container.querySelector(".faction-icon")).toBeNull();
+  });
+
+  /**
+   * And where the caller had no glyph to begin with — the roster's table is a column of plain
+   * names — nothing is drawn at all. Inventing a medal for the rows the game cannot draw would be
+   * decoration rather than a reading of the game.
+   */
+  it("draws nothing where the line never had a mark", async () => {
+    const view = render(<FactionIcon faction={RENOWN} factions={book({})} />);
+
+    await waitFor(() => expect(view.container.textContent).toBe(""));
+  });
+
+  /** A window with no game install behind it draws the line exactly as it always did. */
+  it("keeps the line as it was when nothing can look a picture up", () => {
+    const view = render(<FactionIcon faction={EXALTED} fallback="🎖️" />);
+
+    expect(view.container.textContent).toBe("🎖️");
+    expect(view.container.querySelector(".faction-icon")).toBeNull();
+  });
+});
+
 /** Whatever the backend hands back for a place, which the row only ever puts in an `<img>`. */
 const PLACE_PICTURE = "data:image/png;base64,deadmines";
+
+/** And for a faction, which the line only ever puts in an `<img>`. */
+const FACTION_PICTURE = "data:image/png;base64,argentdawn";
 
 /** The two inks the palette writes initials in, as the stylesheet spells them. */
 const INK_DARK = "#0b0b0b";

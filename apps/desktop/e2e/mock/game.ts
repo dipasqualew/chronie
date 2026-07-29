@@ -67,6 +67,17 @@ export const bossPortraits: E2EMock["bossPortraits"] = {
     "QVR42mP4z9DyHx9mGBkKALdWoIE3ifJxAAAAAElFTkSuQmCC",
 };
 
+// The picture each faction borrows from its own Exalted achievement, keyed by the name the
+// reputation was recorded under — the same shape as the places, and four backend hops behind it.
+// Only the cartographers have one: a faction's picture is the icon of the achievement for reaching
+// Exalted with it, and the modern renown factions have no such achievement at all, so a line with
+// nothing to draw is the ordinary case rather than the exception.
+export const factionIcons: E2EMock["factionIcons"] = {
+  "Cavern Cartographers":
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
+    "QVR42mNwajr2Hx9mGBkKAF+FokHepdeGAAAAAElFTkSuQmCC",
+};
+
 // What the game says about the achievements those segments name. 77 is deliberately absent:
 // an install can only describe the achievements it has, and a row still has to draw.
 export const achievementDetails: E2EMock["achievementDetails"] = {

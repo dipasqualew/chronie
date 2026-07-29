@@ -28,6 +28,7 @@ pub mod models;
 pub mod placement;
 pub mod qualities;
 pub mod query;
+pub mod reputations;
 pub mod retention;
 mod saved_variables;
 pub mod transmog;
@@ -868,6 +869,43 @@ async fn place_icons(
     for (place, file) in named {
         if let Some(url) = by_file["icons"].get(file.to_string()) {
             icons.insert(place, url.clone());
+        }
+    }
+    dto::convert(serde_json::json!({ "icons": icons }))
+}
+
+/// The pictures a list of factions is drawn with, keyed by the name rather than the file.
+///
+/// Keyed by the name for the same reason [`place_icons`] is: a reputation arrives from the addon
+/// under the name the client gave the faction, and that name is the only thing the window holds.
+///
+/// The hop behind it is four tables rather than two, and the picture is borrowed rather than the
+/// faction's own — `Faction` has no icon column, so what this answers with is the icon of the
+/// achievement for reaching Exalted with that faction. Most of what it is asked about comes back
+/// with nothing: the modern renown factions have no such achievement. See [`reputations::icons_of`].
+#[tauri::command]
+#[specta::specta]
+async fn reputation_icons(
+    factions: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<dto::IconsPayload, String> {
+    let cache = Arc::clone(&state.icons);
+    let named =
+        read_game_files(&state, move |files| reputations::icons_of(files, &factions)).await?;
+    let wanted: Vec<u32> = named.values().copied().collect();
+    let missing = cache.missing(&wanted);
+    if !missing.is_empty() {
+        let decoded =
+            read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        cache.store(decoded);
+    }
+    // Re-keyed by the faction rather than by the file, and a fan-out rather than a rename: six of
+    // the 138 achievements this reaches are drawn for more than one faction.
+    let by_file = cache.answer(&wanted);
+    let mut icons = serde_json::Map::new();
+    for (faction, file) in named {
+        if let Some(url) = by_file["icons"].get(file.to_string()) {
+            icons.insert(faction, url.clone());
         }
     }
     dto::convert(serde_json::json!({ "icons": icons }))
@@ -1898,6 +1936,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         log_retention,
         place_icons,
         boss_portraits,
+        reputation_icons,
         query_schema,
         release,
         reset_activities,

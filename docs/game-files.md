@@ -152,6 +152,9 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `LFGDungeons` | 1361033 | fixed | yes, **columns read**, only through col8 |
 | `JournalEncounter` | 1240336 | fixed | yes, **columns read**, id in col3 |
 | `JournalEncounterCreature` | 1301155 | fixed | yes, **columns read**, id in col2 |
+| `Faction` | 1361972 | fixed | yes, **columns read**, name in col1 |
+| `Criteria` | 1263817 | fixed | yes, **columns read**, id in col0 |
+| `CriteriaTree` | 1263818 | fixed | yes, **columns read** |
 
 ### ItemSparse
 
@@ -957,10 +960,13 @@ a name neither table has heard of. That is not a gap in the reader:
 |---|---|
 | `JournalTier` — the expansions | none |
 | `UiMap` — the zones | none |
-| `Faction` — the reputations | none, though two indirect routes exist — see #213 |
 
-`JournalEncounter` was listed here as having none, and that was **wrong**: it holds no picture
-itself, but the table hanging off it does. See "Bosses, verified" below.
+Two rows have been struck off this list since it was written, and both were wrong in the same
+way — the table itself holds no picture, and something one join away does.
+
+- `JournalEncounter` — the bosses. See "Bosses, verified" below.
+- `Faction` — the reputations. It genuinely has no icon column, but the achievement for reaching
+  Exalted with a faction does, and its icon is per-faction artwork. See "Reputations, verified".
 
 **What each column was checked against**, since a reordered table shows wrong values rather than
 failing:
@@ -1055,6 +1061,89 @@ decode sweep, the fights that store their creatures out of order, and the chain 
 with the instance each fight was filed under. That is what to run after a patch; pass names to
 reach a modern row, a delve or a modern boss.
 
+## Reputations, verified
+
+`Faction` has no icon column. What the app draws on a reputation line instead is **borrowed**: the
+icon of the achievement for reaching Exalted with that faction, which is real per-faction artwork —
+"Hero of the Frostwolf Clan" is a Frostwolf banner, "Knight of Arathor" the League's crest. Four
+tables, and the join starts from a name because a name is what a segment carries.
+
+```
+Faction                           (id in a list beside the rows)
+  col0 = ReputationRaceMask[4]     256 bits wide, which is what puts the name at col1
+  col1 = Name_lang               ◀── the string a segment and a standing carry
+  col2 = Description_lang
+  col3 = ReputationIndex
+  col4 = ParentFactionID
+
+Criteria                          (id in col0)
+  col0 = ID
+  col1 = Type                      46 is "reach reputation with faction"
+  col2 = Asset                     for a type-46 row, a Faction id — and something else entirely
+                                   on the row beside it
+
+CriteriaTree                      (id in a list beside the rows)
+  col0 = Description_lang
+  col1 = Parent                  ──▶ another CriteriaTree row, and 0 on a root
+  col2 = Amount
+  col3 = Operator
+  col4 = CriteriaID              ──▶ Criteria col0
+  col5 = OrderIndex
+  col6 = Flags
+
+Achievement
+  col14 = Criteria_tree          ──▶ the root CriteriaTree row this achievement asks for
+  col12 = IconFileID               the picture, already read for the achievements themselves
+```
+
+The walk goes **up** the tree rather than down. A node names its one parent, so collecting the
+parents is one pass and the climb from each of the few thousand nodes that are about a reputation is
+short — where walking down would need a list of children per node over a table of 115,826 rows.
+
+**The rule that matters is which achievement a faction is allowed to land on.** 386 criteria are of
+type 46, over 223 factions, and 216 of those factions are reachable from some achievement. But most
+are reachable only through the *aggregate* achievements — "25 Exalted Reputations", "30 Exalted
+Reputations" — whose icon is a generic pile of tabards and says nothing about any one faction.
+Letting one through would put the same picture on every reputation line in the app, which is worse
+than putting none on any. So: **an achievement answers for a faction only if its criteria name that
+faction and no other.** That leaves **138 factions**, every one of whose icons decodes, and every one
+of them 64×64.
+
+Two more rules, each of which is a wrong picture rather than a missing one if skipped:
+
+- **A faction can have several achievements of its own; the lowest id wins.** 38 of the 138 do — a
+  later hidden per-character copy, an unshipped "[DNT]" tier, a seasonal reissue. The lowest id is
+  the original, and where two are both real they share an icon anyway.
+- **14 faction names are on more than one `Faction` row.** "Venture Company" is on three; there are
+  rows literally called "reuse" and "unused". So every row bearing an asked-for name is followed and
+  whichever reaches an achievement answers.
+
+**What this route does not reach is the modern half.** No Dragonflight-or-later renown faction has an
+Exalted achievement, because renown has no Exalted tier — the Council of Dornogal, the Assembly of
+the Deeps, Hallowfall Arathi, the Valdrakken Accord and Dragonscale Expedition all come back with
+nothing. They have real artwork of their own in `interface/majorfactions/majorfactionsicons.blp`
+(`4672345`), reachable only through the texture atlas, which `icons.rs` cannot crop. That is the
+remaining piece of #213.
+
+**What each column was checked against:**
+
+| Column | Checked against |
+|---|---|
+| `Faction` col1 | reads "Argent Dawn" for 529, "Frostwolf Clan" for 729, "PLAYER, Human" for 1; all 860 rows hold a string here and col0 holds none |
+| `Criteria` col1 = 46 | its assets are 529, 576, 609, 749, 910 — Argent Dawn, Timbermaw Hold, the Cenarion Circle, the Hydraxian Waterlords, the Brood of Nozdormu, five factions with nothing in common but being reputations a player grinds. Reading the two columns the other way round finds 3 rows and none of those factions |
+| `CriteriaTree` col1 | every one of the 92,387 rows that names a parent names a row that exists; col2 read as a parent resolves on 17,330 of 75,851 |
+| `CriteriaTree` col4 | 6,252 rows name a type-46 criterion; col5 read the same way names none |
+| `Achievement` col14 | 11,239 of the 11,259 rows that hold a value hold an existing `CriteriaTree` id; col13 manages 177 of 549 and col15 31 of 37 |
+| the whole walk | faction 729 comes out at `133287` through "Hero of the Frostwolf Clan", 730 at `133433`, 509 at `132351` through "Knight of Arathor", 510 at `237568` through "The Defiler" |
+
+**A route not taken.** `Faction` has a `RenownFactionID` and a `FriendshipRepID`, and neither leads
+to a picture. `DungeonEncounter`'s `SpellIconFileID` is the equivalent shortcut for bosses and was
+rejected for the same kind of reason — see above.
+
+`cargo run --example dump_achievements -- "<install>" --factions` prints all four tables' column
+censuses, the type-46 count, the 138 against the 216, the sizes every answered icon decodes to, and
+the four spot checks. That is what to run after a patch.
+
 ## Regenerating the fixtures
 
 Tests never read the game. One script per area writes real WDC5 tables and real BLP2
@@ -1077,6 +1166,18 @@ encrypts, an `ItemAppearance` whose display info is encrypted, one with no icon 
 display whose only model sits in the second slot, an item `ItemSparse` holds a row for and no
 name in, an achievement filed under a category whose parent is encrypted, one filed under a
 category that is not in the tree at all, and one the game withholds entirely.
+
+The achievement fixtures carry `Faction`, `Criteria` and `CriteriaTree` too, because what those
+three are *for* is reaching the achievement table beside them. They hold both of the ways that walk
+gives a wrong answer rather than none: an aggregate achievement naming three factions, which must
+never lend its icon to any of them, and a faction with two achievements of its own where only the
+first counts. And the ways it legitimately reaches nothing — a faction only the aggregate names, one
+no criterion mentions at all, a criterion of the wrong type whose asset is a faction id all the same,
+a name on two faction rows where only the second reaches an achievement, and a pair of tree nodes
+whose parents point at each other so that the climb has to stop rather than run forever. The
+sharpest of them is a criteria-tree node in an *encrypted* section: it hangs off the Emberforge
+Covenant's own achievement and is about a different faction, so a reader that saw it would decide
+that achievement was an aggregate and the Covenant would draw nothing.
 
 The transmog fixtures carry `Item` as well, for the wardrobe's sake: browsing by kind reads
 that table and nothing else can say a one-handed sword from a two-handed one. They also hold
