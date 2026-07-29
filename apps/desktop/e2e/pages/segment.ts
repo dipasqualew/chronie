@@ -249,18 +249,11 @@ export class AppearancePicture {
    *
    * A drag does not end when the mouse does: the controls carry a shrinking fraction of it into
    * every frame after, which is what makes turning a model feel like turning something with
-   * weight. Two readings that agree is the end of what three decimals can see of that.
+   * weight. The stage says when that remainder is spent, so a starved render loop only makes
+   * this wait longer rather than making two accidentally adjacent readings look settled.
    */
   async settled(): Promise<{ out: number; above: number }> {
-    let last = "";
-    await expect
-      .poll(async () => {
-        const now = (await this.stage().getAttribute("data-camera")) ?? "";
-        const still = now !== "" && now === last;
-        last = now;
-        return still;
-      }, { timeout: 15_000 })
-      .toBe(true);
+    await expect(this.stage()).toHaveAttribute("data-camera-state", "settled");
     return this.framing();
   }
 
