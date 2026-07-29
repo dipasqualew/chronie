@@ -64,7 +64,11 @@ fn embed_migrations() {
 
     let mut files = fs::read_dir(&directory)
         .expect("the desktop should have a migrations folder")
-        .map(|entry| entry.expect("a migration directory entry should be readable").path())
+        .map(|entry| {
+            entry
+                .expect("a migration directory entry should be readable")
+                .path()
+        })
         .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
         .collect::<Vec<_>>();
     files.sort();
@@ -86,7 +90,7 @@ fn embed_migrations() {
         })
         .collect::<String>();
 
-    let generated = format!("static MIGRATIONS: &[Migration] = &[\n{entries}];\n");
+    let generated = format!("pub(super) static MIGRATIONS: &[Migration] = &[\n{entries}];\n");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("migrations.rs");
     fs::write(out, generated).expect("the generated migration list should be writable");
 }
@@ -204,7 +208,10 @@ fn embed_addon() {
         );
         let source = addon.join(&relative);
         println!("cargo:rerun-if-changed={}", source.display());
-        assert!(source.is_file(), "chronie.toc lists a missing file: {listed}");
+        assert!(
+            source.is_file(),
+            "chronie.toc lists a missing file: {listed}"
+        );
         entries.push(entry(&source, &relative));
     }
 
