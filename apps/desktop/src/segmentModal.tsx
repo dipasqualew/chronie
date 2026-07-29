@@ -19,6 +19,7 @@ import type { CaptureAlbum } from "./captures";
 import { equipsetDetail, equipsetSlotLine, equipsetTitle } from "./equipsets";
 import type { AppearanceModalState } from "./appearanceModal";
 import { GameItem } from "./item";
+import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
@@ -50,13 +51,12 @@ const At = ({ event }: { event: { at?: number | null } }): ReactNode =>
 /**
  * What to call an item on a control that has to say something before anything has been read.
  *
- * The book first, because it is the game's own name and is what the row itself is drawing by
- * the time anybody clicks; then the name the addon caught at the time, which is what the app
- * had before it read the game's tables at all; and the number, which is always true.
+ * The same order `itemLine` draws a row in, because this is the same claim said out loud: the
+ * button opens a picture of whatever the row beside it ended up showing, and a label that
+ * disagreed with the row would be naming something else.
  */
-function itemName(event: { id: number; name?: string | null }, items: ItemBook): string {
-  return items.detail(event.id)?.name || event.name || `Item ${event.id}`;
-}
+const shownAs = (event: { id: number; name?: string | null }, items: ItemBook): string =>
+  itemName(event.id, event.name, items.detail(event.id));
 
 /**
  * A section of the modal, or nothing when the segment has no events of that kind.
@@ -425,10 +425,10 @@ function Lists(
               {onShowAppearance
                 ? <button
                   type="button" className="ghost appearance-show"
-                  title={`Show ${itemName(event, items)} drawn`}
-                  aria-label={`Show ${itemName(event, items)} drawn`}
+                  title={`Show ${shownAs(event, items)} drawn`}
+                  aria-label={`Show ${shownAs(event, items)} drawn`}
                   onClick={() => onShowAppearance({
-                    itemId: event.id, name: itemName(event, items),
+                    itemId: event.id, name: shownAs(event, items),
                   })}
                 >Show</button>
                 : null}

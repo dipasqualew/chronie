@@ -21,6 +21,7 @@
  */
 
 import { ago } from "./format";
+import { itemName } from "./items";
 import { markFacets, markWords, survivesMarks } from "./marks";
 import type { MarkFilter } from "./marks";
 import { placeOrder, wornPieces } from "./outfit";
@@ -71,7 +72,7 @@ export function rowOf(piece: CustomSetPiece): AppearanceRow {
     // on a row, and a row in a saved set should read the way the same row read in the set it
     // was picked out of — see `wardrobeRow`, which names its slot the same way.
     slot: slotName(piece.displayType, piece.inventoryType),
-    label: piece.name || `Item ${piece.itemId}`,
+    label: itemName(piece.itemId, piece.name),
     itemId: piece.itemId,
     appearanceId: piece.appearanceId,
     displayType: piece.displayType,
@@ -81,7 +82,7 @@ export function rowOf(piece: CustomSetPiece): AppearanceRow {
     hasModel: piece.hasModel,
     withheld: false,
     sources: [{
-      label: piece.name || `Item ${piece.itemId}`,
+      label: itemName(piece.itemId, piece.name),
       itemId: piece.itemId,
       modifiedAppearanceId: piece.appearanceId,
       inventoryType: piece.inventoryType,

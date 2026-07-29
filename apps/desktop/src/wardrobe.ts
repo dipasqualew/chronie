@@ -20,6 +20,7 @@
  */
 
 import { plural } from "./format";
+import { itemName } from "./items";
 import { markFacets, markWords, survivesMarks } from "./marks";
 import type { MarkFilter } from "./marks";
 import { qualityFacets, qualityWords } from "./qualities";
@@ -154,7 +155,7 @@ export function answerKey(kind: Kind): string {
  * name the eight items behind each, and a slot is five thousand and cannot.
  */
 export function wardrobeRow(appearance: WardrobeAppearance): AppearanceRow {
-  const label = appearance.name || `Item ${appearance.itemId}`;
+  const label = itemName(appearance.itemId, appearance.name);
   return {
     slot: slotName(appearance.displayType, appearance.inventoryType),
     label,

@@ -192,7 +192,10 @@ function SessionCard(
           ? <ol className="session-segments">
             {session.segments.map((segment) => (
               <li key={segment.segmentId}>
-                <SegmentButton segment={segment} onOpen={() => onOpenSegment(segment.segmentId)} />
+                <SegmentButton
+                  segment={segment} items={items}
+                  onOpen={() => onOpenSegment(segment.segmentId)}
+                />
               </li>
             ))}
           </ol>

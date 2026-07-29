@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 
 import { equipsetDetail, equipsetTitle } from "./equipsets";
 import { clock, duration, gold, signed, signedGold } from "./format";
+import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import { eventsOf } from "./types";
 import type {
@@ -63,7 +64,7 @@ const collectionText = (events?: CollectibleEvent[]): string =>
 const housingText = (events?: HousingItemEvent[]): string =>
   (events || []).map((event) => `${event.name} (${event.warbandFirst ? "warband first" : "additional"})`).join(", ");
 const transmogText = (events?: TransmogEvent[]): string => (events || []).map((event) =>
-  `${event.name || `Item ${event.id}`} (${event.newAppearance === true
+  `${itemName(event.id, event.name)} (${event.newAppearance === true
     ? "new" : event.newAppearance === false ? "variant" : "unknown"})`).join(", ");
 const questText = (events?: QuestEvent[]): string =>
   (events || []).map((event) => event.name || `Quest ${event.id}`).join(", ");

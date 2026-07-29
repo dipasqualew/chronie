@@ -2,14 +2,16 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CLASS_FILES, CharacterCircle, ClassDot, HighlightList } from "./ui";
+import { CLASS_FILES, CharacterCircle, ClassDot, HighlightList, SegmentButton } from "./ui";
 import type { HighlightListProps } from "./ui";
+import { createItemBook } from "./items";
+import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
 import type { SessionCharacter } from "./sessions";
-import type { Segment } from "./types";
+import type { IconsPayload, ItemDetail, ItemDetailsPayload, Segment } from "./types";
 
 const BASE = 1_785_000_000;
 
@@ -64,6 +66,60 @@ const three = (): Segment => segment({
     { id: 2, name: "Another First", accountFirst: true, at: BASE + 120 },
     { id: 3, name: "A Third First", accountFirst: true },
   ],
+});
+
+/** A piece of gear as the game's own tables answer for it; only the name is read here. */
+const piece = (id: number, name: string): ItemDetail => ({
+  id,
+  name,
+  classId: 4,
+  subclassId: 2,
+  inventoryType: 10,
+  quality: 3,
+  requiredLevel: 25,
+  allowableClass: 0xffff,
+  iconFileDataId: 260_001,
+});
+
+/** The pieces the game will answer for, for the marks that are about one. */
+const WARDROBE: Record<number, ItemDetail> = {
+  4200: piece(4200, "Insanity's Grip"),
+  4201: piece(4201, "Boulderfist Belt"),
+  4202: piece(4202, "Ashwood Sandals"),
+};
+
+/**
+ * A real book over a backend a test answers, built the way `item.test.tsx` builds one: the
+ * lookup is the app's own and only its far end is fake, injected rather than patched.
+ */
+function itemBook(known: Record<number, ItemDetail> = WARDROBE): ItemBook {
+  const load = (ids: number[]): Promise<ItemDetailsPayload> => Promise.resolve({
+    items: Object.fromEntries(
+      ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
+    ),
+  });
+  const loadIcons = (fdids: number[]): Promise<IconsPayload> => Promise.resolve({
+    icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), "data:image/png;base64,icon"])),
+  });
+  return createItemBook({ load, loadIcons });
+}
+
+/**
+ * A book that has already been answered, so what is drawn from it is a decision rather than a
+ * race: a card that counts because the names had not arrived yet counts for the wrong reason.
+ */
+async function answered(ids: number[]): Promise<ItemBook> {
+  const book = itemBook();
+  book.learn(ids, () => {});
+  await waitFor(() => expect(book.detail(ids[0] as number)).toBeTruthy());
+  return book;
+}
+
+/** However many pieces of the addon's commonest catch: an id, a variant, and no name at all. */
+const variants = (count: number): Segment => segment({
+  transmogs: Array.from({ length: count }, (_unused, index) => ({
+    id: 4200 + index, newAppearance: false,
+  })),
 });
 
 /**
@@ -275,6 +331,42 @@ describe("HighlightList", () => {
         expect(screen.getByRole("button", { name: said })).toBeTruthy();
       });
 
+    /**
+     * A mark about a piece of gear has to call it what the game calls it.
+     *
+     * The addon catches a name only when the client happened to have the item loaded at the
+     * moment the source was learned, which is almost never — the backend's own table has
+     * nowhere to keep one — so the sentence baked in `sessions.ts` came out as the number:
+     * "Item 39473 · variant of one owned", on a real evening, as the mark's entire words. The
+     * list that same mark unfolds into draws its rows through the game's tables and reads
+     * "Insanity's Grip", so the card disagreed with itself about the same piece of gear.
+     *
+     * The lookup is asynchronous, so the id is what it says until the answer lands. That is
+     * the same fallback every other item in the app draws and is not the defect.
+     */
+    describe("a piece the addon caught no name for", () => {
+      it("names the one piece a mark stands for, once the game has answered", async () => {
+        const view = draw([variants(1)], { items: itemBook() });
+        const mark = (): Element | null => view.container.querySelector(".hl-transmogVariant");
+
+        expect(mark()?.getAttribute("data-tip")).toBe("Item 4200 · variant of one owned");
+
+        await waitFor(() => expect(mark()?.getAttribute("data-tip"))
+          .toBe("Insanity's Grip · variant of one owned"));
+        expect(screen.getByRole("button", { name: "Insanity's Grip · variant of one owned" }))
+          .toBeTruthy();
+      });
+
+      // The count is what a mark of several is for, and naming the first of three would be a
+      // claim about the other two. The names are what unfolding it is for.
+      it("still counts where the mark stands for several", async () => {
+        const view = draw([variants(3)], { items: await answered([4200, 4201, 4202]) });
+
+        expect(view.container.querySelector(".hl-transmogVariant")?.getAttribute("data-tip"))
+          .toBe("3 variants");
+      });
+    });
+
     it("keeps its label where it is not the one drawn quietly", () => {
       const view = draw([segment({ mounts: [{ id: 11, name: "Clockwork Glider" }] })]);
 
@@ -338,6 +430,26 @@ describe("HighlightList", () => {
 
   it("has nothing to draw for a segment nothing happened in", () => {
     expect(draw([segment()]).container.textContent).toBe("");
+  });
+});
+
+/**
+ * The row an evening on the timeline and a character's history both unfold into.
+ *
+ * Its summary is drawn inert — the row is itself one button and can hold no others — but it is
+ * the same summary the card above it draws, so a piece named one way here and another way
+ * there is the one disagreement told twice. The row is where a reader is likeliest to meet a
+ * transmog variant at all, and it is the only one of the three that was never handed the book.
+ */
+describe("SegmentButton", () => {
+  it("names the piece its summary stands for, the way the rest of the app does", async () => {
+    const view = render(
+      <SegmentButton segment={variants(1)} items={itemBook()} onOpen={() => {}} />,
+    );
+
+    await waitFor(() => expect(view.container.querySelector(".hl-transmogVariant")
+      ?.getAttribute("data-tip")).toBe("Insanity's Grip · variant of one owned"));
+    expect(screen.getByLabelText("Insanity's Grip · variant of one owned")).toBeTruthy();
   });
 });
 
