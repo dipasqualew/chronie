@@ -1731,7 +1731,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
 }
 
 fn checkout_bindings(source: &str) -> String {
-    source.to_owned()
+    source.replace("\r\n", "\n")
 }
 
 /// Writes the deterministic TypeScript command client, or verifies the committed copy.
@@ -1760,13 +1760,13 @@ pub fn export_bindings(check: bool) -> Result<(), String> {
         return fs::write(destination, expected).map_err(|error| error.to_string());
     }
 
-    let committed = fs::read(&destination).map_err(|_| {
+    let committed = fs::read_to_string(&destination).map_err(|_| {
         format!(
             "{} is missing; run `cargo run --bin export_bindings`.",
             destination.display()
         )
     })?;
-    if expected.as_bytes() != committed {
+    if expected != checkout_bindings(&committed) {
         return Err(format!(
             "{} is stale; run `cargo run --bin export_bindings`.",
             destination.display()
