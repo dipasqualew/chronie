@@ -13,6 +13,7 @@
  */
 
 import { equipsetDetail, equipsetTitle } from "./equipsets";
+import { itemName } from "./items";
 import { eventsOf } from "./types";
 import type { Activity, EventListKey, EventOf, Segment } from "./types";
 
@@ -452,13 +453,15 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   // one, so they are counted apart — and the variants, being a wardrobe tidied rather than a
   // wardrobe grown, are drawn as a mark.
   const transmogs = from("transmogs");
+  // The name the addon caught, and the id where it caught none. This is a summary rather than
+  // a row, so there is no book to ask here — what the game calls the piece is filled in by
+  // whatever draws it, out of the `itemId` travelling beside these words.
   const pieces = (said: string, was: boolean): HighlightEntry[] =>
     transmogs.filter(({ event }) => event.newAppearance === was).map((sourced) =>
-      entry(sourced, sourced.event.name || `Item ${sourced.event.id}`, said, sourced.event.id));
+      entry(sourced, itemName(sourced.event.id, sourced.event.name), said, sourced.event.id));
 
   // The new ones count rather than name, because the number is the whole of what a collection
-  // growing means — and because the addon catches an id far more often than it catches a
-  // name, so a chip naming the one piece would as often as not read "Item 101".
+  // growing means.
   const fresh = pieces("new appearance", true);
   if (fresh.length) {
     out.push({

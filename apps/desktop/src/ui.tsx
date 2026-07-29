@@ -20,9 +20,12 @@ import { activityIcon, activityLabel, activitySummary, isUncertain } from "./act
 import type { PartialActivity } from "./activities";
 import { clock, duration, escapeHtml, initials, plural, signed, signedGold } from "./format";
 import { GameItem } from "./item";
+import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import { highlights } from "./sessions";
-import type { Highlight, HighlightKind, SessionActivity, SessionCharacter } from "./sessions";
+import type {
+  Highlight, HighlightKind, SessionActivity, SessionCharacter,
+} from "./sessions";
 import type { Segment } from "./types";
 
 /**
@@ -113,15 +116,39 @@ interface ChipProps {
   entry: Highlight;
   /** Namespaces the panel's id, so two sessions on screen do not share one. */
   scope: string;
+  /** What the game says about the piece a summary of one item stands for. */
+  items?: ItemBook;
   expanded?: string | null;
   interactive?: boolean;
   onUnfold?: (kind: string) => void;
   onOpenSegment?: (segmentId: number) => void;
 }
 
+/**
+ * The piece a summary was named after, where it was named after one.
+ *
+ * A summary of several is a count and stays one — naming the first of three variants would be
+ * a claim about the other two, and the names are what unfolding it is for. A summary that
+ * chose a count over a name is left alone for the same reason: "16 new appearances" is the
+ * whole of what a collection growing means, and this is not the place to overrule it. What is
+ * left is the case this exists for — a summary standing for one piece, worded in `sessions.ts`
+ * out of what the addon caught, which is almost never a name.
+ */
+function namedPiece(entry: Highlight): { id: number; caught: string } | undefined {
+  const only = entry.items.length === 1 ? entry.items[0] : undefined;
+  if (!only?.itemId || only.label !== entry.label) return undefined;
+  return { id: only.itemId, caught: only.label };
+}
+
+/** What a summary calls itself, with any piece it names called what the game calls it. */
+const chipLabel = (entry: Highlight, items?: ItemBook): string => {
+  const piece = items && namedPiece(entry);
+  return piece ? itemName(piece.id, piece.caught, items.detail(piece.id)) : entry.label;
+};
+
 /** The whole of what a chip says, for the tooltip and the accessible name of an icon. */
-const chipText = (entry: Highlight): string =>
-  [entry.label, entry.detail].filter(Boolean).join(" · ");
+const chipText = (entry: Highlight, items?: ItemBook): string =>
+  [chipLabel(entry, items), entry.detail].filter(Boolean).join(" · ");
 
 /**
  * One thing worth remembering, or one summary of several.
@@ -136,10 +163,10 @@ const chipText = (entry: Highlight): string =>
  * who does not never has to read past it. Which kinds those are is `KINDS`' business.
  */
 export function HighlightChip(
-  { entry, scope, expanded, interactive, onUnfold, onOpenSegment }: ChipProps,
+  { entry, scope, items, expanded, interactive, onUnfold, onOpenSegment }: ChipProps,
 ): ReactNode {
   const quiet = !!entry.quiet;
-  const text = chipText(entry);
+  const text = chipText(entry, items);
   // A chip with no words on it still has to be reachable and still has to say what it is, so
   // the sentence it dropped becomes both its tooltip and the name a screen reader reads.
   const named = quiet
@@ -149,7 +176,7 @@ export function HighlightChip(
     ? <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
     : <>
       <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
-      <span className="hl-label">{entry.label}</span>
+      <span className="hl-label">{chipLabel(entry, items)}</span>
       {entry.detail ? <span className="detail">{entry.detail}</span> : null}
     </>;
   const style = `hl hl-${entry.kind}${quiet ? " hl-quiet" : ""}`;
@@ -206,7 +233,9 @@ export function HighlightPanel(
         // colour of its quality — and everything else as the label the summary built. The
         // button around it is what it always was: a way back to the segment, and it is named
         // by whatever the row ended up showing rather than by the label underneath it.
-        const shown = (item.itemId && items?.detail(item.itemId)?.name) || item.label;
+        const shown = item.itemId
+          ? itemName(item.itemId, item.label, items?.detail(item.itemId))
+          : item.label;
         return (
           <li key={`${item.segmentId}-${item.label}-${index}`}>
             <button
@@ -361,6 +390,16 @@ export function HighlightList(
     expanded = null, interactive = true, onUnfold, onOpenSegment,
   }: HighlightListProps,
 ): ReactNode {
+  // The book is a cache outside React, so an answer landing changes nothing React would
+  // notice on its own. The panel asks for the rows it is about to draw; this asks for the
+  // pieces the chips above it are named after, which are wanted whether or not anything is
+  // ever unfolded — a mark drawn as its icon alone says the name and nothing else.
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
+  const wanted = entries.map((entry) => namedPiece(entry)?.id).filter(Boolean).join(",");
+  useEffect(() => items?.learn(
+    wanted ? wanted.split(",").map(Number) : [], redraw,
+  ), [items, wanted]);
+
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
   const chips = milestones.filter((entry) => !entry.quiet);
   const marks = milestones.filter((entry) => entry.quiet);
@@ -378,7 +417,7 @@ export function HighlightList(
       ? <div className="hl-row">
         {chips.map((entry) => (
           <HighlightChip
-            key={entry.kind} entry={entry} scope={scope} expanded={expanded}
+            key={entry.kind} entry={entry} scope={scope} items={items} expanded={expanded}
             interactive={interactive} onUnfold={onUnfold} onOpenSegment={onOpenSegment}
           />
         ))}
@@ -391,7 +430,7 @@ export function HighlightList(
       ? <div className="tally-row" role="group" aria-label="The quieter marks">
         {marks.map((entry) => (
           <HighlightChip
-            key={entry.kind} entry={entry} scope={scope} expanded={expanded}
+            key={entry.kind} entry={entry} scope={scope} items={items} expanded={expanded}
             interactive={interactive} onUnfold={onUnfold} onOpenSegment={onOpenSegment}
           />
         ))}
@@ -553,7 +592,16 @@ export function ActivityRoll(
  * would say the opposite of the truth if every row took the colour of whoever led.
  */
 export function SegmentButton(
-  { segment, onOpen }: { segment: Segment; onOpen: () => void },
+  { segment, items, onOpen }: {
+    segment: Segment;
+    /**
+     * What the game says about the pieces its summary names. The row cannot unfold — it is
+     * one button and can hold no others — so this is the only thing that keeps a mark about
+     * a transmog from reading as the number the addon recorded.
+     */
+    items?: ItemBook;
+    onOpen: () => void;
+  },
 ): ReactNode {
   const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
   const summary = highlights([segment]);
@@ -579,7 +627,7 @@ export function SegmentButton(
         </span>
         {shownHighlights(summary, { tallies: false }).length
           ? <span className="seg-summary">
-            <HighlightList entries={summary} tallies={false} interactive={false} />
+            <HighlightList entries={summary} items={items} tallies={false} interactive={false} />
           </span>
           : null}
       </span>

@@ -24,6 +24,7 @@
  */
 
 import { ago, plural } from "./format";
+import { itemName } from "./items";
 import { wearable } from "./modelPreview";
 import { wornPieces } from "./outfit";
 import type { Outfit } from "./outfit";
@@ -74,7 +75,7 @@ export function rowOf(appearance: TransmogAppearance): AppearanceRow {
   const withheld = !appearance.itemId;
   const label = withheld
     ? "The game keeps this appearance encrypted"
-    : appearance.name || `Item ${appearance.itemId}`;
+    : itemName(appearance.itemId, appearance.name);
   return {
     slot: withheld ? "Unknown slot" : slotName(appearance.displayType, appearance.inventoryType),
     label,
@@ -87,7 +88,7 @@ export function rowOf(appearance: TransmogAppearance): AppearanceRow {
     hasModel: appearance.hasModel,
     withheld,
     sources: [{
-      label: appearance.name || `Item ${appearance.itemId}`,
+      label: itemName(appearance.itemId, appearance.name),
       itemId: appearance.itemId,
       modifiedAppearanceId: appearance.modifiedAppearanceId,
       inventoryType: appearance.inventoryType,

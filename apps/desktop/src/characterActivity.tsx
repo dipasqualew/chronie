@@ -142,7 +142,7 @@ export function CharacterActivity(
                 {group.segments.map((segment) => (
                   <li key={segment.segmentId}>
                     <SegmentButton
-                      segment={segment}
+                      segment={segment} items={items}
                       onOpen={() => onOpenSegment(segment.segmentId, segments)}
                     />
                   </li>

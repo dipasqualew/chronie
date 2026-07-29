@@ -153,13 +153,24 @@ export interface ItemLine {
 }
 
 /**
- * How a row reads, out of what the addon recorded and what the game could be asked.
+ * What an item is called, wherever in the app it is named.
  *
  * The game's name leads and the addon's is the fallback, the same way round as an
  * achievement's: the game's is the one that is definitely spelled the way the game spells it,
  * while the addon's was whatever the client had loaded at the time — and for an item the
  * install cannot describe at all, the addon's name is the only name there is. Under both of
  * them is the id, which is at least something a reader can look up.
+ *
+ * One function rather than the four copies of `name || "Item " + id` this app grew, because
+ * the copies disagreed: a summary chip worded before anything had been asked said "Item 39473"
+ * while the list it unfolded into said "Insanity's Grip", about the same piece, on the same
+ * card. Anything that has to say what an item is called says it through here.
+ */
+export const itemName = (id: number, recorded?: string | null, detail?: ItemDetail): string =>
+  detail?.name || recorded || `Item ${id}`;
+
+/**
+ * How a row reads, out of what the addon recorded and what the game could be asked.
  */
 export function itemLine(
   id: number,
@@ -168,7 +179,7 @@ export function itemLine(
 ): ItemLine {
   const quality = detail && detail.name ? detail.quality : null;
   return {
-    name: detail?.name || recorded || `Item ${id}`,
+    name: itemName(id, recorded, detail),
     quality,
     qualityName: quality == null ? "" : QUALITIES[quality] ?? "",
     kind: kindOf(detail),
