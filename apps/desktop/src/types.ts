@@ -192,6 +192,11 @@ export interface E2EMock {
    * the other happens in the backend. A currency absent from here is one the game names no
    * picture for, which the real backend also leaves out. */
   currencyIcons: Record<number, string>;
+  /** The picture each place is drawn with, keyed by the name a segment was filed under rather
+   * than by the file behind it — which is the whole shape of the real command, because the hop
+   * from one to the other happens in the backend. A place absent from here is one the game names
+   * no picture for, which is most of them: the open world has none anywhere. */
+  placeIcons: Record<string, string>;
   /** What the game says about each achievement, keyed by id. An id absent from here is one
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;

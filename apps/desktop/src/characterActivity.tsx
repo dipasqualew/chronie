@@ -36,6 +36,7 @@ import type { CharacterProfile } from "./characters";
 import { RANGES, WIDEST_RANGE, rangeOf, within } from "./characterRange";
 import { dayLabel, plural } from "./format";
 import type { ItemBook } from "./items";
+import type { PlaceIcons } from "./places";
 import { activitiesIn, highlights } from "./sessions";
 import { ActivityRoll, HighlightList, SegmentButton, shownHighlights } from "./ui";
 import type { OpenSegment } from "./ui";
@@ -52,6 +53,8 @@ export interface CharacterActivityProps {
   now: number;
   /** What the game says about an item, for the gains that unfold into pieces of transmog. */
   items: ItemBook;
+  /** The pictures the game draws a place with, for the segment rows below. */
+  places?: PlaceIcons;
   /**
    * Opens a segment, walking the ones the range is showing.
    *
@@ -63,7 +66,7 @@ export interface CharacterActivityProps {
 }
 
 export function CharacterActivity(
-  { entry, range, onRange, now, items, onOpenSegment }: CharacterActivityProps,
+  { entry, range, onRange, now, items, places, onOpenSegment }: CharacterActivityProps,
 ): ReactNode {
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const chosen = rangeOf(range);
@@ -142,7 +145,7 @@ export function CharacterActivity(
                 {group.segments.map((segment) => (
                   <li key={segment.segmentId}>
                     <SegmentButton
-                      segment={segment} items={items}
+                      segment={segment} items={items} places={places}
                       onOpen={() => onOpenSegment(segment.segmentId, segments)}
                     />
                   </li>

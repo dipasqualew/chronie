@@ -19,6 +19,7 @@ import type { CaptureActions } from "./captureGallery";
 import type { CaptureAlbum } from "./captures";
 import { clock, dayLabel, duration, plural } from "./format";
 import type { ItemBook } from "./items";
+import type { PlaceIcons } from "./places";
 import type { Session } from "./sessions";
 import {
   ActivityRoll, CharacterCircle, HighlightList, SegmentButton, classProps, shownHighlights,
@@ -30,13 +31,15 @@ export interface TimelineProps {
   onOpenSegment: OpenSegment;
   /** What the game says about an item, for the summaries that unfold into transmog. */
   items: ItemBook;
+  /** The pictures the game draws a place with, for the segment rows an evening unfolds into. */
+  places?: PlaceIcons;
   /** The thumbnails the window has already been handed, shared with every other grid. */
   album: CaptureAlbum;
   captures: CaptureActions;
 }
 
 export function Timeline(
-  { sessions, onOpenSegment, items, album, captures }: TimelineProps,
+  { sessions, onOpenSegment, items, places, album, captures }: TimelineProps,
 ): ReactNode {
   // What the user has opened, kept across repaints: an activity edit redraws the whole view,
   // and having it fold back up under the cursor would be maddening.
@@ -95,7 +98,7 @@ export function Timeline(
               session={session}
               open={expanded.has(session.id)}
               unfolded={unfolded.get(session.id) ?? null}
-              items={items}
+              items={items} places={places}
               album={album}
               captures={captures}
               showingCaptures={showing.has(session.id)}
@@ -118,6 +121,7 @@ interface SessionCardProps {
   open: boolean;
   unfolded: string | null;
   items: ItemBook;
+  places?: PlaceIcons;
   album: CaptureAlbum;
   captures: CaptureActions;
   showingCaptures: boolean;
@@ -129,7 +133,7 @@ interface SessionCardProps {
 
 function SessionCard(
   {
-    session, open, unfolded, items, album, captures, showingCaptures, onToggleCaptures,
+    session, open, unfolded, items, places, album, captures, showingCaptures, onToggleCaptures,
     onToggleSegments, onUnfold, onOpenSegment,
   }: SessionCardProps,
 ): ReactNode {
@@ -193,7 +197,7 @@ function SessionCard(
             {session.segments.map((segment) => (
               <li key={segment.segmentId}>
                 <SegmentButton
-                  segment={segment} items={items}
+                  segment={segment} items={items} places={places}
                   onOpen={() => onOpenSegment(segment.segmentId)}
                 />
               </li>

@@ -22,6 +22,7 @@ import { clock, duration, escapeHtml, initials, plural, signed, signedGold } fro
 import { GameItem } from "./item";
 import { itemName } from "./items";
 import type { ItemBook } from "./items";
+import type { PlaceIcons } from "./places";
 import { highlights } from "./sessions";
 import type {
   Highlight, HighlightKind, SessionActivity, SessionCharacter,
@@ -572,6 +573,46 @@ export function ActivityRoll(
   );
 }
 
+/* ---------- the place a segment happened in ---------- */
+
+/**
+ * The picture the game draws a place with, beside wherever that place is named.
+ *
+ * Most segments get nothing here, and that is the design rather than a gap: the game draws a
+ * picture for a dungeon, a raid and a delve, and draws none at all for the open world. So the
+ * frame is only there once a picture is, and an evening in Durotar reads exactly as it did
+ * before this existed — no blank box standing in for something that is never coming.
+ *
+ * The name beside it says what the place is, so the picture says nothing: it carries the place in
+ * its own label only so that something can be asked for by name, and the `<img>` inside it is
+ * marked decorative so no reader hears the place twice.
+ */
+export function PlaceIcon(
+  { place, places }: {
+    place: string;
+    /**
+     * The pictures the window has been handed, shared with every other view that names a place.
+     * Absent where nothing can draw one — a window with no game install behind it — which leaves
+     * the row exactly as it was.
+     */
+    places?: PlaceIcons;
+  },
+): ReactNode {
+  // The book is a cache outside React, so a picture landing changes nothing React would notice.
+  // This is what turns an arrival into a redraw. Each row asks for its own place, and the book
+  // sends one request for whatever asked in that turn.
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
+  useEffect(() => places?.learn([place], redraw), [places, place]);
+
+  const picture = places?.icon(place);
+  if (!picture) return null;
+  return (
+    <span className="place-icon" role="img" aria-label={`Icon for ${place}`}>
+      <img src={picture} alt="" />
+    </span>
+  );
+}
+
 /* ---------- a segment, as one row ---------- */
 
 /**
@@ -592,7 +633,7 @@ export function ActivityRoll(
  * would say the opposite of the truth if every row took the colour of whoever led.
  */
 export function SegmentButton(
-  { segment, items, onOpen }: {
+  { segment, items, places, onOpen }: {
     segment: Segment;
     /**
      * What the game says about the pieces its summary names. The row cannot unfold — it is
@@ -600,6 +641,8 @@ export function SegmentButton(
      * a transmog from reading as the number the addon recorded.
      */
     items?: ItemBook;
+    /** The pictures the game draws a place with, shared with every other view that names one. */
+    places?: PlaceIcons;
     onOpen: () => void;
   },
 ): ReactNode {
@@ -615,7 +658,10 @@ export function SegmentButton(
       <span className="seg-body">
         <span className="seg-head">
           <span className="seg-who"><ClassDot classFile={segment.classFile} />{segment.character}</span>
-          <span className="seg-where">{segment.instance}</span>
+          <span className="seg-where">
+            <PlaceIcon place={segment.instance} places={places} />
+            {segment.instance}
+          </span>
           <span className="badge">{locationType(segment)}</span>
           {segment.difficulty ? <span className="muted">{segment.difficulty}</span> : null}
         </span>

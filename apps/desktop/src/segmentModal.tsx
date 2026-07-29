@@ -21,6 +21,7 @@ import type { AppearanceModalState } from "./appearanceModal";
 import { GameItem } from "./item";
 import { itemName } from "./items";
 import type { ItemBook } from "./items";
+import type { PlaceIcons } from "./places";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
 import { eventsOf } from "./types";
@@ -28,7 +29,8 @@ import type {
   AccountCurrency, AccountFaction, AccountHoldings, AchievementEvent, Segment,
 } from "./types";
 import {
-  ActivityChip, ClassDot, HighlightList, StandingBar, className, locationType, shownHighlights,
+  ActivityChip, ClassDot, HighlightList, PlaceIcon, StandingBar, className, locationType,
+  shownHighlights,
 } from "./ui";
 
 /** Everything the modal is showing, or nothing at all when it is closed. */
@@ -517,6 +519,8 @@ export interface SegmentModalProps {
    * draws one. Each row asks for its own item, so nothing here has to collect ids first.
    */
   items: ItemBook;
+  /** The pictures the game draws a place with, shared with every other view that names one. */
+  places?: PlaceIcons;
   /**
    * What every character on the account was last seen holding, so a gain can be read against
    * the account rather than only against the character that earned it. Absent on a history
@@ -537,8 +541,8 @@ export interface SegmentModalProps {
 
 export function SegmentModal(
   {
-    showing, onStep, onClose, onEditActivities, achievements: book, items, holdings, album,
-    captures, onShowAppearance,
+    showing, onStep, onClose, onEditActivities, achievements: book, items, places, holdings,
+    album, captures, onShowAppearance,
   }: SegmentModalProps,
 ): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -599,6 +603,10 @@ export function SegmentModal(
     >
       <div className="detail-head">
         <div>
+          {/* Beside the heading rather than inside it. The dialog is named after the heading,
+              and a picture within it would have every reader hear the place twice — once as
+              the picture of it and once as the words. */}
+          {segment ? <PlaceIcon place={segment.instance} places={places} /> : null}
           <h2 className="detail-title" id="segment-detail-title">{segment?.instance ?? ""}</h2>
           {/* Where in the list the reader is, announced as it changes — stepping to the next
               segment is exactly the moment "2 of 2" is worth hearing. */}

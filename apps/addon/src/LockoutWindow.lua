@@ -27,6 +27,11 @@ local COLUMNS = {
 }
 
 local ROW_HEIGHT = 16
+---The picture beside an activity's name, and the room its cell gives up for it. Every row of
+---this window is an instance, so the indent is paid on every one of them and a row the journal
+---draws nothing for lines up with the rest rather than reaching left into the column before it.
+local ICON_SIZE = 14
+local ICON_GAP = 4
 local PADDING = 12
 local HEADER_Y = -52
 local WIDTH = 870
@@ -156,14 +161,27 @@ function ns.newLockoutWindow(deps)
                 local offset = 0
                 local offsets = {}
                 for columnIndex, column in ipairs(COLUMNS) do
+                    -- The activity's name starts after its picture; every other column starts
+                    -- at its own edge.
+                    local indent = columnIndex == ACTIVITY_COLUMN and ICON_SIZE + ICON_GAP or 0
                     local text = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                    text:SetPoint("LEFT", offset, 0)
-                    text:SetWidth(column.width)
+                    text:SetPoint("LEFT", offset + indent, 0)
+                    text:SetWidth(column.width - indent)
                     text:SetJustifyH("LEFT")
                     widget.texts[columnIndex] = text
                     offsets[columnIndex] = offset
                     offset = offset + column.width
                 end
+
+                -- The journal's own picture for the instance, in the space the name gave up.
+                -- Created once and hidden when there is nothing to show, because the row pool
+                -- is recycled across sorts and a texture left over from the row before would
+                -- put the wrong dungeon's face on this one.
+                local icon = holder:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(ICON_SIZE, ICON_SIZE)
+                icon:SetPoint("LEFT", offsets[ACTIVITY_COLUMN], 0)
+                icon:Hide()
+                widget.icon = icon
 
                 ---Invisible hit area over a single cell, so both the tooltip and the
                 ---drill-down land where the player is actually pointing.
@@ -210,6 +228,17 @@ function ns.newLockoutWindow(deps)
             widget.texts[DIFFICULTY_COLUMN]:SetText(row.difficulty)
             widget.texts[PERIOD_COLUMN]:SetText(lockoutTable.periodLabel(row))
             widget.texts[EXPIRY_COLUMN]:SetText(lockoutTable.formatExpiry(row))
+
+            local icon = expansions.iconFor(row.activity)
+            if icon then
+                widget.icon:SetTexture(icon)
+                -- An expired row is grey throughout, and a picture at full colour would be the
+                -- one thing on it still shouting.
+                widget.icon:SetDesaturated(expired)
+                widget.icon:Show()
+            else
+                widget.icon:Hide()
+            end
 
             for _, text in ipairs(widget.texts) do
                 text:SetTextColor(color[1], color[2], color[3])

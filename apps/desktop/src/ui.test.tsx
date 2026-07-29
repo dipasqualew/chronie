@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CLASS_FILES, CharacterCircle, ClassDot, HighlightList, SegmentButton } from "./ui";
+import { createPlaceIcons } from "./places";
 import type { HighlightListProps } from "./ui";
 import { createItemBook } from "./items";
 import type { ItemBook } from "./items";
@@ -451,7 +452,60 @@ describe("SegmentButton", () => {
       ?.getAttribute("data-tip")).toBe("Insanity's Grip · variant of one owned"));
     expect(screen.getByLabelText("Insanity's Grip · variant of one owned")).toBeTruthy();
   });
+
+  /**
+   * The place is the one thing every segment has, and the game draws a picture for some of
+   * them. The row names the place beside the picture, so the picture is found by the place it
+   * is of rather than announcing itself again.
+   */
+  it("draws the picture the game gives the place it happened in", async () => {
+    const places = createPlaceIcons({
+      load: (asked) => Promise.resolve({
+        icons: Object.fromEntries(asked.map((place) => [place, PLACE_PICTURE])),
+      }),
+    });
+
+    render(
+      <SegmentButton
+        segment={segment({ instance: "Deadmines" })} places={places} onOpen={() => {}}
+      />,
+    );
+
+    const icon = await screen.findByRole("img", { name: "Icon for Deadmines" });
+    expect(icon.querySelector("img")?.getAttribute("src")).toBe(PLACE_PICTURE);
+  });
+
+  /**
+   * Most evenings are spent in the open world, which nothing in the game draws a picture for.
+   * A blank square standing in for one that is never coming would indent a whole timeline for
+   * the sake of the few rows that fill it.
+   */
+  it("leaves no room for a picture where the game has none", async () => {
+    const places = createPlaceIcons({ load: () => Promise.resolve({ icons: {} }) });
+
+    const view = render(
+      <SegmentButton
+        segment={segment({ instance: "Durotar" })} places={places} onOpen={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Durotar")).toBeTruthy());
+    expect(view.container.querySelector(".place-icon")).toBeNull();
+  });
+
+  /** A window with no game install behind it draws the row exactly as it always did. */
+  it("draws the row without a picture when nothing can look one up", () => {
+    const view = render(
+      <SegmentButton segment={segment({ instance: "Deadmines" })} onOpen={() => {}} />,
+    );
+
+    expect(screen.getByText("Deadmines")).toBeTruthy();
+    expect(view.container.querySelector(".place-icon")).toBeNull();
+  });
 });
+
+/** Whatever the backend hands back for a place, which the row only ever puts in an `<img>`. */
+const PLACE_PICTURE = "data:image/png;base64,deadmines";
 
 /** The two inks the palette writes initials in, as the stylesheet spells them. */
 const INK_DARK = "#0b0b0b";

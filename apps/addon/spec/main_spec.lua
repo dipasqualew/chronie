@@ -926,7 +926,8 @@ describe("addon integration", function()
         ---Builds a window with fake deps only, so the click handlers can be driven
         ---without booting the whole addon.
         ---@return table window, table frames, table selections `{ activities, characters }`
-        local function newWindow()
+        ---@param tiers table[]? what the Encounter Journal holds, if anything
+        local function newWindow(tiers)
             local ns = loader.load()
             local createFrame, frames = fake.newCreateFrame()
             local selections = { activities = {}, characters = {} }
@@ -963,9 +964,10 @@ describe("addon integration", function()
                 onRefreshRequested = function() end,
                 tooltip = fake.newTooltip(),
                 classDisplay = newClassDisplay(),
-                -- An empty journal: these tests are about click routing, and no
-                -- activity having an expansion keeps the cells out of the way.
-                expansions = ns.newExpansionIndex(fake.newEncounterJournal()),
+                -- An empty journal by default: those tests are about click routing, and no
+                -- activity having an expansion keeps the cells out of the way. One that holds
+                -- Ulduar is what the picture beside its name is read out of.
+                expansions = ns.newExpansionIndex(fake.newEncounterJournal(tiers)),
                 onActivitySelected = function(row)
                     selections.activities[#selections.activities + 1] = row
                 end,
@@ -1018,6 +1020,43 @@ describe("addon integration", function()
 
             assert.same({}, selections.activities)
             assert.same({}, selections.characters)
+        end)
+
+        ---The row's own picture, which is the one texture a row holder owns.
+        ---@param frames table[]
+        ---@return table
+        local function rowIcon(frames)
+            for _, frame in ipairs(frames) do
+                if frame.frameType == "Frame" and #frame.textures == 1 then
+                    return frame.textures[1]
+                end
+            end
+            error("no row holder with a picture was built")
+        end
+
+        it("draws the journal's own picture beside the activity it belongs to", function()
+            local window, frames = newWindow({
+                { name = "Wrath of the Lich King", raids = { "Ulduar" } },
+            })
+
+            window.toggle()
+
+            local icon = rowIcon(frames)
+            assert.is_true(icon:IsShown())
+            -- The sixth return of the client's own describe call, which is the small button
+            -- icon rather than the banner or the background beside it.
+            assert.equal(930001, icon.texture)
+        end)
+
+        -- Every other row of this window is an instance the journal knows, so a row it does not
+        -- is the odd one out — and a picture left over from the row the pool last drew would put
+        -- the wrong dungeon's face on it.
+        it("shows no picture for an activity the journal has never heard of", function()
+            local window, frames = newWindow()
+
+            window.toggle()
+
+            assert.is_false(rowIcon(frames):IsShown())
         end)
     end)
 

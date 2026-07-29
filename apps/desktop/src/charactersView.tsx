@@ -35,6 +35,7 @@ import type { CurrencyIcons } from "./currencies";
 import { ago, duration, initials, plural } from "./format";
 import { setsFor } from "./inGameSets";
 import type { ItemBook } from "./items";
+import type { PlaceIcons } from "./places";
 import { classProps, className } from "./ui";
 import type { OpenSegment } from "./ui";
 import type {
@@ -57,6 +58,8 @@ export interface CharactersProps {
   items: ItemBook;
   /** The pictures the game draws each currency with. */
   currencyIcons: CurrencyIcons;
+  /** The pictures the game draws a place with, for the segment rows on a character's page. */
+  places?: PlaceIcons;
   /**
    * The transmog sets every character saved in the game, or null until they have been read.
    *
@@ -73,7 +76,8 @@ export interface CharactersProps {
 
 export function Characters(
   {
-    profiles, onOpenSegment, items, currencyIcons, inGameSets, loadSetAppearances, loadWorn,
+    profiles, onOpenSegment, items, currencyIcons, places, inGameSets, loadSetAppearances,
+    loadWorn,
   }: CharactersProps,
 ): ReactNode {
   // Held by name rather than by index: an activity edit repaints the whole view, and the
@@ -121,7 +125,7 @@ export function Characters(
         {showing
           ? <Profile
             entry={showing} page={page} onPage={setPage} range={range} onRange={setRange}
-            now={now} items={items} currencyIcons={currencyIcons}
+            now={now} items={items} currencyIcons={currencyIcons} places={places}
             wardrobe={setsFor(inGameSets, showing.name)}
             loadSetAppearances={loadSetAppearances} loadWorn={loadWorn}
             onOpenSegment={onOpenSegment}
@@ -176,6 +180,8 @@ interface ProfileProps {
   now: number;
   items: ItemBook;
   currencyIcons: CurrencyIcons;
+  /** The pictures the game draws a place with, for the segment rows on a character's page. */
+  places?: PlaceIcons;
   /** What this character has saved in game, or null when Chronie has never read their wardrobe. */
   wardrobe: InGameSet[] | null;
   loadSetAppearances: (appearanceIds: number[]) => Promise<InGameSetAppearancesPayload>;
@@ -192,7 +198,7 @@ interface ProfileProps {
  */
 function Profile(
   {
-    entry, page, onPage, range, onRange, now, items, currencyIcons, wardrobe,
+    entry, page, onPage, range, onRange, now, items, currencyIcons, places, wardrobe,
     loadSetAppearances, loadWorn, onOpenSegment,
   }: ProfileProps,
 ): ReactNode {
@@ -236,6 +242,7 @@ function Profile(
         ? <CharacterSummary entry={entry} wardrobe={wardrobe} currencyIcons={currencyIcons} />
         : <CharacterActivity
           entry={entry} range={range} onRange={onRange} now={now} items={items}
+          places={places}
           onOpenSegment={onOpenSegment}
         />}
     </div>

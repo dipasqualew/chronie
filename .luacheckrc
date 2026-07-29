@@ -38,6 +38,7 @@ read_globals = {
     "EJ_SelectTier",
     "EJ_GetTierInfo",
     "EJ_GetInstanceByIndex",
+    "EJ_GetInstanceInfo",
     "GetMoney",
     "C_Bank",
     "Enum",

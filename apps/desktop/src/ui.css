@@ -166,6 +166,16 @@ button.hl:hover { border-color: var(--series-1); background: var(--series-1-soft
 .seg-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
 .seg-who { font-weight: 550; }
 .seg-where { color: var(--text-secondary); }
+
+/* The picture the game draws a place with, wherever a place is named.
+   No box behind it and no space held for one, unlike a currency's: a currency the game draws
+   nothing for is one row among a table of rows that do, while a place the game draws nothing for
+   is most of a history — an evening in the open world — and reserving a square on every one of
+   them would indent a whole timeline for the sake of the few that fill it. */
+.place-icon {
+  display: inline-block; width: 16px; height: 16px; margin-right: 5px; vertical-align: -3px;
+}
+.place-icon img { width: 100%; height: 100%; border-radius: 3px; display: block; }
 .seg-activities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; font-size: 11px; }
 /* The same summary as the session's, a size down: on a segment row it is the supporting
    line, and drawn at full size it would compete with the place and the character. */

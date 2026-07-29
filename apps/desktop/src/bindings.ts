@@ -376,6 +376,26 @@ async logRetention() : Promise<Result<Report, string>> {
 }
 },
 /**
+ * The pictures a list of places is drawn with, keyed by the name rather than the file.
+ *
+ * Keyed by the name because that is what the caller holds and all it holds: a segment arrives
+ * from the addon under the name the client gave the place, and the tables that draw a dungeon are
+ * keyed by that same localised name. So the whole errand happens here — the two tables, then the
+ * textures — and the window gets back what it can put in an `<img>`.
+ *
+ * Most of what it is asked about is an open-world zone the game draws no picture for at all, and
+ * those simply do not come back. See [`journal::icons_of`], and the same cache every other icon
+ * goes through, so a second evening in the same dungeon costs the table reads and nothing else.
+ */
+async placeIcons(places: string[]) : Promise<Result<IconsPayload, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("place_icons", { places }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What is in the history, so that a query can be written without reading the migrations.
  */
 async querySchema() : Promise<Result<QuerySchema, string>> {
