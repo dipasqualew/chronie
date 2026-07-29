@@ -13,6 +13,7 @@
 //! seconds; this is called on that beat and compares what it sees with what it saw last time.
 
 use serde::Serialize;
+use specta::Type;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -38,17 +39,18 @@ pub const FRESH_SECONDS: i64 = 3600;
 const LOG_PREFIX: &str = "wowcombatlog";
 
 /// The newest combat log found, as the window describes it to a reader.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LogFile {
     pub name: String,
     pub bytes: u64,
     /// Epoch seconds, or `None` on a filesystem that will not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<i64>,
 }
 
 /// Which of the four things is true of this install.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum State {
     /// Chronie is not asking for logging, which is the default and costs nothing.
@@ -64,18 +66,21 @@ pub enum State {
 }
 
 /// Everything the Setup panel draws its combat-logging section from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     /// Whether Chronie's own setting is on. Everything else is about what the game is doing.
     pub requested: bool,
     /// The CVar as the game's config last recorded it. `None` means no config could be read
     /// at all, which is not the same as off and is never reported as if it were.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advanced: Option<bool>,
     /// Which file that answer came from, relative to the game folder, so a reader can go and
     /// look. `None` when nothing was found to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// The newest file in `Logs/` that looks like a combat log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<LogFile>,
     /// Whether that file is actually being written: it grew since the last look, or it is
     /// new, or it was touched inside the last hour.

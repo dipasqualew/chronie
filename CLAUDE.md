@@ -260,12 +260,13 @@ that is what `data-class` and `data-quality` are for.
 
 The frontend, its tests and this repository's own scripts are TypeScript, under
 `strict`. There is no JavaScript left in the tree and no new file should add any.
-The shapes the Rust backend serialises are written down once in
-`apps/desktop/src/types.ts`; a change to a `serde_json::json!` literal in
-`src-tauri/src/collector.rs` belongs there too, and nothing downstream should
-re-describe a segment for itself. Nothing is compiled by `tsc` — Vite, Vitest and
-Bun each strip the types — so `bun run typecheck` is the only thing that ever
-reads the annotations, which is why `./scripts/check.sh` runs it.
+The shapes that cross the Tauri boundary are Rust DTOs and command signatures;
+tauri-specta generates `apps/desktop/src/bindings.ts` from them. Run
+`bun run bindings:generate` after changing either, and never edit the generated
+file or mirror a command payload in `types.ts`. `scripts/check-rust.sh` rejects a
+stale generated client. Nothing is compiled by `tsc` — Vite, Vitest and Bun each
+strip the types — so `bun run typecheck` is the only thing that ever reads the
+annotations, which is why `./scripts/check.sh` runs it.
 
 The addon's only job in that pipeline is writing `db.segments`; everything
 downstream reads the file the client dumps at logout.

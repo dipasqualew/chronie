@@ -14,6 +14,7 @@
 //! files and a saved set can be read on a machine that has not got the game installed at all.
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// A set of the reader's own, as `marks::subject_kind` spells it.
 ///
@@ -42,7 +43,7 @@ const PLACE_LIMIT: usize = 24;
 /// The same numbers the row it was picked from carried. `display_info_id` is the one the
 /// character is actually drawn from, `appearance_id` is the game's own unit of collection and
 /// so is what a mark against this piece is keyed by, and the rest is what a list draws.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Piece {
     /// Where on the body it sits, in the window's own words: `armour-3`, `hand-right`.
@@ -66,7 +67,7 @@ pub struct Piece {
 /// Whole rather than summarised, and unlike a Blizzard set — which is a card that costs four
 /// table walks to open. A saved set is a dozen rows already written down, so there is nothing
 /// to defer and no second command to ask for it with.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomSet {
     pub id: i64,
@@ -82,7 +83,7 @@ pub struct CustomSet {
 ///
 /// All of them at once, for the reason the marks are: this is what one person made with their
 /// own hands, so it is tens of rows rather than the game's several thousand sets.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct CustomSetsPayload {
     pub sets: Vec<CustomSet>,
 }

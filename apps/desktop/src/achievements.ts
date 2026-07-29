@@ -125,7 +125,7 @@ export function createAchievementBook({ load, loadIcons }: AchievementBookOption
       try {
         const payload = await load(fresh);
         for (const [id, detail] of Object.entries(payload.achievements ?? {})) {
-          known.set(Number(id), detail);
+          if (detail) known.set(Number(id), detail);
         }
       } catch {
         for (const id of fresh) asked.delete(id);
@@ -140,7 +140,9 @@ export function createAchievementBook({ load, loadIcons }: AchievementBookOption
     for (const fdid of pictures) askedIcons.add(fdid);
     try {
       const payload = await loadIcons(pictures);
-      for (const [fdid, url] of Object.entries(payload.icons ?? {})) icons.set(Number(fdid), url);
+      for (const [fdid, url] of Object.entries(payload.icons ?? {})) {
+        if (url) icons.set(Number(fdid), url);
+      }
     } catch {
       for (const fdid of pictures) askedIcons.delete(fdid);
       return;

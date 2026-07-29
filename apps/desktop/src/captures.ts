@@ -238,7 +238,9 @@ export function createCaptureAlbum(
       for (const id of fresh) asked.add(id);
       try {
         const payload = await load(fresh);
-        for (const [id, url] of Object.entries(payload.thumbnails ?? {})) known.set(Number(id), url);
+        for (const [id, url] of Object.entries(payload.thumbnails ?? {})) {
+          if (url) known.set(Number(id), url);
+        }
       } catch {
         for (const id of fresh) asked.delete(id);
         return;

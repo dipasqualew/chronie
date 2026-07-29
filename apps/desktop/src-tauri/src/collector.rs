@@ -13,6 +13,7 @@ use crate::retention;
 use chrono::{DateTime, Datelike, Local, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use serde_json::{Map, Value};
 use std::{
     collections::{HashMap, HashSet},
@@ -31,7 +32,7 @@ include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
 
 const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncResult {
     pub added: usize,
@@ -5104,6 +5105,9 @@ ChronieDB = {{ ["segments"] = {{
         assert_eq!(result.segment_count, 2);
 
         let payload = dashboard(&database).unwrap();
+        let typed: crate::dto::DashboardPayload =
+            crate::dto::convert(payload.clone()).expect("dashboard matches the command DTO");
+        assert_eq!(typed.segments.len(), 2);
         assert_eq!(payload["segments"][0]["id"], "kept");
         // The class is filed against the character and read back through the join, which is
         // the only route it has to the window that colours the cast by it.

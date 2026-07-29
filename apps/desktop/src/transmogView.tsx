@@ -291,7 +291,9 @@ export function TransmogView(
     for (const id of missing) askedIcons.add(id);
     void loadIcons(missing)
       .then((pictures) => {
-        for (const [id, url] of Object.entries(pictures.icons || {})) icons.set(Number(id), url);
+        for (const [id, url] of Object.entries(pictures.icons || {})) {
+          if (url) icons.set(Number(id), url);
+        }
         redraw();
       })
       .catch(() => undefined);

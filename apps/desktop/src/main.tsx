@@ -21,7 +21,7 @@ import "./base.css";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";
-import { desktop } from "./bridge";
+import { desktop } from "./desktop";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("The window is missing #root.");
