@@ -62,7 +62,11 @@ local addonName, ns = ...
 ---@field toyInfo fun(id: integer): string? Localised name of a toy.
 ---@field housingItemInfo fun(id: integer): (string?, integer?) Localised name and warband-owned count.
 ---@field openAchievement fun(id: integer)
----@field previewTransmog fun(itemID: integer)
+---@field dressUpItem fun(link: string): boolean Client DressUpItemLink: opens the dressing room
+---on the character as they are dressed and lays this item over the top. False when the client
+---will not put the item on a body at all.
+---@field dressUpActor fun(): table? The player's actor in whichever dressing room dressUpItem
+---just opened. Nil until one has been, and nil on a client that built no actor for it.
 ---@field openTransmogCollection fun(sourceID: integer)
 ---@field itemName fun(itemID: integer): string?
 ---@field playerGUID fun(): string? UnitGUID("player"), the client's own unique character id.
@@ -197,6 +201,13 @@ function ns.main(env)
         holdings.record(currentCharacter(), env.heldSweep())
     end
 
+    -- Both panels hand the same one out, so a click on a collected appearance in either of
+    -- them shows the same picture.
+    local transmogPreview = ns.newTransmogPreview({
+        dressUp = env.dressUpItem,
+        playerActor = env.dressUpActor,
+    })
+
     -- Declared before the panel and filled in after the log and the tracker they read from,
     -- because the panel is built first and its picker has to reach them.
     ---@type SegmentViews
@@ -228,7 +239,7 @@ function ns.main(env)
             env.db.resultsWindow = { point = point, x = x, y = y }
         end,
         openAchievement = env.openAchievement,
-        previewTransmog = env.previewTransmog,
+        previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
         itemName = env.itemName,
         now = env.now,
@@ -688,7 +699,7 @@ function ns.main(env)
         end,
         savePoint = function() end,
         openAchievement = env.openAchievement,
-        previewTransmog = env.previewTransmog,
+        previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
         itemName = env.itemName,
         now = env.now,
@@ -1744,8 +1755,28 @@ if CreateFrame then
                 ShowUIPanel(AchievementFrame)
                 AchievementFrame_SelectAchievement(id)
             end,
-            previewTransmog = function(itemID)
-                DressUpItemLink("item:" .. itemID)
+            dressUpItem = function(link)
+                return DressUpItemLink(link) and true or false
+            end,
+            -- Which frame the item went into is the client's choice and not one it reports:
+            -- `DressUpItemLink` hands off to whichever dressing room the player is standing
+            -- in front of, preferring the side panel an auction house or a merchant window
+            -- carries, then the transmog-and-mount one, and falling back to the ordinary
+            -- dressing room. Asked in that same order once the call has returned, the first
+            -- one shown is the one it chose. A build without one of them leaves the global
+            -- nil, which is a frame that cannot have been chosen either.
+            dressUpActor = function()
+                -- Walked by index rather than with ipairs, because a build that has none of
+                -- these globals puts a nil in the first slot and ipairs stops at the first
+                -- hole — which would answer "no dressing room" while one is open.
+                local frames = { SideDressUpFrame, TransmogAndMountDressupFrame, DressUpFrame }
+                for index = 1, 3 do
+                    local frame = frames[index]
+                    if frame and frame:IsShown() and frame.ModelScene then
+                        return frame.ModelScene:GetPlayerActor()
+                    end
+                end
+                return nil
             end,
             openTransmogCollection = function(sourceID)
                 CollectionsJournal_LoadUI()

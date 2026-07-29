@@ -3303,6 +3303,47 @@ describe("addon integration", function()
             }, drawn)
         end)
 
+        -- Clicking a collected appearance is three things wired together — the panel that
+        -- draws the row, the preview that decides what the model wears, and the client's own
+        -- dressing room — and only the whole addon says whether the panel was handed a preview
+        -- rather than the raw `DressUpItemLink` it used to carry. Wired to the client directly
+        -- the room opens over what the character already has on, so a robe hides the legs the
+        -- run just collected and the click shows the old look (issue #207); wired to nothing at
+        -- all the row is silently a row that does nothing when a player clicks it. Neither is
+        -- visible to a unit test of either end, and the order is the whole of the answer.
+        it("shows a collected transmog on an undressed model when its row is clicked", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                transmogSources = { [11] = { item = 19019, newAppearance = true } },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            local frame = panelFrame(recorded)
+            -- The heading first, because the item's own row is not drawn until the block it
+            -- sits in has been opened, and then the row the appearance was filed under.
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and (fontString.text or ""):find("Transmog", 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+            for _, fontString in ipairs(frame.fontStrings) do
+                if fontString.shown and (fontString.text or ""):find("Item 19019", 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            assert.same({
+                { call = "dressUp", link = "item:19019" },
+                { call = "undress" },
+                { call = "tryOn", link = "item:19019" },
+            }, recorded.dressingRoom())
+        end)
+
         it("registers the events that feed the segment panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 
