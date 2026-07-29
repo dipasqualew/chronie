@@ -1730,6 +1730,10 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
     ])
 }
 
+fn checkout_bindings(source: &str) -> String {
+    source.to_owned()
+}
+
 /// Writes the deterministic TypeScript command client, or verifies the committed copy.
 ///
 /// This uses only Rust metadata and the filesystem: no Tauri process or webview is started,
@@ -1860,6 +1864,11 @@ mod tests {
 
     fn plugins(value: Value) -> PluginConfig {
         PluginConfig(serde_json::from_value(value).unwrap())
+    }
+
+    #[test]
+    fn binding_drift_check_ignores_windows_checkout_line_endings() {
+        assert_eq!(checkout_bindings("one\r\ntwo\r\n"), "one\ntwo\n");
     }
 
     /// The files the .toc names, in the .toc's own order, read the way build.rs reads them.
