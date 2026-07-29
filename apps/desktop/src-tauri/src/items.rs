@@ -48,9 +48,10 @@ pub const ANY_CLASS: u32 = 0xFFFF;
 #[serde(rename_all = "camelCase")]
 pub struct Item {
     pub id: u32,
-    /// What the game calls it. Empty for an item `ItemSparse` holds no readable row for,
-    /// which is a real answer: the rest of the row is still worth drawing, and the window
-    /// falls back to the name the addon caught.
+    /// What the game calls it. Empty for an item `ItemSparse` holds no readable row for — or
+    /// holds one that names it nothing, which comes to the same thing — and that is a real
+    /// answer: what `Item` said is still worth drawing, and the window falls back to the name
+    /// the addon caught. Nothing else from an unnamed row is carried; see [`read`].
     pub name: String,
     /// [`ARMOR`], [`WEAPON`], or one of the kinds nothing is worn from.
     pub class_id: u32,
@@ -114,7 +115,17 @@ pub fn read(files: &dyn GameFiles, wanted: &[u32]) -> Result<Vec<(u32, Option<It
             let Some(item) = found.get_mut(&row.id()) else {
                 continue;
             };
-            item.name = row.text(item_column::NAME);
+            // A row that cannot say what the item is called says nothing else either. The name
+            // and the numbers are the same record read at different offsets, so whatever leaves
+            // the text empty — a patch that moved the strings, a locale that holds none — leaves
+            // the numbers pointing somewhere they should not, and a quality read as a required
+            // level is worse than no level at all: it draws as a fact. The window makes the same
+            // judgement about the same row when it declines to colour an item it cannot name.
+            let name = row.text(item_column::NAME);
+            if name.is_empty() {
+                continue;
+            }
+            item.name = name;
             item.quality = row.number(item_column::QUALITY);
             item.required_level = row.number(item_column::REQUIRED_LEVEL);
             item.allowable_class = row.number(item_column::ALLOWABLE_CLASS);
@@ -193,6 +204,9 @@ mod tests {
     const NIGHT_CLOAK: u32 = 204;
     /// Held in `Item` and not in `ItemSparse`, which is half a row rather than none.
     const NAMELESS_TRINKET: u32 = 205;
+    /// Held in both, and named by neither: an `ItemSparse` row whose text is empty and whose
+    /// numbers are not.
+    const UNNAMED_CHEST: u32 = 207;
     /// Not worn at all, so nothing about it is a slot.
     const HEARTH_TOKEN: u32 = 206;
     /// A mail chestpiece the game keeps encrypted.
@@ -339,6 +353,34 @@ mod tests {
         assert_eq!(found.inventory_type, 12);
         assert_eq!(found.icon_file_data_id, 260004);
         assert_eq!(found.quality, 0);
+    }
+
+    // A row that cannot say what the item is called is not a row to read numbers off either.
+    //
+    // The window showed "Item 39270 · Sword · One-hand · Level 4" about an epic Wrath sword that
+    // takes level 30: the name had come back empty and the level was the quality, read a few
+    // columns off. Whatever moves the strings moves the numbers beside them, and a level that is
+    // really a quality is worse than no level — it reads as a fact. So an unnamed row contributes
+    // nothing but its silence, and what the row *before* it said still stands: the slot, the
+    // kind and the picture come out of `Item` and are unaffected.
+    //
+    // `itemLine` in the window already refuses to colour an item it cannot name, for the same
+    // reason and about the same row.
+    #[test]
+    fn takes_no_numbers_from_a_row_that_cannot_name_the_item() {
+        let found = one(UNNAMED_CHEST);
+        assert_eq!(found.name, "");
+        // What `Item` says, which is not in doubt.
+        assert_eq!(
+            (found.class_id, found.subclass_id, found.inventory_type),
+            (ARMOR, 1, 5)
+        );
+        assert_eq!(found.icon_file_data_id, 260003);
+        // And what the nameless row said, which is not believed: the defaults an item nothing is
+        // known about carries.
+        assert_eq!(found.quality, 0);
+        assert_eq!(found.required_level, 0);
+        assert_eq!(found.allowable_class, ANY_CLASS);
     }
 
     // Two ways an id can go unanswered, and neither is a reason to fail the batch.

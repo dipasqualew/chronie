@@ -99,8 +99,11 @@ const item: TableSpec = {
         [ARMOR, 0, 0, 12, 0, 255, 260004, 0, 0, 0],
         // Not worn at all, and not armour either.
         [15, 0, 0, 0, 0, 255, 260001, 0, 0, 0],
+        // Cloth, worn on the chest. The big table has a row for this one and cannot name it,
+        // which is the pair the reader has to be careful with — see `itemSparse` below.
+        [ARMOR, 1, 7, 5, 0, 255, 260003, 11, 0, 0],
       ],
-      idList: [201, 202, 203, 204, 205, 206],
+      idList: [201, 202, 203, 204, 205, 206, 207],
     },
     {
       // Encrypted, so its rows arrive as zeroes: a segment that collected item 900 can be
@@ -227,9 +230,23 @@ const itemSparse: TableSpec = {
         }),
         // Worn nowhere, needing no level, and common: a token rather than a piece of gear.
         sparseRow("Hearth Token", "", { quality: 1, requiredLevel: 0, inventoryType: 0 }),
+        // A row that names the item nothing at all, and carries numbers regardless.
+        //
+        // This is the shape of a real misreading rather than of a real item: when the strings
+        // in this record are read from the wrong place the name comes back empty, and the
+        // numbers a few columns further on come back as whatever they landed on — a quality
+        // where a level should be, which is how the window came to show "Level 4" beside an
+        // item it could not name. The numbers here are deliberately the ones that would be
+        // believed: a plausible quality, a plausible level, and a restriction.
+        sparseRow("", "", {
+          quality: 4,
+          requiredLevel: 60,
+          inventoryType: 5,
+          allowableClass: 0b10_0011,
+        }),
       ],
       // 205 is missing on purpose: the trinket `Item` describes and this table cannot name.
-      idList: [201, 202, 203, 204, 206],
+      idList: [201, 202, 203, 204, 206, 207],
     },
     {
       // Encrypted, so item 900 cannot be named either — the other half of the row `Item`
