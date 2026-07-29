@@ -13,11 +13,12 @@
 
 import "./activityEditor.css";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { activityFields, activityLabel, parseMetadata } from "./activities";
 import type { ActivityField } from "./activities";
+import { useModalDialog } from "./dialog";
 import { duration } from "./format";
 import type { ActivityMetadata, DashboardPayload, Segment } from "./types";
 
@@ -86,18 +87,12 @@ export function ActivityEditor({
   onApply,
   onClose,
 }: ActivityEditorProps): ReactNode {
-  const dialog = useRef<HTMLDialogElement>(null);
-
-  // `showModal` rather than the `open` attribute, and not only for the backdrop: this dialog
-  // is opened from on top of the segment detail, which is itself modal. A dialog that is
-  // merely open sits below the top layer, which would leave this one behind that one's
-  // backdrop — on screen, and unreachable.
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    if (segment && !element.open) element.showModal();
-    if (!segment && element.open) element.close();
-  }, [segment]);
+  // `showModal` rather than the `open` attribute, and not only for the backdrop: this dialog is
+  // opened from on top of the segment detail, which is itself modal. A dialog that is merely open
+  // sits below the top layer, which would leave this one behind that one's backdrop — on screen,
+  // and unreachable. React has no prop for `showModal`, so the element is driven from an effect;
+  // `dialog.ts` is where that lives.
+  const dialog = useModalDialog(segment !== null);
 
   return (
     <dialog

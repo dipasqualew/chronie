@@ -8,9 +8,10 @@
 
 import "./details.css";
 
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useBook } from "./book";
 import { equipsetDetail, equipsetTitle } from "./equipsets";
 import { clock, duration, gold, signed, signedGold } from "./format";
 import { itemName } from "./items";
@@ -356,8 +357,6 @@ export function Details({ segments, onOpenSegment, items }: DetailsProps): React
     [segments],
   );
 
-  // The book is a cache outside React, so a name arriving changes nothing React would notice.
-  const [learned, redraw] = useReducer((count: number) => count + 1, 0);
   // Everything the table could name, in one request: the ids come out of the whole history
   // rather than the filtered rows, because filtering is instant and a second request per
   // filter would not be. A history with no transmog in it asks for nothing.
@@ -373,7 +372,9 @@ export function Details({ segments, onOpenSegment, items }: DetailsProps): React
     ],
     [segments],
   );
-  useEffect(() => items.learn(named, redraw), [items, named]);
+  // The book is a cache outside React, so a name arriving changes nothing React would notice —
+  // `useBook` is the subscription that tells it, and `learned` is what it counted. See `book.ts`.
+  const learned = useBook(items, named);
 
   const rows = useMemo(() => {
     const wanted = term.trim().toLowerCase();

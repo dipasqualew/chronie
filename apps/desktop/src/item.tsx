@@ -19,9 +19,9 @@
 
 import "./item.css";
 
-import { useEffect, useReducer } from "react";
 import type { ReactNode } from "react";
 
+import { useBook } from "./book";
 import { itemLine } from "./items";
 import type { ItemBook } from "./items";
 
@@ -76,12 +76,12 @@ export function GameItem({
 }: GameItemProps): ReactNode {
   // The book is not state — it is a cache outside React, shared with every other row in the
   // window — so an answer landing has nothing to change that React would notice on its own.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-
+  // `useBook` is the subscription that tells it: see `book.ts`.
+  //
   // Asking is idempotent: the book keeps what it has been told and what it has already asked
-  // about, so a second row naming the same item adds nothing to the next request and still
-  // hears about the answer. The unsubscribe is the effect's own cleanup.
-  useEffect(() => book.learn([id], redraw), [id, book]);
+  // about, so a second row naming the same item adds nothing to the next request and still hears
+  // about the answer.
+  useBook(book, [id]);
 
   const line = itemLine(id, name, book.detail(id));
   const icon = book.icon(id);

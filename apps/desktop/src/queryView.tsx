@@ -38,6 +38,7 @@ import {
 } from "./query";
 import type { Axes, Recipe, Shape } from "./query";
 import { QueryChart } from "./queryChart";
+import { useAsyncResource } from "./resource";
 import type { QueryAnswer, QuerySchema } from "./types";
 
 export interface QueryActions {
@@ -57,6 +58,9 @@ export interface QueryViewProps {
 /** How many rows a reader may ask for. The ceiling matches `query::MAX_ROWS`. */
 const LIMITS = [100, DEFAULT_LIMIT, 2000, 5000];
 
+/** What the sidebar shows when the schema could not be read: no tables, rather than a wait. */
+const NO_TABLES: QuerySchema = { tables: [] };
+
 const SHAPE_LABELS: Record<Shape, string> = {
   bar: "Bars",
   line: "Line",
@@ -70,21 +74,17 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
   const [answer, setAnswer] = useState<QueryAnswer | null>(null);
   const [failure, setFailure] = useState("");
   const [running, setRunning] = useState(false);
-  const [schema, setSchema] = useState<QuerySchema | null>(null);
   const [axes, setAxes] = useState<Axes | null>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
   /** Whether the opening question has been asked, so re-entering the view does not re-ask it. */
   const asked = useRef(false);
 
   // The tables do not change while somebody is typing, so this is asked for once — and only
-  // once anybody is here to read it, because a first run opens on Settings.
-  useEffect(() => {
-    if (!visible || schema) return;
-    void actions
-      .schema()
-      .then(setSchema)
-      .catch(() => setSchema({ tables: [] }));
-  }, [actions, schema, visible]);
+  // once anybody is here to read it, because a first run opens on Settings. A list of tables
+  // that will not come is an empty one: the editor is the point of this view and it works
+  // without the sidebar.
+  const tables = useAsyncResource({ when: visible, load: actions.schema });
+  const schema: QuerySchema | null = tables.state === "failed" ? NO_TABLES : tables.value;
 
   // Opened already answered. The alternative is a blank editor over an empty table, which
   // asks the reader to invent a question before they have seen that any of this works.

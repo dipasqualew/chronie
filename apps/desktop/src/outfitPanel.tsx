@@ -24,9 +24,10 @@ import { Herself } from "./herselfPanel";
 import type { HerselfProps } from "./herselfPanel";
 import { iconFrom, requestSummary, slotsFrom } from "./inGameSets";
 import { glbBytes, REASONS, wornSetKey } from "./modelPreview";
-import type { ModelStage } from "./modelViewer";
 import { outfitSummary, piecesOf, wornPieces, wornTip } from "./outfit";
 import type { Outfit } from "./outfit";
+import { usePaneStage } from "./stage";
+import type { MakeStage } from "./stage";
 import type {
   CharacterModelPayload,
   CustomSet,
@@ -93,7 +94,7 @@ export interface OutfitPanelProps {
    * Makes the 3D pane. Passed in because it is the one thing here that needs a graphics card:
    * a machine without working 3D throws, and the reader is told so rather than shown nothing.
    */
-  createStage?: (container: HTMLElement) => ModelStage | Promise<ModelStage>;
+  createStage?: MakeStage;
 }
 
 /**
@@ -151,10 +152,10 @@ export function OutfitPanel({
   // model for every outfit there is, and the read behind it is the game's own storage — but it
   // is a model *of somebody*, so it is held under the same key the dressed bodies are.
   const character = useRef(new Map<string, Promise<CharacterModelPayload>>()).current;
-  // One stage for as long as the view is mounted. Each one is a graphics context of its own,
-  // and a browser will only hand out so many before it starts taking them back.
-  const stage = useRef<ModelStage | null>(null);
-  const starting = useRef<Promise<ModelStage> | null>(null);
+  // One stage for as long as the view is mounted. Each one is a graphics context of its own, and a
+  // browser will only hand out so many before it starts taking them back — `stage.ts` is where that
+  // arrangement lives, and where the reason nothing is ever drawn on one already given back is.
+  const stage = usePaneStage(createStage);
   // Which outfit the pane is currently answering. A reader clicking faster than the bodies
   // arrive would otherwise be left looking at whichever finished last.
   const asked = useRef(0);
@@ -179,17 +180,14 @@ export function OutfitPanel({
       const container = stagePane.current;
       if (!container) return;
       try {
-        // One stage, and one attempt to make one: two quick picks would otherwise each start a
-        // renderer and the second would be left running with nothing pointing at it.
-        starting.current ??= Promise.resolve(createStage(container));
-        stage.current = await starting.current;
-        await stage.current.show(glbBytes(glb));
-        if (mine === asked.current) setPane({ state: "shown", note });
+        const drew = await stage.show(container, glbBytes(glb));
+        // `drew` is false for a view that has gone away since, which has no note to be written.
+        if (drew && mine === asked.current) setPane({ state: "shown", note });
       } catch (error: unknown) {
         if (mine === asked.current) fallback(error);
       }
     },
-    [createStage],
+    [stage],
   );
 
   /**
@@ -265,16 +263,6 @@ export function OutfitPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, dress]);
 
-  // The graphics context goes back when the view does.
-  useEffect(
-    () => () => {
-      stage.current?.dispose();
-      stage.current = null;
-      starting.current = null;
-    },
-    [],
-  );
-
   const worn = wornPieces(outfit);
 
   return (
@@ -330,11 +318,7 @@ export function OutfitPanel({
               being redrawn is still a body somebody can have dragged too far, so the way back
               goes where the picture goes rather than away for the length of every read. */}
           {drawn(pane) ? (
-            <button
-              type="button"
-              className="outfit-reset"
-              onClick={() => stage.current?.resetCamera()}
-            >
+            <button type="button" className="outfit-reset" onClick={() => stage.resetCamera()}>
               Reset camera
             </button>
           ) : null}
@@ -490,7 +474,7 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
  * is a chunk of its own rather than part of the window's first load. Nobody who never opens
  * the wardrobe ever downloads it.
  */
-const lazyStage = (container: HTMLElement): Promise<ModelStage> =>
+const lazyStage: MakeStage = (container) =>
   import("./modelViewer").then((viewer) =>
     viewer.createModelStage(container, { label: "The character, drawn" }),
   );

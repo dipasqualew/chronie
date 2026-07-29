@@ -19,9 +19,9 @@
 
 import "./characterSummary.css";
 
-import { useEffect, useReducer } from "react";
 import type { ReactNode } from "react";
 
+import { useBook } from "./book";
 import { dayOf } from "./characters";
 import type { CharacterFaction, CharacterGold, CharacterProfile } from "./characters";
 import type { CurrencyIcons } from "./currencies";
@@ -136,13 +136,11 @@ function Currencies({
   icons: CurrencyIcons;
 }): ReactNode {
   // The book is a cache outside React, so a picture landing changes nothing React would notice.
-  // This is what turns an arrival into a redraw, and it asks for the whole table at once rather
-  // than a row at a time — the rows would each ask for themselves anyway.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-  const wanted = entry.currencies.map((held) => held.id).join(",");
-  useEffect(
-    () => icons.learn(wanted ? wanted.split(",").map(Number) : [], redraw),
-    [icons, wanted],
+  // `useBook` is what turns an arrival into a redraw, and it asks for the whole table at once
+  // rather than a row at a time — the rows would each ask for themselves anyway.
+  useBook(
+    icons,
+    entry.currencies.map((held) => held.id),
   );
 
   if (!entry.currencies.length) return null;

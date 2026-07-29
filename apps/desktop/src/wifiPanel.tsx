@@ -13,10 +13,12 @@
 
 import "./wifiPanel.css";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { plural } from "./format";
+import { usePoll } from "./resource";
+import type { StillWanted } from "./resource";
 import { offerSentence, receiptSentence, receiveSentence } from "./wifi";
 import type { WifiPeer, WifiReceipt, WifiReceiveStatus } from "./types";
 
@@ -63,44 +65,33 @@ export function WifiPanel({ actions, visible }: WifiPanelProps): ReactNode {
 
   const listening = receiveStatus?.listening ?? false;
 
-  function took(status: WifiReceiveStatus): void {
-    setReceiveStatus(status);
-    setReceiveSaying("");
-    if (status.outcome?.stored && !replaced.current) {
-      replaced.current = true;
-      actions.onReplaced();
-    }
-  }
+  /** What the station has just said, wherever it was asked — a button, or the poll below. */
+  const took = useCallback(
+    (status: WifiReceiveStatus): void => {
+      setReceiveStatus(status);
+      setReceiveSaying("");
+      if (status.outcome?.stored && !replaced.current) {
+        replaced.current = true;
+        actions.onReplaced();
+      }
+    },
+    [actions],
+  );
 
-  useEffect(() => {
-    let alive = true;
-    const refresh = async (): Promise<void> => {
+  const refresh = useCallback(
+    async (live: StillWanted): Promise<void> => {
       try {
         const answer = await actions.status();
-        if (!alive) return;
-        setReceiveStatus(answer);
-        setReceiveSaying("");
-        if (answer.outcome?.stored && !replaced.current) {
-          replaced.current = true;
-          actions.onReplaced();
-        }
+        if (live()) took(answer);
       } catch (error) {
-        if (alive) setReceiveSaying(actions.onError(error));
+        if (live()) setReceiveSaying(actions.onError(error));
       }
-    };
-    void refresh();
-    // Only while somebody could act on the answer — or while this machine is waiting, because
-    // then the answer arrives from elsewhere and replaces everything on screen.
-    if (!visible && !listening)
-      return () => {
-        alive = false;
-      };
-    const timer = setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [actions, visible, listening]);
+    },
+    [actions, took],
+  );
+  // Only while somebody could act on the answer — or while this machine is waiting, because then
+  // the answer arrives from elsewhere and replaces everything on screen.
+  usePoll(refresh, { active: visible || listening, every: POLL_MS });
 
   /**
    * Runs one button's work, reporting whatever went wrong under the half of the panel that

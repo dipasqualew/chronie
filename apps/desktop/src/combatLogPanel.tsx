@@ -12,10 +12,12 @@
 
 import "./combatLogPanel.css";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { evidence, stateSentence } from "./combatLog";
+import { usePoll } from "./resource";
+import type { StillWanted } from "./resource";
 import type { CombatLogStatus } from "./types";
 
 export interface CombatLogActions {
@@ -53,31 +55,25 @@ export function CombatLogPanel({ actions, requested, visible }: CombatLogPanelPr
   // Never over the top of a switch somebody has just thrown. The poll and the write are both
   // in flight for a moment, and the poll's answer is the older of the two — drawing it would
   // flick the box back to where it was until the write landed.
-  useEffect(() => {
-    let alive = true;
-    const refresh = async (): Promise<void> => {
+  //
+  // `live` is the other guard, and it is the poll's rather than this panel's: it says whether
+  // the ask that is now answering is one the poll still wants — see `resource.ts`.
+  const refresh = useCallback(
+    async (live: StillWanted): Promise<void> => {
       if (writing.current) return;
       try {
         const answer = await actions.status();
-        if (alive && !writing.current) {
+        if (live() && !writing.current) {
           setStatus(answer);
           setSaying("");
         }
       } catch (error) {
-        if (alive) setSaying(actions.onError(error));
+        if (live()) setSaying(actions.onError(error));
       }
-    };
-    void refresh();
-    if (!visible)
-      return () => {
-        alive = false;
-      };
-    const timer = setInterval(() => void refresh(), POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [actions, visible]);
+    },
+    [actions],
+  );
+  usePoll(refresh, { active: visible, every: POLL_MS });
 
   function change(wanted: boolean): void {
     writing.current = true;

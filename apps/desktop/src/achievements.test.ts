@@ -160,10 +160,23 @@ describe("createAchievementBook", () => {
     return { load, loadIcons, asked, askedIcons };
   }
 
+  /**
+   * Lets the two reads one `learn` is made of run to their end.
+   *
+   * `learn` answers with the way to stop listening rather than with a promise — that is what makes
+   * a book something React can subscribe to rather than an errand somebody has to remember to
+   * abandon — so a test waits for the reads instead of awaiting the call. Nothing in here uses a
+   * timer, so flushing the microtask queue is the whole of the wait.
+   */
+  const settle = async (): Promise<void> => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  };
+
   it("looks an achievement up and hands back what the game said", async () => {
     const { load, loadIcons } = backend();
     const book = createAchievementBook({ load, loadIcons });
-    await book.learn([101], () => {});
+    book.learn([101], () => {});
+    await settle();
 
     expect(book.detail(101)).toEqual(detail());
     expect(book.icon(101)).toBe("data:250001");
@@ -175,7 +188,8 @@ describe("createAchievementBook", () => {
     const { load, loadIcons } = backend();
     const changed = vi.fn();
     const book = createAchievementBook({ load, loadIcons });
-    await book.learn([101], changed);
+    book.learn([101], changed);
+    await settle();
 
     expect(changed).toHaveBeenCalledTimes(2);
   });
@@ -186,11 +200,14 @@ describe("createAchievementBook", () => {
     const { load, loadIcons, asked, askedIcons } = backend({ 101: detail(), 9: detail({ id: 9 }) });
     const book = createAchievementBook({ load, loadIcons });
 
-    await book.learn([101, 101], () => {});
-    await book.learn([101], () => {});
+    book.learn([101, 101], () => {});
+    await settle();
+    book.learn([101], () => {});
+    await settle();
     // A second segment naming one of the same achievements and one of its own — which shares
     // its picture, so there is nothing new to decode either.
-    await book.learn([101, 9], () => {});
+    book.learn([101, 9], () => {});
+    await settle();
 
     expect(asked).toEqual([[101], [9]]);
     expect(askedIcons).toEqual([[250001]]);
@@ -200,11 +217,66 @@ describe("createAchievementBook", () => {
   it("says nothing changed when it had nothing to ask", async () => {
     const { load, loadIcons } = backend();
     const book = createAchievementBook({ load, loadIcons });
-    await book.learn([101], () => {});
+    book.learn([101], () => {});
+    await settle();
 
     const changed = vi.fn();
-    await book.learn([101], changed);
+    book.learn([101], changed);
+    await settle();
     expect(changed).not.toHaveBeenCalled();
+  });
+
+  /*
+   * A reader can close a segment inside the second the game's tables take to read, and something
+   * that has left the screen must not be told what arrived for it. This is the whole reason `learn`
+   * answers with a way to stop: the promise it used to answer with had nowhere to say so.
+   */
+  it("says nothing to a listener that has stopped listening", async () => {
+    const { load, loadIcons } = backend();
+    const changed = vi.fn();
+    const book = createAchievementBook({ load, loadIcons });
+
+    const stop = book.learn([101], changed);
+    stop();
+    await settle();
+
+    expect(changed).not.toHaveBeenCalled();
+    // The read itself still happened and is still remembered, which is what makes closing a
+    // segment and opening it again cost nothing.
+    expect(book.detail(101)).toEqual(detail());
+  });
+
+  // Who asked is not who is waiting: the same achievement can be in two open lists, and only the
+  // first of them put it in the request.
+  it("tells everything listening, not only whoever asked", async () => {
+    const { load, loadIcons } = backend();
+    const first = vi.fn();
+    const second = vi.fn();
+    const book = createAchievementBook({ load, loadIcons });
+
+    book.learn([101], first);
+    book.learn([101], second);
+    await settle();
+
+    expect(first).toHaveBeenCalled();
+    expect(second).toHaveBeenCalled();
+  });
+
+  // What React compares to decide whether anything has changed, which has to move when the book
+  // does and stay still when it does not.
+  it("counts a version up as things arrive and leaves it alone when nothing does", async () => {
+    const { load, loadIcons } = backend();
+    const book = createAchievementBook({ load, loadIcons });
+    expect(book.version()).toBe(0);
+
+    book.learn([101], () => {});
+    await settle();
+    const after = book.version();
+    expect(after).toBeGreaterThan(0);
+
+    book.learn([101], () => {});
+    await settle();
+    expect(book.version()).toBe(after);
   });
 
   // An id the install cannot describe is still an id it has been asked about, and asking
@@ -213,8 +285,10 @@ describe("createAchievementBook", () => {
     const { load, loadIcons, asked } = backend({});
     const book = createAchievementBook({ load, loadIcons });
 
-    await book.learn([77], () => {});
-    await book.learn([77], () => {});
+    book.learn([77], () => {});
+    await settle();
+    book.learn([77], () => {});
+    await settle();
 
     expect(book.detail(77)).toBeUndefined();
     expect(book.icon(77)).toBeUndefined();
@@ -234,11 +308,13 @@ describe("createAchievementBook", () => {
     const book = createAchievementBook({ load, loadIcons });
     const changed = vi.fn();
 
-    await expect(book.learn([101], changed)).resolves.toBeUndefined();
+    book.learn([101], changed);
+    await settle();
     expect(book.detail(101)).toBeUndefined();
     expect(changed).not.toHaveBeenCalled();
 
-    await book.learn([101], changed);
+    book.learn([101], changed);
+    await settle();
     expect(book.detail(101)).toEqual(detail());
   });
 
@@ -249,7 +325,8 @@ describe("createAchievementBook", () => {
     const book = createAchievementBook({ load, loadIcons });
     const changed = vi.fn();
 
-    await book.learn([101], changed);
+    book.learn([101], changed);
+    await settle();
     expect(book.detail(101)).toEqual(detail());
     expect(book.icon(101)).toBeUndefined();
     expect(changed).toHaveBeenCalledTimes(1);
@@ -261,7 +338,8 @@ describe("createAchievementBook", () => {
     const { load, loadIcons, askedIcons } = backend({ 101: detail({ iconFileDataId: 0 }) });
     const book = createAchievementBook({ load, loadIcons });
 
-    await book.learn([101], () => {});
+    book.learn([101], () => {});
+    await settle();
     expect(askedIcons).toEqual([]);
     expect(book.icon(101)).toBeUndefined();
   });

@@ -352,13 +352,26 @@ describe("createCaptureAlbum", () => {
   const answer = (ids: number[]): Promise<CaptureThumbnailsPayload> =>
     Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, `picture-${id}`])) });
 
+  /**
+   * Lets the read behind a `learn` run to its end.
+   *
+   * `learn` answers with the way to stop listening rather than with a promise — that is what makes
+   * the album something React can subscribe to — so a test waits for the read instead of awaiting
+   * the call. Nothing in here uses a timer, so flushing the microtask queue is the whole of it.
+   */
+  const settle = async (): Promise<void> => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  };
+
   it("asks for a picture once and hands it to every grid after that", async () => {
     const load = vi.fn(answer);
     const album = createCaptureAlbum(load);
     const changed = vi.fn();
 
-    await album.learn([1, 2, 1], changed);
-    await album.learn([2, 3], changed);
+    album.learn([1, 2, 1], changed);
+    await settle();
+    album.learn([2, 3], changed);
+    await settle();
 
     expect(load.mock.calls).toEqual([[[1, 2]], [[3]]]);
     expect(album.thumbnail(1)).toBe("picture-1");
@@ -370,13 +383,36 @@ describe("createCaptureAlbum", () => {
     const load = vi.fn(answer);
     const album = createCaptureAlbum(load);
     const changed = vi.fn();
-    await album.learn([1], changed);
+    album.learn([1], changed);
+    await settle();
     changed.mockClear();
 
-    await album.learn([1], changed);
+    album.learn([1], changed);
+    await settle();
 
     expect(load).toHaveBeenCalledTimes(1);
     expect(changed).not.toHaveBeenCalled();
+  });
+
+  /*
+   * More than one grid can be showing the same evening — unfolded on its card, and open in the
+   * modal over it — and closing one of them must not stop the other hearing, nor let the one that
+   * has gone be told.
+   */
+  it("tells every grid still listening and none that has stopped", async () => {
+    const load = vi.fn(answer);
+    const album = createCaptureAlbum(load);
+    const staying = vi.fn();
+    const leaving = vi.fn();
+
+    album.learn([1], staying);
+    const stop = album.learn([1], leaving);
+    stop();
+    await settle();
+
+    expect(staying).toHaveBeenCalledTimes(1);
+    expect(leaving).not.toHaveBeenCalled();
+    expect(album.thumbnail(1)).toBe("picture-1");
   });
 
   // A grid whose pictures did not arrive draws the same placeholder as one whose captures
@@ -388,10 +424,12 @@ describe("createCaptureAlbum", () => {
       .mockImplementation(answer);
     const album = createCaptureAlbum(load);
 
-    await album.learn([1], () => {});
+    album.learn([1], () => {});
+    await settle();
     expect(album.thumbnail(1)).toBeUndefined();
 
-    await album.learn([1], () => {});
+    album.learn([1], () => {});
+    await settle();
     expect(album.thumbnail(1)).toBe("picture-1");
   });
 
@@ -401,12 +439,14 @@ describe("createCaptureAlbum", () => {
   it("forgets the picture of a capture that has been deleted", async () => {
     const load = vi.fn(answer);
     const album = createCaptureAlbum(load);
-    await album.learn([7], () => {});
+    album.learn([7], () => {});
+    await settle();
 
     album.forget(7);
 
     expect(album.thumbnail(7)).toBeUndefined();
-    await album.learn([7], () => {});
+    album.learn([7], () => {});
+    await settle();
     expect(load).toHaveBeenCalledTimes(2);
   });
 });

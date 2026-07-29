@@ -12,6 +12,7 @@
  * achievement it does not have, and a row still has to draw.
  */
 
+import type { Book } from "./book";
 import { eventsOf } from "./types";
 import type {
   AchievementDetail,
@@ -83,16 +84,18 @@ export interface AchievementBookOptions {
   loadIcons: (iconFileDataIds: number[]) => Promise<IconsPayload>;
 }
 
-export interface AchievementBook {
+export interface AchievementBook extends Book<number> {
   /**
-   * Looks up whatever of `ids` has not been looked up already, and the pictures for it.
+   * Looks up whatever of `ids` has not been looked up already, and the pictures for it, and
+   * watches for what comes back until the function it hands back is called.
    *
-   * `changed` is called when the words arrive and again when the pictures do, because the
-   * two are separate reads of the game's storage and a list of achievements is worth reading
-   * while the second is still going. It is never called for a request that turned up nothing
-   * new, and the promise resolves when there is nothing further coming.
+   * `changed` is called when the words arrive and again when the pictures do, because the two are
+   * separate reads of the game's storage and a list of achievements is worth reading while the
+   * second is still going. It is never called for a request that turned up nothing new — and
+   * never after the caller has stopped listening, which is the point of the unsubscribe: reading
+   * the game's tables takes about a second, and a reader can close a segment inside one.
    */
-  learn: (ids: number[], changed: () => void) => Promise<void>;
+  learn: (ids: number[], changed: () => void) => () => void;
   detail: (id: number) => AchievementDetail | undefined;
   /** The picture for an achievement, once it has arrived. */
   icon: (id: number) => string | undefined;
@@ -121,8 +124,24 @@ export function createAchievementBook({
   const asked = new Set<number>();
   /** Textures a request has already been made for, likewise. */
   const askedIcons = new Set<number>();
+  /** Everything currently on screen that is waiting to hear about any of this. */
+  const listeners = new Set<() => void>();
+  /** How many times anything has arrived, which is the snapshot React compares. See `book.ts`. */
+  let version = 0;
 
-  async function learn(ids: number[], changed: () => void): Promise<void> {
+  /**
+   * Says that something new has arrived, to everything currently on screen.
+   *
+   * To all of them rather than to whoever asked, the same as the item book beside it: the same
+   * achievement can be in two open lists, and only the first of them put it in the request.
+   */
+  const tell = (): void => {
+    version += 1;
+    for (const listener of [...listeners]) listener();
+  };
+
+  /** The two reads one `learn` turns into: the words, and then the pictures they name. */
+  async function fetch(ids: number[]): Promise<void> {
     const fresh = [...new Set(ids)].filter((id) => id > 0 && !asked.has(id));
     for (const id of fresh) asked.add(id);
     if (fresh.length) {
@@ -135,7 +154,7 @@ export function createAchievementBook({
         for (const id of fresh) asked.delete(id);
         return;
       }
-      changed();
+      tell();
     }
 
     const pictures = [...new Set(ids.map((id) => known.get(id)?.iconFileDataId ?? 0))].filter(
@@ -152,11 +171,16 @@ export function createAchievementBook({
       for (const fdid of pictures) askedIcons.delete(fdid);
       return;
     }
-    changed();
+    tell();
   }
 
   return {
-    learn,
+    learn(ids, changed) {
+      listeners.add(changed);
+      void fetch(ids);
+      return () => listeners.delete(changed);
+    },
+    version: () => version,
     detail: (id) => known.get(id),
     icon: (id) => {
       const fdid = known.get(id)?.iconFileDataId;

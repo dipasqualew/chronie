@@ -13,9 +13,11 @@
 
 import "./captureGallery.css";
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useBook } from "./book";
+import { useModalDialog } from "./dialog";
 import {
   captureFacts,
   captureLabel,
@@ -61,16 +63,13 @@ export function CaptureGallery({ segments, album, actions }: CaptureGalleryProps
   const moments = capturedMoments(segments);
   const [open, setOpen] = useState<string | null>(null);
   // The album is a cache outside React — shared with every other grid the reader opens — so a
-  // thumbnail landing has nothing to change that React would notice by itself.
-  const [, redraw] = useReducer((count: number) => count + 1, 0);
-
-  const wanted = thumbnailIds(moments).join(",");
-  useEffect(() => {
-    const ids = wanted ? wanted.split(",").map(Number) : [];
-    // Asking again costs nothing: the album keeps what it has been handed and what it has
-    // already asked about, so a repeat is filtered to nothing before it reaches a backend.
-    if (ids.length) void album.learn(ids, redraw);
-  }, [wanted, album]);
+  // thumbnail landing has nothing to change that React would notice by itself. `useBook` is the
+  // subscription that tells it, and it is what stops a grid the reader has closed being told
+  // about pictures it is no longer showing. See `book.ts`.
+  //
+  // Asking again costs nothing: the album keeps what it has been handed and what it has already
+  // asked about, so a repeat is filtered to nothing before it reaches a backend.
+  useBook(album, thumbnailIds(moments));
 
   if (!moments.length) return null;
 
@@ -197,21 +196,17 @@ function CaptureViewer({
   onClose,
   onDeleted,
 }: ViewerProps): ReactNode {
-  const dialog = useRef<HTMLDialogElement>(null);
+  // `showModal` is the dialog's own state and React has no prop for it, so the element is driven
+  // from an effect — see `dialog.ts`. Always open: this is mounted only while a capture is being
+  // looked at, and closing it is the parent unmounting it. The reverse direction is `onClose`:
+  // Escape closes a dialog without asking anybody, and the grid behind has to find out.
+  const dialog = useModalDialog(true);
   const capture = moment.capture;
   const [image, setImage] = useState<CaptureImagePayload | null>(null);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [confirming, setConfirming] = useState(false);
-
-  // `showModal` is the dialog's own state and React has no prop for it, so the element is
-  // driven here, once, as it mounts. The reverse direction is `onClose`: Escape closes a dialog
-  // without asking anybody, and the grid behind has to find out.
-  useEffect(() => {
-    const element = dialog.current;
-    if (element && !element.open) element.showModal();
-  }, []);
 
   const { sourceId, id: captureId, note: stored } = capture;
   useEffect(() => {

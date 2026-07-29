@@ -388,14 +388,29 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
       controls.reset();
       report();
     },
+    /**
+     * Everything this stage holds, given back: the loop, the model, the observer, the controls,
+     * the renderer's own resources, the canvas — and the graphics context itself.
+     *
+     * `forceContextLoss` is the last of those and is not tidiness. `dispose` gives back what the
+     * renderer allocated *through* the context and leaves the context alive, to be collected
+     * whenever the browser gets round to it. A browser hands out about sixteen and then starts
+     * silently discarding the oldest, so a stage built and given back several times over — which
+     * is what a reader opening one appearance after another is, and what React's own
+     * setup/cleanup/setup does to every effect in development — walks through the whole allowance
+     * and takes some other pane's picture with it. Nothing about that looks like an error. The
+     * gallery's stage has always done this; the pane forgot.
+     */
     dispose(): void {
       running = false;
       if (model) discard(model);
       model = null;
       announce(null);
       observer.disconnect();
+      controls.removeEventListener("change", moving);
       controls.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
       renderer.domElement.remove();
     },
   };

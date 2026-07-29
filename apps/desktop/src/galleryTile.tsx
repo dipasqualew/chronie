@@ -59,15 +59,26 @@ export const lazyGalleryStage = (): Promise<GalleryStage> =>
  *
  * `on` is whether the grid is showing pictures at all. Turning it off is what gives the context
  * back, and so is the view going away with it left on.
+ *
+ * **Nothing is painted on a stage that has been given back.** React tears an effect down and sets
+ * it up again to prove the teardown is real — development Strict Mode does it to every effect in
+ * the app — and a tile's first paint is asked for before this hook's own effect has run, because
+ * React runs a child's effects before its parent's. So a paint in flight across a teardown would
+ * otherwise resolve against a disposed renderer. `era` is what answers that: the number the paint
+ * started in, compared against the number the grid is on when it comes back. The tile asks again on
+ * the setup that follows, so the picture still arrives. `stage.ts` is the same rule for a live pane.
  */
 export function useGalleryPaint(
   on: boolean,
   createGalleryStage: () => GalleryStage | Promise<GalleryStage>,
 ): Paint {
   const starting = useRef<Promise<GalleryStage> | null>(null);
+  /** Which era of this grid's life is being painted for. Bumped by every teardown. */
+  const era = useRef(0);
   useEffect(() => {
     if (!on) return undefined;
     return () => {
+      era.current += 1;
       const pending = starting.current;
       starting.current = null;
       // A stage that could not be made at all — a machine with no working 3D — is nothing to
@@ -83,10 +94,14 @@ export function useGalleryPaint(
       focus: Focus,
       turn: number,
     ): Promise<void> => {
+      const mine = era.current;
       // One stage, and one attempt to make one: twenty tiles painting at once would otherwise each
       // start a context of their own, which is the thing this exists to avoid.
       starting.current ??= Promise.resolve(createGalleryStage());
       const made = await starting.current;
+      // Given back while it was being made. The teardown disposed this stage already, and painting
+      // on it now would be painting on a dead renderer.
+      if (mine !== era.current) return;
       await made.paint(target, bytes, focus, turn);
     },
     [createGalleryStage],

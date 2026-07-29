@@ -6,11 +6,27 @@
  * of what every view reads, and a first paint of empty scaffolding followed a beat later by
  * the real thing is a worse window than one that opens with its contents already in it.
  *
- * There is no `StrictMode` around the app, and that is a decision rather than an oversight.
- * Its double-invocation is a way of finding effects that are not safe to run twice, and three
- * of the ones here are deliberately not: the 3D stage is a graphics context a browser hands
- * out a limited number of, the link handler is a document listener with nothing to remove it,
- * and the dialogs drive an element that throws if it is opened while already open.
+ * `StrictMode` is here, and what it is for is the effects rather than the rendering. In
+ * development it sets every effect in the app up, tears it down and sets it up again — so an
+ * effect whose cleanup is missing, incomplete or in the wrong order fails loudly on the
+ * developer's own machine rather than quietly on somebody's. Three things in this window had to be
+ * made honest before it could go back in, and each of them is a thing that would have gone wrong
+ * in production sooner or later:
+ *
+ *  - **The 3D stages.** A graphics context is something a browser hands out about sixteen of,
+ *    silently discarding the oldest after that, so one leaked is a picture somewhere else that
+ *    stops working for no visible reason. `stage.ts` and `galleryTile.tsx` hold the two of them,
+ *    and both now give back a stage that was still being made as surely as one that had arrived,
+ *    and refuse to draw on one already given back.
+ *  - **The link handler.** `installExternalLinks` answers with the way to stop, and did not: a
+ *    listener on the document with nothing to remove it, and two of them is one click on one link
+ *    opening two browser tabs.
+ *  - **The dialogs.** `showModal` throws on an element that is already open, so `dialog.ts` reads
+ *    the element's own `open` rather than a prop, in one place, for all four of them.
+ *
+ * The rest of it is in `resource.ts` and `book.ts`: what the window goes and asks for, asked once
+ * across a teardown rather than twice, and never written to the screen after the thing that wanted
+ * it has gone.
  */
 
 // First, and deliberately: every sheet below it is written in the terms this one sets, and a
@@ -18,6 +34,7 @@
 // the page rather than the other way round.
 import "./base.css";
 
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";
@@ -35,4 +52,8 @@ const [payload, settings, release] = await Promise.all([
   desktop.release().catch(() => null),
 ]);
 
-createRoot(root).render(<App payload={payload} settings={settings} release={release} />);
+createRoot(root).render(
+  <StrictMode>
+    <App payload={payload} settings={settings} release={release} />
+  </StrictMode>,
+);

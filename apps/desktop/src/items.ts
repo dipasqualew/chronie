@@ -13,6 +13,7 @@
  * draw. [`createItemBook`] is what fetches and remembers them.
  */
 
+import type { Book } from "./book";
 import type { IconsPayload, ItemDetail, ItemDetailsPayload } from "./types";
 
 /** The class of thing an item is, in the game's own numbering. */
@@ -233,7 +234,7 @@ export interface ItemBookOptions {
   schedule?: (run: () => void) => void;
 }
 
-export interface ItemBook {
+export interface ItemBook extends Book<number> {
   /**
    * Puts `ids` in the next request and watches for what comes back, until the function it
    * hands back is called.
@@ -247,7 +248,7 @@ export interface ItemBook {
    * rather than once.
    *
    * The unsubscribe shape is React's own: an effect returns it and the row stops listening
-   * when it leaves the screen.
+   * when it leaves the screen. `useBook` in `book.ts` is what every row reaches it through.
    */
   learn: (ids: number[], changed: () => void) => () => void;
   detail: (id: number) => ItemDetail | undefined;
@@ -285,6 +286,8 @@ export function createItemBook({
   let pending = new Set<number>();
   let sending = false;
   const listeners = new Set<() => void>();
+  /** How many times anything has arrived, which is the snapshot React compares. See `book.ts`. */
+  let version = 0;
 
   /**
    * Says that something new has arrived, to everything currently on screen.
@@ -293,6 +296,7 @@ export function createItemBook({
    * same item can be on two rows, and only the first of them puts it in the request.
    */
   const tell = (): void => {
+    version += 1;
     for (const listener of [...listeners]) listener();
   };
 
@@ -348,6 +352,7 @@ export function createItemBook({
 
   return {
     learn,
+    version: () => version,
     detail: (id) => known.get(id),
     icon: (id) => {
       const fdid = known.get(id)?.iconFileDataId;
