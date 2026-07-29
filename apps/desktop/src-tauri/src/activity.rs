@@ -41,6 +41,7 @@ pub const KIND_MYTHIC_PLUS: &str = "mythic_plus";
 pub const KIND_PROGRESS_RAID: &str = "progress_raid";
 pub const KIND_LEGACY_RAID: &str = "legacy_raid";
 pub const KIND_LEVELLING: &str = "levelling";
+pub const KIND_PREY: &str = "prey";
 
 /// Every kind this build knows how to name, for the desktop app's editor. A user is not
 /// limited to these — a kind they type in is stored verbatim — but these are the ones the
@@ -50,6 +51,7 @@ pub const KNOWN_KINDS: &[&str] = &[
     KIND_PROGRESS_RAID,
     KIND_LEGACY_RAID,
     KIND_LEVELLING,
+    KIND_PREY,
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -178,13 +180,93 @@ fn levelling(segment: &Segment) -> Option<Activity> {
     ))
 }
 
+/// How a completed prey hunt names itself in the quest log: `Prey: <name> (<difficulty>)`.
+///
+/// Localised, and only the English form is matched. That is a real limit rather than an
+/// oversight: the client offers nothing else to match on. A 12.0.5 binary exposes exactly
+/// `C_QuestLog.GetActivePreyQuest`, a `PreyHuntProgress` widget and an
+/// `Enum.PreyHuntProgressState` of Cold/Warm/Final — enough for the addon to know *which*
+/// quest is the hunt in progress, and nothing anywhere that names the hunt or its difficulty
+/// apart from the title itself. Matching the title here rather than in the addon is what
+/// makes a hunt recognisable in history recorded before anybody went looking for one, and
+/// what lets a better rule be re-run over that history later.
+const PREY_TITLE_PREFIX: &str = "Prey: ";
+
+/// One hunt, as its quest title spelled it.
+struct PreyHunt {
+    title: String,
+    /// Absent when the title carried no trailing parenthetical — the hunt still happened.
+    difficulty: Option<String>,
+}
+
+/// Reads a quest title as a prey hunt, or decides it was not one.
+///
+/// The difficulty is the *last* parenthetical, so a prey whose own name contains brackets
+/// keeps them. A title that is only the prefix names nothing and is not a hunt.
+fn prey_hunt(title: &str) -> Option<PreyHunt> {
+    let rest = title.trim().strip_prefix(PREY_TITLE_PREFIX)?.trim();
+    if let Some(open) = rest.rfind('(') {
+        if let Some(inside) = rest.strip_suffix(')') {
+            let difficulty = inside[open + 1..].trim();
+            let name = rest[..open].trim();
+            if !name.is_empty() && !difficulty.is_empty() {
+                return Some(PreyHunt {
+                    title: name.to_string(),
+                    difficulty: Some(difficulty.to_string()),
+                });
+            }
+        }
+    }
+    if rest.is_empty() {
+        return None;
+    }
+    Some(PreyHunt {
+        title: rest.to_string(),
+        difficulty: None,
+    })
+}
+
+/// A prey hunt handed in during the segment, from the quests the addon already files.
+///
+/// A segment can hold several, and a kind may only be guessed once, so the activity names the
+/// last hunt of the segment and counts the rest: the last one is what the player was doing
+/// when the segment ended, and the count stops that reading as "this segment was one hunt".
+///
+/// Confidence separates the two ways a title can match. The full shape — a name and a
+/// difficulty — is as sure as reading a keystone's own record. A bare `Prey: something` is
+/// the prefix and a guess about what follows it, and says so.
+fn prey(segment: &Segment) -> Option<Activity> {
+    let hunts: Vec<PreyHunt> = segment
+        .quests
+        .iter()
+        .filter_map(|quest| quest.name.as_deref())
+        .filter_map(prey_hunt)
+        .collect();
+
+    let last = hunts.last()?;
+    Some(Activity::new(
+        KIND_PREY,
+        if last.difficulty.is_some() { 0.9 } else { 0.6 },
+        compact(json!({
+            "title": last.title,
+            "difficulty": last.difficulty,
+            "huntsCompleted": hunts.len(),
+        })),
+    ))
+}
+
 /// Every guess this build can make about one segment.
 ///
 /// More than one may apply at once and that is not a conflict: a levelling raid night is
 /// honestly both. What cannot happen is two guesses of the same kind, because a kind is how
 /// a user's suppression of a guess is matched back to it on the next sync.
 pub fn infer(segment: &Segment) -> Vec<Activity> {
-    [mythic_plus(segment), raid(segment), levelling(segment)]
+    [
+        mythic_plus(segment),
+        raid(segment),
+        levelling(segment),
+        prey(segment),
+    ]
         .into_iter()
         .flatten()
         .collect()
@@ -389,6 +471,88 @@ mod tests {
             }))),
             vec![KIND_LEGACY_RAID, KIND_LEVELLING]
         );
+    }
+
+    #[test]
+    fn reads_a_prey_hunt_off_the_quest_it_was_handed_in_as() {
+        let activity = only(
+            &segment(json!({
+                "instance": "Eversong Woods",
+                "quests": [{ "id": 91_000, "name": "Prey: Gorgetusk (Heroic)" }],
+            })),
+            KIND_PREY,
+        );
+
+        assert_eq!(activity.confidence, 0.9);
+        assert_eq!(activity.metadata["title"], "Gorgetusk");
+        assert_eq!(activity.metadata["difficulty"], "Heroic");
+        assert_eq!(activity.metadata["huntsCompleted"], 1);
+    }
+
+    // The rule is a string match on a title, so the thing it must not do is fire on a quest
+    // that merely has the word in it.
+    #[test]
+    fn leaves_a_quest_that_is_only_named_after_prey_alone() {
+        assert!(!kinds(&segment(json!({
+            "quests": [
+                { "id": 1, "name": "Preying on the Weak" },
+                { "id": 2, "name": "Easy Prey" },
+                { "id": 3, "name": "Prey:" },
+            ],
+        })))
+        .contains(&KIND_PREY.to_string()));
+    }
+
+    #[test]
+    fn names_the_last_hunt_of_a_segment_and_counts_the_rest() {
+        let activity = only(
+            &segment(json!({
+                "quests": [
+                    { "id": 1, "name": "Prey: Gorgetusk (Normal)" },
+                    { "id": 2, "name": "An Errand" },
+                    { "id": 3, "name": "Prey: Duskwing Matriarch (Mythic)" },
+                ],
+            })),
+            KIND_PREY,
+        );
+
+        assert_eq!(activity.metadata["title"], "Duskwing Matriarch");
+        assert_eq!(activity.metadata["difficulty"], "Mythic");
+        assert_eq!(activity.metadata["huntsCompleted"], 2);
+    }
+
+    // A hunt with no difficulty in its title is still a hunt, and the difficulty is better
+    // absent than invented — the same rule every other metadata field here follows.
+    #[test]
+    fn records_a_hunt_whose_title_named_no_difficulty_but_says_it_is_unsure() {
+        let activity = only(
+            &segment(json!({ "quests": [{ "id": 1, "name": "Prey: Gorgetusk" }] })),
+            KIND_PREY,
+        );
+
+        assert!(activity.confidence < 0.9);
+        assert_eq!(activity.metadata["title"], "Gorgetusk");
+        assert!(activity.metadata.get("difficulty").is_none());
+    }
+
+    #[test]
+    fn keeps_brackets_that_belong_to_the_preys_own_name() {
+        let activity = only(
+            &segment(json!({
+                "quests": [{ "id": 1, "name": "Prey: Gorgetusk (the Elder) (Heroic)" }],
+            })),
+            KIND_PREY,
+        );
+
+        assert_eq!(activity.metadata["title"], "Gorgetusk (the Elder)");
+        assert_eq!(activity.metadata["difficulty"], "Heroic");
+    }
+
+    // The addon only files a quest's title when it saw the quest in the log first, so a
+    // nameless quest is an ordinary thing to meet rather than a broken record.
+    #[test]
+    fn guesses_nothing_from_a_quest_whose_title_was_never_recorded() {
+        assert!(!kinds(&segment(json!({ "quests": [{ "id": 1 }] }))).contains(&KIND_PREY.to_string()));
     }
 
     #[test]

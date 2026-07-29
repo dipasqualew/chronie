@@ -68,6 +68,15 @@ export const ACTIVITY_KINDS: Record<string, ActivityKind | undefined> = {
       { key: "wipes", label: "Wipes", type: "number" },
     ],
   },
+  prey: {
+    label: "Prey hunt",
+    icon: "🐾",
+    fields: [
+      { key: "title", label: "Prey", type: "text" },
+      { key: "difficulty", label: "Difficulty", type: "text" },
+      { key: "huntsCompleted", label: "Hunts completed", type: "number" },
+    ],
+  },
   levelling: {
     label: "Levelling",
     icon: "⬆️",
@@ -133,6 +142,15 @@ export function activitySummary(activity?: PartialActivity | null): string {
       if (kills !== null) parts.push(`${kills} boss${kills === 1 ? "" : "es"}`);
       const wipes = number(meta.wipes);
       if (wipes) parts.push(`${wipes} wipe${wipes === 1 ? "" : "s"}`);
+      break;
+    }
+    case "prey": {
+      if (meta.title) parts.push(String(meta.title));
+      if (meta.difficulty) parts.push(String(meta.difficulty));
+      // Only worth saying when there was more than one: the named hunt is the last of them,
+      // and a bare title would otherwise read as the whole of what the segment held.
+      const hunts = number(meta.huntsCompleted);
+      if (hunts !== null && hunts > 1) parts.push(`${hunts} hunts`);
       break;
     }
     case "levelling": {
