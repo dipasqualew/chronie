@@ -154,10 +154,14 @@ function resolveRepository(): Repository {
  */
 function remoteSlug(): string {
   const url = git("remote", "get-url", "origin");
-  const segments = url.replace(/\.git$/, "").split(/[:/]/).filter(Boolean);
+  const segments = url
+    .replace(/\.git$/, "")
+    .split(/[:/]/)
+    .filter(Boolean);
   const repo = segments.pop();
   const owner = segments.pop();
-  if (!owner || !repo) throw new Error(`Cannot read an owner/repo out of the origin remote (${url}).`);
+  if (!owner || !repo)
+    throw new Error(`Cannot read an owner/repo out of the origin remote (${url}).`);
   return `${owner}/${repo}`;
 }
 
@@ -177,7 +181,10 @@ const haveGh = ((): boolean => {
 const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -232,7 +239,10 @@ async function viaFetch(path: string): Promise<string> {
     // see, a gateway that has GitHub access switched off entirely — was right there.
     const body = await response.text().catch(() => "");
     const reason = body.trim() ? ` ${body.trim().slice(0, 500)}` : "";
-    throw new HttpError(response.status, `GET ${path} answered ${response.status} ${response.statusText}.${reason}`);
+    throw new HttpError(
+      response.status,
+      `GET ${path} answered ${response.status} ${response.statusText}.${reason}`,
+    );
   }
   return await response.text();
 }
@@ -281,8 +291,12 @@ async function logOf({ owner, repo }: Repository, jobId: number): Promise<string
 
 /* ---------- reporting ---------- */
 
-const out = (line = ""): void => { process.stdout.write(`${line}\n`); };
-const progress = (line: string): void => { process.stderr.write(`${line}\n`); };
+const out = (line = ""): void => {
+  process.stdout.write(`${line}\n`);
+};
+const progress = (line: string): void => {
+  process.stderr.write(`${line}\n`);
+};
 
 /** Actions stamps every log line with a timestamp that is only noise once it is quoted. */
 const strip = (line: string): string => line.replace(/^\S+Z\s/, "").trimEnd();
@@ -351,7 +365,11 @@ async function reportRun(repository: Repository, run: WorkflowRun): Promise<void
 /* ---------- the wait ---------- */
 
 const summarise = (runs: WorkflowRun[]): string =>
-  runs.map((run) => `${run.name || run.id}:${run.status}${run.conclusion ? `/${run.conclusion}` : ""}`).join("  ");
+  runs
+    .map(
+      (run) => `${run.name || run.id}:${run.status}${run.conclusion ? `/${run.conclusion}` : ""}`,
+    )
+    .join("  ");
 
 async function main(): Promise<number> {
   const options = parseArguments(process.argv.slice(2));
@@ -362,14 +380,18 @@ async function main(): Promise<number> {
     progress("No gh CLI and no GH_TOKEN/GITHUB_TOKEN; falling back to anonymous API calls.");
   }
 
-  const sha = options.sha || await headShaOf(repository, branch);
-  progress(`Waiting for CI on ${repository.owner}/${repository.repo}@${branch} (${sha.slice(0, 8)})`);
-  progress(`  polling every ${options.intervalSeconds}s, giving up after ${options.timeoutSeconds}s`);
+  const sha = options.sha || (await headShaOf(repository, branch));
+  progress(
+    `Waiting for CI on ${repository.owner}/${repository.repo}@${branch} (${sha.slice(0, 8)})`,
+  );
+  progress(
+    `  polling every ${options.intervalSeconds}s, giving up after ${options.timeoutSeconds}s`,
+  );
 
   const startedAt = Date.now();
   const elapsed = (): number => (Date.now() - startedAt) / 1000;
   let lastLine = "";
-  let runs: WorkflowRun[] = [];
+  let runs: WorkflowRun[];
 
   for (;;) {
     runs = await runsFor(repository, sha);
@@ -399,8 +421,10 @@ async function main(): Promise<number> {
 
   const red = runs.filter((run) => !run.conclusion || !GREEN.has(run.conclusion));
   if (!red.length) {
-    out(`CI is green on ${branch} (${sha.slice(0, 8)}): ` +
-      runs.map((run) => `${run.name || run.id} ${run.conclusion}`).join(", "));
+    out(
+      `CI is green on ${branch} (${sha.slice(0, 8)}): ` +
+        runs.map((run) => `${run.name || run.id} ${run.conclusion}`).join(", "),
+    );
     return 0;
   }
 
