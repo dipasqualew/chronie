@@ -157,6 +157,15 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
   controls.minPolarAngle = Math.PI / 6;
   controls.maxPolarAngle = Math.PI - Math.PI / 6;
 
+  // A drag changes the camera synchronously in OrbitControls' pointer handler, before the next
+  // animation frame gets a turn. Mark it there rather than in `frame`, so anything waiting on
+  // the stage can never mistake the `settled` left by the frame before a drag for its result.
+  const moving = (): void => {
+    container.dataset.cameraState = "moving";
+  };
+  controls.addEventListener("change", moving);
+  container.dataset.cameraState = "settled";
+
   let model: Group | null = null;
   let running = true;
   // What the camera was last framed on, which is what decides whether the next model moves it.
@@ -180,6 +189,7 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
     // has anything new to say — and with damping on, the frames after a drag ends are moving
     // frames too. Everything else is a string nobody would have been able to tell apart.
     if (controls.update()) report();
+    else container.dataset.cameraState = "settled";
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   };
