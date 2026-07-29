@@ -190,7 +190,7 @@ fn main() {
     }
 
     let mut ranked: Vec<(usize, usize)> = agreed.iter().copied().enumerate().collect();
-    ranked.sort_by(|left, right| right.1.cmp(&left.1));
+    ranked.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     println!("{armour} armour items, and how well each column agrees with the slot they are in:");
     for (column, hits) in ranked.iter().take(SHORTLIST) {
         let shape = items.column_shape(*column);
@@ -238,7 +238,7 @@ fn main() {
     }
     println!();
     let mut pairs: Vec<((u32, u32), usize)> = cross.into_iter().collect();
-    pairs.sort_by(|left, right| left.0.cmp(&right.0));
+    pairs.sort_by_key(|entry| entry.0);
     println!(
         "{} weapons and shields, by the slot and what they say:",
         weapons.len()

@@ -133,7 +133,7 @@ fn main() {
     }
     println!("{both} items are in both tables, and how well each Item column agrees on the slot:");
     let mut ranked: Vec<(usize, usize)> = agreed.iter().copied().enumerate().collect();
-    ranked.sort_by(|left, right| right.1.cmp(&left.1));
+    ranked.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     for (column, hits) in ranked.iter().take(4) {
         println!(
             "    col{column:<3} {:>6.2}%",
