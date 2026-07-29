@@ -120,7 +120,10 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece], who: &Who) -> Result<Value, S
             if worn.is_empty() {
                 continue;
             }
-            drawn[*row] = Some(data_url("model/gltf-binary", &mannequin.wearing(Some(worn))?));
+            drawn[*row] = Some(data_url(
+                "model/gltf-binary",
+                &mannequin.wearing(Some(worn))?,
+            ));
         }
     }
 
@@ -132,7 +135,10 @@ pub fn of(files: &dyn GameFiles, pieces: &[Piece], who: &Who) -> Result<Value, S
             .iter()
             .map(|row| pieces[*row].display_info_id)
             .collect();
-        for (row, alone) in carried.iter().zip(crate::models::each(files, &body, &displays)?) {
+        for (row, alone) in carried
+            .iter()
+            .zip(crate::models::each(files, &body, &displays)?)
+        {
             drawn[*row] = alone.map(|bytes| data_url("model/gltf-binary", &bytes));
         }
     }
@@ -205,7 +211,10 @@ pub fn sets(files: &dyn GameFiles, set_ids: &[u32], who: &Who) -> Result<Value, 
             let model = if worn.is_empty() {
                 Value::Null
             } else {
-                Value::String(data_url("model/gltf-binary", &mannequin.wearing(Some(worn))?))
+                Value::String(data_url(
+                    "model/gltf-binary",
+                    &mannequin.wearing(Some(worn))?,
+                ))
             };
             Ok(serde_json::json!({ "setId": set_id, "model": model }))
         })
@@ -281,10 +290,12 @@ mod tests {
             .iter()
             .map(|row| {
                 (
-                    row["displayInfoId"].as_u64().expect("a row names its display"),
-                    row["model"].as_str().is_some_and(|url| {
-                        url.starts_with("data:model/gltf-binary;base64,")
-                    }),
+                    row["displayInfoId"]
+                        .as_u64()
+                        .expect("a row names its display"),
+                    row["model"]
+                        .as_str()
+                        .is_some_and(|url| url.starts_with("data:model/gltf-binary;base64,")),
                 )
             })
             .collect()
@@ -296,11 +307,13 @@ mod tests {
             .as_array()
             .expect("a page answers with an array")
             .iter()
-            .map(|row| match row["kind"].as_str().expect("a row says what it is") {
-                "worn" => WORN,
-                "held" => HELD,
-                other => panic!("a row came back as {other}"),
-            })
+            .map(
+                |row| match row["kind"].as_str().expect("a row says what it is") {
+                    "worn" => WORN,
+                    "held" => HELD,
+                    other => panic!("a row came back as {other}"),
+                },
+            )
             .collect()
     }
 
@@ -309,7 +322,12 @@ mod tests {
     fn shows_every_appearance_of_a_page() {
         assert_eq!(
             page(&[HELM, SHOULDERS, CHESTPIECE, WEAPON]),
-            vec![(900_001, true), (900_002, true), (900_003, true), (900_007, true)],
+            vec![
+                (900_001, true),
+                (900_002, true),
+                (900_003, true),
+                (900_007, true)
+            ],
         );
     }
 
@@ -388,8 +406,14 @@ mod tests {
     fn answers_in_the_order_it_was_asked() {
         // Reversed, and reversed again: the head layers over the chest and the chest over the
         // legs, so a list sorted by layer would come back in a different order than either.
-        assert_eq!(page(&[CHESTPIECE, HELM]), vec![(900_003, true), (900_001, true)]);
-        assert_eq!(page(&[HELM, CHESTPIECE]), vec![(900_001, true), (900_003, true)]);
+        assert_eq!(
+            page(&[CHESTPIECE, HELM]),
+            vec![(900_003, true), (900_001, true)]
+        );
+        assert_eq!(
+            page(&[HELM, CHESTPIECE]),
+            vec![(900_001, true), (900_003, true)]
+        );
     }
 
     // A row this install can say nothing about keeps its place and comes back empty, because the
@@ -408,7 +432,10 @@ mod tests {
     #[test]
     fn asks_the_game_nothing_for_an_empty_page() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(of(&DirFiles::new(temp.path()), &[], &Who::default()).unwrap()["models"], serde_json::json!([]));
+        assert_eq!(
+            of(&DirFiles::new(temp.path()), &[], &Who::default()).unwrap()["models"],
+            serde_json::json!([])
+        );
     }
 
     // Each row is the appearance on its own, and the way to see that is to put two on a page that
@@ -449,9 +476,9 @@ mod tests {
             .map(|row| {
                 (
                     row["setId"].as_u64().expect("a row names its set"),
-                    row["model"].as_str().is_some_and(|url| {
-                        url.starts_with("data:model/gltf-binary;base64,")
-                    }),
+                    row["model"]
+                        .as_str()
+                        .is_some_and(|url| url.starts_with("data:model/gltf-binary;base64,")),
                 )
             })
             .collect()
@@ -483,7 +510,10 @@ mod tests {
     // 205's one readable row names a display the game encrypts, so there is nothing to paint.
     #[test]
     fn keeps_the_place_of_a_set_it_can_draw_nothing_for() {
-        assert_eq!(set_page(&[201, 205, 203]), vec![(201, true), (205, false), (203, true)]);
+        assert_eq!(
+            set_page(&[201, 205, 203]),
+            vec![(201, true), (205, false), (203, true)]
+        );
     }
 
     // And a page where that is true of every set never reads the character at all — she is the

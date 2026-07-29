@@ -25,7 +25,9 @@ const report = (overrides: Partial<LogRetention> = {}): LogRetention => ({
   unread: {
     count: 1,
     bytes: 1_073_741_824,
-    files: [{ name: "WoWCombatLog-032526_204500.txt", bytes: 1_073_741_824, modified: NOW - 120 * DAY }],
+    files: [
+      { name: "WoWCombatLog-032526_204500.txt", bytes: 1_073_741_824, modified: NOW - 120 * DAY },
+    ],
   },
   unfinished: empty(),
   removed: [],
@@ -70,8 +72,9 @@ describe("RetentionPanel", () => {
     await waitFor(() => expect(state().textContent).toContain("Chronie deletes no combat logs"));
     expect(toggle().checked).toBe(false);
     expect(section("log-retention-doomed")?.textContent).toContain("Would go on the next sync:");
-    expect(section("log-retention-doomed")?.textContent)
-      .toContain("WoWCombatLog-071026_201500.txt");
+    expect(section("log-retention-doomed")?.textContent).toContain(
+      "WoWCombatLog-071026_201500.txt",
+    );
     expect(state().textContent).toContain("would delete 2 logs, 384.0 MB");
   });
 
@@ -82,8 +85,9 @@ describe("RetentionPanel", () => {
 
     await waitFor(() => expect(section("log-retention-unread")).not.toBeNull());
     expect(section("log-retention-unread")?.textContent).toContain("Never deleted by Chronie:");
-    expect(section("log-retention-unread")?.textContent)
-      .toContain("WoWCombatLog-032526_204500.txt");
+    expect(section("log-retention-unread")?.textContent).toContain(
+      "WoWCombatLog-032526_204500.txt",
+    );
     expect(section("log-retention-detail")?.textContent).toContain("Removing them is yours to do.");
   });
 
@@ -98,7 +102,8 @@ describe("RetentionPanel", () => {
 
   it("sends the window the box is showing when the switch goes on", async () => {
     const set = vi.fn((days: number | null) =>
-      Promise.resolve(report({ enabled: days !== null, days: days ?? 7 })));
+      Promise.resolve(report({ enabled: days !== null, days: days ?? 7 })),
+    );
     panel({ set });
 
     await waitFor(() => expect(toggle().checked).toBe(false));
@@ -117,7 +122,8 @@ describe("RetentionPanel", () => {
 
   it("turns the sweeper off rather than setting it to zero", async () => {
     const set = vi.fn((days: number | null) =>
-      Promise.resolve(report({ enabled: days !== null, days: days ?? 7 })));
+      Promise.resolve(report({ enabled: days !== null, days: days ?? 7 })),
+    );
     panel({ status: () => Promise.resolve(report({ enabled: true })), set }, 7);
 
     await waitFor(() => expect(toggle().checked).toBe(true));
@@ -131,7 +137,8 @@ describe("RetentionPanel", () => {
   // "30" is "3", and a sweeper briefly set to three days is not a typo anybody wants.
   it("commits a window when the box is left rather than while it is being typed", async () => {
     const set = vi.fn((days: number | null) =>
-      Promise.resolve(report({ enabled: true, days: days ?? 7 })));
+      Promise.resolve(report({ enabled: true, days: days ?? 7 })),
+    );
     panel({ status: () => Promise.resolve(report({ enabled: true })), set }, 7);
 
     await waitFor(() => expect(window_().disabled).toBe(false));
@@ -147,7 +154,8 @@ describe("RetentionPanel", () => {
     ["a number longer than the app offers", "9999", 365],
   ])("brings %s inside what the backend will honour", async (_case, typed, expected) => {
     const set = vi.fn((days: number | null) =>
-      Promise.resolve(report({ enabled: true, days: days ?? 7 })));
+      Promise.resolve(report({ enabled: true, days: days ?? 7 })),
+    );
     panel({ status: () => Promise.resolve(report({ enabled: true })), set }, 7);
 
     await waitFor(() => expect(window_().disabled).toBe(false));
@@ -163,7 +171,8 @@ describe("RetentionPanel", () => {
     panel({ status: () => Promise.reject(new Error("no game folder is set")) });
 
     await waitFor(() =>
-      expect(state().textContent).toContain("The install said: Error: no game folder is set"));
+      expect(state().textContent).toContain("The install said: Error: no game folder is set"),
+    );
   });
 
   // A write that fails must leave the switch where the setting still is, not where the click
@@ -175,20 +184,29 @@ describe("RetentionPanel", () => {
     fireEvent.click(toggle());
 
     await waitFor(() =>
-      expect(state().textContent).toContain("The install said: Error: settings are read-only"));
+      expect(state().textContent).toContain("The install said: Error: settings are read-only"),
+    );
     expect(toggle().checked).toBe(false);
   });
 
   // A log's name comes off the reader's own disk, so it reaches the screen as a name.
   it("puts a log's name on screen as text rather than as tags", async () => {
     panel({
-      status: () => Promise.resolve(report({
-        doomed: { count: 1, bytes: 12, files: [{ name: "<b>log</b>.txt", bytes: 12, modified: NOW }] },
-      })),
+      status: () =>
+        Promise.resolve(
+          report({
+            doomed: {
+              count: 1,
+              bytes: 12,
+              files: [{ name: "<b>log</b>.txt", bytes: 12, modified: NOW }],
+            },
+          }),
+        ),
     });
 
     await waitFor(() =>
-      expect(section("log-retention-doomed")?.textContent).toContain("<b>log</b>.txt"));
+      expect(section("log-retention-doomed")?.textContent).toContain("<b>log</b>.txt"),
+    );
     expect(section("log-retention-doomed")?.querySelector("b")).toBeNull();
   });
 

@@ -42,7 +42,9 @@ pub fn save_custom_set(
     let name = customsets::clean_name(name)?;
     let pieces = customsets::clean_pieces(pieces)?;
     let mut connection = open_database(database_path)?;
-    let transaction = connection.transaction().map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
     transaction
         .execute(
             "INSERT INTO transmog_custom_sets (name, created_at, updated_at)
@@ -106,7 +108,9 @@ pub fn delete_custom_set(
 ) -> Result<customsets::CustomSetsPayload, String> {
     let id = customsets::set_id(id)?;
     let mut connection = open_database(database_path)?;
-    let transaction = connection.transaction().map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
     // The pieces go with it, by the cascade the migration declares and `PRAGMA foreign_keys`
     // turns on in `open_database`.
     transaction

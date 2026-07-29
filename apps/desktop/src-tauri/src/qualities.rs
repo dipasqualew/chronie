@@ -215,11 +215,21 @@ pub fn each(
         // And what it paints onto her, which is the whole of a chestpiece and none of a sword.
         for texture in &worn.textures {
             if let Some(area) = body.area_of(texture.section) {
-                gathered.paint(files, &mut textures, texture.file, Weight::Body(f64::from(area)));
+                gathered.paint(
+                    files,
+                    &mut textures,
+                    texture.file,
+                    Weight::Body(f64::from(area)),
+                );
             }
         }
         if let Some(cape) = worn.cape {
-            gathered.paint(files, &mut textures, cape, Weight::Body(gathered.whole * CAPE_SHARE));
+            gathered.paint(
+                files,
+                &mut textures,
+                cape,
+                Weight::Body(gathered.whole * CAPE_SHARE),
+            );
         }
 
         looks.push(gathered.look());
@@ -310,8 +320,8 @@ impl Gathered {
             let each = share / held.counted;
             let held = self.buckets.entry(*colour).or_insert((0.0, [0.0; 3]));
             held.0 += count * each;
-            for channel in 0..3 {
-                held.1[channel] += sum[channel] * each;
+            for (into, channel) in held.1.iter_mut().zip(sum) {
+                *into += channel * each;
             }
         }
     }
@@ -332,11 +342,14 @@ impl Gathered {
     /// two textures of a recoloured pair can genuinely tie and the store has to be the same
     /// bytes twice.
     fn primary(&self) -> Option<Colour> {
-        let (_, (count, sum)) = self.buckets.iter().max_by(|(left, (mine, _)), (right, (theirs, _))| {
-            // The fuller bucket wins, and where two are equally full the lower colour does — so
-            // the tie is broken by something stated rather than by where the iteration ended up.
-            mine.total_cmp(theirs).then_with(|| right.cmp(left))
-        })?;
+        let (_, (count, sum)) =
+            self.buckets
+                .iter()
+                .max_by(|(left, (mine, _)), (right, (theirs, _))| {
+                    // The fuller bucket wins, and where two are equally full the lower colour does — so
+                    // the tie is broken by something stated rather than by where the iteration ended up.
+                    mine.total_cmp(theirs).then_with(|| right.cmp(left))
+                })?;
         Some(average(*count, *sum))
     }
 
@@ -543,7 +556,8 @@ pub fn cuts(measures: &[f64]) -> Option<Cuts> {
     }
     let mut sorted = measures.to_vec();
     sorted.sort_by(f64::total_cmp);
-    let at = |fraction: f64| sorted[((sorted.len() as f64 * fraction) as usize).min(sorted.len() - 1)];
+    let at =
+        |fraction: f64| sorted[((sorted.len() as f64 * fraction) as usize).min(sorted.len() - 1)];
     Some(Cuts {
         small: at(1.0 / 3.0),
         large: at(2.0 / 3.0),
@@ -703,8 +717,8 @@ pub fn of_set(looks: &[Look]) -> Option<Look> {
                 .entry([colour[0] & BUCKET, colour[1] & BUCKET, colour[2] & BUCKET])
                 .or_insert((0.0, [0.0; 3]));
             held.0 += weight;
-            for channel in 0..3 {
-                held.1[channel] += f64::from(colour[channel]) * weight;
+            for (into, channel) in held.1.iter_mut().zip(colour) {
+                *into += f64::from(channel) * weight;
             }
         }
     }
@@ -809,7 +823,10 @@ mod tests {
     #[test]
     fn orders_two_things_measured_the_same_way() {
         let extent = |piece| look(piece).size.expect("it has a size").of;
-        assert!(extent(WEAPON) > extent(HELM), "a sword is longer than a helm");
+        assert!(
+            extent(WEAPON) > extent(HELM),
+            "a sword is longer than a helm"
+        );
         assert!(
             extent(CHESTPIECE) > extent(BOOTS),
             "a chestpiece covers more of her than a pair of boots",
@@ -829,7 +846,10 @@ mod tests {
             .filter_map(|section| hers.area_of(*section))
             .map(f64::from)
             .sum();
-        assert_eq!(look(BOOTS).size.expect("the boots have a size").of, painted / whole);
+        assert_eq!(
+            look(BOOTS).size.expect("the boots have a size").of,
+            painted / whole
+        );
     }
 
     // Nothing is the ordinary answer for a display the game withholds: there is no mesh, no
@@ -837,7 +857,10 @@ mod tests {
     #[test]
     fn says_nothing_about_a_display_it_cannot_read() {
         assert_eq!(of(&fixture_files(), &hers(), WITHHELD).unwrap(), None);
-        assert_eq!(of(&fixture_files(), &hers(), worn(404_040, 3)).unwrap(), None);
+        assert_eq!(
+            of(&fixture_files(), &hers(), worn(404_040, 3)).unwrap(),
+            None
+        );
     }
 
     // A batch is an optimisation and nothing else: every row of one is the answer that row would
@@ -859,14 +882,19 @@ mod tests {
     // move when nothing about the game moved is a diff nobody can read.
     #[test]
     fn measures_the_same_install_the_same_way_twice() {
-        assert_eq!(each(&fixture_files(), &hers(), &[CHESTPIECE, HELM, WEAPON]).unwrap(),
-                   each(&fixture_files(), &hers(), &[CHESTPIECE, HELM, WEAPON]).unwrap());
+        assert_eq!(
+            each(&fixture_files(), &hers(), &[CHESTPIECE, HELM, WEAPON]).unwrap(),
+            each(&fixture_files(), &hers(), &[CHESTPIECE, HELM, WEAPON]).unwrap()
+        );
     }
 
     #[test]
     fn asks_the_game_nothing_for_an_empty_batch() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(each(&DirFiles::new(temp.path()), &hers(), &[]).unwrap(), Vec::new());
+        assert_eq!(
+            each(&DirFiles::new(temp.path()), &hers(), &[]).unwrap(),
+            Vec::new()
+        );
     }
 
     // The failure worth reporting rather than answering nothing over: a run that cannot open the
@@ -885,13 +913,19 @@ mod tests {
         assert_eq!((cuts.small, cuts.large, cuts.rows), (3.0, 5.0, 6));
         // Two of the six either side, and two left in the middle.
         let bands: Vec<&str> = (1..=6).map(|of| band(f64::from(of), cuts)).collect();
-        assert_eq!(bands, ["small", "small", "medium", "medium", "large", "large"]);
+        assert_eq!(
+            bands,
+            ["small", "small", "medium", "medium", "large", "large"]
+        );
     }
 
     // The order they arrive in is not the order they sort in, and the cuts are the sorted ones.
     #[test]
     fn cuts_the_same_measurements_whatever_order_they_arrive_in() {
-        assert_eq!(cuts(&[6.0, 1.0, 4.0, 3.0, 2.0, 5.0]), cuts(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        assert_eq!(
+            cuts(&[6.0, 1.0, 4.0, 3.0, 2.0, 5.0]),
+            cuts(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        );
     }
 
     // A slot where every appearance measures the same is a slot with nothing to say about size,
@@ -910,7 +944,11 @@ mod tests {
     /* ---------- the store ---------- */
 
     fn made(primary: Colour, accent: Option<Colour>, size: Option<Size>) -> Look {
-        Look { primary, accent, size }
+        Look {
+            primary,
+            accent,
+            size,
+        }
     }
 
     const fn covering(of: f64) -> Option<Size> {
@@ -969,9 +1007,39 @@ mod tests {
             0,
             "12.0.5.67",
             &[
-                (1, made([1, 1, 1], None, Some(Size { by: By::Geometry, of: 1.0 }))),
-                (2, made([2, 2, 2], None, Some(Size { by: By::Geometry, of: 2.0 }))),
-                (3, made([3, 3, 3], None, Some(Size { by: By::Geometry, of: 3.0 }))),
+                (
+                    1,
+                    made(
+                        [1, 1, 1],
+                        None,
+                        Some(Size {
+                            by: By::Geometry,
+                            of: 1.0,
+                        }),
+                    ),
+                ),
+                (
+                    2,
+                    made(
+                        [2, 2, 2],
+                        None,
+                        Some(Size {
+                            by: By::Geometry,
+                            of: 2.0,
+                        }),
+                    ),
+                ),
+                (
+                    3,
+                    made(
+                        [3, 3, 3],
+                        None,
+                        Some(Size {
+                            by: By::Geometry,
+                            of: 3.0,
+                        }),
+                    ),
+                ),
                 (4, made([4, 4, 4], None, covering(0.1))),
             ],
         );
@@ -1027,7 +1095,10 @@ mod tests {
     fn writes_a_slot_with_nothing_in_it() {
         let text = text(&stored(4, "12.0.5.67", &[]));
         assert!(text.contains("\"appearances\": [],\n"), "{text}");
-        assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["appearances"], json!([]));
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap()["appearances"],
+            json!([])
+        );
     }
 
     // Whatever it writes has to read back as the thing it was written from, because the window
@@ -1038,7 +1109,17 @@ mod tests {
             0,
             "12.0.5.67",
             &[
-                (1, made([255, 0, 0], Some([0, 0, 0]), Some(Size { by: By::Geometry, of: 1.5 }))),
+                (
+                    1,
+                    made(
+                        [255, 0, 0],
+                        Some([0, 0, 0]),
+                        Some(Size {
+                            by: By::Geometry,
+                            of: 1.5,
+                        }),
+                    ),
+                ),
                 (2, made([0, 255, 0], None, None)),
             ],
         );

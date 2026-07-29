@@ -26,7 +26,9 @@ const said = (error: unknown): string => `The install said: ${String(error)}`;
 /** A promise a test hands the outcome to whenever it likes, to look at the panel mid-change. */
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((settle) => { resolve = settle; });
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
   return { promise, resolve };
 }
 
@@ -65,7 +67,9 @@ afterEach(cleanup);
 
 describe("CombatLogPanel", () => {
   it("ticks the box from the setting and states where the install stands", async () => {
-    panel({ status: () => Promise.resolve(status({ state: "basic", advanced: false, growing: false })) });
+    panel({
+      status: () => Promise.resolve(status({ state: "basic", advanced: false, growing: false })),
+    });
 
     await waitFor(() => expect(state().textContent).toContain("advanced combat logging is off"));
     expect(toggle().checked).toBe(true);
@@ -77,7 +81,9 @@ describe("CombatLogPanel", () => {
   });
 
   it("unticks the box for an install nothing has asked to log", async () => {
-    panel({ status: () => Promise.resolve(status({ requested: false, state: "off", growing: false })) });
+    panel({
+      status: () => Promise.resolve(status({ requested: false, state: "off", growing: false })),
+    });
 
     await waitFor(() => expect(state().dataset.state).toBe("off"));
     expect(toggle().checked).toBe(false);
@@ -95,7 +101,8 @@ describe("CombatLogPanel", () => {
   // not as markup.
   it("puts a log's name on screen as text rather than as tags", async () => {
     panel({
-      status: () => Promise.resolve(status({ log: { name: "<b>log</b>.txt", bytes: 12, modified: NOW } })),
+      status: () =>
+        Promise.resolve(status({ log: { name: "<b>log</b>.txt", bytes: 12, modified: NOW } })),
     });
 
     await waitFor(() => expect(detail().textContent).toContain("<b>log</b>.txt"));
@@ -108,18 +115,23 @@ describe("CombatLogPanel", () => {
     panel({ status: () => Promise.reject(new Error("no game folder is set")) });
 
     await waitFor(() =>
-      expect(state().textContent).toContain("The install said: Error: no game folder is set"));
+      expect(state().textContent).toContain("The install said: Error: no game folder is set"),
+    );
   });
 
   it.each<[string, boolean, string]>([
     ["ticking it", true, "stale"],
     ["unticking it", false, "off"],
   ])("%s tells the backend, then repaints from what that left", async (_case, wanted, expected) => {
-    const set = vi.fn((enabled: boolean) => Promise.resolve(status({
-      requested: enabled,
-      growing: false,
-      state: enabled ? "stale" : "off",
-    })));
+    const set = vi.fn((enabled: boolean) =>
+      Promise.resolve(
+        status({
+          requested: enabled,
+          growing: false,
+          state: enabled ? "stale" : "off",
+        }),
+      ),
+    );
     panel({ status: () => Promise.resolve(status({ requested: !wanted })), set });
 
     await waitFor(() => expect(toggle().checked).toBe(!wanted));
@@ -138,21 +150,29 @@ describe("CombatLogPanel", () => {
   it.each<[string, boolean, string]>([
     ["on", true, "Turning combat logging on. It starts at your next login or /reload."],
     ["off", false, "Turning combat logging off. It stops at your next login or /reload."],
-  ])("says a change to %s waits for the next login while the write is in flight", async (_case, wanted, copy) => {
-    const answer = deferred<CombatLogStatus>();
-    panel({ status: () => Promise.resolve(status({ requested: !wanted })), set: () => answer.promise });
+  ])(
+    "says a change to %s waits for the next login while the write is in flight",
+    async (_case, wanted, copy) => {
+      const answer = deferred<CombatLogStatus>();
+      panel({
+        status: () => Promise.resolve(status({ requested: !wanted })),
+        set: () => answer.promise,
+      });
 
-    await waitFor(() => expect(toggle().checked).toBe(!wanted));
-    fireEvent.click(toggle());
+      await waitFor(() => expect(toggle().checked).toBe(!wanted));
+      fireEvent.click(toggle());
 
-    await waitFor(() => expect(state().textContent).toContain(copy));
-    // And nothing can be clicked again in the meantime, so two writes cannot cross.
-    expect(toggle().disabled).toBe(true);
+      await waitFor(() => expect(state().textContent).toContain(copy));
+      // And nothing can be clicked again in the meantime, so two writes cannot cross.
+      expect(toggle().disabled).toBe(true);
 
-    answer.resolve(status({ requested: wanted, growing: false, state: wanted ? "stale" : "off" }));
-    await waitFor(() => expect(toggle().disabled).toBe(false));
-    expect(state().textContent).not.toContain(copy);
-  });
+      answer.resolve(
+        status({ requested: wanted, growing: false, state: wanted ? "stale" : "off" }),
+      );
+      await waitFor(() => expect(toggle().disabled).toBe(false));
+      expect(state().textContent).not.toContain(copy);
+    },
+  );
 
   // The switch stands for what the backend was told. A write that failed changed nothing, so a
   // box left ticked would be the app claiming it had done something it had not.

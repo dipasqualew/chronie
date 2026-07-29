@@ -100,7 +100,9 @@ pub fn clean_name(raw: &str) -> Result<String, String> {
         return Err("Give the set a name and it will be saved under it.".into());
     }
     if name.chars().count() > NAME_LIMIT {
-        return Err(format!("A set's name has to fit in {NAME_LIMIT} characters."));
+        return Err(format!(
+            "A set's name has to fit in {NAME_LIMIT} characters."
+        ));
     }
     Ok(name)
 }
@@ -186,7 +188,10 @@ mod tests {
     #[test]
     fn tidies_a_name_without_changing_what_was_typed() {
         assert_eq!(clean_name("  Horde look "), Ok("Horde look".into()));
-        assert_eq!(clean_name("what   the alt\twears"), Ok("what the alt wears".into()));
+        assert_eq!(
+            clean_name("what   the alt\twears"),
+            Ok("what the alt wears".into())
+        );
         // The case survives; the migration is what makes two spellings of it one set.
         assert_eq!(clean_name("HORDE LOOK"), Ok("HORDE LOOK".into()));
         assert_eq!(clean_name("nor\u{7}mal"), Ok("normal".into()));
@@ -235,7 +240,9 @@ mod tests {
 
     #[test]
     fn refuses_more_pieces_than_a_character_has_places() {
-        let many: Vec<Piece> = (0..=PIECE_LIMIT).map(|at| piece(&format!("armour-{at}"))).collect();
+        let many: Vec<Piece> = (0..=PIECE_LIMIT)
+            .map(|at| piece(&format!("armour-{at}")))
+            .collect();
         assert!(clean_pieces(many).is_err());
     }
 }

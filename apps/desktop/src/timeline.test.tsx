@@ -46,7 +46,12 @@ function segment(overrides: Partial<Segment> = {}): Segment {
   };
 }
 
-const key = (id: number, level: number, dungeon: string, extra: Partial<Activity> = {}): Activity => ({
+const key = (
+  id: number,
+  level: number,
+  dungeon: string,
+  extra: Partial<Activity> = {},
+): Activity => ({
   id,
   kind: "mythic_plus",
   source: "inferred",
@@ -103,8 +108,9 @@ describe("the activities on a session card", () => {
       segment({ startedAt: BASE, activities: [key(1, 14, "Glass Caverns")] }),
     ]);
 
-    const rows = within(view.container.querySelector(".act-roll") as HTMLElement)
-      .getAllByRole("button");
+    const rows = within(view.container.querySelector(".act-roll") as HTMLElement).getAllByRole(
+      "button",
+    );
     expect(rows[0].textContent).toContain("+14");
     expect(rows[1].textContent).toContain("+15");
   });
@@ -124,7 +130,9 @@ describe("the activities on a session card", () => {
   it("says who did it, on an evening that hopped characters", () => {
     const view = draw([
       segment({
-        startedAt: BASE, character: "Brin-Hearth", classFile: "DRUID",
+        startedAt: BASE,
+        character: "Brin-Hearth",
+        classFile: "DRUID",
         activities: [key(1, 9, "Copperwood Depths")],
       }),
     ]);

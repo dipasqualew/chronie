@@ -15,8 +15,9 @@ export class Wardrobe {
 
   constructor(page: Page) {
     this.page = page;
-    this.list = new TransmogView(page).view
-      .getByRole("region", { name: "Every look the game holds" });
+    this.list = new TransmogView(page).view.getByRole("region", {
+      name: "Every look the game holds",
+    });
   }
 
   /** What is drawn right now, which is a page of it rather than the whole kind. */
@@ -49,8 +50,9 @@ export class Wardrobe {
 
   /** One row, found by the look it is for — by its star's name, which is exact. */
   row(label: string): Locator {
-    return this.rows()
-      .filter({ has: this.page.getByRole("button", { name: `Favourite ${label}`, exact: true }) });
+    return this.rows().filter({
+      has: this.page.getByRole("button", { name: `Favourite ${label}`, exact: true }),
+    });
   }
 
   /** The star on that row, which is against the look — the same one a set's row carries. */
@@ -98,17 +100,20 @@ export class Wardrobe {
    * blank at the top. Reading the alpha channel is what tells those two apart.
    */
   async painted(): Promise<number> {
-    return this.bodies().evaluateAll((canvases) => canvases.filter((canvas) => {
-      const picture = (canvas as HTMLCanvasElement).getContext("2d");
-      if (!picture) return false;
-      const { width, height } = canvas as HTMLCanvasElement;
-      if (!width || !height) return false;
-      const { data } = picture.getImageData(0, 0, width, height);
-      // Any pixel that is not fully transparent. The stage draws on a transparent background,
-      // so "something was drawn here" is exactly "some alpha is not zero".
-      for (let at = 3; at < data.length; at += 4) if (data[at] !== 0) return true;
-      return false;
-    }).length);
+    return this.bodies().evaluateAll(
+      (canvases) =>
+        canvases.filter((canvas) => {
+          const picture = (canvas as HTMLCanvasElement).getContext("2d");
+          if (!picture) return false;
+          const { width, height } = canvas as HTMLCanvasElement;
+          if (!width || !height) return false;
+          const { data } = picture.getImageData(0, 0, width, height);
+          // Any pixel that is not fully transparent. The stage draws on a transparent background,
+          // so "something was drawn here" is exactly "some alpha is not zero".
+          for (let at = 3; at < data.length; at += 4) if (data[at] !== 0) return true;
+          return false;
+        }).length,
+    );
   }
 }
 

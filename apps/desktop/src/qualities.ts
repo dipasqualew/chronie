@@ -33,7 +33,8 @@ import type { Quality, QualitiesFile, SetQualitiesFile } from "./types";
  * point of it is that a reader meets the same words both times: this was not typed by anybody,
  * and it is not a fact the game states either — it was measured off the game's own artwork.
  */
-export const BUILT_IN = "Measured from the game's own artwork — Chronie worked this out, nobody typed it";
+export const BUILT_IN =
+  "Measured from the game's own artwork — Chronie worked this out, nobody typed it";
 
 /**
  * Every look of one slot, indexed by the appearance it was measured of.
@@ -105,8 +106,15 @@ export function loadSetQualities(): Promise<SetQualitiesFile | null> {
  * The list is walked from the top, so each entry claims from its own degree up to the next one's.
  */
 const HUES: Array<[number, string]> = [
-  [345, "red"], [290, "pink"], [255, "purple"], [195, "blue"],
-  [160, "teal"], [70, "green"], [45, "yellow"], [15, "orange"], [0, "red"],
+  [345, "red"],
+  [290, "pink"],
+  [255, "purple"],
+  [195, "blue"],
+  [160, "teal"],
+  [70, "green"],
+  [45, "yellow"],
+  [15, "orange"],
+  [0, "red"],
 ];
 
 /** Below this a colour has no hue worth naming and is called grey, black or white instead. */
@@ -187,7 +195,10 @@ export function qualityWords(quality: Quality | undefined): string {
     colourName(quality.primary),
     quality.accent ? colourName(quality.accent) : "",
     quality.size ?? "",
-  ].join(" ").trim().toLowerCase();
+  ]
+    .join(" ")
+    .trim()
+    .toLowerCase();
 }
 
 /** The two keys a measurement is asked for under, in the box and on a clicked chip alike. */

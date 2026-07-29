@@ -22,7 +22,12 @@ import type { ItemBook } from "./items";
 import type { PlaceIcons } from "./places";
 import type { Session } from "./sessions";
 import {
-  ActivityRoll, CharacterCircle, HighlightList, SegmentButton, classProps, shownHighlights,
+  ActivityRoll,
+  CharacterCircle,
+  HighlightList,
+  SegmentButton,
+  classProps,
+  shownHighlights,
 } from "./ui";
 import type { OpenSegment } from "./ui";
 
@@ -38,9 +43,14 @@ export interface TimelineProps {
   captures: CaptureActions;
 }
 
-export function Timeline(
-  { sessions, onOpenSegment, items, places, album, captures }: TimelineProps,
-): ReactNode {
+export function Timeline({
+  sessions,
+  onOpenSegment,
+  items,
+  places,
+  album,
+  captures,
+}: TimelineProps): ReactNode {
   // What the user has opened, kept across repaints: an activity edit redraws the whole view,
   // and having it fold back up under the cursor would be maddening.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -54,39 +64,47 @@ export function Timeline(
     return (
       <div className="empty">
         <p className="empty-title">No play sessions yet</p>
-        <p>Play for a bit, then log out or <code>/reload</code> so the game writes its saved
-        variables. Chronie picks them up within half a minute.</p>
+        <p>
+          Play for a bit, then log out or <code>/reload</code> so the game writes its saved
+          variables. Chronie picks them up within half a minute.
+        </p>
       </div>
     );
   }
 
-  const toggleSegments = (id: string): void => setExpanded((open) => {
-    const next = new Set(open);
-    if (!next.delete(id)) next.add(id);
-    return next;
-  });
+  const toggleSegments = (id: string): void =>
+    setExpanded((open) => {
+      const next = new Set(open);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
-  const toggleCaptures = (id: string): void => setShowing((open) => {
-    const next = new Set(open);
-    if (!next.delete(id)) next.add(id);
-    return next;
-  });
+  const toggleCaptures = (id: string): void =>
+    setShowing((open) => {
+      const next = new Set(open);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
-  const unfold = (id: string, kind: string): void => setUnfolded((open) => {
-    const next = new Map(open);
-    if (next.get(id) === kind) next.delete(id);
-    else next.set(id, kind);
-    return next;
-  });
+  const unfold = (id: string, kind: string): void =>
+    setUnfolded((open) => {
+      const next = new Map(open);
+      if (next.get(id) === kind) next.delete(id);
+      else next.set(id, kind);
+      return next;
+    });
 
   let lastDay: string | null = null;
   return (
     <div className="spine">
       {sessions.map((session) => {
         const label = dayLabel(session.day);
-        const divider = label === lastDay
-          ? null
-          : <div className="spine-day"><span>{label}</span></div>;
+        const divider =
+          label === lastDay ? null : (
+            <div className="spine-day">
+              <span>{label}</span>
+            </div>
+          );
         lastDay = label;
         // A fragment rather than a wrapper, because the day label sticks to the top of the
         // page as the reader scrolls past it — and an element only sticks within its own
@@ -98,7 +116,8 @@ export function Timeline(
               session={session}
               open={expanded.has(session.id)}
               unfolded={unfolded.get(session.id) ?? null}
-              items={items} places={places}
+              items={items}
+              places={places}
               album={album}
               captures={captures}
               showingCaptures={showing.has(session.id)}
@@ -131,19 +150,28 @@ interface SessionCardProps {
   onOpenSegment: (segmentId: number) => void;
 }
 
-function SessionCard(
-  {
-    session, open, unfolded, items, places, album, captures, showingCaptures, onToggleCaptures,
-    onToggleSegments, onUnfold, onOpenSegment,
-  }: SessionCardProps,
-): ReactNode {
+function SessionCard({
+  session,
+  open,
+  unfolded,
+  items,
+  places,
+  album,
+  captures,
+  showingCaptures,
+  onToggleCaptures,
+  onToggleSegments,
+  onUnfold,
+  onOpenSegment,
+}: SessionCardProps): ReactNode {
   const cast = session.characters;
   // The spine's node takes the colour of whoever played most, which makes an evening on one
   // character recognisable from the shape of the page alone.
   const lead = cast[0];
   return (
     <article
-      className="session" {...classProps(lead?.classFile)}
+      className="session"
+      {...classProps(lead?.classFile)}
       aria-label={`Play session ${dayLabel(session.day)} ${clock(session.startedAt)}`}
     >
       <div className="session-node" aria-hidden="true" />
@@ -156,8 +184,9 @@ function SessionCard(
             {/* Named, so the row of circles is one thing — "who played" — rather than two or
                 five unrelated pictures beside a clock. */}
             <span className="session-cast" role="group" aria-label="Who played">
-              {cast.map((character) =>
-                <CharacterCircle key={character.name} character={character} />)}
+              {cast.map((character) => (
+                <CharacterCircle key={character.name} character={character} />
+              ))}
             </span>
           </div>
           <div className="session-time">
@@ -171,39 +200,52 @@ function SessionCard(
             keys and a raid night" long before it is remembered as twelve achievements, so
             the activities lead the card and everything else is what they earned. */}
         <ActivityRoll activities={session.activities} onOpenSegment={onOpenSegment} />
-        {shownHighlights(session.highlights).length
-          ? <HighlightList
-            entries={session.highlights} scope={session.id} expanded={unfolded} items={items}
-            onUnfold={onUnfold} onOpenSegment={onOpenSegment}
+        {shownHighlights(session.highlights).length ? (
+          <HighlightList
+            entries={session.highlights}
+            scope={session.id}
+            expanded={unfolded}
+            items={items}
+            onUnfold={onUnfold}
+            onOpenSegment={onOpenSegment}
           />
-          : session.activities.length
-            ? null
-            : <p className="session-quiet">A quiet session — nothing new to show for it.</p>}
+        ) : session.activities.length ? null : (
+          <p className="session-quiet">A quiet session — nothing new to show for it.</p>
+        )}
         {/* The evening's pictures, above the segments that produced them: a photograph is
             what somebody came back to this card for, and the segments are the ledger. */}
         <CaptureFold
-          segments={session.segments} album={album} actions={captures}
-          open={showingCaptures} onToggle={onToggleCaptures}
+          segments={session.segments}
+          album={album}
+          actions={captures}
+          open={showingCaptures}
+          onToggle={onToggleCaptures}
         />
         <button
-          type="button" className="session-toggle" aria-expanded={open}
+          type="button"
+          className="session-toggle"
+          aria-expanded={open}
           onClick={onToggleSegments}
         >
-          <span className="caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+          <span className="caret" aria-hidden="true">
+            {open ? "▾" : "▸"}
+          </span>
           {plural(session.segments.length, "segment")}
         </button>
-        {open
-          ? <ol className="session-segments">
+        {open ? (
+          <ol className="session-segments">
             {session.segments.map((segment) => (
               <li key={segment.segmentId}>
                 <SegmentButton
-                  segment={segment} items={items} places={places}
+                  segment={segment}
+                  items={items}
+                  places={places}
                   onOpen={() => onOpenSegment(segment.segmentId)}
                 />
               </li>
             ))}
           </ol>
-          : null}
+        ) : null}
       </div>
     </article>
   );

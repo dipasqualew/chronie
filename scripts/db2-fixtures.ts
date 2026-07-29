@@ -23,7 +23,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-
 /** How a column was stored, using the file format's own numbering. */
 export const Storage = {
   plain: 0,
@@ -207,9 +206,13 @@ function packRow(
       // which is the layout `ItemDisplayInfo` uses for its model slots and geoset groups.
       const elementBits = column.sizeBits / raw.length;
       if (!Number.isInteger(elementBits)) {
-        throw new Error(`Column ${index} cannot hold ${raw.length} elements in ${column.sizeBits} bits.`);
+        throw new Error(
+          `Column ${index} cannot hold ${raw.length} elements in ${column.sizeBits} bits.`,
+        );
       }
-      raw.forEach((element, at) => write(column.offsetBits + at * elementBits, elementBits, element));
+      raw.forEach((element, at) =>
+        write(column.offsetBits + at * elementBits, elementBits, element),
+      );
       return;
     }
 
@@ -235,10 +238,7 @@ function packRow(
  * — so every column is a whole number of bytes and a string is simply the text and a NUL.
  * Which is what makes the record as long as its contents, and the offset map necessary.
  */
-function packVariableRow(
-  table: TableSpec,
-  values: Array<number | string | number[]>,
-): Uint8Array {
+function packVariableRow(table: TableSpec, values: Array<number | string | number[]>): Uint8Array {
   const record = new Bytes();
   const text = new Set(table.textColumns ?? []);
 
@@ -259,7 +259,9 @@ function packVariableRow(
     const elements = Array.isArray(raw) ? raw : [Number(raw ?? 0)];
     const width = column.sizeBits / 8 / elements.length;
     if (!Number.isInteger(width)) {
-      throw new Error(`Column ${index} cannot hold ${elements.length} elements in ${column.sizeBits} bits.`);
+      throw new Error(
+        `Column ${index} cannot hold ${elements.length} elements in ${column.sizeBits} bits.`,
+      );
     }
     for (const element of elements) {
       // Anything above four bytes wide is written as a word and then zeroes: the values here
@@ -693,7 +695,9 @@ export function writeIcon(icon: IconSpec): Uint8Array {
   out.zeros(15 * 4);
   out.u32(icon.body.length);
   out.zeros(15 * 4);
-  out.bytes(icon.encoding === Encoding.palette ? iconPalette().toBuffer() : new Uint8Array(PALETTE));
+  out.bytes(
+    icon.encoding === Encoding.palette ? iconPalette().toBuffer() : new Uint8Array(PALETTE),
+  );
   out.bytes(icon.body.toBuffer());
   return out.toBuffer();
 }
@@ -716,17 +720,33 @@ export interface RawFixture {
   note?: string;
 }
 
-/** Writes one area's tables, textures and raw files into `apps/desktop/fixtures/<area>`. */
+/**
+ * Where a run puts what it writes. `apps/desktop/fixtures/` unless a caller says otherwise.
+ *
+ * `CHRONIE_FIXTURE_ROOT` is what lets `check-fixtures.ts` run every generator into a temporary
+ * directory and compare the result with what is committed, which is the only way to know that
+ * the committed bytes are still the bytes these scripts produce. Overwriting the real ones to
+ * find that out would be a check that fixes what it is checking.
+ */
+export const fixtureRoot = (): string =>
+  process.env.CHRONIE_FIXTURE_ROOT ||
+  join(dirname(fileURLToPath(import.meta.url)), "..", "apps", "desktop", "fixtures");
+
+/** Every area a generator writes, which is what `check-fixtures.ts` walks. */
+export const AREAS = ["achievements", "currencies", "items", "journal", "transmog"] as const;
+
+/** Writes one area's tables, textures and raw files into `<root>/<area>`. */
 export function emit(
   area: string,
   { tables, icons = [], raw = [] }: { tables: TableSpec[]; icons?: IconSpec[]; raw?: RawFixture[] },
 ): void {
-  const out = join(dirname(fileURLToPath(import.meta.url)), "..", "apps", "desktop", "fixtures", area);
+  const out = join(fixtureRoot(), area);
   mkdirSync(out, { recursive: true });
+  const quiet = Boolean(process.env.CHRONIE_FIXTURE_ROOT);
   const write = (name: string, bytes: Uint8Array, note = ""): void => {
     const path = join(out, name);
     writeFileSync(path, bytes);
-    console.log(`${path}  ${bytes.length} bytes${note}`);
+    if (!quiet) console.log(`${path}  ${bytes.length} bytes${note}`);
   };
   for (const table of tables) write(`${table.fileDataId}.db2`, writeTable(table));
   for (const icon of icons) write(`${icon.fileDataId}.blp`, writeIcon(icon));

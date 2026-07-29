@@ -92,10 +92,7 @@ export function stillWanted(
  * twice on one page, so this is only ever subtracting what an earlier page already fetched;
  * that it does so at all is what makes scrolling back up free.
  */
-export function stillWantedSets(
-  setIds: number[],
-  have: ReadonlyMap<number, Thumbnail>,
-): number[] {
+export function stillWantedSets(setIds: number[], have: ReadonlyMap<number, Thumbnail>): number[] {
   return [...new Set(setIds)].filter((setId) => !have.has(setId));
 }
 
@@ -139,16 +136,16 @@ export const WHOLE: Focus = { height: 0.5, holds: 1 };
  * and everything above them a weapon.
  */
 const FOCUS: Record<number, Focus> = {
-  0: { height: 0.92, holds: 0.3 },  // head
+  0: { height: 0.92, holds: 0.3 }, // head
   1: { height: 0.82, holds: 0.35 }, // shoulders
-  2: { height: 0.7, holds: 0.45 },  // shirt
-  3: { height: 0.7, holds: 0.45 },  // chest
-  4: { height: 0.6, holds: 0.3 },   // waist
-  5: { height: 0.35, holds: 0.5 },  // legs
+  2: { height: 0.7, holds: 0.45 }, // shirt
+  3: { height: 0.7, holds: 0.45 }, // chest
+  4: { height: 0.6, holds: 0.3 }, // waist
+  5: { height: 0.35, holds: 0.5 }, // legs
   6: { height: 0.08, holds: 0.25 }, // feet
-  7: { height: 0.6, holds: 0.3 },   // wrist
-  8: { height: 0.58, holds: 0.3 },  // hands
-  9: { height: 0.6, holds: 0.9 },   // back: a cloak is most of her
+  7: { height: 0.6, holds: 0.3 }, // wrist
+  8: { height: 0.58, holds: 0.3 }, // hands
+  9: { height: 0.6, holds: 0.9 }, // back: a cloak is most of her
   10: { height: 0.65, holds: 0.6 }, // tabard
 };
 

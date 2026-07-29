@@ -63,18 +63,26 @@ const CATEGORIES = [
   { id: "network", label: "Move this history" },
 ] as const;
 
-type Category = typeof CATEGORIES[number]["id"];
+type Category = (typeof CATEGORIES)[number]["id"];
 
-export function Settings(
-  { settings, actions, captures, combatLog, retention, wifi, visible }: SettingsProps,
-): ReactNode {
+export function Settings({
+  settings,
+  actions,
+  captures,
+  combatLog,
+  retention,
+  wifi,
+  visible,
+}: SettingsProps): ReactNode {
   const [category, setCategory] = useState<Category>("game");
   const [path, setPath] = useState(settings.wowPath || "");
   const [saying, setSaying] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   async function run<T>(
-    name: string, action: () => Promise<T>, success: (result: T) => string,
+    name: string,
+    action: () => Promise<T>,
+    success: (result: T) => string,
   ): Promise<T | undefined> {
     setBusy(name);
     setSaying("");
@@ -93,105 +101,162 @@ export function Settings(
   /** Whether a given category is the one on screen, which is what its panels poll on. */
   const showing = (which: Category): boolean => visible && category === which;
 
-  return <>
-    <header className="view-head">
-      <h1>Settings</h1>
-      <div className="sub">Where the game is, what Chronie records of it, and what it is
-        allowed to delete.</div>
-    </header>
-
-    <div className="settings-layout">
-      <nav className="settings-rail" aria-label="Settings categories">
-        {CATEGORIES.map((entry) => (
-          <button
-            key={entry.id} type="button" id={`${entry.id}-category`}
-            aria-current={entry.id === category ? "true" : "false"}
-            onClick={() => setCategory(entry.id)}
-          >{entry.label}</button>
-        ))}
-      </nav>
-
-      <div className="settings-sections">
-        <section
-          className="panel setup" hidden={category !== "game"}
-          aria-labelledby="game-folder-heading"
-        >
-          <h2 id="game-folder-heading">Game and sync</h2>
-          <p className="sub">Choose the game’s <strong>_retail_</strong> folder. Chronie syncs
-            segments and manages the addon from there.</p>
-          <div className="setup-grid">
-            <label htmlFor="wow-path">Game folder
-              <span className="path-row">
-                <input
-                  id="wow-path" type="text" value={path}
-                  placeholder="C:\Program Files (x86)\World of Warcraft\_retail_"
-                  onChange={(event) => setPath(event.target.value)}
-                />
-                <button
-                  type="button" disabled={busy === "browse"}
-                  onClick={() => void (async () => {
-                    setBusy("browse");
-                    const chosen = await actions.choosePath().finally(() => setBusy(null));
-                    if (chosen) setPath(chosen);
-                  })()}
-                >Browse…</button>
-              </span>
-            </label>
-            <button
-              type="button" className="primary" disabled={busy === "save"}
-              onClick={() => void run("save", () => actions.savePath(path.trim()),
-                () => "Game folder saved.")}
-            >Save</button>
-          </div>
-          <div className="actions">
-            <button
-              type="button" disabled={busy === "sync"}
-              onClick={() => void run("sync", actions.syncNow,
-                (sync) => `Sync complete: ${sync.segmentCount} segments, ${sync.added} new.`)
-                .then((result) => { if (result) actions.onSynced(); })}
-            >Sync now</button>
-            <button
-              type="button" disabled={busy === "install"}
-              onClick={() => void run("install", actions.installAddon,
-                (result) => `Addon ${result.version} installed. Use /reload in game to load it.`)}
-            >Install or update addon</button>
-            <button
-              type="button" disabled={busy === "update"}
-              onClick={() => void run("update", actions.checkForAppUpdate, (result) => result.updated
-                ? `Chronie ${result.version} is ready; restart to finish.`
-                : "Chronie is up to date.")}
-            >Check for app update</button>
-          </div>
-          <p id="setup-status" className="status" role="status">{saying}</p>
-          <p className="sub">Chronie installs its own addon every time it starts, so the two are
-            never out of step. The button above only does it again now, without waiting for a
-            restart.</p>
-          <p id="last-sync" className="sub">
-            {settings.lastSync
-              ? `Last background sync: ${new Date(settings.lastSync).toLocaleString()}`
-              : "No successful sync yet."}
-          </p>
-        </section>
-
-        <div hidden={category !== "screenshots"}>
-          <CapturePanel actions={captures} settings={settings} />
+  return (
+    <>
+      <header className="view-head">
+        <h1>Settings</h1>
+        <div className="sub">
+          Where the game is, what Chronie records of it, and what it is allowed to delete.
         </div>
+      </header>
 
-        <div className="settings-sections" hidden={category !== "logs"}>
-          <CombatLogPanel
-            actions={combatLog} requested={settings.combatLogging === true}
-            visible={showing("logs")}
-          />
-          <RetentionPanel
-            actions={retention} days={settings.retainLogDays ?? null}
-            visible={showing("logs")}
-          />
-        </div>
+      <div className="settings-layout">
+        <nav className="settings-rail" aria-label="Settings categories">
+          {CATEGORIES.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              id={`${entry.id}-category`}
+              aria-current={entry.id === category ? "true" : "false"}
+              onClick={() => setCategory(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </nav>
 
-        <div hidden={category !== "network"}>
-          <WifiPanel actions={wifi} visible={showing("network")} />
+        <div className="settings-sections">
+          <section
+            className="panel setup"
+            hidden={category !== "game"}
+            aria-labelledby="game-folder-heading"
+          >
+            <h2 id="game-folder-heading">Game and sync</h2>
+            <p className="sub">
+              Choose the game’s <strong>_retail_</strong> folder. Chronie syncs segments and manages
+              the addon from there.
+            </p>
+            <div className="setup-grid">
+              <label htmlFor="wow-path">
+                Game folder
+                <span className="path-row">
+                  <input
+                    id="wow-path"
+                    type="text"
+                    value={path}
+                    placeholder="C:\Program Files (x86)\World of Warcraft\_retail_"
+                    onChange={(event) => setPath(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy === "browse"}
+                    onClick={() =>
+                      void (async () => {
+                        setBusy("browse");
+                        const chosen = await actions.choosePath().finally(() => setBusy(null));
+                        if (chosen) setPath(chosen);
+                      })()
+                    }
+                  >
+                    Browse…
+                  </button>
+                </span>
+              </label>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy === "save"}
+                onClick={() =>
+                  void run(
+                    "save",
+                    () => actions.savePath(path.trim()),
+                    () => "Game folder saved.",
+                  )
+                }
+              >
+                Save
+              </button>
+            </div>
+            <div className="actions">
+              <button
+                type="button"
+                disabled={busy === "sync"}
+                onClick={() =>
+                  void run(
+                    "sync",
+                    actions.syncNow,
+                    (sync) => `Sync complete: ${sync.segmentCount} segments, ${sync.added} new.`,
+                  ).then((result) => {
+                    if (result) actions.onSynced();
+                  })
+                }
+              >
+                Sync now
+              </button>
+              <button
+                type="button"
+                disabled={busy === "install"}
+                onClick={() =>
+                  void run(
+                    "install",
+                    actions.installAddon,
+                    (result) =>
+                      `Addon ${result.version} installed. Use /reload in game to load it.`,
+                  )
+                }
+              >
+                Install or update addon
+              </button>
+              <button
+                type="button"
+                disabled={busy === "update"}
+                onClick={() =>
+                  void run("update", actions.checkForAppUpdate, (result) =>
+                    result.updated
+                      ? `Chronie ${result.version} is ready; restart to finish.`
+                      : "Chronie is up to date.",
+                  )
+                }
+              >
+                Check for app update
+              </button>
+            </div>
+            <p id="setup-status" className="status" role="status">
+              {saying}
+            </p>
+            <p className="sub">
+              Chronie installs its own addon every time it starts, so the two are never out of step.
+              The button above only does it again now, without waiting for a restart.
+            </p>
+            <p id="last-sync" className="sub">
+              {settings.lastSync
+                ? `Last background sync: ${new Date(settings.lastSync).toLocaleString()}`
+                : "No successful sync yet."}
+            </p>
+          </section>
+
+          <div hidden={category !== "screenshots"}>
+            <CapturePanel actions={captures} settings={settings} />
+          </div>
+
+          <div className="settings-sections" hidden={category !== "logs"}>
+            <CombatLogPanel
+              actions={combatLog}
+              requested={settings.combatLogging === true}
+              visible={showing("logs")}
+            />
+            <RetentionPanel
+              actions={retention}
+              days={settings.retainLogDays ?? null}
+              visible={showing("logs")}
+            />
+          </div>
+
+          <div hidden={category !== "network"}>
+            <WifiPanel actions={wifi} visible={showing("network")} />
+          </div>
         </div>
       </div>
-    </div>
-  </>;
+    </>
+  );
 }

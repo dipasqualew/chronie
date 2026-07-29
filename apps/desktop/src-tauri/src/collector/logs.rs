@@ -155,9 +155,11 @@ fn upsert_log(
         )
         .map_err(|error| error.to_string())?;
     transaction
-        .query_row("SELECT id FROM combat_logs WHERE name = ?1", [name], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT id FROM combat_logs WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )
         .map_err(|error| error.to_string())
 }
 
@@ -473,7 +475,11 @@ fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
 ///
 /// Nothing here can outrun a capture that has not arrived. A capture is written at logout, within
 /// hours of the points around it; the window is days.
-pub(super) fn compact_positions(connection: &Connection, retain_days: u32, now: i64) -> Result<usize, String> {
+pub(super) fn compact_positions(
+    connection: &Connection,
+    retain_days: u32,
+    now: i64,
+) -> Result<usize, String> {
     let window = i64::from(retain_days.max(retention::MIN_RETAIN_DAYS)) * 86_400;
     let cutoff_ms = (now - window) * 1000;
     connection
@@ -503,7 +509,11 @@ pub(super) fn compact_positions(connection: &Connection, retain_days: u32, now: 
 /// log can be deleted between the folder being listed and the file being opened, and a night
 /// of segments is worth more than refusing them all over one file that went away. A database
 /// error is a different thing and is passed up.
-pub(super) fn ingest_logs(connection: &mut Connection, wow_path: &Path, now: i64) -> Result<(), String> {
+pub(super) fn ingest_logs(
+    connection: &mut Connection,
+    wow_path: &Path,
+    now: i64,
+) -> Result<(), String> {
     let mut budget = LOG_BYTES_PER_SYNC;
     let mut anything = false;
     for found in combatlog::logs(wow_path) {
@@ -519,7 +529,9 @@ pub(super) fn ingest_logs(connection: &mut Connection, wow_path: &Path, now: i64
         budget = budget.saturating_sub(reading.consumed);
         anything = true;
 
-        let transaction = connection.transaction().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
         let log_id = upsert_log(&transaction, &found.file.name, &reading, now)?;
         for bounds in &reading.facts.maps {
             insert_map(&transaction, log_id, bounds)?;
@@ -535,7 +547,9 @@ pub(super) fn ingest_logs(connection: &mut Connection, wow_path: &Path, now: i64
         transaction.commit().map_err(|error| error.to_string())?;
     }
     if anything {
-        let transaction = connection.transaction().map_err(|error| error.to_string())?;
+        let transaction = connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
         place_log_facts(&transaction)?;
         transaction.commit().map_err(|error| error.to_string())?;
     }

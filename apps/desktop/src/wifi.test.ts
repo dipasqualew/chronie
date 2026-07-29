@@ -52,10 +52,12 @@ describe("receiveSentence", () => {
   });
 
   it("says where a sender can reach a machine that is", () => {
-    const sentence = receiveSentence(status({
-      listening: true,
-      addresses: ["192.168.1.31:51571"],
-    }));
+    const sentence = receiveSentence(
+      status({
+        listening: true,
+        addresses: ["192.168.1.31:51571"],
+      }),
+    );
 
     expect(sentence).toContain("“Laptop”");
     expect(sentence).toContain("192.168.1.31:51571");
@@ -70,17 +72,21 @@ describe("receiveSentence", () => {
   it("leads with the offer on the table over anything else it could say", () => {
     const waiting = { offer: offer(), from: "192.168.1.20", receiving: false };
 
-    expect(receiveSentence(status({ listening: true, offer: waiting })))
-      .toBe("A Chronie is waiting for an answer.");
-    expect(receiveSentence(status({ listening: true, offer: { ...waiting, receiving: true } })))
-      .toBe("Receiving the database…");
+    expect(receiveSentence(status({ listening: true, offer: waiting }))).toBe(
+      "A Chronie is waiting for an answer.",
+    );
+    expect(
+      receiveSentence(status({ listening: true, offer: { ...waiting, receiving: true } })),
+    ).toBe("Receiving the database…");
   });
 
   it("keeps reporting what happened after the sender has gone", () => {
-    const sentence = receiveSentence(status({
-      listening: true,
-      outcome: { stored: true, message: "Replaced this history with Desktop's: 1204 segments." },
-    }));
+    const sentence = receiveSentence(
+      status({
+        listening: true,
+        outcome: { stored: true, message: "Replaced this history with Desktop's: 1204 segments." },
+      }),
+    );
 
     expect(sentence).toContain("Replaced this history");
   });
@@ -88,19 +94,23 @@ describe("receiveSentence", () => {
 
 describe("receiptSentence", () => {
   it("reports what the other machine ended up holding", () => {
-    expect(receiptSentence({ stored: true, reason: "", segmentCount: 1204 }, "192.168.1.31"))
-      .toBe("Sent to 192.168.1.31: it now holds 1204 segments.");
+    expect(receiptSentence({ stored: true, reason: "", segmentCount: 1204 }, "192.168.1.31")).toBe(
+      "Sent to 192.168.1.31: it now holds 1204 segments.",
+    );
   });
 
   // A refusal is the other person's answer, not a failure of this machine's, so what they
   // said is what gets shown.
   it("passes on the reason a database was not taken", () => {
-    expect(receiptSentence(
-      { stored: false, reason: "The database was turned down.", segmentCount: 0 },
-      "192.168.1.31",
-    )).toBe("The database was turned down.");
+    expect(
+      receiptSentence(
+        { stored: false, reason: "The database was turned down.", segmentCount: 0 },
+        "192.168.1.31",
+      ),
+    ).toBe("The database was turned down.");
 
-    expect(receiptSentence({ stored: false, reason: "", segmentCount: 0 }, "192.168.1.31"))
-      .toBe("192.168.1.31 did not take the database.");
+    expect(receiptSentence({ stored: false, reason: "", segmentCount: 0 }, "192.168.1.31")).toBe(
+      "192.168.1.31 did not take the database.",
+    );
   });
 });

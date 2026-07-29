@@ -35,10 +35,15 @@ import type { MarkSubjectKind, TransmogMark, TransmogMarksPayload } from "./type
  */
 export interface MarkActions {
   setFavourite: (
-    kind: MarkSubjectKind, id: number, favourite: boolean,
+    kind: MarkSubjectKind,
+    id: number,
+    favourite: boolean,
   ) => Promise<TransmogMarksPayload>;
   setTag: (
-    kind: MarkSubjectKind, id: number, key: string, value: string | null,
+    kind: MarkSubjectKind,
+    id: number,
+    key: string,
+    value: string | null,
   ) => Promise<TransmogMarksPayload>;
   deleteTag: (kind: MarkSubjectKind, id: number, key: string) => Promise<TransmogMarksPayload>;
   /** What the whole view does with a fresh payload, which is hold it and redraw. */
@@ -84,9 +89,14 @@ export function canBeMarked(id: number): boolean {
   return id > 0;
 }
 
-export function MarkControls(
-  { kind, id, mark, name, actions, onFilter }: MarkControlsProps,
-): ReactNode {
+export function MarkControls({
+  kind,
+  id,
+  mark,
+  name,
+  actions,
+  onFilter,
+}: MarkControlsProps): ReactNode {
   const [adding, setAdding] = useState(false);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
@@ -111,13 +121,17 @@ export function MarkControls(
   return (
     <span className="mark">
       <button
-        type="button" className="mark-star" aria-pressed={favourite}
+        type="button"
+        className="mark-star"
+        aria-pressed={favourite}
         // Named by what pressing it would do, so it reads the same whichever state it is in —
         // the pressed state is what says which way round it currently is.
         aria-label={`Favourite ${name}`}
         title={favourite ? `${name} is a favourite` : `Make ${name} a favourite`}
         onClick={() => write(actions.setFavourite(kind, id, !favourite))}
-      ><Star filled={favourite} /></button>
+      >
+        <Star filled={favourite} />
+      </button>
       {tags.map((tag) => (
         <span className="chip mark-tag" key={tag.key.toLowerCase()}>
           {/* In its own element rather than as a bare text node, so that what the tag says
@@ -127,28 +141,40 @@ export function MarkControls(
           {/* "the tag" in the name, because a card carries measured chips that also narrow the
               grid — see `qualitiesChips` — and "filter by brown" out of a grid of cards does
               not say which of the two kinds of thing it is. */}
-          {onFilter
-            ? <button
-              type="button" className="mark-tag-text mark-tag-ask"
+          {onFilter ? (
+            <button
+              type="button"
+              className="mark-tag-text mark-tag-ask"
               aria-label={`Filter by the tag ${tagLabel(tag)}`}
               title={`Filter by the tag ${tagLabel(tag)}`}
               onClick={() => onFilter(termText(tag.key, tag.value))}
-            >{tagLabel(tag)}</button>
-            : <span className="mark-tag-text">{tagLabel(tag)}</span>}
+            >
+              {tagLabel(tag)}
+            </button>
+          ) : (
+            <span className="mark-tag-text">{tagLabel(tag)}</span>
+          )}
           <button
-            type="button" className="mark-drop"
+            type="button"
+            className="mark-drop"
             aria-label={`Remove the tag ${tagLabel(tag)} from ${name}`}
             onClick={() => write(actions.deleteTag(kind, id, tag.key))}
-          >{"×"}</button>
+          >
+            {"×"}
+          </button>
         </span>
       ))}
       <button
-        type="button" className="mark-open" aria-expanded={adding}
+        type="button"
+        className="mark-open"
+        aria-expanded={adding}
         aria-label={`Tag ${name}`}
         onClick={() => setAdding((was) => !was)}
-      >+ tag</button>
-      {adding
-        ? <form
+      >
+        + tag
+      </button>
+      {adding ? (
+        <form
           className="mark-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -163,21 +189,34 @@ export function MarkControls(
           }}
         >
           <input
-            className="mark-key" type="text" value={key} autoFocus
-            aria-label={`Tag name for ${name}`} placeholder="wishlist"
+            className="mark-key"
+            type="text"
+            value={key}
+            autoFocus
+            aria-label={`Tag name for ${name}`}
+            placeholder="wishlist"
             onChange={(event) => setKey(event.target.value)}
           />
           {/* Optional, and said so on the box rather than in a note under it: a tag with
               nothing here is a label, which is half of what this feature is. */}
           <input
-            className="mark-value" type="text" value={value}
-            aria-label={`Tag value for ${name} (optional)`} placeholder="value, or leave empty"
+            className="mark-value"
+            type="text"
+            value={value}
+            aria-label={`Tag value for ${name} (optional)`}
+            placeholder="value, or leave empty"
             onChange={(event) => setValue(event.target.value)}
           />
-          <button type="submit" className="mark-save">Add</button>
+          <button type="submit" className="mark-save">
+            Add
+          </button>
         </form>
-        : null}
-      {failure ? <span className="mark-failure" role="alert">{failure}</span> : null}
+      ) : null}
+      {failure ? (
+        <span className="mark-failure" role="alert">
+          {failure}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -203,27 +242,40 @@ export interface MarkFiltersProps {
  * The picker is absent entirely until there is something in it. An empty dropdown offering
  * only "Any tag" is a control that cannot do anything, and every install starts with one.
  */
-export function MarkFilters(
-  { scope, favourite, onFavourite, tag, onTag, choices }: MarkFiltersProps,
-): ReactNode {
-  return <>
-    <label className="mog-hide">
-      <input
-        type="checkbox" id={`${scope}-favourites`} checked={favourite}
-        onChange={(event) => onFavourite(event.target.checked)}
-      />
-      Favourites only
-    </label>
-    {choices.length
-      ? <select
-        id={`${scope}-tag`} aria-label="Tag" value={tag}
-        onChange={(event) => onTag(event.target.value)}
-      >
-        <option value="">Any tag</option>
-        {choices.map((choice) => (
-          <option key={choice.token} value={choice.token}>{choice.label}</option>
-        ))}
-      </select>
-      : null}
-  </>;
+export function MarkFilters({
+  scope,
+  favourite,
+  onFavourite,
+  tag,
+  onTag,
+  choices,
+}: MarkFiltersProps): ReactNode {
+  return (
+    <>
+      <label className="mog-hide">
+        <input
+          type="checkbox"
+          id={`${scope}-favourites`}
+          checked={favourite}
+          onChange={(event) => onFavourite(event.target.checked)}
+        />
+        Favourites only
+      </label>
+      {choices.length ? (
+        <select
+          id={`${scope}-tag`}
+          aria-label="Tag"
+          value={tag}
+          onChange={(event) => onTag(event.target.value)}
+        >
+          <option value="">Any tag</option>
+          {choices.map((choice) => (
+            <option key={choice.token} value={choice.token}>
+              {choice.label}
+            </option>
+          ))}
+        </select>
+      ) : null}
+    </>
+  );
 }

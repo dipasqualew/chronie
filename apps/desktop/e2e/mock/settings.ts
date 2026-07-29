@@ -51,15 +51,27 @@ export const logRetention: E2EMock["logRetention"] = {
     count: 2,
     bytes: 402_653_184,
     files: [
-      { name: "WoWCombatLog-071026_201500.txt", bytes: 268_435_456, modified: EVENING - 30 * 86400 },
-      { name: "WoWCombatLog-071126_193000.txt", bytes: 134_217_728, modified: EVENING - 29 * 86400 },
+      {
+        name: "WoWCombatLog-071026_201500.txt",
+        bytes: 268_435_456,
+        modified: EVENING - 30 * 86400,
+      },
+      {
+        name: "WoWCombatLog-071126_193000.txt",
+        bytes: 134_217_728,
+        modified: EVENING - 29 * 86400,
+      },
     ],
   },
   unread: {
     count: 1,
     bytes: 1_073_741_824,
     files: [
-      { name: "WoWCombatLog-032526_204500.txt", bytes: 1_073_741_824, modified: EVENING - 120 * 86400 },
+      {
+        name: "WoWCombatLog-032526_204500.txt",
+        bytes: 1_073_741_824,
+        modified: EVENING - 120 * 86400,
+      },
     ],
   },
   unfinished: { count: 0, bytes: 0, files: [] },
@@ -74,6 +86,9 @@ export const installResult: E2EMock["installResult"] = { version: "0.8.0-dev" };
 
 export const appUpdate: E2EMock["appUpdate"] = { updated: false, version: "0.1.0" };
 
-export const release: E2EMock["release"] = { channel: "dev", commit: "95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c" };
+export const release: E2EMock["release"] = {
+  channel: "dev",
+  commit: "95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c",
+};
 
 export const openedUrls: E2EMock["openedUrls"] = [];

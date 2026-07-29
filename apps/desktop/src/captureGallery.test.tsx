@@ -49,11 +49,12 @@ function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
   // Recorded rather than merely answered: "a note is never asked for a thumbnail" is a
   // statement about what crossed the bridge, and only the request itself can say it.
   const thumbnails = vi.fn((ids: number[]) =>
-    Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, THUMBNAIL])) }));
+    Promise.resolve({ thumbnails: Object.fromEntries(ids.map((id) => [id, THUMBNAIL])) }),
+  );
   const album = createCaptureAlbum(thumbnails);
-  const view = render(
+  const grid = (shown: Capture[]) => (
     <CaptureGallery
-      segments={[segment(captures)]}
+      segments={[segment(shown)]}
       album={album}
       actions={{
         loadImage: (captureId) =>
@@ -64,9 +65,13 @@ function gallery(captures: Capture[], actions: Partial<CaptureActions> = {}) {
         onError: said,
         ...actions,
       }}
-    />,
+    />
   );
-  return Object.assign(view, { thumbnails });
+  const view = render(grid(captures));
+  // The whole window redrawn from a dashboard the backend answered with, which is what every
+  // write in this app causes and is the only way to hand the open viewer a changed note.
+  const repaint = (shown: Capture[]): void => view.rerender(grid(shown));
+  return Object.assign(view, { thumbnails, repaint });
 }
 
 /**
@@ -107,7 +112,9 @@ beforeAll(() => {
   // Typed as always present and absent at runtime, which is exactly what "jsdom implements
   // the element and not its modality" looks like from here.
   if (!dialog || typeof dialog.showModal === "function") return;
-  dialog.showModal = function showModal(this: HTMLDialogElement): void { this.open = true; };
+  dialog.showModal = function showModal(this: HTMLDialogElement): void {
+    this.open = true;
+  };
   dialog.close = function close(this: HTMLDialogElement): void {
     this.open = false;
     this.dispatchEvent(new Event("close"));
@@ -121,10 +128,8 @@ describe("CaptureGallery", () => {
     gallery([capture(), capture({ id: 12, sourceId: "TEST|1|12", at: EVENING + 1500 })]);
 
     expect(tiles()).toHaveLength(2);
-    await waitFor(() =>
-      expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(2));
-    expect(document.querySelector<HTMLImageElement>(".capture-thumb img")?.src)
-      .toBe(THUMBNAIL);
+    await waitFor(() => expect(document.querySelectorAll(".capture-thumb img")).toHaveLength(2));
+    expect(document.querySelector<HTMLImageElement>(".capture-thumb img")?.src).toBe(THUMBNAIL);
   });
 
   // Three different things to be told, and none of them is a broken image: a picture that has
@@ -161,16 +166,18 @@ describe("CaptureGallery", () => {
     it("offers a note to be opened rather than a screenshot", () => {
       gallery([memory()]);
 
-      expect(screen.getByRole("button", { name: /^Open the note from Glass Caverns/ }))
-        .toBe(tiles()[0]);
+      expect(screen.getByRole("button", { name: /^Open the note from Glass Caverns/ })).toBe(
+        tiles()[0],
+      );
       expect(screen.queryByRole("button", { name: /^Open the screenshot/ })).toBeNull();
     });
 
     it("shows what somebody wrote instead of the reason there is no picture", () => {
       gallery([memory({ note: "Killed Ragnaros at last" })]);
 
-      expect(tiles()[0].querySelector(".capture-note")?.textContent)
-        .toBe("Killed Ragnaros at last");
+      expect(tiles()[0].querySelector(".capture-note")?.textContent).toBe(
+        "Killed Ragnaros at last",
+      );
       expect(tiles()[0].textContent).not.toContain("A note, with no picture taken.");
     });
 
@@ -203,19 +210,20 @@ describe("CaptureGallery", () => {
   // image that never loads.
   it("says so when the file has gone from under a row that says it is there", async () => {
     gallery([capture()], {
-      loadImage: (captureId) => Promise.resolve<CaptureImagePayload>({ id: captureId, image: null }),
+      loadImage: (captureId) =>
+        Promise.resolve<CaptureImagePayload>({ id: captureId, image: null }),
     });
 
     fireEvent.click(tiles()[0]);
 
-    await waitFor(() =>
-      expect(viewer().textContent).toContain("no longer on disk"));
+    await waitFor(() => expect(viewer().textContent).toContain("no longer on disk"));
     expect(viewer().querySelector("img")).toBeNull();
   });
 
   it("asks for the full-size picture only once one is opened", async () => {
     const loadImage = vi.fn((captureId: number) =>
-      Promise.resolve<CaptureImagePayload>({ id: captureId, image: FULL_SIZE, byteSize: 12 }));
+      Promise.resolve<CaptureImagePayload>({ id: captureId, image: FULL_SIZE, byteSize: 12 }),
+    );
     gallery([capture()], { loadImage });
 
     expect(loadImage).not.toHaveBeenCalled();
@@ -293,7 +301,8 @@ describe("CaptureGallery", () => {
     fireEvent.click(within(viewer()).getByRole("button", { name: "Save note" }));
 
     await waitFor(() =>
-      expect(viewer().textContent).toContain("Chronie said: Error: the database is locked"));
+      expect(viewer().textContent).toContain("Chronie said: Error: the database is locked"),
+    );
     expect(onApply).not.toHaveBeenCalled();
     // And the sentence is still in the field, so it can be tried again rather than retyped.
     expect(noteField().value).toBe("first Yogg kill");
@@ -309,8 +318,9 @@ describe("CaptureGallery", () => {
     fireEvent.click(within(viewer()).getByRole("button", { name: "Delete" }));
 
     expect(remove).not.toHaveBeenCalled();
-    expect(within(viewer()).getByRole("alert").textContent)
-      .toContain("deleted from Chronie's storage");
+    expect(within(viewer()).getByRole("alert").textContent).toContain(
+      "deleted from Chronie's storage",
+    );
 
     fireEvent.click(within(viewer()).getByRole("button", { name: "Yes, delete it" }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith(11));
@@ -330,6 +340,21 @@ describe("CaptureGallery", () => {
 
   // A note somebody abandoned by stepping to the next picture must not follow them onto it,
   // which is the whole reason the field is reset on the capture rather than on the note.
+  // The other half of keying the field on which capture is open rather than on its note. Every
+  // write in this app answers with the whole dashboard and repaints from it, so the viewer is
+  // handed a changed `note` for the capture it is already showing as an ordinary event — and
+  // reaching in to overwrite the field then would take away a sentence somebody is still
+  // writing. Watching `stored`, which is what the lint rule asks for, is exactly that bug.
+  it("leaves a half-typed note alone when the window repaints under it", async () => {
+    const { repaint } = gallery([capture({ note: "first Yogg kill" })]);
+    await open();
+
+    fireEvent.change(noteField(), { target: { value: "first Yogg kill, second try" } });
+    repaint([capture({ note: "something the backend now says" })]);
+
+    expect(noteField().value).toBe("first Yogg kill, second try");
+  });
+
   it("puts the next picture's own note in the field when the reader steps on", async () => {
     gallery([
       capture({ note: "first Yogg kill" }),

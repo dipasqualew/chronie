@@ -1,9 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  captureFacts, captureKind, captureLabel, capturePlaceholder, captureReason, captureSummary,
-  captureTip, capturedMoments, createCaptureAlbum, deleteWarning, fileSize, missingReason,
-  noteChanged, thumbnailIds,
+  captureFacts,
+  captureKind,
+  captureLabel,
+  capturePlaceholder,
+  captureReason,
+  captureSummary,
+  captureTip,
+  capturedMoments,
+  createCaptureAlbum,
+  deleteWarning,
+  fileSize,
+  missingReason,
+  noteChanged,
+  thumbnailIds,
 } from "./captures";
 import { clock } from "./format";
 import type { Capture, CaptureThumbnailsPayload, Segment } from "./types";
@@ -58,12 +69,14 @@ describe("capturedMoments", () => {
   // Two captures a second apart is what the addon's own cooldown allows, and two in the same
   // second is what a clock that went backwards produces. Neither may reshuffle on a repaint.
   it("breaks a tie on the row id rather than on where the segment happened to be", () => {
-    const moments = capturedMoments([segment({
-      captures: [
-        capture({ id: 9, sourceId: "later", at: EVENING }),
-        capture({ id: 4, sourceId: "earlier", at: EVENING }),
-      ],
-    })]);
+    const moments = capturedMoments([
+      segment({
+        captures: [
+          capture({ id: 9, sourceId: "later", at: EVENING }),
+          capture({ id: 4, sourceId: "earlier", at: EVENING }),
+        ],
+      }),
+    ]);
 
     expect(moments.map((moment) => moment.capture.sourceId)).toEqual(["earlier", "later"]);
   });
@@ -88,13 +101,15 @@ describe("missingReason", () => {
 
 describe("thumbnailIds", () => {
   it("asks only for the captures that have a picture to ask for", () => {
-    const moments = capturedMoments([segment({
-      captures: [
-        capture({ id: 1, sourceId: "a" }),
-        capture({ id: 2, sourceId: "b", imageState: "missing" }),
-        capture({ id: 3, sourceId: "c", imageState: "none" }),
-      ],
-    })]);
+    const moments = capturedMoments([
+      segment({
+        captures: [
+          capture({ id: 1, sourceId: "a" }),
+          capture({ id: 2, sourceId: "b", imageState: "missing" }),
+          capture({ id: 3, sourceId: "c", imageState: "none" }),
+        ],
+      }),
+    ]);
 
     expect(thumbnailIds(moments)).toEqual([1]);
   });
@@ -119,17 +134,17 @@ describe("captureLabel", () => {
   it("names the kind, the place and the moment, and nothing about position in a grid", () => {
     const [moment] = capturedMoments([segment({ captures: [capture()] })]);
 
-    expect(captureLabel(moment))
-      .toBe(`Open the screenshot from Glass Caverns at ${clock(EVENING + 1400)}`);
+    expect(captureLabel(moment)).toBe(
+      `Open the screenshot from Glass Caverns at ${clock(EVENING + 1400)}`,
+    );
   });
 
   it("offers a note to be opened rather than a picture that was never taken", () => {
-    const [moment] = capturedMoments([
-      segment({ captures: [capture({ imageState: "none" })] }),
-    ]);
+    const [moment] = capturedMoments([segment({ captures: [capture({ imageState: "none" })] })]);
 
-    expect(captureLabel(moment))
-      .toBe(`Open the note from Glass Caverns at ${clock(EVENING + 1400)}`);
+    expect(captureLabel(moment)).toBe(
+      `Open the note from Glass Caverns at ${clock(EVENING + 1400)}`,
+    );
   });
 });
 
@@ -146,8 +161,9 @@ describe("capturePlaceholder", () => {
   });
 
   it("gives each state a glyph of its own", () => {
-    const glyphs = (["stored", "missing", "none"] as const)
-      .map((imageState) => capturePlaceholder(capture({ imageState })));
+    const glyphs = (["stored", "missing", "none"] as const).map((imageState) =>
+      capturePlaceholder(capture({ imageState })),
+    );
 
     expect(new Set(glyphs).size).toBe(3);
   });
@@ -157,16 +173,18 @@ describe("captureReason", () => {
   // The presence of a trigger is the whole difference between a capture somebody pressed the
   // key for and one Chronie took by itself, so it is worth saying — in words.
   it("says in words which rule took a picture by itself", () => {
-    expect(captureReason(capture({ trigger: "accountFirstAchievement" })))
-      .toBe("Taken for an account first");
+    expect(captureReason(capture({ trigger: "accountFirstAchievement" }))).toBe(
+      "Taken for an account first",
+    );
     expect(captureReason(capture())).toBe("");
   });
 
   // The allowlist is the player's and lives in a settings file, so a name this build has
   // never heard of is a setting from a later one rather than a bug to hide.
   it("names a rule it does not know rather than saying nothing", () => {
-    expect(captureReason(capture({ trigger: "firstKillOfTheTier" })))
-      .toBe("Taken automatically: firstKillOfTheTier");
+    expect(captureReason(capture({ trigger: "firstKillOfTheTier" }))).toBe(
+      "Taken automatically: firstKillOfTheTier",
+    );
   });
 });
 
@@ -176,8 +194,12 @@ describe("captureFacts", () => {
 
     // The clock through the app's own formatter rather than a literal: what it reads is the
     // machine's locale and zone, and a fixed string would pass in one place and fail in another.
-    expect(captureFacts(moment))
-      .toEqual(["Aster-Vale", "Glass Caverns", clock(EVENING + 1400), "3.1 MB"]);
+    expect(captureFacts(moment)).toEqual([
+      "Aster-Vale",
+      "Glass Caverns",
+      clock(EVENING + 1400),
+      "3.1 MB",
+    ]);
   });
 
   it("leaves out a size nobody has said", () => {
@@ -204,9 +226,11 @@ describe("fileSize", () => {
 // escaped by hand: the shared tooltip assigns `data-tip` straight to `innerHTML`.
 describe("captureTip", () => {
   it("puts a note containing markup into the tooltip as text", () => {
-    const [moment] = capturedMoments([segment({
-      captures: [capture({ note: "<b>first</b> Yogg kill" })],
-    })]);
+    const [moment] = capturedMoments([
+      segment({
+        captures: [capture({ note: "<b>first</b> Yogg kill" })],
+      }),
+    ]);
 
     const tip = captureTip(moment);
     expect(tip).toContain("&lt;b&gt;first&lt;/b&gt; Yogg kill");
@@ -214,9 +238,12 @@ describe("captureTip", () => {
   });
 
   it("escapes a place name out of the game as well", () => {
-    const [moment] = capturedMoments([segment({
-      instance: "The <Hall> of \"Fame\"", captures: [capture()],
-    })]);
+    const [moment] = capturedMoments([
+      segment({
+        instance: 'The <Hall> of "Fame"',
+        captures: [capture()],
+      }),
+    ]);
 
     expect(captureTip(moment)).toContain("The &lt;Hall&gt; of &quot;Fame&quot;");
   });
@@ -232,13 +259,15 @@ describe("captureSummary", () => {
   // A player who took ten screenshots and finds nine is owed the explanation on the way in,
   // not after opening the grid and counting.
   it("counts the pictures, and says how many are only markers", () => {
-    const moments = capturedMoments([segment({
-      captures: [
-        capture({ id: 1, sourceId: "a" }),
-        capture({ id: 2, sourceId: "b" }),
-        capture({ id: 3, sourceId: "c", imageState: "missing" }),
-      ],
-    })]);
+    const moments = capturedMoments([
+      segment({
+        captures: [
+          capture({ id: 1, sourceId: "a" }),
+          capture({ id: 2, sourceId: "b" }),
+          capture({ id: 3, sourceId: "c", imageState: "missing" }),
+        ],
+      }),
+    ]);
 
     expect(captureSummary(moments)).toBe("2 screenshots · 1 without a file");
   });
@@ -257,34 +286,40 @@ describe("captureSummary", () => {
   // "No screenshots" while holding a dozen of them — nor grow a "0 screenshots" beside them,
   // which describes an absence nobody was looking for.
   it("counts notes on their own, without mentioning screenshots at all", () => {
-    const moments = capturedMoments([segment({
-      captures: [
-        capture({ id: 1, sourceId: "a", imageState: "none" }),
-        capture({ id: 2, sourceId: "b", imageState: "none" }),
-      ],
-    })]);
+    const moments = capturedMoments([
+      segment({
+        captures: [
+          capture({ id: 1, sourceId: "a", imageState: "none" }),
+          capture({ id: 2, sourceId: "b", imageState: "none" }),
+        ],
+      }),
+    ]);
 
     expect(captureSummary(moments)).toBe("2 notes");
     expect(captureSummary(moments)).not.toContain("screenshot");
   });
 
   it("says one note in the singular", () => {
-    const moments = capturedMoments([segment({
-      captures: [capture({ imageState: "none" })],
-    })]);
+    const moments = capturedMoments([
+      segment({
+        captures: [capture({ imageState: "none" })],
+      }),
+    ]);
 
     expect(captureSummary(moments)).toBe("1 note");
   });
 
   it("counts all three kinds when an evening held all three", () => {
-    const moments = capturedMoments([segment({
-      captures: [
-        capture({ id: 1, sourceId: "a", at: EVENING + 10 }),
-        capture({ id: 2, sourceId: "b", at: EVENING + 20 }),
-        capture({ id: 3, sourceId: "c", at: EVENING + 30, imageState: "missing" }),
-        capture({ id: 4, sourceId: "d", at: EVENING + 40, imageState: "none" }),
-      ],
-    })]);
+    const moments = capturedMoments([
+      segment({
+        captures: [
+          capture({ id: 1, sourceId: "a", at: EVENING + 10 }),
+          capture({ id: 2, sourceId: "b", at: EVENING + 20 }),
+          capture({ id: 3, sourceId: "c", at: EVENING + 30, imageState: "missing" }),
+          capture({ id: 4, sourceId: "d", at: EVENING + 40, imageState: "none" }),
+        ],
+      }),
+    ]);
 
     expect(captureSummary(moments)).toBe("2 screenshots · 1 without a file · 1 note");
   });
@@ -347,7 +382,8 @@ describe("createCaptureAlbum", () => {
   // A grid whose pictures did not arrive draws the same placeholder as one whose captures
   // have none, and it is worth another try the next time somebody opens that evening.
   it("tries again after a request that failed", async () => {
-    const load = vi.fn()
+    const load = vi
+      .fn()
       .mockRejectedValueOnce(new Error("no game folder is set"))
       .mockImplementation(answer);
     const album = createCaptureAlbum(load);

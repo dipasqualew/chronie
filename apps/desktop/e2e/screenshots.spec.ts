@@ -24,8 +24,9 @@ test("shows an evening's screenshots, and lets one be annotated or deleted", asy
   await test.step("the card counts them, and says how many are only markers", async () => {
     // Four captures in the evening across two segments, and one of them is a marker whose
     // file was never found — which is said on the way in rather than discovered by counting.
-    await expect(timeline.fold(card, /screenshots/))
-      .toContainText("3 screenshots · 1 without a file");
+    await expect(timeline.fold(card, /screenshots/)).toContainText(
+      "3 screenshots · 1 without a file",
+    );
   });
 
   const tiles = await shots.unfold(card);
@@ -113,8 +114,9 @@ test("shows an evening's screenshots, and lets one be annotated or deleted", asy
 
     await expect(shots.viewer).toBeHidden();
     await expect(tiles).toHaveCount(3);
-    await expect(timeline.fold(card, /screenshots/))
-      .toContainText("2 screenshots · 1 without a file");
+    await expect(timeline.fold(card, /screenshots/)).toContainText(
+      "2 screenshots · 1 without a file",
+    );
   });
 
   // The same pictures, filed where they were taken: a session's grid is the evening's, and a

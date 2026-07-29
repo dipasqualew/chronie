@@ -42,9 +42,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { ReactNode } from "react";
 
 import { plural } from "./format";
-import {
-  PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted,
-} from "./gallery";
+import { PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted } from "./gallery";
 import type { Thumbnail } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import { Turnable, lazyGalleryStage, useGalleryPaint } from "./galleryTile";
@@ -65,11 +63,22 @@ import { LinkOut } from "./ui";
 import { ANY_CLASS, qualityLabel, wearerLabel } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import {
-  KINDS, PAGE, answerKey, filterAppearances, kindOf, shownSummary, wardrobeRow,
+  KINDS,
+  PAGE,
+  answerKey,
+  filterAppearances,
+  kindOf,
+  shownSummary,
+  wardrobeRow,
 } from "./wardrobe";
 import type { Kind } from "./wardrobe";
 import type {
-  GalleryPayload, QualitiesFile, Quality, TransmogMark, WardrobePayload, WornPiece,
+  GalleryPayload,
+  QualitiesFile,
+  Quality,
+  TransmogMark,
+  WardrobePayload,
+  WornPiece,
 } from "./types";
 
 export interface WardrobeListProps {
@@ -126,13 +135,22 @@ export interface WardrobeListProps {
 /** What the list says while the game's tables are being read for a kind. */
 const READING = "Reading every appearance the game has for this…";
 
-export function WardrobeList(
-  {
-    hidden, load, wantIcons, icons, outfit, hideUnwearable, onHideUnwearable, marks, index,
-    onWear, loadGallery, look, createGalleryStage = lazyGalleryStage,
-    loadQualities = loadStore,
-  }: WardrobeListProps,
-): ReactNode {
+export function WardrobeList({
+  hidden,
+  load,
+  wantIcons,
+  icons,
+  outfit,
+  hideUnwearable,
+  onHideUnwearable,
+  marks,
+  index,
+  onWear,
+  loadGallery,
+  look,
+  createGalleryStage = lazyGalleryStage,
+  loadQualities = loadStore,
+}: WardrobeListProps): ReactNode {
   const [kindKey, setKindKey] = useState(KINDS[0]!.key);
   const [search, setSearch] = useState("");
   const [klass, setKlass] = useState("");
@@ -160,15 +178,18 @@ export function WardrobeList(
   const key = answerKey(kind);
   const answer = answers.get(key);
 
-  const read = useCallback((wanted: Kind): void => {
-    const wantedKey = answerKey(wanted);
-    if (asked.has(wantedKey)) return;
-    asked.add(wantedKey);
-    void load(wanted.displayTypes)
-      .then((payload) => answers.set(wantedKey, payload))
-      .catch((error: unknown) => answers.set(wantedKey, message(error)))
-      .finally(redraw);
-  }, [load, answers, asked]);
+  const read = useCallback(
+    (wanted: Kind): void => {
+      const wantedKey = answerKey(wanted);
+      if (asked.has(wantedKey)) return;
+      asked.add(wantedKey);
+      void load(wanted.displayTypes)
+        .then((payload) => answers.set(wantedKey, payload))
+        .catch((error: unknown) => answers.set(wantedKey, message(error)))
+        .finally(redraw);
+    },
+    [load, answers, asked],
+  );
 
   // Nothing is read until the reader asks to see it. The wardrobe costs the same second of
   // the game's storage the sets do, and a reader who never leaves the sets never pays it.
@@ -198,30 +219,42 @@ export function WardrobeList(
    * A search across the seventeen kinds of weapon is one payload over five files, and a look
    * belongs to exactly one of them — so the first that holds it is the answer.
    */
-  const qualityOf = useCallback((appearanceId: number) => {
-    for (const displayType of kind.displayTypes) {
-      const found = measured.get(displayType)?.of(appearanceId);
-      if (found) return found;
-    }
-    return undefined;
-  }, [kind, measured]);
+  const qualityOf = useCallback(
+    (appearanceId: number) => {
+      for (const displayType of kind.displayTypes) {
+        const found = measured.get(displayType)?.of(appearanceId);
+        if (found) return found;
+      }
+      return undefined;
+    },
+    [kind, measured],
+  );
 
   // Only the tags written against a look this kind actually holds, so a reader browsing heads
   // is not offered the one they invented for staves and then shown nothing. The whole answer
   // rather than the filtered list, so the picker does not shrink as it is used.
   const tags = useMemo(
-    () => (typeof answer === "object"
-      ? tagChoices(index, "appearance", answer.appearances.map((one) => one.appearanceId))
-      : []),
+    () =>
+      typeof answer === "object"
+        ? tagChoices(
+            index,
+            "appearance",
+            answer.appearances.map((one) => one.appearanceId),
+          )
+        : [],
     [index, answer],
   );
 
-  const looks = typeof answer === "object"
-    ? filterAppearances(answer.appearances, {
-      kind, search, klass, marks: { filter: marked, of: (id) => index.of("appearance", id) },
-      qualities: qualityOf,
-    })
-    : [];
+  const looks =
+    typeof answer === "object"
+      ? filterAppearances(answer.appearances, {
+          kind,
+          search,
+          klass,
+          marks: { filter: marked, of: (id) => index.of("appearance", id) },
+          qualities: qualityOf,
+        })
+      : [];
   const rows = looks.map((look) => wardrobeRow(look));
   // Whatever cannot go on her is left out unless the box above says otherwise — the same
   // statement about what a reader is here for that the sets are filtered by.
@@ -231,12 +264,16 @@ export function WardrobeList(
 
   // The pictures for what is actually on screen, and nothing else: a kind holds thousands of
   // rows and decoding a texture for each would be a minute of work nobody asked for.
-  const waiting = drawn.map((row) => row.iconFileDataId).filter((id) => id > 0);
-  const waitingKey = waiting.join(",");
+  // The ids rather than the array, which is new on every render and would ask every time — and
+  // read back out of the key inside the effect, the arrangement `captureGallery` uses, so that
+  // "the key is the identity" is something the code does rather than something a comment says.
+  const waitingKey = drawn
+    .map((row) => row.iconFileDataId)
+    .filter((id) => id > 0)
+    .join(",");
   useEffect(() => {
-    if (waiting.length) wantIcons(waiting);
-    // The ids rather than the array, which is new on every render and would ask every time.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const ids = waitingKey ? waitingKey.split(",").map(Number) : [];
+    if (ids.length) wantIcons(ids);
   }, [waitingKey, wantIcons]);
 
   // The bodies, by the display each is drawn from. Kept outside React for the reason the answers
@@ -261,9 +298,12 @@ export function WardrobeList(
     void loadGallery(missing)
       .then((payload) => {
         for (const row of payload.models) {
-          bodies.set(row.displayInfoId, row.model
-            ? { kind: "model", glb: row.model, shows: row.kind }
-            : { kind: "nothing", note: REASONS.unshowable });
+          bodies.set(
+            row.displayInfoId,
+            row.model
+              ? { kind: "model", glb: row.model, shows: row.kind }
+              : { kind: "nothing", note: REASONS.unshowable },
+          );
         }
       })
       // A page that will not come leaves its rows saying so rather than waiting for ever. The
@@ -274,7 +314,10 @@ export function WardrobeList(
         }
       })
       .finally(redraw);
-    // The display ids rather than the array, which is new on every render.
+    // The display ids rather than the array, which is new on every render. Not readable back
+    // out of the key the way the icon request above is — the effect needs the pieces — so this
+    // stays a suppression, and what holds it is the exact call counts `transmogView.test.tsx`
+    // asserts on `loadGallery` as the reader pages, switches body and comes back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedKey, look, loadGallery, bodies]);
 
@@ -290,12 +333,13 @@ export function WardrobeList(
   };
 
   /** A chip on a row, clicked: the term it stands for goes into the box beside the others. */
-  const askFor = (term: string): void =>
-    narrow(() => setSearch((was) => withTerm(was, term)));
+  const askFor = (term: string): void => narrow(() => setSearch((was) => withTerm(was, term)));
 
   return (
     <section
-      className="panel mog-browser" id="wardrobe" hidden={hidden}
+      className="panel mog-browser"
+      id="wardrobe"
+      hidden={hidden}
       aria-label="Every look the game holds"
     >
       <div className="table-head">
@@ -303,13 +347,17 @@ export function WardrobeList(
           {/* The kinds are grouped because seventeen weapons in one flat list of thirty is a
               list nobody reads to the end of. */}
           <select
-            id="wardrobe-kind" aria-label="Kind of appearance" value={kindKey}
+            id="wardrobe-kind"
+            aria-label="Kind of appearance"
+            value={kindKey}
             onChange={(event) => narrow(() => setKindKey(event.target.value))}
           >
             {groups().map((group) => (
               <optgroup key={group.name} label={group.name}>
                 {group.kinds.map((one) => (
-                  <option key={one.key} value={one.key}>{one.label}</option>
+                  <option key={one.key} value={one.key}>
+                    {one.label}
+                  </option>
                 ))}
               </optgroup>
             ))}
@@ -318,20 +366,31 @@ export function WardrobeList(
               not a thing anybody guesses, and the row of chips below is the other half of how it
               is found out — see `terms.ts`. */}
           <input
-            id="wardrobe-search" type="search" placeholder="Filter by name, or colour:brown…"
-            aria-label="Filter appearances" value={search}
+            id="wardrobe-search"
+            type="search"
+            placeholder="Filter by name, or colour:brown…"
+            aria-label="Filter appearances"
+            value={search}
             onChange={(event) => narrow(() => setSearch(event.target.value))}
           />
           <select
-            id="wardrobe-class" aria-label="Class" value={klass}
+            id="wardrobe-class"
+            aria-label="Class"
+            value={klass}
             onChange={(event) => narrow(() => setKlass(event.target.value))}
           >
             <option value="">All classes</option>
-            {CLASSES.map((name, index) => <option key={name} value={index}>{name}</option>)}
+            {CLASSES.map((name, index) => (
+              <option key={name} value={index}>
+                {name}
+              </option>
+            ))}
           </select>
           <label className="mog-hide">
             <input
-              type="checkbox" id="wardrobe-hide-unwearable" checked={hideUnwearable}
+              type="checkbox"
+              id="wardrobe-hide-unwearable"
+              checked={hideUnwearable}
               onChange={(event) => onHideUnwearable(event.target.checked)}
             />
             Hide what she cannot wear
@@ -341,7 +400,9 @@ export function WardrobeList(
               the time one takes, and a hundred is not. */}
           <label className="mog-hide">
             <input
-              type="checkbox" id="wardrobe-as-models" checked={asModels}
+              type="checkbox"
+              id="wardrobe-as-models"
+              checked={asModels}
               onChange={(event) => {
                 // Not through `narrow`, which puts the list back to *this* mode's page: the
                 // whole point of the switch is that the page after it is a different size, and
@@ -354,12 +415,17 @@ export function WardrobeList(
             Show worn
           </label>
           <MarkFilters
-            scope="wardrobe" favourite={marked.favourite} tag={marked.tag} choices={tags}
+            scope="wardrobe"
+            favourite={marked.favourite}
+            tag={marked.tag}
+            choices={tags}
             onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
             onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
           />
           <span
-            className="count" id="wardrobe-count" role="status"
+            className="count"
+            id="wardrobe-count"
+            role="status"
             aria-label="How much of the wardrobe is shown"
           >
             {typeof answer === "object"
@@ -374,23 +440,29 @@ export function WardrobeList(
         <ul className="mog-items" aria-label="Appearances">
           {drawn.map((row) => (
             <Look
-              key={row.appearanceId} row={row} worn={isWorn(outfit, row)}
-              icon={icons.get(row.iconFileDataId)} marks={marks}
+              key={row.appearanceId}
+              row={row}
+              worn={isWorn(outfit, row)}
+              icon={icons.get(row.iconFileDataId)}
+              marks={marks}
               mark={index.of("appearance", row.appearanceId)}
-              quality={qualityOf(row.appearanceId)} onWear={() => onWear(row)}
+              quality={qualityOf(row.appearanceId)}
+              onWear={() => onWear(row)}
               onFilter={askFor}
-              body={asModels ? bodies.get(row.displayInfoId) : undefined} paint={paint}
+              body={asModels ? bodies.get(row.displayInfoId) : undefined}
+              paint={paint}
             />
           ))}
         </ul>
         {/* What is left, and the way to it. A number rather than an endless scroll, because
             the honest answer to "how much more of this is there" is four thousand. */}
-        {kept.length > drawn.length
-          ? <button
-            type="button" className="mog-more"
+        {kept.length > drawn.length ? (
+          <button
+            type="button"
+            className="mog-more"
             onClick={() => setShown((was) => was + page)}
           >{`Show ${Math.min(page, kept.length - drawn.length)} more of ${plural(kept.length - drawn.length, "appearance")}`}</button>
-          : null}
+        ) : null}
       </div>
       <div className="empty" hidden={typeof answer !== "object" || kept.length > 0}>
         <p className="empty-title">Nothing matches</p>
@@ -410,28 +482,37 @@ export function WardrobeList(
  * button, because it has become something to drag. A click that turned out to be a drag would
  * otherwise put a piece on the character every time somebody looked at the back of a helm.
  */
-function Look(
-  { row, worn, icon, marks, mark, quality, onWear, onFilter, body, paint }: {
-    row: AppearanceRow;
-    worn: boolean;
-    icon?: string;
-    marks: MarkActions;
-    /** The same mark a set's row of this look draws, because both key on the appearance. */
-    mark: TransmogMark | undefined;
-    /** What the committed store measured of it, or nothing where it holds no row. */
-    quality: Quality | undefined;
-    onWear: () => void;
-    /** What a chip on this row asks of the list it is in when it is clicked — see `terms.ts`. */
-    onFilter: (term: string) => void;
-    /**
-     * The picture of this look, when the gallery is on and one has arrived.
-     *
-     * `undefined` is the gallery being off, and the row keeps the icon it always had.
-     */
-    body: Thumbnail | undefined;
-    paint: Paint;
-  },
-): ReactNode {
+function Look({
+  row,
+  worn,
+  icon,
+  marks,
+  mark,
+  quality,
+  onWear,
+  onFilter,
+  body,
+  paint,
+}: {
+  row: AppearanceRow;
+  worn: boolean;
+  icon?: string;
+  marks: MarkActions;
+  /** The same mark a set's row of this look draws, because both key on the appearance. */
+  mark: TransmogMark | undefined;
+  /** What the committed store measured of it, or nothing where it holds no row. */
+  quality: Quality | undefined;
+  onWear: () => void;
+  /** What a chip on this row asks of the list it is in when it is clicked — see `terms.ts`. */
+  onFilter: (term: string) => void;
+  /**
+   * The picture of this look, when the gallery is on and one has arrived.
+   *
+   * `undefined` is the gallery being off, and the row keeps the icon it always had.
+   */
+  body: Thumbnail | undefined;
+  paint: Paint;
+}): ReactNode {
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
   const source = row.sources[0]!;
@@ -441,51 +522,71 @@ function Look(
      app's CSP drops those. The same arrangement `GameItem` uses. */
   const name = (
     <span
-      className="mog-name" data-quality={String(source.quality)}
+      className="mog-name"
+      data-quality={String(source.quality)}
       title={`${row.label} · ${qualityLabel(source.quality)}`}
-    >{row.label}</span>
+    >
+      {row.label}
+    </span>
   );
-  const said = <>
-    {worn ? <span className="chip">worn</span> : null}
-    {/* Before what the reader said about it, because it is of the same kind as the game's own
+  const said = (
+    <>
+      {worn ? <span className="chip">worn</span> : null}
+      {/* Before what the reader said about it, because it is of the same kind as the game's own
         facts beside it — measured rather than typed — and because it is what the eye is
         actually looking for in a list of five thousand chestpieces. */}
-    <Qualities quality={quality} onFilter={onFilter} />
-    <MarkControls
-      kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
-      onFilter={onFilter}
-    />
-    {source.allowableClass !== 0 && source.allowableClass !== ANY_CLASS
-      ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
-      : null}
-    {row.liftsRestriction
-      ? <span className="chip mog-lifted" title="Another item gives this look to any class">
-        Any class too
-      </span>
-      : null}
-    {/* How many items sell the look. A count and not a way in: a set can afford to name the
+      <Qualities quality={quality} onFilter={onFilter} />
+      <MarkControls
+        kind="appearance"
+        id={row.appearanceId}
+        mark={mark}
+        name={row.label}
+        actions={marks}
+        onFilter={onFilter}
+      />
+      {source.allowableClass !== 0 && source.allowableClass !== ANY_CLASS ? (
+        <span className="chip">{wearerLabel(source.allowableClass)}</span>
+      ) : null}
+      {row.liftsRestriction ? (
+        <span className="chip mog-lifted" title="Another item gives this look to any class">
+          Any class too
+        </span>
+      ) : null}
+      {/* How many items sell the look. A count and not a way in: a set can afford to name the
         items behind each of its dozen looks, and a slot holding five thousand cannot. */}
-    {source.itemCount > 1
-      ? <span className="chip muted">{`${source.itemCount} items`}</span>
-      : null}
-    {canWear ? null : <span className="muted">{wanted.note}</span>}
-    <a
-      className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
-      target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
-      aria-label={`${row.label} on Wowhead`}
-    ><LinkOut /></a>
-  </>;
+      {source.itemCount > 1 ? (
+        <span className="chip muted">{`${source.itemCount} items`}</span>
+      ) : null}
+      {canWear ? null : <span className="muted">{wanted.note}</span>}
+      <a
+        className="mog-wowhead"
+        href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${row.label} on Wowhead`}
+        aria-label={`${row.label} on Wowhead`}
+      >
+        <LinkOut />
+      </a>
+    </>
+  );
 
   if (shown) {
     return (
       <li className="mog-item mog-tile" data-worn={worn}>
         <Turnable
-          glb={shown.glb} focus={focusOf(row.displayType, shown.shows)}
-          label={row.label} paint={paint}
+          glb={shown.glb}
+          focus={focusOf(row.displayType, shown.shows)}
+          label={row.label}
+          paint={paint}
         />
         <button
-          type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
-          aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
+          type="button"
+          className="mog-pick"
+          aria-pressed={worn}
+          disabled={!canWear}
+          aria-label={`Wear ${row.slot}: ${row.label}`}
+          onClick={onWear}
         >
           <span className="badge">{row.slot}</span>
           {name}
@@ -500,8 +601,12 @@ function Look(
       {/* The whole row is one button — picture, slot and name — because putting the piece on is
           what a reader opened the list to do. */}
       <button
-        type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
-        aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
+        type="button"
+        className="mog-pick"
+        aria-pressed={worn}
+        disabled={!canWear}
+        aria-label={`Wear ${row.slot}: ${row.label}`}
+        onClick={onWear}
       >
         <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
           {icon ? <img src={icon} alt="" /> : null}

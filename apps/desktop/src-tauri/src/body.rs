@@ -314,7 +314,10 @@ pub fn of_race(files: &dyn GameFiles, race: u32, sex: u32) -> Result<Option<u32>
     Ok(mine
         .iter()
         .find(|offer| offer.sex == sex)
-        .or_else(|| mine.iter().find(|offer| offer.sex != MALE && offer.sex != FEMALE))
+        .or_else(|| {
+            mine.iter()
+                .find(|offer| offer.sex != MALE && offer.sex != FEMALE)
+        })
         .map(|offer| offer.id))
 }
 
@@ -402,7 +405,13 @@ fn offered(files: &dyn GameFiles) -> Result<Vec<Offer>, String> {
         wanted.push((id, race, sex, display, layout));
     }
 
-    let meshes = meshes(files, &wanted.iter().map(|(_, _, _, display, _)| *display).collect())?;
+    let meshes = meshes(
+        files,
+        &wanted
+            .iter()
+            .map(|(_, _, _, display, _)| *display)
+            .collect(),
+    )?;
     let offers: Vec<Offer> = wanted
         .into_iter()
         .filter_map(|(id, race, sex, display, layout)| {
@@ -561,7 +570,15 @@ mod tests {
         let hers = body(HUMAN_FEMALE);
         assert_eq!((hers.layout, hers.atlas), (104, (2048, 1024)));
         assert_eq!(hers.sections.len(), 10);
-        assert_eq!(hers.rect_of(5), Some(&Rect { x: 512, y: 384, width: 512, height: 256 }));
+        assert_eq!(
+            hers.rect_of(5),
+            Some(&Rect {
+                x: 512,
+                y: 384,
+                width: 512,
+                height: 256
+            })
+        );
         assert_eq!(hers.sex, FEMALE);
     }
 
@@ -578,7 +595,15 @@ mod tests {
         // This layout is smaller in the fixtures, which nothing but the read could know — and
         // is what a race whose atlas is 1024 × 1024 would look like from here.
         assert_eq!(his.atlas, (1024, 512));
-        assert_eq!(his.rect_of(5), Some(&Rect { x: 256, y: 192, width: 256, height: 128 }));
+        assert_eq!(
+            his.rect_of(5),
+            Some(&Rect {
+                x: 256,
+                y: 192,
+                width: 256,
+                height: 128
+            })
+        );
     }
 
     // A section this layout has no rectangle for. `ItemDisplayInfoMaterialRes` carries rows for
@@ -604,7 +629,11 @@ mod tests {
     // that names it is the whole of what keeps a reader from being offered one.
     #[test]
     fn leaves_off_a_body_whose_only_race_nobody_can_be() {
-        assert!(!names().iter().any(|name| name.contains("Naga")), "{:?}", names());
+        assert!(
+            !names().iter().any(|name| name.contains("Naga")),
+            "{:?}",
+            names()
+        );
         assert_eq!(known(&fixture_files(), NAGA), Err(NOT_ON_OFFER.into()));
         assert_eq!(body(NAGA), body(DEFAULT));
     }
@@ -615,7 +644,11 @@ mod tests {
     #[test]
     fn offers_a_body_two_races_share_once_under_the_first_of_them() {
         assert_eq!(names().iter().filter(|name| *name == "Orc Male").count(), 1);
-        assert!(!names().iter().any(|name| name.starts_with("Mag'har")), "{:?}", names());
+        assert!(
+            !names().iter().any(|name| name.starts_with("Mag'har")),
+            "{:?}",
+            names()
+        );
         // And the race it carries is that first one, which is what `HelmetGeosetData` and
         // `ComponentTextureFileData` are narrowed by.
         assert_eq!(body(ORC_MALE).race, 2);
@@ -639,7 +672,11 @@ mod tests {
     // error a reader finds by choosing it.
     #[test]
     fn leaves_off_a_playable_body_with_no_mesh_behind_it() {
-        assert!(!names().iter().any(|name| name.contains("Vulpera")), "{:?}", names());
+        assert!(
+            !names().iter().any(|name| name.contains("Vulpera")),
+            "{:?}",
+            names()
+        );
         assert_eq!(known(&fixture_files(), NO_MESH), Err(NOT_ON_OFFER.into()));
     }
 

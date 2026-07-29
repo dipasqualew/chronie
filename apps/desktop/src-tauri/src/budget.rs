@@ -278,8 +278,12 @@ impl Payload {
 /// padding. A count taken before any of that is a count of something nobody downloads.
 pub fn payload_of(glb: &[u8]) -> Result<Payload, String> {
     let (scene, bin) = split(glb)?;
-    let accessors = scene["accessors"].as_array().map_or(&[][..], |all| all.as_slice());
-    let views = scene["bufferViews"].as_array().map_or(&[][..], |all| all.as_slice());
+    let accessors = scene["accessors"]
+        .as_array()
+        .map_or(&[][..], |all| all.as_slice());
+    let views = scene["bufferViews"]
+        .as_array()
+        .map_or(&[][..], |all| all.as_slice());
 
     // Vertices are counted per POSITION accessor rather than per primitive, because
     // `glb::write` gives each piece one that every one of its primitives shares — a body
@@ -363,7 +367,8 @@ fn indices_of(
     let view = views
         .get(number(&accessor["bufferView"]).ok_or("an index accessor names no buffer view")?)
         .ok_or("an index accessor names a buffer view the file does not hold")?;
-    let at = number(&view["byteOffset"]).unwrap_or(0) + number(&accessor["byteOffset"]).unwrap_or(0);
+    let at =
+        number(&view["byteOffset"]).unwrap_or(0) + number(&accessor["byteOffset"]).unwrap_or(0);
     let bytes = bin
         .get(at..at + count * 4)
         .ok_or("an index accessor reaches past the binary chunk")?;
@@ -409,7 +414,10 @@ mod tests {
                 })
             })
             .collect();
-        assert!(!pieces.is_empty(), "the fixture set has to dress her in something");
+        assert!(
+            !pieces.is_empty(),
+            "the fixture set has to dress her in something"
+        );
         let body = crate::body::of(files, crate::body::DEFAULT).expect("the fixture body");
         let worn = worn::of_set(files, &body, &pieces).expect("the fixture outfit resolves");
         character::glb_of(files, Some(&worn), &character::Who::default())
@@ -458,7 +466,11 @@ mod tests {
     #[test]
     fn inflates_nothing_twice() {
         let (_, work) = cost();
-        assert_eq!(work.repeated, 0, "a click inflated {} files twice", work.repeated);
+        assert_eq!(
+            work.repeated, 0,
+            "a click inflated {} files twice",
+            work.repeated
+        );
     }
 
     // And the whole point of remembering: the same click again decodes nothing. On a real
@@ -508,8 +520,11 @@ mod tests {
     #[test]
     fn hangs_what_she_wears_off_her_as_meshes_of_its_own() {
         let files = fixture_files();
-        let bare = payload_of(&character::glb_of(&files, None, &character::Who::default()).expect("the bare body draws"))
-            .expect("a .glb");
+        let bare = payload_of(
+            &character::glb_of(&files, None, &character::Who::default())
+                .expect("the bare body draws"),
+        )
+        .expect("a .glb");
         let dressed = payload_of(&click(&files)).expect("a .glb");
         assert!(
             dressed.meshes.len() > bare.meshes.len(),
@@ -577,7 +592,8 @@ mod tests {
     fn page() -> Vec<worn::Piece> {
         (0..PAGE)
             .map(|row| {
-                let (display_info_id, display_type, inventory_type) = WARDROBE[row % WARDROBE.len()];
+                let (display_info_id, display_type, inventory_type) =
+                    WARDROBE[row % WARDROBE.len()];
                 worn::Piece {
                     display_info_id,
                     display_type,
@@ -593,7 +609,8 @@ mod tests {
         let counted = Counted::over(&files);
         let remembered = Remembered::over(&counted);
         counted.restart();
-        let answer = crate::gallery::of(&remembered, pieces, &character::Who::default()).expect("the fixture page draws");
+        let answer = crate::gallery::of(&remembered, pieces, &character::Who::default())
+            .expect("the fixture page draws");
         assert_eq!(
             answer["models"].as_array().map(Vec::len),
             Some(pieces.len()),
@@ -609,7 +626,12 @@ mod tests {
         let remembered = Remembered::over(&counted);
         counted.restart();
         for piece in pieces {
-            crate::gallery::of(&remembered, std::slice::from_ref(piece), &character::Who::default()).expect("a row draws");
+            crate::gallery::of(
+                &remembered,
+                std::slice::from_ref(piece),
+                &character::Who::default(),
+            )
+            .expect("a row draws");
         }
         counted.work()
     }
@@ -645,7 +667,10 @@ mod tests {
                 .is_empty()
             })
             .count();
-        assert!(painting > 0 && painting < PAGE, "the page has to hold both kinds");
+        assert!(
+            painting > 0 && painting < PAGE,
+            "the page has to hold both kinds"
+        );
         assert_eq!(page_cost(&page()).encodes, painting + 1);
     }
 
@@ -673,10 +698,17 @@ mod tests {
     fn opens_each_table_once_for_a_whole_page() {
         let files = fixture_files();
         let pieces = page();
-        let (_, batched) = counting(&files, |files| crate::gallery::of(files, &pieces, &character::Who::default()));
+        let (_, batched) = counting(&files, |files| {
+            crate::gallery::of(files, &pieces, &character::Who::default())
+        });
         let (_, apart) = counting(&files, |files| {
             for piece in &pieces {
-                crate::gallery::of(files, std::slice::from_ref(piece), &character::Who::default()).expect("a row draws");
+                crate::gallery::of(
+                    files,
+                    std::slice::from_ref(piece),
+                    &character::Who::default(),
+                )
+                .expect("a row draws");
             }
         });
         assert!(
@@ -800,13 +832,21 @@ mod tests {
         let remembered = Remembered::over(&files);
         // Once through everything first, so that neither side is the one paying for whatever the
         // operating system and the allocator were going to warm up anyway.
-        crate::gallery::of(&remembered, &pieces[..1], &character::Who::default()).expect("a row draws");
+        crate::gallery::of(&remembered, &pieces[..1], &character::Who::default())
+            .expect("a row draws");
 
-        let batched =
-            taking(|| { crate::gallery::of(&remembered, &pieces, &character::Who::default()).expect("the page draws"); });
+        let batched = taking(|| {
+            crate::gallery::of(&remembered, &pieces, &character::Who::default())
+                .expect("the page draws");
+        });
         let apart = taking(|| {
             for piece in &pieces {
-                crate::gallery::of(&remembered, std::slice::from_ref(piece), &character::Who::default()).expect("a row draws");
+                crate::gallery::of(
+                    &remembered,
+                    std::slice::from_ref(piece),
+                    &character::Who::default(),
+                )
+                .expect("a row draws");
             }
         });
 
@@ -849,8 +889,12 @@ mod tests {
         let remembered = Remembered::over(&counted);
         counted.restart();
         for set_id in set_ids {
-            crate::gallery::sets(&remembered, std::slice::from_ref(set_id), &character::Who::default())
-                .expect("a card draws");
+            crate::gallery::sets(
+                &remembered,
+                std::slice::from_ref(set_id),
+                &character::Who::default(),
+            )
+            .expect("a card draws");
         }
         counted.work()
     }
@@ -882,7 +926,11 @@ mod tests {
     #[test]
     fn draws_a_page_of_sets_within_what_it_costs_today() {
         let work = set_page_cost(&SET_PAGE);
-        assert!(work.reads <= 62, "a page of sets reads {} files", work.reads);
+        assert!(
+            work.reads <= 62,
+            "a page of sets reads {} files",
+            work.reads
+        );
         assert!(work.rows <= 352, "a page of sets walks {} rows", work.rows);
     }
 
@@ -917,8 +965,8 @@ mod tests {
     fn counts_the_rows_a_table_walk_materialised() {
         let files = fixture_files();
         let (walked, work) = counting(&files, |files| {
-            let table = crate::db2::Db2::parse(files.read(transmog::ITEM_APPEARANCE).unwrap())
-                .unwrap();
+            let table =
+                crate::db2::Db2::parse(files.read(transmog::ITEM_APPEARANCE).unwrap()).unwrap();
             table.rows().count()
         });
         assert!(walked > 0, "the fixture table has rows");
@@ -954,9 +1002,13 @@ mod tests {
     #[test]
     fn counts_a_vertex_two_triangles_share_once() {
         let files = fixture_files();
-        let glb = character::glb_of(&files, None, &character::Who::default()).expect("the bare body draws");
+        let glb = character::glb_of(&files, None, &character::Who::default())
+            .expect("the bare body draws");
         let payload = payload_of(&glb).unwrap();
-        assert!(payload.drawn() <= payload.shipped(), "more drawn than shipped");
+        assert!(
+            payload.drawn() <= payload.shipped(),
+            "more drawn than shipped"
+        );
         assert_eq!(payload.bytes, glb.len());
     }
 }

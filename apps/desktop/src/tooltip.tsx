@@ -37,7 +37,9 @@ export function Tooltip(): ReactNode {
     const tooltip = element.current;
     if (!tooltip) return;
 
-    const hide = (): void => { tooltip.style.opacity = "0"; };
+    const hide = (): void => {
+      tooltip.style.opacity = "0";
+    };
     const show = (event: Event): void => {
       const host = hostOf(event.target);
       if (!host) return hide();

@@ -127,66 +127,82 @@ export function Herself({ load, save, onChanged, onError }: HerselfProps): React
   };
 
   return (
-    <details className="herself" onToggle={(event) => {
-      if (event.currentTarget.open) open();
-    }}>
+    <details
+      className="herself"
+      onToggle={(event) => {
+        if (event.currentTarget.open) open();
+      }}
+    >
       <summary>Who she is</summary>
       {/* A live region, because the answer to opening this is either a form or a sentence and
           the reader is looking at the character rather than at the disclosure they just
           clicked. */}
-      {note ? <p className="muted" role="status">{note}</p> : null}
-      {failure ? <p className="mark-failure" role="alert">{failure}</p> : null}
+      {note ? (
+        <p className="muted" role="status">
+          {note}
+        </p>
+      ) : null}
+      {failure ? (
+        <p className="mark-failure" role="alert">
+          {failure}
+        </p>
+      ) : null}
       {/* An install this app cannot read the tables of says so once and offers nothing —
           rather than a form of empty selects, which would look like a body nobody can change
           instead of a game nothing could be read from. */}
-      {asked && !note && !failure && !payload.questions.length
-        ? <p className="muted">The installed game says nothing about how this body is put together.</p>
-        : null}
+      {asked && !note && !failure && !payload.questions.length ? (
+        <p className="muted">
+          The installed game says nothing about how this body is put together.
+        </p>
+      ) : null}
       <div className="herself-form">
         {/* The reader's own people, above the body because picking one fills the body in too.
             Absent where there are none rather than shown empty: an install the addon has never
             run on has nobody to offer, and an empty select would read as a roster of nobody. */}
-        {payload.characters.length
-          ? (
-            <label className="herself-field" htmlFor="herself-character">
-              <span>Who you play</span>
-              <select
-                id="herself-character" value={shownAs(payload.body, payload.picked, payload.characters)}
-                onChange={(event) => become(event.target.value)}
-              >
-                {/* What the select says when she is nobody in particular, which is every reader
+        {payload.characters.length ? (
+          <label className="herself-field" htmlFor="herself-character">
+            <span>Who you play</span>
+            <select
+              id="herself-character"
+              value={shownAs(payload.body, payload.picked, payload.characters)}
+              onChange={(event) => become(event.target.value)}
+            >
+              {/* What the select says when she is nobody in particular, which is every reader
                     who has arranged a body by hand and the state this panel opens in. */}
-                <option value="">Someone else</option>
-                {payload.characters.map((one) => (
-                  <option key={one.character} value={one.character}>{one.character}</option>
-                ))}
-              </select>
-            </label>
-          )
-          : null}
+              <option value="">Someone else</option>
+              {payload.characters.map((one) => (
+                <option key={one.character} value={one.character}>
+                  {one.character}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {/* The body next, because everything under it belongs to whichever one this is. */}
-        {payload.bodies.length > 1
-          ? (
-            <label className="herself-field" htmlFor="herself-body">
-              <span>Body</span>
-              <select
-                id="herself-body" value={payload.body}
-                onChange={(event) => store(Number(event.target.value), payload.picked)}
-              >
-                {payload.bodies.map((body) => (
-                  <option key={body.id} value={body.id}>{body.name}</option>
-                ))}
-              </select>
-            </label>
-          )
-          : null}
+        {payload.bodies.length > 1 ? (
+          <label className="herself-field" htmlFor="herself-body">
+            <span>Body</span>
+            <select
+              id="herself-body"
+              value={payload.body}
+              onChange={(event) => store(Number(event.target.value), payload.picked)}
+            >
+              {payload.bodies.map((body) => (
+                <option key={body.id} value={body.id}>
+                  {body.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {payload.questions.map((question) => {
           const field = `herself-${question.id}`;
           return (
             <label key={question.id} className="herself-field" htmlFor={field}>
               <span>{question.name || `Question ${question.id}`}</span>
               <select
-                id={field} value={answerOf(question, payload.picked)}
+                id={field}
+                value={answerOf(question, payload.picked)}
                 onChange={(event) => answer(question.id, Number(event.target.value))}
               >
                 {question.swatches.map((swatch) => (

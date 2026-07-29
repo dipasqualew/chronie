@@ -159,13 +159,19 @@ mod tests {
     #[test]
     fn says_nothing_when_the_log_holds_no_readable_line() {
         let quiet = log(Some(NOW - 86_400));
-        assert_eq!(verdict(Some(&quiet), None, Some(NOW - 86_400), NOW), Verdict::Unknown);
+        assert_eq!(
+            verdict(Some(&quiet), None, Some(NOW - 86_400), NOW),
+            Verdict::Unknown
+        );
     }
 
     #[test]
     fn says_nothing_when_there_is_no_history_to_compare_against() {
         let quiet = log(Some(NOW - 86_400));
-        assert_eq!(verdict(Some(&quiet), Some(NOW - 86_400), None, NOW), Verdict::Unknown);
+        assert_eq!(
+            verdict(Some(&quiet), Some(NOW - 86_400), None, NOW),
+            Verdict::Unknown
+        );
     }
 
     #[test]
@@ -186,7 +192,12 @@ mod tests {
         // copying it somewhere — and that is not evidence the client died an hour ago.
         let touched = log(Some(NOW - 60));
         assert_eq!(
-            verdict(Some(&touched), Some(NOW - QUIET_SECONDS - 600), Some(NOW - 86_400), NOW),
+            verdict(
+                Some(&touched),
+                Some(NOW - QUIET_SECONDS - 600),
+                Some(NOW - 86_400),
+                NOW
+            ),
             Verdict::Live
         );
     }
@@ -215,7 +226,12 @@ mod tests {
     fn a_few_seconds_between_the_last_line_and_the_last_segment_is_not_a_hole() {
         let done = log(Some(NOW - 7200));
         assert_eq!(
-            verdict(Some(&done), Some(NOW - 7200), Some(NOW - 7200 - SLACK_SECONDS), NOW),
+            verdict(
+                Some(&done),
+                Some(NOW - 7200),
+                Some(NOW - 7200 - SLACK_SECONDS),
+                NOW
+            ),
             Verdict::Complete
         );
     }

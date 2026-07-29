@@ -98,8 +98,16 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
     }
 
     for (table, name_column, icon_column) in [
-        (JOURNAL_INSTANCE, journal_column::NAME, journal_column::BUTTON_SMALL_FILE_DATA_ID),
-        (LFG_DUNGEONS, lfg_column::NAME, lfg_column::ICON_TEXTURE_FILE_ID),
+        (
+            JOURNAL_INSTANCE,
+            journal_column::NAME,
+            journal_column::BUTTON_SMALL_FILE_DATA_ID,
+        ),
+        (
+            LFG_DUNGEONS,
+            lfg_column::NAME,
+            lfg_column::ICON_TEXTURE_FILE_ID,
+        ),
     ] {
         let table = Db2::parse(files.read(table)?)?;
         for row in table.rows() {
@@ -202,6 +210,8 @@ mod tests {
     #[test]
     fn answers_nothing_when_nothing_was_asked_about() {
         assert!(icons_of(&journal_fixture_files(), &[]).unwrap().is_empty());
-        assert!(icons_of(&journal_fixture_files(), &names(&["", "  "])).unwrap().is_empty());
+        assert!(icons_of(&journal_fixture_files(), &names(&["", "  "]))
+            .unwrap()
+            .is_empty());
     }
 }

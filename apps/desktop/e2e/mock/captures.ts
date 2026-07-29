@@ -10,9 +10,11 @@ import type { E2EMock } from "../../src/types";
 // Two tiny pictures, so the tile and the thing behind it can be told apart on screen. Real
 // PNGs rather than placeholder strings: the browser has to actually decode what the backend
 // hands over, and a `data:` URL that only looks like one would pass a test the app fails.
-export const THUMBNAIL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElE" +
+export const THUMBNAIL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElE" +
   "QVR4nGPQqDgBRww4OQBBxhDhzXmo9QAAAABJRU5ErkJggg==";
-export const FULL_SIZE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAEUlE" +
+export const FULL_SIZE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAEUlE" +
   "QVR4nGM4EaWBFTEMpAQAQEQ94cz6peQAAAAASUVORK5CYII=";
 
 // The screenshots Chronie holds, keyed by the row id a tile asks for them by. 13 is absent

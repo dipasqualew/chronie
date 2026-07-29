@@ -28,8 +28,14 @@ import type { ModelStage } from "./modelViewer";
 import { outfitSummary, piecesOf, wornPieces, wornTip } from "./outfit";
 import type { Outfit } from "./outfit";
 import type {
-  CharacterModelPayload, CustomSet, CustomSetPiece, CustomSetsPayload, InGameSetSlot, SetRequest,
-  WornPiece, WornSetPayload,
+  CharacterModelPayload,
+  CustomSet,
+  CustomSetPiece,
+  CustomSetsPayload,
+  InGameSetSlot,
+  SetRequest,
+  WornPiece,
+  WornSetPayload,
 } from "./types";
 
 /**
@@ -49,7 +55,9 @@ export interface SaveActions {
    * `docs/transmog-sets.md`.
    */
   onSendToGame: (
-    name: string, icon: number | null, slots: InGameSetSlot[],
+    name: string,
+    icon: number | null,
+    slots: InGameSetSlot[],
   ) => Promise<SetRequest[]>;
   sets: CustomSet[];
   onSave: (name: string, pieces: CustomSetPiece[]) => Promise<CustomSetsPayload>;
@@ -113,17 +121,25 @@ const drawn = (was: PaneState): boolean => was.state === "shown" || was.state ==
  * the pane's own last answer can settle — the stage is a ref and a canvas says nothing about
  * whether anything parsed into it.
  */
-const reading = (note: string) => (was: PaneState): PaneState => ({
-  state: drawn(was) ? "redrawing" : "loading",
-  note,
-});
+const reading =
+  (note: string) =>
+  (was: PaneState): PaneState => ({
+    state: drawn(was) ? "redrawing" : "loading",
+    note,
+  });
 
-export function OutfitPanel(
-  {
-    outfit, save, onTakeOff, onClearAll, loadCharacter, loadWorn, icons, herself, look,
-    createStage = lazyStage,
-  }: OutfitPanelProps,
-): ReactNode {
+export function OutfitPanel({
+  outfit,
+  save,
+  onTakeOff,
+  onClearAll,
+  loadCharacter,
+  loadWorn,
+  icons,
+  herself,
+  look,
+  createStage = lazyStage,
+}: OutfitPanelProps): ReactNode {
   const stagePane = useRef<HTMLDivElement>(null);
   // The bodies, by the outfit each is wearing — see `wornSetKey`. Keyed by the whole outfit
   // rather than by a piece of it because that is what the answer is of: a character in a robe
@@ -153,22 +169,28 @@ export function OutfitPanel(
   const key = `${look}|${wornSetKey(pieces)}`;
 
   /** Draws a `.glb` on the stage, making one the first time anything needs it. */
-  const onStage = useCallback(async (
-    glb: string, mine: number, note: string, fallback: (error: unknown) => void,
-  ): Promise<void> => {
-    const container = stagePane.current;
-    if (!container) return;
-    try {
-      // One stage, and one attempt to make one: two quick picks would otherwise each start a
-      // renderer and the second would be left running with nothing pointing at it.
-      starting.current ??= Promise.resolve(createStage(container));
-      stage.current = await starting.current;
-      await stage.current.show(glbBytes(glb));
-      if (mine === asked.current) setPane({ state: "shown", note });
-    } catch (error: unknown) {
-      if (mine === asked.current) fallback(error);
-    }
-  }, [createStage]);
+  const onStage = useCallback(
+    async (
+      glb: string,
+      mine: number,
+      note: string,
+      fallback: (error: unknown) => void,
+    ): Promise<void> => {
+      const container = stagePane.current;
+      if (!container) return;
+      try {
+        // One stage, and one attempt to make one: two quick picks would otherwise each start a
+        // renderer and the second would be left running with nothing pointing at it.
+        starting.current ??= Promise.resolve(createStage(container));
+        stage.current = await starting.current;
+        await stage.current.show(glbBytes(glb));
+        if (mine === asked.current) setPane({ state: "shown", note });
+      } catch (error: unknown) {
+        if (mine === asked.current) fallback(error);
+      }
+    },
+    [createStage],
+  );
 
   /**
    * Puts the outfit on the character, or the bare body on the stage when there is no outfit.
@@ -182,51 +204,53 @@ export function OutfitPanel(
    * sets beside it are still browsable, which is a worse view of a wardrobe and not a broken
    * one.
    */
-  const dress = useCallback((pieces: WornPiece[], key: string): void => {
-    const mine = (asked.current += 1);
-    const blank = (error: unknown): void =>
-      setPane({ state: "empty", note: message(error) });
+  const dress = useCallback(
+    (pieces: WornPiece[], key: string): void => {
+      const mine = (asked.current += 1);
+      const blank = (error: unknown): void => setPane({ state: "empty", note: message(error) });
 
-    if (!pieces.length) {
-      setPane(reading("Reading the character model…"));
-      let bare = character.get(key);
-      if (!bare) {
-        bare = loadCharacter();
-        character.set(key, bare);
+      if (!pieces.length) {
+        setPane(reading("Reading the character model…"));
+        let bare = character.get(key);
+        if (!bare) {
+          bare = loadCharacter();
+          character.set(key, bare);
+        }
+        void bare
+          .then((body) => {
+            if (mine !== asked.current) return;
+            return onStage(body.model, mine, REASONS.bare, blank);
+          })
+          .catch((error: unknown) => {
+            // Forgotten rather than remembered as a failure: an install being read while it is
+            // patched can refuse one moment and answer the next, and this is the one model with
+            // no icons to fall back on.
+            character.delete(key);
+            if (mine === asked.current) blank(error);
+          });
+        return;
       }
-      void bare
-        .then((body) => {
-          if (mine !== asked.current) return;
-          return onStage(body.model, mine, REASONS.bare, blank);
+
+      const put = (glb: string | null): void => {
+        // Nothing to show: the game gives this install nothing it could put on a character for
+        // any of these pieces. The list of what is on and a sentence are what is left.
+        if (glb === null) return setPane({ state: "empty", note: REASONS.unshowable });
+        void onStage(glb, mine, REASONS.set, blank);
+      };
+
+      const cached = bodies.get(key);
+      if (cached !== undefined) return put(cached);
+
+      setPane(reading("Putting it on the character…"));
+      void loadWorn(pieces)
+        .then((answer) => {
+          bodies.set(key, answer.model);
+          if (mine === asked.current) put(answer.model);
         })
-        .catch((error: unknown) => {
-          // Forgotten rather than remembered as a failure: an install being read while it is
-          // patched can refuse one moment and answer the next, and this is the one model with
-          // no icons to fall back on.
-          character.delete(key);
-          if (mine === asked.current) blank(error);
-        });
-      return;
-    }
-
-    const put = (glb: string | null): void => {
-      // Nothing to show: the game gives this install nothing it could put on a character for
-      // any of these pieces. The list of what is on and a sentence are what is left.
-      if (glb === null) return setPane({ state: "empty", note: REASONS.unshowable });
-      void onStage(glb, mine, REASONS.set, blank);
-    };
-
-    const cached = bodies.get(key);
-    if (cached !== undefined) return put(cached);
-
-    setPane(reading("Putting it on the character…"));
-    void loadWorn(pieces)
-      .then((answer) => {
-        bodies.set(key, answer.model);
-        if (mine === asked.current) put(answer.model);
-      })
-      .catch(blank);
-  }, [bodies, character, loadCharacter, loadWorn, onStage]);
+        .catch(blank);
+    },
+    [bodies, character, loadCharacter, loadWorn, onStage],
+  );
 
   // Redrawn every time the outfit changes — including for the empty one the view opens on,
   // which is the bare character — and every time *she* does. Keyed on the outfit's name rather
@@ -235,16 +259,21 @@ export function OutfitPanel(
   useEffect(() => {
     dress(pieces, key);
     // `pieces` is what `key` names, and the key is the identity that matters: two lists holding
-    // the same appearances are the same outfit and must not be read twice.
+    // the same appearances are the same outfit and must not be read twice. Held by "does not
+    // read the same outfit out of the game twice" in `transmogView.test.tsx`, which puts a helm
+    // on, takes it off and puts it back, and asks how many times the game was read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, dress]);
 
   // The graphics context goes back when the view does.
-  useEffect(() => () => {
-    stage.current?.dispose();
-    stage.current = null;
-    starting.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      stage.current?.dispose();
+      stage.current = null;
+      starting.current = null;
+    },
+    [],
+  );
 
   const worn = wornPieces(outfit);
 
@@ -258,8 +287,10 @@ export function OutfitPanel(
               itself — see `createModelStage` — and this names the place it is drawn in, which
               is what survives a pane that has no picture in it at all. */}
           <div
-            className="outfit-stage" ref={stagePane}
-            role="figure" aria-label="Where she is drawn"
+            className="outfit-stage"
+            ref={stagePane}
+            role="figure"
+            aria-label="Where she is drawn"
           />
           {/* What she has on, **down her side rather than under her**. A row apiece in the
               panel's own column was the version this replaced, and it took the character's
@@ -278,15 +309,16 @@ export function OutfitPanel(
                     told apart from. The cross the tile grows under the pointer is what says
                     so before the click. */}
                 <button
-                  type="button" className="outfit-off"
+                  type="button"
+                  className="outfit-off"
                   aria-label={`Take off ${piece.row.label}`}
                   data-tip={wornTip(piece)}
                   onClick={() => onTakeOff(piece.place)}
                 >
                   <span className="mog-icon">
-                    {icons.get(piece.row.iconFileDataId)
-                      ? <img src={icons.get(piece.row.iconFileDataId)} alt="" />
-                      : null}
+                    {icons.get(piece.row.iconFileDataId) ? (
+                      <img src={icons.get(piece.row.iconFileDataId)} alt="" />
+                    ) : null}
                   </span>
                 </button>
               </li>
@@ -297,19 +329,24 @@ export function OutfitPanel(
               sentence because this machine cannot draw 3D has no camera to put back. A body
               being redrawn is still a body somebody can have dragged too far, so the way back
               goes where the picture goes rather than away for the length of every read. */}
-          {drawn(pane)
-            ? (
-              <button
-                type="button" className="outfit-reset"
-                onClick={() => stage.current?.resetCamera()}
-              >Reset camera</button>
-            )
-            : null}
+          {drawn(pane) ? (
+            <button
+              type="button"
+              className="outfit-reset"
+              onClick={() => stage.current?.resetCamera()}
+            >
+              Reset camera
+            </button>
+          ) : null}
         </div>
         <p
-          className="mog-note muted" role="status" id="outfit-note"
+          className="mog-note muted"
+          role="status"
+          id="outfit-note"
           aria-label="What the stage is showing"
-        >{pane.note}</p>
+        >
+          {pane.note}
+        </p>
       </div>
       {/* Under the picture and above the clothes, which is the order the two questions come in:
           this is the body, and everything below it is what goes on the body. Shut, because a
@@ -320,9 +357,11 @@ export function OutfitPanel(
         <span className="muted" id="outfit-summary" role="status" aria-label="How much is on">
           {outfitSummary(outfit)}
         </span>
-        {worn.length
-          ? <button type="button" className="outfit-clear" onClick={onClearAll}>Take it all off</button>
-          : null}
+        {worn.length ? (
+          <button type="button" className="outfit-clear" onClick={onClearAll}>
+            Take it all off
+          </button>
+        ) : null}
       </div>
       {/* Only once there is something to save. A form that could do nothing but refuse is worse
           than no form, and "nothing on yet" is already said by the line under it. */}
@@ -373,7 +412,8 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
         // The backend cleans and refuses; this only avoids sending a form nobody filled in,
         // which would otherwise answer "Give the set a name" for a stray Enter.
         if (!name.trim()) return;
-        void save.onSave(name, piecesFrom(outfit))
+        void save
+          .onSave(name, piecesFrom(outfit))
           .then((payload) => {
             save.onSaved(payload);
             setSaved(`Saved as ${name.trim().replace(/\s+/g, " ")}. It is under "Yours".`);
@@ -383,8 +423,12 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
       }}
     >
       <input
-        className="outfit-name" type="text" id="outfit-name" value={name}
-        aria-label="Name for this set" placeholder="Name this outfit"
+        className="outfit-name"
+        type="text"
+        id="outfit-name"
+        value={name}
+        aria-label="Name for this set"
+        placeholder="Name this outfit"
         onChange={(event) => {
           setName(event.target.value);
           setSaved("");
@@ -400,26 +444,41 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
           `type="button"`, so Enter in the name box still means the ordinary save. Sending an
           outfit into somebody's WoW account is not what a stray keypress should do. */}
       <button
-        type="button" className="outfit-send" disabled={!slots.length}
+        type="button"
+        className="outfit-send"
+        disabled={!slots.length}
         onClick={() => {
           setFailure("");
           setSaved("");
           if (!name.trim()) return;
-          void save.onSendToGame(name, iconFrom(outfit), slots)
+          void save
+            .onSendToGame(name, iconFrom(outfit), slots)
             .then((requests) => {
               const sent = requests[0];
-              setSaved(sent
-                ? requestSummary(sent)
-                : `Sent ${name.trim().replace(/\s+/g, " ")} to the game.`);
+              setSaved(
+                sent
+                  ? requestSummary(sent)
+                  : `Sent ${name.trim().replace(/\s+/g, " ")} to the game.`,
+              );
               setName("");
             })
             .catch((error: unknown) => setFailure(save.onError(error)));
         }}
-      >Send to the game</button>
+      >
+        Send to the game
+      </button>
       {/* A live region rather than a chip that appears: the reader's eye is on the character
           and the list, and the one thing worth interrupting them for is where the set went. */}
-      {saved ? <span className="muted" role="status">{saved}</span> : null}
-      {failure ? <span className="mark-failure" role="alert">{failure}</span> : null}
+      {saved ? (
+        <span className="muted" role="status">
+          {saved}
+        </span>
+      ) : null}
+      {failure ? (
+        <span className="mark-failure" role="alert">
+          {failure}
+        </span>
+      ) : null}
     </form>
   );
 }
@@ -432,8 +491,9 @@ function SaveAsSet({ outfit, save }: { outfit: Outfit; save: SaveActions }): Rea
  * the wardrobe ever downloads it.
  */
 const lazyStage = (container: HTMLElement): Promise<ModelStage> =>
-  import("./modelViewer")
-    .then((viewer) => viewer.createModelStage(container, { label: "The character, drawn" }));
+  import("./modelViewer").then((viewer) =>
+    viewer.createModelStage(container, { label: "The character, drawn" }),
+  );
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -24,9 +24,7 @@ import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import type { PlaceIcons } from "./places";
 import { highlights } from "./sessions";
-import type {
-  Highlight, HighlightKind, SessionActivity, SessionCharacter,
-} from "./sessions";
+import type { Highlight, HighlightKind, SessionActivity, SessionCharacter } from "./sessions";
 import type { Segment } from "./types";
 
 /**
@@ -38,8 +36,19 @@ export type OpenSegment = (segmentId: number, order: Segment[]) => void;
 
 /** The classes the stylesheet has a colour and an ink for, which is all thirteen of them. */
 export const CLASS_FILES = [
-  "DEATHKNIGHT", "DEMONHUNTER", "DRUID", "EVOKER", "HUNTER", "MAGE", "MONK",
-  "PALADIN", "PRIEST", "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
+  "DEATHKNIGHT",
+  "DEMONHUNTER",
+  "DRUID",
+  "EVOKER",
+  "HUNTER",
+  "MAGE",
+  "MONK",
+  "PALADIN",
+  "PRIEST",
+  "ROGUE",
+  "SHAMAN",
+  "WARLOCK",
+  "WARRIOR",
 ] as const;
 
 /**
@@ -62,17 +71,22 @@ export function classProps(classFile?: string | null): { "data-class": string } 
 /** "DEATHKNIGHT" is how the game files it and not how anyone says it. */
 export function className(classFile?: string | null): string {
   if (!classFile) return "Unknown class";
-  const spaced: Record<string, string> = { DEATHKNIGHT: "Death Knight", DEMONHUNTER: "Demon Hunter" };
+  const spaced: Record<string, string> = {
+    DEATHKNIGHT: "Death Knight",
+    DEMONHUNTER: "Demon Hunter",
+  };
   return spaced[classFile] || classFile.charAt(0) + classFile.slice(1).toLowerCase();
 }
 
 /** "none" for open world, else "instance"; used as a small badge on each segment. */
 export const isInstance = (segment: Segment): boolean =>
   !!segment.instanceType && segment.instanceType !== "none";
-export const locationType = (segment: Segment): string => (isInstance(segment) ? "instance" : "world");
+export const locationType = (segment: Segment): string =>
+  isInstance(segment) ? "instance" : "world";
 
-export const ClassDot = ({ classFile }: { classFile?: string | null }): ReactNode =>
-  <span className="dot" {...classProps(classFile)} />;
+export const ClassDot = ({ classFile }: { classFile?: string | null }): ReactNode => (
+  <span className="dot" {...classProps(classFile)} />
+);
 
 /**
  * A character as a circle filled with their class colour, carrying everything the hover card
@@ -93,14 +107,21 @@ export function CharacterCircle({ character }: { character: SessionCharacter }):
   ];
   if (character.goldDiff) parts.push(`${signedGold(character.goldDiff)} in the wallet`);
   const places = (character.places || []).slice(0, 4).join(", ");
-  const tip = `<b>${escapeHtml(character.name)}</b>${parts.map(escapeHtml).join(" · ")}` +
+  const tip =
+    `<b>${escapeHtml(character.name)}</b>${parts.map(escapeHtml).join(" · ")}` +
     (places ? `<span class="tip-places">${escapeHtml(places)}</span>` : "");
   const label = `${character.name}, ${parts.join(", ")}`;
   return (
     <span
-      className="circle" role="img" tabIndex={0} {...classProps(character.classFile)}
-      aria-label={label} data-tip={tip}
-    >{initials(character.name)}</span>
+      className="circle"
+      role="img"
+      tabIndex={0}
+      {...classProps(character.classFile)}
+      aria-label={label}
+      data-tip={tip}
+    >
+      {initials(character.name)}
+    </span>
   );
 }
 
@@ -163,39 +184,65 @@ const chipText = (entry: Highlight, items?: ItemBook): string =>
  * sentence goes into the tooltip, where the reader who cares can still reach it and the reader
  * who does not never has to read past it. Which kinds those are is `KINDS`' business.
  */
-export function HighlightChip(
-  { entry, scope, items, expanded, interactive, onUnfold, onOpenSegment }: ChipProps,
-): ReactNode {
+export function HighlightChip({
+  entry,
+  scope,
+  items,
+  expanded,
+  interactive,
+  onUnfold,
+  onOpenSegment,
+}: ChipProps): ReactNode {
   const quiet = !!entry.quiet;
   const text = chipText(entry, items);
   // A chip with no words on it still has to be reachable and still has to say what it is, so
   // the sentence it dropped becomes both its tooltip and the name a screen reader reads.
-  const named = quiet
-    ? { "aria-label": text, "data-tip": escapeHtml(text) }
-    : {};
-  const body = quiet
-    ? <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
-    : <>
-      <span className="hl-icon" aria-hidden="true">{entry.icon}</span>
+  const named = quiet ? { "aria-label": text, "data-tip": escapeHtml(text) } : {};
+  const body = quiet ? (
+    <span className="hl-icon" aria-hidden="true">
+      {entry.icon}
+    </span>
+  ) : (
+    <>
+      <span className="hl-icon" aria-hidden="true">
+        {entry.icon}
+      </span>
       <span className="hl-label">{chipLabel(entry, items)}</span>
       {entry.detail ? <span className="detail">{entry.detail}</span> : null}
-    </>;
+    </>
+  );
   const style = `hl hl-${entry.kind}${quiet ? " hl-quiet" : ""}`;
-  if (!interactive) return <span className={style} {...named}>{body}</span>;
+  if (!interactive)
+    return (
+      <span className={style} {...named}>
+        {body}
+      </span>
+    );
   if (entry.segmentId != null) {
     const segmentId = entry.segmentId;
     return (
-      <button type="button" className={style} {...named}
-        onClick={() => onOpenSegment?.(segmentId)}>{body}</button>
+      <button type="button" className={style} {...named} onClick={() => onOpenSegment?.(segmentId)}>
+        {body}
+      </button>
     );
   }
   const open = expanded === entry.kind;
   return (
     <button
-      type="button" className={`${style}${open ? " open" : ""}`} {...named}
-      aria-expanded={open} aria-controls={panelId(scope, entry.kind)}
+      type="button"
+      className={`${style}${open ? " open" : ""}`}
+      {...named}
+      aria-expanded={open}
+      aria-controls={panelId(scope, entry.kind)}
       onClick={() => onUnfold?.(entry.kind)}
-    >{body}{quiet ? null : <span className="hl-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>}</button>
+    >
+      {body}
+      {quiet ? null : (
+        <span className="hl-caret" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -205,15 +252,18 @@ const panelId = (scope: string, kind: string): string => `hl-${scope}-${kind}`;
  * What a summary unfolds into: every thing it counted, newest information first, each one a
  * way back to the segment it was recorded in.
  */
-export function HighlightPanel(
-  { entry, scope, items, onOpenSegment }: {
-    entry: Highlight;
-    scope: string;
-    /** What the game says about an item, for the entries that are about one. */
-    items?: ItemBook;
-    onOpenSegment?: (segmentId: number) => void;
-  },
-): ReactNode {
+export function HighlightPanel({
+  entry,
+  scope,
+  items,
+  onOpenSegment,
+}: {
+  entry: Highlight;
+  scope: string;
+  /** What the game says about an item, for the entries that are about one. */
+  items?: ItemBook;
+  onOpenSegment?: (segmentId: number) => void;
+}): ReactNode {
   // The book is a cache outside React, so an answer landing changes nothing React would
   // notice. The rows redraw themselves; this is here for the one thing they cannot — the name
   // in each button's own label, which has to say what the row ended up showing.
@@ -222,14 +272,17 @@ export function HighlightPanel(
   // The whole panel in one request rather than one per row: the rows would each ask for
   // themselves anyway, and asking here means the answer is already in hand when they draw.
   const wanted = named.join(",");
-  useEffect(() => items?.learn(
-    wanted ? wanted.split(",").map(Number) : [], redraw,
-  ), [items, wanted]);
+  useEffect(
+    () => items?.learn(wanted ? wanted.split(",").map(Number) : [], redraw),
+    [items, wanted],
+  );
 
   return (
     <ul className="hl-panel" id={panelId(scope, entry.kind)}>
       {entry.items.map((item, index) => {
-        const meta = [item.detail, item.character, item.at == null ? "" : clock(item.at)].filter(Boolean);
+        const meta = [item.detail, item.character, item.at == null ? "" : clock(item.at)].filter(
+          Boolean,
+        );
         // An entry about an item is drawn as one — the picture, the game's own name, the
         // colour of its quality — and everything else as the label the summary built. The
         // button around it is what it always was: a way back to the segment, and it is named
@@ -240,16 +293,23 @@ export function HighlightPanel(
         return (
           <li key={`${item.segmentId}-${item.label}-${index}`}>
             <button
-              type="button" className="hl-item"
+              type="button"
+              className="hl-item"
               aria-label={`Open the segment ${shown} was recorded in`}
               onClick={() => onOpenSegment?.(item.segmentId)}
             >
               <span className="hl-item-name">
-                {items && item.itemId
-                  ? <GameItem
-                    id={item.itemId} name={item.label} book={items} facts={false} link={false}
+                {items && item.itemId ? (
+                  <GameItem
+                    id={item.itemId}
+                    name={item.label}
+                    book={items}
+                    facts={false}
+                    link={false}
                   />
-                  : item.label}
+                ) : (
+                  item.label
+                )}
               </span>
               <span className="hl-item-meta">{meta.join(" · ")}</span>
             </button>
@@ -304,9 +364,11 @@ export function tallyBadges(entries: Highlight[]): TallyBadge[] {
     };
     // Gold names itself, so "Gold +3g 29s" under a heading reading "Gold" would say it
     // twice; a currency does not, and its name is the whole point of the line.
-    badge.lines.push(entry.label === badge.title
-      ? highlightValue(entry)
-      : `${entry.label} ${highlightValue(entry)}`);
+    badge.lines.push(
+      entry.label === badge.title
+        ? highlightValue(entry)
+        : `${entry.label} ${highlightValue(entry)}`,
+    );
     byKind.set(entry.kind, badge);
   }
   return [...byKind.values()];
@@ -319,13 +381,19 @@ export function tallyBadges(entries: Highlight[]): TallyBadge[] {
  * card says what the evening earned, and it must not be reachable by pointer alone.
  */
 export function TallyMark({ badge }: { badge: TallyBadge }): ReactNode {
-  const tip = `<b>${escapeHtml(badge.title)}</b>` +
+  const tip =
+    `<b>${escapeHtml(badge.title)}</b>` +
     badge.lines.map((line) => `<span class="tip-line">${escapeHtml(line)}</span>`).join("");
   return (
     <span
-      className={`tally tally-${badge.kind}`} role="img" tabIndex={0}
-      aria-label={`${badge.title}: ${badge.lines.join(", ")}`} data-tip={tip}
-    >{badge.icon}</span>
+      className={`tally tally-${badge.kind}`}
+      role="img"
+      tabIndex={0}
+      aria-label={`${badge.title}: ${badge.lines.join(", ")}`}
+      data-tip={tip}
+    >
+      {badge.icon}
+    </span>
   );
 }
 
@@ -365,8 +433,10 @@ export function shownHighlights(
   entries: Highlight[],
   { milestones = true, tallies = true }: { milestones?: boolean; tallies?: boolean } = {},
 ): Highlight[] {
-  return entries.filter((entry) =>
-    (milestones && entry.family === "milestone") || (tallies && entry.family === "tally"));
+  return entries.filter(
+    (entry) =>
+      (milestones && entry.family === "milestone") || (tallies && entry.family === "tally"),
+  );
 }
 
 /**
@@ -385,21 +455,30 @@ export function shownHighlights(
  * `milestones={false}` is for the detail modal, which lists every one of them in full a few
  * lines further down — repeating them as chips first would only make the same page longer.
  */
-export function HighlightList(
-  {
-    entries, items, scope = "", milestones: withChips = true, tallies: withTallies = true,
-    expanded = null, interactive = true, onUnfold, onOpenSegment,
-  }: HighlightListProps,
-): ReactNode {
+export function HighlightList({
+  entries,
+  items,
+  scope = "",
+  milestones: withChips = true,
+  tallies: withTallies = true,
+  expanded = null,
+  interactive = true,
+  onUnfold,
+  onOpenSegment,
+}: HighlightListProps): ReactNode {
   // The book is a cache outside React, so an answer landing changes nothing React would
   // notice on its own. The panel asks for the rows it is about to draw; this asks for the
   // pieces the chips above it are named after, which are wanted whether or not anything is
   // ever unfolded — a mark drawn as its icon alone says the name and nothing else.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
-  const wanted = entries.map((entry) => namedPiece(entry)?.id).filter(Boolean).join(",");
-  useEffect(() => items?.learn(
-    wanted ? wanted.split(",").map(Number) : [], redraw,
-  ), [items, wanted]);
+  const wanted = entries
+    .map((entry) => namedPiece(entry)?.id)
+    .filter(Boolean)
+    .join(",");
+  useEffect(
+    () => items?.learn(wanted ? wanted.split(",").map(Number) : [], redraw),
+    [items, wanted],
+  );
 
   const milestones = withChips ? entries.filter((entry) => entry.family === "milestone") : [];
   const chips = milestones.filter((entry) => !entry.quiet);
@@ -410,36 +489,52 @@ export function HighlightList(
     : undefined;
   // Drawn under whichever row it was opened from, so the list a reader asked for arrives where
   // they were looking rather than above the row they had just pressed.
-  const panel = unfolded
-    ? <HighlightPanel entry={unfolded} scope={scope} items={items} onOpenSegment={onOpenSegment} />
-    : null;
-  return <>
-    {chips.length
-      ? <div className="hl-row">
-        {chips.map((entry) => (
-          <HighlightChip
-            key={entry.kind} entry={entry} scope={scope} items={items} expanded={expanded}
-            interactive={interactive} onUnfold={onUnfold} onOpenSegment={onOpenSegment}
-          />
-        ))}
-      </div>
-      : null}
-    {unfolded?.quiet ? null : panel}
-    {marks.length || tallies.length
-      // Named for the same reason the cast is: a row of marks each announcing something of its
-      // own is a set of unrelated figures until something says what they are a set of.
-      ? <div className="tally-row" role="group" aria-label="The quieter marks">
-        {marks.map((entry) => (
-          <HighlightChip
-            key={entry.kind} entry={entry} scope={scope} items={items} expanded={expanded}
-            interactive={interactive} onUnfold={onUnfold} onOpenSegment={onOpenSegment}
-          />
-        ))}
-        {tallies.map((badge) => <TallyMark key={badge.kind} badge={badge} />)}
-      </div>
-      : null}
-    {unfolded?.quiet ? panel : null}
-  </>;
+  const panel = unfolded ? (
+    <HighlightPanel entry={unfolded} scope={scope} items={items} onOpenSegment={onOpenSegment} />
+  ) : null;
+  return (
+    <>
+      {chips.length ? (
+        <div className="hl-row">
+          {chips.map((entry) => (
+            <HighlightChip
+              key={entry.kind}
+              entry={entry}
+              scope={scope}
+              items={items}
+              expanded={expanded}
+              interactive={interactive}
+              onUnfold={onUnfold}
+              onOpenSegment={onOpenSegment}
+            />
+          ))}
+        </div>
+      ) : null}
+      {unfolded?.quiet ? null : panel}
+      {marks.length || tallies.length ? (
+        // Named for the same reason the cast is: a row of marks each announcing something of its
+        // own is a set of unrelated figures until something says what they are a set of.
+        <div className="tally-row" role="group" aria-label="The quieter marks">
+          {marks.map((entry) => (
+            <HighlightChip
+              key={entry.kind}
+              entry={entry}
+              scope={scope}
+              items={items}
+              expanded={expanded}
+              interactive={interactive}
+              onUnfold={onUnfold}
+              onOpenSegment={onOpenSegment}
+            />
+          ))}
+          {tallies.map((badge) => (
+            <TallyMark key={badge.kind} badge={badge} />
+          ))}
+        </div>
+      ) : null}
+      {unfolded?.quiet ? panel : null}
+    </>
+  );
 }
 
 /* ---------- standings ---------- */
@@ -469,9 +564,13 @@ export interface Standing {
  * is announced as zero per cent, which is a claim about where the character stands, and the
  * one thing known here is that nobody knows.
  */
-export function StandingBar(
-  { standing, faction }: { standing: Standing; faction: string },
-): ReactNode {
+export function StandingBar({
+  standing,
+  faction,
+}: {
+  standing: Standing;
+  faction: string;
+}): ReactNode {
   const max = Math.max(standing.max || 0, 0);
   const current = Math.min(Math.max(standing.current || 0, 0), max);
   if (!standing.standing && max === 0) return null;
@@ -479,12 +578,14 @@ export function StandingBar(
   const caption = [standing.standing, numbers].filter(Boolean).join(" ");
   return (
     <p className="rep-standing">
-      {max === 0
-        ? null
-        : <progress
-          className="rep-bar" value={current} max={max}
+      {max === 0 ? null : (
+        <progress
+          className="rep-bar"
+          value={current}
+          max={max}
           aria-label={`${standing.standing || "Standing"} with ${faction}`}
-        />}
+        />
+      )}
       <span className="muted">{caption}</span>
     </p>
   );
@@ -494,9 +595,9 @@ export function StandingBar(
 
 /** Where an activity came from, in the words a hover uses to say so. */
 const provenance = (activity: PartialActivity): string =>
-  (activity.source === "manual"
+  activity.source === "manual"
     ? "You set this activity"
-    : `Guessed by Chronie · confidence ${Math.round((activity.confidence ?? 1) * 100)}%`);
+    : `Guessed by Chronie · confidence ${Math.round((activity.confidence ?? 1) * 100)}%`;
 
 /**
  * A guess the backend was unsure about is drawn with a dashed border and says so in its
@@ -508,16 +609,23 @@ export function ActivityChip({ activity }: { activity: PartialActivity }): React
   return (
     <span className={`chip activity${guess ? " guess" : ""}`} title={provenance(activity)}>
       {`${activityIcon(activity.kind)} ${activityLabel(activity.kind)}`}
-      {detail ? <> <span className="detail">{detail}</span></> : null}
+      {detail ? (
+        <>
+          {" "}
+          <span className="detail">{detail}</span>
+        </>
+      ) : null}
     </span>
   );
 }
 
 export const activityText = (activities?: PartialActivity[]): string =>
-  (activities || []).map((activity) => {
-    const detail = activitySummary(activity);
-    return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
-  }).join(", ");
+  (activities || [])
+    .map((activity) => {
+      const detail = activitySummary(activity);
+      return activityLabel(activity.kind) + (detail ? ` (${detail})` : "");
+    })
+    .join(", ");
 
 /**
  * The evening's activities, listed out in the order they happened.
@@ -533,12 +641,13 @@ export const activityText = (activities?: PartialActivity[]): string =>
  * Each row is the way back into the segment it was recorded in, which is where the rest of it
  * lives — the fight-by-fight, the loot, the pictures — and where it can be corrected.
  */
-export function ActivityRoll(
-  { activities, onOpenSegment }: {
-    activities: SessionActivity[];
-    onOpenSegment: (segmentId: number) => void;
-  },
-): ReactNode {
+export function ActivityRoll({
+  activities,
+  onOpenSegment,
+}: {
+  activities: SessionActivity[];
+  onOpenSegment: (segmentId: number) => void;
+}): ReactNode {
   if (!activities.length) return null;
   return (
     <ol className="act-roll" aria-label="What was done">
@@ -558,7 +667,9 @@ export function ActivityRoll(
               data-tip={escapeHtml(provenance(entry.activity))}
               onClick={() => onOpenSegment(entry.segmentId)}
             >
-              <span className="act-icon" aria-hidden="true">{activityIcon(entry.activity.kind)}</span>
+              <span className="act-icon" aria-hidden="true">
+                {activityIcon(entry.activity.kind)}
+              </span>
               <span className="act-body">
                 <span className="act-name">{label}</span>
                 {detail ? <span className="act-detail">{detail}</span> : null}
@@ -587,17 +698,18 @@ export function ActivityRoll(
  * its own label only so that something can be asked for by name, and the `<img>` inside it is
  * marked decorative so no reader hears the place twice.
  */
-export function PlaceIcon(
-  { place, places }: {
-    place: string;
-    /**
-     * The pictures the window has been handed, shared with every other view that names a place.
-     * Absent where nothing can draw one — a window with no game install behind it — which leaves
-     * the row exactly as it was.
-     */
-    places?: PlaceIcons;
-  },
-): ReactNode {
+export function PlaceIcon({
+  place,
+  places,
+}: {
+  place: string;
+  /**
+   * The pictures the window has been handed, shared with every other view that names a place.
+   * Absent where nothing can draw one — a window with no game install behind it — which leaves
+   * the row exactly as it was.
+   */
+  places?: PlaceIcons;
+}): ReactNode {
   // The book is a cache outside React, so a picture landing changes nothing React would notice.
   // This is what turns an arrival into a redraw. Each row asks for its own place, and the book
   // sends one request for whatever asked in that turn.
@@ -632,32 +744,41 @@ export function PlaceIcon(
  * three characters is exactly when the rail down the left of each row is worth having, and it
  * would say the opposite of the truth if every row took the colour of whoever led.
  */
-export function SegmentButton(
-  { segment, items, places, onOpen }: {
-    segment: Segment;
-    /**
-     * What the game says about the pieces its summary names. The row cannot unfold — it is
-     * one button and can hold no others — so this is the only thing that keeps a mark about
-     * a transmog from reading as the number the addon recorded.
-     */
-    items?: ItemBook;
-    /** The pictures the game draws a place with, shared with every other view that names one. */
-    places?: PlaceIcons;
-    onOpen: () => void;
-  },
-): ReactNode {
+export function SegmentButton({
+  segment,
+  items,
+  places,
+  onOpen,
+}: {
+  segment: Segment;
+  /**
+   * What the game says about the pieces its summary names. The row cannot unfold — it is
+   * one button and can hold no others — so this is the only thing that keeps a mark about
+   * a transmog from reading as the number the addon recorded.
+   */
+  items?: ItemBook;
+  /** The pictures the game draws a place with, shared with every other view that names one. */
+  places?: PlaceIcons;
+  onOpen: () => void;
+}): ReactNode {
   const label = `${segment.character} in ${segment.instance} at ${clock(segment.startedAt)}`;
   const summary = highlights([segment]);
   const activities = segment.activities || [];
   return (
     <button
-      type="button" className="seg" {...classProps(segment.classFile)}
-      aria-label={`Open segment: ${label}`} onClick={onOpen}
+      type="button"
+      className="seg"
+      {...classProps(segment.classFile)}
+      aria-label={`Open segment: ${label}`}
+      onClick={onOpen}
     >
       <span className="seg-time">{clock(segment.startedAt)}</span>
       <span className="seg-body">
         <span className="seg-head">
-          <span className="seg-who"><ClassDot classFile={segment.classFile} />{segment.character}</span>
+          <span className="seg-who">
+            <ClassDot classFile={segment.classFile} />
+            {segment.character}
+          </span>
           <span className="seg-where">
             <PlaceIcon place={segment.instance} places={places} />
             {segment.instance}
@@ -666,16 +787,19 @@ export function SegmentButton(
           {segment.difficulty ? <span className="muted">{segment.difficulty}</span> : null}
         </span>
         <span className="seg-activities">
-          {activities.length
-            ? activities.map((activity, index) =>
-              <ActivityChip key={activity.id ?? index} activity={activity} />)
-            : <span className="muted">No activity recorded</span>}
+          {activities.length ? (
+            activities.map((activity, index) => (
+              <ActivityChip key={activity.id ?? index} activity={activity} />
+            ))
+          ) : (
+            <span className="muted">No activity recorded</span>
+          )}
         </span>
-        {shownHighlights(summary, { tallies: false }).length
-          ? <span className="seg-summary">
+        {shownHighlights(summary, { tallies: false }).length ? (
+          <span className="seg-summary">
             <HighlightList entries={summary} items={items} tallies={false} interactive={false} />
           </span>
-          : null}
+        ) : null}
       </span>
       <span className="seg-dur">{duration(segment.seconds)}</span>
     </button>
@@ -694,8 +818,15 @@ export function SegmentButton(
 export function LinkOut(): ReactNode {
   return (
     <svg
-      viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"
-      fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"
+      viewBox="0 0 16 16"
+      width="13"
+      height="13"
+      aria-hidden="true"
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
       strokeLinejoin="round"
     >
       <path d="M9.5 2.5H13.5V6.5" />
@@ -717,8 +848,14 @@ export function LinkOut(): ReactNode {
 export function Star({ filled }: { filled: boolean }): ReactNode {
   return (
     <svg
-      viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"
-      fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+      focusable="false"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.4"
       strokeLinejoin="round"
     >
       <path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2-.7-4.3-3.1-3 4.3-.6z" />

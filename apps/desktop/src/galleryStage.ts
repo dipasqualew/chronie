@@ -139,7 +139,7 @@ export function createGalleryStage(options: GalleryStageOptions = {}): GallerySt
     const holds = Math.max(focus.holds * height, focus.holds >= 1 ? span.x : 0, 0.001);
     const half = (FIELD_OF_VIEW / 2) * (Math.PI / 180);
     const distance = (holds / 2 / Math.tan(half)) * MARGIN;
-    camera.position.set(...FROM.map((axis) => axis * distance) as [number, number, number]);
+    camera.position.set(...(FROM.map((axis) => axis * distance) as [number, number, number]));
     camera.position.applyAxisAngle(UP, turn);
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
@@ -213,9 +213,7 @@ export function createGalleryStage(options: GalleryStageOptions = {}): GallerySt
   }
 
   return {
-    paint(
-      target: HTMLCanvasElement, glb: Uint8Array, focus: Focus, turn = 0,
-    ): Promise<void> {
+    paint(target: HTMLCanvasElement, glb: Uint8Array, focus: Focus, turn = 0): Promise<void> {
       // The model already on the card, which is every frame of a drag but its first. Nothing is
       // parsed and nothing is uploaded, and what is left is a camera move and a render — which
       // is the whole reason turning a thumbnail does not cost what a live pane costs.
@@ -229,19 +227,24 @@ export function createGalleryStage(options: GalleryStageOptions = {}): GallerySt
         // A copy, because the loader takes ownership of the buffer it parses and the caller's
         // array may be a view into a longer one.
         const bytes = glb.slice().buffer as ArrayBuffer;
-        loader.parse(bytes, "", (loaded) => {
-          // Only once the new one has parsed, so a `.glb` that will not load leaves the picture
-          // that was there rather than blanking the card on the way to failing.
-          release();
-          const model = loaded.scene;
-          scene.add(model);
-          frame(model, focus, turn);
-          copyTo(target, model);
-          held = { source: glb, model };
-          resolve();
-        }, (error: unknown) => {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        });
+        loader.parse(
+          bytes,
+          "",
+          (loaded) => {
+            // Only once the new one has parsed, so a `.glb` that will not load leaves the picture
+            // that was there rather than blanking the card on the way to failing.
+            release();
+            const model = loaded.scene;
+            scene.add(model);
+            frame(model, focus, turn);
+            copyTo(target, model);
+            held = { source: glb, model };
+            resolve();
+          },
+          (error: unknown) => {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
       });
     },
     dispose(): void {

@@ -120,7 +120,11 @@ fn main() {
         if name.is_empty() {
             continue;
         }
-        if !wanted.is_empty() && !wanted.iter().any(|asked| name.to_lowercase().contains(asked)) {
+        if !wanted.is_empty()
+            && !wanted
+                .iter()
+                .any(|asked| name.to_lowercase().contains(asked))
+        {
             continue;
         }
         if shown >= SHOWN {

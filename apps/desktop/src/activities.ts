@@ -107,7 +107,9 @@ const spec = (kind?: string | null): ActivityKind | undefined => ACTIVITY_KINDS[
 
 /** Turns an unknown kind slug into something readable: "transmog_farm" → "Transmog farm". */
 function titleCase(kind?: string | null): string {
-  const words = String(kind || "").replace(/[_-]+/g, " ").trim();
+  const words = String(kind || "")
+    .replace(/[_-]+/g, " ")
+    .trim();
   if (!words) return "Activity";
   return words[0].toUpperCase() + words.slice(1);
 }
@@ -236,7 +238,10 @@ export function parseMetadata(
  * The value to prefill a field's input with. Booleans use a three-way select — yes, no, and
  * an empty "unknown" — so an unset flag stays unset instead of defaulting to false.
  */
-export function fieldValue(activity: PartialActivity | null | undefined, field: ActivityField): string {
+export function fieldValue(
+  activity: PartialActivity | null | undefined,
+  field: ActivityField,
+): string {
   const value = activity?.metadata?.[field.key];
   if (value === undefined || value === null) return "";
   if (field.type === "boolean") return value ? "yes" : "no";

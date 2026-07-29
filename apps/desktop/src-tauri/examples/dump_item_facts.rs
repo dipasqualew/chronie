@@ -104,7 +104,10 @@ fn main() {
     // for a test over them to be worth anything.
     for column in 0..item.column_count() {
         if let Some(shape) = item.column_shape(column) {
-            println!("    Item col{column:<3} {}, {} bits", shape.storage, shape.size_bits);
+            println!(
+                "    Item col{column:<3} {}, {} bits",
+                shape.storage, shape.size_bits
+            );
         }
     }
     println!();
@@ -122,15 +125,15 @@ fn main() {
             continue;
         };
         both += 1;
-        for column in 0..item.column_count() {
+        for (column, hits) in agreed.iter_mut().enumerate() {
             if row.number(column) == slot {
-                agreed[column] += 1;
+                *hits += 1;
             }
         }
     }
     println!("{both} items are in both tables, and how well each Item column agrees on the slot:");
     let mut ranked: Vec<(usize, usize)> = agreed.iter().copied().enumerate().collect();
-    ranked.sort_by(|left, right| right.1.cmp(&left.1));
+    ranked.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     for (column, hits) in ranked.iter().take(4) {
         println!(
             "    col{column:<3} {:>6.2}%",
@@ -161,7 +164,9 @@ fn main() {
     );
     let mut by_class: HashMap<u32, usize> = HashMap::new();
     for row in item.rows() {
-        *by_class.entry(row.number(items::column::CLASS)).or_default() += 1;
+        *by_class
+            .entry(row.number(items::column::CLASS))
+            .or_default() += 1;
     }
     let mut classes: Vec<(u32, usize)> = by_class.into_iter().collect();
     classes.sort();

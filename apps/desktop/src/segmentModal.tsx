@@ -26,10 +26,20 @@ import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
 import { eventsOf } from "./types";
 import type {
-  AccountCurrency, AccountFaction, AccountHoldings, AchievementEvent, Segment,
+  AccountCurrency,
+  AccountFaction,
+  AccountHoldings,
+  AchievementEvent,
+  Segment,
 } from "./types";
 import {
-  ActivityChip, ClassDot, HighlightList, PlaceIcon, StandingBar, className, locationType,
+  ActivityChip,
+  ClassDot,
+  HighlightList,
+  PlaceIcon,
+  StandingBar,
+  className,
+  locationType,
   shownHighlights,
 } from "./ui";
 
@@ -40,15 +50,26 @@ export interface SegmentModalState {
   index: number;
 }
 
-const Wowhead = (
-  { kind, id, children }: { kind: string; id: number; children: ReactNode },
-): ReactNode => (
-  <a href={`https://www.wowhead.com/${kind}=${encodeURIComponent(id)}`}
-    target="_blank" rel="noopener noreferrer">{children}</a>
+const Wowhead = ({
+  kind,
+  id,
+  children,
+}: {
+  kind: string;
+  id: number;
+  children: ReactNode;
+}): ReactNode => (
+  <a
+    href={`https://www.wowhead.com/${kind}=${encodeURIComponent(id)}`}
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    {children}
+  </a>
 );
 
 const At = ({ event }: { event: { at?: number | null } }): ReactNode =>
-  (event.at ? <span className="muted">{clock(event.at)}</span> : null);
+  event.at ? <span className="muted">{clock(event.at)}</span> : null;
 
 /**
  * What to call an item on a control that has to say something before anything has been read.
@@ -67,9 +88,7 @@ const shownAs = (event: { id: number; name?: string | null }, items: ItemBook): 
  * lists of different things and "the achievements" is how somebody asks for one of them —
  * whether they are jumping between regions with a screen reader or scoping a test to it.
  */
-function Section(
-  { title, children }: { title: string; children: ReactNode },
-): ReactNode {
+function Section({ title, children }: { title: string; children: ReactNode }): ReactNode {
   return (
     <section className="detail-section" aria-label={title}>
       <h3>{title}</h3>
@@ -90,8 +109,9 @@ function Section(
 function Earned({ event, book }: { event: AchievementEvent; book: AchievementBook }): ReactNode {
   const line = achievementLine(event, book.detail(event.id));
   const icon = book.icon(event.id);
-  const facts = [line.category, line.worth, line.side && `${line.side} only`, line.first]
-    .filter(Boolean);
+  const facts = [line.category, line.worth, line.side && `${line.side} only`, line.first].filter(
+    Boolean,
+  );
   // The icon is decorative: the row names the achievement beside it, and a picture that
   // announced itself as well would have a screen reader read every row twice. The frame is
   // drawn whether or not there is anything in it yet, so the column never goes ragged.
@@ -100,12 +120,20 @@ function Earned({ event, book }: { event: AchievementEvent; book: AchievementBoo
       <span className="earned-icon">{icon ? <img src={icon} alt="" /> : null}</span>
       <div>
         <p className="earned-name">
-          🏆 <Wowhead kind="achievement" id={event.id}>{line.title}</Wowhead> <At event={event} />
+          🏆{" "}
+          <Wowhead kind="achievement" id={event.id}>
+            {line.title}
+          </Wowhead>{" "}
+          <At event={event} />
         </p>
         {line.description ? <p className="earned-what">{line.description}</p> : null}
         {line.reward ? <p className="earned-reward">{line.reward}</p> : null}
         <p className="earned-facts">
-          {facts.map((fact) => <span className="chip" key={fact}>{fact}</span>)}
+          {facts.map((fact) => (
+            <span className="chip" key={fact}>
+              {fact}
+            </span>
+          ))}
         </p>
       </div>
     </li>
@@ -132,14 +160,13 @@ function Equipsets({ segment, items }: { segment: Segment; items: ItemBook }): R
         {changes.map((change, index) => (
           <li className="equipset" key={`${change.setId}-${index}`}>
             <p className="equipset-name">
-              🎽 {equipsetTitle(change)}{" "}
-              <span className="muted">{equipsetDetail(change)}</span> <At event={change} />
+              🎽 {equipsetTitle(change)} <span className="muted">{equipsetDetail(change)}</span>{" "}
+              <At event={change} />
             </p>
-            {(change.items || []).length === 0
-              ? null
+            {(change.items || []).length === 0 ? null : (
               // Named after the set it belongs to, because a segment can change several and a
               // list of slots means nothing without saying whose slots they are.
-              : <ul className="equipset-slots" aria-label={`Slots in ${equipsetTitle(change)}`}>
+              <ul className="equipset-slots" aria-label={`Slots in ${equipsetTitle(change)}`}>
                 {(change.items || []).map((item) => {
                   const line = equipsetSlotLine(item);
                   return (
@@ -149,26 +176,40 @@ function Equipsets({ segment, items }: { segment: Segment; items: ItemBook }): R
                           are left off, because two items sit side by side in a slot and the
                           armour class is the same on both of them anyway. */}
                       <span className="equipset-was">
-                        {line.previousItemId == null
-                          ? <span className="muted">—</span>
-                          : <GameItem
-                            id={line.previousItemId} name={item.previousItemName} book={items}
+                        {line.previousItemId == null ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <GameItem
+                            id={line.previousItemId}
+                            name={item.previousItemName}
+                            book={items}
                             facts={false}
-                          >{line.previousLevel
-                            ? <span className="muted">{line.previousLevel}</span>
-                            : null}</GameItem>}
+                          >
+                            {line.previousLevel ? (
+                              <span className="muted">{line.previousLevel}</span>
+                            ) : null}
+                          </GameItem>
+                        )}
                       </span>
                       <span className="equipset-now">
-                        {line.itemId == null
-                          ? <span className="muted">—</span>
-                          : <GameItem id={line.itemId} name={item.itemName} book={items} facts={false}>
+                        {line.itemId == null ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          <GameItem
+                            id={line.itemId}
+                            name={item.itemName}
+                            book={items}
+                            facts={false}
+                          >
                             {line.level ? <span className="muted">{line.level}</span> : null}
-                          </GameItem>}
+                          </GameItem>
+                        )}
                       </span>
                     </li>
                   );
                 })}
-              </ul>}
+              </ul>
+            )}
           </li>
         ))}
       </ul>
@@ -188,15 +229,20 @@ function Equipsets({ segment, items }: { segment: Segment; items: ItemBook }): R
  * when it was last played, and a standing read months ago is a weaker claim than a name alone
  * would suggest.
  */
-function AccountStanding(
-  { faction, character }: { faction: AccountFaction | undefined; character: string },
-): ReactNode {
+function AccountStanding({
+  faction,
+  character,
+}: {
+  faction: AccountFaction | undefined;
+  character: string;
+}): ReactNode {
   const best = faction?.best;
   if (!best || best.character === character || !best.standing) return null;
   const when = best.at ? ` · read ${ago(best.at)}` : "";
   return (
     <p className="rep-account muted">
-      {best.character} is further along: {best.standing}{when}
+      {best.character} is further along: {best.standing}
+      {when}
     </p>
   );
 }
@@ -207,9 +253,13 @@ function AccountStanding(
  * A section of its own rather than a one-line formatter, because the bar is a block under the
  * gain rather than something that fits on the end of it.
  */
-function Reputation(
-  { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
-): ReactNode {
+function Reputation({
+  segment,
+  holdings,
+}: {
+  segment: Segment;
+  holdings?: AccountHoldings;
+}): ReactNode {
   const gains = eventsOf(segment, "reputation");
   if (!gains.length) return null;
   const byFaction = new Map((holdings?.factions || []).map((entry) => [entry.faction, entry]));
@@ -218,7 +268,8 @@ function Reputation(
       <ul>
         {gains.map((gain) => (
           <li key={gain.faction}>
-            🎖️ {gain.faction} <span className="muted">{signed(gain.amount)}</span> <At event={gain} />
+            🎖️ {gain.faction} <span className="muted">{signed(gain.amount)}</span>{" "}
+            <At event={gain} />
             <StandingBar standing={gain} faction={gain.faction} />
             <AccountStanding faction={byFaction.get(gain.faction)} character={segment.character} />
           </li>
@@ -242,9 +293,7 @@ function Reputation(
  * movement beside it, and a third number that agrees with neither of the other two is worse
  * than no number at all. The ledger on the details view still carries it.
  */
-function Gold(
-  { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
-): ReactNode {
+function Gold({ segment, holdings }: { segment: Segment; holdings?: AccountHoldings }): ReactNode {
   const account = holdings?.gold;
   const held = account?.characters.find((holder) => holder.character === segment.character);
   if (!segment.goldDiff && !held) return null;
@@ -253,9 +302,11 @@ function Gold(
     <Section title="Gold">
       <ul>
         <li>
-          💰 <span className={isLoss(segment.goldDiff) ? "loss" : "gold"}>
+          💰{" "}
+          <span className={isLoss(segment.goldDiff) ? "loss" : "gold"}>
             {signedGold(segment.goldDiff)}
-          </span> <span className="muted">over the segment</span>
+          </span>{" "}
+          <span className="muted">over the segment</span>
         </li>
         {held ? (
           <li>
@@ -299,20 +350,35 @@ function AccountTotal({ held }: { held: AccountCurrency | undefined }): ReactNod
   if (!held) return null;
   if (held.accountWide) {
     const read = held.oldest ? `, read ${ago(held.oldest)}` : "";
-    return <> <span className="account-total">
-      · {held.total.toLocaleString()} shared across the warband{read}
-    </span></>;
+    return (
+      <>
+        {" "}
+        <span className="account-total">
+          · {held.total.toLocaleString()} shared across the warband{read}
+        </span>
+      </>
+    );
   }
   if (held.characters.length < 2) return null;
   const eldest = held.oldest ? `, eldest read ${ago(held.oldest)}` : "";
-  return <> <span className="account-total">
-    · {held.total.toLocaleString()} across {plural(held.characters.length, "character")}{eldest}
-  </span></>;
+  return (
+    <>
+      {" "}
+      <span className="account-total">
+        · {held.total.toLocaleString()} across {plural(held.characters.length, "character")}
+        {eldest}
+      </span>
+    </>
+  );
 }
 
-function Currencies(
-  { segment, holdings }: { segment: Segment; holdings?: AccountHoldings },
-): ReactNode {
+function Currencies({
+  segment,
+  holdings,
+}: {
+  segment: Segment;
+  holdings?: AccountHoldings;
+}): ReactNode {
   const gains = eventsOf(segment, "currencies");
   if (!gains.length) return null;
   return (
@@ -324,11 +390,15 @@ function Currencies(
           // is enough to buy anything; the third is the one no single character can answer.
           // Both are absent rather than zero when nobody has said.
           <li key={gain.id}>
-            🪙 {gain.name} <span className="muted">
-              {signed(gain.amount)}{gain.total == null ? "" : ` (${gain.total.toLocaleString()})`}
+            🪙 {gain.name}{" "}
+            <span className="muted">
+              {signed(gain.amount)}
+              {gain.total == null ? "" : ` (${gain.total.toLocaleString()})`}
             </span>
-            <AccountTotal held={(holdings?.currencies || []).find((entry) => entry.id === gain.id)} />
-            {" "}<At event={gain} />
+            <AccountTotal
+              held={(holdings?.currencies || []).find((entry) => entry.id === gain.id)}
+            />{" "}
+            <At event={gain} />
           </li>
         ))}
       </ul>
@@ -342,15 +412,18 @@ function Currencies(
  * The table columns abbreviate; these do not, because this is where somebody comes when the
  * abbreviation was not enough.
  */
-function Lists(
-  { segment, book, items, onShowAppearance }: {
-    segment: Segment;
-    book: AchievementBook;
-    items: ItemBook;
-    /** Absent where nothing can draw one, which is what leaves the transmog rows as they were. */
-    onShowAppearance?: (showing: AppearanceModalState) => void;
-  },
-): ReactNode {
+function Lists({
+  segment,
+  book,
+  items,
+  onShowAppearance,
+}: {
+  segment: Segment;
+  book: AchievementBook;
+  items: ItemBook;
+  /** Absent where nothing can draw one, which is what leaves the transmog rows as they were. */
+  onShowAppearance?: (showing: AppearanceModalState) => void;
+}): ReactNode {
   const encounters = eventsOf(segment, "encounters");
   const achievements = eventsOf(segment, "achievements");
   const levelUps = eventsOf(segment, "levelUps");
@@ -361,130 +434,195 @@ function Lists(
   const quests = eventsOf(segment, "quests");
   const housingItems = eventsOf(segment, "housingItems");
   const housingLevelUps = eventsOf(segment, "housingLevelUps");
-  return <>
-    {encounters.length
-      ? <Section title="Encounters"><ul>
-        {encounters.map((event, index) => (
-          <li key={`${event.id}-${index}`}>
-            {event.name || `Encounter ${event.id}`}{" "}
-            <span className={event.success ? "ok" : "loss"}>{event.success ? "killed" : "wipe"}</span>
-            {event.groupSize ? <> <span className="muted">{plural(event.groupSize, "player")}</span></> : null}
-            {" "}<At event={event} />
-          </li>
-        ))}
-      </ul></Section>
-      : null}
-    {achievements.length
-      ? <Section title="Achievements"><ul className="earned">
-        {achievements.map((event, index) =>
-          <Earned key={`${event.id}-${index}`} event={event} book={book} />)}
-      </ul></Section>
-      : null}
-    {levelUps.length
-      ? <Section title="Level ups"><ul>
-        {levelUps.map((event, index) =>
-          <li key={index}>⬆️ Level {event.level} <At event={event} /></li>)}
-      </ul></Section>
-      : null}
-    {mounts.length
-      ? <Section title="Mounts"><ul>
-        {mounts.map((event, index) => (
-          <li key={`${event.id}-${index}`}>
-            🐎 {event.name || `Mount ${event.id}`} <At event={event} />
-          </li>
-        ))}
-      </ul></Section>
-      : null}
-    {pets.length
-      ? <Section title="Pets"><ul>
-        {pets.map((event, index) => (
-          <li key={`${event.id}-${index}`}>🐾 {event.name || `Pet ${event.id}`} <At event={event} /></li>
-        ))}
-      </ul></Section>
-      : null}
-    {toys.length
-      ? <Section title="Toys"><ul>
-        {toys.map((event, index) => (
-          <li key={`${event.id}-${index}`}>🧸 {event.name || `Toy ${event.id}`} <At event={event} /></li>
-        ))}
-      </ul></Section>
-      : null}
-    {transmogs.length
-      ? <Section title="Transmog"><ul className="items">
-        {transmogs.map((event, index) => (
-          <li key={`${event.id}-${index}`}>
-            <GameItem id={event.id} name={event.name} book={items}>
-              {event.newAppearance === true
-                ? <span className="appearance-new">new appearance</span>
-                : event.newAppearance === false
-                  ? <span className="appearance-variant">variant of one owned</span>
-                  : <span className="muted">unknown</span>}
-              <At event={event} />
-              {/* The way through to a picture of it, and the only thing on this row that costs
+  return (
+    <>
+      {encounters.length ? (
+        <Section title="Encounters">
+          <ul>
+            {encounters.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                {event.name || `Encounter ${event.id}`}{" "}
+                <span className={event.success ? "ok" : "loss"}>
+                  {event.success ? "killed" : "wipe"}
+                </span>
+                {event.groupSize ? (
+                  <>
+                    {" "}
+                    <span className="muted">{plural(event.groupSize, "player")}</span>
+                  </>
+                ) : null}{" "}
+                <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {achievements.length ? (
+        <Section title="Achievements">
+          <ul className="earned">
+            {achievements.map((event, index) => (
+              <Earned key={`${event.id}-${index}`} event={event} book={book} />
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {levelUps.length ? (
+        <Section title="Level ups">
+          <ul>
+            {levelUps.map((event, index) => (
+              <li key={index}>
+                ⬆️ Level {event.level} <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {mounts.length ? (
+        <Section title="Mounts">
+          <ul>
+            {mounts.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                🐎 {event.name || `Mount ${event.id}`} <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {pets.length ? (
+        <Section title="Pets">
+          <ul>
+            {pets.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                🐾 {event.name || `Pet ${event.id}`} <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {toys.length ? (
+        <Section title="Toys">
+          <ul>
+            {toys.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                🧸 {event.name || `Toy ${event.id}`} <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {transmogs.length ? (
+        <Section title="Transmog">
+          <ul className="items">
+            {transmogs.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                <GameItem id={event.id} name={event.name} book={items}>
+                  {event.newAppearance === true ? (
+                    <span className="appearance-new">new appearance</span>
+                  ) : event.newAppearance === false ? (
+                    <span className="appearance-variant">variant of one owned</span>
+                  ) : (
+                    <span className="muted">unknown</span>
+                  )}
+                  <At event={event} />
+                  {/* The way through to a picture of it, and the only thing on this row that costs
                   anything: three of the game's tables stand between an item id and a model, and
                   none of them is opened until this is pressed. A button rather than the row
                   itself, because the row is already a link out to Wowhead. */}
-              {onShowAppearance
-                ? <button
-                  type="button" className="ghost appearance-show"
-                  title={`Show ${shownAs(event, items)} drawn`}
-                  aria-label={`Show ${shownAs(event, items)} drawn`}
-                  onClick={() => onShowAppearance({
-                    itemId: event.id, name: shownAs(event, items),
-                  })}
-                >Show</button>
-                : null}
-            </GameItem>
-          </li>
-        ))}
-      </ul></Section>
-      : null}
-    <Equipsets segment={segment} items={items} />
-    {quests.length
-      ? <Section title="Quests"><ul>
-        {quests.map((event, index) => (
-          <li key={`${event.id}-${index}`}>
-            📜 <Wowhead kind="quest" id={event.id}>{event.name || `Quest ${event.id}`}</Wowhead>
-            {event.accountFirst ? <> <span className="muted">account first</span></> : null}
-            {" "}<At event={event} />
-          </li>
-        ))}
-      </ul></Section>
-      : null}
-    {housingItems.length
-      ? <Section title="Housing"><ul>
-        {housingItems.map((event, index) => (
-          <li key={`${event.id}-${index}`}>
-            🪑 {event.name || `Decor ${event.id}`}{" "}
-            <span className="muted">{event.warbandFirst ? "warband first" : "already known"}</span>
-            {" "}<At event={event} />
-          </li>
-        ))}
-      </ul></Section>
-      : null}
-    {housingLevelUps.length
-      ? <Section title="Housing levels"><ul>
-        {housingLevelUps.map((event, index) =>
-          <li key={index}>🏡 Housing level {event.level} <At event={event} /></li>)}
-      </ul></Section>
-      : null}
-  </>;
+                  {onShowAppearance ? (
+                    <button
+                      type="button"
+                      className="ghost appearance-show"
+                      title={`Show ${shownAs(event, items)} drawn`}
+                      aria-label={`Show ${shownAs(event, items)} drawn`}
+                      onClick={() =>
+                        onShowAppearance({
+                          itemId: event.id,
+                          name: shownAs(event, items),
+                        })
+                      }
+                    >
+                      Show
+                    </button>
+                  ) : null}
+                </GameItem>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      <Equipsets segment={segment} items={items} />
+      {quests.length ? (
+        <Section title="Quests">
+          <ul>
+            {quests.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                📜{" "}
+                <Wowhead kind="quest" id={event.id}>
+                  {event.name || `Quest ${event.id}`}
+                </Wowhead>
+                {event.accountFirst ? (
+                  <>
+                    {" "}
+                    <span className="muted">account first</span>
+                  </>
+                ) : null}{" "}
+                <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {housingItems.length ? (
+        <Section title="Housing">
+          <ul>
+            {housingItems.map((event, index) => (
+              <li key={`${event.id}-${index}`}>
+                🪑 {event.name || `Decor ${event.id}`}{" "}
+                <span className="muted">
+                  {event.warbandFirst ? "warband first" : "already known"}
+                </span>{" "}
+                <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {housingLevelUps.length ? (
+        <Section title="Housing levels">
+          <ul>
+            {housingLevelUps.map((event, index) => (
+              <li key={index}>
+                🏡 Housing level {event.level} <At event={event} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+    </>
+  );
 }
 
 function Keystone({ segment }: { segment: Segment }): ReactNode {
   const run = segment.keystone;
   if (!run) return null;
-  const outcome = !run.completed
-    ? <span className="loss">abandoned</span>
-    : run.onTime === false
-      ? <span className="loss">depleted</span>
-      : <span className="ok">timed</span>;
+  const outcome = !run.completed ? (
+    <span className="loss">abandoned</span>
+  ) : run.onTime === false ? (
+    <span className="loss">depleted</span>
+  ) : (
+    <span className="ok">timed</span>
+  );
   return (
     <Section title="Keystone">
       <p>
         🔑 <strong>+{run.level}</strong> {outcome}
         {run.upgrades ? ` · +${run.upgrades} upgrade${run.upgrades === 1 ? "" : "s"}` : ""}
-        {run.durationMs ? <> <span className="muted">{duration(run.durationMs / 1000)}</span></> : null}
+        {run.durationMs ? (
+          <>
+            {" "}
+            <span className="muted">{duration(run.durationMs / 1000)}</span>
+          </>
+        ) : null}
       </p>
     </Section>
   );
@@ -497,7 +635,12 @@ function Experience({ segment }: { segment: Segment }): ReactNode {
     <Section title="Experience">
       <p>
         {signed(gained.gained)} XP · {Math.round(gained.percent * 10) / 10}% of a level
-        {gained.endLevel == null ? null : <> <span className="muted">now level {gained.endLevel}</span></>}
+        {gained.endLevel == null ? null : (
+          <>
+            {" "}
+            <span className="muted">now level {gained.endLevel}</span>
+          </>
+        )}
       </p>
     </Section>
   );
@@ -539,12 +682,19 @@ export interface SegmentModalProps {
   onShowAppearance?: (showing: AppearanceModalState) => void;
 }
 
-export function SegmentModal(
-  {
-    showing, onStep, onClose, onEditActivities, achievements: book, items, places, holdings,
-    album, captures, onShowAppearance,
-  }: SegmentModalProps,
-): ReactNode {
+export function SegmentModal({
+  showing,
+  onStep,
+  onClose,
+  onEditActivities,
+  achievements: book,
+  items,
+  places,
+  holdings,
+  album,
+  captures,
+  onShowAppearance,
+}: SegmentModalProps): ReactNode {
   const dialog = useRef<HTMLDialogElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // The book is not state — it is a cache outside React, shared with every other segment the
@@ -575,16 +725,19 @@ export function SegmentModal(
     if (wanted.length) void book.learn(wanted, redraw);
   }, [segment, book]);
 
-  const step = useCallback((by: number) => {
-    onStep(by);
-    body.current?.scrollTo({ top: 0 });
-  }, [onStep]);
+  const step = useCallback(
+    (by: number) => {
+      onStep(by);
+      body.current?.scrollTo({ top: 0 });
+    },
+    [onStep],
+  );
 
   const facts = segment
     ? [
-      `${dayLabel(segment.day)} · ${clock(segment.startedAt)} – ${clock(segment.endedAt)}`,
-      duration(segment.seconds),
-    ]
+        `${dayLabel(segment.day)} · ${clock(segment.startedAt)} – ${clock(segment.endedAt)}`,
+        duration(segment.seconds),
+      ]
     : [];
 
   const summary = segment ? highlights([segment]) : [];
@@ -592,7 +745,9 @@ export function SegmentModal(
 
   return (
     <dialog
-      id="segment-detail" aria-labelledby="segment-detail-title" ref={dialog}
+      id="segment-detail"
+      aria-labelledby="segment-detail-title"
+      ref={dialog}
       onClose={onClose}
       // Arrow keys are what a reader reaches for once they realise the modal walks a list, and
       // nothing inside it wants them: the body scrolls, it does not select.
@@ -607,7 +762,9 @@ export function SegmentModal(
               and a picture within it would have every reader hear the place twice — once as
               the picture of it and once as the words. */}
           {segment ? <PlaceIcon place={segment.instance} places={places} /> : null}
-          <h2 className="detail-title" id="segment-detail-title">{segment?.instance ?? ""}</h2>
+          <h2 className="detail-title" id="segment-detail-title">
+            {segment?.instance ?? ""}
+          </h2>
           {/* Where in the list the reader is, announced as it changes — stepping to the next
               segment is exactly the moment "2 of 2" is worth hearing. */}
           <span className="detail-position" role="status" aria-label="Which segment">
@@ -616,60 +773,80 @@ export function SegmentModal(
         </div>
         <div className="detail-nav">
           <button
-            type="button" aria-label="Previous segment"
-            disabled={!showing || showing.index === 0} onClick={() => step(-1)}
-          >‹</button>
+            type="button"
+            aria-label="Previous segment"
+            disabled={!showing || showing.index === 0}
+            onClick={() => step(-1)}
+          >
+            ‹
+          </button>
           <button
-            type="button" aria-label="Next segment"
-            disabled={!showing || showing.index >= showing.order.length - 1} onClick={() => step(1)}
-          >›</button>
-          <button type="button" aria-label="Close segment" onClick={onClose}>Close</button>
+            type="button"
+            aria-label="Next segment"
+            disabled={!showing || showing.index >= showing.order.length - 1}
+            onClick={() => step(1)}
+          >
+            ›
+          </button>
+          <button type="button" aria-label="Close segment" onClick={onClose}>
+            Close
+          </button>
         </div>
       </div>
       <div className="detail-body" ref={body}>
-        {segment ? <>
-          <p className="detail-who">
-            <ClassDot classFile={segment.classFile} /><strong>{segment.character}</strong>{" "}
-            <span className="muted">
-              {className(segment.classFile)}
-              {segment.level == null ? "" : ` · level ${segment.level}`}
-            </span>
-          </p>
-          <p className="detail-facts">
-            {facts.join(" · ")} · <span className="badge">{locationType(segment)}</span>
-            {segment.difficulty ? ` · ${segment.difficulty}` : ""}
-          </p>
-          <div className="detail-activities">
-            {activities.length
-              ? activities.map((activity, index) =>
-                <ActivityChip key={activity.id ?? index} activity={activity} />)
-              : <span className="muted">No activity recorded</span>}
-            <button type="button" onClick={() => onEditActivities(segment.segmentId)}>
-              Edit activities
-            </button>
-          </div>
-          <Keystone segment={segment} />
-          <Experience segment={segment} />
-          <div className="detail-highlights">
-            {shownHighlights(summary, { milestones: false }).length
-              ? <HighlightList entries={summary} milestones={false} interactive={false} />
-              : <p className="muted">Nothing was gained or collected in this segment.</p>}
-          </div>
-          {/* Above the lists, because a photograph of the evening is what somebody opens a
+        {segment ? (
+          <>
+            <p className="detail-who">
+              <ClassDot classFile={segment.classFile} />
+              <strong>{segment.character}</strong>{" "}
+              <span className="muted">
+                {className(segment.classFile)}
+                {segment.level == null ? "" : ` · level ${segment.level}`}
+              </span>
+            </p>
+            <p className="detail-facts">
+              {facts.join(" · ")} · <span className="badge">{locationType(segment)}</span>
+              {segment.difficulty ? ` · ${segment.difficulty}` : ""}
+            </p>
+            <div className="detail-activities">
+              {activities.length ? (
+                activities.map((activity, index) => (
+                  <ActivityChip key={activity.id ?? index} activity={activity} />
+                ))
+              ) : (
+                <span className="muted">No activity recorded</span>
+              )}
+              <button type="button" onClick={() => onEditActivities(segment.segmentId)}>
+                Edit activities
+              </button>
+            </div>
+            <Keystone segment={segment} />
+            <Experience segment={segment} />
+            <div className="detail-highlights">
+              {shownHighlights(summary, { milestones: false }).length ? (
+                <HighlightList entries={summary} milestones={false} interactive={false} />
+              ) : (
+                <p className="muted">Nothing was gained or collected in this segment.</p>
+              )}
+            </div>
+            {/* Above the lists, because a photograph of the evening is what somebody opens a
               segment for when there is one, and the lists are what they read afterwards. */}
-          {(segment.captures || []).length
-            ? <Section title="Screenshots">
-              <CaptureGallery segments={[segment]} album={album} actions={captures} />
-            </Section>
-            : null}
-          <Lists
-            segment={segment} book={book} items={items}
-            onShowAppearance={onShowAppearance}
-          />
-          <Gold segment={segment} holdings={holdings} />
-          <Currencies segment={segment} holdings={holdings} />
-          <Reputation segment={segment} holdings={holdings} />
-        </> : null}
+            {(segment.captures || []).length ? (
+              <Section title="Screenshots">
+                <CaptureGallery segments={[segment]} album={album} actions={captures} />
+              </Section>
+            ) : null}
+            <Lists
+              segment={segment}
+              book={book}
+              items={items}
+              onShowAppearance={onShowAppearance}
+            />
+            <Gold segment={segment} holdings={holdings} />
+            <Currencies segment={segment} holdings={holdings} />
+            <Reputation segment={segment} holdings={holdings} />
+          </>
+        ) : null}
       </div>
     </dialog>
   );

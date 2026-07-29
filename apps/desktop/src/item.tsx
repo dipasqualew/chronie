@@ -66,9 +66,14 @@ const wowhead = (id: number): string => `https://www.wowhead.com/item=${encodeUR
 const qualityProps = (quality: number | null): { "data-quality"?: string } =>
   quality == null ? {} : { "data-quality": String(quality) };
 
-export function GameItem(
-  { id, name, book, facts = true, link = true, children }: GameItemProps,
-): ReactNode {
+export function GameItem({
+  id,
+  name,
+  book,
+  facts = true,
+  link = true,
+  children,
+}: GameItemProps): ReactNode {
   // The book is not state — it is a cache outside React, shared with every other row in the
   // window — so an answer landing has nothing to change that React would notice on its own.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
@@ -95,22 +100,33 @@ export function GameItem(
       </span>
       <span className="item-said">
         <span className="item-line">
-          {link
-            ? <a
-              className="item-name" {...qualityProps(line.quality)}
-              href={wowhead(id)} target="_blank" rel="noopener noreferrer"
+          {link ? (
+            <a
+              className="item-name"
+              {...qualityProps(line.quality)}
+              href={wowhead(id)}
+              target="_blank"
+              rel="noopener noreferrer"
               title={title}
-            >{line.name}</a>
-            : <span className="item-name" {...qualityProps(line.quality)} title={title}>
+            >
               {line.name}
-            </span>}
+            </a>
+          ) : (
+            <span className="item-name" {...qualityProps(line.quality)} title={title}>
+              {line.name}
+            </span>
+          )}
           {children}
         </span>
-        {facts && said.length
-          ? <span className="item-facts">
-            {said.map((fact) => <span className="chip" key={fact}>{fact}</span>)}
+        {facts && said.length ? (
+          <span className="item-facts">
+            {said.map((fact) => (
+              <span className="chip" key={fact}>
+                {fact}
+              </span>
+            ))}
           </span>
-          : null}
+        ) : null}
       </span>
     </span>
   );

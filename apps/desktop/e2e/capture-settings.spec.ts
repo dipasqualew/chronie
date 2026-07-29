@@ -40,8 +40,9 @@ test("says what photographs itself, and what Chronie keeps of it", async ({ page
   await test.step("and says when a broader rule already covers a narrower one", async () => {
     await captures.trigger(/Every achievement this character earns/).check();
 
-    await expect(captures.panel)
-      .toContainText("Already covered by “Every achievement this character earns”");
+    await expect(captures.panel).toContainText(
+      "Already covered by “Every achievement this character earns”",
+    );
     await expect(captures.trigger(/An achievement nobody on this account had/)).toBeChecked();
   });
 
@@ -60,8 +61,9 @@ test("says what photographs itself, and what Chronie keeps of it", async ({ page
   // The two opposite risks: a folder that never stops growing, and a folder somebody has
   // curated for years losing files. Which one is running has to be on screen.
   await test.step("and so is whether the game keeps its own copy", async () => {
-    await expect(captures.panel)
-      .toContainText("Chronie deletes the game’s copy once it holds a verified one of its own.");
+    await expect(captures.panel).toContainText(
+      "Chronie deletes the game’s copy once it holds a verified one of its own.",
+    );
 
     await captures.originals().check();
 

@@ -48,14 +48,21 @@ export const query: E2EMock["query"] = {
   answers: {
     [collapsed(RECIPES[0]?.sql ?? "")]: {
       columns: ["character", "hours"],
-      rows: [["Aster-Vale", 41.5], ["Brin-Hearth", 12], ["Corvin-Vale", 3.2]],
+      rows: [
+        ["Aster-Vale", 41.5],
+        ["Brin-Hearth", 12],
+        ["Corvin-Vale", 3.2],
+      ],
       truncated: false,
       elapsedMs: 3,
     },
     [collapsed(RECIPES[1]?.sql ?? "")]: {
       columns: ["day", "hours"],
       rows: [
-        ["2026-07-23", 2.5], ["2026-07-24", 4], ["2026-07-25", 0.75], ["2026-07-26", 3.25],
+        ["2026-07-23", 2.5],
+        ["2026-07-24", 4],
+        ["2026-07-25", 0.75],
+        ["2026-07-26", 3.25],
       ],
       truncated: false,
       elapsedMs: 5,
@@ -64,7 +71,11 @@ export const query: E2EMock["query"] = {
     // empty cell and a cell holding nothing look identical, and only one of them is true.
     'SELECT * FROM "characters" LIMIT 50': {
       columns: ["id", "name", "class_file"],
-      rows: [[1, "Aster-Vale", "MAGE"], [2, "Brin-Hearth", "PALADIN"], [3, "Corvin-Vale", null]],
+      rows: [
+        [1, "Aster-Vale", "MAGE"],
+        [2, "Brin-Hearth", "PALADIN"],
+        [3, "Corvin-Vale", null],
+      ],
       truncated: false,
       elapsedMs: 1,
     },

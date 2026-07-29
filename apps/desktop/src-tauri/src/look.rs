@@ -221,8 +221,14 @@ mod tests {
                 sex: 3,
                 observed_at: Some(1_700_000_000),
                 picked: vec![
-                    Picked { question: 14, swatch: 133 },
-                    Picked { question: 16, swatch: 21 },
+                    Picked {
+                        question: 14,
+                        swatch: 133
+                    },
+                    Picked {
+                        question: 16,
+                        swatch: 21
+                    },
                 ],
             }]
         );
@@ -264,7 +270,13 @@ mod tests {
             ] }
         }));
 
-        assert_eq!(found[0].picked, vec![Picked { question: 16, swatch: 21 }]);
+        assert_eq!(
+            found[0].picked,
+            vec![Picked {
+                question: 16,
+                swatch: 21
+            }]
+        );
     }
 
     /// A body cannot wear two hairstyles, and a file a player edited by hand can say it does.
@@ -281,8 +293,14 @@ mod tests {
         assert_eq!(
             found[0].picked,
             vec![
-                Picked { question: 14, swatch: 133 },
-                Picked { question: 16, swatch: 21 },
+                Picked {
+                    question: 14,
+                    swatch: 133
+                },
+                Picked {
+                    question: 16,
+                    swatch: 21
+                },
             ]
         );
     }
@@ -318,7 +336,10 @@ mod tests {
         }));
 
         assert_eq!(
-            drawn(&looks).iter().map(|known| known.body).collect::<Vec<_>>(),
+            drawn(&looks)
+                .iter()
+                .map(|known| known.body)
+                .collect::<Vec<_>>(),
             vec![HUMAN_FEMALE, HUMAN_MALE]
         );
     }
@@ -337,7 +358,10 @@ mod tests {
             vec![Known {
                 character: "Aster-Vale".into(),
                 body: HUMAN_FEMALE,
-                picked: vec![Picked { question: 16, swatch: 133 }],
+                picked: vec![Picked {
+                    question: 16,
+                    swatch: 133
+                }],
             }]
         );
     }
@@ -352,7 +376,10 @@ mod tests {
         }));
 
         assert_eq!(
-            drawn(&looks).iter().map(|known| known.body).collect::<Vec<_>>(),
+            drawn(&looks)
+                .iter()
+                .map(|known| known.body)
+                .collect::<Vec<_>>(),
             vec![SEXLESS, SEXLESS]
         );
     }
@@ -367,7 +394,10 @@ mod tests {
         }));
 
         assert_eq!(
-            drawn(&looks).iter().map(|known| known.character.as_str()).collect::<Vec<_>>(),
+            drawn(&looks)
+                .iter()
+                .map(|known| known.character.as_str())
+                .collect::<Vec<_>>(),
             vec!["Zia-Vale"]
         );
     }

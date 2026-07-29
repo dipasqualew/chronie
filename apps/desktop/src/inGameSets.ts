@@ -31,8 +31,13 @@ import type { Outfit } from "./outfit";
 import { ANY_CLASS, heldIn, slotName } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import type {
-  CharacterInGameSets, InGameSet, InGameSetSlot, InGameSetsPayload, SetRequest,
-  TransmogAppearance, WornPiece,
+  CharacterInGameSets,
+  InGameSet,
+  InGameSetSlot,
+  InGameSetsPayload,
+  SetRequest,
+  TransmogAppearance,
+  WornPiece,
 } from "./types";
 
 /** What the game calls a set it would not name — its own API is documented as sometimes not. */
@@ -87,19 +92,21 @@ export function rowOf(appearance: TransmogAppearance): AppearanceRow {
     iconFileDataId: appearance.iconFileDataId,
     hasModel: appearance.hasModel,
     withheld,
-    sources: [{
-      label: itemName(appearance.itemId, appearance.name),
-      itemId: appearance.itemId,
-      modifiedAppearanceId: appearance.modifiedAppearanceId,
-      inventoryType: appearance.inventoryType,
-      // The game's own answers rather than the shrug a saved piece has to give, because these
-      // came out of `ItemSparse` on this machine a moment ago. `ANY_CLASS` where the game
-      // withheld the item, which is the mask that makes no claim about who may wear it.
-      allowableClass: withheld ? ANY_CLASS : appearance.allowableClass,
-      requiredLevel: appearance.requiredLevel,
-      quality: appearance.quality,
-      itemCount: 1,
-    }],
+    sources: [
+      {
+        label: itemName(appearance.itemId, appearance.name),
+        itemId: appearance.itemId,
+        modifiedAppearanceId: appearance.modifiedAppearanceId,
+        inventoryType: appearance.inventoryType,
+        // The game's own answers rather than the shrug a saved piece has to give, because these
+        // came out of `ItemSparse` on this machine a moment ago. `ANY_CLASS` where the game
+        // withheld the item, which is the mask that makes no claim about who may wear it.
+        allowableClass: withheld ? ANY_CLASS : appearance.allowableClass,
+        requiredLevel: appearance.requiredLevel,
+        quality: appearance.quality,
+        itemCount: 1,
+      },
+    ],
     liftsRestriction: false,
   };
 }
@@ -130,10 +137,12 @@ export function wornFrom(appearances: TransmogAppearance[]): WornPiece[] {
   for (const row of rowsOf(appearances)) {
     const wanted = wearable(row);
     if (wanted.kind !== "worn") continue;
-    const already = worn.some((one) =>
-      one.displayInfoId === wanted.piece.displayInfoId
-      && one.displayType === wanted.piece.displayType
-      && one.inventoryType === wanted.piece.inventoryType);
+    const already = worn.some(
+      (one) =>
+        one.displayInfoId === wanted.piece.displayInfoId &&
+        one.displayType === wanted.piece.displayType &&
+        one.inventoryType === wanted.piece.inventoryType,
+    );
     if (!already) worn.push(wanted.piece);
   }
   return worn;
@@ -327,10 +336,7 @@ export function charactersWithSets(payload: InGameSetsPayload | null): Character
 }
 
 /** What one character has, or nothing when Chronie has never read that character's wardrobe. */
-export function setsFor(
-  payload: InGameSetsPayload | null,
-  character: string,
-): InGameSet[] | null {
+export function setsFor(payload: InGameSetsPayload | null, character: string): InGameSet[] | null {
   const found = charactersWithSets(payload).find((entry) => entry.character === character);
   return found ? found.sets : null;
 }

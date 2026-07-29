@@ -43,8 +43,19 @@ const LAST_ARMOUR_SLOT = 10;
  * about which texture lands over which, and this one is about where a reader's eye goes.
  */
 const PLACES = [
-  "armour-0", "armour-1", "armour-9", "armour-2", "armour-3", "armour-10", "armour-4",
-  "armour-7", "armour-8", "armour-5", "armour-6", "hand-right", "hand-left",
+  "armour-0",
+  "armour-1",
+  "armour-9",
+  "armour-2",
+  "armour-3",
+  "armour-10",
+  "armour-4",
+  "armour-7",
+  "armour-8",
+  "armour-5",
+  "armour-6",
+  "hand-right",
+  "hand-left",
 ] as const;
 
 /** What the two hands are called, since no display type names them. */
@@ -72,7 +83,8 @@ export type Placeable = Previewable;
  */
 export function placeOf(row: Placeable): string | null {
   if (canBeWorn(row).kind !== "worn") return null;
-  if (row.displayType >= 0 && row.displayType <= LAST_ARMOUR_SLOT) return `armour-${row.displayType}`;
+  if (row.displayType >= 0 && row.displayType <= LAST_ARMOUR_SLOT)
+    return `armour-${row.displayType}`;
   const hand = heldIn(row.displayType, row.inventoryType);
   return hand ? `hand-${hand}` : null;
 }

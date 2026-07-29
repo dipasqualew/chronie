@@ -58,10 +58,12 @@ test("keeps what she has on as a set of the reader's own", async ({ page }) => {
 
     await yours.wearAll("Deeps run").click();
 
-    await expect.poll(() => outfit.worn()).toEqual([
-      "Coif of the Drowned Star · Head · Deeps run",
-      "Staff of the Quiet Tide · Main hand · Deeps run",
-    ]);
+    await expect
+      .poll(() => outfit.worn())
+      .toEqual([
+        "Coif of the Drowned Star · Head · Deeps run",
+        "Staff of the Quiet Tide · Main hand · Deeps run",
+      ]);
     // The same body the two looks asked for when they were picked out of the game itself: the
     // outfit is keyed by its display ids, so a body arriving at all says the saved set asked
     // for the same one, and nothing was lost on the way through Chronie's own storage.
@@ -168,10 +170,9 @@ test("reads the sets the player saved in the game, and sends one back", async ({
   await test.step("the character is dressed in a set she saved in the game", async () => {
     await inGame.wearAll("Tideglass").click();
 
-    await expect.poll(() => outfit.worn()).toEqual([
-      "Tideglass Crown · Head · Tideglass",
-      "Tideglass Mantle · Shoulder · Tideglass",
-    ]);
+    await expect
+      .poll(() => outfit.worn())
+      .toEqual(["Tideglass Crown · Head · Tideglass", "Tideglass Mantle · Shoulder · Tideglass"]);
     await expect(outfit.summary()).toHaveText("2 of 13 slots filled");
   });
 

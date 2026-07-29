@@ -12,9 +12,12 @@ const unwrap = <Value>(answer: Value | Result<Value, unknown>): Value => {
 };
 
 const generated = new Proxy(commands, {
-  get: (target, key: keyof typeof commands) => (...args: unknown[]) =>
-    (target[key] as (...commandArgs: unknown[]) => Promise<Result<unknown, unknown>>)(...args)
-      .then(unwrap),
+  get:
+    (target, key: keyof typeof commands) =>
+    (...args: unknown[]) =>
+      (target[key] as (...commandArgs: unknown[]) => Promise<Result<unknown, unknown>>)(
+        ...args,
+      ).then(unwrap),
 }) as unknown as DesktopCommands;
 
 /** The production adapter: generated Rust commands plus the operating-system URL handoff. */

@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Herself } from "./herselfPanel";
 import type { HerselfProps } from "./herselfPanel";
-import type { CharacterChosen, CharacterLookPayload, CharacterPick, CharacterQuestion } from "./types";
+import type {
+  CharacterChosen,
+  CharacterLookPayload,
+  CharacterPick,
+  CharacterQuestion,
+} from "./types";
 
 afterEach(cleanup);
 
@@ -13,20 +18,47 @@ const HERS: CharacterQuestion[] = [
   {
     id: 16,
     name: "Hair Style",
-    swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+    swatches: [
+      { id: 132, name: "Loose" },
+      { id: 133, name: "Braided" },
+    ],
   },
-  { id: 14, name: "Skin Color", swatches: [{ id: 85, name: "" }, { id: 86, name: "" }] },
+  {
+    id: 14,
+    name: "Skin Color",
+    swatches: [
+      { id: 85, name: "" },
+      { id: 86, name: "" },
+    ],
+  },
 ];
 
 /** And what it asks about the other body, which is not the same list under other names: a
  * beard is a question no female body is ever asked. */
 const HIS: CharacterQuestion[] = [
-  { id: 11, name: "Hair Style", swatches: [{ id: 44, name: "Bald" }, { id: 45, name: "Peasant" }] },
-  { id: 13, name: "Beard", swatches: [{ id: 70, name: "Clean" }, { id: 71, name: "Full" }] },
+  {
+    id: 11,
+    name: "Hair Style",
+    swatches: [
+      { id: 44, name: "Bald" },
+      { id: 45, name: "Peasant" },
+    ],
+  },
+  {
+    id: 13,
+    name: "Beard",
+    swatches: [
+      { id: 70, name: "Clean" },
+      { id: 71, name: "Full" },
+    ],
+  },
 ];
 
 const ASKED: CharacterLookPayload = {
-  bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+  bodies: [
+    { id: 1, name: "Human Male" },
+    { id: 2, name: "Human Female" },
+  ],
   body: 2,
   questions: HERS,
   picked: [],
@@ -44,13 +76,15 @@ function panel(overrides: Partial<HerselfProps> = {}) {
   let picked: CharacterPick[] = [...ASKED.picked];
   let body = ASKED.body;
   const props: HerselfProps = {
-    load: vi.fn(() => Promise.resolve({
-      ...ASKED,
-      body,
-      // The questions of whichever body is being drawn, which is what the backend re-reads.
-      questions: body === ASKED.body ? HERS : HIS,
-      picked: [...picked],
-    })),
+    load: vi.fn(() =>
+      Promise.resolve({
+        ...ASKED,
+        body,
+        // The questions of whichever body is being drawn, which is what the backend re-reads.
+        questions: body === ASKED.body ? HERS : HIS,
+        picked: [...picked],
+      }),
+    ),
     save: vi.fn((chosen: number, answers: CharacterPick[]): Promise<CharacterChosen> => {
       body = chosen;
       picked = answers;
@@ -78,8 +112,7 @@ function open(): void {
   fireEvent(details, new Event("toggle"));
 }
 
-const field = (name: string | RegExp): HTMLSelectElement =>
-  screen.getByRole("combobox", { name });
+const field = (name: string | RegExp): HTMLSelectElement => screen.getByRole("combobox", { name });
 
 describe("Herself", () => {
   // The panel walks five of the game's tables and the overwhelming majority of the time a
@@ -139,7 +172,10 @@ describe("Herself", () => {
 
     fireEvent.change(field("Hair Style"), { target: { value: "133" } });
 
-    const answered = [{ question: 16, swatch: 133 }, { question: 14, swatch: 85 }];
+    const answered = [
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 85 },
+    ];
     await waitFor(() => expect(save).toHaveBeenCalledWith(2, answered));
     expect(onChanged).toHaveBeenCalledWith({ body: 2, picked: answered });
     expect(field("Hair Style").value).toBe("133");
@@ -156,10 +192,12 @@ describe("Herself", () => {
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     fireEvent.change(field("Skin Color"), { target: { value: "86" } });
 
-    await waitFor(() => expect(save).toHaveBeenLastCalledWith(2, [
-      { question: 16, swatch: 133 },
-      { question: 14, swatch: 86 },
-    ]));
+    await waitFor(() =>
+      expect(save).toHaveBeenLastCalledWith(2, [
+        { question: 16, swatch: 133 },
+        { question: 14, swatch: 86 },
+      ]),
+    );
   });
 
   // An install whose tables this app cannot read says so. A form of empty selects would look
@@ -179,7 +217,8 @@ describe("Herself", () => {
     open();
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("Choose the game folder"));
+      expect(screen.getByRole("alert").textContent).toContain("Choose the game folder"),
+    );
   });
 
   // A refusal from the write end leaves the form where it was rather than showing an answer
@@ -194,7 +233,8 @@ describe("Herself", () => {
     fireEvent.change(field("Hair Style"), { target: { value: "133" } });
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("names no question"));
+      expect(screen.getByRole("alert").textContent).toContain("names no question"),
+    );
     expect(onChanged).not.toHaveBeenCalled();
   });
 
@@ -212,13 +252,14 @@ describe("Herself", () => {
     let picked: CharacterPick[] = [];
     let body = ASKED.body;
     return panel({
-      load: () => Promise.resolve({
-        ...ASKED,
-        body,
-        questions: body === ASKED.body ? HERS : HIS,
-        picked: [...picked],
-        characters: ROSTER,
-      }),
+      load: () =>
+        Promise.resolve({
+          ...ASKED,
+          body,
+          questions: body === ASKED.body ? HERS : HIS,
+          picked: [...picked],
+          characters: ROSTER,
+        }),
       save: vi.fn((chosen: number, answers: CharacterPick[]): Promise<CharacterChosen> => {
         body = chosen;
         picked = answers;

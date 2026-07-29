@@ -29,12 +29,14 @@ export function VersionTag({ release }: VersionTagProps): ReactNode {
       <a href={version.channelUrl} aria-label={`The ${version.channel} release on GitHub`}>
         {version.channel}
       </a>
-      {version.commit && version.commitUrl && <>
-        <span aria-hidden="true">#</span>
-        <a href={version.commitUrl} aria-label={`Commit ${version.commit} on GitHub`}>
-          {version.commit}
-        </a>
-      </>}
+      {version.commit && version.commitUrl && (
+        <>
+          <span aria-hidden="true">#</span>
+          <a href={version.commitUrl} aria-label={`Commit ${version.commit} on GitHub`}>
+            {version.commit}
+          </a>
+        </>
+      )}
     </span>
   );
 }

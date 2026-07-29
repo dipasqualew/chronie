@@ -39,14 +39,17 @@ test("gives every character a page of their own", async ({ page }) => {
   // The same rail a segment row wears, for the same reason: the roster is a list of people,
   // and the colour is what tells them apart before the name has been read.
   await test.step("each of them wears their own class colour", async () => {
-    await expect(railColours(roster.entries()))
-      .resolves.toEqual(["rgb(255, 124, 10)", "rgb(63, 199, 235)"]);
+    await expect(railColours(roster.entries())).resolves.toEqual([
+      "rgb(255, 124, 10)",
+      "rgb(63, 199, 235)",
+    ]);
   });
 
   await test.step("and the one the view opened on is the one it is showing", async () => {
     await expect(roster.entries().first()).toHaveAttribute("aria-pressed", "true");
-    await expect(roster.profile.getByRole("heading", { name: "Brin-Hearth", level: 2 }))
-      .toBeVisible();
+    await expect(
+      roster.profile.getByRole("heading", { name: "Brin-Hearth", level: 2 }),
+    ).toBeVisible();
     // Summary first: a reader arriving on somebody wants to know who they are before they
     // want a fortnight of their evenings.
     await expect(roster.pageTab("Summary")).toHaveAttribute("aria-selected", "true");
@@ -67,8 +70,7 @@ test("gives every character a page of their own", async ({ page }) => {
   await test.step("and told plainly when there is nothing to dress them in", async () => {
     await roster.pick("Brin-Hearth");
 
-    await expect(roster.figureNote("Brin-Hearth"))
-      .toContainText("No transmog sets saved in game");
+    await expect(roster.figureNote("Brin-Hearth")).toContainText("No transmog sets saved in game");
   });
 
   await test.step("the summary adds up everything known about them", async () => {
@@ -91,13 +93,15 @@ test("gives every character a page of their own", async ({ page }) => {
     // The 6,000 on this row is the account's one pot read from here rather than this
     // character's share of it, and unlabelled it would read as a coincidence that the alt
     // beside them holds exactly as much.
-    await expect(roster.holding("Currencies", "Warband Chit"))
-      .toContainText("shared across the warband");
+    await expect(roster.holding("Currencies", "Warband Chit")).toContainText(
+      "shared across the warband",
+    );
 
     // Somebody else is out in front here, and who that is is the whole question in front of a
     // faction: a reputation is grind a warband does once.
-    await expect(roster.holding("Reputation", "Cavern Cartographers"))
-      .toContainText("Brin-Hearth · Revered");
+    await expect(roster.holding("Reputation", "Cavern Cartographers")).toContainText(
+      "Brin-Hearth · Revered",
+    );
     const standing = roster.standingWith(/Cavern Cartographers/);
     await expect(standing).toHaveJSProperty("value", 4200);
     await expect(standing).toHaveJSProperty("max", 12000);
@@ -117,8 +121,7 @@ test("gives every character a page of their own", async ({ page }) => {
 
     // The furthest anybody has got with this one is this character, which is said as such
     // rather than by repeating the name at the top of the page.
-    await expect(roster.holding("Reputation", "Deepwater Wardens"))
-      .toContainText("This character");
+    await expect(roster.holding("Reputation", "Deepwater Wardens")).toContainText("This character");
   });
 
   // The other half of the pane, and the only one a time range means anything to. Two weeks is

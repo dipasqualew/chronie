@@ -114,12 +114,7 @@ fn fully_read(cursor: &Cursor, file: &LogFile) -> bool {
 /// nothing here re-sorts and hopes.
 ///
 /// `read` is keyed on the log's name, the way `combat_logs` keys its rows.
-pub fn plan(
-    logs: &[Found],
-    read: &HashMap<String, Cursor>,
-    retain_days: u32,
-    now: i64,
-) -> Plan {
+pub fn plan(logs: &[Found], read: &HashMap<String, Cursor>, retain_days: u32, now: i64) -> Plan {
     let window = i64::from(retain_days.max(MIN_RETAIN_DAYS)) * SECONDS_PER_DAY;
     let mut plan = Plan::default();
     let newest = logs.len().saturating_sub(1);
@@ -303,7 +298,13 @@ mod tests {
 
         let plan = plan(&logs, &read, 7, NOW);
 
-        assert_eq!(names(&plan.doomed), ["WoWCombatLog-060126_200000.txt", "WoWCombatLog-060226_200000.txt"]);
+        assert_eq!(
+            names(&plan.doomed),
+            [
+                "WoWCombatLog-060126_200000.txt",
+                "WoWCombatLog-060226_200000.txt"
+            ]
+        );
         assert_eq!(plan.bytes(), 900);
         assert!(plan.spared.is_empty());
     }
@@ -321,7 +322,10 @@ mod tests {
         let plan = plan(&logs, &HashMap::new(), 7, NOW);
 
         assert!(plan.doomed.is_empty());
-        assert_eq!(spared(&plan), [("WoWCombatLog-060126_200000.txt", Kept::Unread)]);
+        assert_eq!(
+            spared(&plan),
+            [("WoWCombatLog-060126_200000.txt", Kept::Unread)]
+        );
     }
 
     /// A backlog part way through: the cursor exists and has not reached the end. Another sync
@@ -334,13 +338,20 @@ mod tests {
         ];
         let read = HashMap::from([(
             "WoWCombatLog-060126_200000.txt".to_string(),
-            Cursor { offset: 300, size: 900, lines: 20 },
+            Cursor {
+                offset: 300,
+                size: 900,
+                lines: 20,
+            },
         )]);
 
         let plan = plan(&logs, &read, 7, NOW);
 
         assert!(plan.doomed.is_empty());
-        assert_eq!(spared(&plan), [("WoWCombatLog-060126_200000.txt", Kept::Partial)]);
+        assert_eq!(
+            spared(&plan),
+            [("WoWCombatLog-060126_200000.txt", Kept::Partial)]
+        );
     }
 
     /// Read to the end of what it was, and bigger now. The bytes past the old end have been
@@ -353,13 +364,20 @@ mod tests {
         ];
         let read = HashMap::from([(
             "WoWCombatLog-060126_200000.txt".to_string(),
-            Cursor { offset: 400, size: 400, lines: 40 },
+            Cursor {
+                offset: 400,
+                size: 400,
+                lines: 40,
+            },
         )]);
 
         let plan = plan(&logs, &read, 7, NOW);
 
         assert!(plan.doomed.is_empty());
-        assert_eq!(spared(&plan), [("WoWCombatLog-060126_200000.txt", Kept::Partial)]);
+        assert_eq!(
+            spared(&plan),
+            [("WoWCombatLog-060126_200000.txt", Kept::Partial)]
+        );
     }
 
     /// The newest file is the one the client appends to, and a player who stopped raiding in
@@ -378,20 +396,30 @@ mod tests {
         let plan = plan(&logs, &read, 7, NOW);
 
         assert_eq!(names(&plan.doomed), ["WoWCombatLog-050126_200000.txt"]);
-        assert_eq!(spared(&plan), [("WoWCombatLog-050226_200000.txt", Kept::Active)]);
+        assert_eq!(
+            spared(&plan),
+            [("WoWCombatLog-050226_200000.txt", Kept::Active)]
+        );
     }
 
     /// One log in the folder is the active one, and a folder with one log is a folder a sweep
     /// does nothing to.
     #[test]
     fn does_nothing_to_a_folder_with_one_log_in_it() {
-        let logs = [found("WoWCombatLog-050126_200000.txt", 400, Some(NOW - 90 * DAY))];
+        let logs = [found(
+            "WoWCombatLog-050126_200000.txt",
+            400,
+            Some(NOW - 90 * DAY),
+        )];
         let read = HashMap::from([("WoWCombatLog-050126_200000.txt".to_string(), finished(400))]);
 
         let plan = plan(&logs, &read, 7, NOW);
 
         assert!(plan.doomed.is_empty());
-        assert_eq!(spared(&plan), [("WoWCombatLog-050126_200000.txt", Kept::Active)]);
+        assert_eq!(
+            spared(&plan),
+            [("WoWCombatLog-050126_200000.txt", Kept::Active)]
+        );
     }
 
     #[test]
@@ -416,7 +444,11 @@ mod tests {
 
         let plan = plan(&logs, &read, 7, NOW);
 
-        assert_eq!(plan, Plan::default(), "nothing deleted and nothing to explain");
+        assert_eq!(
+            plan,
+            Plan::default(),
+            "nothing deleted and nothing to explain"
+        );
     }
 
     /// A longer window keeps more, which is the entire point of the setting being a number.
@@ -433,7 +465,10 @@ mod tests {
             ("WoWCombatLog-072626_200000.txt".to_string(), finished(600)),
         ]);
 
-        assert_eq!(names(&plan(&logs, &read, 30, NOW).doomed), ["WoWCombatLog-060126_200000.txt"]);
+        assert_eq!(
+            names(&plan(&logs, &read, 30, NOW).doomed),
+            ["WoWCombatLog-060126_200000.txt"]
+        );
         assert_eq!(names(&plan(&logs, &read, 90, NOW).doomed), [] as [&str; 0]);
     }
 
@@ -488,10 +523,17 @@ mod tests {
         ];
         let read = HashMap::from([(
             "WoWCombatLog-060126_200000.txt".to_string(),
-            Cursor { offset: 0, size: 0, lines: 0 },
+            Cursor {
+                offset: 0,
+                size: 0,
+                lines: 0,
+            },
         )]);
 
-        assert_eq!(names(&plan(&logs, &read, 7, NOW).doomed), ["WoWCombatLog-060126_200000.txt"]);
+        assert_eq!(
+            names(&plan(&logs, &read, 7, NOW).doomed),
+            ["WoWCombatLog-060126_200000.txt"]
+        );
     }
 
     /// The report keeps the two piles apart, because the answer to each is different: one is a
@@ -507,7 +549,14 @@ mod tests {
         let read = HashMap::from([
             ("WoWCombatLog-060126_200000.txt".to_string(), finished(400)),
             ("WoWCombatLog-060226_200000.txt".to_string(), finished(500)),
-            ("WoWCombatLog-060326_200000.txt".to_string(), Cursor { offset: 10, size: 700, lines: 2 }),
+            (
+                "WoWCombatLog-060326_200000.txt".to_string(),
+                Cursor {
+                    offset: 10,
+                    size: 700,
+                    lines: 2,
+                },
+            ),
         ]);
 
         let report = Report::of(&plan(&logs, &read, 7, NOW), false, 7);
@@ -525,7 +574,13 @@ mod tests {
     #[test]
     fn counts_every_file_while_naming_only_the_first_few() {
         let logs: Vec<Found> = (0..40)
-            .map(|index| found(&format!("WoWCombatLog-0601{index:02}.txt"), 100, Some(NOW - 30 * DAY)))
+            .map(|index| {
+                found(
+                    &format!("WoWCombatLog-0601{index:02}.txt"),
+                    100,
+                    Some(NOW - 30 * DAY),
+                )
+            })
             .collect();
 
         let report = Report::of(&plan(&logs, &HashMap::new(), 7, NOW), true, 7);

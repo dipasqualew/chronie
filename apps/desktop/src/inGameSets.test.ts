@@ -1,15 +1,32 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  UNNAMED, appearanceIds, charactersWithSets, filterInGameSets, iconFrom, requestSummary, rowOf,
-  rowsOf, setLabel, setSummary, setsFor, slotsFrom, transmogSlotOf, wardrobeSummary, wornFrom,
+  UNNAMED,
+  appearanceIds,
+  charactersWithSets,
+  filterInGameSets,
+  iconFrom,
+  requestSummary,
+  rowOf,
+  rowsOf,
+  setLabel,
+  setSummary,
+  setsFor,
+  slotsFrom,
+  transmogSlotOf,
+  wardrobeSummary,
+  wornFrom,
 } from "./inGameSets";
 import { NOTHING_ON, wear } from "./outfit";
 import type { Outfit, Worn } from "./outfit";
 import { ANY_CLASS } from "./transmogModal";
 import type { AppearanceRow } from "./transmogModal";
 import type {
-  InGameSet, InGameSetSlot, InGameSetsPayload, SetRequest, TransmogAppearance,
+  InGameSet,
+  InGameSetSlot,
+  InGameSetsPayload,
+  SetRequest,
+  TransmogAppearance,
 } from "./types";
 
 /** One appearance as the game's own tables answer for it, with only what a test spells out. */
@@ -194,8 +211,13 @@ describe("rowsOf", () => {
   // second — which is a piece of the outfit the player actually put on.
   it("keeps two slots holding one appearance as two rows", () => {
     const sword = appearance({
-      modifiedAppearanceId: 71_007, itemId: 30_007, name: "Emberforge Blade", appearanceId: 80_007,
-      displayType: 11, inventoryType: 13, displayInfoId: 900_007,
+      modifiedAppearanceId: 71_007,
+      itemId: 30_007,
+      name: "Emberforge Blade",
+      appearanceId: 80_007,
+      displayType: 11,
+      inventoryType: 13,
+      displayInfoId: 900_007,
     });
 
     expect(rowsOf([sword, sword])).toHaveLength(2);
@@ -205,8 +227,12 @@ describe("rowsOf", () => {
 describe("wornFrom", () => {
   const CROWN = appearance();
   const MANTLE = appearance({
-    modifiedAppearanceId: 71_002, name: "Tideglass Mantle", appearanceId: 80_002,
-    displayType: 1, inventoryType: 3, displayInfoId: 900_002,
+    modifiedAppearanceId: 71_002,
+    name: "Tideglass Mantle",
+    appearanceId: 80_002,
+    displayType: 1,
+    inventoryType: 3,
+    displayInfoId: 900_002,
   });
 
   it("is the set as an outfit, in the order the appearances were answered", () => {
@@ -220,8 +246,13 @@ describe("wornFrom", () => {
   // somewhere no body has. The set is still what the set is; it has one fewer thing showing.
   it("leaves out a piece the character has nowhere to put", () => {
     const arrow = appearance({
-      modifiedAppearanceId: 71_020, itemId: 30_020, name: "Emberforge Arrow",
-      appearanceId: 80_020, displayType: 20, inventoryType: 24, displayInfoId: 900_020,
+      modifiedAppearanceId: 71_020,
+      itemId: 30_020,
+      name: "Emberforge Arrow",
+      appearanceId: 80_020,
+      displayType: 20,
+      inventoryType: 24,
+      displayInfoId: 900_020,
     });
 
     expect(wornFrom([CROWN, WITHHELD, arrow])).toEqual([
@@ -234,8 +265,13 @@ describe("wornFrom", () => {
   // picture of it wearing the sword once.
   it("wears one appearance once however many slots the set gave it", () => {
     const sword = appearance({
-      modifiedAppearanceId: 71_007, itemId: 30_007, name: "Emberforge Blade",
-      appearanceId: 80_007, displayType: 11, inventoryType: 13, displayInfoId: 900_007,
+      modifiedAppearanceId: 71_007,
+      itemId: 30_007,
+      name: "Emberforge Blade",
+      appearanceId: 80_007,
+      displayType: 11,
+      inventoryType: 13,
+      displayInfoId: 900_007,
     });
 
     expect(wornFrom([sword, sword])).toHaveLength(1);
@@ -254,20 +290,24 @@ describe("filterInGameSets", () => {
   const names = (sets: InGameSet[]): string[] => sets.map(setLabel);
 
   it("leaves every set alone when nothing is asked of it", () => {
-    expect(names(filterInGameSets([TIDEGLASS, EMBERFORGE], "  ")))
-      .toEqual(["Tideglass court", "Emberforge court"]);
+    expect(names(filterInGameSets([TIDEGLASS, EMBERFORGE], "  "))).toEqual([
+      "Tideglass court",
+      "Emberforge court",
+    ]);
   });
 
   it("matches the name the player gave it, whatever case it is typed in", () => {
-    expect(names(filterInGameSets([TIDEGLASS, EMBERFORGE], "TIDEGLASS")))
-      .toEqual(["Tideglass court"]);
+    expect(names(filterInGameSets([TIDEGLASS, EMBERFORGE], "TIDEGLASS"))).toEqual([
+      "Tideglass court",
+    ]);
   });
 
   // Every word rather than the whole phrase, the way every other search in this view works —
   // so a reader who remembers two words about a set need not remember their order.
   it("wants every word rather than the whole phrase", () => {
-    expect(names(filterInGameSets([TIDEGLASS, EMBERFORGE], "court emberforge")))
-      .toEqual(["Emberforge court"]);
+    expect(names(filterInGameSets([TIDEGLASS, EMBERFORGE], "court emberforge"))).toEqual([
+      "Emberforge court",
+    ]);
     expect(filterInGameSets([TIDEGLASS, EMBERFORGE], "tideglass emberforge")).toEqual([]);
   });
 
@@ -331,8 +371,10 @@ describe("charactersWithSets", () => {
   });
 
   it("keeps the order the backend sorted them into", () => {
-    expect(charactersWithSets(PAYLOAD).map((one) => one.character))
-      .toEqual(["Aster-Ravencrest", "Nerine-Ravencrest"]);
+    expect(charactersWithSets(PAYLOAD).map((one) => one.character)).toEqual([
+      "Aster-Ravencrest",
+      "Nerine-Ravencrest",
+    ]);
   });
 });
 
@@ -392,9 +434,12 @@ const dressedIn = (...rows: AppearanceRow[]): Outfit =>
  * send has nowhere to put. Forcing one in is what makes the guard under it assertable.
  */
 const forced = (pieces: Record<string, AppearanceRow>): Outfit =>
-  Object.fromEntries(Object.entries(pieces).map(
-    ([place, one]): [string, Worn] => [place, { place, row: one, from: "" }],
-  ));
+  Object.fromEntries(
+    Object.entries(pieces).map(([place, one]): [string, Worn] => [
+      place,
+      { place, row: one, from: "" },
+    ]),
+  );
 
 describe("transmogSlotOf", () => {
   // The whole reason this is a written-out table rather than the display type passed through.
@@ -503,8 +548,9 @@ describe("slotsFrom", () => {
     const helm = row({ displayType: 0, appearanceId: 80_001 });
 
     expect(slotsFrom(dressedIn(helm, arrows))).toEqual([{ slot: 0, appearanceId: 80_001 }]);
-    expect(slotsFrom(forced({ "armour-0": helm, "hand-right": arrows })))
-      .toEqual([{ slot: 0, appearanceId: 80_001 }]);
+    expect(slotsFrom(forced({ "armour-0": helm, "hand-right": arrows }))).toEqual([
+      { slot: 0, appearanceId: 80_001 },
+    ]);
   });
 });
 
@@ -535,10 +581,13 @@ describe("iconFrom", () => {
   // is the caller's to deal with rather than a nil for the game to refuse.
   it.each<[string, Outfit]>([
     ["an outfit with nothing on it", NOTHING_ON],
-    ["one whose every piece the game names no texture for", dressedIn(
-      row({ displayType: 0, iconFileDataId: 0 }),
-      row({ displayType: 3, iconFileDataId: 0 }),
-    )],
+    [
+      "one whose every piece the game names no texture for",
+      dressedIn(
+        row({ displayType: 0, iconFileDataId: 0 }),
+        row({ displayType: 3, iconFileDataId: 0 }),
+      ),
+    ],
   ])("has no picture to give for %s", (_what, outfit) => {
     expect(iconFrom(outfit)).toBeNull();
   });
@@ -593,8 +642,8 @@ describe("requestSummary", () => {
   // slots, and the request is still waiting rather than lost.
   it("says how to make room when the account's sets are full", () => {
     expect(requestSummary(request({ outcome: "full" }))).toBe(
-      "Not saved: the account's transmog sets are full. "
-      + "Delete one in game and Tideglass court goes in next login.",
+      "Not saved: the account's transmog sets are full. " +
+        "Delete one in game and Tideglass court goes in next login.",
     );
   });
 

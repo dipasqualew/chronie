@@ -23,30 +23,37 @@ import type { InGameSetSlot, SetRequest, TransmogAppearance } from "./types";
 afterEach(cleanup);
 
 /** One appearance as the row a browser hands the panel, with only what a test spells out. */
-const row = (fields: Partial<TransmogAppearance>): AppearanceRow => rowOf({
-  modifiedAppearanceId: 71_001,
-  itemId: 30_001,
-  name: "Tideglass Crown",
-  appearanceId: 80_001,
-  displayType: 0,
-  inventoryType: 1,
-  allowableClass: 0xffff,
-  requiredLevel: 0,
-  quality: 4,
-  displayInfoId: 900_001,
-  iconFileDataId: 130_001,
-  hasModel: true,
-  ...fields,
-});
+const row = (fields: Partial<TransmogAppearance>): AppearanceRow =>
+  rowOf({
+    modifiedAppearanceId: 71_001,
+    itemId: 30_001,
+    name: "Tideglass Crown",
+    appearanceId: 80_001,
+    displayType: 0,
+    inventoryType: 1,
+    allowableClass: 0xffff,
+    requiredLevel: 0,
+    quality: 4,
+    displayInfoId: 900_001,
+    iconFileDataId: 130_001,
+    hasModel: true,
+    ...fields,
+  });
 
 const HELM = row({ displayType: 0, appearanceId: 80_001, iconFileDataId: 130_001 });
 const ROBE = row({
-  name: "Tideglass Robe", displayType: 3, appearanceId: 80_003, displayInfoId: 900_003,
+  name: "Tideglass Robe",
+  displayType: 3,
+  appearanceId: 80_003,
+  displayInfoId: 900_003,
   iconFileDataId: 130_003,
 });
 /** Arrows: the game files them under a weapon slot and nobody holds them. */
 const ARROWS = row({
-  name: "A quiver of arrows", displayType: 11, inventoryType: 24, appearanceId: 80_024,
+  name: "A quiver of arrows",
+  displayType: 11,
+  inventoryType: 24,
+  appearanceId: 80_024,
   displayInfoId: 900_024,
 });
 
@@ -61,9 +68,12 @@ const dressedIn = (...rows: AppearanceRow[]): Outfit =>
  * ordinary way cannot reach it, and forcing the row in is what makes the guard assertable.
  */
 const forced = (pieces: Record<string, AppearanceRow>): Outfit =>
-  Object.fromEntries(Object.entries(pieces).map(
-    ([place, one]): [string, Worn] => [place, { place, row: one, from: "" }],
-  ));
+  Object.fromEntries(
+    Object.entries(pieces).map(([place, one]): [string, Worn] => [
+      place,
+      { place, row: one, from: "" },
+    ]),
+  );
 
 /** A `.glb` in a data URL, the shape the backend hands one over in. */
 const model = (body: string): string => `data:model/gltf-binary;base64,${btoa(body)}`;
@@ -75,26 +85,27 @@ const model = (body: string): string => `data:model/gltf-binary;base64,${btoa(bo
  * a real request is in from the moment it is written until the player next logs in. A double
  * answering "created" would be testing the sentence this app almost never shows.
  */
-const waiting = (name: string, icon: number | null, slots: InGameSetSlot[]): SetRequest[] => [{
-  id: 1,
-  // Tidied by the backend rather than by the window, which is what the window then draws.
-  name: name.trim().replace(/\s+/g, " "),
-  icon,
-  createdAt: 2_100_000_000,
-  slots,
-}];
+const waiting = (name: string, icon: number | null, slots: InGameSetSlot[]): SetRequest[] => [
+  {
+    id: 1,
+    // Tidied by the backend rather than by the window, which is what the window then draws.
+    name: name.trim().replace(/\s+/g, " "),
+    icon,
+    createdAt: 2_100_000_000,
+    slots,
+  },
+];
 
-const WAITING_FOR_LOGIN
-  = "Waiting for Deeps run to be saved — it goes in next time you log that account in.";
+const WAITING_FOR_LOGIN =
+  "Waiting for Deeps run to be saved — it goes in next time you log that account in.";
 
 /** The panel over doubles a test answers; nothing here talks to a backend. */
-function panel(
-  outfit: Outfit,
-  actions: Partial<SaveActions> = {},
-) {
-  const onSendToGame = vi.fn(actions.onSendToGame
-    ?? ((name: string, icon: number | null, slots: InGameSetSlot[]) =>
-      Promise.resolve(waiting(name, icon, slots))));
+function panel(outfit: Outfit, actions: Partial<SaveActions> = {}) {
+  const onSendToGame = vi.fn(
+    actions.onSendToGame ??
+      ((name: string, icon: number | null, slots: InGameSetSlot[]) =>
+        Promise.resolve(waiting(name, icon, slots))),
+  );
   const onSave = vi.fn(actions.onSave ?? (() => Promise.resolve({ sets: [] })));
   const stage: ModelStage = {
     show: () => Promise.resolve(),
@@ -132,10 +143,8 @@ function panel(
   return { onSendToGame, onSave };
 }
 
-const nameBox = (): HTMLInputElement =>
-  screen.getByRole("textbox", { name: "Name for this set" });
-const send = (): HTMLButtonElement =>
-  screen.getByRole("button", { name: "Send to the game" });
+const nameBox = (): HTMLInputElement => screen.getByRole("textbox", { name: "Name for this set" });
+const send = (): HTMLButtonElement => screen.getByRole("button", { name: "Send to the game" });
 
 /**
  * Everything the form is currently saying, as the live regions it says it through.

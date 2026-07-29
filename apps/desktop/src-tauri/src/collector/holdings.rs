@@ -291,15 +291,17 @@ fn share_one_pot(entry: &mut Value) {
     let freshest = entry["characters"]
         .as_array()
         .and_then(|holders| {
-            holders.iter().fold(None::<&Value>, |best, holder| match best {
-                Some(best)
-                    if holder["at"].as_i64().unwrap_or(i64::MIN)
-                        <= best["at"].as_i64().unwrap_or(i64::MIN) =>
-                {
+            holders
+                .iter()
+                .fold(None::<&Value>, |best, holder| match best {
                     Some(best)
-                }
-                _ => Some(holder),
-            })
+                        if holder["at"].as_i64().unwrap_or(i64::MIN)
+                            <= best["at"].as_i64().unwrap_or(i64::MIN) =>
+                    {
+                        Some(best)
+                    }
+                    _ => Some(holder),
+                })
         })
         .cloned();
     let Some(freshest) = freshest else {
@@ -361,12 +363,7 @@ fn account_gold(connection: &Connection) -> Result<Value, String> {
         .query_row(
             "SELECT SUM(warband), MIN(observed_at) FROM account_gold",
             [],
-            |row| {
-                Ok((
-                    row.get::<_, Option<i64>>(0)?,
-                    row.get::<_, Option<i64>>(1)?,
-                ))
-            },
+            |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
         )
         .map_err(|error| error.to_string())?;
 

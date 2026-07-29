@@ -28,20 +28,22 @@ export function stateSentence(status: CombatLogStatus, now?: number): string {
     case "off":
       return status.growing
         ? "Chronie is not asking for combat logging — though this install is writing a " +
-          "combat log anyway, which somebody turned on outside Chronie."
+            "combat log anyway, which somebody turned on outside Chronie."
         : "Combat logging is off. Nothing is being written and nothing is using disk.";
     case "basic":
       return status.advanced === null || status.advanced === undefined
         ? "Combat logging is on, but Chronie could not read the game's settings, so it " +
-          `cannot confirm advanced logging. Check ${NETWORK_OPTIONS}.`
+            `cannot confirm advanced logging. Check ${NETWORK_OPTIONS}.`
         : "Combat logging is on, but advanced combat logging is off — the log will have no " +
-          `positions in it. Tick ${NETWORK_OPTIONS}, then log in again.`;
+            `positions in it. Tick ${NETWORK_OPTIONS}, then log in again.`;
     case "advanced":
       return "Advanced combat logging is on, and the game is writing to it.";
     case "stale": {
       if (!status.log) {
-        return "Advanced combat logging is set up, but this install has no combat log at " +
-          "all yet. One appears the next time you log in.";
+        return (
+          "Advanced combat logging is set up, but this install has no combat log at " +
+          "all yet. One appears the next time you log in."
+        );
       }
       // A file this machine will not date is a file nothing can be said about the age of.
       // Reckoning from the epoch would put "20659 days ago" on screen, which is worse than
@@ -49,8 +51,10 @@ export function stateSentence(status: CombatLogStatus, now?: number): string {
       const when = status.log.modified
         ? `nothing has been written ${ago(status.log.modified, now)}`
         : "this machine will not say when the log was last written";
-      return `Advanced combat logging is set up, but ${when}. Expected while the game is ` +
-        "closed; if you have been playing since, the game is not logging.";
+      return (
+        `Advanced combat logging is set up, but ${when}. Expected while the game is ` +
+        "closed; if you have been playing since, the game is not logging."
+      );
     }
   }
 }

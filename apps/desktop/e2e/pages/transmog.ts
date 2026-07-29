@@ -38,8 +38,10 @@ export class TransmogView {
    * the ones the player saved in the game itself.
    */
   async browseBy(what: "Sets" | "Items" | "Yours" | "Personal in-game sets"): Promise<void> {
-    await this.view.getByRole("group", { name: "Browse the game by" })
-      .getByRole("button", { name: what, exact: true }).click();
+    await this.view
+      .getByRole("group", { name: "Browse the game by" })
+      .getByRole("button", { name: what, exact: true })
+      .click();
   }
 
   /** Whatever the view says about the whole of what it read, above all four browsers. */
@@ -57,8 +59,7 @@ export class SetGrid {
 
   constructor(page: Page) {
     this.page = page;
-    this.browser = new TransmogView(page).view
-      .getByRole("region", { name: "The game's sets" });
+    this.browser = new TransmogView(page).view.getByRole("region", { name: "The game's sets" });
   }
 
   /** The collection headings, which are the browser's own — the panels beside it have them too. */
@@ -195,15 +196,18 @@ export class SetGrid {
    * and a window handing out a graphics context per card fails silently.
    */
   async painted(): Promise<number> {
-    return this.bodies().evaluateAll((canvases) => canvases.filter((canvas) => {
-      const picture = (canvas as HTMLCanvasElement).getContext("2d");
-      if (!picture) return false;
-      const { width, height } = canvas as HTMLCanvasElement;
-      if (!width || !height) return false;
-      const { data } = picture.getImageData(0, 0, width, height);
-      for (let at = 3; at < data.length; at += 4) if (data[at] !== 0) return true;
-      return false;
-    }).length);
+    return this.bodies().evaluateAll(
+      (canvases) =>
+        canvases.filter((canvas) => {
+          const picture = (canvas as HTMLCanvasElement).getContext("2d");
+          if (!picture) return false;
+          const { width, height } = canvas as HTMLCanvasElement;
+          if (!width || !height) return false;
+          const { data } = picture.getImageData(0, 0, width, height);
+          for (let at = 3; at < data.length; at += 4) if (data[at] !== 0) return true;
+          return false;
+        }).length,
+    );
   }
 
   /**
@@ -230,7 +234,9 @@ export class SetGrid {
    * that row is for.
    */
   wear(set: string, slot: string, label: string, nth = 0): Locator {
-    return this.card(set).getByRole("button", { name: `Wear ${slot}: ${label}` }).nth(nth);
+    return this.card(set)
+      .getByRole("button", { name: `Wear ${slot}: ${label}` })
+      .nth(nth);
   }
 
   /** The whole set at once, which is how a player looks at one. */
@@ -260,14 +266,15 @@ export class SetGrid {
 
   /** One of those chips, named by what clicking it would ask the grid for. */
   askByTag(set: string, label: string): Locator {
-    return this.card(set)
-      .getByRole("button", { name: `Filter by the tag ${label}`, exact: true });
+    return this.card(set).getByRole("button", { name: `Filter by the tag ${label}`, exact: true });
   }
 
   /** Throws a tag away again, from the chip it is written on. */
   dropTag(set: string, label: string): Locator {
-    return this.card(set)
-      .getByRole("button", { name: `Remove the tag ${label} from ${set}`, exact: true });
+    return this.card(set).getByRole("button", {
+      name: `Remove the tag ${label} from ${set}`,
+      exact: true,
+    });
   }
 
   /**
@@ -277,8 +284,9 @@ export class SetGrid {
    * carry names one contains the other of and only the control is named exactly.
    */
   row(set: string, label: string): Locator {
-    return this.rows(set)
-      .filter({ has: this.page.getByRole("button", { name: `Favourite ${label}`, exact: true }) });
+    return this.rows(set).filter({
+      has: this.page.getByRole("button", { name: `Favourite ${label}`, exact: true }),
+    });
   }
 
   /** The star on one of those rows, which is against the *look* and not against the set. */
@@ -309,7 +317,8 @@ export class SetGrid {
    */
   swatchColours(set: string): Promise<string[]> {
     return this.measured(set).evaluate((chip) =>
-      [...chip.querySelectorAll("rect")].map((square) => square.getAttribute("fill") ?? ""));
+      [...chip.querySelectorAll("rect")].map((square) => square.getAttribute("fill") ?? ""),
+    );
   }
 
   /** Whether the grid is narrowed to the starred sets. */
@@ -388,12 +397,13 @@ export class Outfit {
    * a piece going on is a round trip through the backend and the tips arrive with it.
    */
   worn(): Promise<string[]> {
-    return this.panel.getByRole("button", { name: /^Take off / })
-      .evaluateAll((tiles) => tiles.map((tile) => {
+    return this.panel.getByRole("button", { name: /^Take off / }).evaluateAll((tiles) =>
+      tiles.map((tile) => {
         const tip = document.createElement("div");
         tip.innerHTML = (tile as HTMLElement).dataset.tip ?? "";
         return [...tip.children].map((part) => part.textContent).join(" · ");
-      }));
+      }),
+    );
   }
 
   takeOff(label: string): Promise<void> {
@@ -475,7 +485,7 @@ export class Outfit {
    */
   async settled(): Promise<string> {
     await expect(this.stage()).toHaveAttribute("data-camera-state", "settled");
-    return await this.drew("camera") ?? "";
+    return (await this.drew("camera")) ?? "";
   }
 
   /**
@@ -486,7 +496,7 @@ export class Outfit {
    */
   async movedFrom(camera: string): Promise<number> {
     const numbers = (reading: string): number[] => reading.split(",").map(Number);
-    const [now, before] = [numbers(await this.drew("camera") ?? ""), numbers(camera)];
+    const [now, before] = [numbers((await this.drew("camera")) ?? ""), numbers(camera)];
     return Math.hypot(...now.map((axis, at) => axis - (before[at] ?? 0)));
   }
 
@@ -539,14 +549,17 @@ export class Outfit {
     await this.panel.getByRole("group", { name: "The stage" }).evaluate((pane) => {
       const seen: string[] = [pane.dataset.state ?? ""];
       (window as unknown as { paneStates: string[] }).paneStates = seen;
-      new MutationObserver(() => seen.push(pane.dataset.state ?? ""))
-        .observe(pane, { attributes: true, attributeFilter: ["data-state"] });
+      new MutationObserver(() => seen.push(pane.dataset.state ?? "")).observe(pane, {
+        attributes: true,
+        attributeFilter: ["data-state"],
+      });
     });
   }
 
   /** Every state the pane has been in since [`watchPane`], oldest first. */
   paneStates(): Promise<string[]> {
-    return this.page.evaluate(() =>
-      (window as unknown as { paneStates?: string[] }).paneStates ?? []);
+    return this.page.evaluate(
+      () => (window as unknown as { paneStates?: string[] }).paneStates ?? [],
+    );
   }
 }

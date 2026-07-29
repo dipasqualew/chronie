@@ -65,95 +65,122 @@ export interface CharacterActivityProps {
   onOpenSegment: OpenSegment;
 }
 
-export function CharacterActivity(
-  { entry, range, onRange, now, items, places, onOpenSegment }: CharacterActivityProps,
-): ReactNode {
+export function CharacterActivity({
+  entry,
+  range,
+  onRange,
+  now,
+  items,
+  places,
+  onOpenSegment,
+}: CharacterActivityProps): ReactNode {
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const chosen = rangeOf(range);
   const segments = within(entry.segments, chosen, now);
   const activities = activitiesIn(segments);
   const gains = highlights(segments);
 
-  return <>
-    <div className="act-head">
-      <label htmlFor="character-range">Showing</label>
-      <select
-        id="character-range" value={chosen.key}
-        onChange={(event) => {
-          // A gain unfolded over one range says nothing about another, so changing the window
-          // starts folded rather than leaving a panel of things that are no longer in it.
-          setUnfolded(null);
-          onRange(event.target.value);
-        }}
-      >
-        {RANGES.map((one) => <option key={one.key} value={one.key}>{one.label}</option>)}
-      </select>
-      <span className="act-count muted" role="status" aria-label="What the range holds">
-        {segments.length
-          ? `${plural(activities.length, "activity", "activities")} · ${plural(segments.length, "segment")}`
-          : ""}
-      </span>
-    </div>
-
-    {segments.length === 0
-      // A character is only on the roster because they have segments, and the widest range
-      // holds every one of them — so an empty section always has something to report and
-      // somewhere to send the reader, and never has to apologise for an empty history.
-      ? <div className="empty">
-        <p className="empty-title">Nothing in this range</p>
-        <p>{`${entry.name} has ${plural(entry.segmentCount, "segment")} recorded altogether.`}</p>
-        {chosen.key === WIDEST_RANGE
-          ? null
-          : <button type="button" onClick={() => onRange(WIDEST_RANGE)}>Show all time</button>}
+  return (
+    <>
+      <div className="act-head">
+        <label htmlFor="character-range">Showing</label>
+        <select
+          id="character-range"
+          value={chosen.key}
+          onChange={(event) => {
+            // A gain unfolded over one range says nothing about another, so changing the window
+            // starts folded rather than leaving a panel of things that are no longer in it.
+            setUnfolded(null);
+            onRange(event.target.value);
+          }}
+        >
+          {RANGES.map((one) => (
+            <option key={one.key} value={one.key}>
+              {one.label}
+            </option>
+          ))}
+        </select>
+        <span className="act-count muted" role="status" aria-label="What the range holds">
+          {segments.length
+            ? `${plural(activities.length, "activity", "activities")} · ${plural(segments.length, "segment")}`
+            : ""}
+        </span>
       </div>
-      : <>
-        <section className="detail-section">
-          <h3>What was done</h3>
-          {activities.length
-            ? <ActivityRoll
-              activities={activities}
-              onOpenSegment={(segmentId) => onOpenSegment(segmentId, segments)}
-            />
-            : <p className="muted">Nothing named in this range. Segments are still below.</p>}
-        </section>
 
-        {/* Named as well as headed, because it is a region a reader wants to arrive at rather
+      {segments.length === 0 ? (
+        // A character is only on the roster because they have segments, and the widest range
+        // holds every one of them — so an empty section always has something to report and
+        // somewhere to send the reader, and never has to apologise for an empty history.
+        <div className="empty">
+          <p className="empty-title">Nothing in this range</p>
+          <p>{`${entry.name} has ${plural(entry.segmentCount, "segment")} recorded altogether.`}</p>
+          {chosen.key === WIDEST_RANGE ? null : (
+            <button type="button" onClick={() => onRange(WIDEST_RANGE)}>
+              Show all time
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <section className="detail-section">
+            <h3>What was done</h3>
+            {activities.length ? (
+              <ActivityRoll
+                activities={activities}
+                onOpenSegment={(segmentId) => onOpenSegment(segmentId, segments)}
+              />
+            ) : (
+              <p className="muted">Nothing named in this range. Segments are still below.</p>
+            )}
+          </section>
+
+          {/* Named as well as headed, because it is a region a reader wants to arrive at rather
             than scroll to — and because the chips inside it are the same chips a segment row
             carries, so something has to say which set of them is the range's. */}
-        <section className="detail-section" aria-label="What it got them">
-          <h3>What it got them</h3>
-          {shownHighlights(gains).length
-            ? <HighlightList
-              entries={gains} scope={SCOPE} expanded={unfolded} items={items}
-              onUnfold={(kind) => setUnfolded((open) => (open === kind ? null : kind))}
-              onOpenSegment={(segmentId) => onOpenSegment(segmentId, segments)}
-            />
-            : <p className="muted">Nothing gained or collected in this range.</p>}
-        </section>
+          <section className="detail-section" aria-label="What it got them">
+            <h3>What it got them</h3>
+            {shownHighlights(gains).length ? (
+              <HighlightList
+                entries={gains}
+                scope={SCOPE}
+                expanded={unfolded}
+                items={items}
+                onUnfold={(kind) => setUnfolded((open) => (open === kind ? null : kind))}
+                onOpenSegment={(segmentId) => onOpenSegment(segmentId, segments)}
+              />
+            ) : (
+              <p className="muted">Nothing gained or collected in this range.</p>
+            )}
+          </section>
 
-        {/* Open by nobody's default. `<details>` rather than a button of our own because it is
+          {/* Open by nobody's default. `<details>` rather than a button of our own because it is
             exactly what the element is for, and because it keeps the whole list out of the
             accessibility tree until it is asked for rather than merely off screen. */}
-        <details
-          className="detail-section profile-segments" aria-label="Every segment in this range"
-        >
-          <summary>{plural(segments.length, "segment")}</summary>
-          {byDay(segments).map((group) => (
-            <section className="profile-day" key={group.day}>
-              <h4>{dayLabel(group.day)}</h4>
-              <ol className="segment-rows">
-                {group.segments.map((segment) => (
-                  <li key={segment.segmentId}>
-                    <SegmentButton
-                      segment={segment} items={items} places={places}
-                      onOpen={() => onOpenSegment(segment.segmentId, segments)}
-                    />
-                  </li>
-                ))}
-              </ol>
-            </section>
-          ))}
-        </details>
-      </>}
-  </>;
+          <details
+            className="detail-section profile-segments"
+            aria-label="Every segment in this range"
+          >
+            <summary>{plural(segments.length, "segment")}</summary>
+            {byDay(segments).map((group) => (
+              <section className="profile-day" key={group.day}>
+                <h4>{dayLabel(group.day)}</h4>
+                <ol className="segment-rows">
+                  {group.segments.map((segment) => (
+                    <li key={segment.segmentId}>
+                      <SegmentButton
+                        segment={segment}
+                        items={items}
+                        places={places}
+                        onOpen={() => onOpenSegment(segment.segmentId, segments)}
+                      />
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ))}
+          </details>
+        </>
+      )}
+    </>
+  );
 }

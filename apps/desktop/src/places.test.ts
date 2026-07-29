@@ -15,11 +15,15 @@ const PICTURE = "data:image/png;base64,deadmines";
  */
 function book(held: Record<string, string>, load?: (places: string[]) => Promise<IconsPayload>) {
   const run: Array<() => void> = [];
-  const asked = vi.fn(load ?? ((places: string[]) => Promise.resolve({
-    icons: Object.fromEntries(
-      places.filter((place) => held[place]).map((place) => [place, held[place]!]),
-    ),
-  })));
+  const asked = vi.fn(
+    load ??
+      ((places: string[]) =>
+        Promise.resolve({
+          icons: Object.fromEntries(
+            places.filter((place) => held[place]).map((place) => [place, held[place]!]),
+          ),
+        })),
+  );
   const icons = createPlaceIcons({ load: asked, schedule: (send) => run.push(send) });
   const flush = async (): Promise<void> => {
     for (const send of run.splice(0)) send();

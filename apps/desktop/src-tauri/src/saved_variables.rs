@@ -1000,7 +1000,7 @@ mod tests {
         let segments = raw.take_segments();
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].currencies[0].total, None);
-        assert_eq!(segments[0].encounters[0].success, false);
+        assert!(!segments[0].encounters[0].success);
     }
 
     #[test]

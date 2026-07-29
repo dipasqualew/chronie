@@ -68,7 +68,10 @@ export function CombatLogPanel({ actions, requested, visible }: CombatLogPanelPr
       }
     };
     void refresh();
-    if (!visible) return () => { alive = false; };
+    if (!visible)
+      return () => {
+        alive = false;
+      };
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => {
       alive = false;
@@ -82,11 +85,14 @@ export function CombatLogPanel({ actions, requested, visible }: CombatLogPanelPr
     // Said before the await, because turning this on reinstalls the addon and the game will
     // not read it until the next login — a switch that silently does nothing for an hour is
     // the thing this panel exists to prevent.
-    setSaying(wanted
-      ? "Turning combat logging on. It starts at your next login or /reload."
-      : "Turning combat logging off. It stops at your next login or /reload.");
+    setSaying(
+      wanted
+        ? "Turning combat logging on. It starts at your next login or /reload."
+        : "Turning combat logging off. It stops at your next login or /reload.",
+    );
     setStatus((was) => (was ? { ...was, requested: wanted } : was));
-    void actions.set(wanted)
+    void actions
+      .set(wanted)
       .then((answer) => {
         setStatus(answer);
         setSaying("");
@@ -110,14 +116,19 @@ export function CombatLogPanel({ actions, requested, visible }: CombatLogPanelPr
   return (
     <section className="panel setup" aria-labelledby="combat-log-heading">
       <h2 id="combat-log-heading">Combat logging</h2>
-      <p className="sub">The game can write every combat event to a file, with the positions
-        Chronie needs to say where something happened. It is off unless you turn it on here,
-        because it is not cheap: <strong>a raid night is hundreds of megabytes</strong>. Chronie
-        deletes nothing out of the game&apos;s <strong>Logs</strong> folder unless the panel
-        below this one is turned on as well.</p>
+      <p className="sub">
+        The game can write every combat event to a file, with the positions Chronie needs to say
+        where something happened. It is off unless you turn it on here, because it is not cheap:{" "}
+        <strong>a raid night is hundreds of megabytes</strong>. Chronie deletes nothing out of the
+        game&apos;s <strong>Logs</strong> folder unless the panel below this one is turned on as
+        well.
+      </p>
       <label className="check">
         <input
-          id="combat-logging" type="checkbox" checked={checked} disabled={busy}
+          id="combat-logging"
+          type="checkbox"
+          checked={checked}
+          disabled={busy}
           onChange={(event) => change(event.target.checked)}
         />
         Start combat logging when I log in
@@ -128,7 +139,9 @@ export function CombatLogPanel({ actions, requested, visible }: CombatLogPanelPr
         {saying || (status ? stateSentence(status) : "")}
       </p>
       <div id="combat-log-detail" className="sub">
-        {lines.map((line) => <div key={line}>{line}</div>)}
+        {lines.map((line) => (
+          <div key={line}>{line}</div>
+        ))}
       </div>
     </section>
   );

@@ -253,6 +253,6 @@ export const eventsOf = <K extends EventListKey>(segment: Segment, key: K): Arra
   (segment[key] ?? []) as Array<EventOf<K>>;
 
 declare global {
-  // eslint-disable-next-line no-var -- a `var` is the only declaration that reaches globalThis.
+  // A `var` is the only declaration that reaches globalThis.
   var __Chronie_E2E__: E2EMock | undefined;
 }

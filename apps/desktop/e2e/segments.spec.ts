@@ -123,8 +123,9 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(detail.gainFor("Warband Chit")).toContainText("6,000 shared across the warband");
     await expect(detail.gainFor("Warband Chit")).not.toContainText("across 2 characters");
 
-    await expect(detail.gainFor("Cavern Cartographers"))
-      .toContainText("Brin-Hearth is further along: Revered");
+    await expect(detail.gainFor("Cavern Cartographers")).toContainText(
+      "Brin-Hearth is further along: Revered",
+    );
   });
 
   // The same split the character pane draws, in the place a reader meets one segment: what
@@ -181,12 +182,14 @@ test("digs from a session down into a single segment and back out again", async 
     await detail.linkTo("Quest 81").click();
     await detail.linkTo("Into the Light").click();
     await detail.linkTo("Wanderer's Mantle").click();
-    await expect.poll(() => shell.openedUrls()).toEqual([
-      "https://www.wowhead.com/quest=81",
-      "https://www.wowhead.com/achievement=9",
-      // By the id the segment recorded, whatever the game ended up calling the item.
-      "https://www.wowhead.com/item=101",
-    ]);
+    await expect
+      .poll(() => shell.openedUrls())
+      .toEqual([
+        "https://www.wowhead.com/quest=81",
+        "https://www.wowhead.com/achievement=9",
+        // By the id the segment recorded, whatever the game ended up calling the item.
+        "https://www.wowhead.com/item=101",
+      ]);
     await expect(detail.title()).toHaveText("Glass Caverns");
     expect(shell.url()).toContain("127.0.0.1:4399");
   });
@@ -250,49 +253,50 @@ test("digs from a session down into a single segment and back out again", async 
  * Both readings are of the camera against the point it is looking at, because a canvas draws
  * the same rectangle at any distance and any angle.
  */
-test("frames one appearance on the part of the character it is worn on, and turns it there",
-  async ({ page }) => {
-    const timeline = new Timeline(page);
-    const detail = new SegmentDetail(page);
-    const drawn = new AppearancePicture(page);
+test("frames one appearance on the part of the character it is worn on, and turns it there", async ({
+  page,
+}) => {
+  const timeline = new Timeline(page);
+  const detail = new SegmentDetail(page);
+  const drawn = new AppearancePicture(page);
 
-    await timeline.open();
-    await timeline.fold(timeline.sessions().first(), "2 segments").click();
-    await detail.openFor("Aster-Vale", "Glass Caverns");
-    await drawn.open();
-    await expect.poll(() => drawn.vertices(), { timeout: PATIENCE_MS }).toBe("1152");
+  await timeline.open();
+  await timeline.fold(timeline.sessions().first(), "2 segments").click();
+  await detail.openFor("Aster-Vale", "Glass Caverns");
+  await drawn.open();
+  await expect.poll(() => drawn.vertices(), { timeout: PATIENCE_MS }).toBe("1152");
 
-    let framed = { out: 0, above: 0 };
+  let framed = { out: 0, above: 0 };
 
-    await test.step("the camera stands at the slot rather than off the whole body", async () => {
-      framed = await drawn.settled();
-      // The row is a chestpiece, so the framing holds not quite half her height. Framing all of
-      // what came back instead stands the camera thirty-eight units out — the fixture body is a
-      // long bar, and that is the number this pane used to open on.
-      expect(framed.out).toBeLessThan(5);
-      expect(framed.out).toBeGreaterThan(0);
-    });
-
-    await test.step("a drag turns it and leaves it the same distance away", async () => {
-      await drawn.drag(120, 0);
-      const turned = await drawn.settled();
-      // An orbit changes which way round the model is and nothing else, so the distance is the
-      // statement that the drag turned the appearance rather than re-framed something.
-      expect(turned.out).toBeCloseTo(framed.out, 1);
-    });
-
-    // The other half of the report: a drag with any vertical in it threw the camera up over the
-    // model's head, where the controls pin the angle and the remaining drag becomes a spin about
-    // the middle of the pane. A whole pane's worth of downward drag is nearly three full turns
-    // of it, and a reader turning a helm does not mean any of them.
-    await test.step("and no drag takes the camera over the top of it", async () => {
-      await drawn.drag(0, 400);
-      const tilted = await drawn.settled();
-      // Straight overhead is 1. Sixty degrees up, which is as far as the pane goes, is 0.866.
-      expect(tilted.above).toBeLessThan(0.9);
-      expect(tilted.above).toBeGreaterThan(0.7);
-    });
+  await test.step("the camera stands at the slot rather than off the whole body", async () => {
+    framed = await drawn.settled();
+    // The row is a chestpiece, so the framing holds not quite half her height. Framing all of
+    // what came back instead stands the camera thirty-eight units out — the fixture body is a
+    // long bar, and that is the number this pane used to open on.
+    expect(framed.out).toBeLessThan(5);
+    expect(framed.out).toBeGreaterThan(0);
   });
+
+  await test.step("a drag turns it and leaves it the same distance away", async () => {
+    await drawn.drag(120, 0);
+    const turned = await drawn.settled();
+    // An orbit changes which way round the model is and nothing else, so the distance is the
+    // statement that the drag turned the appearance rather than re-framed something.
+    expect(turned.out).toBeCloseTo(framed.out, 1);
+  });
+
+  // The other half of the report: a drag with any vertical in it threw the camera up over the
+  // model's head, where the controls pin the angle and the remaining drag becomes a spin about
+  // the middle of the pane. A whole pane's worth of downward drag is nearly three full turns
+  // of it, and a reader turning a helm does not mean any of them.
+  await test.step("and no drag takes the camera over the top of it", async () => {
+    await drawn.drag(0, 400);
+    const tilted = await drawn.settled();
+    // Straight overhead is 1. Sixty degrees up, which is as far as the pane goes, is 0.866.
+    expect(tilted.above).toBeLessThan(0.9);
+    expect(tilted.above).toBeGreaterThan(0.7);
+  });
+});
 
 /**
  * The same pane, on the kind of screen most readers have.

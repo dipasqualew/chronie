@@ -17,10 +17,12 @@ import type { WifiOffer, WifiReceipt, WifiReceiveStatus } from "./types";
  */
 export function offerSentence(offer: WifiOffer, from: string): string {
   const upTo = offer.newestDay ? `, up to ${offer.newestDay}` : "";
-  return `${offer.device} (${from}) is offering a history of ` +
+  return (
+    `${offer.device} (${from}) is offering a history of ` +
     `${plural(offer.segmentCount, "segment")} across ` +
     `${plural(offer.characterCount, "character")}${upTo} — ${fileSize(offer.bytes)}. ` +
-    "Accepting replaces everything this Chronie has collected.";
+    "Accepting replaces everything this Chronie has collected."
+  );
 }
 
 /** What the receiving half is doing, in one line. */

@@ -67,8 +67,9 @@ describe("activitySummary", () => {
   });
 
   it("calls out a depleted key", () => {
-    expect(activitySummary(activity("mythic_plus", { keystoneLevel: 9, timed: false })))
-      .toContain("depleted");
+    expect(activitySummary(activity("mythic_plus", { keystoneLevel: 9, timed: false }))).toContain(
+      "depleted",
+    );
   });
 
   it("prefers 'abandoned' over the timer for a run that never finished", () => {
@@ -88,29 +89,34 @@ describe("activitySummary", () => {
   });
 
   it("mentions wipes only when there were any", () => {
-    expect(activitySummary(activity("legacy_raid", { bossesKilled: 2, wipes: 0 })))
-      .not.toContain("wipe");
-    expect(activitySummary(activity("legacy_raid", { bossesKilled: 2, wipes: 1 })))
-      .toContain("1 wipe");
+    expect(activitySummary(activity("legacy_raid", { bossesKilled: 2, wipes: 0 }))).not.toContain(
+      "wipe",
+    );
+    expect(activitySummary(activity("legacy_raid", { bossesKilled: 2, wipes: 1 }))).toContain(
+      "1 wipe",
+    );
   });
 
   it("reports levelling as a fraction of a level", () => {
-    expect(
-      activitySummary(activity("levelling", { percentOfLevel: 42.5, levelsGained: 0 })),
-    ).toBe("42.5% of a level");
+    expect(activitySummary(activity("levelling", { percentOfLevel: 42.5, levelsGained: 0 }))).toBe(
+      "42.5% of a level",
+    );
   });
 
   it("leads a prey hunt with what was hunted and how hard it was", () => {
     expect(
-      activitySummary(activity("prey", { title: "Gorgetusk", difficulty: "Heroic", huntsCompleted: 1 })),
+      activitySummary(
+        activity("prey", { title: "Gorgetusk", difficulty: "Heroic", huntsCompleted: 1 }),
+      ),
     ).toBe("Gorgetusk · Heroic");
   });
 
   // The named hunt is the last of the segment, so a count is the only thing that keeps a
   // single title from reading as the whole evening.
   it("counts a segment's hunts only once there was more than one", () => {
-    expect(activitySummary(activity("prey", { title: "Gorgetusk", huntsCompleted: 3 })))
-      .toBe("Gorgetusk · 3 hunts");
+    expect(activitySummary(activity("prey", { title: "Gorgetusk", huntsCompleted: 3 }))).toBe(
+      "Gorgetusk · 3 hunts",
+    );
   });
 
   it("leads a delve with the delve's own name and the tier it was run at", () => {
@@ -123,18 +129,21 @@ describe("activitySummary", () => {
   // the same instance and nothing alike — so a missing one is said out loud rather than left
   // off, the same reading a keystone of unknown level gets.
   it("says the tier is unknown rather than leaving it off", () => {
-    expect(activitySummary(activity("delve", { delve: "Kriegval's Rest" })))
-      .toBe("Kriegval's Rest · tier unknown");
+    expect(activitySummary(activity("delve", { delve: "Kriegval's Rest" }))).toBe(
+      "Kriegval's Rest · tier unknown",
+    );
   });
 
   it("calls out a delve the player left part way through", () => {
-    expect(activitySummary(activity("delve", { delve: "Fungal Folly", tier: 8, completed: false })))
-      .toBe("Fungal Folly · tier 8 · left unfinished");
+    expect(
+      activitySummary(activity("delve", { delve: "Fungal Folly", tier: 8, completed: false })),
+    ).toBe("Fungal Folly · tier 8 · left unfinished");
   });
 
   it("falls back to the raw metadata for a kind the app does not know", () => {
-    expect(activitySummary(activity("transmog_farm", { target: "Val'anyr" })))
-      .toBe("target: Val'anyr");
+    expect(activitySummary(activity("transmog_farm", { target: "Val'anyr" }))).toBe(
+      "target: Val'anyr",
+    );
   });
 
   it("survives an activity with no metadata at all", () => {
@@ -178,8 +187,10 @@ describe("parseMetadata", () => {
   // The two things the issue behind this kind asked to be kept, and both editable: a hunt is
   // recognised from a localised quest title, so a wrong reading is a thing a user can correct.
   it("offers a prey hunt's own name and difficulty as fields", () => {
-    expect(parseMetadata("prey", { title: "Gorgetusk", difficulty: "Heroic" }))
-      .toEqual({ title: "Gorgetusk", difficulty: "Heroic" });
+    expect(parseMetadata("prey", { title: "Gorgetusk", difficulty: "Heroic" })).toEqual({
+      title: "Gorgetusk",
+      difficulty: "Heroic",
+    });
   });
 
   it("drops a number that will not parse", () => {

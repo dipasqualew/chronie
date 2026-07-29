@@ -317,18 +317,16 @@ mod tests {
             read_all(&[WANDERERS_MANTLE, BULWARK_HELM, TIDEGLASS_EDGE, HEARTH_TOKEN])
                 .into_iter()
                 .filter_map(|(id, found)| {
-                    found.map(|found| {
-                        (id, found.class_id, found.subclass_id, found.inventory_type)
-                    })
+                    found.map(|found| (id, found.class_id, found.subclass_id, found.inventory_type))
                 })
                 .collect();
         assert_eq!(
             kinds,
             vec![
-                (WANDERERS_MANTLE, ARMOR, 2, 3),  // leather shoulders
-                (BULWARK_HELM, ARMOR, 4, 1),      // plate head
-                (TIDEGLASS_EDGE, WEAPON, 7, 13),  // a one-handed sword
-                (HEARTH_TOKEN, 15, 0, 0),         // worn nowhere at all
+                (WANDERERS_MANTLE, ARMOR, 2, 3), // leather shoulders
+                (BULWARK_HELM, ARMOR, 4, 1),     // plate head
+                (TIDEGLASS_EDGE, WEAPON, 7, 13), // a one-handed sword
+                (HEARTH_TOKEN, 15, 0, 0),        // worn nowhere at all
             ]
         );
     }

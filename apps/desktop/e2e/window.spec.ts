@@ -14,7 +14,9 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "./harness";
 import { Shell } from "./pages/shell";
 
-test("is served the policy the packaged window is, and says which build it is", async ({ page }) => {
+test("is served the policy the packaged window is, and says which build it is", async ({
+  page,
+}) => {
   const shell = new Shell(page);
 
   /**
@@ -60,7 +62,11 @@ test("is served the policy the packaged window is, and says which build it is", 
     ).app.security.csp;
     for (const directive of ["connect-src", "img-src"]) {
       const granted = (policy: string): string[] =>
-        policy.split(";").find((one) => one.trim().startsWith(directive))?.trim().split(/\s+/) ?? [];
+        policy
+          .split(";")
+          .find((one) => one.trim().startsWith(directive))
+          ?.trim()
+          .split(/\s+/) ?? [];
       // `blob:` by name, because it is the one every picture in every `.glb` arrives through —
       // as a `fetch` on Chromium and as an `<img>` on WebKit, so both directives or neither.
       expect(granted(packaged), `${directive} in tauri.conf.json`).toContain("blob:");
@@ -80,12 +86,14 @@ test("is served the policy the packaged window is, and says which build it is", 
     await shell.build().getByRole("link", { name: "Commit 95b5e08 on GitHub" }).click();
     await shell.build().getByRole("link", { name: "The dev release on GitHub" }).click();
 
-    await expect.poll(() => shell.openedUrls()).toEqual([
-      // The whole sha, which is the only form GitHub resolves — the seven on screen are for
-      // reading, and a link built out of them would be a link to nothing.
-      "https://github.com/dipasqualew/chronie/commit/95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c",
-      "https://github.com/dipasqualew/chronie/releases/tag/dev",
-    ]);
+    await expect
+      .poll(() => shell.openedUrls())
+      .toEqual([
+        // The whole sha, which is the only form GitHub resolves — the seven on screen are for
+        // reading, and a link built out of them would be a link to nothing.
+        "https://github.com/dipasqualew/chronie/commit/95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c",
+        "https://github.com/dipasqualew/chronie/releases/tag/dev",
+      ]);
   });
 
   await test.step("and the window is still the window afterwards", async () => {

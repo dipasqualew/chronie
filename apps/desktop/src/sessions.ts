@@ -88,7 +88,8 @@ export function buildSessions(
   gapSeconds: number = SESSION_GAP_SECONDS,
 ): Session[] {
   const ordered = [...(segments || [])].sort(
-    (left, right) => (left.startedAt || 0) - (right.startedAt || 0) || (left.endedAt || 0) - (right.endedAt || 0),
+    (left, right) =>
+      (left.startedAt || 0) - (right.startedAt || 0) || (left.endedAt || 0) - (right.endedAt || 0),
   );
 
   const groups: Segment[][] = [];
@@ -162,7 +163,8 @@ export function charactersIn(segments: Segment[]): SessionCharacter[] {
     // The level at the end of the session is the one worth showing; segments arrive in
     // order, so the largest seen is where the character finished.
     if (segment.level != null) found.level = Math.max(found.level ?? 0, segment.level);
-    if (segment.instance && !found.places.includes(segment.instance)) found.places.push(segment.instance);
+    if (segment.instance && !found.places.includes(segment.instance))
+      found.places.push(segment.instance);
     byName.set(segment.character, found);
   }
   return [...byName.values()].sort((left, right) => right.seconds - left.seconds);
@@ -179,24 +181,38 @@ export function charactersIn(segments: Segment[]): SessionCharacter[] {
 export function activitiesIn(segments: Segment[]): SessionActivity[] {
   return [...segments]
     .sort((left, right) => (left.startedAt || 0) - (right.startedAt || 0))
-    .flatMap((segment) => (segment.activities || []).map((activity) => ({
-      activity,
-      segmentId: segment.segmentId,
-      character: segment.character,
-      classFile: segment.classFile,
-      instance: segment.instance,
-      at: segment.startedAt,
-      seconds: segment.seconds,
-    })));
+    .flatMap((segment) =>
+      (segment.activities || []).map((activity) => ({
+        activity,
+        segmentId: segment.segmentId,
+        character: segment.character,
+        classFile: segment.classFile,
+        instance: segment.instance,
+        at: segment.startedAt,
+        seconds: segment.seconds,
+      })),
+    );
 }
 
 /* ---------- what mattered ---------- */
 
 export type HighlightKind =
-  | "achievement" | "levelUp" | "mount" | "toy" | "pet" | "transmog"
-  | "housingLevel" | "housingItem"
-  | "achievementCharacter" | "transmogVariant" | "quest" | "equipset"
-  | "gold" | "currency" | "reputation" | "housingXP";
+  | "achievement"
+  | "levelUp"
+  | "mount"
+  | "toy"
+  | "pet"
+  | "transmog"
+  | "housingLevel"
+  | "housingItem"
+  | "achievementCharacter"
+  | "transmogVariant"
+  | "quest"
+  | "equipset"
+  | "gold"
+  | "currency"
+  | "reputation"
+  | "housingXP";
 
 /**
  * `milestone` entries are the things a player would tell someone about; `tally` entries are
@@ -346,7 +362,7 @@ interface Sourced<T> {
  * one thing it names is a click away from the run it came from either way.
  */
 const counted = (items: HighlightEntry[], plural: string): string =>
-  (items.length === 1 ? items[0].label : `${items.length} ${plural}`);
+  items.length === 1 ? items[0].label : `${items.length} ${plural}`;
 
 /**
  * The things a player would tell someone about, one summary each.
@@ -383,11 +399,14 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   // rare ones — so they are two summaries, and the quieter of them is drawn as a mark.
   const achievements = from("achievements");
   const earned = (
-    kind: HighlightKind, found: Array<Sourced<EventOf<"achievements">>>, said: string,
+    kind: HighlightKind,
+    found: Array<Sourced<EventOf<"achievements">>>,
+    said: string,
   ): void => {
     if (!found.length) return;
-    const items = found.map((sourced) => entry(sourced,
-      sourced.event.name || `Achievement ${sourced.event.id}`, said));
+    const items = found.map((sourced) =>
+      entry(sourced, sourced.event.name || `Achievement ${sourced.event.id}`, said),
+    );
     out.push({
       kind,
       label: counted(items, "achievements"),
@@ -396,9 +415,16 @@ function milestones(segments: Segment[]): HighlightSeed[] {
       items,
     });
   };
-  earned("achievement", achievements.filter(({ event }) => event.accountFirst), "account first");
-  earned("achievementCharacter", achievements.filter(({ event }) => !event.accountFirst),
-    "character first");
+  earned(
+    "achievement",
+    achievements.filter(({ event }) => event.accountFirst),
+    "account first",
+  );
+  earned(
+    "achievementCharacter",
+    achievements.filter(({ event }) => !event.accountFirst),
+    "character first",
+  );
 
   const levelUps = from("levelUps");
   if (levelUps.length) {
@@ -417,19 +443,30 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     out.push({
       kind: "levelUp",
       label: counted(items, "levels"),
-      detail: reached.size > 1
-        ? `${reached.size} characters`
-        : (items.length === 1 ? (cast.size > 1 ? who : "") : reach),
+      detail:
+        reached.size > 1
+          ? `${reached.size} characters`
+          : items.length === 1
+            ? cast.size > 1
+              ? who
+              : ""
+            : reach,
       weight: Math.max(...reached.values()),
       items,
     });
   }
 
-  const collection = (key: "mounts" | "toys", kind: HighlightKind, noun: string, plural: string): void => {
+  const collection = (
+    key: "mounts" | "toys",
+    kind: HighlightKind,
+    noun: string,
+    plural: string,
+  ): void => {
     const found = from(key);
     if (!found.length) return;
     const items = found.map((sourced) =>
-      entry(sourced, sourced.event.name || `${noun} ${sourced.event.id}`));
+      entry(sourced, sourced.event.name || `${noun} ${sourced.event.id}`),
+    );
     out.push({ kind, label: counted(items, plural), weight: items.length, items });
   };
   collection("mounts", "mount", "Mount", "mounts");
@@ -444,7 +481,8 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   const pets = from("pets").filter(({ event }) => event.speciesFirst !== false);
   if (pets.length) {
     const items = pets.map((sourced) =>
-      entry(sourced, sourced.event.name || `Pet ${sourced.event.id}`));
+      entry(sourced, sourced.event.name || `Pet ${sourced.event.id}`),
+    );
     out.push({ kind: "pet", label: counted(items, "pets"), weight: items.length, items });
   }
 
@@ -457,8 +495,11 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   // a row, so there is no book to ask here — what the game calls the piece is filled in by
   // whatever draws it, out of the `itemId` travelling beside these words.
   const pieces = (said: string, was: boolean): HighlightEntry[] =>
-    transmogs.filter(({ event }) => event.newAppearance === was).map((sourced) =>
-      entry(sourced, itemName(sourced.event.id, sourced.event.name), said, sourced.event.id));
+    transmogs
+      .filter(({ event }) => event.newAppearance === was)
+      .map((sourced) =>
+        entry(sourced, itemName(sourced.event.id, sourced.event.name), said, sourced.event.id),
+      );
 
   // The new ones count rather than name, because the number is the whole of what a collection
   // growing means.
@@ -487,7 +528,9 @@ function milestones(segments: Segment[]): HighlightSeed[] {
 
   const housingLevels = from("housingLevelUps");
   if (housingLevels.length) {
-    const items = housingLevels.map((sourced) => entry(sourced, `Housing level ${sourced.event.level}`));
+    const items = housingLevels.map((sourced) =>
+      entry(sourced, `Housing level ${sourced.event.level}`),
+    );
     const top = Math.max(...housingLevels.map(({ event }) => event.level));
     out.push({
       kind: "housingLevel",
@@ -502,8 +545,12 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   if (housing.length) {
     const warband = housing.filter(({ event }) => event.warbandFirst);
     const items = housing.map((sourced) =>
-      entry(sourced, sourced.event.name || `Decor ${sourced.event.id}`,
-        sourced.event.warbandFirst ? "warband first" : "already known"));
+      entry(
+        sourced,
+        sourced.event.name || `Decor ${sourced.event.id}`,
+        sourced.event.warbandFirst ? "warband first" : "already known",
+      ),
+    );
     out.push({
       kind: "housingItem",
       label: counted(items, "decor"),
@@ -518,18 +565,22 @@ function milestones(segments: Segment[]): HighlightSeed[] {
     // Which set, what happened to it, and whether the character ended up better dressed —
     // the three things a chip about an equipment set is worth reading for.
     const items = equipsets.map((sourced) =>
-      entry(sourced, equipsetTitle(sourced.event), equipsetDetail(sourced.event)));
+      entry(sourced, equipsetTitle(sourced.event), equipsetDetail(sourced.event)),
+    );
     const edits = equipsets.filter(({ event }) => event.kind === "updated");
     out.push({
       kind: "equipset",
       label: counted(items, "equipment set changes"),
       // With one change the line already says what happened, so the quieter half carries
       // the items. With several it carries the shape of the evening's fiddling instead.
-      detail: items.length === 1
-        ? items[0].detail
-        : `${edits.length ? `${edits.length} edited` : ""}${
-          edits.length && edits.length < items.length ? ", " : ""}${
-          edits.length < items.length ? `${items.length - edits.length} created or deleted` : ""}`,
+      detail:
+        items.length === 1
+          ? items[0].detail
+          : `${edits.length ? `${edits.length} edited` : ""}${
+              edits.length && edits.length < items.length ? ", " : ""
+            }${
+              edits.length < items.length ? `${items.length - edits.length} created or deleted` : ""
+            }`,
       weight: items.length,
       items,
     });
@@ -539,8 +590,12 @@ function milestones(segments: Segment[]): HighlightSeed[] {
   if (quests.length) {
     const first = quests.filter(({ event }) => event.accountFirst);
     const items = quests.map((sourced) =>
-      entry(sourced, sourced.event.name || `Quest ${sourced.event.id}`,
-        sourced.event.accountFirst ? "account first" : ""));
+      entry(
+        sourced,
+        sourced.event.name || `Quest ${sourced.event.id}`,
+        sourced.event.accountFirst ? "account first" : "",
+      ),
+    );
     out.push({
       kind: "quest",
       label: counted(items, "quests"),
@@ -571,16 +626,29 @@ function tallies(segments: Segment[]): HighlightSeed[] {
 
   // Currencies and reputations are named things earned repeatedly across an evening; each
   // name is one line carrying its total, rather than one line per segment that touched it.
-  for (const [name, amount] of totalsByName(segments, (segment) => segment.currencies, (event) => event.name)) {
+  for (const [name, amount] of totalsByName(
+    segments,
+    (segment) => segment.currencies,
+    (event) => event.name,
+  )) {
     out.push({ kind: "currency", label: name, value: amount, weight: Math.abs(amount) });
   }
-  for (const [faction, amount] of totalsByName(segments, (segment) => segment.reputation, (event) => event.faction)) {
+  for (const [faction, amount] of totalsByName(
+    segments,
+    (segment) => segment.reputation,
+    (event) => event.faction,
+  )) {
     out.push({ kind: "reputation", label: faction, value: amount, weight: Math.abs(amount) });
   }
 
   const housingXP = sum(segments, "housingXP");
   if (housingXP !== 0) {
-    out.push({ kind: "housingXP", label: "Housing XP", value: housingXP, weight: Math.abs(housingXP) });
+    out.push({
+      kind: "housingXP",
+      label: "Housing XP",
+      value: housingXP,
+      weight: Math.abs(housingXP),
+    });
   }
 
   return out;

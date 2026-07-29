@@ -113,8 +113,9 @@ async function render(options: Options, glb: Buffer): Promise<void> {
       // The page's own function, reached through `globalThis` because this file has no DOM to
       // name a `window` with — it never runs in one.
       (request) =>
-        (globalThis as unknown as { renderModel(one: typeof request): Promise<Report> })
-          .renderModel(request),
+        (
+          globalThis as unknown as { renderModel(one: typeof request): Promise<Report> }
+        ).renderModel(request),
       {
         glb: glb.toString("base64"),
         size: options.size,
@@ -267,4 +268,3 @@ function usage(): never {
   );
   process.exit(2);
 }
-

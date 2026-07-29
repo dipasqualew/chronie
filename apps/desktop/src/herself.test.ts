@@ -7,19 +7,29 @@ import type { CharacterLookPayload, CharacterQuestion, PlayedCharacter } from ".
 const HAIR: CharacterQuestion = {
   id: 16,
   name: "Hair Style",
-  swatches: [{ id: 132, name: "Loose" }, { id: 133, name: "Braided" }],
+  swatches: [
+    { id: 132, name: "Loose" },
+    { id: 133, name: "Braided" },
+  ],
 };
 
 /** And one whose are not, which is what it does for every skin tone and most hair colours. */
 const SKIN: CharacterQuestion = {
   id: 14,
   name: "Skin Color",
-  swatches: [{ id: 85, name: "" }, { id: 86, name: "" }, { id: 87, name: "" }],
+  swatches: [
+    { id: 85, name: "" },
+    { id: 86, name: "" },
+    { id: 87, name: "" },
+  ],
 };
 
 /** The two bodies, as the backend offers them, with hers the one being drawn. */
 const ASKED: CharacterLookPayload = {
-  bodies: [{ id: 1, name: "Human Male" }, { id: 2, name: "Human Female" }],
+  bodies: [
+    { id: 1, name: "Human Male" },
+    { id: 2, name: "Human Female" },
+  ],
   body: 2,
   questions: [HAIR, SKIN],
   picked: [],
@@ -36,8 +46,12 @@ describe("which swatch is on her", () => {
   });
 
   it("takes the answer where there is one", () => {
-    expect(answerOf(HAIR, [{ question: 14, swatch: 86 }, { question: 16, swatch: 133 }]))
-      .toBe(133);
+    expect(
+      answerOf(HAIR, [
+        { question: 14, swatch: 86 },
+        { question: 16, swatch: 133 },
+      ]),
+    ).toBe(133);
   });
 
   // A settings file older than the install it is being applied to. `chosen_by` ignores such an
@@ -90,7 +104,10 @@ describe("answering a question", () => {
   it("keeps the answers about the body it is not showing", () => {
     const both: CharacterLookPayload = {
       ...ASKED,
-      picked: [{ question: 11, swatch: 48 }, { question: 14, swatch: 87 }],
+      picked: [
+        { question: 11, swatch: 48 },
+        { question: 14, swatch: 87 },
+      ],
     };
     expect(withAnswer(both, 16, 133)).toEqual([
       { question: 16, swatch: 133 },
@@ -112,8 +129,9 @@ describe("her as a cache key", () => {
   // What the panes holding pictures of her key on. It has to change when she does and not
   // otherwise: a key that moved for nothing throws away twenty rendered bodies.
   it("changes when an answer does", () => {
-    expect(lookKey(2, [{ question: 16, swatch: 132 }]))
-      .not.toBe(lookKey(2, [{ question: 16, swatch: 133 }]));
+    expect(lookKey(2, [{ question: 16, swatch: 132 }])).not.toBe(
+      lookKey(2, [{ question: 16, swatch: 133 }]),
+    );
   });
 
   // And when the body does, which is the coarser half of the same statement: every picture in
@@ -123,13 +141,22 @@ describe("her as a cache key", () => {
   });
 
   it("is the same person whichever order the answers arrive in", () => {
-    const one = [{ question: 16, swatch: 133 }, { question: 14, swatch: 86 }];
-    const other = [{ question: 14, swatch: 86 }, { question: 16, swatch: 133 }];
+    const one = [
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 86 },
+    ];
+    const other = [
+      { question: 14, swatch: 86 },
+      { question: 16, swatch: 133 },
+    ];
     expect(lookKey(2, one)).toBe(lookKey(2, other));
   });
 
   it("leaves the list it was given alone", () => {
-    const picked = [{ question: 16, swatch: 133 }, { question: 14, swatch: 86 }];
+    const picked = [
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 86 },
+    ];
     lookKey(2, picked);
     expect(picked[0]).toEqual({ question: 16, swatch: 133 });
   });
@@ -140,7 +167,10 @@ describe("becoming somebody the reader plays", () => {
   const ASTER: PlayedCharacter = {
     character: "Aster-Vale",
     body: 2,
-    picked: [{ question: 16, swatch: 133 }, { question: 14, swatch: 87 }],
+    picked: [
+      { question: 16, swatch: 133 },
+      { question: 14, swatch: 87 },
+    ],
   };
 
   /** And somebody who has not, which is most of a roster: the right body, and nothing else the
@@ -170,7 +200,10 @@ describe("becoming somebody the reader plays", () => {
   it("keeps the answers about every other body untouched", () => {
     const both: CharacterLookPayload = {
       ...ASKED,
-      picked: [{ question: 11, swatch: 48 }, { question: 16, swatch: 132 }],
+      picked: [
+        { question: 11, swatch: 48 },
+        { question: 16, swatch: 132 },
+      ],
     };
 
     expect(withCharacter(both, ASTER)).toEqual([
@@ -192,7 +225,9 @@ describe("becoming somebody the reader plays", () => {
 
 describe("which of them the form is showing", () => {
   const ASTER: PlayedCharacter = {
-    character: "Aster-Vale", body: 2, picked: [{ question: 16, swatch: 133 }],
+    character: "Aster-Vale",
+    body: 2,
+    picked: [{ question: 16, swatch: 133 }],
   };
   const BRIN: PlayedCharacter = { character: "Brin-Ravencrest", body: 1, picked: [] };
   const ROSTER = [ASTER, BRIN];
@@ -204,7 +239,10 @@ describe("which of them the form is showing", () => {
   // The settings file also holds answers about every other body the reader has ever touched.
   // Held against a character, nobody would ever match after the first look at a second body.
   it("ignores the answers about bodies the character has nothing to do with", () => {
-    const picked = [{ question: 16, swatch: 133 }, { question: 11, swatch: 48 }];
+    const picked = [
+      { question: 16, swatch: 133 },
+      { question: 11, swatch: 48 },
+    ];
 
     expect(shownAs(2, picked, ROSTER)).toBe("Aster-Vale");
   });

@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  RECIPES, axisNumber, cellText, columnKinds, defaultAxes, everything, niceScale, plot,
-  recipeAxes, summary,
+  RECIPES,
+  axisNumber,
+  cellText,
+  columnKinds,
+  defaultAxes,
+  everything,
+  niceScale,
+  plot,
+  recipeAxes,
+  summary,
 } from "./query";
 import type { ColumnKind, Recipe } from "./query";
 import type { QueryAnswer, QueryCell } from "./types";
@@ -69,7 +77,13 @@ describe("defaultAxes", () => {
   // were selected, because `SELECT keystone_level, minutes` says which of the two the reader
   // thinks is doing the explaining.
   it("draws a pair of number columns as a scatter, in the order they were selected", () => {
-    const pair = answer(["keystone_level", "minutes"], [[10, 24], [12, 27]]);
+    const pair = answer(
+      ["keystone_level", "minutes"],
+      [
+        [10, 24],
+        [12, 27],
+      ],
+    );
 
     expect(defaultAxes(pair)).toEqual({ x: 0, y: 1, shape: "scatter" });
   });
@@ -155,8 +169,18 @@ describe("summary", () => {
   it.each<[string, QueryAnswer, string]>([
     // "1 rows" is the tell that nobody read the line before shipping it.
     ["one of each", answer(["hours"], [[1]], { elapsedMs: 1 }), "1 row · 1 column · 1 ms"],
-    ["several", answer(["a", "b"], [[1, 2], [3, 4]], { elapsedMs: 12 }),
-      "2 rows · 2 columns · 12 ms"],
+    [
+      "several",
+      answer(
+        ["a", "b"],
+        [
+          [1, 2],
+          [3, 4],
+        ],
+        { elapsedMs: 12 },
+      ),
+      "2 rows · 2 columns · 12 ms",
+    ],
     ["none", answer(["a", "b"], [], { elapsedMs: 0 }), "0 rows · 2 columns · 0 ms"],
   ])("says what %s amounts to", (_case, given, expected) => {
     expect(summary(given)).toBe(expected);
@@ -164,7 +188,11 @@ describe("summary", () => {
 
   // A five figure row count read as "12345" is a number somebody has to count the digits of.
   it("groups a large row count the way the reader's locale does", () => {
-    const many = answer(["hours"], Array.from({ length: 1234 }, () => [1]), { elapsedMs: 2048 });
+    const many = answer(
+      ["hours"],
+      Array.from({ length: 1234 }, () => [1]),
+      { elapsedMs: 2048 },
+    );
     const rows = (1234).toLocaleString();
     const elapsed = (2048).toLocaleString();
 
@@ -219,17 +247,19 @@ describe("niceScale", () => {
 
   // Adding a step to itself twenty times is how an axis ends up labelled 0.30000000000000004.
   // The ticks are the strings a reader sees, so a tail in one of them is a tail on the chart.
-  it.each<[number, number]>([[0, 1], [0, 0.7], [-0.3, 0.3], [0, 3]])(
-    "leaves no floating point tail in the ticks between %s and %s",
-    (low, high) => {
-      const span = niceScale(low, high);
+  it.each<[number, number]>([
+    [0, 1],
+    [0, 0.7],
+    [-0.3, 0.3],
+    [0, 3],
+  ])("leaves no floating point tail in the ticks between %s and %s", (low, high) => {
+    const span = niceScale(low, high);
 
-      for (const tick of span.ticks) {
-        expect(String(tick).replace("-", "").replace(".", "").length).toBeLessThanOrEqual(6);
-        expect(tick).toBe(Number(tick.toPrecision(12)));
-      }
-    },
-  );
+    for (const tick of span.ticks) {
+      expect(String(tick).replace("-", "").replace(".", "").length).toBeLessThanOrEqual(6);
+      expect(tick).toBe(Number(tick.toPrecision(12)));
+    }
+  });
 
   it("takes the two ends in either order", () => {
     expect(niceScale(97, 0)).toEqual(niceScale(0, 97));
@@ -269,7 +299,14 @@ describe("axisNumber", () => {
 });
 
 describe("plot", () => {
-  const LEVELS = answer(["day", "level"], [["Mon", 68], ["Tue", 70], ["Wed", 69]]);
+  const LEVELS = answer(
+    ["day", "level"],
+    [
+      ["Mon", 68],
+      ["Tue", 70],
+      ["Wed", 69],
+    ],
+  );
 
   // A bar is read from its base, so the base has to be on the chart. Bars of 68, 69 and 70
   // against an axis starting at 68 say the middle one is a third of the last one.
@@ -298,7 +335,11 @@ describe("plot", () => {
   it("counts the rows with no number in them instead of drawing them as zero", () => {
     const patchy = answer(
       ["place", "gold_per_hour"],
-      [["Vale", 120], ["Caverns", null], ["Hearth", "unknown"]],
+      [
+        ["Vale", 120],
+        ["Caverns", null],
+        ["Hearth", "unknown"],
+      ],
     );
 
     const drawn = plot(patchy, { x: 0, y: 1, shape: "bar" });
@@ -313,7 +354,13 @@ describe("plot", () => {
   it("keeps every bar inside the frame the axes leave for it", () => {
     const places = answer(
       ["place", "hours"],
-      [["Vale", 12], ["Caverns", 3], ["Hearth", 40], ["Reach", 21], ["Spire", 7]],
+      [
+        ["Vale", 12],
+        ["Caverns", 3],
+        ["Hearth", 40],
+        ["Reach", 21],
+        ["Spire", 7],
+      ],
     );
 
     const drawn = plot(places, { x: 0, y: 1, shape: "bar" });
@@ -330,7 +377,13 @@ describe("plot", () => {
   // A bar of no height is a bar nobody can hover, and "the place with no loot" is exactly the
   // row somebody is looking for the tooltip of.
   it("leaves a hairline where a bar has no height to draw", () => {
-    const nothing = answer(["place", "hours"], [["Reach", 0], ["Vale", 12]]);
+    const nothing = answer(
+      ["place", "hours"],
+      [
+        ["Reach", 0],
+        ["Vale", 12],
+      ],
+    );
 
     const drawn = plot(nothing, { x: 0, y: 1, shape: "bar" });
 
@@ -341,7 +394,14 @@ describe("plot", () => {
   // A line joins its points in the order it is given them, so a line over a numeric axis has
   // to be sorted or it doubles back — `ORDER BY` in the query is not the reader's job.
   it("walks a line up a numeric column rather than through the rows as they arrived", () => {
-    const hours = answer(["hour_of_day", "hours"], [[20, 30], [18, 10], [19, 20]]);
+    const hours = answer(
+      ["hour_of_day", "hours"],
+      [
+        [20, 30],
+        [18, 10],
+        [19, 20],
+      ],
+    );
 
     const drawn = plot(hours, { x: 0, y: 1, shape: "line" });
 
@@ -404,7 +464,13 @@ describe("plot", () => {
   // Two rows with the same category are two bars: the tool on the other side of this is SQL,
   // and `GROUP BY` is how somebody says they wanted them added up.
   it("draws a bar per row rather than adding up rows that share a category", () => {
-    const repeated = answer(["place", "hours"], [["Vale", 2], ["Vale", 3]]);
+    const repeated = answer(
+      ["place", "hours"],
+      [
+        ["Vale", 2],
+        ["Vale", 3],
+      ],
+    );
 
     expect(plot(repeated, { x: 0, y: 1, shape: "bar" })?.bars).toHaveLength(2);
   });

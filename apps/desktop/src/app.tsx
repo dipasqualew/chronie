@@ -42,13 +42,19 @@ import { Tooltip } from "./tooltip";
 import { TransmogView } from "./transmogView";
 import { VersionTag } from "./versionTag";
 import type {
-  CustomSetsPayload, DashboardPayload, InGameSetsPayload, Release, Segment, SessionGap, Settings,
+  CustomSetsPayload,
+  DashboardPayload,
+  InGameSetsPayload,
+  Release,
+  Segment,
+  SessionGap,
+  Settings,
   TransmogMarksPayload,
   TransmogPayload,
 } from "./types";
 
 const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
-type View = typeof VIEWS[number];
+type View = (typeof VIEWS)[number];
 
 const TAB_LABELS: Record<View, string> = {
   timeline: "Timeline",
@@ -92,27 +98,41 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
-  const knownKinds = useMemo(() => [...new Set([
-    ...(payload.knownActivityKinds || []),
-    ...segments.flatMap((segment) => (segment.activities || []).map((entry) => entry.kind)),
-  ])].sort(), [payload.knownActivityKinds, segments]);
+  const knownKinds = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...(payload.knownActivityKinds || []),
+          ...segments.flatMap((segment) => (segment.activities || []).map((entry) => entry.kind)),
+        ]),
+      ].sort(),
+    [payload.knownActivityKinds, segments],
+  );
 
   // What the game says about an achievement outlives any one segment, so the book is made once
   // for the whole window rather than per modal: a reader walking a history meets the same
   // achievements over and over, and each is looked up the first time and never again.
-  const achievements = useMemo(() => createAchievementBook({
-    load: (ids) => desktop.achievementDetails(ids),
-    loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
-  }), []);
+  const achievements = useMemo(
+    () =>
+      createAchievementBook({
+        load: (ids) => desktop.achievementDetails(ids),
+        loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
+      }),
+    [],
+  );
 
   // And the same for items, which every view that names one asks for itself: a row puts its
   // own id in the book and the book sends one request for whatever asked in that turn, so a
   // segment of twenty pieces is one lookup and the second segment naming the same piece is
   // none. One book for the window, because a wardrobe is the same wardrobe on every screen.
-  const items = useMemo(() => createItemBook({
-    load: (ids) => desktop.itemDetails(ids),
-    loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
-  }), []);
+  const items = useMemo(
+    () =>
+      createItemBook({
+        load: (ids) => desktop.itemDetails(ids),
+        loadIcons: (iconFileDataIds) => desktop.gameIcons(iconFileDataIds),
+      }),
+    [],
+  );
 
   // And the pictures the game draws a currency with, on the same terms and for the same reason:
   // a reader walking a roster of ten alts meets the same handful of currencies on every one of
@@ -133,20 +153,23 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // Every write answers with the whole dashboard, so what ends up on screen is what was
   // stored. Which matters more for a note than for anything else in the app: a sentence that
   // looked saved and was not is one nobody will think to type again.
-  const captureActions = useMemo(() => ({
-    loadImage: desktop.captureImage,
-    setNote: desktop.setCaptureNote,
-    remove: desktop.deleteCapture,
-    onApply: applyDashboard,
-    onError: message,
-  // `applyDashboard` is redeclared on every render and does not close over anything that
-  // changes, so pinning the actions here is what keeps the viewer's effects from re-running.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), []);
+  const captureActions = useMemo(
+    () => ({
+      loadImage: desktop.captureImage,
+      setNote: desktop.setCaptureNote,
+      remove: desktop.deleteCapture,
+      onApply: applyDashboard,
+      onError: message,
+      // `applyDashboard` is redeclared on every render and does not close over anything that
+      // changes, so pinning the actions here is what keeps the viewer's effects from re-running.
+    }),
+    [],
+  );
 
   const sessions = useMemo(() => buildSessions(segments), [segments]);
   const profiles = useMemo(
-    () => buildCharacters(segments, payload.holdings), [segments, payload.holdings],
+    () => buildCharacters(segments, payload.holdings),
+    [segments, payload.holdings],
   );
 
   // Every link the window draws is a link out of it, and the window is the wrong place for a
@@ -164,7 +187,8 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   useEffect(() => {
     if (view !== "transmog" || transmog || transmogStatus === LOADING) return;
     setTransmogStatus(LOADING);
-    void desktop.transmogSets()
+    void desktop
+      .transmogSets()
       .then(setTransmog)
       .catch((error: unknown) => setTransmogStatus(message(error)));
   }, [view, transmog, transmogStatus]);
@@ -175,7 +199,10 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // nothing marked on it, and the first attempt to mark something says why it will not.
   useEffect(() => {
     if (view !== "transmog" || marks) return;
-    void desktop.transmogMarks().then(setMarks).catch(() => undefined);
+    void desktop
+      .transmogMarks()
+      .then(setMarks)
+      .catch(() => undefined);
   }, [view, marks]);
 
   // The sets the reader saved, on the same terms: Chronie's own database, read when the view is
@@ -183,7 +210,10 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // the two beside it are the game's.
   useEffect(() => {
     if (view !== "transmog" || customSets) return;
-    void desktop.customSets().then(setCustomSets).catch(() => undefined);
+    void desktop
+      .customSets()
+      .then(setCustomSets)
+      .catch(() => undefined);
   }, [view, customSets]);
 
   // And the sets the player saved in the game, on the same terms. Also Chronie's own database —
@@ -195,7 +225,10 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // whichever is opened first.
   useEffect(() => {
     if ((view !== "transmog" && view !== "characters") || inGameSets) return;
-    void desktop.inGameSets().then(setInGameSets).catch(() => undefined);
+    void desktop
+      .inGameSets()
+      .then(setInGameSets)
+      .catch(() => undefined);
   }, [view, inGameSets]);
 
   // Whether an evening was played that never reached the file. Asked on the same beat the
@@ -207,12 +240,18 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   useEffect(() => {
     let alive = true;
     const ask = (): void => {
-      void desktop.sessionGap()
-        .then((answer) => { if (alive) setGap(answer); })
+      void desktop
+        .sessionGap()
+        .then((answer) => {
+          if (alive) setGap(answer);
+        })
         .catch(() => undefined);
     };
     ask();
-    if (!desktop.pollDashboard) return () => { alive = false; };
+    if (!desktop.pollDashboard)
+      return () => {
+        alive = false;
+      };
     const timer = setInterval(ask, DASHBOARD_POLL_MS);
     return () => {
       alive = false;
@@ -244,12 +283,14 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
    */
   function applyDashboard(fresh: DashboardPayload): void {
     const byId = new Map((fresh.segments || []).map((segment) => [segment.segmentId, segment]));
-    setSegments((list) => list.map((segment) => {
-      const next = byId.get(segment.segmentId);
-      return next
-        ? { ...segment, activities: next.activities || [], captures: next.captures || [] }
-        : segment;
-    }));
+    setSegments((list) =>
+      list.map((segment) => {
+        const next = byId.get(segment.segmentId);
+        return next
+          ? { ...segment, activities: next.activities || [], captures: next.captures || [] }
+          : segment;
+      }),
+    );
   }
 
   // The modal walks the list it was opened from, and that list is re-resolved against the
@@ -265,30 +306,38 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
   const openSegment = (segmentId: number, order: Segment[]): void => {
     if (!order.length) return;
-    setShowing({ order, index: Math.max(order.findIndex((s) => s.segmentId === segmentId), 0) });
+    setShowing({
+      order,
+      index: Math.max(
+        order.findIndex((s) => s.segmentId === segmentId),
+        0,
+      ),
+    });
   };
 
-  const editingSegment = editing == null
-    ? null
-    : segments.find((segment) => segment.segmentId === editing) ?? null;
+  const editingSegment =
+    editing == null ? null : (segments.find((segment) => segment.segmentId === editing) ?? null);
 
   const meta = segments.length
     ? [
-      plural(sessions.length, "play session"),
-      plural(segments.length, "segment"),
-      plural(new Set(segments.map((segment) => segment.character)).size, "character"),
-      `${duration(segments.reduce((total, segment) => total + (segment.seconds || 0), 0))} played`,
-    ].join(" · ")
+        plural(sessions.length, "play session"),
+        plural(segments.length, "segment"),
+        plural(new Set(segments.map((segment) => segment.character)).size, "character"),
+        `${duration(segments.reduce((total, segment) => total + (segment.seconds || 0), 0))} played`,
+      ].join(" · ")
     : "Nothing collected yet.";
 
   const missing = gapSentence(gap);
 
   const rosterMeta = profiles.length
     ? [
-      plural(profiles.length, "character"),
-      plural(profiles.reduce((total, entry) => total + entry.segmentCount, 0), "segment"),
-      `${duration(profiles.reduce((total, entry) => total + entry.seconds, 0))} played`,
-    ].join(" · ")
+        plural(profiles.length, "character"),
+        plural(
+          profiles.reduce((total, entry) => total + entry.segmentCount, 0),
+          "segment",
+        ),
+        `${duration(profiles.reduce((total, entry) => total + entry.seconds, 0))} played`,
+      ].join(" · ")
     : "Nothing collected yet.";
 
   return (
@@ -298,11 +347,15 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         <VersionTag release={release} />
         {VIEWS.map((name) => (
           <button
-            key={name} id={`${name}-tab`} type="button"
+            key={name}
+            id={`${name}-tab`}
+            type="button"
             className={name === view ? "primary" : undefined}
             aria-current={name === view ? "page" : "false"}
             onClick={() => setView(name)}
-          >{TAB_LABELS[name]}</button>
+          >
+            {TAB_LABELS[name]}
+          </button>
         ))}
       </nav>
 
@@ -315,7 +368,12 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           <h1>Timeline</h1>
           {/* A live region, because it is recomputed as segments arrive and it is the one line
               that says how much of a history is on screen. */}
-          <div className="sub" id="timeline-meta" role="status" aria-label="What the timeline holds">
+          <div
+            className="sub"
+            id="timeline-meta"
+            role="status"
+            aria-label="What the timeline holds"
+          >
             {meta}
           </div>
           {/* Only ever drawn when there is a hole, and an alert rather than a status because
@@ -324,28 +382,49 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           {missing && (
             <div className="notice" id="timeline-gap" role="alert" aria-label="Missing play">
               <p>{missing}</p>
-              {gapEvidence(gap).map((line) => <p className="sub" key={line}>{line}</p>)}
+              {gapEvidence(gap).map((line) => (
+                <p className="sub" key={line}>
+                  {line}
+                </p>
+              ))}
             </div>
           )}
         </header>
         <div id="timeline">
           <Timeline
-            sessions={sessions} onOpenSegment={openSegment} items={items} places={placeIcons}
-            album={album} captures={captureActions}
+            sessions={sessions}
+            onOpenSegment={openSegment}
+            items={items}
+            places={placeIcons}
+            album={album}
+            captures={captureActions}
           />
         </div>
       </main>
 
-      <section id="characters-view" aria-label={TAB_LABELS.characters} hidden={view !== "characters"}>
+      <section
+        id="characters-view"
+        aria-label={TAB_LABELS.characters}
+        hidden={view !== "characters"}
+      >
         <header className="view-head">
           <h1>Characters</h1>
-          <div className="sub" id="characters-meta" role="status" aria-label="What the roster holds">
+          <div
+            className="sub"
+            id="characters-meta"
+            role="status"
+            aria-label="What the roster holds"
+          >
             {rosterMeta}
           </div>
         </header>
         <Characters
-          profiles={profiles} onOpenSegment={openSegment} items={items} inGameSets={inGameSets}
-          currencyIcons={currencyIcons} places={placeIcons}
+          profiles={profiles}
+          onOpenSegment={openSegment}
+          items={items}
+          inGameSets={inGameSets}
+          currencyIcons={currencyIcons}
+          places={placeIcons}
           loadSetAppearances={desktop.inGameSetAppearances}
           loadWorn={desktop.characterWornSet}
         />
@@ -354,8 +433,9 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
       <section id="details-view" aria-label={TAB_LABELS.details} hidden={view !== "details"}>
         <header className="view-head">
           <h1>Details</h1>
-          <div className="sub">Every segment on its own row. Click a column to sort, a row to
-            open it.</div>
+          <div className="sub">
+            Every segment on its own row. Click a column to sort, a row to open it.
+          </div>
         </header>
         <Details segments={segments} onOpenSegment={openSegment} items={items} />
       </section>
@@ -467,11 +547,13 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         holdings={payload.holdings}
         album={album}
         captures={captureActions}
-        onStep={(by) => setShowing((was) => {
-          if (!was) return was;
-          const next = was.index + by;
-          return next < 0 || next >= was.order.length ? was : { ...was, index: next };
-        })}
+        onStep={(by) =>
+          setShowing((was) => {
+            if (!was) return was;
+            const next = was.index + by;
+            return next < 0 || next >= was.order.length ? was : { ...was, index: next };
+          })
+        }
         onClose={() => setShowing(null)}
         onEditActivities={setEditing}
         onShowAppearance={setDrawing}

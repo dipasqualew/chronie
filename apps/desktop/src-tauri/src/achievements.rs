@@ -218,7 +218,10 @@ pub struct AchievementBook {
 impl AchievementBook {
     /// Which of the ids asked for have not been looked up yet, without repeats.
     pub fn missing(&self, wanted: &[u32]) -> Vec<u32> {
-        let known = self.known.lock().expect("the achievement book is not poisoned");
+        let known = self
+            .known
+            .lock()
+            .expect("the achievement book is not poisoned");
         let mut missing: Vec<u32> = Vec::new();
         for id in wanted {
             if *id != 0 && !known.contains_key(id) && !missing.contains(id) {
@@ -229,7 +232,10 @@ impl AchievementBook {
     }
 
     pub fn store(&self, found: Vec<(u32, Option<Achievement>)>) {
-        let mut known = self.known.lock().expect("the achievement book is not poisoned");
+        let mut known = self
+            .known
+            .lock()
+            .expect("the achievement book is not poisoned");
         known.extend(found);
     }
 
@@ -240,7 +246,10 @@ impl AchievementBook {
     /// mentions an achievement the game says nothing about draws it exactly as it would
     /// before the lookup had come back — the addon's own name, and no more.
     pub fn answer(&self, wanted: &[u32]) -> Value {
-        let known = self.known.lock().expect("the achievement book is not poisoned");
+        let known = self
+            .known
+            .lock()
+            .expect("the achievement book is not poisoned");
         let mut achievements = serde_json::Map::new();
         for id in wanted {
             if let Some(Some(found)) = known.get(id) {
@@ -351,8 +360,14 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                (LIGHTHOUSE, vec!["Chronicles".to_string(), "Tideglass Deeps".to_string()]),
-                (EMBERFORGE, vec!["Chronicles".to_string(), "Emberforge Halls".to_string()]),
+                (
+                    LIGHTHOUSE,
+                    vec!["Chronicles".to_string(), "Tideglass Deeps".to_string()]
+                ),
+                (
+                    EMBERFORGE,
+                    vec!["Chronicles".to_string(), "Emberforge Halls".to_string()]
+                ),
                 // Its category's parent is encrypted, so the trail stops one short of a root
                 // rather than being followed to a name that is not there.
                 (ODDMENTS, vec!["Lost Ledgers".to_string()]),
@@ -378,7 +393,12 @@ mod tests {
             worth,
             // The last is worth nothing, which is what a feat of strength is worth and what
             // half the real table comes to.
-            vec![(LIGHTHOUSE, 10), (UNSEEN, 25), (ODDMENTS, 5), (LONG_ROAD, 0)]
+            vec![
+                (LIGHTHOUSE, 10),
+                (UNSEEN, 25),
+                (ODDMENTS, 5),
+                (LONG_ROAD, 0)
+            ]
         );
         // The fixture stores what the game stores, so a reader that took the column whole
         // would answer with 0x3C0A here rather than with 10.
@@ -416,7 +436,10 @@ mod tests {
             .iter()
             .map(|(id, found)| (*id, found.is_some()))
             .collect();
-        assert_eq!(named, vec![(LIGHTHOUSE, true), (WITHHELD, false), (ABSENT, false)]);
+        assert_eq!(
+            named,
+            vec![(LIGHTHOUSE, true), (WITHHELD, false), (ABSENT, false)]
+        );
     }
 
     // Both tables are parsed once however many achievements a batch asks about, and the
@@ -429,7 +452,10 @@ mod tests {
             found.iter().map(|(id, _)| *id).collect::<Vec<u32>>(),
             vec![EMBERFORGE, LIGHTHOUSE, ODDMENTS]
         );
-        assert_eq!(files.asked.into_inner(), vec![ACHIEVEMENT, ACHIEVEMENT_CATEGORY]);
+        assert_eq!(
+            files.asked.into_inner(),
+            vec![ACHIEVEMENT, ACHIEVEMENT_CATEGORY]
+        );
     }
 
     // The tree is a second file, and a batch nothing could be found for has nothing to file.
@@ -475,7 +501,12 @@ mod tests {
 
         assert_eq!(
             files.asked.into_inner(),
-            vec![ACHIEVEMENT, ACHIEVEMENT_CATEGORY, ACHIEVEMENT, ACHIEVEMENT_CATEGORY]
+            vec![
+                ACHIEVEMENT,
+                ACHIEVEMENT_CATEGORY,
+                ACHIEVEMENT,
+                ACHIEVEMENT_CATEGORY
+            ]
         );
         let answer = book.answer(&[LIGHTHOUSE, UNSEEN, EMBERFORGE]);
         assert_eq!(answer["achievements"].as_object().unwrap().len(), 3);
@@ -486,7 +517,13 @@ mod tests {
     #[test]
     fn does_not_go_looking_again_for_an_achievement_it_already_failed_to_find() {
         let book = AchievementBook::default();
-        book.store(read(&achievement_fixture_files(), &book.missing(&[WITHHELD, ABSENT])).unwrap());
+        book.store(
+            read(
+                &achievement_fixture_files(),
+                &book.missing(&[WITHHELD, ABSENT]),
+            )
+            .unwrap(),
+        );
 
         assert_eq!(book.missing(&[WITHHELD, ABSENT]), Vec::<u32>::new());
         assert_eq!(book.answer(&[WITHHELD, ABSENT])["achievements"], json!({}));
@@ -510,13 +547,19 @@ mod tests {
         let book = AchievementBook::default();
         book.store(read(&achievement_fixture_files(), &[LIGHTHOUSE, WITHHELD]).unwrap());
         let answer = book.answer(&[LIGHTHOUSE, WITHHELD]);
-        assert_eq!(answer["achievements"]["101"]["title"], json!("Into the Light"));
+        assert_eq!(
+            answer["achievements"]["101"]["title"],
+            json!("Into the Light")
+        );
         assert_eq!(answer["achievements"]["101"]["points"], json!(10));
         assert_eq!(
             answer["achievements"]["101"]["category"],
             json!(["Chronicles", "Tideglass Deeps"])
         );
-        assert_eq!(answer["achievements"]["101"]["iconFileDataId"], json!(250001));
+        assert_eq!(
+            answer["achievements"]["101"]["iconFileDataId"],
+            json!(250001)
+        );
         assert_eq!(answer["achievements"][WITHHELD.to_string()], Value::Null);
     }
 }

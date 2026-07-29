@@ -66,7 +66,10 @@ export function RetentionPanel({ actions, days, visible }: RetentionPanelProps):
       }
     };
     void refresh();
-    if (!visible) return () => { alive = false; };
+    if (!visible)
+      return () => {
+        alive = false;
+      };
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => {
       alive = false;
@@ -78,7 +81,8 @@ export function RetentionPanel({ actions, days, visible }: RetentionPanelProps):
     writing.current = true;
     setBusy(true);
     setStatus((was) => (was ? { ...was, enabled: wanted !== null } : was));
-    void actions.set(wanted)
+    void actions
+      .set(wanted)
       .then((answer) => {
         setStatus(answer);
         setTyped(String(answer.days));
@@ -107,28 +111,40 @@ export function RetentionPanel({ actions, days, visible }: RetentionPanelProps):
   return (
     <section className="panel setup" aria-labelledby="log-retention-heading">
       <h2 id="log-retention-heading">Deleting old combat logs</h2>
-      <p className="sub">Chronie can delete a combat log once it has read the whole of it and
-        it is older than the window below. It <strong>never</strong> deletes one it has not
-        finished reading, and never the file the game is writing to — so a log from before
-        Chronie was watching stays where it is, and is listed here instead.</p>
+      <p className="sub">
+        Chronie can delete a combat log once it has read the whole of it and it is older than the
+        window below. It <strong>never</strong> deletes one it has not finished reading, and never
+        the file the game is writing to — so a log from before Chronie was watching stays where it
+        is, and is listed here instead.
+      </p>
       <label className="check">
         <input
-          id="log-retention" type="checkbox" checked={enabled} disabled={busy}
+          id="log-retention"
+          type="checkbox"
+          checked={enabled}
+          disabled={busy}
           onChange={(event) => change(event.target.checked ? windowDays(Number(typed)) : null)}
         />
         Delete combat logs Chronie has finished reading
       </label>
       <div className="setup-grid">
-        <label htmlFor="retain-days">Keep logs for
+        <label htmlFor="retain-days">
+          Keep logs for
           <span className="path-row">
             {/* Named explicitly, because the label around it also carries the unit and the
                 control is "keep logs for", not "keep logs for days". */}
             <input
-              id="retain-days" type="number" aria-label="Keep logs for"
-              min={MIN_DAYS} max={MAX_DAYS} value={typed}
+              id="retain-days"
+              type="number"
+              aria-label="Keep logs for"
+              min={MIN_DAYS}
+              max={MAX_DAYS}
+              value={typed}
               disabled={busy || !enabled}
               onChange={(event) => setTyped(event.target.value)}
-              onBlur={() => { if (enabled) change(windowDays(Number(typed))); }}
+              onBlur={() => {
+                if (enabled) change(windowDays(Number(typed)));
+              }}
             />
             <span className="sub">days</span>
           </span>
@@ -137,7 +153,9 @@ export function RetentionPanel({ actions, days, visible }: RetentionPanelProps):
       {/* The stylesheet colours this from `data-state`: what is about to be deleted does not
           get to look like a success. */}
       <p
-        id="log-retention-state" className="status" role="status"
+        id="log-retention-state"
+        className="status"
+        role="status"
         data-state={status && status.doomed.count > 0 ? "stale" : undefined}
       >
         {saying || (status ? sweepSentence(status) : "")}
@@ -145,16 +163,22 @@ export function RetentionPanel({ actions, days, visible }: RetentionPanelProps):
       {doomed.length > 0 && (
         <div id="log-retention-doomed" className="sub">
           <div>{enabled ? "Going on the next sync:" : "Would go on the next sync:"}</div>
-          {doomed.map((line) => <div key={line}>{line}</div>)}
+          {doomed.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
       )}
       <div id="log-retention-detail" className="sub">
-        {lines.map((line) => <div key={line}>{line}</div>)}
+        {lines.map((line) => (
+          <div key={line}>{line}</div>
+        ))}
       </div>
       {unread.length > 0 && (
         <div id="log-retention-unread" className="sub">
           <div>Never deleted by Chronie:</div>
-          {unread.map((line) => <div key={line}>{line}</div>)}
+          {unread.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
         </div>
       )}
     </section>

@@ -34,7 +34,8 @@ export const inkColours = (elements: Locator): Promise<string[]> =>
  */
 export const railColours = (elements: Locator): Promise<string[]> =>
   elements.evaluateAll((nodes) =>
-    nodes.map((node) => getComputedStyle(node).boxShadow.match(/rgba?\([^)]*\)/)?.[0] ?? ""));
+    nodes.map((node) => getComputedStyle(node).boxShadow.match(/rgba?\([^)]*\)/)?.[0] ?? ""),
+  );
 
 /**
  * How much of each element in a row the one after it covers, as a fraction of its own width.
@@ -49,8 +50,9 @@ export const railColours = (elements: Locator): Promise<string[]> =>
 export const overlapFractions = (elements: Locator): Promise<number[]> =>
   elements.evaluateAll((nodes) => {
     const ringOf = (node: Element): number => {
-      const spreads = [...getComputedStyle(node).boxShadow.matchAll(/(?:-?[\d.]+px\s+){3}(-?[\d.]+)px/g)]
-        .map((layer) => Number(layer[1]));
+      const spreads = [
+        ...getComputedStyle(node).boxShadow.matchAll(/(?:-?[\d.]+px\s+){3}(-?[\d.]+)px/g),
+      ].map((layer) => Number(layer[1]));
       return Math.max(0, ...spreads);
     };
     return nodes.slice(0, -1).map((node, index) => {

@@ -66,7 +66,8 @@ describe("describeVersion", () => {
   // A channel is a git tag and goes into a path. Nothing puts one there but the backend today,
   // and that is exactly the kind of thing that stops being true quietly.
   it("escapes a channel that would otherwise reshape the url", () => {
-    expect(describeVersion(built(SHA, "release/1.0")).channelUrl)
-      .toBe(`${REPOSITORY}/releases/tag/release%2F1.0`);
+    expect(describeVersion(built(SHA, "release/1.0")).channelUrl).toBe(
+      `${REPOSITORY}/releases/tag/release%2F1.0`,
+    );
   });
 });

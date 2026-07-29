@@ -108,8 +108,9 @@ describe("achievementLine", () => {
 
   // The game's spelling wins, because the addon's was whatever the client had loaded.
   it("prefers the game's own title to the one the addon caught", () => {
-    expect(achievementLine(event({ name: "into the light" }), detail()).title)
-      .toBe("Into the Light");
+    expect(achievementLine(event({ name: "into the light" }), detail()).title).toBe(
+      "Into the Light",
+    );
   });
 
   it.each<[string, number, string]>([
@@ -226,7 +227,8 @@ describe("createAchievementBook", () => {
   // recorded either way.
   it("keeps quiet about a lookup that failed, and tries again later", async () => {
     const { loadIcons } = backend();
-    const load = vi.fn()
+    const load = vi
+      .fn()
       .mockRejectedValueOnce(new Error("Choose the game folder in Setup first."))
       .mockResolvedValueOnce({ achievements: { 101: detail() } });
     const book = createAchievementBook({ load, loadIcons });

@@ -21,8 +21,19 @@ import type { Alternate, Quality, SameLookReason, TransmogMark, TransmogSet } fr
  * particular, which is how the game marks the sets anyone can wear.
  */
 export const CLASSES = [
-  "Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Death Knight", "Shaman",
-  "Mage", "Warlock", "Monk", "Druid", "Demon Hunter", "Evoker",
+  "Warrior",
+  "Paladin",
+  "Hunter",
+  "Rogue",
+  "Priest",
+  "Death Knight",
+  "Shaman",
+  "Mage",
+  "Warlock",
+  "Monk",
+  "Druid",
+  "Demon Hunter",
+  "Evoker",
 ] as const;
 
 /** Every class at once, which the game writes as a full mask rather than as zero. */
@@ -30,9 +41,18 @@ const ALL_CLASSES = (1 << CLASSES.length) - 1;
 
 /** The expansions, indexed by the id the game files use. */
 const EXPANSIONS = [
-  "Classic", "The Burning Crusade", "Wrath of the Lich King", "Cataclysm",
-  "Mists of Pandaria", "Warlords of Draenor", "Legion", "Battle for Azeroth",
-  "Shadowlands", "Dragonflight", "The War Within", "Midnight",
+  "Classic",
+  "The Burning Crusade",
+  "Wrath of the Lich King",
+  "Cataclysm",
+  "Mists of Pandaria",
+  "Warlords of Draenor",
+  "Legion",
+  "Battle for Azeroth",
+  "Shadowlands",
+  "Dragonflight",
+  "The War Within",
+  "Midnight",
 ] as const;
 
 /**
@@ -87,17 +107,22 @@ export function patchName(packed: number): string {
  * withholds the name.
  */
 function searchable(
-  set: TransmogSet, mark: TransmogMark | undefined, quality: Quality | undefined,
+  set: TransmogSet,
+  mark: TransmogMark | undefined,
+  quality: Quality | undefined,
 ): string {
-  const game = [set, ...(set.alternates ?? [])].flatMap((one) => [
-    one.name,
-    one.group,
-    classLabel(one.classMask),
-    ...classNames(one.classMask),
-    expansionName(one.expansionId),
-    patchName(one.patchIntroduced),
-    String(one.id),
-  ]).join(" ").toLowerCase();
+  const game = [set, ...(set.alternates ?? [])]
+    .flatMap((one) => [
+      one.name,
+      one.group,
+      classLabel(one.classMask),
+      ...classNames(one.classMask),
+      expansionName(one.expansionId),
+      patchName(one.patchIntroduced),
+      String(one.id),
+    ])
+    .join(" ")
+    .toLowerCase();
   // And whatever the reader themselves filed it under, so "horde" or "wishlist" finds the sets
   // they said it about without their having to go near the picker beside the box. And what the
   // artwork was measured to be, which the wardrobe beside this has always searched and this had
@@ -119,16 +144,20 @@ function searchable(
  * one. See the same paragraph in `wardrobe.ts`.
  */
 function facetsOf(
-  set: TransmogSet, mark: TransmogMark | undefined, quality: Quality | undefined,
+  set: TransmogSet,
+  mark: TransmogMark | undefined,
+  quality: Quality | undefined,
 ): Facet[] {
-  const game = [set, ...(set.alternates ?? [])].flatMap((one): Facet[] => [
-    { key: "name", value: one.name },
-    { key: "collection", value: one.group },
-    { key: "class", value: classLabel(one.classMask) },
-    ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
-    { key: "expansion", value: expansionName(one.expansionId) },
-    { key: "patch", value: patchName(one.patchIntroduced) },
-  ]).filter((facet) => facet.value !== "");
+  const game = [set, ...(set.alternates ?? [])]
+    .flatMap((one): Facet[] => [
+      { key: "name", value: one.name },
+      { key: "collection", value: one.group },
+      { key: "class", value: classLabel(one.classMask) },
+      ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
+      { key: "expansion", value: expansionName(one.expansionId) },
+      { key: "patch", value: patchName(one.patchIntroduced) },
+    ])
+    .filter((facet) => facet.value !== "");
   return [...game, ...markFacets(mark), ...qualityFacets(quality)];
 }
 
@@ -169,13 +198,14 @@ export function alternateLabel(alternate: Alternate, shown: TransmogSet): string
   // writes "anyone" two ways — a mask of zero and every bit at once. Those are the same
   // audience, and a line saying "Any class" under a card already saying it is a wasted line.
   const wearers = classLabel(alternate.classMask);
-  const qualifier = wearers !== classLabel(shown.classMask)
-    ? wearers
-    : alternate.expansionId !== shown.expansionId
-      ? expansionName(alternate.expansionId)
-      : patchName(alternate.patchIntroduced) !== patchName(shown.patchIntroduced)
-        ? `Patch ${patchName(alternate.patchIntroduced)}`
-        : "";
+  const qualifier =
+    wearers !== classLabel(shown.classMask)
+      ? wearers
+      : alternate.expansionId !== shown.expansionId
+        ? expansionName(alternate.expansionId)
+        : patchName(alternate.patchIntroduced) !== patchName(shown.patchIntroduced)
+          ? `Patch ${patchName(alternate.patchIntroduced)}`
+          : "";
   return `${REASONS[alternate.reason]} ${alternate.name}${qualifier ? ` · ${qualifier}` : ""}`;
 }
 
@@ -218,8 +248,8 @@ export function filterSets(
     if (expansion !== null && !everyExpansion(set).includes(expansion)) return false;
     // A set with no class of its own is for everyone, so it survives a class filter.
     const wearers = everyClass(set);
-    if (klass !== null
-      && !wearers.some((mask) => mask === 0 || (mask & (1 << klass)) !== 0)) return false;
+    if (klass !== null && !wearers.some((mask) => mask === 0 || (mask & (1 << klass)) !== 0))
+      return false;
     const mark = filters.marks?.of(set.id);
     if (filters.marks && !survivesMarks(mark, filters.marks.filter)) return false;
     if (!asked) return true;

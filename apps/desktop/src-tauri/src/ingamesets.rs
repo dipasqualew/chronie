@@ -18,8 +18,8 @@
 //! for what that costs, which is that it cannot be *opened* there.
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use serde_json::Value;
+use specta::Type;
 
 /// The client's `TransmogSlot` enumeration, which runs 0 to 12 inclusive.
 ///
@@ -164,8 +164,10 @@ pub fn read(value: &Value) -> Vec<CharacterSets> {
         .filter_map(|(character, entry)| {
             let observed_at = number(entry.get("at"));
             let rows = entry.get("sets").and_then(Value::as_array)?;
-            let mut sets: Vec<InGameSet> =
-                rows.iter().filter_map(|row| set(row, observed_at)).collect();
+            let mut sets: Vec<InGameSet> = rows
+                .iter()
+                .filter_map(|row| set(row, observed_at))
+                .collect();
             sets.sort_by_key(|found| found.id);
             sets.dedup_by_key(|found| found.id);
             Some(CharacterSets {

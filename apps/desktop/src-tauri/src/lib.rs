@@ -1,5 +1,5 @@
-mod activity;
 pub mod achievements;
+mod activity;
 pub mod appearances;
 pub mod body;
 pub mod budget;
@@ -811,12 +811,15 @@ async fn currency_icons(
     state: State<'_, AppState>,
 ) -> Result<dto::IconsPayload, String> {
     let cache = Arc::clone(&state.icons);
-    let named = read_game_files(&state, move |files| currencies::icons_of(files, &currency_ids))
-        .await?;
+    let named = read_game_files(&state, move |files| {
+        currencies::icons_of(files, &currency_ids)
+    })
+    .await?;
     let wanted: Vec<u32> = named.values().copied().collect();
     let missing = cache.missing(&wanted);
     if !missing.is_empty() {
-        let decoded = read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        let decoded =
+            read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
         cache.store(decoded);
     }
     // The icons keyed by the file they came out of, re-keyed by the currency that named it. Two
@@ -853,7 +856,8 @@ async fn place_icons(
     let wanted: Vec<u32> = named.values().copied().collect();
     let missing = cache.missing(&wanted);
     if !missing.is_empty() {
-        let decoded = read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        let decoded =
+            read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
         cache.store(decoded);
     }
     // The icons keyed by the file they came out of, re-keyed by the place that named it. Every
@@ -1093,8 +1097,12 @@ fn session_gap_now(state: &AppState) -> Result<gap::Verdict, String> {
     // Milliseconds out of the log, seconds everywhere else: the addon's clock and the
     // database's are both `time()`, which is whole seconds, and a rule comparing the two has
     // no use for the third decimal place.
-    let played_to = logfile::tail_at(&found.path, combatlog::year_of(&found), logfile::Zone::Local)
-        .map(|millis| millis.div_euclid(1000));
+    let played_to = logfile::tail_at(
+        &found.path,
+        combatlog::year_of(&found),
+        logfile::Zone::Local,
+    )
+    .map(|millis| millis.div_euclid(1000));
     let recorded_to = collector::newest_segment_end(&state.database_path())?;
     Ok(gap::verdict(
         Some(&found.file),
@@ -1357,7 +1365,10 @@ const REQUESTS_MODULE: &str = "src/CustomSetRequests.lua";
 /// nothing anyway, and silently rewriting somebody's typo into a different rule would be
 /// worse than ignoring it.
 fn trigger_literal(name: &str) -> Option<String> {
-    let clean = !name.is_empty() && name.chars().all(|character| character.is_ascii_alphabetic());
+    let clean = !name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphabetic());
     clean.then(|| format!("\"{name}\""))
 }
 
@@ -1427,7 +1438,11 @@ fn stage_addon(
 /// A game folder with no Chronie in it is not an error. Somebody can send an outfit before they
 /// have ever installed the addon, and the install itself lays the same file down with the same
 /// requests in it, so nothing is lost by saying nothing here.
-fn write_requests(wow_path: &Path, requests: &[ingamesets::Request], now: i64) -> Result<(), String> {
+fn write_requests(
+    wow_path: &Path,
+    requests: &[ingamesets::Request],
+    now: i64,
+) -> Result<(), String> {
     let target = wow_path
         .join("Interface")
         .join("AddOns")
@@ -2097,7 +2112,10 @@ mod tests {
         bundled.sort();
         assert_eq!(bundled, expected);
         for (relative, contents) in BUNDLED_ADDON {
-            assert!(!relative.starts_with("spec/"), "{relative} is not part of the addon");
+            assert!(
+                !relative.starts_with("spec/"),
+                "{relative} is not part of the addon"
+            );
             assert!(!contents.is_empty(), "{relative} was embedded empty");
         }
     }
@@ -2130,11 +2148,19 @@ mod tests {
         let installed = addon_folder(&retail);
         assert!(installed.join("Main.lua").is_file());
         assert!(!installed.join("spec").exists());
-        assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
+        assert_eq!(
+            fs::read(installed.join("chronie.toc")).unwrap(),
+            bundled("chronie.toc")
+        );
         let lua_modules = fs::read_dir(installed.join("src"))
             .unwrap()
             .filter(|entry| {
-                entry.as_ref().unwrap().path().extension().is_some_and(|kind| kind == "lua")
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|kind| kind == "lua")
             })
             .count();
         assert!(lua_modules > 0, "no Lua modules landed in src/");
@@ -2170,8 +2196,14 @@ mod tests {
 
         let written =
             fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
-        assert!(written.contains(r#"["name"] = "Winter Look","#), "{written}");
-        assert!(written.contains(r#"["slot"] = 0, ["appearance"] = 55,"#), "{written}");
+        assert!(
+            written.contains(r#"["name"] = "Winter Look","#),
+            "{written}"
+        );
+        assert!(
+            written.contains(r#"["slot"] = 0, ["appearance"] = 55,"#),
+            "{written}"
+        );
         assert_ne!(written.as_bytes(), bundled("src/CustomSetRequests.lua"));
     }
 
@@ -2332,8 +2364,14 @@ mod tests {
 
         let written = serde_json::to_string(&settings).unwrap();
 
-        assert!(written.contains(r#""captureQuality":"original""#), "{written}");
-        assert!(written.contains(r#""keepOriginalScreenshots":true"#), "{written}");
+        assert!(
+            written.contains(r#""captureQuality":"original""#),
+            "{written}"
+        );
+        assert!(
+            written.contains(r#""keepOriginalScreenshots":true"#),
+            "{written}"
+        );
         let read: Settings = serde_json::from_str(&written).unwrap();
         assert_eq!(read.capture_quality, captures::Quality::Original);
         assert!(read.keep_original_screenshots);
@@ -2346,13 +2384,19 @@ mod tests {
     #[test]
     fn round_trips_who_the_character_is_through_the_file() {
         let settings = Settings {
-            character_look: vec![customization::Picked { question: 16, swatch: 133 }],
+            character_look: vec![customization::Picked {
+                question: 16,
+                swatch: 133,
+            }],
             ..Settings::default()
         };
 
         let written = serde_json::to_string(&settings).unwrap();
 
-        assert!(written.contains(r#""characterLook":[{"question":16,"swatch":133}]"#), "{written}");
+        assert!(
+            written.contains(r#""characterLook":[{"question":16,"swatch":133}]"#),
+            "{written}"
+        );
         let read: Settings = serde_json::from_str(&written).unwrap();
         assert_eq!(read.character_look, settings.character_look);
     }
@@ -2378,11 +2422,21 @@ mod tests {
 
         replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
-        assert!(!stale.exists(), "a file from the old copy survived the install");
-        assert_eq!(fs::read(installed.join("chronie.toc")).unwrap(), bundled("chronie.toc"));
+        assert!(
+            !stale.exists(),
+            "a file from the old copy survived the install"
+        );
+        assert_eq!(
+            fs::read(installed.join("chronie.toc")).unwrap(),
+            bundled("chronie.toc")
+        );
         // The backup is the install's own scaffolding; leaving it behind would put a second
         // copy of the addon in the folder the game scans.
-        assert!(!retail.join("Interface").join("AddOns").join(".chronie-backup").exists());
+        assert!(!retail
+            .join("Interface")
+            .join("AddOns")
+            .join(".chronie-backup")
+            .exists());
     }
 
     /// The particular file that had to go, and the reason the install being a swap rather
@@ -2398,12 +2452,22 @@ mod tests {
         let installed = addon_folder(&retail);
         fs::create_dir_all(&installed).unwrap();
         let stale = installed.join("Bindings.xml");
-        fs::write(&stale, b"<Bindings><Binding name=\"CHRONIE_CAPTURE\" /></Bindings>\n").unwrap();
+        fs::write(
+            &stale,
+            b"<Bindings><Binding name=\"CHRONIE_CAPTURE\" /></Bindings>\n",
+        )
+        .unwrap();
 
         replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
 
-        assert!(!stale.exists(), "an older copy's Bindings.xml survived the install");
-        assert!(installed.join("Main.lua").is_file(), "the new copy did not land");
+        assert!(
+            !stale.exists(),
+            "an older copy's Bindings.xml survived the install"
+        );
+        assert!(
+            installed.join("Main.lua").is_file(),
+            "the new copy did not land"
+        );
     }
 
     #[test]
@@ -2432,7 +2496,10 @@ mod tests {
 
         assert!(error.contains("AddOns"), "unhelpful error: {error}");
         assert_eq!(tree(root.path()), Vec::<String>::new());
-        assert!(bystander.is_dir(), "the failed install took the folder's contents with it");
+        assert!(
+            bystander.is_dir(),
+            "the failed install took the folder's contents with it"
+        );
     }
 
     #[test]
@@ -2498,8 +2565,14 @@ mod tests {
         let home = [("HOME", "/home/ana"), ("LOCALAPPDATA", local)];
         let cases = [
             ("windows", PathBuf::from(local).join("Chronie")),
-            ("macos", PathBuf::from("/home/ana/Library/Logs").join("Chronie")),
-            ("linux", PathBuf::from("/home/ana/.local/state").join("chronie")),
+            (
+                "macos",
+                PathBuf::from("/home/ana/Library/Logs").join("Chronie"),
+            ),
+            (
+                "linux",
+                PathBuf::from("/home/ana/.local/state").join("chronie"),
+            ),
         ];
         for (os, expected) in cases {
             let directory = log_directory(os, environment(&home), Path::new("/tmp"));
@@ -2536,8 +2609,16 @@ mod tests {
         let written = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = written.lines().collect();
         assert_eq!(lines.len(), 2, "expected both lines in {written}");
-        assert!(lines[0].ends_with("] starting Chronie 0.1.0"), "{}", lines[0]);
-        assert!(lines[1].ends_with("] failed to start: no window"), "{}", lines[1]);
+        assert!(
+            lines[0].ends_with("] starting Chronie 0.1.0"),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].ends_with("] failed to start: no window"),
+            "{}",
+            lines[1]
+        );
         // A stamp, so two launches can be told apart and a crash can be dated.
         assert!(lines[0].starts_with('['), "{}", lines[0]);
     }
@@ -2551,7 +2632,10 @@ mod tests {
         append_log_line(&path, "starting Chronie 0.1.0").unwrap();
 
         let written = fs::read_to_string(&path).unwrap();
-        assert!(!written.contains('x'), "the oversized log should have been dropped");
+        assert!(
+            !written.contains('x'),
+            "the oversized log should have been dropped"
+        );
         assert!(written.ends_with("] starting Chronie 0.1.0\n"), "{written}");
     }
 
@@ -2571,9 +2655,10 @@ mod tests {
             if line.starts_with('[') {
                 inside = line == header;
             } else if inside {
-                if let Some(value) = line.strip_prefix("name").and_then(|rest| {
-                    rest.trim_start().strip_prefix('=').map(str::trim)
-                }) {
+                if let Some(value) = line
+                    .strip_prefix("name")
+                    .and_then(|rest| rest.trim_start().strip_prefix('=').map(str::trim))
+                {
                     names.push(value.trim_matches('"').to_string());
                 }
             }
@@ -2608,19 +2693,22 @@ mod tests {
     #[test]
     fn the_manifest_declares_the_app_binary_and_nothing_else() {
         let package = manifest_names(CARGO_TOML, "[package]");
-        let package = package.first().expect("the manifest should name the package");
+        let package = package
+            .first()
+            .expect("the manifest should name the package");
         assert_eq!(
             manifest_names(CARGO_TOML, "[[bin]]"),
-            [package.clone()],
+            std::slice::from_ref(package),
             "the manifest has to declare a [[bin]] named {package} and no other, or the \
              bundle will launch or carry a binary that is not the app"
         );
-        let discovered: Vec<String> = fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin"))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect();
+        let discovered: Vec<String> =
+            fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
         assert!(
             discovered.is_empty(),
             "src/bin holds {discovered:?}, and Cargo builds those alongside the declared \

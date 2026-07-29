@@ -131,7 +131,10 @@ fn parse_stamp(date: &str, time: &str) -> Option<Stamp> {
         millis: parse_fraction(fraction)?,
         offset,
     };
-    (stamp.month <= 12 && stamp.day <= 31 && stamp.hour < 24 && stamp.minute < 60
+    (stamp.month <= 12
+        && stamp.day <= 31
+        && stamp.hour < 24
+        && stamp.minute < 60
         && stamp.second < 60)
         .then_some(stamp)
 }
@@ -350,7 +353,10 @@ pub fn integer(field: &str) -> Option<i64> {
 /// Unit flags, which the client writes as hex.
 fn flags(field: &str) -> Option<u64> {
     let field = field.trim();
-    match field.strip_prefix("0x").or_else(|| field.strip_prefix("0X")) {
+    match field
+        .strip_prefix("0x")
+        .or_else(|| field.strip_prefix("0X"))
+    {
         Some(hex) => u64::from_str_radix(hex, 16).ok(),
         None => field.parse().ok(),
     }
@@ -623,8 +629,8 @@ impl Reader {
 
     /// Reads what is new in `path`.
     pub fn read(&self, path: &Path, resume: &Resume) -> Result<Reading, String> {
-        let mut file =
-            File::open(path).map_err(|error| format!("Could not open {}: {error}", path.display()))?;
+        let mut file = File::open(path)
+            .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
         let size = file
             .metadata()
             .map_err(|error| format!("Could not measure {}: {error}", path.display()))?
@@ -854,7 +860,10 @@ fn read_map(parts: &[&str], at: i64) -> Option<MapBounds> {
 fn start_encounter(parts: &[&str], at: i64) -> Fight {
     Fight {
         encounter_id: parts.get(1).and_then(|field| integer(field)),
-        name: parts.get(2).map(|field| unquoted(field).to_string()).unwrap_or_default(),
+        name: parts
+            .get(2)
+            .map(|field| unquoted(field).to_string())
+            .unwrap_or_default(),
         difficulty_id: parts.get(3).and_then(|field| integer(field)),
         group_size: parts.get(4).and_then(|field| integer(field)),
         instance_id: parts.get(5).and_then(|field| integer(field)),
@@ -872,15 +881,27 @@ fn end_encounter(open: Option<Fight>, parts: &[&str], at: i64) -> Fight {
     });
     fight.kind = Fought::Encounter;
     fight.ended_at = Some(at);
-    fight.encounter_id = parts.get(1).and_then(|field| integer(field)).or(fight.encounter_id);
+    fight.encounter_id = parts
+        .get(1)
+        .and_then(|field| integer(field))
+        .or(fight.encounter_id);
     if let Some(name) = parts.get(2).map(|field| unquoted(field)) {
         if !name.is_empty() {
             fight.name = name.to_string();
         }
     }
-    fight.difficulty_id = parts.get(3).and_then(|field| integer(field)).or(fight.difficulty_id);
-    fight.group_size = parts.get(4).and_then(|field| integer(field)).or(fight.group_size);
-    fight.success = parts.get(5).and_then(|field| integer(field)).map(|value| value != 0);
+    fight.difficulty_id = parts
+        .get(3)
+        .and_then(|field| integer(field))
+        .or(fight.difficulty_id);
+    fight.group_size = parts
+        .get(4)
+        .and_then(|field| integer(field))
+        .or(fight.group_size);
+    fight.success = parts
+        .get(5)
+        .and_then(|field| integer(field))
+        .map(|value| value != 0);
     fight.duration_ms = parts.get(6).and_then(|field| integer(field));
     fight
 }
@@ -888,14 +909,22 @@ fn end_encounter(open: Option<Fight>, parts: &[&str], at: i64) -> Fight {
 /// `CHALLENGE_MODE_START,zoneName,instanceID,challengeModeID,keystoneLevel,[affixes]`
 fn start_keystone(parts: &[&str], at: i64) -> Fight {
     Fight {
-        name: parts.get(1).map(|field| unquoted(field).to_string()).unwrap_or_default(),
+        name: parts
+            .get(1)
+            .map(|field| unquoted(field).to_string())
+            .unwrap_or_default(),
         instance_id: parts.get(2).and_then(|field| integer(field)),
         encounter_id: parts.get(3).and_then(|field| integer(field)),
         keystone_level: parts.get(4).and_then(|field| integer(field)),
         affixes: parts
             .get(5)
             .and_then(|field| group(field))
-            .map(|inner| entries(inner).iter().filter_map(|entry| integer(entry)).collect())
+            .map(|inner| {
+                entries(inner)
+                    .iter()
+                    .filter_map(|entry| integer(entry))
+                    .collect()
+            })
             .unwrap_or_default(),
         ..Fight::opened(Fought::Keystone, at)
     }
@@ -909,9 +938,18 @@ fn end_keystone(open: Option<Fight>, parts: &[&str], at: i64) -> Fight {
     });
     fight.kind = Fought::Keystone;
     fight.ended_at = Some(at);
-    fight.instance_id = parts.get(1).and_then(|field| integer(field)).or(fight.instance_id);
-    fight.success = parts.get(2).and_then(|field| integer(field)).map(|value| value != 0);
-    fight.keystone_level = parts.get(3).and_then(|field| integer(field)).or(fight.keystone_level);
+    fight.instance_id = parts
+        .get(1)
+        .and_then(|field| integer(field))
+        .or(fight.instance_id);
+    fight.success = parts
+        .get(2)
+        .and_then(|field| integer(field))
+        .map(|value| value != 0);
+    fight.keystone_level = parts
+        .get(3)
+        .and_then(|field| integer(field))
+        .or(fight.keystone_level);
     fight.duration_ms = parts.get(4).and_then(|field| integer(field));
     fight
 }
@@ -1000,10 +1038,10 @@ fn worn(found: &[&str]) -> Value {
                     "bonusIds": parts
                         .get(3)
                         .and_then(|field| group(field))
-                        .map(|inner| {
+                        .map(|inner| -> Vec<i64> {
                             entries(inner).iter().filter_map(|entry| integer(entry)).collect()
                         })
-                        .unwrap_or_else(Vec::<i64>::new),
+                        .unwrap_or_default(),
                 }))
             })
             .collect(),
@@ -1413,7 +1451,17 @@ mod tests {
     fn keeps_a_comma_inside_a_group_out_of_the_split() {
         let found = fields("COMBATANT_INFO,Player-1-2,0,(1,2,3),[(4,5,(6,7))],9");
 
-        assert_eq!(found, ["COMBATANT_INFO", "Player-1-2", "0", "(1,2,3)", "[(4,5,(6,7))]", "9"]);
+        assert_eq!(
+            found,
+            [
+                "COMBATANT_INFO",
+                "Player-1-2",
+                "0",
+                "(1,2,3)",
+                "[(4,5,(6,7))]",
+                "9"
+            ]
+        );
     }
 
     #[test]
@@ -1542,9 +1590,21 @@ mod tests {
         assert_eq!(
             track,
             [
-                (moment((2026, 7, 27), (16, 24, 38), 1) + 408, -3420.47, 4526.44),
-                (moment((2026, 7, 27), (16, 24, 45), 1) + 207, -3383.77, 4498.26),
-                (moment((2026, 7, 27), (16, 24, 51), 1) + 78, -3382.32, 4518.92),
+                (
+                    moment((2026, 7, 27), (16, 24, 38), 1) + 408,
+                    -3420.47,
+                    4526.44
+                ),
+                (
+                    moment((2026, 7, 27), (16, 24, 45), 1) + 207,
+                    -3383.77,
+                    4498.26
+                ),
+                (
+                    moment((2026, 7, 27), (16, 24, 51), 1) + 78,
+                    -3382.32,
+                    4518.92
+                ),
             ]
         );
         assert_eq!(facts.positions[0].facing, Some(0.5276));
@@ -1566,7 +1626,11 @@ mod tests {
     fn puts_a_real_position_where_it_really_was() {
         let facts = read("real-client.txt", 2026);
 
-        assert_eq!(facts.maps.len(), 2, "the client states its map more than once");
+        assert_eq!(
+            facts.maps.len(),
+            2,
+            "the client states its map more than once"
+        );
         let bounds = &facts.maps[0];
         assert_eq!(bounds.ui_map_id, 108);
         assert_eq!(bounds.name, "Terokkar Forest");
@@ -1581,7 +1645,10 @@ mod tests {
             .map(|point| (round(point.map_x.unwrap()), round(point.map_y.unwrap())))
             .collect();
         assert_eq!(placed, [(0.473, 0.672), (0.479, 0.662), (0.475, 0.662)]);
-        assert!(facts.positions.iter().all(|point| point.ui_map_id == Some(108)));
+        assert!(facts
+            .positions
+            .iter()
+            .all(|point| point.ui_map_id == Some(108)));
     }
 
     /// Real bounds are not round, so a real point does not normalise to anything a test can
@@ -1613,7 +1680,10 @@ mod tests {
                 (moment((2023, 11, 14), (20, 20, 10), -5), 0.6, 0.4),
             ]
         );
-        assert!(facts.positions.iter().all(|point| point.ui_map_id == Some(2232)));
+        assert!(facts
+            .positions
+            .iter()
+            .all(|point| point.ui_map_id == Some(2232)));
         assert!(facts.advanced_seen);
         assert_eq!(facts.advanced_declared, Some(true));
     }
@@ -1673,15 +1743,24 @@ mod tests {
         assert_eq!(wipe.difficulty_id, Some(16));
         assert_eq!(wipe.group_size, Some(20));
         assert_eq!(wipe.instance_id, Some(2549));
-        assert_eq!(wipe.started_at, Some(moment((2023, 11, 14), (20, 16, 0), -5)));
-        assert_eq!(wipe.ended_at, Some(moment((2023, 11, 14), (20, 16, 30), -5)));
+        assert_eq!(
+            wipe.started_at,
+            Some(moment((2023, 11, 14), (20, 16, 0), -5))
+        );
+        assert_eq!(
+            wipe.ended_at,
+            Some(moment((2023, 11, 14), (20, 16, 30), -5))
+        );
         assert_eq!(wipe.success, Some(false));
         assert_eq!(wipe.duration_ms, Some(1_800_000));
 
         let kill = &facts.fights[1];
         assert_eq!(kill.success, Some(true));
         assert_eq!(kill.duration_ms, Some(240_000));
-        assert_eq!(kill.started_at, Some(moment((2023, 11, 14), (20, 20, 0), -5)));
+        assert_eq!(
+            kill.started_at,
+            Some(moment((2023, 11, 14), (20, 20, 0), -5))
+        );
     }
 
     #[test]
@@ -1748,7 +1827,10 @@ mod tests {
         assert_eq!(run.success, Some(true));
         assert_eq!(run.duration_ms, Some(1_834_567));
         assert_eq!(run.started_at, Some(moment((2023, 12, 2), (19, 0, 2), -5)));
-        assert_eq!(run.ended_at, Some(moment((2023, 12, 2), (19, 30, 34), -5) + 567));
+        assert_eq!(
+            run.ended_at,
+            Some(moment((2023, 12, 2), (19, 30, 34), -5) + 567)
+        );
         assert_eq!(run.combatants.len(), 2);
     }
 
@@ -2053,7 +2135,10 @@ mod tests {
             )
             .unwrap();
 
-        assert!(second.facts.maps.is_empty(), "no map change was read this time");
+        assert!(
+            second.facts.maps.is_empty(),
+            "no map change was read this time"
+        );
         let point = &second.facts.positions[0];
         assert_eq!((point.map_x, point.map_y), (Some(0.5), Some(0.5)));
     }
@@ -2067,7 +2152,11 @@ mod tests {
 
         // The same file, cut down to its first two lines.
         let whole = fs::read_to_string(&path).unwrap();
-        let head: String = whole.lines().take(2).map(|line| format!("{line}\n")).collect();
+        let head: String = whole
+            .lines()
+            .take(2)
+            .map(|line| format!("{line}\n"))
+            .collect();
         fs::write(&path, &head).unwrap();
 
         let second = reader(2024)
@@ -2098,7 +2187,10 @@ mod tests {
 
         fs::copy(fixture("rotated-after.txt"), &path).unwrap();
         let after = fs::metadata(&path).unwrap().len();
-        assert!(after > first.cursor.size, "the fixture is meant to be the longer one");
+        assert!(
+            after > first.cursor.size,
+            "the fixture is meant to be the longer one"
+        );
 
         let second = reader(2024)
             .read(
@@ -2113,7 +2205,11 @@ mod tests {
         assert_eq!(second.restarted, Some(Restarted::Replaced));
         assert_eq!(second.cursor.offset, after);
         assert_eq!(second.facts.fights.len(), 2);
-        assert!(second.facts.fights.iter().all(|fight| fight.name == "Fyrakk the Blazing"));
+        assert!(second
+            .facts
+            .fights
+            .iter()
+            .all(|fight| fight.name == "Fyrakk the Blazing"));
     }
 
     /// A log that was short when it was first read and long by the time it is read again is
@@ -2172,10 +2268,15 @@ mod tests {
             resume = Resume {
                 cursor: Some(reading.cursor),
                 map: reading.facts.maps.last().cloned().or(resume.map),
-                sampled: reading.facts.positions.last().map(|point| Sampled {
-                    at: point.at,
-                    ui_map_id: point.ui_map_id,
-                }).or(resume.sampled),
+                sampled: reading
+                    .facts
+                    .positions
+                    .last()
+                    .map(|point| Sampled {
+                        at: point.at,
+                        ui_map_id: point.ui_map_id,
+                    })
+                    .or(resume.sampled),
             };
             if done {
                 break;
@@ -2188,7 +2289,10 @@ mod tests {
         // Each fight is split across two passes at some budget, so the halves are compared
         // rather than the count: what matters is that no boundary was lost or doubled.
         assert_eq!(
-            fights.iter().filter(|fight| fight.ended_at.is_some()).count(),
+            fights
+                .iter()
+                .filter(|fight| fight.ended_at.is_some())
+                .count(),
             whole.facts.fights.len()
         );
     }
@@ -2201,7 +2305,10 @@ mod tests {
             .read(Path::new("/no/such/WoWCombatLog.txt"), &Resume::default())
             .unwrap_err();
 
-        assert!(error.contains("WoWCombatLog.txt"), "unhelpful error: {error}");
+        assert!(
+            error.contains("WoWCombatLog.txt"),
+            "unhelpful error: {error}"
+        );
     }
 
     /// Every fixture in the folder, read end to end. A file that stops the parser is a
@@ -2234,6 +2341,10 @@ mod tests {
             );
             read += 1;
         }
-        assert!(read >= 8, "only {read} fixtures were found in {}", folder.display());
+        assert!(
+            read >= 8,
+            "only {read} fixtures were found in {}",
+            folder.display()
+        );
     }
 }

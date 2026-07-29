@@ -395,7 +395,7 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
         if !hers.iter().any(|(_, swatch, _)| doing.contains(swatch)) {
             continue;
         }
-        hers.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+        hers.sort_by_key(|entry| (entry.0, entry.1));
         found.push((
             order,
             id,
@@ -409,7 +409,7 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
             },
         ));
     }
-    found.sort_by(|left, right| (left.0, left.1).cmp(&(right.0, right.1)));
+    found.sort_by_key(|entry| (entry.0, entry.1));
     Ok(found.into_iter().map(|(_, _, question)| question).collect())
 }
 
@@ -418,10 +418,7 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
 /// A map rather than a set because what asks this asks two things of it — whether a question is
 /// hers, and what to call it — and because `ChrCustomizationOption` describes every playable
 /// body at once. Dropping the `ChrModelID` filter is what would give group 32 two owners.
-fn questions_of(
-    files: &dyn GameFiles,
-    body: u32,
-) -> Result<HashMap<u32, (u32, String)>, String> {
+fn questions_of(files: &dyn GameFiles, body: u32) -> Result<HashMap<u32, (u32, String)>, String> {
     let options = Db2::parse(files.read(CHR_CUSTOMIZATION_OPTION)?)?;
     Ok(options
         .rows()
@@ -474,14 +471,19 @@ fn doing_something(
 /// what a form that sends everything it holds means by sending a question twice.
 pub fn clean(picked: Vec<Picked>) -> Result<Vec<Picked>, String> {
     if picked.len() > ANSWER_LIMIT {
-        return Err(format!("A character carries at most {ANSWER_LIMIT} choices."));
+        return Err(format!(
+            "A character carries at most {ANSWER_LIMIT} choices."
+        ));
     }
     let mut cleaned: Vec<Picked> = Vec::with_capacity(picked.len());
     for answer in picked {
         if answer.question == 0 || answer.swatch == 0 {
             return Err("That choice names no question of hers, or no swatch of it.".into());
         }
-        match cleaned.iter_mut().find(|held| held.question == answer.question) {
+        match cleaned
+            .iter_mut()
+            .find(|held| held.question == answer.question)
+        {
             Some(held) => held.swatch = answer.swatch,
             None => cleaned.push(answer),
         }
@@ -598,9 +600,9 @@ fn paint(
         match (layer.texture_type == BODY_TEXTURE, layer.copied) {
             // The bottom of the body's stack, and the only layer that covers the whole buffer.
             (true, true) => into.base = file,
-            (true, false) => into
-                .over
-                .extend(sections(layer.section_mask).map(|section| ComponentTexture { section, file })),
+            (true, false) => into.over.extend(
+                sections(layer.section_mask).map(|section| ComponentTexture { section, file }),
+            ),
             // An atlas of its own: one picture, bound whole, and a later copy replaces an
             // earlier one exactly as it would in a compositor.
             (false, true) => {
@@ -746,17 +748,41 @@ mod tests {
             Customization {
                 base: BASE_SKIN,
                 over: vec![
-                    ComponentTexture { section: SCALP_LOWER, file: FACE },
-                    ComponentTexture { section: UPPER_LEGS, file: UNDER_LEGS },
-                    ComponentTexture { section: UPPER_TORSO, file: UNDER_TORSO },
+                    ComponentTexture {
+                        section: SCALP_LOWER,
+                        file: FACE
+                    },
+                    ComponentTexture {
+                        section: UPPER_LEGS,
+                        file: UNDER_LEGS
+                    },
+                    ComponentTexture {
+                        section: UPPER_TORSO,
+                        file: UNDER_TORSO
+                    },
                 ],
                 atlases: vec![(HAIR_TEXTURE, HAIR), (EYE_TEXTURE, EYES)],
                 geosets: vec![
-                    Geoset { group: 0, geoset: 2 },     // her hairstyle, and not the first
-                    Geoset { group: 36, geoset: 3600 }, // no necklace: a value the body lacks
-                    Geoset { group: 21, geoset: 2101 }, // the skull her skin choice drives
-                    Geoset { group: 32, geoset: 3202 }, // her head
-                    Geoset { group: 7, geoset: 702 },   // and her ears
+                    Geoset {
+                        group: 0,
+                        geoset: 2
+                    }, // her hairstyle, and not the first
+                    Geoset {
+                        group: 36,
+                        geoset: 3600
+                    }, // no necklace: a value the body lacks
+                    Geoset {
+                        group: 21,
+                        geoset: 2101
+                    }, // the skull her skin choice drives
+                    Geoset {
+                        group: 32,
+                        geoset: 3202
+                    }, // her head
+                    Geoset {
+                        group: 7,
+                        geoset: 702
+                    }, // and her ears
                 ],
             }
         );
@@ -768,11 +794,20 @@ mod tests {
     #[test]
     fn reads_a_geoset_as_a_group_and_a_value_within_it() {
         let hers = herself().geosets;
-        let head = hers.iter().find(|geoset| geoset.group == 32).expect("she has a head");
-        assert_eq!(head.geoset, 3202, "type 32 and value 2, and not 32 or 3200 or 322");
+        let head = hers
+            .iter()
+            .find(|geoset| geoset.group == 32)
+            .expect("she has a head");
+        assert_eq!(
+            head.geoset, 3202,
+            "type 32 and value 2, and not 32 or 3200 or 322"
+        );
         // And a value of zero is the game switching a group off rather than a row to drop —
         // which is what keeps her from wearing the necklace she declined.
-        let necklace = hers.iter().find(|geoset| geoset.group == 36).expect("group 36 is decided");
+        let necklace = hers
+            .iter()
+            .find(|geoset| geoset.group == 36)
+            .expect("group 36 is decided");
         assert_eq!(necklace.geoset, 3600);
     }
 
@@ -798,7 +833,10 @@ mod tests {
     // and every one of those rows resolves.
     #[test]
     fn opens_on_the_first_swatch_of_each_option_by_order_rather_than_by_row() {
-        assert_eq!(chosen(), vec![85, 102, 132, 156, 4150, 4908, 5059, 54_353, 56653]);
+        assert_eq!(
+            chosen(),
+            vec![85, 102, 132, 156, 4150, 4908, 5059, 54_353, 56653]
+        );
     }
 
     // And the options are this body's. `ChrCustomizationOption` describes every playable model
@@ -806,7 +844,10 @@ mod tests {
     // `ChrModelID` filter gives group 32 two owners and a head that depends on row order.
     #[test]
     fn takes_only_the_options_that_belong_to_the_body_this_app_draws() {
-        assert!(!chosen().contains(&9001), "another body's swatch was chosen");
+        assert!(
+            !chosen().contains(&9001),
+            "another body's swatch was chosen"
+        );
         let hers = herself().geosets;
         assert!(hers.iter().all(|geoset| geoset.geoset != 3203), "{hers:?}");
     }
@@ -823,7 +864,10 @@ mod tests {
             painted.over
         );
         assert!(
-            !painted.over.iter().any(|texture| texture.file == ANOTHER_FACE),
+            !painted
+                .over
+                .iter()
+                .any(|texture| texture.file == ANOTHER_FACE),
             "the face authored for the other skin swatch was painted over hers"
         );
         // Both are pictures, and both resolve: the condition is the only thing between them.
@@ -841,7 +885,10 @@ mod tests {
         assert_eq!(herself.base, BASE_SKIN);
         assert_ne!(ANOTHER_SKIN, BASE_SKIN);
         for painted in &herself.over {
-            assert_ne!(painted.file, BASE_SKIN, "the skin is not one of the layers above it");
+            assert_ne!(
+                painted.file, BASE_SKIN,
+                "the skin is not one of the layers above it"
+            );
         }
     }
 
@@ -850,7 +897,10 @@ mod tests {
     #[test]
     fn paints_a_layer_above_the_base_into_the_sections_its_mask_names() {
         assert_eq!(sections(0).count(), 0);
-        assert_eq!(sections(1 << UPPER_TORSO).collect::<Vec<u32>>(), vec![UPPER_TORSO]);
+        assert_eq!(
+            sections(1 << UPPER_TORSO).collect::<Vec<u32>>(),
+            vec![UPPER_TORSO]
+        );
         // One layer, several sections: nothing on this body does it, and the mask is a mask.
         assert_eq!(sections(0b101_000).collect::<Vec<u32>>(), vec![3, 5]);
     }
@@ -862,7 +912,11 @@ mod tests {
     fn keeps_the_layers_in_the_order_the_game_paints_them() {
         let layers = layers_of(&fixture_files(), hers().layout).unwrap();
         let numbered: Vec<u32> = layers.iter().map(|layer| layer.target).collect();
-        assert_eq!(numbered, vec![1, 10, 4, 5, 13, 14, 25, 27], "bottom layer first");
+        assert_eq!(
+            numbered,
+            vec![1, 10, 4, 5, 13, 14, 25, 27],
+            "bottom layer first"
+        );
     }
 
     // The layer table describes every layout the client has, and another body's rows are the
@@ -875,7 +929,10 @@ mod tests {
             .filter(|row| row.foreign_id() != hers().layout)
             .map(|row| row.element(layer_column::TEXTURE_TARGET, 0, TARGET_BITS))
             .collect();
-        assert!(elsewhere.contains(&40), "the fixture holds another layout's base layer");
+        assert!(
+            elsewhere.contains(&40),
+            "the fixture holds another layout's base layer"
+        );
         let mine = layers_of(&fixture_files(), hers().layout).unwrap();
         assert!(!mine.iter().any(|layer| layer.target == 40));
     }
@@ -887,7 +944,10 @@ mod tests {
     #[test]
     fn keeps_the_other_atlases_whole_rather_than_compositing_them_into_the_body() {
         let herself = herself();
-        assert_eq!(herself.atlases, vec![(HAIR_TEXTURE, HAIR), (EYE_TEXTURE, EYES)]);
+        assert_eq!(
+            herself.atlases,
+            vec![(HAIR_TEXTURE, HAIR), (EYE_TEXTURE, EYES)]
+        );
         assert_ne!(herself.base, HAIR);
         assert!(!herself.over.iter().any(|texture| texture.file == HAIR));
     }
@@ -897,7 +957,9 @@ mod tests {
     #[test]
     fn ignores_an_element_that_paints_nothing() {
         let elements = elements_of(&fixture_files(), &chosen()).unwrap();
-        assert!(elements.iter().any(|(geoset, material)| *geoset != 0 && *material == 0));
+        assert!(elements
+            .iter()
+            .any(|(geoset, material)| *geoset != 0 && *material == 0));
         let painted = painted_by(&fixture_files(), &elements).unwrap();
         assert!(!painted.values().any(|resource| *resource == 0));
     }
@@ -907,7 +969,10 @@ mod tests {
     #[test]
     fn drops_a_layer_whose_texture_no_install_holds() {
         let elements = elements_of(&fixture_files(), &chosen()).unwrap();
-        assert_eq!(painted_by(&fixture_files(), &elements).unwrap().get(&20), Some(&53_009));
+        assert_eq!(
+            painted_by(&fixture_files(), &elements).unwrap().get(&20),
+            Some(&53_009)
+        );
         let herself = herself();
         assert!(!herself.over.iter().any(|texture| texture.file == 0));
         assert!(!herself.atlases.iter().any(|(_, file)| *file == 0));
@@ -919,8 +984,14 @@ mod tests {
     #[test]
     fn answers_with_nothing_for_a_body_it_cannot_read() {
         let files = fixture_files();
-        assert!(elements_of(&files, &[900]).unwrap().is_empty(), "the withheld choice");
-        assert!(elements_of(&files, &[40_404]).unwrap().is_empty(), "a choice in no section");
+        assert!(
+            elements_of(&files, &[900]).unwrap().is_empty(),
+            "the withheld choice"
+        );
+        assert!(
+            elements_of(&files, &[40_404]).unwrap().is_empty(),
+            "a choice in no section"
+        );
     }
 
     #[test]
@@ -937,16 +1008,28 @@ mod tests {
     const HAIR_STYLE: u32 = 16;
     /// The question of hers that drives nothing at all, which is the one she is not asked.
     const INERT_QUESTION: u32 = 8523;
-    const ANOTHER_HAIRSTYLE: Picked = Picked { question: HAIR_STYLE, swatch: 133 };
-    const ANOTHER_SKIN_SWATCH: Picked = Picked { question: 14, swatch: 86 };
-    const ANOTHER_FACE_SHAPE: Picked = Picked { question: 526, swatch: 5060 };
+    const ANOTHER_HAIRSTYLE: Picked = Picked {
+        question: HAIR_STYLE,
+        swatch: 133,
+    };
+    const ANOTHER_SKIN_SWATCH: Picked = Picked {
+        question: 14,
+        swatch: 86,
+    };
+    const ANOTHER_FACE_SHAPE: Picked = Picked {
+        question: 526,
+        swatch: 5060,
+    };
 
     fn asked() -> Vec<Question> {
         questions(&fixture_files(), crate::body::DEFAULT).unwrap()
     }
 
     fn question(id: u32) -> Question {
-        asked().into_iter().find(|question| question.id == id).expect("a question of hers")
+        asked()
+            .into_iter()
+            .find(|question| question.id == id)
+            .expect("a question of hers")
     }
 
     // What there is to personalise at all: the screen's own questions, named, each with every
@@ -954,8 +1037,10 @@ mod tests {
     #[test]
     fn asks_what_the_character_creation_screen_asks_about_this_body() {
         let hers = asked();
-        let named: Vec<(u32, &str)> =
-            hers.iter().map(|question| (question.id, question.name.as_str())).collect();
+        let named: Vec<(u32, &str)> = hers
+            .iter()
+            .map(|question| (question.id, question.name.as_str()))
+            .collect();
         assert_eq!(
             named,
             vec![
@@ -976,7 +1061,11 @@ mod tests {
     // the hairstyles second-swatch-first for exactly this reason.
     #[test]
     fn lists_the_swatches_of_a_question_in_the_order_the_screen_offers_them() {
-        let ids: Vec<u32> = question(HAIR_STYLE).swatches.iter().map(|swatch| swatch.id).collect();
+        let ids: Vec<u32> = question(HAIR_STYLE)
+            .swatches
+            .iter()
+            .map(|swatch| swatch.id)
+            .collect();
         assert_eq!(ids, vec![132, 133]);
     }
 
@@ -1007,14 +1096,26 @@ mod tests {
     fn draws_the_swatch_the_reader_chose_rather_than_the_one_the_game_opens_on() {
         let hers = as_answered(&[ANOTHER_HAIRSTYLE]);
         assert!(
-            hers.geosets.contains(&Geoset { group: 0, geoset: 1 }),
+            hers.geosets.contains(&Geoset {
+                group: 0,
+                geoset: 1
+            }),
             "the hairstyle she chose: {:?}",
             hers.geosets
         );
-        assert!(!hers.geosets.contains(&Geoset { group: 0, geoset: 2 }), "and not the first one");
+        assert!(
+            !hers.geosets.contains(&Geoset {
+                group: 0,
+                geoset: 2
+            }),
+            "and not the first one"
+        );
         // Her head, her ears and her skin are not what was asked about and do not move.
         assert_eq!(hers.base, herself().base);
-        assert!(hers.geosets.contains(&Geoset { group: 32, geoset: 3202 }));
+        assert!(hers.geosets.contains(&Geoset {
+            group: 32,
+            geoset: 3202
+        }));
     }
 
     // Several answers at once, which is what a settings file holds — and the conditional
@@ -1029,7 +1130,13 @@ mod tests {
             "the face authored for that skin: {:?}",
             hers.over
         );
-        assert!(hers.geosets.contains(&Geoset { group: 32, geoset: 3203 }), "the head she chose");
+        assert!(
+            hers.geosets.contains(&Geoset {
+                group: 32,
+                geoset: 3203
+            }),
+            "the head she chose"
+        );
     }
 
     // An answer out of a settings file older than the install it is being applied to. Both ways
@@ -1037,9 +1144,18 @@ mod tests {
     // nobody's, and a swatch of another question would put a hairstyle where an ear goes.
     #[test]
     fn ignores_an_answer_the_installed_game_does_not_bear_out() {
-        let elsewhere = Picked { question: 9000, swatch: 9001 };
-        let crossed = Picked { question: HAIR_STYLE, swatch: 5060 };
-        let absent = Picked { question: HAIR_STYLE, swatch: 40_404 };
+        let elsewhere = Picked {
+            question: 9000,
+            swatch: 9001,
+        };
+        let crossed = Picked {
+            question: HAIR_STYLE,
+            swatch: 5060,
+        };
+        let absent = Picked {
+            question: HAIR_STYLE,
+            swatch: 40_404,
+        };
         for answer in [elsewhere, crossed, absent] {
             assert_eq!(as_answered(&[answer]), herself(), "{answer:?} was obeyed");
         }
@@ -1049,17 +1165,41 @@ mod tests {
     // a machine with no install still saves what a machine with one chose.
     #[test]
     fn keeps_one_answer_per_question() {
-        let twice = vec![ANOTHER_HAIRSTYLE, Picked { question: HAIR_STYLE, swatch: 132 }];
-        assert_eq!(clean(twice), Ok(vec![Picked { question: HAIR_STYLE, swatch: 132 }]));
+        let twice = vec![
+            ANOTHER_HAIRSTYLE,
+            Picked {
+                question: HAIR_STYLE,
+                swatch: 132,
+            },
+        ];
+        assert_eq!(
+            clean(twice),
+            Ok(vec![Picked {
+                question: HAIR_STYLE,
+                swatch: 132
+            }])
+        );
         let both = vec![ANOTHER_HAIRSTYLE, ANOTHER_SKIN_SWATCH];
         assert_eq!(clean(both.clone()), Ok(both));
     }
 
     #[test]
     fn refuses_an_answer_that_names_no_question_or_no_swatch() {
-        assert!(clean(vec![Picked { question: 0, swatch: 132 }]).is_err());
-        assert!(clean(vec![Picked { question: HAIR_STYLE, swatch: 0 }]).is_err());
-        assert_eq!(clean(Vec::new()), Ok(Vec::new()), "nobody has answered anything yet");
+        assert!(clean(vec![Picked {
+            question: 0,
+            swatch: 132
+        }])
+        .is_err());
+        assert!(clean(vec![Picked {
+            question: HAIR_STYLE,
+            swatch: 0
+        }])
+        .is_err());
+        assert_eq!(
+            clean(Vec::new()),
+            Ok(Vec::new()),
+            "nobody has answered anything yet"
+        );
     }
 
     // The limit is a floor under a payload that is not a person's answers rather than a count of
@@ -1068,7 +1208,12 @@ mod tests {
     #[test]
     fn refuses_more_answers_than_a_settings_file_could_hold() {
         let answers = |how_many: u32| -> Vec<Picked> {
-            (0..how_many).map(|at| Picked { question: at + 1, swatch: at + 1 }).collect()
+            (0..how_many)
+                .map(|at| Picked {
+                    question: at + 1,
+                    swatch: at + 1,
+                })
+                .collect()
         };
         assert!(clean(answers(ANSWER_LIMIT as u32 + 1)).is_err());
         // Fifty-one bodies of a dozen questions each, which is what trying on a whole roster in
@@ -1100,7 +1245,11 @@ mod tests {
             .collect();
         assert_eq!(
             his,
-            vec![(40, "Skin Color"), (HIS_HAIR, "Hair Style"), (FACIAL_HAIR, "Facial Hair")],
+            vec![
+                (40, "Skin Color"),
+                (HIS_HAIR, "Hair Style"),
+                (FACIAL_HAIR, "Facial Hair")
+            ],
         );
         assert!(!asked().iter().any(|question| question.id == FACIAL_HAIR));
     }
@@ -1109,11 +1258,25 @@ mod tests {
     // layout, and his beard is a geoset in a group her body has nothing in.
     #[test]
     fn draws_the_body_it_was_asked_about() {
-        let his = of(&fixture_files(), &his(), &[Picked { question: FACIAL_HAIR, swatch: 421 }])
-            .unwrap()
-            .expect("the fixture install can say who this body is");
+        let his = of(
+            &fixture_files(),
+            &his(),
+            &[Picked {
+                question: FACIAL_HAIR,
+                swatch: 421,
+            }],
+        )
+        .unwrap()
+        .expect("the fixture install can say who this body is");
         assert_eq!(his.base, 160_101, "his skin, not hers");
-        assert!(his.geosets.contains(&Geoset { group: 1, geoset: 101 }), "{:?}", his.geosets);
+        assert!(
+            his.geosets.contains(&Geoset {
+                group: 1,
+                geoset: 101
+            }),
+            "{:?}",
+            his.geosets
+        );
     }
 
     // An answer about him is an answer about his questions: the same rule the female body
@@ -1121,13 +1284,33 @@ mod tests {
     #[test]
     fn answers_a_question_of_the_other_bodys() {
         let opens_on = of(&fixture_files(), &his(), &[]).unwrap().unwrap();
-        assert!(opens_on.geosets.contains(&Geoset { group: 0, geoset: 2 }));
+        assert!(opens_on.geosets.contains(&Geoset {
+            group: 0,
+            geoset: 2
+        }));
 
-        let chosen = of(&fixture_files(), &his(), &[Picked { question: HIS_HAIR, swatch: 411 }])
-            .unwrap()
-            .unwrap();
-        assert!(chosen.geosets.contains(&Geoset { group: 0, geoset: 1 }), "{:?}", chosen.geosets);
-        assert!(!chosen.geosets.contains(&Geoset { group: 0, geoset: 2 }));
+        let chosen = of(
+            &fixture_files(),
+            &his(),
+            &[Picked {
+                question: HIS_HAIR,
+                swatch: 411,
+            }],
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            chosen.geosets.contains(&Geoset {
+                group: 0,
+                geoset: 1
+            }),
+            "{:?}",
+            chosen.geosets
+        );
+        assert!(!chosen.geosets.contains(&Geoset {
+            group: 0,
+            geoset: 2
+        }));
     }
 
     // Her answers are not his. Both bodies' answers live in one settings file, because the
@@ -1135,10 +1318,15 @@ mod tests {
     // her head is the same check that drops a stale answer.
     #[test]
     fn ignores_the_other_bodys_answers_when_drawing_this_one() {
-        let his_hair = Picked { question: HIS_HAIR, swatch: 411 };
+        let his_hair = Picked {
+            question: HIS_HAIR,
+            swatch: 411,
+        };
         assert_eq!(as_answered(&[his_hair]), herself());
         // And the other way round, which is the same statement from the other end.
-        let hers = of(&fixture_files(), &his(), &[ANOTHER_HAIRSTYLE]).unwrap().unwrap();
+        let hers = of(&fixture_files(), &his(), &[ANOTHER_HAIRSTYLE])
+            .unwrap()
+            .unwrap();
         assert_eq!(hers, of(&fixture_files(), &his(), &[]).unwrap().unwrap());
     }
 

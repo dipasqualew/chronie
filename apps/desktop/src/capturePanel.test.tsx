@@ -18,9 +18,15 @@ function panel(settings: Settings = {}, overrides: Partial<CaptureActions> = {})
   const stored: Settings = { captureTriggers: [], captureQuality: "balanced", ...settings };
   const actions: CaptureActions = {
     setTriggers: vi.fn((triggers: string[]) =>
-      Promise.resolve({ ...stored, captureTriggers: triggers })),
+      Promise.resolve({ ...stored, captureTriggers: triggers }),
+    ),
     setStorage: vi.fn((quality: CaptureQuality, keepOriginals: boolean) =>
-      Promise.resolve({ ...stored, captureQuality: quality, keepOriginalScreenshots: keepOriginals })),
+      Promise.resolve({
+        ...stored,
+        captureQuality: quality,
+        keepOriginalScreenshots: keepOriginals,
+      }),
+    ),
     onError: said,
     ...overrides,
   };
@@ -28,8 +34,7 @@ function panel(settings: Settings = {}, overrides: Partial<CaptureActions> = {})
   return actions;
 }
 
-const box = (name: string | RegExp): HTMLInputElement =>
-  screen.getByRole("checkbox", { name });
+const box = (name: string | RegExp): HTMLInputElement => screen.getByRole("checkbox", { name });
 const level = (name: string | RegExp): HTMLInputElement => screen.getByRole("radio", { name });
 const state = (): HTMLElement => screen.getByRole("status");
 const section = (id: string): HTMLElement | null => document.getElementById(id);
@@ -54,7 +59,8 @@ describe("CapturePanel", () => {
     fireEvent.click(box(/A mount added to the collection/));
 
     await waitFor(() =>
-      expect(actions.setTriggers).toHaveBeenCalledWith(["accountFirstAchievement", "mount"]));
+      expect(actions.setTriggers).toHaveBeenCalledWith(["accountFirstAchievement", "mount"]),
+    );
     expect(state().textContent).toContain("2 kinds of moment");
   });
 
@@ -64,7 +70,8 @@ describe("CapturePanel", () => {
     fireEvent.click(box(/A mount added to the collection/));
 
     await waitFor(() =>
-      expect(actions.setTriggers).toHaveBeenCalledWith(["accountFirstAchievement"]));
+      expect(actions.setTriggers).toHaveBeenCalledWith(["accountFirstAchievement"]),
+    );
   });
 
   // Turning everything off is a legitimate thing to want, and the panel has to say what that
@@ -87,8 +94,9 @@ describe("CapturePanel", () => {
     fireEvent.click(box(/Every achievement this character earns/));
 
     await waitFor(() => expect(screen.getByText(/Already covered by/)).toBeTruthy());
-    expect(screen.getByText(/Already covered by/).textContent)
-      .toContain("Every achievement this character earns");
+    expect(screen.getByText(/Already covered by/).textContent).toContain(
+      "Every achievement this character earns",
+    );
     // Still ticked and still the reader's to untick: this is a note, not a correction.
     expect(box(/An achievement nobody on this account had/).checked).toBe(true);
   });
@@ -103,7 +111,8 @@ describe("CapturePanel", () => {
     fireEvent.click(box(/A toy added to the collection/));
 
     await waitFor(() =>
-      expect(actions.setTriggers).toHaveBeenCalledWith(["mount", "toy", "somethingNewer"]));
+      expect(actions.setTriggers).toHaveBeenCalledWith(["mount", "toy", "somethingNewer"]),
+    );
   });
 
   it("shows the stored quality, and saves the one that is chosen", async () => {
@@ -143,7 +152,8 @@ describe("CapturePanel", () => {
     fireEvent.click(box("Leave the game’s own copy where it is"));
 
     await waitFor(() =>
-      expect(section("capture-storage-state")?.textContent).toContain("goes on growing"));
+      expect(section("capture-storage-state")?.textContent).toContain("goes on growing"),
+    );
   });
 
   // Neither setting reaches into the store, and somebody deciding to save disk needs to know
@@ -157,14 +167,18 @@ describe("CapturePanel", () => {
   // A write that fails must leave the boxes showing what is still stored, not what the click
   // hoped — and must say what went wrong rather than failing silently.
   it("puts a rule back when the write fails, and says why", async () => {
-    panel({ captureTriggers: ["mount"] }, {
-      setTriggers: () => Promise.reject(new Error("settings are read-only")),
-    });
+    panel(
+      { captureTriggers: ["mount"] },
+      {
+        setTriggers: () => Promise.reject(new Error("settings are read-only")),
+      },
+    );
 
     fireEvent.click(box(/A toy added to the collection/));
 
     await waitFor(() =>
-      expect(state().textContent).toContain("The install said: Error: settings are read-only"));
+      expect(state().textContent).toContain("The install said: Error: settings are read-only"),
+    );
   });
 
   it("reports a storage write the backend refused", async () => {
@@ -173,6 +187,7 @@ describe("CapturePanel", () => {
     fireEvent.click(level(/Fits a laptop screen/));
 
     await waitFor(() =>
-      expect(state().textContent).toContain("The install said: Error: no game folder is set"));
+      expect(state().textContent).toContain("The install said: Error: no game folder is set"),
+    );
   });
 });

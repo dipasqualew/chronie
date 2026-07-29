@@ -26,7 +26,10 @@ import { glbBytes } from "./modelPreview";
 
 /** What a tile does to get itself drawn, which is the one thing here that needs a graphics card. */
 export type Paint = (
-  target: HTMLCanvasElement, bytes: Uint8Array, focus: Focus, turn: number,
+  target: HTMLCanvasElement,
+  bytes: Uint8Array,
+  focus: Focus,
+  turn: number,
 ) => Promise<void>;
 
 /**
@@ -73,15 +76,21 @@ export function useGalleryPaint(
     };
   }, [on]);
 
-  return useCallback(async (
-    target: HTMLCanvasElement, bytes: Uint8Array, focus: Focus, turn: number,
-  ): Promise<void> => {
-    // One stage, and one attempt to make one: twenty tiles painting at once would otherwise each
-    // start a context of their own, which is the thing this exists to avoid.
-    starting.current ??= Promise.resolve(createGalleryStage());
-    const made = await starting.current;
-    await made.paint(target, bytes, focus, turn);
-  }, [createGalleryStage]);
+  return useCallback(
+    async (
+      target: HTMLCanvasElement,
+      bytes: Uint8Array,
+      focus: Focus,
+      turn: number,
+    ): Promise<void> => {
+      // One stage, and one attempt to make one: twenty tiles painting at once would otherwise each
+      // start a context of their own, which is the thing this exists to avoid.
+      starting.current ??= Promise.resolve(createGalleryStage());
+      const made = await starting.current;
+      await made.paint(target, bytes, focus, turn);
+    },
+    [createGalleryStage],
+  );
 }
 
 /**
@@ -107,15 +116,18 @@ export function useGalleryPaint(
  * the slot and the quality are still what the row is for, and a machine with no working 3D at
  * all is a machine where every tile of the gallery is an empty one of these.
  */
-export function Turnable(
-  { glb, focus, label, paint }: {
-    glb: string;
-    /** How much of what arrived to hold in view, and where on it to look — see `gallery.ts`. */
-    focus: Focus;
-    label: string;
-    paint: Paint;
-  },
-): ReactNode {
+export function Turnable({
+  glb,
+  focus,
+  label,
+  paint,
+}: {
+  glb: string;
+  /** How much of what arrived to hold in view, and where on it to look — see `gallery.ts`. */
+  focus: Focus;
+  label: string;
+  paint: Paint;
+}): ReactNode {
   const canvas = useRef<HTMLCanvasElement>(null);
   const bytes = useMemo(() => glbBytes(glb), [glb]);
 
@@ -125,26 +137,29 @@ export function Turnable(
   const wanted = useRef<number | null>(null);
   const painting = useRef(false);
 
-  const ask = useCallback((at: number): void => {
-    wanted.current = at;
-    if (painting.current) return;
-    painting.current = true;
-    void (async () => {
-      try {
-        while (wanted.current !== null) {
-          const next = wanted.current;
-          wanted.current = null;
-          const target = canvas.current;
-          if (!target) break;
-          await paint(target, bytes, focus, next);
+  const ask = useCallback(
+    (at: number): void => {
+      wanted.current = at;
+      if (painting.current) return;
+      painting.current = true;
+      void (async () => {
+        try {
+          while (wanted.current !== null) {
+            const next = wanted.current;
+            wanted.current = null;
+            const target = canvas.current;
+            if (!target) break;
+            await paint(target, bytes, focus, next);
+          }
+        } catch {
+          // Leaves the picture that was there. See the note above.
+        } finally {
+          painting.current = false;
         }
-      } catch {
-        // Leaves the picture that was there. See the note above.
-      } finally {
-        painting.current = false;
-      }
-    })();
-  }, [bytes, focus, paint]);
+      })();
+    },
+    [bytes, focus, paint],
+  );
 
   // The first paint, and any later one caused by the model itself changing. Not by the angle:
   // the angle lives in a ref precisely so that turning a tile is not a React render.
@@ -156,7 +171,9 @@ export function Turnable(
   return (
     <span className="mog-shot">
       <canvas
-        ref={canvas} role="img" aria-label={`${label}, drawn`}
+        ref={canvas}
+        role="img"
+        aria-label={`${label}, drawn`}
         onPointerDown={(event) => {
           // Captured, so a drag that leaves the tile keeps turning it rather than stopping at
           // the edge — twenty tiles side by side means most drags cross one.
@@ -167,12 +184,18 @@ export function Turnable(
           const started = drag.current;
           if (!started || started.pointer !== event.pointerId) return;
           turn.current = turnedBy(
-            started.at, event.clientX - started.from, event.currentTarget.clientWidth,
+            started.at,
+            event.clientX - started.from,
+            event.currentTarget.clientWidth,
           );
           ask(turn.current);
         }}
-        onPointerUp={() => { drag.current = null; }}
-        onPointerCancel={() => { drag.current = null; }}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
       />
     </span>
   );

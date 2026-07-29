@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ALL_TRIGGERS, CAPTURE_QUALITIES, DEFAULT_QUALITY, TRIGGER_GROUPS,
-  supersededBy, toggleTrigger, triggerSentence, unknownTriggers,
+  ALL_TRIGGERS,
+  CAPTURE_QUALITIES,
+  DEFAULT_QUALITY,
+  TRIGGER_GROUPS,
+  supersededBy,
+  toggleTrigger,
+  triggerSentence,
+  unknownTriggers,
 } from "./captureSettings";
 import type { CaptureQuality } from "./types";
 
@@ -50,14 +56,12 @@ describe("the catalogue of rules", () => {
 
   // The three the issue asks for by name, plus the one this change added. Named individually
   // rather than counted, because a rename on either side of the boundary is the failure.
-  it.each([
-    "accountFirstAchievement",
-    "achievement",
-    "mount",
-    "newAppearance",
-  ])("offers %s", (name) => {
-    expect(named(name)).toBeDefined();
-  });
+  it.each(["accountFirstAchievement", "achievement", "mount", "newAppearance"])(
+    "offers %s",
+    (name) => {
+      expect(named(name)).toBeDefined();
+    },
+  );
 });
 
 describe("a broader rule covering a narrower one", () => {
@@ -98,10 +102,12 @@ describe("turning one rule on or off", () => {
   // vanish the first time somebody ticked something — and the settings file can be edited by
   // hand, and a newer addon may know rules this window does not.
   it("carries a rule this build has no box for through untouched", () => {
-    expect(toggleTrigger(["mount", "somethingNewer"], "levelUp", true))
-      .toEqual(["mount", "levelUp", "somethingNewer"]);
-    expect(toggleTrigger(["mount", "somethingNewer"], "mount", false))
-      .toEqual(["somethingNewer"]);
+    expect(toggleTrigger(["mount", "somethingNewer"], "levelUp", true)).toEqual([
+      "mount",
+      "levelUp",
+      "somethingNewer",
+    ]);
+    expect(toggleTrigger(["mount", "somethingNewer"], "mount", false)).toEqual(["somethingNewer"]);
   });
 
   // The catalogue's order rather than the click order, so ticking two boxes in either sequence

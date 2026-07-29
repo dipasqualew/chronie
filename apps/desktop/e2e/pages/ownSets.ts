@@ -20,8 +20,9 @@ export class YourSets {
 
   constructor(page: Page) {
     this.page = page;
-    this.list = new TransmogView(page).view
-      .getByRole("region", { name: "The sets you saved here" });
+    this.list = new TransmogView(page).view.getByRole("region", {
+      name: "The sets you saved here",
+    });
   }
 
   /** The saved sets on screen, by the names the reader gave them. */
@@ -43,7 +44,9 @@ export class YourSets {
 
   /** The pieces a saved set turned out to be made of, which arrived with the card. */
   pieces(name: string): Locator {
-    return this.card(name).getByRole("list", { name: `Pieces of ${name}` }).getByRole("listitem");
+    return this.card(name)
+      .getByRole("list", { name: `Pieces of ${name}` })
+      .getByRole("listitem");
   }
 
   /** One of those rows, found by what its button would do. */
@@ -109,8 +112,9 @@ export class InGameSets {
 
   constructor(page: Page) {
     this.page = page;
-    this.list = new TransmogView(page).view
-      .getByRole("region", { name: "The sets you saved in the game" });
+    this.list = new TransmogView(page).view.getByRole("region", {
+      name: "The sets you saved in the game",
+    });
   }
 
   /** The characters with something to show, in the order the backend sorted them. */
@@ -135,7 +139,9 @@ export class InGameSets {
 
   /** One row per slot the player filled, which is what an opened set turned out to be. */
   rows(name: string): Locator {
-    return this.card(name).getByRole("list", { name: `Pieces of ${name}` }).getByRole("listitem");
+    return this.card(name)
+      .getByRole("list", { name: `Pieces of ${name}` })
+      .getByRole("listitem");
   }
 
   /** Opens one in place, which is where the game's files are actually read. */
@@ -161,9 +167,7 @@ export class InGameSets {
  * The value is optional here because it is optional there — a tag with nothing in that box is
  * a label, which is half of what marking is for.
  */
-export async function tagIt(
-  host: Locator, name: string, key: string, value = "",
-): Promise<void> {
+export async function tagIt(host: Locator, name: string, key: string, value = ""): Promise<void> {
   await host.getByRole("button", { name: `Tag ${name}`, exact: true }).click();
   await host.getByLabel(`Tag name for ${name}`, { exact: true }).fill(key);
   if (value) await host.getByLabel(`Tag value for ${name} (optional)`, { exact: true }).fill(value);

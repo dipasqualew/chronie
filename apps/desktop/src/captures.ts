@@ -31,8 +31,10 @@ export interface CapturedMoment {
 export function capturedMoments(segments: Segment[]): CapturedMoment[] {
   return segments
     .flatMap((segment) => (segment.captures || []).map((capture) => ({ capture, segment })))
-    .sort((left, right) =>
-      (left.capture.at || 0) - (right.capture.at || 0) || left.capture.id - right.capture.id);
+    .sort(
+      (left, right) =>
+        (left.capture.at || 0) - (right.capture.at || 0) || left.capture.id - right.capture.id,
+    );
 }
 
 /** The ids whose thumbnails a grid of these needs; the ones with no image are not asked for. */
@@ -189,7 +191,7 @@ export const noteChanged = (capture: Capture, typed: string): boolean =>
 export function deleteWarning(capture: Capture): string {
   return capture.imageState === "stored"
     ? "Delete this screenshot? The picture is deleted from Chronie's storage as well as the " +
-      "entry, and neither can be recovered."
+        "entry, and neither can be recovered."
     : "Delete this entry? It cannot be recovered.";
 }
 

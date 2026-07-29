@@ -42,11 +42,21 @@ describe("itemLine", () => {
   // cannot describe the item at all is left with; the id is what neither of them said.
   it.each([
     ["the game's name over the addon's", "Caught At The Time", detail(), "Wanderer's Mantle"],
-    ["the addon's where the game says nothing", "Caught At The Time", undefined, "Caught At The Time"],
+    [
+      "the addon's where the game says nothing",
+      "Caught At The Time",
+      undefined,
+      "Caught At The Time",
+    ],
     ["the id where nothing said anything", null, undefined, "Item 201"],
     // A row the small table describes and the big one cannot name: half an answer, and the
     // half that is missing is exactly the one the addon might have.
-    ["the addon's where the game's row has no name", "Caught At The Time", detail({ name: "" }), "Caught At The Time"],
+    [
+      "the addon's where the game's row has no name",
+      "Caught At The Time",
+      detail({ name: "" }),
+      "Caught At The Time",
+    ],
   ])("names a row by %s", (_what, recorded, found, expected) => {
     expect(itemLine(201, recorded, found).name).toBe(expected);
   });
@@ -67,7 +77,11 @@ describe("itemLine", () => {
     ["plate", detail({ subclassId: 4 }), "Plate"],
     // A ring is armour by class and nothing by armour class, and a chip saying "Miscellaneous"
     // on every ring in the history would be noise rather than information.
-    ["a ring, which is filed under no armour class at all", detail({ subclassId: 0, inventoryType: 11 }), ""],
+    [
+      "a ring, which is filed under no armour class at all",
+      detail({ subclassId: 0, inventoryType: 11 }),
+      "",
+    ],
     // The game keeps one-handed and two-handed swords apart; the slot beside this already
     // says which, so saying it again here would say it twice.
     ["a one-handed sword", detail({ classId: WEAPON, subclassId: 7, inventoryType: 13 }), "Sword"],
@@ -101,7 +115,11 @@ describe("itemLine", () => {
     ["nobody, when the mask is empty", 0, ""],
     ["the three that wear plate", 0b10_0011, "Warrior, Paladin, Death Knight only"],
     ["one class", 0b1000, "Rogue only"],
-    ["the newest class, which is the highest bit that means anything", 0b1_0000_0000_0000, "Evoker only"],
+    [
+      "the newest class, which is the highest bit that means anything",
+      0b1_0000_0000_0000,
+      "Evoker only",
+    ],
     // Every class the game has, plus two bits set aside for classes that never arrived.
     ["nobody, when every class that exists is allowed", 0b111_1111_1111_1111, ""],
   ])("names %s", (_what, allowableClass, expected) => {
@@ -125,21 +143,25 @@ const ICON = "data:image/png;base64,icon";
  * "everything that asked in this turn shares one request" is something a test states rather
  * than something it hopes a microtask arranged.
  */
-function book(
-  known: Record<number, ItemDetail>,
-  overrides: Partial<ItemBookOptions> = {},
-) {
+function book(known: Record<number, ItemDetail>, overrides: Partial<ItemBookOptions> = {}) {
   const run: Array<() => void> = [];
-  const load = vi.fn((ids: number[]): Promise<ItemDetailsPayload> => Promise.resolve({
-    items: Object.fromEntries(
-      ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
-    ),
-  }));
-  const loadIcons = vi.fn((fdids: number[]): Promise<IconsPayload> => Promise.resolve({
-    icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), ICON])),
-  }));
+  const load = vi.fn((ids: number[]): Promise<ItemDetailsPayload> =>
+    Promise.resolve({
+      items: Object.fromEntries(
+        ids.filter((id) => known[id]).map((id) => [String(id), known[id] as ItemDetail]),
+      ),
+    }),
+  );
+  const loadIcons = vi.fn((fdids: number[]): Promise<IconsPayload> =>
+    Promise.resolve({
+      icons: Object.fromEntries(fdids.map((fdid) => [String(fdid), ICON])),
+    }),
+  );
   const made = createItemBook({
-    load, loadIcons, schedule: (send) => run.push(send), ...overrides,
+    load,
+    loadIcons,
+    schedule: (send) => run.push(send),
+    ...overrides,
   });
   /** Sends the batch that has piled up, and settles both halves of the answer. */
   const flush = async (): Promise<void> => {
@@ -242,9 +264,12 @@ describe("createItemBook", () => {
   // it has not been chosen yet, or it is mid-patch — and those are worth one more try when the
   // reader opens the next segment.
   it("tries again after a lookup that failed", async () => {
-    const shown = book({ 201: detail() }, {
-      load: vi.fn(() => Promise.reject(new Error("Choose the game folder in Setup first."))),
-    });
+    const shown = book(
+      { 201: detail() },
+      {
+        load: vi.fn(() => Promise.reject(new Error("Choose the game folder in Setup first."))),
+      },
+    );
     shown.book.learn([201], () => {});
     await shown.flush();
     expect(shown.book.detail(201)).toBeUndefined();

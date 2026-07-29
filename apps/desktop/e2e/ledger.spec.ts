@@ -26,8 +26,9 @@ test("lists every segment on the details view and filters it", async ({ page }) 
     // One cell, both factions: the one the client could not place says only what was gained,
     // and the one it named a level for says the level even though no bar could be drawn for
     // it. The table has room for the name and never had room for the bar.
-    await expect(ledger.cellSaying("Lamplighters"))
-      .toHaveText("Lamplighters +10, Deepwater Wardens +40 (Exalted)");
+    await expect(ledger.cellSaying("Lamplighters")).toHaveText(
+      "Lamplighters +10, Deepwater Wardens +40 (Exalted)",
+    );
   });
 
   // The ledger abbreviates but does not number: an item the addon could put no name to is

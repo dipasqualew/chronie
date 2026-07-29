@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  PAGE, SET_PAGE, WHOLE, focusOf, piecesOf, stillWanted, stillWantedSets, turnedBy,
+  PAGE,
+  SET_PAGE,
+  WHOLE,
+  focusOf,
+  piecesOf,
+  stillWanted,
+  stillWantedSets,
+  turnedBy,
   type Thumbnail,
 } from "./gallery";
 import type { AppearanceRow } from "./transmogModal";
@@ -41,8 +48,9 @@ describe("piecesOf", () => {
     ["a cloak", 9, 16],
     ["a two-hander", 11, 17],
   ])("asks for %s to be shown worn", (_, displayType, inventoryType) => {
-    expect(piecesOf([row({ displayType, inventoryType })]))
-      .toEqual([piece({ displayType, inventoryType })]);
+    expect(piecesOf([row({ displayType, inventoryType })])).toEqual([
+      piece({ displayType, inventoryType }),
+    ]);
   });
 
   // The two the game itself gives no place to. Both keep their row and their icon in the list,
@@ -73,13 +81,17 @@ describe("stillWanted", () => {
   // with nothing: an appearance this install can put on nobody answers `null` once, and asking
   // again on every repaint is the whole of a page's cost spent to be told the same thing.
   it.each<[string, Thumbnail]>([
-    ["one already drawn", { kind: "model", glb: "data:model/gltf-binary;base64,AA", shows: "worn" }],
+    [
+      "one already drawn",
+      { kind: "model", glb: "data:model/gltf-binary;base64,AA", shows: "worn" },
+    ],
     ["one already sent for", { kind: "wanted" }],
     ["one that came back with nothing", { kind: "nothing", note: "no place on her" }],
   ])("leaves out %s", (_, thumbnail) => {
     const pieces = [piece({ displayInfoId: 900001 }), piece({ displayInfoId: 900003 })];
-    expect(stillWanted(pieces, held([[900001, thumbnail]])))
-      .toEqual([piece({ displayInfoId: 900003 })]);
+    expect(stillWanted(pieces, held([[900001, thumbnail]]))).toEqual([
+      piece({ displayInfoId: 900003 }),
+    ]);
   });
 
   // Two rows of one display is one picture. The wardrobe reaches the same look through several
@@ -102,7 +114,10 @@ describe("stillWantedSets", () => {
   // wardrobe's page keeps, and for the same reason: a set this install can dress nobody in
   // answers `null` once, and asking again on every repaint is a page's cost to hear it twice.
   it.each<[string, Thumbnail]>([
-    ["one already drawn", { kind: "model", glb: "data:model/gltf-binary;base64,AA", shows: "worn" }],
+    [
+      "one already drawn",
+      { kind: "model", glb: "data:model/gltf-binary;base64,AA", shows: "worn" },
+    ],
     ["one already sent for", { kind: "wanted" }],
     ["one that came back with nothing", { kind: "nothing", note: "nothing to put on her" }],
   ])("leaves out %s", (_, thumbnail) => {

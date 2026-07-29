@@ -16,7 +16,8 @@ export class Screenshots {
 
   constructor(page: Page) {
     this.page = page;
-    this.viewer = page.getByRole("dialog")
+    this.viewer = page
+      .getByRole("dialog")
       .filter({ has: page.getByRole("button", { name: "Close screenshot" }) });
   }
 

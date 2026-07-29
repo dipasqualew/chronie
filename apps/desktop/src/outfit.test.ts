@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NOTHING_ON, isWorn, onlyWearable, outfitSummary, piecesOf, placeName, placeOf, setLabel,
-  takeOff, toggle, wear, wearSet, wearable, wornPieces, wornTip,
+  NOTHING_ON,
+  isWorn,
+  onlyWearable,
+  outfitSummary,
+  piecesOf,
+  placeName,
+  placeOf,
+  setLabel,
+  takeOff,
+  toggle,
+  wear,
+  wearSet,
+  wearable,
+  wornPieces,
+  wornTip,
 } from "./outfit";
 import type { AppearanceRow } from "./transmogModal";
 import type { TransmogSet } from "./types";
@@ -18,10 +31,18 @@ const row = (fields: Partial<AppearanceRow> = {}): AppearanceRow => ({
   displayInfoId: 100,
   iconFileDataId: 0,
   hasModel: false,
-  sources: [{
-    label: "Something", itemId: 1, modifiedAppearanceId: 1, inventoryType: 0,
-    allowableClass: 0xffff, requiredLevel: 0, quality: 4, itemCount: 1,
-  }],
+  sources: [
+    {
+      label: "Something",
+      itemId: 1,
+      modifiedAppearanceId: 1,
+      inventoryType: 0,
+      allowableClass: 0xffff,
+      requiredLevel: 0,
+      quality: 4,
+      itemCount: 1,
+    },
+  ],
   liftsRestriction: false,
   withheld: false,
   ...fields,
@@ -51,8 +72,17 @@ describe("placeOf", () => {
   // The armour slots are the one case where the place and the kind of item coincide: the game
   // files a helm under the head and the head is where it goes.
   it.each<[string, number]>([
-    ["head", 0], ["shoulder", 1], ["shirt", 2], ["chest", 3], ["waist", 4], ["legs", 5],
-    ["feet", 6], ["wrist", 7], ["hands", 8], ["back", 9], ["tabard", 10],
+    ["head", 0],
+    ["shoulder", 1],
+    ["shirt", 2],
+    ["chest", 3],
+    ["waist", 4],
+    ["legs", 5],
+    ["feet", 6],
+    ["wrist", 7],
+    ["hands", 8],
+    ["back", 9],
+    ["tabard", 10],
   ])("puts a %s appearance in the slot the game files it under", (_what, displayType) => {
     expect(placeOf(row({ displayType }))).toBe(`armour-${displayType}`);
   });
@@ -91,8 +121,11 @@ describe("onlyWearable", () => {
   it("drops the rows there is nowhere on her to put, and keeps the rest in the set's order", () => {
     const arrows = row({ displayType: 11, inventoryType: 24, label: "A quiver of arrows" });
     const encrypted = row({ withheld: true, label: "Something the game encrypts" });
-    expect(onlyWearable([HELM, arrows, ROBE, encrypted, SWORD]).map((kept) => kept.label))
-      .toEqual(["A helm", "A robe", "A sword"]);
+    expect(onlyWearable([HELM, arrows, ROBE, encrypted, SWORD]).map((kept) => kept.label)).toEqual([
+      "A helm",
+      "A robe",
+      "A sword",
+    ]);
   });
 
   // Which is nearly every set there is: on 12.0.5.67823 three rows in the whole game have no
@@ -126,11 +159,7 @@ describe("wear", () => {
   // The point of the whole module: pieces come out of whichever set the reader was looking at,
   // and they all end up on the same body.
   it("keeps pieces taken out of different sets at once", () => {
-    const outfit = wear(
-      wear(NOTHING_ON, HELM, "One"),
-      ROBE,
-      "Two",
-    );
+    const outfit = wear(wear(NOTHING_ON, HELM, "One"), ROBE, "Two");
     expect(wornPieces(outfit).map((piece) => piece.from)).toEqual(["One", "Two"]);
   });
 
@@ -147,7 +176,11 @@ describe("wear", () => {
   // different item from a one-hander and the same right hand, so it takes it.
   it("treats the hand as the place, so a two-hander takes the one-hander's hand", () => {
     const twoHander = row({ displayType: 11, inventoryType: 17, displayInfoId: 900_014 });
-    const outfit = wear(wear(NOTHING_ON, SWORD, "Tideglass Regalia"), twoHander, "Tideglass Regalia");
+    const outfit = wear(
+      wear(NOTHING_ON, SWORD, "Tideglass Regalia"),
+      twoHander,
+      "Tideglass Regalia",
+    );
     expect(wornPieces(outfit)).toHaveLength(1);
     expect(wornPieces(outfit)[0]?.row.displayInfoId).toBe(900_014);
   });
@@ -183,7 +216,9 @@ describe("wear", () => {
 describe("takeOff", () => {
   it("takes one piece off and leaves the rest on", () => {
     const outfit = wear(wear(NOTHING_ON, HELM, "Tideglass Regalia"), ROBE, "Tideglass Regalia");
-    expect(wornPieces(takeOff(outfit, "armour-0")).map((piece) => piece.place)).toEqual(["armour-3"]);
+    expect(wornPieces(takeOff(outfit, "armour-0")).map((piece) => piece.place)).toEqual([
+      "armour-3",
+    ]);
   });
 
   it("leaves an outfit that has nothing in that place exactly as it was", () => {
@@ -200,8 +235,11 @@ describe("wornPieces", () => {
     let outfit = wear(NOTHING_ON, SWORD, "Tideglass Regalia");
     outfit = wear(outfit, boots, "Tideglass Regalia");
     outfit = wear(outfit, HELM, "Tideglass Regalia");
-    expect(wornPieces(outfit).map((piece) => piece.place))
-      .toEqual(["armour-0", "armour-6", "hand-right"]);
+    expect(wornPieces(outfit).map((piece) => piece.place)).toEqual([
+      "armour-0",
+      "armour-6",
+      "hand-right",
+    ]);
   });
 });
 
@@ -220,7 +258,9 @@ describe("isWorn", () => {
   });
 
   it("does not mark an appearance that could never go on", () => {
-    expect(isWorn(wear(NOTHING_ON, ROBE, "Tideglass Regalia"), row({ withheld: true }))).toBe(false);
+    expect(isWorn(wear(NOTHING_ON, ROBE, "Tideglass Regalia"), row({ withheld: true }))).toBe(
+      false,
+    );
   });
 });
 
@@ -252,8 +292,11 @@ describe("wearSet", () => {
   // A set is a set of clothes and seeing all of it at once is the ordinary thing to want.
   it("puts every piece of a set on at once", () => {
     const outfit = wearSet(NOTHING_ON, [HELM, ROBE, SWORD], someSet());
-    expect(wornPieces(outfit).map((piece) => piece.place))
-      .toEqual(["armour-0", "armour-3", "hand-right"]);
+    expect(wornPieces(outfit).map((piece) => piece.place)).toEqual([
+      "armour-0",
+      "armour-3",
+      "hand-right",
+    ]);
   });
 
   // The rows the game gives no place on a body keep their place in the list and stay off her.
@@ -267,8 +310,7 @@ describe("wearSet", () => {
   it("keeps the last of two pieces for one place, and everything else on", () => {
     const other = row({ displayType: 0, displayInfoId: 900_099, label: "Another helm" });
     const outfit = wearSet(wear(NOTHING_ON, SWORD, "Tideglass Regalia"), [HELM, other], someSet());
-    expect(wornPieces(outfit).map((piece) => piece.row.label))
-      .toEqual(["Another helm", "A sword"]);
+    expect(wornPieces(outfit).map((piece) => piece.row.label)).toEqual(["Another helm", "A sword"]);
   });
 });
 
@@ -287,8 +329,9 @@ describe("wornTip", () => {
   // nowhere: what it is, where on her it is, and which set it was taken out of.
   it("says what the piece is, where it goes and where it came from", () => {
     const [piece] = wornPieces(wear(NOTHING_ON, HELM, "Tideglass Regalia"));
-    expect(wornTip(piece!))
-      .toBe('<b>A helm</b><span class="tip-line">Head · Tideglass Regalia</span>');
+    expect(wornTip(piece!)).toBe(
+      '<b>A helm</b><span class="tip-line">Head · Tideglass Regalia</span>',
+    );
   });
 
   // A look picked out of the game's whole wardrobe came out of no set, and naming one — "the
@@ -304,8 +347,8 @@ describe("wornTip", () => {
     const rude = row({ displayType: 0, label: '<img src=x onerror="alert(1)">' });
     const [piece] = wornPieces(wear(NOTHING_ON, rude, "<b>Set</b>"));
     expect(wornTip(piece!)).toBe(
-      '<b>&lt;img src=x onerror=&quot;alert(1)&quot;&gt;</b>'
-      + '<span class="tip-line">Head · &lt;b&gt;Set&lt;/b&gt;</span>',
+      "<b>&lt;img src=x onerror=&quot;alert(1)&quot;&gt;</b>" +
+        '<span class="tip-line">Head · &lt;b&gt;Set&lt;/b&gt;</span>',
     );
   });
 });

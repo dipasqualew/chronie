@@ -59,7 +59,9 @@ const item: TableSpec = {
     { storage: Storage.indexed, offsetBits: 5, sizeBits: 5, palette: [0, 1, 2, 3, 4, 7] }, // SubclassID
     { storage: Storage.bitpacked, offsetBits: 10, sizeBits: 4 }, // Material
     {
-      storage: Storage.indexed, offsetBits: 14, sizeBits: 6,
+      storage: Storage.indexed,
+      offsetBits: 14,
+      sizeBits: 6,
       palette: [0, 1, 3, 5, 12, 13, 16],
     }, // InventoryType
     { storage: Storage.indexed, offsetBits: 20, sizeBits: 4, palette: [0, 1, 3] }, // SheatheType
@@ -113,9 +115,15 @@ function sparseRow(
   name: string,
   description: string,
   {
-    quality, requiredLevel, inventoryType, allowableClass = ANY_CLASS,
+    quality,
+    requiredLevel,
+    inventoryType,
+    allowableClass = ANY_CLASS,
   }: {
-    quality: number; requiredLevel: number; inventoryType: number; allowableClass?: number;
+    quality: number;
+    requiredLevel: number;
+    inventoryType: number;
+    allowableClass?: number;
   },
 ): Array<number | string> {
   const row: Array<number | string> = [0, description, "", "", "", name];
@@ -156,7 +164,9 @@ const itemSparse: TableSpec = {
     // Everything between the name and the class mask, then the mask, then everything up to
     // the three the table ends on: the level it takes, where it is worn, and what it is worth.
     ...Array.from({ length: SPARSE.allowableClass - 6 }, (_, index) => ({
-      storage: Storage.plain, offsetBits: 224 + index * 32, sizeBits: 32,
+      storage: Storage.plain,
+      offsetBits: 224 + index * 32,
+      sizeBits: 32,
     })),
     {
       storage: Storage.plain,
@@ -192,13 +202,18 @@ const itemSparse: TableSpec = {
         // The plate helm, which is the one item that says who may wear it: the three classes
         // that wear plate, as a bit each — warrior, paladin, death knight.
         sparseRow("Bulwark Helm", "Stamped in the Emberforge, and never dented.", {
-          quality: 4, requiredLevel: 60, inventoryType: 1, allowableClass: 0b10_0011,
+          quality: 4,
+          requiredLevel: 60,
+          inventoryType: 1,
+          allowableClass: 0b10_0011,
         }),
         sparseRow("Tideglass Edge", "", { quality: 5, requiredLevel: 60, inventoryType: 13 }),
         // A description on a second row, so that two rows of the same shape are still
         // different lengths and the offset map is doing something.
         sparseRow("Cloak of the Long Night", "Frayed at the hem, and warm regardless.", {
-          quality: 3, requiredLevel: 30, inventoryType: 16,
+          quality: 3,
+          requiredLevel: 30,
+          inventoryType: 16,
         }),
         // Worn nowhere, needing no level, and common: a token rather than a piece of gear.
         sparseRow("Hearth Token", "", { quality: 1, requiredLevel: 0, inventoryType: 0 }),

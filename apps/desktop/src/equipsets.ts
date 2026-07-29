@@ -19,17 +19,31 @@ import type { EquipsetChangeEvent, EquipsetSlotChange } from "./types";
  * name it, and 4 the shirt, which is not armour but is part of an outfit.
  */
 const SLOT_NAMES: Record<number, string> = {
-  1: "Head", 2: "Neck", 3: "Shoulder", 4: "Shirt", 5: "Chest",
-  6: "Waist", 7: "Legs", 8: "Feet", 9: "Wrist", 10: "Hands",
-  11: "Ring 1", 12: "Ring 2", 13: "Trinket 1", 14: "Trinket 2", 15: "Back",
-  16: "Main hand", 17: "Off hand", 18: "Ranged", 19: "Tabard",
+  1: "Head",
+  2: "Neck",
+  3: "Shoulder",
+  4: "Shirt",
+  5: "Chest",
+  6: "Waist",
+  7: "Legs",
+  8: "Feet",
+  9: "Wrist",
+  10: "Hands",
+  11: "Ring 1",
+  12: "Ring 2",
+  13: "Trinket 1",
+  14: "Trinket 2",
+  15: "Back",
+  16: "Main hand",
+  17: "Off hand",
+  18: "Ranged",
+  19: "Tabard",
 };
 
 /** What the character sheet calls a slot, or its number where this build has no name. */
 export const slotName = (slot: number): string => SLOT_NAMES[slot] || `Slot ${slot}`;
 
-const plural = (count: number, noun: string): string =>
-  `${count} ${noun}${count === 1 ? "" : "s"}`;
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
  * What a change did to the set's item level, or null when it cannot be said.
@@ -114,7 +128,7 @@ export interface EquipsetSlotLine {
  */
 export function equipsetSlotLine(item: EquipsetSlotChange): EquipsetSlotLine {
   const worth = (id?: number | null, level?: number | null): string =>
-    (id == null || level == null ? "" : String(level));
+    id == null || level == null ? "" : String(level);
   return {
     slot: slotName(item.slot),
     itemId: item.itemId ?? null,

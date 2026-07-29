@@ -39,7 +39,6 @@ image = { opt-level = 2 }
 miniz_oxide = { opt-level = 2 }
 png = { opt-level = 2 }
 sha2 = { opt-level = 2 }
-tact-parser = { opt-level = 2 }
 wow-blp = { opt-level = 2 }
 zune-core = { opt-level = 2 }
 zune-jpeg = { opt-level = 2 }

@@ -63,8 +63,17 @@ import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { REASONS, wearable as canBeWorn } from "./modelPreview";
 import {
-  NOTHING_ON, isWorn, onlyWearable, setLabel, takeOff, toggle as toggleWorn, toggleAt, wearAll,
-  wearAllAt, wearSet, wearable,
+  NOTHING_ON,
+  isWorn,
+  onlyWearable,
+  setLabel,
+  takeOff,
+  toggle as toggleWorn,
+  toggleAt,
+  wearAll,
+  wearAllAt,
+  wearSet,
+  wearable,
 } from "./outfit";
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
@@ -72,10 +81,23 @@ import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "
 import { Qualities } from "./qualitiesChips";
 import { withTerm } from "./terms";
 import {
-  CLASSES, alternateLabel, classLabel, classNames, expansionName, filterSets, groupSets, patchName,
+  CLASSES,
+  alternateLabel,
+  classLabel,
+  classNames,
+  expansionName,
+  filterSets,
+  groupSets,
+  patchName,
 } from "./transmog";
 import {
-  appearanceRows, appearanceSummary, iconIds, itemsBehind, qualityLabel, varyingFacts, wearerLabel,
+  appearanceRows,
+  appearanceSummary,
+  iconIds,
+  itemsBehind,
+  qualityLabel,
+  varyingFacts,
+  wearerLabel,
 } from "./transmogModal";
 import type { AppearanceRow, AppearanceSource } from "./transmogModal";
 import type { GalleryStage } from "./galleryStage";
@@ -172,7 +194,9 @@ export interface TransmogViewProps {
     onError: (error: unknown) => string;
     /** And the other keeping: asking the game itself to hold on to what she has on. */
     sendToGame: (
-      name: string, icon: number | null, slots: InGameSetSlot[],
+      name: string,
+      icon: number | null,
+      slots: InGameSetSlot[],
     ) => Promise<SetRequest[]>;
   };
   /**
@@ -214,13 +238,25 @@ export interface TransmogViewProps {
  */
 type Browsing = "sets" | "items" | "yours" | "ingame";
 
-export function TransmogView(
-  {
-    payload, status, loadSet, loadAppearances, loadIcons, loadCharacter, loadWorn, loadGallery,
-    loadSetGallery, herself, marks, custom, inGame, createStage,
-    createGalleryStage = lazyGalleryStage, loadQualities, loadSetQualities = loadSetStore,
-  }: TransmogViewProps,
-): ReactNode {
+export function TransmogView({
+  payload,
+  status,
+  loadSet,
+  loadAppearances,
+  loadIcons,
+  loadCharacter,
+  loadWorn,
+  loadGallery,
+  loadSetGallery,
+  herself,
+  marks,
+  custom,
+  inGame,
+  createStage,
+  createGalleryStage = lazyGalleryStage,
+  loadQualities,
+  loadSetQualities = loadSetStore,
+}: TransmogViewProps): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
   /**
    * Who she is, as a string that changes when she does, and nothing else about her.
@@ -284,20 +320,24 @@ export function TransmogView(
    * the one thing on a row that can be missing without the row losing its point, and the row
    * already names its slot and its item.
    */
-  const wantIcons = useCallback((wanted: number[]): void => {
-    const missing = [...new Set(wanted)]
-      .filter((id) => id > 0 && !icons.has(id) && !askedIcons.has(id));
-    if (!missing.length) return;
-    for (const id of missing) askedIcons.add(id);
-    void loadIcons(missing)
-      .then((pictures) => {
-        for (const [id, url] of Object.entries(pictures.icons || {})) {
-          if (url) icons.set(Number(id), url);
-        }
-        redraw();
-      })
-      .catch(() => undefined);
-  }, [loadIcons, icons, askedIcons]);
+  const wantIcons = useCallback(
+    (wanted: number[]): void => {
+      const missing = [...new Set(wanted)].filter(
+        (id) => id > 0 && !icons.has(id) && !askedIcons.has(id),
+      );
+      if (!missing.length) return;
+      for (const id of missing) askedIcons.add(id);
+      void loadIcons(missing)
+        .then((pictures) => {
+          for (const [id, url] of Object.entries(pictures.icons || {})) {
+            if (url) icons.set(Number(id), url);
+          }
+          redraw();
+        })
+        .catch(() => undefined);
+    },
+    [loadIcons, icons, askedIcons],
+  );
 
   /**
    * Reads what a set is made of, and then the pictures its rows are waiting on.
@@ -306,34 +346,40 @@ export function TransmogView(
    * takes longer than reading the tables that named them — so this is two steps that redraw
    * separately rather than one that waits for both.
    */
-  const read = useCallback((setId: number): void => {
-    if (asked.has(setId)) return;
-    asked.add(setId);
-    void loadSet(setId)
-      .then((answer) => {
-        known.set(setId, answer);
-        redraw();
-        wantIcons(iconIds(answer));
-      })
-      // A set that will not come is worth saying, because the reader clicked to see what was
-      // in it.
-      .catch((error: unknown) => {
-        if (!known.has(setId)) known.set(setId, message(error));
-        redraw();
-      });
-  }, [loadSet, wantIcons, known, asked]);
+  const read = useCallback(
+    (setId: number): void => {
+      if (asked.has(setId)) return;
+      asked.add(setId);
+      void loadSet(setId)
+        .then((answer) => {
+          known.set(setId, answer);
+          redraw();
+          wantIcons(iconIds(answer));
+        })
+        // A set that will not come is worth saying, because the reader clicked to see what was
+        // in it.
+        .catch((error: unknown) => {
+          if (!known.has(setId)) known.set(setId, message(error));
+          redraw();
+        });
+    },
+    [loadSet, wantIcons, known, asked],
+  );
 
-  const openSet = useCallback((set: TransmogSet): void => {
-    setOpen((was) => {
-      const next = new Set(was);
-      if (next.has(set.id)) next.delete(set.id);
-      else {
-        next.add(set.id);
-        read(set.id);
-      }
-      return next;
-    });
-  }, [read]);
+  const openSet = useCallback(
+    (set: TransmogSet): void => {
+      setOpen((was) => {
+        const next = new Set(was);
+        if (next.has(set.id)) next.delete(set.id);
+        else {
+          next.add(set.id);
+          read(set.id);
+        }
+        return next;
+      });
+    },
+    [read],
+  );
 
   // What the game's own artwork was measured to be, for the sets. One small file for all of
   // them rather than a file per slot: a set's colours are the colours of the looks in it, worked
@@ -343,10 +389,14 @@ export function TransmogView(
   useEffect(() => {
     let stale = false;
     void loadSetQualities()
-      .then((file) => { if (!stale) setSetQualities(indexQualities(file)); })
+      .then((file) => {
+        if (!stale) setSetQualities(indexQualities(file));
+      })
       // The cards drew without it before any of this existed, and they draw without it now.
       .catch(() => undefined);
-    return () => { stale = true; };
+    return () => {
+      stale = true;
+    };
   }, [loadSetQualities]);
 
   // A lookup per row rather than a scan of the list, because the search box re-filters several
@@ -359,18 +409,26 @@ export function TransmogView(
   // Only the tags actually written against a set, so the picker offers nothing that would
   // empty the grid. Recomputed when a mark changes and not on every keystroke.
   const setTags = useMemo(
-    () => tagChoices(index, "set", (payload?.sets ?? []).map((set) => set.id)),
+    () =>
+      tagChoices(
+        index,
+        "set",
+        (payload?.sets ?? []).map((set) => set.id),
+      ),
     [index, payload],
   );
 
   const sets = payload
     ? filterSets(payload.sets, {
-      search, expansion, klass, marks: { filter: marked, of: (id) => index.of("set", id) },
-      // So that "brown" and `colour:brown` mean here what they already meant in the wardrobe
-      // beside this: the card draws the same measured chip, and a chip the box cannot be asked
-      // about is a chip that raises a question and will not answer it.
-      qualities: (id) => setQualities.of(id),
-    })
+        search,
+        expansion,
+        klass,
+        marks: { filter: marked, of: (id) => index.of("set", id) },
+        // So that "brown" and `colour:brown` mean here what they already meant in the wardrobe
+        // beside this: the card draws the same measured chip, and a chip the box cannot be asked
+        // about is a chip that raises a question and will not answer it.
+        qualities: (id) => setQualities.of(id),
+      })
     : [];
   // Paged only once there is a body behind each card — see `shown`.
   const drawn = asModels ? sets.slice(0, shown) : sets;
@@ -396,9 +454,12 @@ export function TransmogView(
     void loadSetGallery(missing)
       .then((answer) => {
         for (const row of answer.models) {
-          bodies.set(row.setId, row.model
-            ? { kind: "model", glb: row.model, shows: "worn" }
-            : { kind: "nothing", note: REASONS.unshowable });
+          bodies.set(
+            row.setId,
+            row.model
+              ? { kind: "model", glb: row.model, shows: "worn" }
+              : { kind: "nothing", note: REASONS.unshowable },
+          );
         }
       })
       // A page that will not come leaves its cards without pictures rather than waiting for
@@ -410,6 +471,9 @@ export function TransmogView(
       })
       .finally(redraw);
     // The ids rather than the array, which is new on every render and would ask every time.
+    // `wantedSets` cannot be read back out of the key the way the icon requests below are —
+    // the effect needs the rows themselves — so this stays a suppression, and what holds it is
+    // the exact call counts `transmogView.test.tsx` asserts on `loadSetGallery`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedKey, look, loadSetGallery, bodies]);
 
@@ -433,213 +497,292 @@ export function TransmogView(
   const expansions = payload
     ? [...new Set(payload.sets.map((set) => set.expansionId))].sort((a, b) => b - a)
     : [];
-  const withheld = payload && payload.withheldCount > 0
-    ? ` · ${plural(payload.withheldCount, "set")} the game keeps encrypted`
-    : "";
+  const withheld =
+    payload && payload.withheldCount > 0
+      ? ` · ${plural(payload.withheldCount, "set")} the game keeps encrypted`
+      : "";
   // The grid is shorter than the game's own count and says why. 436 sets of a shipping
   // install hold exactly another set's appearances, and a reader counting cards against the
   // number above would otherwise be missing several hundred with no explanation.
   const foldedCount = payload ? payload.sets.filter((set) => set.sameLookAs).length : 0;
-  const folded = foldedCount > 0
-    ? ` · ${plural(foldedCount, "set")} shown under another holding the same appearances`
-    : "";
+  const folded =
+    foldedCount > 0
+      ? ` · ${plural(foldedCount, "set")} shown under another holding the same appearances`
+      : "";
 
-  return <>
-    <header className="view-head">
-      <h1>Transmog</h1>
-      <div className="sub" id="transmog-meta">
-        {payload
-          ? `${plural(payload.sets.length, "set")} from the installed game${withheld}${folded}`
-          : status}
-      </div>
-    </header>
-    <div className="mog-layout">
-      <div className="mog-half">
-        {/* The one control above both browsers, because it is a statement about what a reader
+  return (
+    <>
+      <header className="view-head">
+        <h1>Transmog</h1>
+        <div className="sub" id="transmog-meta">
+          {payload
+            ? `${plural(payload.sets.length, "set")} from the installed game${withheld}${folded}`
+            : status}
+        </div>
+      </header>
+      <div className="mog-layout">
+        <div className="mog-half">
+          {/* The one control above both browsers, because it is a statement about what a reader
             is looking for rather than about either list. Two buttons rather than a select:
             there are two of them and both are worth being one click away. */}
-        <div className="mog-modes" role="group" aria-label="Browse the game by">
-          <button
-            type="button" aria-pressed={browsing === "sets"}
-            onClick={() => setBrowsing("sets")}
-          >Sets</button>
-          <button
-            type="button" aria-pressed={browsing === "items"}
-            onClick={() => setBrowsing("items")}
-          >Items</button>
-          {/* Third rather than first, because the first two are the game and this is the
+          <div className="mog-modes" role="group" aria-label="Browse the game by">
+            <button
+              type="button"
+              aria-pressed={browsing === "sets"}
+              onClick={() => setBrowsing("sets")}
+            >
+              Sets
+            </button>
+            <button
+              type="button"
+              aria-pressed={browsing === "items"}
+              onClick={() => setBrowsing("items")}
+            >
+              Items
+            </button>
+            {/* Third rather than first, because the first two are the game and this is the
               reader — and on a fresh install it is empty, which is not what a view should
               open on. */}
-          <button
-            type="button" aria-pressed={browsing === "yours"}
-            onClick={() => setBrowsing("yours")}
-          >Yours</button>
-          {/* Last, because it is the only one of the four that is not about this machine at
+            <button
+              type="button"
+              aria-pressed={browsing === "yours"}
+              onClick={() => setBrowsing("yours")}
+            >
+              Yours
+            </button>
+            {/* Last, because it is the only one of the four that is not about this machine at
               all: these were saved in the game, by a character, and Chronie is reporting them
               rather than offering them. */}
-          <button
-            type="button" aria-pressed={browsing === "ingame"}
-            onClick={() => setBrowsing("ingame")}
-          >Personal in-game sets</button>
-        </div>
-      {/* Named, because all four browsers are the same panel with the same controls in it — a
+            <button
+              type="button"
+              aria-pressed={browsing === "ingame"}
+              onClick={() => setBrowsing("ingame")}
+            >
+              Personal in-game sets
+            </button>
+          </div>
+          {/* Named, because all four browsers are the same panel with the same controls in it — a
           class filter, a search box, a box about what she can wear — and "the class filter" is
           only a question with an answer once it is asked of one of them. */}
-      <section
-        className="panel mog-browser" id="transmog-browser" hidden={browsing !== "sets"}
-        aria-label="The game's sets"
-      >
-        <div className="table-head">
-          <div className="controls">
-            {/* A term in the placeholder beside the words, because `class:mage` is not a thing
+          <section
+            className="panel mog-browser"
+            id="transmog-browser"
+            hidden={browsing !== "sets"}
+            aria-label="The game's sets"
+          >
+            <div className="table-head">
+              <div className="controls">
+                {/* A term in the placeholder beside the words, because `class:mage` is not a thing
                 anybody guesses a search box takes — see `terms.ts`, and the chips on every card
                 below, which write one into here when they are clicked. */}
-            <input
-              id="transmog-search" type="search"
-              placeholder="Filter by name, class, or colour:brown…"
-              aria-label="Filter transmog sets" value={search}
-              onChange={(event) => narrow(() => setSearch(event.target.value))}
-            />
-            <select
-              id="transmog-expansion" aria-label="Expansion" value={expansion}
-              onChange={(event) => narrow(() => setExpansion(event.target.value))}
-            >
-              <option value="">All expansions</option>
-              {expansions.map((id) => <option key={id} value={id}>{expansionName(id)}</option>)}
-            </select>
-            <select
-              id="transmog-class" aria-label="Class" value={klass}
-              onChange={(event) => narrow(() => setKlass(event.target.value))}
-            >
-              <option value="">All classes</option>
-              {CLASSES.map((name, index) => <option key={name} value={index}>{name}</option>)}
-            </select>
-            {/* Applies to every set at once rather than to the one being read, because it is a
+                <input
+                  id="transmog-search"
+                  type="search"
+                  placeholder="Filter by name, class, or colour:brown…"
+                  aria-label="Filter transmog sets"
+                  value={search}
+                  onChange={(event) => narrow(() => setSearch(event.target.value))}
+                />
+                <select
+                  id="transmog-expansion"
+                  aria-label="Expansion"
+                  value={expansion}
+                  onChange={(event) => narrow(() => setExpansion(event.target.value))}
+                >
+                  <option value="">All expansions</option>
+                  {expansions.map((id) => (
+                    <option key={id} value={id}>
+                      {expansionName(id)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  id="transmog-class"
+                  aria-label="Class"
+                  value={klass}
+                  onChange={(event) => narrow(() => setKlass(event.target.value))}
+                >
+                  <option value="">All classes</option>
+                  {CLASSES.map((name, index) => (
+                    <option key={name} value={index}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                {/* Applies to every set at once rather than to the one being read, because it is a
                 statement about what a reader is here for and not about a particular set. */}
-            <label className="mog-hide">
-              <input
-                type="checkbox" id="transmog-hide-unwearable" checked={hideUnwearable}
-                onChange={(event) => setHideUnwearable(event.target.checked)}
-              />
-              Hide what she cannot wear
-            </label>
-            {/* Beside it, because both are statements about what a reader is here for. A set
+                <label className="mog-hide">
+                  <input
+                    type="checkbox"
+                    id="transmog-hide-unwearable"
+                    checked={hideUnwearable}
+                    onChange={(event) => setHideUnwearable(event.target.checked)}
+                  />
+                  Hide what she cannot wear
+                </label>
+                {/* Beside it, because both are statements about what a reader is here for. A set
                 is a set of clothes, and the one thing a name and a count cannot say is what it
                 looks like — so this is what the grid is for once somebody is choosing rather
                 than looking something up. It shortens the grid to a page: a card of names is a
                 string, and a card of a set worn is a body out of the game's own files. */}
-            <label className="mog-hide">
-              <input
-                type="checkbox" id="transmog-as-models" checked={asModels}
-                onChange={(event) => {
-                  setAsModels(event.target.checked);
-                  setShown(SET_PAGE);
-                }}
-              />
-              Show each set worn
-            </label>
-            {/* Beside the game's own filters rather than somewhere of their own, because
-                "plate, Cataclysm, starred" is one question a reader asks and not two. */}
-            <MarkFilters
-              scope="transmog" favourite={marked.favourite} tag={marked.tag} choices={setTags}
-              onFavourite={(only) => narrow(() => setMarked((was) => ({ ...was, favourite: only })))}
-              onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
-            />
-            <span
-              className="count" id="transmog-count" role="status"
-              aria-label="How much of the grid is shown"
-            >
-              {payload ? shownCount(drawn.length, sets.length) : ""}
-            </span>
-          </div>
-        </div>
-        <div id="transmog-list" className="mog-list" data-models={asModels}>
-          {groupSets(drawn).map((group) => (
-            <section className="mog-group" key={group.group}>
-              <h3>{group.group}<span className="muted"> · {plural(group.sets.length, "set")}</span></h3>
-              <div className="mog-grid">
-                {group.sets.map((set) => (
-                  <Card
-                    key={set.id} set={set} open={open.has(set.id)} onToggle={() => openSet(set)}
-                    contents={known.get(set.id)} icons={icons} outfit={outfit}
-                    hideUnwearable={hideUnwearable} marks={marks} markOf={markOf}
-                    quality={setQualities.of(set.id)}
-                    onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
-                    body={asModels ? bodies.get(set.id) : undefined} paint={paint}
-                    onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
-                    onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
+                <label className="mog-hide">
+                  <input
+                    type="checkbox"
+                    id="transmog-as-models"
+                    checked={asModels}
+                    onChange={(event) => {
+                      setAsModels(event.target.checked);
+                      setShown(SET_PAGE);
+                    }}
                   />
-                ))}
+                  Show each set worn
+                </label>
+                {/* Beside the game's own filters rather than somewhere of their own, because
+                "plate, Cataclysm, starred" is one question a reader asks and not two. */}
+                <MarkFilters
+                  scope="transmog"
+                  favourite={marked.favourite}
+                  tag={marked.tag}
+                  choices={setTags}
+                  onFavourite={(only) =>
+                    narrow(() => setMarked((was) => ({ ...was, favourite: only })))
+                  }
+                  onTag={(tag) => narrow(() => setMarked((was) => ({ ...was, tag })))}
+                />
+                <span
+                  className="count"
+                  id="transmog-count"
+                  role="status"
+                  aria-label="How much of the grid is shown"
+                >
+                  {payload ? shownCount(drawn.length, sets.length) : ""}
+                </span>
               </div>
-            </section>
-          ))}
-          {/* What is left, and the way to it — the same button the wardrobe has, and only ever
+            </div>
+            <div id="transmog-list" className="mog-list" data-models={asModels}>
+              {groupSets(drawn).map((group) => (
+                <section className="mog-group" key={group.group}>
+                  <h3>
+                    {group.group}
+                    <span className="muted"> · {plural(group.sets.length, "set")}</span>
+                  </h3>
+                  <div className="mog-grid">
+                    {group.sets.map((set) => (
+                      <Card
+                        key={set.id}
+                        set={set}
+                        open={open.has(set.id)}
+                        onToggle={() => openSet(set)}
+                        contents={known.get(set.id)}
+                        icons={icons}
+                        outfit={outfit}
+                        hideUnwearable={hideUnwearable}
+                        marks={marks}
+                        markOf={markOf}
+                        quality={setQualities.of(set.id)}
+                        onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
+                        body={asModels ? bodies.get(set.id) : undefined}
+                        paint={paint}
+                        onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
+                        onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+              {/* What is left, and the way to it — the same button the wardrobe has, and only ever
               here for the same reason: a grid of pictures is paged and a grid of names is not. */}
-          {sets.length > drawn.length
-            ? <button
-              type="button" className="mog-more"
-              onClick={() => setShown((was) => was + SET_PAGE)}
-            >{`Show ${Math.min(SET_PAGE, sets.length - drawn.length)} more of ${plural(sets.length - drawn.length, "set")}`}</button>
-            : null}
-        </div>
-        <div className="empty" id="transmog-empty" hidden={!payload || sets.length > 0}>
-          <p className="empty-title">Nothing matches</p>
-          <p>Try a different search, class or expansion.</p>
-        </div>
-      </section>
-      {/* Kept in the tree rather than swapped in, so that what a reader has read, searched
+              {sets.length > drawn.length ? (
+                <button
+                  type="button"
+                  className="mog-more"
+                  onClick={() => setShown((was) => was + SET_PAGE)}
+                >{`Show ${Math.min(SET_PAGE, sets.length - drawn.length)} more of ${plural(sets.length - drawn.length, "set")}`}</button>
+              ) : null}
+            </div>
+            <div className="empty" id="transmog-empty" hidden={!payload || sets.length > 0}>
+              <p className="empty-title">Nothing matches</p>
+              <p>Try a different search, class or expansion.</p>
+            </div>
+          </section>
+          {/* Kept in the tree rather than swapped in, so that what a reader has read, searched
           and scrolled is still there when they come back to it. Nothing is read for it until
           it is first shown — see `hidden`, which the list takes as the word to start. */}
-      <WardrobeList
-        hidden={browsing !== "items"} load={loadAppearances} wantIcons={wantIcons} icons={icons}
-        outfit={outfit} hideUnwearable={hideUnwearable} onHideUnwearable={setHideUnwearable}
-        marks={marks} index={index} loadGallery={loadGallery} look={look}
-        createGalleryStage={createGalleryStage} loadQualities={loadQualities}
-        onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
-      />
-      {/* Kept in the tree beside the other two, and for the stronger version of their reason:
+          <WardrobeList
+            hidden={browsing !== "items"}
+            load={loadAppearances}
+            wantIcons={wantIcons}
+            icons={icons}
+            outfit={outfit}
+            hideUnwearable={hideUnwearable}
+            onHideUnwearable={setHideUnwearable}
+            marks={marks}
+            index={index}
+            loadGallery={loadGallery}
+            look={look}
+            createGalleryStage={createGalleryStage}
+            loadQualities={loadQualities}
+            onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
+          />
+          {/* Kept in the tree beside the other two, and for the stronger version of their reason:
           this list is already in memory, so hiding it costs nothing and swapping it out would
           throw away a search and a scroll for no saving at all. */}
-      <CustomSetList
-        hidden={browsing !== "yours"} payload={custom.payload} onDelete={custom.remove}
-        onSaved={custom.onApply} onError={custom.onError} icons={icons} wantIcons={wantIcons}
-        outfit={outfit} marks={marks} index={index}
-        onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
-        onWearAll={(set) => setOutfit((was) => wearAll(was, rowsOf(set), set.name))}
-      />
-      {/* And in the tree beside the other three, for their reason: what a reader opened and
+          <CustomSetList
+            hidden={browsing !== "yours"}
+            payload={custom.payload}
+            onDelete={custom.remove}
+            onSaved={custom.onApply}
+            onError={custom.onError}
+            icons={icons}
+            wantIcons={wantIcons}
+            outfit={outfit}
+            marks={marks}
+            index={index}
+            onWear={(row) => setOutfit((was) => toggleWorn(was, row))}
+            onWearAll={(set) => setOutfit((was) => wearAll(was, rowsOf(set), set.name))}
+          />
+          {/* And in the tree beside the other three, for their reason: what a reader opened and
           searched here should still be open when they come back from trying a hat. */}
-      <InGameSetList
-        hidden={browsing !== "ingame"} payload={inGame.payload}
-        loadAppearances={inGame.loadAppearances} icons={icons} wantIcons={wantIcons}
-        outfit={outfit}
-        // The place travels with the row rather than being worked out from it: an in-game set
-        // is the only kind that names the slot, and so the only one that can say which hand a
-        // one-hander is in. See `wearAllAt`.
-        onWear={(place, row) => setOutfit((was) => toggleAt(was, place, row))}
-        onWearAll={(set, pieces) =>
-          setOutfit((was) => wearAllAt(was, pieces, inGameSetLabel(set)))}
-      />
+          <InGameSetList
+            hidden={browsing !== "ingame"}
+            payload={inGame.payload}
+            loadAppearances={inGame.loadAppearances}
+            icons={icons}
+            wantIcons={wantIcons}
+            outfit={outfit}
+            // The place travels with the row rather than being worked out from it: an in-game set
+            // is the only kind that names the slot, and so the only one that can say which hand a
+            // one-hander is in. See `wearAllAt`.
+            onWear={(place, row) => setOutfit((was) => toggleAt(was, place, row))}
+            onWearAll={(set, pieces) =>
+              setOutfit((was) => wearAllAt(was, pieces, inGameSetLabel(set)))
+            }
+          />
+        </div>
+        <OutfitPanel
+          outfit={outfit}
+          icons={icons}
+          createStage={createStage}
+          look={look}
+          loadCharacter={loadCharacter}
+          loadWorn={loadWorn}
+          herself={{
+            ...herself,
+            onChanged: (chosen) => setLook(lookKey(chosen.body, chosen.picked)),
+          }}
+          save={{
+            sets: custom.payload?.sets ?? [],
+            onSave: custom.save,
+            onSaved: custom.onApply,
+            onError: custom.onError,
+            onSendToGame: custom.sendToGame,
+          }}
+          onTakeOff={(place) => setOutfit((was) => takeOff(was, place))}
+          onClearAll={() => setOutfit(NOTHING_ON)}
+        />
       </div>
-      <OutfitPanel
-        outfit={outfit} icons={icons} createStage={createStage} look={look}
-        loadCharacter={loadCharacter} loadWorn={loadWorn}
-        herself={{
-          ...herself,
-          onChanged: (chosen) => setLook(lookKey(chosen.body, chosen.picked)),
-        }}
-        save={{
-          sets: custom.payload?.sets ?? [],
-          onSave: custom.save,
-          onSaved: custom.onApply,
-          onError: custom.onError,
-          onSendToGame: custom.sendToGame,
-        }}
-        onTakeOff={(place) => setOutfit((was) => takeOff(was, place))}
-        onClearAll={() => setOutfit(NOTHING_ON)}
-      />
-    </div>
-  </>;
+    </>
+  );
 }
 
 /**
@@ -655,43 +798,54 @@ export function TransmogView(
  * turned out to be a drag would otherwise open a set every time somebody looked at the back of
  * one.
  */
-function Card(
-  {
-    set, open, onToggle, contents, icons, outfit, hideUnwearable, marks, markOf, quality,
-    onFilter, body, paint, onWear, onWearAll,
-  }: {
-    set: TransmogSet;
-    open: boolean;
-    onToggle: () => void;
-    /** What the set holds, the sentence saying why it could not be read, or nothing yet. */
-    contents: TransmogSetItemsPayload | string | undefined;
-    icons: Map<number, string>;
-    outfit: Outfit;
-    /** Whether the rows with nowhere to go are left out, which the browser decides for all. */
-    hideUnwearable: boolean;
-    marks: MarkActions;
-    markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
-    /** What the committed store measured the whole set to be, or nothing where it holds none. */
-    quality: Quality | undefined;
-    /**
-     * What a chip on the card asks of the grid when it is clicked — see `terms.ts`.
-     *
-     * The card's own chips only. The rows inside an opened set carry chips of their own and are
-     * given none of this: they are looks, and the box above the grid filters sets.
-     */
-    onFilter: (term: string) => void;
-    /**
-     * The character wearing this set, when the pictures are on and one has arrived.
-     *
-     * `undefined` is the pictures being off, and the card is exactly what it was before any of
-     * this existed.
-     */
-    body: Thumbnail | undefined;
-    paint: Paint;
-    onWear: (row: AppearanceRow) => void;
-    onWearAll: (rows: AppearanceRow[]) => void;
-  },
-): ReactNode {
+function Card({
+  set,
+  open,
+  onToggle,
+  contents,
+  icons,
+  outfit,
+  hideUnwearable,
+  marks,
+  markOf,
+  quality,
+  onFilter,
+  body,
+  paint,
+  onWear,
+  onWearAll,
+}: {
+  set: TransmogSet;
+  open: boolean;
+  onToggle: () => void;
+  /** What the set holds, the sentence saying why it could not be read, or nothing yet. */
+  contents: TransmogSetItemsPayload | string | undefined;
+  icons: Map<number, string>;
+  outfit: Outfit;
+  /** Whether the rows with nowhere to go are left out, which the browser decides for all. */
+  hideUnwearable: boolean;
+  marks: MarkActions;
+  markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
+  /** What the committed store measured the whole set to be, or nothing where it holds none. */
+  quality: Quality | undefined;
+  /**
+   * What a chip on the card asks of the grid when it is clicked — see `terms.ts`.
+   *
+   * The card's own chips only. The rows inside an opened set carry chips of their own and are
+   * given none of this: they are looks, and the box above the grid filters sets.
+   */
+  onFilter: (term: string) => void;
+  /**
+   * The character wearing this set, when the pictures are on and one has arrived.
+   *
+   * `undefined` is the pictures being off, and the card is exactly what it was before any of
+   * this existed.
+   */
+  body: Thumbnail | undefined;
+  paint: Paint;
+  onWear: (row: AppearanceRow) => void;
+  onWearAll: (rows: AppearanceRow[]) => void;
+}): ReactNode {
   const patch = patchName(set.patchIntroduced);
   const classes = classNames(set.classMask);
   const rows = typeof contents === "object" ? appearanceRows(contents, set.name) : [];
@@ -705,7 +859,8 @@ function Card(
 
   return (
     <article
-      className="mog-card" data-open={open}
+      className="mog-card"
+      data-open={open}
       title={classes.length ? classes.join(", ") : undefined}
     >
       {/* A set is a body's worth of clothes, so the whole of her is the picture — there is no
@@ -732,7 +887,11 @@ function Card(
           one reader said. Available with the card shut — starring a set is not a reason to
           have to read what is in it. */}
       <MarkControls
-        kind="set" id={set.id} mark={markOf("set", set.id)} name={name} actions={marks}
+        kind="set"
+        id={set.id}
+        mark={markOf("set", set.id)}
+        name={name}
+        actions={marks}
         onFilter={onFilter}
       />
       {/* Who else wears exactly these clothes. 436 of the game's sets are another set's
@@ -740,13 +899,13 @@ function Card(
           reissued a season later — and showing all of them is showing one set up to six times.
           They are named here instead, because the name is the part a reader was looking for
           and the only part that was ever different. */}
-      {alternates.length
-        ? <ul className="mog-alternates" aria-label={`Sets holding the same appearances as ${name}`}>
+      {alternates.length ? (
+        <ul className="mog-alternates" aria-label={`Sets holding the same appearances as ${name}`}>
           {alternates.map((alternate) => (
             <li key={alternate.id}>{alternateLabel(alternate, set)}</li>
           ))}
         </ul>
-        : null}
+      ) : null}
       {/* Items rather than appearances, because items is what this number is. `TransmogSetItem`
           holds one row per item and the game's own table says nothing about how many looks
           they come to — that takes four more tables and is what opening the set is for. A card
@@ -755,41 +914,51 @@ function Card(
         <span>{plural(set.itemCount, "item")}</span>
         <span className="muted">#{set.id}</span>
       </div>
-      {open ? <div className="mog-contents">
-        {contents === undefined ? <p className="muted">Reading what the set is made of…</p> : null}
-        {typeof contents === "string" ? <p className="muted">{contents}</p> : null}
-        {typeof contents === "object" ? <>
-          <div className="mog-contents-head">
-            {/* Always, now: the card counts items and this counts looks, and for 65% of the
+      {open ? (
+        <div className="mog-contents">
+          {contents === undefined ? (
+            <p className="muted">Reading what the set is made of…</p>
+          ) : null}
+          {typeof contents === "string" ? <p className="muted">{contents}</p> : null}
+          {typeof contents === "object" ? (
+            <>
+              <div className="mog-contents-head">
+                {/* Always, now: the card counts items and this counts looks, and for 65% of the
                 sets in the game those are different numbers. It is the sentence that explains
                 why a set of 126 items opened as a list of 11. */}
-            <p className="detail-facts">{appearanceSummary(rows, contents)}</p>
-            {/* Hidden rather than absent: the count on the card includes them, and a list
+                <p className="detail-facts">{appearanceSummary(rows, contents)}</p>
+                {/* Hidden rather than absent: the count on the card includes them, and a list
                 shorter than it promised is what a reader would otherwise have to explain. */}
-            {hidden
-              ? <p className="detail-facts muted">
-                {`${plural(hidden, "appearance")} hidden, with nowhere on her to go`}
-              </p>
-              : null}
-            {/* A set is a set of clothes and seeing all of it at once is the ordinary thing to
+                {hidden ? (
+                  <p className="detail-facts muted">
+                    {`${plural(hidden, "appearance")} hidden, with nowhere on her to go`}
+                  </p>
+                ) : null}
+                {/* A set is a set of clothes and seeing all of it at once is the ordinary thing to
                 want; clicking twelve rows to get there is not. */}
-            {rows.some((row) => wearable(row))
-              ? <button type="button" className="mog-wear-all" onClick={() => onWearAll(rows)}>
-                {`Wear all of ${name}`}
-              </button>
-              : null}
-          </div>
-          <ul className="mog-items" aria-label={`Appearances in ${name}`}>
-            {shown.map((row, index) => (
-              <Line
-                key={`${row.appearanceId}-${index}`} row={row} worn={isWorn(outfit, row)}
-                icon={icons.get(row.iconFileDataId)} marks={marks}
-                mark={markOf("appearance", row.appearanceId)} onWear={() => onWear(row)}
-              />
-            ))}
-          </ul>
-        </> : null}
-      </div> : null}
+                {rows.some((row) => wearable(row)) ? (
+                  <button type="button" className="mog-wear-all" onClick={() => onWearAll(rows)}>
+                    {`Wear all of ${name}`}
+                  </button>
+                ) : null}
+              </div>
+              <ul className="mog-items" aria-label={`Appearances in ${name}`}>
+                {shown.map((row, index) => (
+                  <Line
+                    key={`${row.appearanceId}-${index}`}
+                    row={row}
+                    worn={isWorn(outfit, row)}
+                    icon={icons.get(row.iconFileDataId)}
+                    marks={marks}
+                    mark={markOf("appearance", row.appearanceId)}
+                    onWear={() => onWear(row)}
+                  />
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -811,17 +980,22 @@ function Card(
  * place to hold. Such a row is hidden unless the browser above is asked to show it, and when
  * it is shown it says why it is not on her instead of being a button that does nothing.
  */
-function Line(
-  { row, worn, icon, marks, mark, onWear }: {
-    row: AppearanceRow;
-    worn: boolean;
-    icon?: string;
-    marks: MarkActions;
-    /** What the reader said about this *look*, which is the same mark the wardrobe draws. */
-    mark: TransmogMark | undefined;
-    onWear: () => void;
-  },
-): ReactNode {
+function Line({
+  row,
+  worn,
+  icon,
+  marks,
+  mark,
+  onWear,
+}: {
+  row: AppearanceRow;
+  worn: boolean;
+  icon?: string;
+  marks: MarkActions;
+  /** What the reader said about this *look*, which is the same mark the wardrobe draws. */
+  mark: TransmogMark | undefined;
+  onWear: () => void;
+}): ReactNode {
   const wanted = canBeWorn(row);
   const canWear = wanted.kind === "worn";
   const [showSources, setShowSources] = useState(false);
@@ -837,8 +1011,12 @@ function Line(
   return (
     <li className="mog-item" data-worn={worn}>
       <button
-        type="button" className="mog-pick" aria-pressed={worn} disabled={!canWear}
-        aria-label={`Wear ${row.slot}: ${row.label}`} onClick={onWear}
+        type="button"
+        className="mog-pick"
+        aria-pressed={worn}
+        disabled={!canWear}
+        aria-label={`Wear ${row.slot}: ${row.label}`}
+        onClick={onWear}
       >
         <span className="mog-icon" role="img" aria-label={`Icon for ${row.label}`}>
           {icon ? <img src={icon} alt="" /> : null}
@@ -851,25 +1029,31 @@ function Line(
           up, including in the wardrobe list beside this one, because both key on the
           appearance. An appearance the game withholds has no id and gets no controls. */}
       <MarkControls
-        kind="appearance" id={row.appearanceId} mark={mark} name={row.label} actions={marks}
+        kind="appearance"
+        id={row.appearanceId}
+        mark={mark}
+        name={row.label}
+        actions={marks}
       />
       {/* The one thing about a row worth saying without being asked. A reader whose class
           cannot wear the set's own version of a look can still have the look, and nothing else
           on the row would ever tell them so. */}
-      {row.liftsRestriction
-        ? <span className="chip mog-lifted" title="Another item gives this look to any class">
+      {row.liftsRestriction ? (
+        <span className="chip mog-lifted" title="Another item gives this look to any class">
           Any class too
         </span>
-        : null}
+      ) : null}
       {/* Every item that gives the look, behind a count. The row above is the look and this is
           the shopping: a set names one appearance once per item that has it, and 15,304 of the
           28,486 appearances in the game's sets are named more than once. */}
-      {others > 0
-        ? <button
-          type="button" className="mog-sources-toggle" aria-expanded={showSources}
+      {others > 0 ? (
+        <button
+          type="button"
+          className="mog-sources-toggle"
+          aria-expanded={showSources}
           onClick={() => setShowSources((open) => !open)}
         >{`+${others} ${others === 1 ? "item" : "items"}`}</button>
-        : null}
+      ) : null}
       {/* A withheld row says so where a name would be, and saying it twice is two elements
           with the same sentence in them rather than one clearer row. */}
       {canWear || row.withheld ? null : <span className="muted">{wanted.note}</span>}
@@ -879,10 +1063,15 @@ function Line(
           the count opens, where every item has a corner of its own. */}
       {row.withheld || others > 0 ? null : (
         <a
-          className="mog-wowhead" href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
-          target="_blank" rel="noopener noreferrer" title={`${row.label} on Wowhead`}
+          className="mog-wowhead"
+          href={`https://www.wowhead.com/item=${encodeURIComponent(row.itemId)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`${row.label} on Wowhead`}
           aria-label={`${row.label} on Wowhead`}
-        ><LinkOut /></a>
+        >
+          <LinkOut />
+        </a>
       )}
       {showSources ? <Sources row={row} /> : null}
     </li>
@@ -910,20 +1099,25 @@ function Sources({ row }: { row: AppearanceRow }): ReactNode {
         <li key={source.modifiedAppearanceId} className="mog-source">
           <span className="mog-source-name">{source.label}</span>
           {/* One line standing for several items the game says nothing different about. */}
-          {source.itemCount > 1 ? <span className="chip">{`\u00d7${source.itemCount}`}</span> : null}
-          {varies.allowableClass
-            ? <span className="chip">{wearerLabel(source.allowableClass)}</span>
-            : null}
+          {source.itemCount > 1 ? (
+            <span className="chip">{`\u00d7${source.itemCount}`}</span>
+          ) : null}
+          {varies.allowableClass ? (
+            <span className="chip">{wearerLabel(source.allowableClass)}</span>
+          ) : null}
           {varies.quality ? <span className="chip">{qualityLabel(source.quality)}</span> : null}
-          {varies.requiredLevel && source.requiredLevel > 0
-            ? <span className="chip">{`Level ${source.requiredLevel}`}</span>
-            : null}
+          {varies.requiredLevel && source.requiredLevel > 0 ? (
+            <span className="chip">{`Level ${source.requiredLevel}`}</span>
+          ) : null}
           <a
             className="mog-wowhead"
             href={`https://www.wowhead.com/item=${encodeURIComponent(source.itemId)}`}
-            target="_blank" rel="noopener noreferrer"
+            target="_blank"
+            rel="noopener noreferrer"
             aria-label={`${source.label} on Wowhead`}
-          ><LinkOut /></a>
+          >
+            <LinkOut />
+          </a>
         </li>
       ))}
     </ul>

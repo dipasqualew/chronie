@@ -15,13 +15,24 @@
     "test": "bun run --cwd apps/desktop test",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
     "test:scripts": "node node_modules/vitest/vitest.mjs run",
+    "test:fixtures": "bun run scripts/check-fixtures.ts",
     "typecheck": "tsc -p apps/desktop && tsc -p scripts",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx}\"",
     "ci:wait": "bun run scripts/wait-for-ci.ts"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@playwright/test": "^1.54.2",
     "@types/node": "^22.15.3",
+    "eslint": "10.8.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.8.0",
+    "jiti": "2.7.0",
+    "prettier": "3.9.6",
     "typescript": "^5.9.2",
+    "typescript-eslint": "8.65.0",
     "vitest": "^3.2.4"
   }
 }

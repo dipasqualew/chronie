@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  SESSION_GAP_SECONDS, activitiesIn, buildSessions, charactersIn, highlights,
+  SESSION_GAP_SECONDS,
+  activitiesIn,
+  buildSessions,
+  charactersIn,
+  highlights,
 } from "./sessions";
 import type { Session } from "./sessions";
 import type { Activity, Segment } from "./types";
@@ -131,7 +135,13 @@ describe("charactersIn", () => {
     const cast = charactersIn([
       segment({ character: "Brin-Hearth", classFile: "DRUID", seconds: 300, level: 8 }),
       segment({ character: "Aster-Vale", classFile: "MAGE", seconds: 900, level: 11 }),
-      segment({ character: "Aster-Vale", classFile: "MAGE", seconds: 600, level: 12, instance: "Copperwood" }),
+      segment({
+        character: "Aster-Vale",
+        classFile: "MAGE",
+        seconds: 600,
+        level: 12,
+        instance: "Copperwood",
+      }),
     ]);
 
     expect(cast.map((entry) => entry.name)).toEqual(["Aster-Vale", "Brin-Hearth"]);
@@ -171,7 +181,9 @@ describe("activitiesIn", () => {
 
   it("carries the segment, the character and the class each one belongs to", () => {
     const only = segment({
-      character: "Brin-Hearth", classFile: "DRUID", instance: "Copperwood Depths",
+      character: "Brin-Hearth",
+      classFile: "DRUID",
+      instance: "Copperwood Depths",
       activities: [key(9, "Copperwood Depths")],
     });
 
@@ -214,8 +226,13 @@ describe("highlights", () => {
 
   describe("equipment sets", () => {
     const raidSet = {
-      setId: 3, name: "Raid", kind: "updated" as const, at: BASE + 60,
-      items: [{ slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 }],
+      setId: 3,
+      name: "Raid",
+      kind: "updated" as const,
+      at: BASE + 60,
+      items: [
+        { slot: 1, itemId: 101, itemLevel: 639, previousItemId: 100, previousItemLevel: 623 },
+      ],
     };
 
     it("names the set, what happened to it, and where the item level went", () => {
@@ -283,9 +300,16 @@ describe("highlights", () => {
 
     const earned = session.highlights.filter((entry) => entry.kind === "achievement");
     expect(earned).toHaveLength(1);
-    expect(earned[0]).toMatchObject({ label: "3 achievements", detail: "account firsts", count: 3 });
-    expect(earned[0].items.map((item) => item.label))
-      .toEqual(["Warband First", "Another First", "A Third First"]);
+    expect(earned[0]).toMatchObject({
+      label: "3 achievements",
+      detail: "account firsts",
+      count: 3,
+    });
+    expect(earned[0].items.map((item) => item.label)).toEqual([
+      "Warband First",
+      "Another First",
+      "A Third First",
+    ]);
   });
 
   it("names the one thing rather than counting it, when there is only one", () => {
@@ -293,7 +317,10 @@ describe("highlights", () => {
       segment({ achievements: [{ id: 1, name: "Into the Light", accountFirst: true }] }),
     ]);
 
-    expect(session.highlights[0]).toMatchObject({ label: "Into the Light", detail: "account first" });
+    expect(session.highlights[0]).toMatchObject({
+      label: "Into the Light",
+      detail: "account first",
+    });
   });
 
   /**
@@ -303,13 +330,14 @@ describe("highlights", () => {
    * rare ones — "3 achievements" for one thing worth telling somebody about.
    */
   describe("the two sorts of achievement", () => {
-    const mixed = (): Segment => segment({
-      achievements: [
-        { id: 1, name: "Just Me", accountFirst: false },
-        { id: 2, name: "Warband First", accountFirst: true },
-        { id: 3, name: "Also Just Me", accountFirst: false },
-      ],
-    });
+    const mixed = (): Segment =>
+      segment({
+        achievements: [
+          { id: 1, name: "Just Me", accountFirst: false },
+          { id: 2, name: "Warband First", accountFirst: true },
+          { id: 3, name: "Also Just Me", accountFirst: false },
+        ],
+      });
 
     // The rare one keeps its words and its place at the front; the catching up is a mark.
     it("counts them apart, and leads with the rarer of the two", () => {
@@ -319,10 +347,16 @@ describe("highlights", () => {
     });
 
     it.each([
-      ["the one worth telling somebody about", "achievement",
-        { label: "Warband First", detail: "account first", count: 1 }],
-      ["the two that only caught this character up", "achievementCharacter",
-        { label: "2 achievements", detail: "character firsts", count: 2 }],
+      [
+        "the one worth telling somebody about",
+        "achievement",
+        { label: "Warband First", detail: "account first", count: 1 },
+      ],
+      [
+        "the two that only caught this character up",
+        "achievementCharacter",
+        { label: "2 achievements", detail: "character firsts", count: 2 },
+      ],
     ] as const)("words %s on its own", (_case, kind, expected) => {
       const [session] = buildSessions([mixed()]);
 
@@ -334,7 +368,10 @@ describe("highlights", () => {
 
       const marked = session.highlights.find((entry) => entry.kind === "achievementCharacter");
       expect(marked?.items.map((item) => item.label)).toEqual(["Just Me", "Also Just Me"]);
-      expect(marked?.items.map((item) => item.detail)).toEqual(["character first", "character first"]);
+      expect(marked?.items.map((item) => item.detail)).toEqual([
+        "character first",
+        "character first",
+      ]);
     });
 
     // A summary of a sort that did not happen is not an empty summary, it is no summary: a
@@ -370,12 +407,19 @@ describe("highlights", () => {
   it("names the character on a summary only where somebody else played too", () => {
     const alone = buildSessions([segment({ levelUps: [{ level: 12 }] })]);
     const shared = buildSessions([
-      segment({ startedAt: BASE, character: "Aster-Vale", levelUps: [{ level: 11 }, { level: 12 }] }),
+      segment({
+        startedAt: BASE,
+        character: "Aster-Vale",
+        levelUps: [{ level: 11 }, { level: 12 }],
+      }),
       segment({ startedAt: BASE + 700, character: "Brin-Hearth" }),
     ]);
 
     expect(alone[0].highlights[0]).toMatchObject({ label: "Level 12", detail: "" });
-    expect(shared[0].highlights[0]).toMatchObject({ label: "2 levels", detail: "Aster-Vale now 12" });
+    expect(shared[0].highlights[0]).toMatchObject({
+      label: "2 levels",
+      detail: "Aster-Vale now 12",
+    });
   });
 
   // With an alt in the evening too there is no single "now 12" to report, and the number of
@@ -395,9 +439,13 @@ describe("highlights", () => {
   // A summary is only worth reading if it can be taken apart again, and taking it apart
   // means knowing when each thing happened and which run to open to see the rest of it.
   it("keeps the time, the character and the segment of everything it counted", () => {
-    const first = segment({ startedAt: BASE, mounts: [{ id: 11, name: "Clockwork Glider", at: BASE + 60 }] });
+    const first = segment({
+      startedAt: BASE,
+      mounts: [{ id: 11, name: "Clockwork Glider", at: BASE + 60 }],
+    });
     const second = segment({
-      startedAt: BASE + 700, character: "Brin-Hearth",
+      startedAt: BASE + 700,
+      character: "Brin-Hearth",
       mounts: [{ id: 12, name: "Dust Strider", at: BASE + 800 }],
     });
     const [session] = buildSessions([first, second]);
@@ -405,8 +453,20 @@ describe("highlights", () => {
     expect(session.highlights.find((entry) => entry.kind === "mount")).toMatchObject({
       label: "2 mounts",
       items: [
-        { label: "Clockwork Glider", detail: "", at: BASE + 60, character: "Aster-Vale", segmentId: first.segmentId },
-        { label: "Dust Strider", detail: "", at: BASE + 800, character: "Brin-Hearth", segmentId: second.segmentId },
+        {
+          label: "Clockwork Glider",
+          detail: "",
+          at: BASE + 60,
+          character: "Aster-Vale",
+          segmentId: first.segmentId,
+        },
+        {
+          label: "Dust Strider",
+          detail: "",
+          at: BASE + 800,
+          character: "Brin-Hearth",
+          segmentId: second.segmentId,
+        },
       ],
     });
   });
@@ -426,13 +486,14 @@ describe("highlights", () => {
    * the quiet half.
    */
   describe("the two sorts of transmog", () => {
-    const both = (): Segment => segment({
-      transmogs: [
-        { id: 1, name: "Wanderer's Mantle", newAppearance: true },
-        { id: 2, name: "Tideglass Cowl", newAppearance: true },
-        { id: 3, name: "Storm Cloak", newAppearance: false },
-      ],
-    });
+    const both = (): Segment =>
+      segment({
+        transmogs: [
+          { id: 1, name: "Wanderer's Mantle", newAppearance: true },
+          { id: 2, name: "Tideglass Cowl", newAppearance: true },
+          { id: 3, name: "Storm Cloak", newAppearance: false },
+        ],
+      });
 
     it("counts new appearances apart from the variants of things already owned", () => {
       const [session] = buildSessions([both()]);
@@ -443,10 +504,16 @@ describe("highlights", () => {
     // The new ones count rather than name: the number is the whole of what a collection
     // growing means, and the addon catches an id far more often than it catches a name.
     it.each([
-      ["what the collection gained", "transmog",
-        { label: "2 new appearances", detail: "", count: 2 }],
-      ["what it merely recoloured", "transmogVariant",
-        { label: "Storm Cloak", detail: "variant of one owned", count: 1 }],
+      [
+        "what the collection gained",
+        "transmog",
+        { label: "2 new appearances", detail: "", count: 2 },
+      ],
+      [
+        "what it merely recoloured",
+        "transmogVariant",
+        { label: "Storm Cloak", detail: "variant of one owned", count: 1 },
+      ],
     ] as const)("words %s on its own", (_case, kind, expected) => {
       const [session] = buildSessions([both()]);
 
@@ -457,7 +524,10 @@ describe("highlights", () => {
       const [session] = buildSessions([both()]);
 
       const fresh = session.highlights.find((entry) => entry.kind === "transmog");
-      expect(fresh?.items.map((item) => item.label)).toEqual(["Wanderer's Mantle", "Tideglass Cowl"]);
+      expect(fresh?.items.map((item) => item.label)).toEqual([
+        "Wanderer's Mantle",
+        "Tideglass Cowl",
+      ]);
       expect(fresh?.items.map((item) => item.itemId)).toEqual([1, 2]);
     });
 
@@ -493,8 +563,9 @@ describe("highlights", () => {
     // A source the client said nothing either way about is not a new appearance and not a
     // variant; counting it as either would be inventing the half of the record that is missing.
     it("puts a source the client said nothing about in neither", () => {
-      expect(kinds(buildSessions([segment({ transmogs: [{ id: 3, name: "Storm Cloak" }] })])[0]))
-        .toEqual([]);
+      expect(
+        kinds(buildSessions([segment({ transmogs: [{ id: 3, name: "Storm Cloak" }] })])[0]),
+      ).toEqual([]);
     });
   });
 
@@ -561,9 +632,7 @@ describe("highlights", () => {
     // A catch from before the addon started asking is not a duplicate, it is unknown — and
     // dropping it would hide a pet that may well have been the first of its species.
     it("keeps a catch nothing could say either way about", () => {
-      const [session] = buildSessions([
-        segment({ pets: [{ id: 456, name: "Darkmoon Rabbit" }] }),
-      ]);
+      const [session] = buildSessions([segment({ pets: [{ id: 456, name: "Darkmoon Rabbit" }] })]);
 
       expect(session.highlights.find((entry) => entry.kind === "pet")).toMatchObject({
         label: "Darkmoon Rabbit",
@@ -583,7 +652,9 @@ describe("highlights", () => {
     const only = segment({ mounts: [{ id: 11, name: "Clockwork Glider" }] });
     const [session] = buildSessions([only]);
 
-    expect(session.highlights.find((entry) => entry.kind === "mount")?.segmentId).toBe(only.segmentId);
+    expect(session.highlights.find((entry) => entry.kind === "mount")?.segmentId).toBe(
+      only.segmentId,
+    );
   });
 
   // Sending a click to whichever segment happened to be first would be a lie about where
@@ -628,13 +699,19 @@ describe("highlights", () => {
     const summaryOf = (overrides: Partial<Segment>) => highlights([segment(overrides)])[0]!;
 
     it.each([
-      ["a character catching up on one the warband already had",
-        { achievements: [{ id: 1, name: "Into the Light", accountFirst: false }] }],
-      ["another colour of a piece already owned",
-        { transmogs: [{ id: 3, name: "Storm Cloak", newAppearance: false }] }],
+      [
+        "a character catching up on one the warband already had",
+        { achievements: [{ id: 1, name: "Into the Light", accountFirst: false }] },
+      ],
+      [
+        "another colour of a piece already owned",
+        { transmogs: [{ id: 3, name: "Storm Cloak", newAppearance: false }] },
+      ],
       ["a quest handed in", { quests: [{ id: 81 }] }],
-      ["a set of gear saved",
-        { equipsetChanges: [{ setId: 3, name: "Raid", kind: "created" as const, items: [] }] }],
+      [
+        "a set of gear saved",
+        { equipsetChanges: [{ setId: 3, name: "Raid", kind: "created" as const, items: [] }] },
+      ],
     ])("has nothing to say out loud about %s", (_case, overrides) => {
       expect(summaryOf(overrides)).toMatchObject({ quiet: true, family: "milestone" });
     });
@@ -642,9 +719,14 @@ describe("highlights", () => {
     // The other side of the same rule: the things somebody would actually mention keep both
     // their words and their place up among the chips.
     it.each([
-      ["the warband's first", { achievements: [{ id: 1, name: "Into the Light", accountFirst: true }] }],
-      ["an appearance nobody owned",
-        { transmogs: [{ id: 1, name: "Wanderer's Mantle", newAppearance: true }] }],
+      [
+        "the warband's first",
+        { achievements: [{ id: 1, name: "Into the Light", accountFirst: true }] },
+      ],
+      [
+        "an appearance nobody owned",
+        { transmogs: [{ id: 1, name: "Wanderer's Mantle", newAppearance: true }] },
+      ],
       ["a mount", { mounts: [{ id: 11, name: "Clockwork Glider" }] }],
       ["a level", { levelUps: [{ level: 12 }] }],
     ])("leaves %s its words", (_case, overrides) => {

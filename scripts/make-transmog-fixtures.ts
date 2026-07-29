@@ -78,7 +78,13 @@ const transmogSet: TableSpec = {
     { storage: Storage.plain, offsetBits: 0, sizeBits: 32 }, // Name
     { storage: Storage.bitpackedSigned, offsetBits: 32, sizeBits: 14 }, // ID
     { storage: Storage.bitpackedSigned, offsetBits: 46, sizeBits: 16 }, // ClassMask
-    { storage: Storage.common, offsetBits: 62, sizeBits: 0, default: 0, common: new Map([[204, 8801]]) }, // TrackingQuestID
+    {
+      storage: Storage.common,
+      offsetBits: 62,
+      sizeBits: 0,
+      default: 0,
+      common: new Map([[204, 8801]]),
+    }, // TrackingQuestID
     // Bits 2 and 3 are the two factions, and the install never sets both: 435 sets carry one
     // and 438 the other across the whole shipping table.
     { storage: Storage.indexed, offsetBits: 62, sizeBits: 6, palette: [0, 1, 2, 4, 8, 16] }, // Flags
@@ -87,9 +93,20 @@ const transmogSet: TableSpec = {
     { storage: Storage.bitpackedSigned, offsetBits: 93, sizeBits: 14 }, // ParentID
     { storage: Storage.common, offsetBits: 107, sizeBits: 0, default: 1, common: new Map() }, // CompleteWorldStateID
     { storage: Storage.bitpackedSigned, offsetBits: 107, sizeBits: 5 }, // ExpansionID
-    { storage: Storage.indexed, offsetBits: 112, sizeBits: 7, palette: [0, 100200, 100300, 110000] }, // PatchIntroduced
+    {
+      storage: Storage.indexed,
+      offsetBits: 112,
+      sizeBits: 7,
+      palette: [0, 100200, 100300, 110000],
+    }, // PatchIntroduced
     { storage: Storage.indexed, offsetBits: 119, sizeBits: 9, palette: [0, 5, 10, 15, 20, 25] }, // UiOrder
-    { storage: Storage.common, offsetBits: 128, sizeBits: 0, default: 0, common: new Map([[206, 44]]) }, // ConditionID
+    {
+      storage: Storage.common,
+      offsetBits: 128,
+      sizeBits: 0,
+      default: 0,
+      common: new Map([[206, 44]]),
+    }, // ConditionID
   ],
   sections: [
     {
@@ -210,8 +227,7 @@ const transmogSetItem: TableSpec = {
         [209, 71023, 0],
       ],
       idList: [
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25,
-        26, 27,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27,
       ],
       // One more appearance for set 201, stored as row 1 again — so the set holds the same
       // appearance twice, and a detail view has to show four rows rather than three.
@@ -356,8 +372,8 @@ const itemAppearance: TableSpec = {
         [0, 900002, 130001],
       ],
       idList: [
-        80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013,
-        80014, 80015, 80016, 80017, 80018, 80019, 80020, 80021,
+        80001, 80002, 80003, 80004, 80005, 80006, 80007, 80008, 80009, 80010, 80011, 80013, 80014,
+        80015, 80016, 80017, 80018, 80019, 80020, 80021,
       ],
     },
     {
@@ -401,12 +417,16 @@ const item: TableSpec = {
   columns: [
     { storage: Storage.indexed, offsetBits: 0, sizeBits: 5, palette: [ARMOR, WEAPON, 15] }, // ClassID
     {
-      storage: Storage.indexed, offsetBits: 5, sizeBits: 5,
+      storage: Storage.indexed,
+      offsetBits: 5,
+      sizeBits: 5,
       palette: [0, 1, 2, 3, 4, 6, 7, 8],
     }, // SubclassID
     { storage: Storage.bitpacked, offsetBits: 10, sizeBits: 4 }, // Material
     {
-      storage: Storage.indexed, offsetBits: 14, sizeBits: 6,
+      storage: Storage.indexed,
+      offsetBits: 14,
+      sizeBits: 6,
       palette: [1, 3, 4, 5, 7, 8, 10, 13, 14, 17, 23],
     }, // InventoryType
     { storage: Storage.indexed, offsetBits: 20, sizeBits: 4, palette: [0, 1, 3] }, // SheatheType
@@ -448,8 +468,8 @@ const item: TableSpec = {
         [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Stormbreaker's Breastplate
       ],
       idList: [
-        30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015,
-        30016, 30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
+        30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015, 30016,
+        30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
       ],
     },
     {
@@ -545,64 +565,304 @@ const itemDisplayInfo: TableSpec = {
         // which read as a value would ask the body for its hundred-and-somethingth skull.
         // Its two `HelmetGeosetVis` entries hide different things, which is the trap: 701 is
         // the one an app drawing a male body would take, and it hides the robe group.
-        [1, 11, 0, 0, 0, 0, 0, 0, 0, 1, [41001, 0], [51001, 0], [1, 0], [2, -1, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, [701, 700]],
+        [
+          1,
+          11,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          [41001, 0],
+          [51001, 0],
+          [1, 0],
+          [2, -1, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          [701, 700],
+        ],
         // Shoulders: both model slots used, left and right.
-        [0, 12, 0, 0, 0, 0, 0, 0, 0, 0, [41002, 41003], [51002, 51003], [2, 3], [1, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          12,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [41002, 41003],
+          [51002, 51003],
+          [2, 3],
+          [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A chestpiece: no model at all, and the two of its five groups this body has —
         // sleeves over the bare arms, and a chest piece over the bare torso.
-        [16, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51004, 0], [0, 0], [1, 1, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          16,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51004, 0],
+          [0, 0],
+          [1, 1, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // Boots: the first element is the boot itself, and the second is the feet group whose
         // zero means "booted" rather than "bare" — the exception a reader has to know about.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51005, 0], [0, 0], [1, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51005, 0],
+          [0, 0],
+          [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // Gloves: a slot this body holds no geoset for at all, so it is texture and nothing
         // else — which is what most of a wardrobe does to most of a mesh.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51006, 0], [0, 0], [1, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51006, 0],
+          [0, 0],
+          [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // Legs, whose first element is the trousers.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51007, 0], [0, 0], [3, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51007, 0],
+          [0, 0],
+          [3, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A weapon, which is geometry and nothing else.
-        [0, 13, 0, 0, 0, 0, 0, 0, 0, 0, [41004, 0], [51008, 0], [1, 0], [0, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          13,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [41004, 0],
+          [51008, 0],
+          [1, 0],
+          [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A shirt: nothing at all beyond its material.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51009, 0], [0, 0], [0, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51009, 0],
+          [0, 0],
+          [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // Shoulders that keep their model in the second slot only, which is exactly what a
         // reader that stops at element zero calls "no model at all".
-        [0, 14, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41005], [51010, 51011], [2, 3], [1, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          14,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 41005],
+          [51010, 51011],
+          [2, 3],
+          [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A display naming a model resource no file in this install belongs to, which is what
         // a partial download looks like from here.
-        [0, 16, 0, 0, 0, 0, 0, 0, 0, 0, [41006, 0], [51012, 0], [1, 0], [2, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          16,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [41006, 0],
+          [51012, 0],
+          [1, 0],
+          [2, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // One whose file is there and is not a model, which is the other kind of wrong and
         // has to read differently: an install missing a file is ordinary, an unreadable file
         // is this app being wrong about the format.
-        [0, 17, 0, 0, 0, 0, 0, 0, 0, 0, [41007, 0], [51013, 0], [1, 0], [2, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          17,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [41007, 0],
+          [51013, 0],
+          [1, 0],
+          [2, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A robe, which is the chest slot again and the one that shows why the groups are
         // worth getting right: it leaves the chest group bare and switches on the robe group
         // instead, which is the skirt that hangs over the legs.
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51014, 0], [0, 0], [1, 0, 1, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51014, 0],
+          [0, 0],
+          [1, 0, 1, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A cape, which is the one slot with geometry and no model: both model slots are zero
         // and it names a material anyway, because what it supplies is the picture on a cloak
         // the body already carries. Its geoset value switches that cloak on.
-        [0, 18, 0, 0, 0, 0, 0, 0, 0, 0, [0, 0], [51015, 0], [0, 0], [1, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          18,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 0],
+          [51015, 0],
+          [0, 0],
+          [1, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // A second weapon, so that a one-hander and a two-hander are different models rather
         // than the same one hung twice.
-        [0, 19, 0, 0, 0, 0, 0, 0, 0, 0, [41005, 0], [51011, 0], [1, 0], [0, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          19,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [41005, 0],
+          [51011, 0],
+          [1, 0],
+          [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
         // And a weapon that keeps its model in the *second* slot, which a reader that took
         // element zero would call a shield with no geometry. Armour has a second slot because
         // shoulders come in pairs; a weapon has one model and it can be in either.
-        [0, 20, 0, 0, 0, 0, 0, 0, 0, 0, [0, 41004], [0, 51008], [0, 1], [0, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          0,
+          20,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [0, 41004],
+          [0, 51008],
+          [0, 1],
+          [0, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
       ],
       idList: [
         900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008, 900009, 900010, 900011,
@@ -613,8 +873,24 @@ const itemDisplayInfo: TableSpec = {
       // Encrypted, so an appearance pointing here knows its slot and nothing more.
       key: 0x5d38af0c9e142b76n,
       rows: [
-        [4, 15, 0, 0, 0, 0, 0, 0, 0, 0, [41900, 0], [51900, 0], [1, 0], [2, 0, 0, 0, 0, 0],
-          NO_ATTACHMENT_GROUPS, NO_HELMET_VIS],
+        [
+          4,
+          15,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          [41900, 0],
+          [51900, 0],
+          [1, 0],
+          [2, 0, 0, 0, 0, 0],
+          NO_ATTACHMENT_GROUPS,
+          NO_HELMET_VIS,
+        ],
       ],
       idList: [900900],
     },
@@ -749,9 +1025,15 @@ function sparseRow(
   name: string,
   description: string,
   {
-    quality, inventoryType, requiredLevel = 0, allowableClass = ANY_CLASS,
+    quality,
+    inventoryType,
+    requiredLevel = 0,
+    allowableClass = ANY_CLASS,
   }: {
-    quality: number; inventoryType: number; requiredLevel?: number; allowableClass?: number;
+    quality: number;
+    inventoryType: number;
+    requiredLevel?: number;
+    allowableClass?: number;
   },
 ): Array<number | string> {
   const row: Array<number | string> = [0, description, "", "", "", name];
@@ -784,7 +1066,9 @@ const itemSparse: TableSpec = {
     // Everything between the name and the class mask, then the mask, then everything up to
     // the three the table ends on: the level it takes, where it is worn, and what it is worth.
     ...Array.from({ length: SPARSE.allowableClass - 6 }, (_, index) => ({
-      storage: Storage.plain, offsetBits: 224 + index * 32, sizeBits: 32,
+      storage: Storage.plain,
+      offsetBits: 224 + index * 32,
+      sizeBits: 32,
     })),
     {
       storage: Storage.plain,
@@ -821,7 +1105,8 @@ const itemSparse: TableSpec = {
         // The one item with a description, so that two rows of the same shape are still
         // different lengths and the offset map is doing something.
         sparseRow("Tideglass Robe", "Woven from the glass the tide leaves behind.", {
-          quality: 4, inventoryType: 5,
+          quality: 4,
+          inventoryType: 5,
         }),
         sparseRow("Tideglass Sandals", "", { quality: 3, inventoryType: 8 }),
         sparseRow("Tideglass Gloves", "", { quality: 3, inventoryType: 10 }),
@@ -845,26 +1130,36 @@ const itemSparse: TableSpec = {
         // The head is the interesting one — the set's own version is Warrior-only and two
         // other items give the same look to anybody, at a lower price the second time.
         sparseRow("Stormforged Helm", "", {
-          quality: 4, inventoryType: 1, requiredLevel: 60, allowableClass: 0b1,
+          quality: 4,
+          inventoryType: 1,
+          requiredLevel: 60,
+          allowableClass: 0b1,
         }),
         sparseRow("Stormforged Greathelm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
         sparseRow("Helm of the Tempest", "", { quality: 3, inventoryType: 1, requiredLevel: 45 }),
         sparseRow("Stormforged Breastplate", "", {
-          quality: 4, inventoryType: 5, requiredLevel: 60, allowableClass: 0b1,
+          quality: 4,
+          inventoryType: 5,
+          requiredLevel: 60,
+          allowableClass: 0b1,
         }),
         sparseRow("Breastplate of the Tempest", "", {
-          quality: 4, inventoryType: 5, requiredLevel: 60,
+          quality: 4,
+          inventoryType: 5,
+          requiredLevel: 60,
         }),
         // What sets 208 and 209 are both made of: one wardrobe, sold to each faction under a
         // name of its own.
         sparseRow("Stormbreaker's Helm", "", { quality: 4, inventoryType: 1, requiredLevel: 60 }),
         sparseRow("Stormbreaker's Breastplate", "", {
-          quality: 4, inventoryType: 5, requiredLevel: 60,
+          quality: 4,
+          inventoryType: 5,
+          requiredLevel: 60,
         }),
       ],
       idList: [
-        30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015,
-        30016, 30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
+        30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015, 30016,
+        30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
       ],
     },
     {
@@ -927,11 +1222,7 @@ const modelFileData: TableSpec = {
       // helm's levels of detail are 140001 and 140101 and why the lower of them is the one to
       // draw. The 139xxx files are the other body's and the other shoulder's, and are named by
       // nothing else here — a reader that took the lowest id would draw every one of them.
-      idList: [
-        139001, 140001, 140101,
-        139002, 140002, 139006, 140006,
-        140004, 140005, 140007,
-      ],
+      idList: [139001, 140001, 140101, 139002, 140002, 139006, 140006, 140004, 140005, 140007],
     },
     {
       // Encrypted, so the model an unreleased appearance names cannot be found at all.
@@ -1004,10 +1295,9 @@ const textureFileData: TableSpec = {
         [0, 0, 53101], // and the other body's skin, which is a picture of its own
       ],
       idList: [
-        150004, 150002, 150102, 150007, 150005, 150003, 150006,
-        151001, 151002, 151003, 151004, 151005, 151006, 151007, 151008, 151009, 151010, 151011,
-        151012, 151013,
-        160001, 160002, 160003, 160004, 160005, 160006, 160007, 160008, 160101,
+        150004, 150002, 150102, 150007, 150005, 150003, 150006, 151001, 151002, 151003, 151004,
+        151005, 151006, 151007, 151008, 151009, 151010, 151011, 151012, 151013, 160001, 160002,
+        160003, 160004, 160005, 160006, 160007, 160008, 160101,
       ],
     },
     {
@@ -1231,7 +1521,13 @@ const chrModelTextureLayer: TableSpec = {
     { storage: Storage.indexed, offsetBits: 18, sizeBits: 2, palette: [-1] }, // SectionMask2
     // Field_9_0_1_34365_006[3], which nothing has ever needed and which sits between the
     // blend modes and the targets — so a reader that skipped it reads a target as a mask.
-    { storage: Storage.indexedArray, offsetBits: 20, sizeBits: 2, arrayCount: 3, palette: [0, 0, 0] },
+    {
+      storage: Storage.indexedArray,
+      offsetBits: 20,
+      sizeBits: 2,
+      arrayCount: 3,
+      palette: [0, 0, 0],
+    },
     // ChrModelTextureTargetID[2]. The game stores it as runs of two and uses only the first.
     {
       storage: Storage.indexedArray,
@@ -1371,10 +1667,8 @@ const chrCustomizationElement: TableSpec = {
         [421, 0, 47, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       ],
       idList: [
-        45, 46,
-        2917, 2918, 2919, 2920, 2921, 2922,
-        2964, 2965, 3277, 9002, 18774, 22918, 33059, 33060, 40000,
-        40100, 40101, 40102, 40103,
+        45, 46, 2917, 2918, 2919, 2920, 2921, 2922, 2964, 2965, 3277, 9002, 18774, 22918, 33059,
+        33060, 40000, 40100, 40101, 40102, 40103,
       ],
     },
     {
@@ -1402,7 +1696,12 @@ const chrCustomizationMaterial: TableSpec = {
   recordSize: 4,
   columns: [
     // TextureTargetID
-    { storage: Storage.indexed, offsetBits: 0, sizeBits: 6, palette: [1, 5, 10, 13, 14, 20, 25, 41] },
+    {
+      storage: Storage.indexed,
+      offsetBits: 0,
+      sizeBits: 6,
+      palette: [1, 5, 10, 13, 14, 20, 25, 41],
+    },
     { storage: Storage.bitpackedSigned, offsetBits: 6, sizeBits: 22 }, // MaterialResourcesID
   ],
   sections: [
@@ -1868,10 +2167,7 @@ const charComponentTextureSections: TableSpec = {
         [103, 9, 512, 0, 512, 512, 0],
         [103, 10, 512, 0, 512, 512, 0],
       ],
-      idList: [
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-        11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-      ],
+      idList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
     },
   ],
 };
@@ -1933,12 +2229,42 @@ const HALF_ROOT_TWO = Math.SQRT1_2;
 
 /** Two triangles per face, wound anticlockwise seen from outside the cube. */
 const CUBE_TRIANGLES = [
-  0, 2, 3, 0, 3, 1, // -Z
-  4, 5, 7, 4, 7, 6, // +Z
-  0, 1, 5, 0, 5, 4, // -Y
-  2, 6, 7, 2, 7, 3, // +Y
-  0, 4, 6, 0, 6, 2, // -X
-  1, 3, 7, 1, 7, 5, // +X
+  0,
+  2,
+  3,
+  0,
+  3,
+  1, // -Z
+  4,
+  5,
+  7,
+  4,
+  7,
+  6, // +Z
+  0,
+  1,
+  5,
+  0,
+  5,
+  4, // -Y
+  2,
+  6,
+  7,
+  2,
+  7,
+  3, // +Y
+  0,
+  4,
+  6,
+  0,
+  6,
+  2, // -X
+  1,
+  3,
+  7,
+  1,
+  7,
+  5, // +X
 ];
 
 /** One texture a model declares. Type 0 is a file of the model's own; anything else is the
@@ -2236,7 +2562,10 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
   const trailerAt = bonesAt + boneCount * BONE;
 
   /** One track's keyframes, and where the two nested arrays naming them begin. */
-  interface Keys { times: number; values: number }
+  interface Keys {
+    times: number;
+    values: number;
+  }
 
   /**
    * One track's keys, written into the trailer.
@@ -2294,13 +2623,25 @@ function writeSkeleton(attachments: readonly AttachmentSpec[]): Uint8Array {
     const laid = (write: ((into: Bytes) => void) | null): Keys | null =>
       write === null ? null : lay(write, keyframes);
     const translation = laid(
-      spec.at ? (into) => { for (const axis of spec.at!) into.f32(axis); } : null,
+      spec.at
+        ? (into) => {
+            for (const axis of spec.at!) into.f32(axis);
+          }
+        : null,
     );
     const rotation = laid(
-      spec.rotation ? (into) => { for (const part of spec.rotation!) into.u16(compressed(part)); } : null,
+      spec.rotation
+        ? (into) => {
+            for (const part of spec.rotation!) into.u16(compressed(part));
+          }
+        : null,
     );
     const scale = laid(
-      spec.scale ? (into) => { for (const axis of spec.scale!) into.f32(axis); } : null,
+      spec.scale
+        ? (into) => {
+            for (const axis of spec.scale!) into.f32(axis);
+          }
+        : null,
     );
     bones.u32(0xffffffff);
     bones.u32(0x0200);
@@ -2408,7 +2749,11 @@ const ATTACHMENTS: readonly AttachmentSpec[] = [
     at: [0, 0, 0],
     chain: [
       { pivot: [0, 0.001, 0] },
-      { at: [1, -3.5, 0.5], rotation: [HALF_ROOT_TWO, 0, 0, HALF_ROOT_TWO], scale: [0.8, 0.8, 0.8] },
+      {
+        at: [1, -3.5, 0.5],
+        rotation: [HALF_ROOT_TWO, 0, 0, HALF_ROOT_TWO],
+        scale: [0.8, 0.8, 0.8],
+      },
       { pivot: [1, -3, 1] },
     ],
   },
@@ -2421,7 +2766,11 @@ const ATTACHMENTS: readonly AttachmentSpec[] = [
     id: 2,
     at: [0, 0, 0],
     chain: [
-      { at: [1, 3.5, 0.5], rotation: [-HALF_ROOT_TWO, 0, 0, HALF_ROOT_TWO], scale: [0.8, 0.8, 0.8] },
+      {
+        at: [1, 3.5, 0.5],
+        rotation: [-HALF_ROOT_TWO, 0, 0, HALF_ROOT_TWO],
+        scale: [0.8, 0.8, 0.8],
+      },
       { pivot: [1, 3, 1] },
     ],
   },
@@ -2434,7 +2783,12 @@ const ATTACHMENTS: readonly AttachmentSpec[] = [
     id: 0,
     at: [0, 0, 0],
     chain: [
-      { moving: true, at: [9, -9, 9], rotation: [0, 0, HALF_ROOT_TWO, HALF_ROOT_TWO], scale: [3, 3, 3] },
+      {
+        moving: true,
+        at: [9, -9, 9],
+        rotation: [0, 0, HALF_ROOT_TWO, HALF_ROOT_TWO],
+        scale: [3, 3, 3],
+      },
       { pivot: [0, 3, 2] },
     ],
   },
@@ -2787,26 +3141,50 @@ const otherCharacterModel: ModelSpec = {
  * right, and 204 and 205 are the two sets whose icons cannot be shown at all.
  */
 const icons: IconSpec[] = [
-  { fileDataId: 130001, encoding: Encoding.palette, alphaBits: 0, alphaType: 0, body: palettePixels(0) },
-  { fileDataId: 130002, encoding: Encoding.palette, alphaBits: 8, alphaType: 0, body: palettePixels(8) },
   {
-    fileDataId: 130003, encoding: Encoding.dxt, alphaBits: 0,
-    alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
+    fileDataId: 130001,
+    encoding: Encoding.palette,
+    alphaBits: 0,
+    alphaType: 0,
+    body: palettePixels(0),
   },
   {
-    fileDataId: 130004, encoding: Encoding.dxt, alphaBits: 8,
-    alphaType: AlphaType.dxt3, body: dxtBlocks(AlphaType.dxt3),
+    fileDataId: 130002,
+    encoding: Encoding.palette,
+    alphaBits: 8,
+    alphaType: 0,
+    body: palettePixels(8),
   },
   {
-    fileDataId: 130005, encoding: Encoding.dxt, alphaBits: 8,
-    alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
+    fileDataId: 130003,
+    encoding: Encoding.dxt,
+    alphaBits: 0,
+    alphaType: AlphaType.dxt1,
+    body: dxtBlocks(AlphaType.dxt1),
+  },
+  {
+    fileDataId: 130004,
+    encoding: Encoding.dxt,
+    alphaBits: 8,
+    alphaType: AlphaType.dxt3,
+    body: dxtBlocks(AlphaType.dxt3),
+  },
+  {
+    fileDataId: 130005,
+    encoding: Encoding.dxt,
+    alphaBits: 8,
+    alphaType: AlphaType.dxt5,
+    body: dxtBlocks(AlphaType.dxt5),
   },
   { fileDataId: 130006, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
   // The textures the models are painted with. Same format, different job: 150001 is named by
   // a model's own `TXID`, and the rest by `TextureFileData` for the items that supply one.
   {
-    fileDataId: 150001, encoding: Encoding.dxt, alphaBits: 0,
-    alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
+    fileDataId: 150001,
+    encoding: Encoding.dxt,
+    alphaBits: 0,
+    alphaType: AlphaType.dxt1,
+    body: dxtBlocks(AlphaType.dxt1),
   },
   { fileDataId: 150002, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
   { fileDataId: 150003, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
@@ -2815,16 +3193,22 @@ const icons: IconSpec[] = [
   { fileDataId: 150006, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
   { fileDataId: 150007, encoding: Encoding.bgra, alphaBits: 8, alphaType: 0, body: bgraPixels() },
   {
-    fileDataId: 150005, encoding: Encoding.dxt, alphaBits: 8,
-    alphaType: AlphaType.dxt5, body: dxtBlocks(AlphaType.dxt5),
+    fileDataId: 150005,
+    encoding: Encoding.dxt,
+    alphaBits: 8,
+    alphaType: AlphaType.dxt5,
+    body: dxtBlocks(AlphaType.dxt5),
   },
   // The character's own skin, which is what the body atlas is built on top of. Opaque
   // throughout, unlike the item textures above: a base with a transparent corner would leave
   // a quarter of the body see-through, and the four quadrant colours are what says the whole
   // 2048 × 1024 atlas was covered by it rather than a corner of it.
   {
-    fileDataId: 160001, encoding: Encoding.dxt, alphaBits: 0,
-    alphaType: AlphaType.dxt1, body: dxtBlocks(AlphaType.dxt1),
+    fileDataId: 160001,
+    encoding: Encoding.dxt,
+    alphaBits: 0,
+    alphaType: AlphaType.dxt1,
+    body: dxtBlocks(AlphaType.dxt1),
   },
   ...skinTextures(),
   ...bodyTextures(),
@@ -2911,7 +3295,6 @@ function bodyTextures(): IconSpec[] {
     body: bodyPixels(top, bottom),
   }));
 }
-
 
 /* ---------- go ---------- */
 

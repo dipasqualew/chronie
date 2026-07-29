@@ -62,22 +62,44 @@ const HOLDINGS: AccountHoldings = {
       // for: "Honored, and the alt you never play is Revered".
       faction: "Cavern Cartographers",
       best: {
-        character: "Brin-Hearth", standing: "Revered", current: 3_000, max: 21_000,
-        rank: 7, system: "reaction", at: BASE,
+        character: "Brin-Hearth",
+        standing: "Revered",
+        current: 3_000,
+        max: 21_000,
+        rank: 7,
+        system: "reaction",
+        at: BASE,
       },
-      characters: [{
-        character: "Aster-Vale", standing: "Honored", current: 4_200, max: 12_000,
-        rank: 6, system: "reaction", at: BASE,
-      }],
+      characters: [
+        {
+          character: "Aster-Vale",
+          standing: "Honored",
+          current: 4_200,
+          max: 12_000,
+          rank: 6,
+          system: "reaction",
+          at: BASE,
+        },
+      ],
     },
     {
       faction: "Deepwater Wardens",
       best: {
-        character: "Aster-Vale", standing: "Exalted", rank: 8, system: "reaction", at: BASE,
+        character: "Aster-Vale",
+        standing: "Exalted",
+        rank: 8,
+        system: "reaction",
+        at: BASE,
       },
-      characters: [{
-        character: "Aster-Vale", standing: "Exalted", rank: 8, system: "reaction", at: BASE,
-      }],
+      characters: [
+        {
+          character: "Aster-Vale",
+          standing: "Exalted",
+          rank: 8,
+          system: "reaction",
+          at: BASE,
+        },
+      ],
     },
   ],
   gold: {
@@ -90,34 +112,37 @@ const HOLDINGS: AccountHoldings = {
 };
 
 const SET: InGameSet = {
-  id: 4, name: "Tideglass", icon: 130_001, observedAt: null,
+  id: 4,
+  name: "Tideglass",
+  icon: 130_001,
+  observedAt: null,
   slots: [{ slot: 0, appearanceId: 71_001 }],
 };
 
 /** A book over an install that draws Glass Token and has no picture for the warband's pot. */
 function icons(): CurrencyIcons {
   return createCurrencyIcons({
-    load: (ids) => Promise.resolve({
-      icons: Object.fromEntries(
-        ids.filter((id) => id === GLASS_TOKEN).map((id) => [String(id), PICTURE]),
-      ),
-    }),
+    load: (ids) =>
+      Promise.resolve({
+        icons: Object.fromEntries(
+          ids.filter((id) => id === GLASS_TOKEN).map((id) => [String(id), PICTURE]),
+        ),
+      }),
   });
 }
 
-function show(
-  { wardrobe = null, profile }: { wardrobe?: InGameSet[] | null; profile?: CharacterProfile } = {},
-): CharacterProfile {
-  const entry = profile
-    ?? buildCharacters([segment({ lootValue: 245_000 })], HOLDINGS)[0]!;
+function show({
+  wardrobe = null,
+  profile,
+}: { wardrobe?: InGameSet[] | null; profile?: CharacterProfile } = {}): CharacterProfile {
+  const entry = profile ?? buildCharacters([segment({ lootValue: 245_000 })], HOLDINGS)[0]!;
   render(<CharacterSummary entry={entry} wardrobe={wardrobe} currencyIcons={icons()} />);
   return entry;
 }
 
 /** The cells of the row a table names something on, in the order the table draws them. */
 const rowFor = (table: string, name: string) =>
-  within(screen.getByRole("table", { name: table }))
-    .getByRole("row", { name: new RegExp(name) });
+  within(screen.getByRole("table", { name: table })).getByRole("row", { name: new RegExp(name) });
 
 describe("CharacterSummary", () => {
   it("adds up what is known about the character", () => {
@@ -163,18 +188,20 @@ describe("CharacterSummary", () => {
 
       // Asked for by tag rather than by role: the picture is decoration in the strict sense —
       // the row says everything without it — so it carries no accessible name to ask for.
-      await waitFor(() => expect(
-        rowFor("Currencies", "Glass Token").querySelector("img")?.getAttribute("src"),
-      ).toBe(PICTURE));
+      await waitFor(() =>
+        expect(rowFor("Currencies", "Glass Token").querySelector("img")?.getAttribute("src")).toBe(
+          PICTURE,
+        ),
+      );
     });
 
     /** A row whose currency the game names no picture for still draws, blank in that column. */
     it("draws a currency the game has no picture for anyway", async () => {
       show();
 
-      await waitFor(() => expect(
-        rowFor("Currencies", "Glass Token").querySelector("img"),
-      ).toBeTruthy());
+      await waitFor(() =>
+        expect(rowFor("Currencies", "Glass Token").querySelector("img")).toBeTruthy(),
+      );
       expect(rowFor("Currencies", "Warband Chit").querySelector("img")).toBeNull();
       expect(rowFor("Currencies", "Warband Chit").textContent).toContain("Warband Chit");
     });
@@ -188,8 +215,9 @@ describe("CharacterSummary", () => {
     it("names who on the account has got furthest with each faction", () => {
       show();
 
-      expect(rowFor("Reputation", "Cavern Cartographers").textContent)
-        .toContain("Brin-Hearth · Revered");
+      expect(rowFor("Reputation", "Cavern Cartographers").textContent).toContain(
+        "Brin-Hearth · Revered",
+      );
     });
 
     /** The name is the heading of the page; repeating it would read as somebody else's. */

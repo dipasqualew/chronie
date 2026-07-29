@@ -190,12 +190,15 @@ fn read_line<T: DeserializeOwned>(reader: &mut impl BufRead, what: &str) -> Resu
         .read_until(b'\n', &mut line)
         .map_err(|error| format!("Could not read the {what}: {error}"))?;
     if read == 0 {
-        return Err(format!("The other Chronie closed before sending the {what}."));
+        return Err(format!(
+            "The other Chronie closed before sending the {what}."
+        ));
     }
     if !line.ends_with(b"\n") {
         return Err(format!("The {what} never ended."));
     }
-    serde_json::from_slice(&line).map_err(|_| format!("The {what} was not something Chronie sends."))
+    serde_json::from_slice(&line)
+        .map_err(|_| format!("The {what} was not something Chronie sends."))
 }
 
 /// The rules an offer has to pass before a person is even shown it.
@@ -255,7 +258,12 @@ pub fn local_addresses(port: u16) -> Vec<String> {
 
 fn local_ips() -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
-    for target in ["8.8.8.8:53", "192.168.1.1:53", "10.0.0.1:53", "172.16.0.1:53"] {
+    for target in [
+        "8.8.8.8:53",
+        "192.168.1.1:53",
+        "10.0.0.1:53",
+        "172.16.0.1:53",
+    ] {
         let Ok(socket) = UdpSocket::bind("0.0.0.0:0") else {
             continue;
         };
@@ -580,7 +588,16 @@ impl Station {
                         let data_dir = data_dir.clone();
                         let database = Arc::clone(&database);
                         thread::spawn(move || {
-                            serve(Desk { shared, database_path, data_dir, database }, stream, from);
+                            serve(
+                                Desk {
+                                    shared,
+                                    database_path,
+                                    data_dir,
+                                    database,
+                                },
+                                stream,
+                                from,
+                            );
                         });
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(POLL),
@@ -992,9 +1009,27 @@ mod tests {
         };
         assert!(vet(&sound).is_ok());
         for (offer, expected) in [
-            (Offer { protocol: 2, ..sound.clone() }, "version 2"),
-            (Offer { bytes: 0, ..sound.clone() }, "empty"),
-            (Offer { bytes: LARGEST_TRANSFER + 1, ..sound.clone() }, "too large"),
+            (
+                Offer {
+                    protocol: 2,
+                    ..sound.clone()
+                },
+                "version 2",
+            ),
+            (
+                Offer {
+                    bytes: 0,
+                    ..sound.clone()
+                },
+                "empty",
+            ),
+            (
+                Offer {
+                    bytes: LARGEST_TRANSFER + 1,
+                    ..sound.clone()
+                },
+                "too large",
+            ),
         ] {
             let error = vet(&offer).unwrap_err();
             assert!(error.contains(expected), "unhelpful error: {error}");
@@ -1020,8 +1055,12 @@ mod tests {
 
         // The person on the receiving machine is not at the keyboard yet, so the send has to
         // be in flight while the offer sits there being looked at.
-        let sender = thread::spawn(move || send(&mine, &sending, "Desktop", &address, &Mutex::default()));
-        assert!(until(|| station.status().unwrap().offer.is_some()), "no offer arrived");
+        let sender =
+            thread::spawn(move || send(&mine, &sending, "Desktop", &address, &Mutex::default()));
+        assert!(
+            until(|| station.status().unwrap().offer.is_some()),
+            "no offer arrived"
+        );
         let waiting = station.status().unwrap().offer.unwrap();
         assert_eq!(waiting.offer.device, "Desktop");
         assert_eq!(waiting.offer.segment_count, 3);
@@ -1041,7 +1080,11 @@ mod tests {
         assert!(until(|| station.status().unwrap().offer.is_none()));
         let outcome = station.status().unwrap().outcome.unwrap();
         assert!(outcome.stored);
-        assert!(outcome.message.contains("3 segments"), "{}", outcome.message);
+        assert!(
+            outcome.message.contains("3 segments"),
+            "{}",
+            outcome.message
+        );
         station.stop().unwrap();
     }
 
@@ -1055,8 +1098,12 @@ mod tests {
         let (station, received_into, address) = station(&receiving);
         let mine = database(&sending, &["Brin-Hearth"]);
 
-        let sender = thread::spawn(move || send(&mine, &sending, "Desktop", &address, &Mutex::default()));
-        assert!(until(|| station.status().unwrap().offer.is_some()), "no offer arrived");
+        let sender =
+            thread::spawn(move || send(&mine, &sending, "Desktop", &address, &Mutex::default()));
+        assert!(
+            until(|| station.status().unwrap().offer.is_some()),
+            "no offer arrived"
+        );
         station.answer(false).unwrap();
         let receipt = sender.join().unwrap().unwrap();
 
@@ -1084,7 +1131,10 @@ mod tests {
 
         let error = send(&mine, &sending, "Desktop", &address, &Mutex::default()).unwrap_err();
 
-        assert!(error.contains("could not reach"), "unhelpful error: {error}");
+        assert!(
+            error.contains("could not reach"),
+            "unhelpful error: {error}"
+        );
         // A station that has been stopped can be started again on the same socket, which a
         // thread left holding it would prevent.
         assert!(station.start_on(port).unwrap().listening);
@@ -1108,12 +1158,19 @@ mod tests {
             let address = address.clone();
             thread::spawn(move || send(&first, &first_dir, "Desktop", &address, &Mutex::default()))
         };
-        assert!(until(|| station.status().unwrap().offer.is_some()), "no offer arrived");
+        assert!(
+            until(|| station.status().unwrap().offer.is_some()),
+            "no offer arrived"
+        );
 
         let refused = send(&second, &second_dir, "Laptop", &address, &Mutex::default()).unwrap();
 
         assert!(!refused.stored);
-        assert!(refused.reason.contains("already deciding"), "{}", refused.reason);
+        assert!(
+            refused.reason.contains("already deciding"),
+            "{}",
+            refused.reason
+        );
         station.answer(true).unwrap();
         assert!(held.join().unwrap().unwrap().stored);
         assert_eq!(segment_count(&received_into), 1);
@@ -1152,12 +1209,19 @@ mod tests {
                 read_line(&mut reader, "receipt")
             })
         };
-        assert!(until(|| station.status().unwrap().offer.is_some()), "no offer arrived");
+        assert!(
+            until(|| station.status().unwrap().offer.is_some()),
+            "no offer arrived"
+        );
         station.answer(true).unwrap();
         let receipt = sender.join().unwrap().unwrap();
 
         assert!(!receipt.stored);
-        assert!(receipt.reason.contains("not a Chronie database"), "{}", receipt.reason);
+        assert!(
+            receipt.reason.contains("not a Chronie database"),
+            "{}",
+            receipt.reason
+        );
         assert_eq!(segment_count(&received_into), 1);
         assert!(!received_into.with_extension("replaced.sqlite3").exists());
         station.stop().unwrap();
@@ -1172,7 +1236,12 @@ mod tests {
         let receiving = temp.path().join("receiver");
         std::fs::create_dir_all(&receiving).unwrap();
         let database_path = database(&receiving, &["Aster-Vale"]);
-        let station = Station::new(database_path, receiving.clone(), "Laptop".into(), Arc::default());
+        let station = Station::new(
+            database_path,
+            receiving.clone(),
+            "Laptop".into(),
+            Arc::default(),
+        );
         let port = station.start_on(0).unwrap().port;
 
         let asking = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -1180,10 +1249,14 @@ mod tests {
         // short below, where the assertion is that nothing comes back at all and every
         // millisecond of the wait is spent proving a negative that a loopback datagram would
         // have settled immediately.
-        asking.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        asking
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         let mut buffer = [0_u8; 512];
         asking.send_to(PROBE, ("127.0.0.1", port)).unwrap();
-        let (read, _) = asking.recv_from(&mut buffer).expect("a waiting station said nothing");
+        let (read, _) = asking
+            .recv_from(&mut buffer)
+            .expect("a waiting station said nothing");
         let beacon: Beacon = serde_json::from_slice(&buffer[..read]).unwrap();
         assert_eq!(beacon.protocol, PROTOCOL);
         assert_eq!(beacon.device, "Laptop");
@@ -1191,11 +1264,18 @@ mod tests {
         // necessarily the one it was asked for.
         assert_eq!(beacon.port, port);
 
-        asking.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+        asking
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
 
         // Something other than a probe is not an invitation to announce anything.
-        asking.send_to(b"who is there?", ("127.0.0.1", port)).unwrap();
-        assert!(asking.recv_from(&mut buffer).is_err(), "the beacon answered a stranger");
+        asking
+            .send_to(b"who is there?", ("127.0.0.1", port))
+            .unwrap();
+        assert!(
+            asking.recv_from(&mut buffer).is_err(),
+            "the beacon answered a stranger"
+        );
 
         station.stop().unwrap();
         asking.send_to(PROBE, ("127.0.0.1", port)).unwrap();
@@ -1218,6 +1298,9 @@ mod tests {
 
         let error = station.answer(true).unwrap_err();
 
-        assert!(error.contains("no database waiting"), "unhelpful error: {error}");
+        assert!(
+            error.contains("no database waiting"),
+            "unhelpful error: {error}"
+        );
     }
 }

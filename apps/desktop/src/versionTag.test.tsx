@@ -18,10 +18,12 @@ describe("VersionTag", () => {
   it("shows the build and points each half of it at GitHub", () => {
     render(<VersionTag release={built(SHA)} />);
 
-    expect(linkTo("The dev release on GitHub"))
-      .toBe("https://github.com/dipasqualew/chronie/releases/tag/dev");
-    expect(linkTo("Commit 95b5e08 on GitHub"))
-      .toBe(`https://github.com/dipasqualew/chronie/commit/${SHA}`);
+    expect(linkTo("The dev release on GitHub")).toBe(
+      "https://github.com/dipasqualew/chronie/releases/tag/dev",
+    );
+    expect(linkTo("Commit 95b5e08 on GitHub")).toBe(
+      `https://github.com/dipasqualew/chronie/commit/${SHA}`,
+    );
   });
 
   // What a reader copies into a bug report is the text, not the accessible names above it.
@@ -39,8 +41,9 @@ describe("VersionTag", () => {
   ])("still names the channel for %s", (_what, release) => {
     render(<VersionTag release={release} />);
 
-    expect(linkTo("The dev release on GitHub"))
-      .toBe("https://github.com/dipasqualew/chronie/releases/tag/dev");
+    expect(linkTo("The dev release on GitHub")).toBe(
+      "https://github.com/dipasqualew/chronie/releases/tag/dev",
+    );
     expect(screen.queryByRole("link", { name: /^Commit / })).toBeNull();
     expect(screen.getByTitle("Chronie dev").textContent).toBe("dev");
   });

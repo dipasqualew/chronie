@@ -25,8 +25,16 @@ import type { ReactNode } from "react";
 
 import { plural } from "./format";
 import {
-  DEFAULT_LIMIT, RECIPES, SHAPES, cellText, columnKinds, defaultAxes, everything, plot,
-  recipeAxes, summary,
+  DEFAULT_LIMIT,
+  RECIPES,
+  SHAPES,
+  cellText,
+  columnKinds,
+  defaultAxes,
+  everything,
+  plot,
+  recipeAxes,
+  summary,
 } from "./query";
 import type { Axes, Recipe, Shape } from "./query";
 import { QueryChart } from "./queryChart";
@@ -72,7 +80,10 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
   // once anybody is here to read it, because a first run opens on Settings.
   useEffect(() => {
     if (!visible || schema) return;
-    void actions.schema().then(setSchema).catch(() => setSchema({ tables: [] }));
+    void actions
+      .schema()
+      .then(setSchema)
+      .catch(() => setSchema({ tables: [] }));
   }, [actions, schema, visible]);
 
   // Opened already answered. The alternative is a blank editor over an empty table, which
@@ -82,7 +93,9 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
     asked.current = true;
     void ask(sql, opening);
     // Deliberately the first render's `sql` — this runs once, and what it runs is the recipe
-    // the view opened with.
+    // the view opened with. Listing `sql` would re-run the query on every keystroke in the
+    // editor. Held by "opens already answered, with both a chart and its rows on screen" and
+    // "asks the backend nothing at all while nobody is looking at it".
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -124,24 +137,29 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
   const kinds = useMemo(() => (answer ? columnKinds(answer) : []), [answer]);
   const drawn = useMemo(() => (answer && axes ? plot(answer, axes) : null), [answer, axes]);
   const numeric = useMemo(
-    () => kinds.flatMap((kind, at) => (kind === "number" ? [at] : [])), [kinds],
+    () => kinds.flatMap((kind, at) => (kind === "number" ? [at] : [])),
+    [kinds],
   );
 
   return (
     <div className="query">
       <header className="view-head">
         <h1>Query</h1>
-        <div className="sub">Your own history, in SQL. Reads only — nothing typed here can
-          change what Chronie has collected.</div>
+        <div className="sub">
+          Your own history, in SQL. Reads only — nothing typed here can change what Chronie has
+          collected.
+        </div>
       </header>
 
       <div className="query-body">
         <aside className="query-tables" aria-label="Tables in the history">
           <h2>Tables</h2>
-          {schema
-            ? schema.tables.map((table) => (
+          {schema ? (
+            schema.tables.map((table) => (
               <details
-                key={table.name} id={`query-table-${table.name}`} className="query-table"
+                key={table.name}
+                id={`query-table-${table.name}`}
+                className="query-table"
                 aria-label={table.name}
               >
                 {/* The summary does what a summary does — nothing but open. Everything that
@@ -158,23 +176,29 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
                 <ul>
                   <li>
                     <button
-                      type="button" className="query-seed"
+                      type="button"
+                      className="query-seed"
                       onClick={() => start(everything(table.name))}
                     >{`SELECT * FROM ${table.name}`}</button>
                   </li>
                   {table.columns.map((column) => (
                     <li key={column.name}>
                       <button
-                        type="button" aria-label={`Insert ${column.name}`}
+                        type="button"
+                        aria-label={`Insert ${column.name}`}
                         onClick={() => insert(column.name)}
-                      >{column.name}</button>
+                      >
+                        {column.name}
+                      </button>
                       <span className="muted">{column.kind.toLowerCase()}</span>
                     </li>
                   ))}
                 </ul>
               </details>
             ))
-            : <p className="muted">Reading the schema…</p>}
+          ) : (
+            <p className="muted">Reading the schema…</p>
+          )}
         </aside>
 
         <section className="query-main" aria-label="The query and its answer">
@@ -182,15 +206,25 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
             <span className="muted">Start from:</span>
             {RECIPES.map((recipe) => (
               <button
-                key={recipe.name} type="button" className="chip recipe"
-                title={recipe.about} onClick={() => start(recipe)}
-              >{recipe.name}</button>
+                key={recipe.name}
+                type="button"
+                className="chip recipe"
+                title={recipe.about}
+                onClick={() => start(recipe)}
+              >
+                {recipe.name}
+              </button>
             ))}
           </div>
 
           <textarea
-            id="query-sql" className="query-editor" ref={editor} spellCheck={false}
-            aria-label="SQL" rows={9} value={sql}
+            id="query-sql"
+            className="query-editor"
+            ref={editor}
+            spellCheck={false}
+            aria-label="SQL"
+            rows={9}
+            value={sql}
             onChange={(event) => setSql(event.target.value)}
             onKeyDown={(event) => {
               // The shortcut every SQL editor has, because the query is several lines long
@@ -204,95 +238,122 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
 
           <div className="query-bar">
             <button
-              type="button" className="primary" disabled={running}
+              type="button"
+              className="primary"
+              disabled={running}
               onClick={() => void ask(sql)}
-            >{running ? "Running…" : "Run"}</button>
+            >
+              {running ? "Running…" : "Run"}
+            </button>
             <span className="muted">⌘↵</span>
             <label className="query-limit">
               At most
               <select
-                aria-label="Rows at most" value={limit}
+                aria-label="Rows at most"
+                value={limit}
                 onChange={(event) => setLimit(Number(event.target.value))}
               >
                 {LIMITS.map((rows) => (
-                  <option key={rows} value={rows}>{rows.toLocaleString()}</option>
+                  <option key={rows} value={rows}>
+                    {rows.toLocaleString()}
+                  </option>
                 ))}
               </select>
               rows
             </label>
             <span className="query-summary" role="status">
-              {running ? "Running…" : (answer ? summary(answer) : "")}
+              {running ? "Running…" : answer ? summary(answer) : ""}
             </span>
           </div>
 
           {/* An alert rather than a status: a refused query is the one thing here that
               somebody has to be told about rather than left to notice. */}
-          {failure ? <p className="query-failure" role="alert">{failure}</p> : null}
+          {failure ? (
+            <p className="query-failure" role="alert">
+              {failure}
+            </p>
+          ) : null}
 
-          {answer?.truncated
-            ? <p className="query-truncated">Stopped at {plural(answer.rows.length, "row")}.
-              There were more — the chart and the table below are of this much of it. Ask for
-              more rows, or narrow the query down.</p>
-            : null}
+          {answer?.truncated ? (
+            <p className="query-truncated">
+              Stopped at {plural(answer.rows.length, "row")}. There were more — the chart and the
+              table below are of this much of it. Ask for more rows, or narrow the query down.
+            </p>
+          ) : null}
 
-          {answer
-            ? <>
+          {answer ? (
+            <>
               <section className="query-chart" aria-label="Chart">
-                {axes && numeric.length
-                  ? <>
+                {axes && numeric.length ? (
+                  <>
                     <div className="query-axes">
                       <label>
                         Across
                         <select
-                          aria-label="Horizontal axis" value={axes.x}
-                          onChange={(event) =>
-                            setAxes({ ...axes, x: Number(event.target.value) })}
+                          aria-label="Horizontal axis"
+                          value={axes.x}
+                          onChange={(event) => setAxes({ ...axes, x: Number(event.target.value) })}
                         >
                           {answer.columns.map((name, at) => (
-                            <option key={`${name}-${at}`} value={at}>{name}</option>
+                            <option key={`${name}-${at}`} value={at}>
+                              {name}
+                            </option>
                           ))}
                         </select>
                       </label>
                       <label>
                         Up
                         <select
-                          aria-label="Vertical axis" value={axes.y}
-                          onChange={(event) =>
-                            setAxes({ ...axes, y: Number(event.target.value) })}
+                          aria-label="Vertical axis"
+                          value={axes.y}
+                          onChange={(event) => setAxes({ ...axes, y: Number(event.target.value) })}
                         >
                           {/* Only the columns that hold numbers: a chart of a column of
                               names against anything is not a chart. */}
                           {numeric.map((at) => (
-                            <option key={at} value={at}>{answer.columns[at]}</option>
+                            <option key={at} value={at}>
+                              {answer.columns[at]}
+                            </option>
                           ))}
                         </select>
                       </label>
                       <label>
                         As
                         <select
-                          aria-label="Chart shape" value={axes.shape}
+                          aria-label="Chart shape"
+                          value={axes.shape}
                           onChange={(event) =>
-                            setAxes({ ...axes, shape: event.target.value as Shape })}
+                            setAxes({ ...axes, shape: event.target.value as Shape })
+                          }
                         >
                           {SHAPES.map((shape) => (
-                            <option key={shape} value={shape}>{SHAPE_LABELS[shape]}</option>
+                            <option key={shape} value={shape}>
+                              {SHAPE_LABELS[shape]}
+                            </option>
                           ))}
                         </select>
                       </label>
-                      {drawn?.skipped
-                        ? <span className="muted">
+                      {drawn?.skipped ? (
+                        <span className="muted">
                           {plural(drawn.skipped, "row")} had no number to plot.
                         </span>
-                        : null}
+                      ) : null}
                     </div>
-                    {drawn
-                      ? <QueryChart plot={drawn} />
-                      : <p className="muted">Nothing in those two columns can be drawn against
-                        each other.</p>}
+                    {drawn ? (
+                      <QueryChart plot={drawn} />
+                    ) : (
+                      <p className="muted">
+                        Nothing in those two columns can be drawn against each other.
+                      </p>
+                    )}
                   </>
-                  : <p className="muted">Nothing that came back is a number, so there is
-                    nothing to plot. Count something — <code>COUNT(*)</code>,
-                    <code>SUM(duration_seconds)</code> — and the chart appears.</p>}
+                ) : (
+                  <p className="muted">
+                    Nothing that came back is a number, so there is nothing to plot. Count something
+                    — <code>COUNT(*)</code>,<code>SUM(duration_seconds)</code> — and the chart
+                    appears.
+                  </p>
+                )}
               </section>
 
               <div className="query-rows">
@@ -301,9 +362,12 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
                     <tr>
                       {answer.columns.map((name, at) => (
                         <th
-                          key={`${name}-${at}`} scope="col"
+                          key={`${name}-${at}`}
+                          scope="col"
                           className={kinds[at] === "number" ? "num" : undefined}
-                        >{name}</th>
+                        >
+                          {name}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -314,7 +378,9 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
                           <td
                             key={`${name}-${column}`}
                             className={kinds[column] === "number" ? "num" : undefined}
-                          >{cellText(row[column] ?? null)}</td>
+                          >
+                            {cellText(row[column] ?? null)}
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -323,7 +389,7 @@ export function QueryView({ actions, visible }: QueryViewProps): ReactNode {
                 {answer.rows.length ? null : <p className="muted">No rows matched.</p>}
               </div>
             </>
-            : null}
+          ) : null}
         </section>
       </div>
     </div>
