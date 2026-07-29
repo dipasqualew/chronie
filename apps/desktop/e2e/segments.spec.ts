@@ -131,6 +131,17 @@ test("digs from a session down into a single segment and back out again", async 
     await expect(detail.gainFor("Cavern Cartographers")).toContainText("Honored 4,200 / 12,000");
   });
 
+  // A faction has no icon anywhere in the game, so the picture on the line is borrowed: the icon
+  // of the achievement for reaching Exalted with it, four table hops away. It takes the medal's
+  // place rather than sitting beside it, and the renown line keeps its medal — renown has no
+  // Exalted tier, so there is no achievement to borrow from and never will be.
+  await test.step("a reputation carries the picture its Exalted achievement is drawn with", async () => {
+    await expect(detail.factionIcon("Cavern Cartographers")).toBeVisible();
+    await expect(detail.factionIcon("Council of Dornogal")).toHaveCount(0);
+    await expect(detail.gainFor("Council of Dornogal")).toContainText("🎖️");
+    await expect(detail.gainFor("Cavern Cartographers")).not.toContainText("🎖️");
+  });
+
   // Those two numbers are still one character's. The account's are the ones that decide
   // whether the grind is worth continuing here at all.
   await test.step("a gain says what the whole account has, not only this character", async () => {

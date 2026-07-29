@@ -32,6 +32,7 @@ import { CharacterFigure } from "./characterFigure";
 import { CharacterSummary } from "./characterSummary";
 import type { CharacterProfile } from "./characters";
 import type { CurrencyIcons } from "./currencies";
+import type { FactionIcons } from "./reputations";
 import { ago, duration, initials, plural } from "./format";
 import { setsFor } from "./inGameSets";
 import type { ItemBook } from "./items";
@@ -62,6 +63,7 @@ export interface CharactersProps {
   items: ItemBook;
   /** The pictures the game draws each currency with. */
   currencyIcons: CurrencyIcons;
+  factionIcons?: FactionIcons;
   /** The pictures the game draws a place with, for the segment rows on a character's page. */
   places?: PlaceIcons;
   /**
@@ -83,6 +85,7 @@ export function Characters({
   onOpenSegment,
   items,
   currencyIcons,
+  factionIcons,
   places,
   inGameSets,
   loadSetAppearances,
@@ -145,6 +148,7 @@ export function Characters({
             now={now}
             items={items}
             currencyIcons={currencyIcons}
+            factionIcons={factionIcons}
             places={places}
             wardrobe={setsFor(inGameSets, showing.name)}
             loadSetAppearances={loadSetAppearances}
@@ -215,6 +219,7 @@ interface ProfileProps {
   now: number;
   items: ItemBook;
   currencyIcons: CurrencyIcons;
+  factionIcons?: FactionIcons;
   /** The pictures the game draws a place with, for the segment rows on a character's page. */
   places?: PlaceIcons;
   /** What this character has saved in game, or null when Chronie has never read their wardrobe. */
@@ -240,6 +245,7 @@ function Profile({
   now,
   items,
   currencyIcons,
+  factionIcons,
   places,
   wardrobe,
   loadSetAppearances,
@@ -298,7 +304,12 @@ function Profile({
         aria-labelledby={`character-${page}-tab`}
       >
         {page === "summary" ? (
-          <CharacterSummary entry={entry} wardrobe={wardrobe} currencyIcons={currencyIcons} />
+          <CharacterSummary
+            entry={entry}
+            wardrobe={wardrobe}
+            currencyIcons={currencyIcons}
+            factionIcons={factionIcons}
+          />
         ) : (
           <CharacterActivity
             entry={entry}

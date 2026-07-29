@@ -94,6 +94,18 @@ export class Roster {
       .filter({ hasText: name });
   }
 
+  /**
+   * The picture a faction borrows from its own Exalted achievement, in the standings table.
+   *
+   * Found by the faction it is of, because the row names the faction beside it. This column was
+   * plain names before there were any pictures and stays plain for every faction the game has no
+   * achievement for — which is every renown faction — so asking for a frame is how a spec says
+   * which of the two a row is.
+   */
+  factionIcon(faction: string): Locator {
+    return this.profile.getByRole("img", { name: `Icon for ${faction}` });
+  }
+
   /** Where the character stands with a faction, as a screen reader is told it. */
   standingWith(faction: string | RegExp): Locator {
     return this.profile.getByRole("progressbar", { name: faction });

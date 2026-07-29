@@ -24,6 +24,7 @@ import { Characters } from "./charactersView";
 import { createCurrencyIcons } from "./currencies";
 import { createBossPortraits } from "./bosses";
 import { createPlaceIcons } from "./places";
+import { createFactionIcons } from "./reputations";
 import { Details } from "./details";
 import { duration, plural } from "./format";
 import { gapEvidence, gapSentence } from "./gap";
@@ -159,6 +160,11 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // regardless, because a raid night is the same eight bosses across every segment of it and a
   // reader stepping through them would otherwise ask about each fight once per evening it was in.
   const bossPortraits = useMemo(() => createBossPortraits({ load: desktop.bossPortraits }), []);
+
+  // And the pictures a faction borrows from its own Exalted achievement, which the segment modal
+  // and the roster both name. One book because they are the same factions: a warband grinds a
+  // reputation once, and every character's page and every evening's segments list it again.
+  const factionIcons = useMemo(() => createFactionIcons({ load: desktop.reputationIcons }), []);
 
   // The same argument as the achievement book: a thumbnail outlives any one grid, and a reader
   // scrolling back through a history meets the same evening's pictures over and over. One
@@ -394,6 +400,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           items={items}
           inGameSets={inGameSets.value}
           currencyIcons={currencyIcons}
+          factionIcons={factionIcons}
           places={placeIcons}
           loadSetAppearances={desktop.inGameSetAppearances}
           loadWorn={desktop.characterWornSet}
@@ -517,6 +524,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         items={items}
         places={placeIcons}
         bosses={bossPortraits}
+        factions={factionIcons}
         holdings={payload.holdings}
         album={album}
         captures={captureActions}

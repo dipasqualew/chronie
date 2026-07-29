@@ -24,6 +24,7 @@ import { GameItem } from "./item";
 import { itemName } from "./items";
 import type { ItemBook } from "./items";
 import type { BossPortraits } from "./bosses";
+import type { FactionIcons } from "./reputations";
 import type { PlaceIcons } from "./places";
 import { highlights } from "./sessions";
 import { ago, clock, dayLabel, duration, gold, isLoss, plural, signed, signedGold } from "./format";
@@ -38,6 +39,7 @@ import type {
 import {
   ActivityChip,
   ClassDot,
+  FactionIcon,
   HighlightList,
   PlaceIcon,
   StandingBar,
@@ -291,9 +293,12 @@ function AccountStanding({
 function Reputation({
   segment,
   holdings,
+  factions,
 }: {
   segment: Segment;
   holdings?: AccountHoldings;
+  /** The pictures the game gives a faction. Absent leaves every line with the medal it had. */
+  factions?: FactionIcons;
 }): ReactNode {
   const gains = eventsOf(segment, "reputation");
   if (!gains.length) return null;
@@ -303,8 +308,8 @@ function Reputation({
       <ul>
         {gains.map((gain) => (
           <li key={gain.faction}>
-            🎖️ {gain.faction} <span className="muted">{signed(gain.amount)}</span>{" "}
-            <At event={gain} />
+            <FactionIcon faction={gain.faction} factions={factions} fallback="🎖️" /> {gain.faction}{" "}
+            <span className="muted">{signed(gain.amount)}</span> <At event={gain} />
             <StandingBar standing={gain} faction={gain.faction} />
             <AccountStanding faction={byFaction.get(gain.faction)} character={segment.character} />
           </li>
@@ -704,6 +709,11 @@ export interface SegmentModalProps {
   /** The pictures the game draws a place with, shared with every other view that names one. */
   places?: PlaceIcons;
   /**
+   * The pictures a faction borrows from its own Exalted achievement, shared with the roster —
+   * where the same standings are listed again, and where a reader meets the same factions.
+   */
+  factions?: FactionIcons;
+  /**
    * The portraits the game draws a boss with. The modal is the only place a fight is named, so
    * this is not shared with anything — but it is a book for the same reason the others are: a
    * raid night is the same eight bosses over and over, and a reader stepping through its segments
@@ -740,6 +750,7 @@ export function SegmentModal({
   items,
   places,
   bosses,
+  factions,
   holdings,
   album,
   captures,
@@ -887,7 +898,7 @@ export function SegmentModal({
             />
             <Gold segment={segment} holdings={holdings} />
             <Currencies segment={segment} holdings={holdings} />
-            <Reputation segment={segment} holdings={holdings} />
+            <Reputation segment={segment} holdings={holdings} factions={factions} />
           </>
         ) : null}
       </div>

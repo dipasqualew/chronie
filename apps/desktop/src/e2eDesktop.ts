@@ -273,6 +273,10 @@ export const e2eDesktop = {
   // same two backend-only hops before it is a texture, so the command is keyed by the id.
   bossPortraits: (encounters: number[]): Promise<IconsPayload> =>
     mock ? Promise.resolve({ icons: mockBossPortraits(encounters) }) : missingMock(),
+  // And the factions, keyed by the name a reputation was recorded under: the four table hops from
+  // that name to a borrowed achievement icon all happen in the backend.
+  reputationIcons: (factions: string[]): Promise<IconsPayload> =>
+    mock ? Promise.resolve({ icons: mockFactionIcons(factions) }) : missingMock(),
   // The body every appearance is worn on. One model for the whole app, so the window asks the
   // first time a set is opened and keeps it for every set after.
   characterModel: (): Promise<CharacterModelPayload> =>
@@ -766,6 +770,17 @@ function mockBossPortraits(wanted: number[]): Record<string, string> {
   for (const encounter of wanted) {
     const url = mock.bossPortraits[encounter];
     if (url) found[String(encounter)] = url;
+  }
+  return found;
+}
+
+/** The faction pictures held by the e2e mock, keyed by the name the reputation was recorded under. */
+function mockFactionIcons(wanted: string[]): Record<string, string> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, string> = {};
+  for (const faction of wanted) {
+    const url = mock.factionIcons[faction];
+    if (url) found[faction] = url;
   }
   return found;
 }

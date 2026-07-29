@@ -66,6 +66,19 @@ export class SegmentDetail {
     return this.section(title).getByAltText("", { exact: true });
   }
 
+  /**
+   * The picture a faction borrows from its own Exalted achievement, on the line it was earned on.
+   *
+   * Found by the faction it is of, because that is the only thing the frame says: the line names
+   * the faction beside it, so a picture that announced itself as well would have a screen reader
+   * read every reputation twice. Where the game has nothing to borrow — every renown faction, which
+   * is most of a modern history — there is no frame at all, and asking for one is how a spec says
+   * so.
+   */
+  factionIcon(faction: string): Locator {
+    return this.dialog.getByRole("img", { name: `Icon for ${faction}` });
+  }
+
   /** A link out of the window, named by the text it shows. */
   linkTo(name: string): Locator {
     return this.dialog.getByRole("link", { name });

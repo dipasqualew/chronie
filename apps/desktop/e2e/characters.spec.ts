@@ -105,6 +105,12 @@ test("gives every character a page of their own", async ({ page }) => {
     const standing = roster.standingWith(/Cavern Cartographers/);
     await expect(standing).toHaveJSProperty("value", 4200);
     await expect(standing).toHaveJSProperty("max", 12000);
+
+    // A faction has no icon of its own anywhere in the game. What the row draws is borrowed from
+    // the achievement for reaching Exalted with it, which is four table hops away and arrives
+    // after the names do — and the column stays plain for the factions that have no such
+    // achievement, which every renown faction is.
+    await expect(roster.factionIcon("Cavern Cartographers")).toBeVisible();
   });
 
   // Gold is the one number the pane says twice, and the two are different kinds of thing: the

@@ -27,7 +27,8 @@ import type { CharacterFaction, CharacterGold, CharacterProfile } from "./charac
 import type { CurrencyIcons } from "./currencies";
 import { ago, dayLabel, duration, gold, signedGold } from "./format";
 import { setLabel, setSummary, wardrobeSummary } from "./inGameSets";
-import { StandingBar } from "./ui";
+import type { FactionIcons } from "./reputations";
+import { FactionIcon, StandingBar } from "./ui";
 import type { InGameSet } from "./types";
 
 export interface CharacterSummaryProps {
@@ -36,12 +37,18 @@ export interface CharacterSummaryProps {
   wardrobe: InGameSet[] | null;
   /** The pictures the game draws their currencies with. */
   currencyIcons: CurrencyIcons;
+  /**
+   * The pictures a faction borrows from its own Exalted achievement, shared with the segment
+   * modal — where the same standings are met one gain at a time.
+   */
+  factionIcons?: FactionIcons;
 }
 
 export function CharacterSummary({
   entry,
   wardrobe,
   currencyIcons,
+  factionIcons,
 }: CharacterSummaryProps): ReactNode {
   const where = entry.places.slice(0, 3).join(", ");
   return (
@@ -71,7 +78,7 @@ export function CharacterSummary({
       {entry.gold ? <AccountWorth held={entry.gold} /> : null}
       {where ? <p className="profile-where sub">Mostly in {where}</p> : null}
       <Currencies entry={entry} icons={currencyIcons} />
-      <Factions entry={entry} />
+      <Factions entry={entry} icons={factionIcons} />
       <Wardrobe sets={wardrobe} />
     </>
   );
@@ -200,7 +207,14 @@ function Currencies({
  * "furthest on the account" answered half of that on the characters who happened to be leading
  * and said nothing at all on the ones who were not.
  */
-function Factions({ entry }: { entry: CharacterProfile }): ReactNode {
+function Factions({
+  entry,
+  icons,
+}: {
+  entry: CharacterProfile;
+  /** Absent leaves the column of names exactly as it was, which is most of what it will be. */
+  icons?: FactionIcons;
+}): ReactNode {
   if (!entry.factions.length) return null;
   return (
     <section className="detail-section">
@@ -216,7 +230,12 @@ function Factions({ entry }: { entry: CharacterProfile }): ReactNode {
         <tbody>
           {entry.factions.map((standing) => (
             <tr key={standing.faction}>
-              <th scope="row">{standing.faction}</th>
+              {/* No glyph to fall back to here: this column was plain names before there were
+                  any pictures, and adding a medal to the rows the game cannot draw would be
+                  inventing decoration rather than reading the game. */}
+              <th scope="row">
+                <FactionIcon faction={standing.faction} factions={icons} /> {standing.faction}
+              </th>
               <td>
                 <StandingBar standing={standing} faction={standing.faction} />
               </td>

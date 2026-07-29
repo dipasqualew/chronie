@@ -278,6 +278,10 @@ export const dashboard: E2EMock["dashboard"] = {
         { id: 7, name: "Glass Token", amount: 4, total: 12450 },
         { id: 10, name: "Warband Chit", amount: 100, total: 6000 },
       ],
+      // Two factions, and the game has a picture for one of them. The cartographers have an
+      // Exalted achievement whose icon the line can borrow; the Council is a renown faction, and
+      // renown has no Exalted tier to earn an achievement for — so it keeps the medal it always
+      // had. That is the split a real history has, and the modern half is the larger one.
       reputation: [
         {
           faction: "Cavern Cartographers",
@@ -285,6 +289,13 @@ export const dashboard: E2EMock["dashboard"] = {
           standing: "Honored",
           current: 4200,
           max: 12000,
+        },
+        {
+          faction: "Council of Dornogal",
+          amount: 60,
+          standing: "Renown 4",
+          current: 1400,
+          max: 2500,
         },
       ],
       achievements: [
