@@ -11,7 +11,7 @@
 //! [`lua`] the SavedVariables text, [`roster`] the accounts and characters every other
 //! table hangs off, and then one module per kind of thing kept — [`segments`],
 //! [`activities`], [`lockouts`], [`captures`], [`logs`], [`holdings`], [`looks`],
-//! [`ingame_sets`], [`custom_sets`], [`marks`] — with [`dashboard`] reading them back out
+//! [`ingame_sets`], [`mod@custom_sets`], [`marks`] — with [`read_model`] reading them back out
 //! again. A domain owns its tables, its SQL and its tests; a change to one is a change to
 //! one file.
 

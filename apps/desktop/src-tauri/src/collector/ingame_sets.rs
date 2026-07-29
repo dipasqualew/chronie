@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// What each character was last seen to have saved in game, replacing whatever it last said.
 ///
-/// Wholesale per character, the way [`sync_holdings`] is and for the same reason: this is a
+/// Wholesale per character, the way [`super::holdings::sync_holdings`] is and for the same reason: this is a
 /// snapshot of one wardrobe, and half of an old one beside half of a new one is a wardrobe
 /// nobody ever had. That is also the whole of the cleaning up the file needs — a set deleted in
 /// game stops being written by the addon, and stops existing here on the next sync, without

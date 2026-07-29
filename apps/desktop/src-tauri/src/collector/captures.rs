@@ -334,7 +334,7 @@ pub(super) fn link_capture_achievements(transaction: &Transaction<'_>) -> Result
 /// record of where the player was standing. Screenshots and memories are the same row with the
 /// picture left out, so one pass covers both.
 ///
-/// Run after [`ingest_logs`] rather than beside `link_captures`, because both halves have to be
+/// Run after [`super::logs::ingest_logs`] rather than beside `link_captures`, because both halves have to be
 /// in before either can find the other: the capture arrives at logout, the points that surround
 /// it were read thirty seconds at a time during the session, and a pass placed before the read
 /// would be working from a track that stops short of the moment it is trying to place.

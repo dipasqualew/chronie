@@ -14,8 +14,8 @@ use std::path::Path;
 
 /// Who each character was last seen to be, replacing whatever they last said.
 ///
-/// Wholesale per character, for the reason the sets above are: this is one statement about one
-/// person, and half an old look beside half a new one is nobody. A character who has since
+/// Wholesale per character, for the reason [`super::ingame_sets`] is: this is one statement about
+/// one person, and half an old look beside half a new one is nobody. A character who has since
 /// answered fewer questions — which is what a race change comes to, since the new race's
 /// questions are not the old one's — has to lose the answers that are no longer theirs, and
 /// deleting the row first is what does it.
