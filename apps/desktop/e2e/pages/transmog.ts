@@ -470,34 +470,19 @@ export class Outfit {
    *
    * A drag does not end when the mouse does: the controls carry a shrinking fraction of it
    * into every frame after, which is what makes turning a model feel like turning something
-   * with weight. So a reading taken straight after one is of something still in flight, and
-   * two such readings are never the same number twice. This waits for two that are.
-   *
-   * Two that are is not the end of the remainder, only the end of what three decimals can
-   * see: the controls stop reporting movement while a thousandth of the drag is still owed,
-   * and go on spending it after that. [`movedFrom`] is how a later reading is compared to
-   * this one for that reason.
+   * with weight. The stage says when that remainder is spent, so a starved render loop only
+   * makes this wait longer rather than making two accidentally adjacent readings look settled.
    */
   async settled(): Promise<string> {
-    let last = "";
-    await expect
-      .poll(async () => {
-        const now = await this.drew("camera") ?? "";
-        const still = now !== "" && now === last;
-        last = now;
-        return still;
-      }, { timeout: 15_000 })
-      .toBe(true);
-    return last;
+    await expect(this.stage()).toHaveAttribute("data-camera-state", "settled");
+    return await this.drew("camera") ?? "";
   }
 
   /**
    * How far the camera has moved from a reading taken earlier, in the model's own units.
    *
-   * Distance rather than string equality, because the last digit of the readout belongs to
-   * the drag's remainder rather than to anything the app decided — see [`settled`]. What the
-   * comparisons using this rule out is a camera that was *framed* again, and a framing moves
-   * it the better part of thirty units.
+   * Distance rather than string equality, because what the comparisons using this rule out is
+   * a camera that was *framed* again, and a framing moves it the better part of thirty units.
    */
   async movedFrom(camera: string): Promise<number> {
     const numbers = (reading: string): number[] => reading.split(",").map(Number);
