@@ -119,13 +119,18 @@ function ns.newLogProbe(deps)
             attempt("combat_secure", deps.createCombatLogMessage)
 
             -- Everything below here is visible to the player, which is why it is opt-in.
-            local chatLoggingWasOn, chatLoggingTouched = false, false
+            -- `chatLoggingKnown` is what keeps the closing advice honest. A build that
+            -- protects the read but not the write would otherwise be told its logging was off
+            -- and is now on — and a player who follows that and runs /chatlog would be
+            -- switching off logging they had turned on themselves.
+            local chatLoggingWasOn, chatLoggingTouched, chatLoggingKnown = false, false, true
             if includeChat then
                 -- Read and set before any chat channel is touched: the client writes
                 -- WoWChatLog.txt as it goes rather than backfilling it, so a line sent while
                 -- the switch was off was never a candidate for the file.
                 if deps.chatLoggingEnabled then
                     local ok, state = pcall(deps.chatLoggingEnabled)
+                    chatLoggingKnown = ok
                     chatLoggingWasOn = ok and state == true
                 end
                 if not chatLoggingWasOn and deps.setChatLogging then
@@ -159,8 +164,10 @@ function ns.newLogProbe(deps)
                     lines[#lines + 1] = ("  %s: %s (%s)"):format(entry.id, entry.status, entry.detail or "")
                 end
             end
-            if chatLoggingTouched then
+            if chatLoggingTouched and chatLoggingKnown then
                 lines[#lines + 1] = "chat logging was off and is now on; /chatlog turns it back off."
+            elseif chatLoggingTouched then
+                lines[#lines + 1] = "chat logging is on; this client would not say whether it already was."
             end
             -- Verified on 12.0.5.67823: the tokens were in neither log while the client was
             -- running, nor after /reload, and were in both the moment it exited.
