@@ -4,7 +4,53 @@ fn main() {
     embed_addon();
     embed_migrations();
     embed_commit();
+    embed_windows_manifest_for_tests();
     tauri_build::build()
+}
+
+/// Gives `[[test]]` binaries the Windows application manifest that only `[[bin]]`s get.
+///
+/// `tauri_build::build()` embeds a manifest declaring a dependency on version 6 of
+/// Common-Controls, and announces it to Cargo through `embed_resource` as
+/// `cargo:rustc-link-arg-bins` — bins and nothing else. Any other target that links Tauri's
+/// Windows window and dialog code therefore imports functions that only the version 6
+/// comctl32 exports, is given the version 5 one out of System32 because nothing asked for the
+/// other, and dies in the loader with `STATUS_ENTRYPOINT_NOT_FOUND` before `main` runs.
+///
+/// That is not hypothetical. It is what `tests/bindings.rs` does the moment it calls
+/// `command_builder()`, and it is why the bindings check could not simply become an example
+/// when it stopped being a binary the app had to ship.
+///
+/// The manifest is written here rather than kept as a file beside this script for the same
+/// reason the migrations and the addon are: `OUT_DIR` is a path this code knows exactly,
+/// which spares the resource compiler a relative lookup of its own.
+fn embed_windows_manifest_for_tests() {
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+        return;
+    }
+    // The same assembly `tauri-build`'s own `windows-app-manifest.xml` names. A test binary
+    // needs no more than this: it is not shipped, and nothing reads its version resources.
+    let manifest = "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\
+                    <dependency><dependentAssembly><assemblyIdentity type=\"win32\" \
+                    name=\"Microsoft.Windows.Common-Controls\" version=\"6.0.0.0\" \
+                    processorArchitecture=\"*\" publicKeyToken=\"6595b64144ccf1df\" \
+                    language=\"*\"/></dependentAssembly></dependency></assembly>\n";
+
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let manifest_path = out.join("tests.manifest");
+    fs::write(&manifest_path, manifest).expect("the test manifest should be writable");
+
+    // Resource id 1 of type 24 is `CREATEPROCESS_MANIFEST_RESOURCE_ID` as `RT_MANIFEST`: the
+    // one the loader reads when it starts a process. The path is absolute and its backslashes
+    // are escaped, because a resource script is C-like enough that `\t` in a Windows path is a
+    // tab.
+    let script = out.join("tests.rc");
+    let quoted = manifest_path.display().to_string().replace('\\', "\\\\");
+    fs::write(&script, format!("1 24 \"{quoted}\"\n")).expect("the test .rc should be writable");
+
+    embed_resource::compile_for_tests(&script, embed_resource::NONE)
+        .manifest_required()
+        .expect("the test manifest should compile");
 }
 
 /// Writes the timestamped migration files into a Rust slice in lexicographic order.

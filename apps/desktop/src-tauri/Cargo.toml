@@ -9,19 +9,17 @@ edition = "2021"
 name = "chronie_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# Both binaries, named, because the bundler reads this list to decide which one the shipped
-# app launches. Left undeclared it goes looking in `src/bin/` instead — where `src/main.rs`
-# has never been, since Cargo builds that one without being told — finds `export_bindings`
-# alone in there, and promotes the only candidate it found to the app's main executable. The
-# result installs and opens and dies in the same instant, because what the player launched
-# was the bindings exporter doing its job and exiting.
+# The app's binary, named, because the bundler reads this list to decide which one the
+# shipped app launches. Left undeclared it goes looking in `src/bin/` instead — where
+# `src/main.rs` has never been, since Cargo builds that one without being told — and
+# promotes whatever single candidate it finds to the app's main executable. That is how a
+# bindings exporter parked in `src/bin/` became the program a player launched, installing
+# and opening and dying in the same instant. The exporter is a test now, so there is nothing
+# left to confuse the bundler with — and naming this one keeps its answer from depending on
+# what else happens to be lying around later.
 [[bin]]
 name = "chronie-desktop"
 path = "src/main.rs"
-
-[[bin]]
-name = "export_bindings"
-path = "src/bin/export_bindings.rs"
 
 # A debug build of this crate is fine; a debug build of a codec is not. The tests decode
 # BLPs, resize textures, re-encode PNGs and JPEGs and hash what comes out, and at
@@ -53,6 +51,10 @@ zune-jpeg = { opt-level = 2 }
 debug = "line-tables-only"
 
 [build-dependencies]
+# The same version `tauri-winres` already builds, so this costs no extra compilation. It is
+# here because `tauri-build` equips only `[[bin]]` targets with the Windows manifest — see
+# `embed_windows_manifest_for_tests` in build.rs.
+embed-resource = "3.0"
 tauri-build = { version = "2.0.3", features = [] }
 
 [dependencies]

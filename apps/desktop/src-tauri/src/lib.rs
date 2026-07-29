@@ -1828,13 +1828,13 @@ pub fn export_bindings(check: bool) -> Result<(), String> {
 
     let committed = fs::read_to_string(&destination).map_err(|_| {
         format!(
-            "{} is missing; run `cargo run --bin export_bindings`.",
+            "{} is missing; run `bun run bindings:generate`.",
             destination.display()
         )
     })?;
     if expected != checkout_bindings(&committed) {
         return Err(format!(
-            "{} is stale; run `cargo run --bin export_bindings`.",
+            "{} is stale; run `bun run bindings:generate`.",
             destination.display()
         ));
     }
@@ -2508,32 +2508,43 @@ mod tests {
         assert_eq!(manifest_names(manifest, "[[bin]]"), ["one", "two"]);
     }
 
-    /// The bundle has to launch the app, and which binary that is comes from the manifest.
+    /// The bundle has to launch the app, and every binary the crate has is shipped inside it.
     ///
-    /// A crate that declares no `[[bin]]` leaves the bundler to discover its binaries by
-    /// reading `src/bin/`, and a crate whose search turns up exactly one promotes it to the
-    /// bundle's main executable whatever it happens to be called. `src/main.rs` is never in
-    /// that search, because Cargo does not need it named to build it. So the moment
-    /// `src/bin/export_bindings.rs` arrived, the shipped app started launching the bindings
-    /// exporter — which writes a file and exits — and a player saw a program that died the
-    /// instant it opened. Naming the binaries settles it, and this fails if they stop being
-    /// named while something still sits in `src/bin/`.
+    /// Two ways that has gone wrong, and this guards both. A crate that declares no `[[bin]]`
+    /// leaves the bundler to discover its binaries by reading `src/bin/`, and a crate whose
+    /// search turns up exactly one promotes it to the bundle's main executable whatever it
+    /// happens to be called — `src/main.rs` is never in that search, because Cargo does not
+    /// need it named to build it. So the moment `src/bin/export_bindings.rs` arrived, the
+    /// shipped app started launching the bindings exporter, which writes a file and exits,
+    /// and a player saw a program that died the instant it opened. And even once the right
+    /// one launches, a second binary is still 20 MB of dead weight copied into the `.app` and
+    /// into every Windows download and auto-update.
+    ///
+    /// So: the manifest names the package's own binary, and that binary is the only one the
+    /// crate has. A tool that is not the app belongs in `examples/`, which no bundle carries —
+    /// or, if it has to run on Windows as well, in `tests/`, for the reason
+    /// `tests/bindings.rs` gives.
     #[test]
-    fn the_manifest_names_the_binary_the_bundle_has_to_launch() {
-        let discovered = fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin"))
+    fn the_manifest_declares_the_app_binary_and_nothing_else() {
+        let package = manifest_names(CARGO_TOML, "[package]");
+        let package = package.first().expect("the manifest should name the package");
+        assert_eq!(
+            manifest_names(CARGO_TOML, "[[bin]]"),
+            [package.clone()],
+            "the manifest has to declare a [[bin]] named {package} and no other, or the \
+             bundle will launch or carry a binary that is not the app"
+        );
+        let discovered: Vec<String> = fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/bin"))
             .into_iter()
             .flatten()
             .flatten()
-            .count();
-        if discovered == 0 {
-            return;
-        }
-        let package = manifest_names(CARGO_TOML, "[package]");
-        let package = package.first().expect("the manifest should name the package");
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
         assert!(
-            manifest_names(CARGO_TOML, "[[bin]]").iter().any(|bin| bin == package),
-            "src/bin holds {discovered} binary target(s), so the manifest has to declare a \
-             [[bin]] named {package} or the bundle will launch one of them instead of the app"
+            discovered.is_empty(),
+            "src/bin holds {discovered:?}, and Cargo builds those alongside the declared \
+             [[bin]] whether the manifest mentions them or not — the bundle would ship them. \
+             A tool that is not the app belongs in examples/ or in the test suite."
         );
     }
 }
