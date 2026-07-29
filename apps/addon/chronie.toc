@@ -45,6 +45,7 @@ src/LockoutScanner.lua
 src/LockoutStore.lua
 src/LockoutTable.lua
 src/LockoutWindow.lua
+src/LogProbe.lua
 src/Logger.lua
 src/MapPosition.lua
 src/MinimapButton.lua

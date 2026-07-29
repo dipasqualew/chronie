@@ -64,6 +64,14 @@ read_globals = {
     "Screenshot",
     "GetBindingKey",
     "LoggingCombat",
+    -- Undocumented on 12.0.5 and read out of the client binary rather than a wiki. Every one
+    -- of these is reached through a nil check and a pcall (see LogProbe.lua) precisely because
+    -- nothing outside the binary says they exist, let alone what they do.
+    "LoggingChat",
+    "C_Log",
+    "SendSystemMessage",
+    "C_CombatLogSecure",
+    "DEFAULT_CHAT_FRAME",
     "C_CVar",
     "GetCVar",
     "SetCVar",
