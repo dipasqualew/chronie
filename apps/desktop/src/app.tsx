@@ -22,6 +22,7 @@ import { createCaptureAlbum } from "./captures";
 import { buildCharacters } from "./characters";
 import { Characters } from "./charactersView";
 import { createCurrencyIcons } from "./currencies";
+import { createPlaceIcons } from "./places";
 import { Details } from "./details";
 import { duration, plural } from "./format";
 import { createAchievementBook } from "./achievements";
@@ -115,6 +116,12 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // a reader walking a roster of ten alts meets the same handful of currencies on every one of
   // them, so each is asked about once for the life of the window.
   const currencyIcons = useMemo(() => createCurrencyIcons({ load: desktop.currencyIcons }), []);
+
+  // And the pictures the game draws a place with, which every segment row and the modal over it
+  // ask for by the name the addon filed them under. One book for the window because a history is
+  // the same forty evenings on every screen, and most of what it is asked about — the open world
+  // — comes back with nothing at all and is remembered as such.
+  const placeIcons = useMemo(() => createPlaceIcons({ load: desktop.placeIcons }), []);
 
   // The same argument as the achievement book: a thumbnail outlives any one grid, and a reader
   // scrolling back through a history meets the same evening's pictures over and over. One
@@ -288,7 +295,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         </header>
         <div id="timeline">
           <Timeline
-            sessions={sessions} onOpenSegment={openSegment} items={items}
+            sessions={sessions} onOpenSegment={openSegment} items={items} places={placeIcons}
             album={album} captures={captureActions}
           />
         </div>
@@ -303,7 +310,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         </header>
         <Characters
           profiles={profiles} onOpenSegment={openSegment} items={items} inGameSets={inGameSets}
-          currencyIcons={currencyIcons}
+          currencyIcons={currencyIcons} places={placeIcons}
           loadSetAppearances={desktop.inGameSetAppearances}
           loadWorn={desktop.characterWornSet}
         />
@@ -421,6 +428,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         showing={walking}
         achievements={achievements}
         items={items}
+        places={placeIcons}
         holdings={payload.holdings}
         album={album}
         captures={captureActions}

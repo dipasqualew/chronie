@@ -224,6 +224,17 @@ test("stitches segments into play sessions and leads with what happened", async 
     await expect(timeline.mark(row, /Raid updated/)).toBeVisible();
   });
 
+  // The place a run happened in is the one thing every segment has, and the game draws a
+  // picture for the places that are somewhere: a dungeon, a raid, a delve. The open world has
+  // none anywhere, which is most of a history — so the claim is both halves at once, that the
+  // picture arrives where there is one and that nothing stands in for it where there is not.
+  await test.step("and the ones that happened somewhere the game draws carry its picture", async () => {
+    const rows = timeline.segments(first);
+
+    await expect(timeline.placeIcon(rows.first(), "Glass Caverns")).toBeVisible();
+    await expect(timeline.placeIcon(rows.nth(1), "Copperwood Depths")).toHaveCount(0);
+  });
+
   // Each row carries its own character's colour rather than the session's. This evening
   // opens on a mage and finishes on a druid, so a rail that took the card's colour — which
   // is what it does if a row forgets to name its own class, since the property is inherited

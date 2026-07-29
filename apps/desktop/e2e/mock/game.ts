@@ -39,6 +39,16 @@ export const currencyIcons: E2EMock["currencyIcons"] = {
     + "j0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
+// The picture each place is drawn with, keyed by the name the addon filed the segment under —
+// which is the shape of the real command, because the tables that draw a dungeon are keyed by
+// that same localised name and the hop happens in the backend. Only the scenario has one: the
+// game draws a picture for a dungeon, a raid and a delve, and none at all for the open world, so
+// the two zone segments beside it are what a row with nothing to show has to look like.
+export const placeIcons: E2EMock["placeIcons"] = {
+  "Glass Caverns": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE"
+    + "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
+};
+
 // What the game says about the achievements those segments name. 77 is deliberately absent:
 // an install can only describe the achievements it has, and a row still has to draw.
 export const achievementDetails: E2EMock["achievementDetails"] = {

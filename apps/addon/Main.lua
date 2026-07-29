@@ -26,6 +26,7 @@ local addonName, ns = ...
 ---@field selectTier fun(tier: integer)
 ---@field getTierInfo fun(tier: integer): string?
 ---@field getInstanceByIndex fun(index: integer, isRaid: boolean): ...
+---@field getInstanceInfo fun(instanceID: integer): ...
 ---@field registerSlash fun(tokens: string[], handler: fun(text: string))
 ---@field getMoney fun(): integer Current wallet total, in copper.
 ---@field instanceInfo fun(): InstanceInfo? Name, type and difficulty of the current zone.
@@ -116,6 +117,7 @@ function ns.main(env)
         selectTier = env.selectTier,
         getTierInfo = env.getTierInfo,
         getInstanceByIndex = env.getInstanceByIndex,
+        getInstanceInfo = env.getInstanceInfo,
     })
 
     local details = ns.newLockoutDetails({
@@ -1385,6 +1387,7 @@ if CreateFrame then
             selectTier = EJ_SelectTier,
             getTierInfo = EJ_GetTierInfo,
             getInstanceByIndex = EJ_GetInstanceByIndex,
+            getInstanceInfo = EJ_GetInstanceInfo,
             registerSlash = registerSlash,
             getMoney = GetMoney,
             -- The warband bank's own gold. Read on build 12.0.5.67823 as answering anywhere,

@@ -244,6 +244,11 @@ export const e2eDesktop = {
   currencyIcons: (currencyIds: number[]): Promise<IconsPayload> => mock
     ? Promise.resolve({ icons: mockCurrencyIcons(currencyIds) })
     : missingMock(),
+  // Place names need two backend-only table hops before they become texture ids, so this command
+  // is keyed by the name the segment already carries rather than by the file behind it.
+  placeIcons: (places: string[]): Promise<IconsPayload> => mock
+    ? Promise.resolve({ icons: mockPlaceIcons(places) })
+    : missingMock(),
   // The body every appearance is worn on. One model for the whole app, so the window asks the
   // first time a set is opened and keeps it for every set after.
   characterModel: (): Promise<CharacterModelPayload> => mock
@@ -662,6 +667,17 @@ function mockCurrencyIcons(wanted: number[]): Record<string, string> {
   for (const id of wanted) {
     const url = mock.currencyIcons[id];
     if (url) found[String(id)] = url;
+  }
+  return found;
+}
+
+/** The place pictures held by the e2e mock, keyed by the name the segment was filed under. */
+function mockPlaceIcons(wanted: string[]): Record<string, string> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, string> = {};
+  for (const place of wanted) {
+    const url = mock.placeIcons[place];
+    if (url) found[place] = url;
   }
   return found;
 }

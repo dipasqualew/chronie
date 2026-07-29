@@ -13,6 +13,7 @@ local _, ns = ...
 ---@field abbreviationFor fun(instance: string): string
 ---@field colorOf fun(instance: string): number, number, number
 ---@field tagFor fun(instance: string): string
+---@field iconFor fun(instance: string): integer? The journal's own picture for it, as a file id.
 
 ---@class ExpansionIndexDeps
 ---@field getNumTiers fun(): integer EJ_GetNumTiers.
@@ -21,6 +22,10 @@ local _, ns = ...
 ---@field getTierInfo fun(tier: integer): string? EJ_GetTierInfo; localised tier name.
 --- EJ_GetInstanceByIndex. Returns instanceID, name, ...
 ---@field getInstanceByIndex fun(index: integer, isRaid: boolean): ...
+--- EJ_GetInstanceInfo. Returns name, description, bgImage, buttonImage, loreImage,
+--- buttonSmallImage, ... — the sixth is the small button icon, which is the only one of the
+--- four pictures a row can show. Optional: an index built without it simply has no pictures.
+---@field getInstanceInfo fun(instanceID: integer): ...
 
 ---Tags in Encounter Journal tier order. The journal has always listed tiers oldest
 ---first, so the index doubles as the expansion number; anything past the end of this
@@ -57,16 +62,22 @@ end
 function ns.newExpansionIndex(deps)
     ---@type table<string, Expansion>?
     local byInstance
+    ---The journal's own picture per instance, filled in by the same walk. Separate from the
+    ---expansion because the two answer different questions and an instance can have either
+    ---without the other: a tier this build has no tag for still draws its dungeons.
+    ---@type table<string, integer>
+    local iconByInstance = {}
 
     ---Reads whichever tier the journal is currently selected on; the caller owns that
     ---selection, exactly as the real API demands.
     ---@param isRaid boolean
     ---@param into table<string, Expansion>
     ---@param expansion Expansion
-    local function collectTier(isRaid, into, expansion)
+    ---@param icons table<string, integer>
+    local function collectTier(isRaid, into, expansion, icons)
         local index = 1
         while true do
-            local _, name = deps.getInstanceByIndex(index, isRaid)
+            local instanceID, name = deps.getInstanceByIndex(index, isRaid)
             if not name then
                 return
             end
@@ -74,6 +85,16 @@ function ns.newExpansionIndex(deps)
             -- tier, and the one that shipped them is the honest answer.
             if not into[name] then
                 into[name] = expansion
+            end
+            -- The picture is a second call because the by-index one does not carry it: the
+            -- journal hands the small button icon out of `EJ_GetInstanceInfo` only. It is one
+            -- call per instance on a walk that already happens once for the life of the
+            -- session, and an instance the client will not describe simply has no picture.
+            if instanceID and deps.getInstanceInfo and not icons[name] then
+                local _, _, _, _, _, buttonSmall = deps.getInstanceInfo(instanceID)
+                if type(buttonSmall) == "number" and buttonSmall > 0 then
+                    icons[name] = buttonSmall
+                end
             end
             index = index + 1
         end
@@ -86,6 +107,7 @@ function ns.newExpansionIndex(deps)
     local function build()
         local into = {}
         local restore = deps.getCurrentTier()
+        iconByInstance = {}
 
         for tier = 1, deps.getNumTiers() do
             deps.selectTier(tier)
@@ -99,8 +121,8 @@ function ns.newExpansionIndex(deps)
                 color = tag and tag.color or UNKNOWN_COLOR,
             }
 
-            collectTier(true, into, expansion)
-            collectTier(false, into, expansion)
+            collectTier(true, into, expansion, iconByInstance)
+            collectTier(false, into, expansion, iconByInstance)
         end
 
         if restore then
@@ -121,6 +143,16 @@ function ns.newExpansionIndex(deps)
 
     return {
         forInstance = forInstance,
+
+        ---The picture the Adventure Guide draws an instance with, as a file id a texture can be
+        ---set to directly. Nothing for the open world, which the journal has no row for at all
+        ---and which is most of where a player spends an evening.
+        ---@param instance string
+        ---@return integer?
+        iconFor = function(instance)
+            forInstance(instance)
+            return iconByInstance[instance]
+        end,
 
         ---The journal has always listed tiers oldest first, so the tier count *is* the
         ---current expansion's number. EJ_GetCurrentTier is deliberately not used here: it

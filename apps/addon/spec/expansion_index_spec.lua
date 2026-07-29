@@ -278,4 +278,62 @@ describe("ns.newExpansionIndex", function()
             assert.equal(afterFirst, #recorded.selected)
         end)
     end)
+
+    describe("iconFor", function()
+        -- The journal hands out four pictures per instance and only the last of them is an
+        -- icon: the others are a background, a wide banner and a lore illustration, each
+        -- several hundred pixels. The fake spaces them a hundred thousand apart so a reader
+        -- that took one of the neighbours reads a number this can tell apart.
+        it("answers the small button picture the journal draws an instance with", function()
+            local expansions = newIndex({
+                { name = "Cataclysm", raids = { "Blackwing Descent" } },
+            })
+
+            assert.equal(930001, expansions.iconFor("Blackwing Descent"))
+        end)
+
+        it("answers the picture for a dungeon as well as a raid", function()
+            local expansions = newIndex({
+                { name = "Classic", dungeons = { "Deadmines" } },
+            })
+
+            assert.equal(930001, expansions.iconFor("Deadmines"))
+        end)
+
+        -- Which is most of a history: the journal has no row for the open world at all, and a
+        -- row with nothing to show has to draw rather than fail.
+        it("answers nothing for a place the journal has never heard of", function()
+            local expansions = newIndex({
+                { name = "Classic", raids = { "Molten Core" } },
+            })
+
+            assert.is_nil(expansions.iconFor("Durotar"))
+        end)
+
+        -- The picture rides on the same walk the expansion does, so asking for one after the
+        -- other must not send the index back through the journal a second time.
+        it("walks the journal once for the expansion and the picture together", function()
+            local expansions, recorded = newIndex(everyTier())
+            expansions.abbreviationFor("Raid 1")
+            local afterFirst = #recorded.selected
+
+            expansions.iconFor("Raid 1")
+            expansions.iconFor("Raid 2")
+
+            assert.equal(afterFirst, #recorded.selected)
+        end)
+
+        -- A build whose journal will not describe an instance is not a build with no journal:
+        -- the expansion still comes out of the by-index call, and only the picture is missing.
+        it("still names the expansion when the client describes no instance", function()
+            local journal = fake.newEncounterJournal({
+                { name = "Classic", raids = { "Molten Core" } },
+            })
+            journal.getInstanceInfo = nil
+            local expansions = ns.newExpansionIndex(journal)
+
+            assert.equal("Classic", expansions.abbreviationFor("Molten Core"))
+            assert.is_nil(expansions.iconFor("Molten Core"))
+        end)
+    end)
 end)

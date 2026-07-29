@@ -15,7 +15,7 @@ import type { E2EMock } from "../../src/types";
 import { captureImages } from "./captures";
 import { dashboard } from "./dashboard";
 import {
-  achievementDetails, currencyIcons, gameIcons, itemAppearances, itemDetails,
+  achievementDetails, currencyIcons, gameIcons, itemAppearances, itemDetails, placeIcons,
 } from "./game";
 import { query } from "./query";
 import {
@@ -55,6 +55,7 @@ export const mockDesktop: E2EMock = {
   setRequests,
   gameIcons,
   currencyIcons,
+  placeIcons,
   achievementDetails,
   itemAppearances,
   itemDetails,

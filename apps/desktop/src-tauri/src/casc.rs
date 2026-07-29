@@ -119,6 +119,12 @@ pub fn currency_fixture_files() -> DirFiles {
     fixtures("currencies")
 }
 
+/// The fixtures for `JournalInstance`, written by `scripts/make-journal-fixtures.ts`.
+#[cfg(test)]
+pub fn journal_fixture_files() -> DirFiles {
+    fixtures("journal")
+}
+
 /* ---------- the real thing ---------- */
 
 /// The 30-byte record CASC writes in front of every BLTE payload inside a `data.NNN`.

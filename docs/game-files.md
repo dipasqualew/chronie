@@ -148,6 +148,8 @@ of these were confirmed readable on 12.0.5.67 except where noted.
 | `Achievement_Category` | 1324299 | fixed | yes |
 | `Item` | 841626 | fixed | yes |
 | `ItemSparse` | 1572924 | offset map | yes, needs `parse_with_text_columns()` |
+| `JournalInstance` | 1237438 | fixed | yes, **columns read** |
+| `LFGDungeons` | 1361033 | fixed | yes, **columns read**, only through col8 |
 
 ### ItemSparse
 
@@ -902,6 +904,83 @@ rows decodes as a PNG.
 `cargo run --example dump_currencies -- "<install>"` prints the lot and is what to run after a
 patch; pass names to reach a modern row.
 
+## Places, verified
+
+Two tables and one column of each. A segment arrives from the addon under the name of the place
+it happened in and nothing else, because the client reports where a player is standing by its
+localised name — so a name is the whole of what there is to key on, and both tables below are
+keyed by that same localised name in the same locale the client used. `journal.rs` reads them
+for the handful of places a window is showing.
+
+```
+JournalInstance                   (id in a list beside the rows)
+  col0 = Name_lang                 "Deadmines", "Nerub-ar Palace"
+  col1 = Description_lang          the paragraph the Adventure Guide shows
+  col2 = MapID
+  col3 = BackgroundFileDataID    ──▶ 512×512
+  col4 = ButtonFileDataID        ──▶ 256×128, the wide banner
+  col5 = ButtonSmallFileDataID   ──▶ 128×128, the icon, decoded through `icons`
+  col6 = LoreFileDataID          ──▶ 512×512
+
+LFGDungeons                       (id in a list beside the rows)
+  col0 = Name_lang                 "Earthcrawl Mines", "Deadmines"
+  col1 = Description_lang
+  col2 = TypeID                    1 dungeon, 2 raid, 4 outdoor area, 6 random bucket
+  col3 = Subtype                   3 is a delve
+  col4 = Faction                   -1 for both
+  col5 = IconTextureFileID       ──▶ 128×128 or 64×64, the picture the finder lists it with
+  col6 = RewardsBgTextureFileID
+  col7 = PopupBgTextureFileID
+  col8 = ExpansionLevel
+```
+
+**Neither one is the whole answer, which is why there are two.** `JournalInstance` is 211 rows,
+209 of which name an icon, and every one of those 209 decodes at 128×128 — it is the picture the
+game draws for that dungeon and no other. `LFGDungeons` is 1,825 rows and a far wider net: it is
+where the delves are, and where the six hundred names the journal has no row for are. **Delves
+are not in the Encounter Journal at all** — of the whole delve roster only Zekvir's Lair has a
+`JournalInstance` row, and that row names no icon — so a reader of the journal alone leaves every
+delve a player runs blank.
+
+So the journal is read first and the finder fills in behind it. Where both know a place they
+agree on the picture 171 names out of 180; where they do not, the journal's is the hand-drawn one
+and the finder's is often `136349`, `interface/lfgframe/lfgicon-quest.blp`, which it shows for a
+good many entries at once — including every delve, which all share it. Between them the two
+tables answer for **805 places** on 12.0.5.67823.
+
+**Everywhere else draws no picture, and most places are everywhere else.** An open-world zone is
+a name neither table has heard of. That is not a gap in the reader:
+
+| Named on | Icon column |
+|---|---|
+| `JournalTier` — the expansions | none |
+| `UiMap` — the zones | none |
+| `Faction` — the reputations | none |
+| `JournalEncounter` — the bosses | none |
+
+Whatever draws those in another addon is an editorial mapping somebody maintains by hand, not a
+column read out of the game.
+
+**What each column was checked against**, since a reordered table shows wrong values rather than
+failing:
+
+| Column | Checked against |
+|---|---|
+| `JournalInstance` col0 | reads "Deadmines", "Shadowfang Keep", "Throne of the Tides" in order |
+| `JournalInstance` col5 | all 209 icons decode, every one of them 128×128; its neighbours come out 512×512, 256×128 and 512×512 |
+| `LFGDungeons` col0 | reads "Earthcrawl Mines" for 2522, which is a delve |
+| `LFGDungeons` col5 | exactly 1,657 rows hold a value, which is the count the community schema gives `IconTextureFileID`, and all 1,657 decode |
+| the two together | Deadmines reads `136332` out of both, Nerub-ar Palace `5912511` out of both |
+
+`LFGDungeons` has one trap worth writing down: **the reader and the community schema part
+company after column 8.** Column 9 should be `MapID` and reads a seven-digit number instead —
+nothing this app reads, but a warning against extending the column list by counting. Columns 0
+through 8 line up exactly.
+
+`cargo run --example dump_journal -- "<install>"` prints both tables, decodes every icon each
+names and reports the sizes they came out at, and is what to run after a patch; pass names to
+reach a modern row or a delve.
+
 ## Regenerating the fixtures
 
 Tests never read the game. One script per area writes real WDC5 tables and real BLP2
@@ -915,6 +994,7 @@ bun run scripts/make-transmog-fixtures.ts
 bun run scripts/make-achievement-fixtures.ts
 bun run scripts/make-item-fixtures.ts
 bun run scripts/make-currency-fixtures.ts
+bun run scripts/make-journal-fixtures.ts
 ```
 
 Every table on the chains above has a fixture, and between them they hold each way a hop can
@@ -951,6 +1031,14 @@ never be painted.
 The currency fixture is one table and three textures, and it holds each way a currency can fail
 to have a picture: one the game names and draws nothing for, one naming an icon this install has
 no file for, and one whose whole row is encrypted.
+
+The journal fixture is the two place tables and six textures, and it holds each way the pair has
+to be read together: a delve only the group finder lists, a place both tables draw and draw
+differently, an instance the journal lists and draws nothing for, a dungeon the finder repeats
+once per difficulty, a name on two journal rows, and a row whose section is encrypted. The
+backgrounds and banners beside each icon are given plausible FileDataIDs that no file is written
+for, so a reader that took the column next to the right one comes back with nothing rather than
+with something that happens to decode.
 
 The `ItemSparse` fixture is the only one with variable-length records, and it is where that
 half of the reader is exercised: strings written into the record, records addressed through

@@ -18,6 +18,7 @@ pub mod glb;
 pub mod icons;
 pub mod ingamesets;
 pub mod items;
+pub mod journal;
 pub mod logfile;
 pub mod look;
 pub mod m2;
@@ -825,6 +826,43 @@ async fn currency_icons(
     for (currency, file) in named {
         if let Some(url) = by_file["icons"].get(file.to_string()) {
             icons.insert(currency.to_string(), url.clone());
+        }
+    }
+    dto::convert(serde_json::json!({ "icons": icons }))
+}
+
+/// The pictures a list of places is drawn with, keyed by the name rather than the file.
+///
+/// Keyed by the name because that is what the caller holds and all it holds: a segment arrives
+/// from the addon under the name the client gave the place, and the tables that draw a dungeon are
+/// keyed by that same localised name. So the whole errand happens here — the two tables, then the
+/// textures — and the window gets back what it can put in an `<img>`.
+///
+/// Most of what it is asked about is an open-world zone the game draws no picture for at all, and
+/// those simply do not come back. See [`journal::icons_of`], and the same cache every other icon
+/// goes through, so a second evening in the same dungeon costs the table reads and nothing else.
+#[tauri::command]
+#[specta::specta]
+async fn place_icons(
+    places: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<dto::IconsPayload, String> {
+    let cache = Arc::clone(&state.icons);
+    let named = read_game_files(&state, move |files| journal::icons_of(files, &places)).await?;
+    let wanted: Vec<u32> = named.values().copied().collect();
+    let missing = cache.missing(&wanted);
+    if !missing.is_empty() {
+        let decoded = read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        cache.store(decoded);
+    }
+    // The icons keyed by the file they came out of, re-keyed by the place that named it. Every
+    // delve names the one picture the group finder draws them all with, so this is a fan-out
+    // rather than a rename, and the cache is asked once per file either way.
+    let by_file = cache.answer(&wanted);
+    let mut icons = serde_json::Map::new();
+    for (place, file) in named {
+        if let Some(url) = by_file["icons"].get(file.to_string()) {
+            icons.insert(place, url.clone());
         }
     }
     dto::convert(serde_json::json!({ "icons": icons }))
@@ -1763,6 +1801,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         item_appearances,
         item_details,
         log_retention,
+        place_icons,
         query_schema,
         release,
         reset_activities,

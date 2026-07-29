@@ -98,6 +98,18 @@ export class Timeline {
     return session.getByRole("button", { name: /^Open segment:/ });
   }
 
+  /**
+   * The picture the game draws a place with, on the row that happened there.
+   *
+   * Found by the place it is of, because that is the only thing the frame says: the row names
+   * the place beside it, so a picture that announced itself as well would have a screen reader
+   * read every row twice. Where the game draws nothing — the open world, which is most of a
+   * history — there is no frame at all, and asking for one is how a spec says so.
+   */
+  placeIcon(segment: Locator, place: string): Locator {
+    return segment.getByRole("img", { name: `Icon for ${place}` });
+  }
+
   /** The fold on a card, by what it says it holds: "2 segments", "3 screenshots". */
   fold(session: Locator, saying: string | RegExp): Locator {
     return session.getByRole("button", { name: saying });

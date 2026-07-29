@@ -164,13 +164,29 @@ function fake.newFontString(template)
 end
 
 ---A stand-in for a Texture. Records the colour it was filled with and the box it was
----given, which is what a progress bar is: a track and a filled part of it, both sized.
+---given, which is what a progress bar is: a track and a filled part of it, both sized —
+---and the picture it was pointed at, which is what an icon is.
 ---@return table
 function fake.newTexture(layer)
     local texture = { shown = true, layer = layer, points = {} }
 
     function texture:SetColorTexture(r, g, b, a)
         self.color = { r, g, b, a }
+    end
+
+    ---The client takes a file id or a path here and asks no questions about either, so the
+    ---fake records whichever it was handed rather than judging it.
+    function texture:SetTexture(picture)
+        self.texture = picture
+    end
+
+    function texture:SetDesaturated(desaturated)
+        self.desaturated = desaturated and true or false
+    end
+
+    function texture:SetSize(width, height)
+        self.width = width
+        self.height = height or width
     end
 
     function texture:SetPoint(...)
@@ -534,7 +550,7 @@ end
 ---The fakes honour the real API's statefulness: `getInstanceByIndex` only sees the tier
 ---that was last selected, so an addon that forgets to call `selectTier` reads nothing.
 ---@param tiers table[]?
----@return table journal `{ getNumTiers, getCurrentTier, selectTier, getTierInfo, getInstanceByIndex }`
+---@return table journal `{ getNumTiers, getCurrentTier, selectTier, getTierInfo, getInstanceByIndex, getInstanceInfo }`
 ---@return table recorded `{ selected = integer[], current = fun(): integer }`
 function fake.newEncounterJournal(tiers)
     tiers = tiers or {}
@@ -573,6 +589,25 @@ function fake.newEncounterJournal(tiers)
         end
         -- instanceID, name
         return 1000 + index, name
+    end
+
+    ---The client's own second call about one instance, which is where the small button icon
+    ---lives: the by-index call above does not carry it. The returns are placed exactly where
+    ---the real API puts them — the sixth is `buttonSmallImage` — so a reader that took the
+    ---banner beside it reads a number the fixtures can tell apart.
+    ---@param instanceID integer
+    function journal.getInstanceInfo(instanceID)
+        local entry = tiers[current]
+        if not entry or not instanceID then
+            return nil
+        end
+        local index = instanceID - 1000
+        local name = (entry.raids or {})[index] or (entry.dungeons or {})[index]
+        if not name then
+            return nil
+        end
+        -- name, description, bgImage, buttonImage, loreImage, buttonSmallImage
+        return name, "", 900000 + index, 910000 + index, 920000 + index, 930000 + index
     end
 
     return journal, {
@@ -974,6 +1009,7 @@ function fake.newEnv(options)
         selectTier = journal.selectTier,
         getTierInfo = journal.getTierInfo,
         getInstanceByIndex = journal.getInstanceByIndex,
+        getInstanceInfo = journal.getInstanceInfo,
         registerSlash = function(tokens, handler)
             slashRegistrations[#slashRegistrations + 1] = { tokens = tokens, handler = handler }
         end,
