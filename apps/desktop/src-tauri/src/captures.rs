@@ -118,9 +118,14 @@ impl Marker {
 /// entry missing an id or a moment is not readable as a record at all and is skipped; every
 /// other field is allowed to be absent.
 pub fn markers(saved: &Value) -> Vec<Marker> {
-    saved
-        .get("entries")
-        .and_then(Value::as_array)
+    saved.get("entries").map(markers_from_entries).unwrap_or_default()
+}
+
+/// The typed SavedVariables root hands the entry feed over directly, so the collector does not
+/// have to recover it by indexing the root again.
+pub fn markers_from_entries(entries: &Value) -> Vec<Marker> {
+    entries
+        .as_array()
         .map(|entries| entries.iter().filter_map(Marker::read).collect())
         .unwrap_or_default()
 }

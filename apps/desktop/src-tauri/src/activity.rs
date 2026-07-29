@@ -25,6 +25,7 @@
 //! * `housing` — housing XP and decor. Derivable today.
 //! * `battleground` and `arena` — the addon does not yet distinguish PvP instance types.
 
+use crate::saved_variables::Segment;
 use serde_json::{json, Map, Value};
 
 /// The difficulty the client reports for a Mythic Keystone dungeon. Used only as a fallback:
@@ -70,26 +71,6 @@ impl Activity {
     }
 }
 
-fn text<'a>(segment: &'a Value, key: &str) -> Option<&'a str> {
-    segment.get(key).and_then(Value::as_str)
-}
-
-fn integer(segment: &Value, key: &str) -> Option<i64> {
-    segment.get(key).and_then(Value::as_i64)
-}
-
-fn float(segment: &Value, key: &str) -> Option<f64> {
-    segment.get(key).and_then(Value::as_f64)
-}
-
-fn list<'a>(segment: &'a Value, key: &str) -> &'a [Value] {
-    segment
-        .get(key)
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-}
-
 /// Drops the keys whose value is null, so an activity's metadata carries only what is
 /// actually known. A field the addon never recorded is better absent than present-and-null:
 /// the editor renders an absent field as empty, and a reader cannot mistake it for a real
@@ -107,11 +88,11 @@ fn compact(value: Value) -> Value {
 
 /// A keystone run, from the run's own record when the addon captured one, and from the
 /// Mythic Keystone difficulty alone when it did not.
-fn mythic_plus(segment: &Value) -> Option<Activity> {
-    let dungeon = text(segment, "instance").unwrap_or("Unknown");
-    let seconds = integer(segment, "seconds").unwrap_or(0);
-    let Some(keystone) = segment.get("keystone").filter(|value| value.is_object()) else {
-        if integer(segment, "difficultyId") != Some(MYTHIC_KEYSTONE_DIFFICULTY) {
+fn mythic_plus(segment: &Segment) -> Option<Activity> {
+    let dungeon = segment.instance.as_str();
+    let seconds = segment.seconds;
+    let Some(keystone) = segment.keystone.as_ref() else {
+        if segment.difficulty_id != Some(MYTHIC_KEYSTONE_DIFFICULTY) {
             return None;
         }
         // The difficulty says keystone but nothing recorded the key itself, so the level —
@@ -123,23 +104,18 @@ fn mythic_plus(segment: &Value) -> Option<Activity> {
         ));
     };
 
-    let completed = keystone
-        .get("completed")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
     Some(Activity::new(
         KIND_MYTHIC_PLUS,
         1.0,
         compact(json!({
             "dungeon": dungeon,
-            "keystoneLevel": integer(keystone, "level"),
-            "completed": completed,
-            "timed": keystone.get("onTime").and_then(Value::as_bool),
-            "upgrades": integer(keystone, "upgrades"),
-            "affixes": keystone.get("affixes").cloned(),
+            "keystoneLevel": keystone.level,
+            "completed": keystone.completed,
+            "timed": keystone.on_time,
+            "upgrades": keystone.upgrades,
+            "affixes": keystone.affixes,
             "durationSeconds": keystone
-                .get("durationMs")
-                .and_then(Value::as_i64)
+                .duration_ms
                 .map(|milliseconds| milliseconds / 1000)
                 .unwrap_or(seconds),
         })),
@@ -152,25 +128,22 @@ fn mythic_plus(segment: &Value) -> Option<Activity> {
 /// Without those tiers the raid is still a raid, so it is reported rather than dropped — as
 /// legacy, because far more raiding happens in old content than in the current tier, and at
 /// a confidence that says the classification is the guess, not the raiding.
-fn raid(segment: &Value) -> Option<Activity> {
-    if text(segment, "instanceType") != Some("raid") {
+fn raid(segment: &Segment) -> Option<Activity> {
+    if segment.instance_type != "raid" {
         return None;
     }
-    let encounters = list(segment, "encounters");
-    let kills = encounters
-        .iter()
-        .filter(|event| event.get("success").and_then(Value::as_bool) == Some(true))
-        .count();
+    let encounters = &segment.encounters;
+    let kills = encounters.iter().filter(|event| event.success).count();
     let metadata = compact(json!({
-        "raid": text(segment, "instance").unwrap_or("Unknown"),
-        "difficulty": text(segment, "difficulty").unwrap_or(""),
+        "raid": segment.instance,
+        "difficulty": segment.difficulty,
         "bossesKilled": kills,
         "wipes": encounters.len() - kills,
-        "expansionTier": integer(segment, "expansionTier"),
+        "expansionTier": segment.expansion_tier,
     }));
 
-    let tier = integer(segment, "expansionTier");
-    let latest = integer(segment, "latestExpansionTier");
+    let tier = segment.expansion_tier;
+    let latest = segment.latest_expansion_tier;
     match (tier, latest) {
         (Some(tier), Some(latest)) if tier >= latest => {
             Some(Activity::new(KIND_PROGRESS_RAID, 0.9, metadata))
@@ -185,10 +158,10 @@ fn raid(segment: &Value) -> Option<Activity> {
 ///
 /// A level-up is levelling whatever the fraction says: crossing a level is the whole point,
 /// and a character that dinged one experience point into the segment still did it here.
-fn levelling(segment: &Value) -> Option<Activity> {
-    let experience = segment.get("experience").filter(|value| value.is_object());
-    let percent = experience.and_then(|value| float(value, "percent")).unwrap_or(0.0);
-    let levels = list(segment, "levelUps").len();
+fn levelling(segment: &Segment) -> Option<Activity> {
+    let experience = segment.experience.as_ref();
+    let percent = experience.map(|value| value.percent).unwrap_or_default();
+    let levels = segment.level_ups.len();
     if levels == 0 && percent < LEVELLING_PERCENT_THRESHOLD {
         return None;
     }
@@ -196,11 +169,11 @@ fn levelling(segment: &Value) -> Option<Activity> {
         KIND_LEVELLING,
         1.0,
         compact(json!({
-            "experienceGained": experience.and_then(|value| integer(value, "gained")).unwrap_or(0),
+            "experienceGained": experience.map(|value| value.gained).unwrap_or_default(),
             "percentOfLevel": (percent * 1000.0).round() / 10.0,
             "levelsGained": levels,
-            "startLevel": experience.and_then(|value| integer(value, "startLevel")),
-            "endLevel": experience.and_then(|value| integer(value, "endLevel")),
+            "startLevel": experience.and_then(|value| value.start_level),
+            "endLevel": experience.and_then(|value| value.end_level),
         })),
     ))
 }
@@ -210,7 +183,7 @@ fn levelling(segment: &Value) -> Option<Activity> {
 /// More than one may apply at once and that is not a conflict: a levelling raid night is
 /// honestly both. What cannot happen is two guesses of the same kind, because a kind is how
 /// a user's suppression of a guess is matched back to it on the next sync.
-pub fn infer(segment: &Value) -> Vec<Activity> {
+pub fn infer(segment: &Segment) -> Vec<Activity> {
     [mythic_plus(segment), raid(segment), levelling(segment)]
         .into_iter()
         .flatten()
@@ -223,8 +196,11 @@ mod tests {
 
     /// A segment with only the fields every segment has. Each test adds exactly the fields
     /// its rule reads, so what drives the guess is visible in the test itself.
-    fn segment(fields: Value) -> Value {
+    fn segment(fields: Value) -> Segment {
         let mut base = json!({
+            "id": "test",
+            "character": "Test-Realm",
+            "endedAt": 1,
             "instance": "Unknown",
             "instanceType": "none",
             "difficulty": "",
@@ -237,17 +213,20 @@ mod tests {
         for (key, value) in extra {
             target.insert(key, value);
         }
-        base
+        serde_json::from_value::<crate::saved_variables::RawSegment>(base)
+            .unwrap()
+            .normalize()
+            .unwrap()
     }
 
-    fn kinds(segment: &Value) -> Vec<String> {
+    fn kinds(segment: &Segment) -> Vec<String> {
         infer(segment)
             .into_iter()
             .map(|activity| activity.kind)
             .collect()
     }
 
-    fn only(segment: &Value, kind: &str) -> Activity {
+    fn only(segment: &Segment, kind: &str) -> Activity {
         infer(segment)
             .into_iter()
             .find(|activity| activity.kind == kind)
