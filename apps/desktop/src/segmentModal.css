@@ -16,25 +16,32 @@
 .appearance-show { padding: 2px 8px; font-size: 11.5px; line-height: 1.5; }
 /* The picture of the place, as the header the modal opens with.
 
-   Two shapes arrive here and the band has to hold both. A dungeon's banner is 256×128, which is
-   the shape both of the game's own tables keep it in; a zone has no banner and comes as the map
-   the game draws of it, which is 3:2. So the band is 5:2 — at the modal's 680 pixels that is 272
-   tall — and crops rather than stretches, which keeps four fifths of a banner's height and three
-   fifths of a map's. It was 132 when the banner was the only thing that could arrive, and a map
-   through a band that thin is a strip of parchment with nothing on it: what makes a header worth
-   having is that the place is recognisable in it.
+   **The band takes the shape of the picture in it, and never the other way round.** It is as wide
+   as the modal and as tall as that makes the picture; nothing is cropped, and nothing is stretched.
 
-   `aspect-ratio` rather than a height so a narrow window shrinks the band with the modal, and
-   `max-height` so a short one does not give a third of itself to a picture. `cover` crops and
-   `object-position` centres what gets kept.
+   That is the second answer to this. The first gave the band a shape of its own — 5:2, chosen as a
+   compromise between the two that arrive — and cropped whatever came to fit it. Measured against a
+   real install, the two shapes are not close enough for any compromise to work: a dungeon's banner
+   is *exactly* 2:1, every one of them, and a zone's map is *exactly* 3:2. So the compromise cut a
+   fifth off the height of every banner and two fifths off every map, and two fifths of a map is
+   its border, its coastlines and half its labels — Isle of Dorn came through as a strip of
+   parchment with the middle of an island on it. A header that has to be recognisable cannot be the
+   one thing on the screen that is showing you a piece of something. Issue #230.
 
-   `width` is said outright, and that is not redundant. A box with an `aspect-ratio` and no width
-   of its own resolves the ratio in whichever direction it has a length for, so clamping the
-   height with `max-height` back-computes a *narrower band* rather than a shallower one — the
-   header stopped a fifth short of the modal's right edge on any window under about 900 pixels
-   tall, and left a bare column of page beside itself. Chromium stretches a flex item to the
-   column's width first and never sees it; WebKit, which is the engine the packaged macOS app
-   is, does. Issue #230, and the reason the browser suite could not have caught it.
+   What it costs is height, and the honest amount: 340 pixels for a banner across the modal's 680,
+   453 for a map. The modal is a flex column capped at 86vh whose body scrolls, so what the header
+   takes comes out of how much of the reading is visible at once rather than out of the reading.
+
+   `flex: none` is load-bearing and was briefly `0 1 auto`, which looked like the considerate
+   choice and is the bug all over again. Shrinking is shared out in proportion to what each item
+   asked for, and the body asks for the whole segment, so a modal a hundred pixels too tall took
+   almost all of those hundred out of the band — the header came back at a quarter of the picture
+   on an ordinary window. A header that may not crop may not shrink either; the part that gives way
+   is the part that can, which is the body, and it gives way by scrolling.
+
+   `width: 100%` on the picture and `height: auto` under it is the whole of the mechanism: the
+   picture is drawn to the width it has and reports its own height, which is what makes this hold
+   for any shape a later patch ships without anything here having to know the shape.
 
    Its own bottom border rather than the head's, because the head keeps one either way: on a
    window with no game install behind it there is no band at all, and the modal opens on its
@@ -46,10 +53,10 @@
    better copy to be had; a zone's map, which is assembled here rather than read, comes out at
    1,024 and is the one that looks it. See `heroes::heroes_of` and `docs/game-files.md`. */
 .detail-hero {
-  flex: none; width: 100%; aspect-ratio: 5 / 2; max-height: 30vh;
+  flex: none; width: 100%;
   overflow: hidden; border-bottom: 1px solid var(--border);
 }
-.detail-hero img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.detail-hero img { display: block; width: 100%; height: auto; }
 .detail-head {
   display: flex; align-items: center; gap: 12px;
   padding: 13px 16px; border-bottom: 1px solid var(--border); flex: none;

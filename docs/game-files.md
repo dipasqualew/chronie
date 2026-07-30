@@ -1004,6 +1004,12 @@ a header for a raid and with a bare line of text for the zone outside it, which 
 different modals. What the stand-in was for when it was written was every open-world zone, which is
 most places; since "Zone maps, verified" below it is what almost nothing falls through to.
 
+**And the shape is exactly 2:1, which the header is built around.** Every banner either table names
+decodes at 2:1 and every assembled zone map at 3:2 — measured, not assumed, and there is no third
+shape. The modal's header therefore takes the shape of whatever is in it rather than imposing one
+of its own: a band with a shape of its own has to crop, and no single shape is within a fifth of
+both of these. See `.detail-hero` in `segmentModal.css`.
+
 **And 256×128 is as sharp as a header can be.** Swept over both columns on 12.0.5.67823, every one
 of the journal's 209 and 1,686 of the finder's 1,702 decode at exactly that; the remaining 16 of
 the finder's are 512×256, and nothing at all comes back larger. `icons::decode` already asks for

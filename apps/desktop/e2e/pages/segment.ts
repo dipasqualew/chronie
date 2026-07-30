@@ -61,6 +61,26 @@ export class SegmentDetail {
   }
 
   /**
+   * How much of that picture is on screen, as a fraction of the whole of it.
+   *
+   * The other half of the same claim and the one that needs the picture's own size, so it is a
+   * reading rather than anything a locator could express: the band draws the picture at the width
+   * it has, and what says nothing was cropped is that the height it took is the height the whole
+   * picture wants at that width. Compared against the band as well as against the picture, because
+   * a band that clipped what it was given would leave the picture measuring its full height and
+   * showing less of it.
+   */
+  heroShown(place: string): Promise<number> {
+    return this.hero(place).evaluate((band) => {
+      const picture = band.querySelector("img");
+      if (!picture?.naturalWidth || !picture.naturalHeight) return 0;
+      const drawn = picture.getBoundingClientRect();
+      const whole = (drawn.width * picture.naturalHeight) / picture.naturalWidth;
+      return whole === 0 ? 0 : Math.min(band.clientHeight, drawn.height) / whole;
+    });
+  }
+
+  /**
    * What the frame around each boss portrait is filled with.
    *
    * Read off the frame rather than asked for by name, because the frame says nothing to a screen
