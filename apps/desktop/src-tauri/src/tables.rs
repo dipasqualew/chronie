@@ -720,8 +720,20 @@ pub mod chr_customization_choice {
 
     /// `OrderIndex`
     ///
-    /// Which swatch this is, in the order the character creation screen lists them.
+    /// **Not the order the screen lists them in** — that is `UI_ORDER` below. This is closer
+    /// to the order the swatches were authored in, and it is only read here to break a tie
+    /// on a build that gives an option no UI order at all.
     pub const ORDER: usize = 5;
+
+    /// `UiOrderIndex`
+    ///
+    /// Where the swatch sits on the character creation screen, which is what says the one a
+    /// body opens on. Not a running count: it is banded, and the bands are the groups the
+    /// game's own screen draws and highlights together — a Blood Elf Female's skins run 1–14
+    /// for the elven tones, 50–55 and 70–72 for the two borrowed sets, and 100+ for the
+    /// Death Knight and transmog swatches. `OrderIndex` cuts across those bands, which is
+    /// why the two disagree on 92 of this build's options.
+    pub const UI_ORDER: usize = 6;
 }
 
 /// Columns of `ChrCustomizationElement` that this app reads.

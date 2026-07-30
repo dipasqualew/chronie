@@ -632,7 +632,8 @@ ChrCustomizationOption            (id inline, in column 1)
 ChrCustomizationChoice            (id inline, in column 1 — the other exception)
   col1 = ID                        85 is Human Female's first skin swatch
   col2 = ChrCustomizationOptionID  14, which ChrCustomizationOption names "Skin Color"
-  col5 = OrderIndex                0, which is what makes it the default
+  col5 = OrderIndex                0 — and NOT what makes it the default
+  col6 = UiOrderIndex              40, the lowest of its option's, which is what does
      │
      ▼
 ChrCustomizationElement           (id in the id list)
@@ -765,8 +766,35 @@ questions reach a reader:
 
 **Most swatches have no name**, which is not a gap in the read: the character creation screen
 draws a square of colour and `Name_lang` is genuinely empty. A window over this numbers them by
-their place in `OrderIndex`, and a question can be half named — Hair Color names fifteen of
+their place in `UiOrderIndex`, and a question can be half named — Hair Color names fifteen of
 fifty-eight.
+
+**`UiOrderIndex` is the screen's order and `OrderIndex` is not**, which is #235 and is the sort of
+mistake that costs a year because the two columns sit beside each other and the wrong one reads
+perfectly. `OrderIndex` runs 0 upwards with no gaps; `UiOrderIndex` is *banded*, and the bands are
+the groups the game's own screen lays out and highlights together. A Blood Elf Female's thirty skin
+swatches:
+
+| `ChrCustomizationReqID` | what the band is | `UiOrderIndex` | `OrderIndex` |
+|---|---|---|---|
+| 141 | the elven tones | 1–14 | 0–9, 26–29 |
+| 143 | one borrowed set | 50–55 | 19–24 |
+| 646 | another | 60 | 15 |
+| 115 | and another | 70–72 | 16–18 |
+| 12 | the Death Knight pallors | 100–104 | 10–14 |
+| 10 | the transmog swatch | 106 | 25 |
+
+Read down `OrderIndex` and a Death Knight's grey sits in the middle of the living tones and the four
+skins added in a later patch sit after the transmog swatch, which is not what the screen shows. Read
+down `UiOrderIndex` and each requirement's swatches are contiguous, in the order and the groups a
+player sees. So it is `UiOrderIndex` that says which swatch a body **opens on** — and on
+12.0.5.67823 the two columns name a different first swatch for **92 options across 50 of the 51
+playable bodies**. Human Female is very nearly the exception: her skin, face, hair style and hair
+colour all agree, which is exactly why this app drew its own default body correctly and every
+character on a reader's roster in the wrong skin and the wrong hair.
+
+`scripts/game-tables.test.ts` will not let either column be declared anywhere but the registry, so
+the check is `docs/game-tables.json` and `customization::on_screen`.
 
 **8523 Eye Style is the thirteenth and is not offered.** No element names any of its swatches,
 so nothing follows from answering it. That is the rule `questions` applies — a question none of
