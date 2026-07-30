@@ -4009,6 +4009,64 @@ describe("addon integration", function()
         end)
     end)
 
+    describe("the account's own census", function()
+        -- The hole neither the segments nor the pane sweep can close. Both of those record
+        -- something happening, so the record of what an account has collected begins empty and
+        -- fills in one at a time — and never at all for a mount bought on a laptop or an
+        -- achievement earned in 2011. The walk is what closes it, and the whole of what this
+        -- level has to prove is that the client's own lists are wired to it: the walk itself is
+        -- covered against fake domains in census_spec.lua.
+        it("writes down what the account holds once the world has settled", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            local mounts = recorded.db.census.account.mounts
+            assert.equal("Swift Zhevra", mounts.entries[6].name)
+            -- Only what is held: the second mount in the journal is one this account has not
+            -- collected, and an absence is written down by writing nothing.
+            assert.is_nil(mounts.entries[9])
+            assert.is_true(mounts.complete)
+            assert.equal("Thrall-Ragnaros", mounts.by)
+            assert.equal("12.0.5.67823", mounts.build)
+
+            local achievements = recorded.db.census.account.achievements
+            assert.equal("Herald of the Titans", achievements.entries[4842].name)
+            assert.is_nil(achievements.entries[2144])
+            assert.is_true(achievements.complete)
+        end)
+
+        -- The walk is spread a slice per frame and costs the player nothing, but *starting* it
+        -- in the instant the world arrives is asking the client questions the server has not
+        -- told it the answers to yet — the achievement tree in particular lands after login.
+        it("asks the client nothing until the world has had a moment", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+
+            assert.is_nil(recorded.db.census)
+        end)
+
+        -- Cheap on every loading screen but the first, which is what makes it safe to provoke
+        -- from one at all: in the steady state the audit names nothing and no pass is started.
+        it("does not walk it again on a loading screen with nothing to find", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            assert.equal(1, recorded.db.census.account.mounts.revision)
+            assert.equal(1, recorded.db.census.account.achievements.revision)
+        end)
+    end)
+
     describe("the player's own transmog sets", function()
         ---One set in the shape Main.lua reduces the client's three transmog calls to, so a
         ---test says only the part it is about.

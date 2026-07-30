@@ -173,6 +173,15 @@ impl SavedVariables {
         self.table("warband", lua)
     }
 
+    /// What the account *holds*, as opposed to what it was watched collecting.
+    ///
+    /// The addon's own census table: an `account` table for the domains every character answers
+    /// the same for, a `characters` table for the ones that belong to one of them, and under
+    /// each domain the claim its walk made beside the entries it found. See [`super::census`].
+    pub(super) fn census(self, lua: &str) -> Self {
+        self.braced("census", lua)
+    }
+
     /// The wardrobe the addon read out of the game itself. `customSets` is the addon's word
     /// for it, because the addon is talking to the game — see [`super::ingame_sets`].
     pub(super) fn in_game_sets(self, lua: &str) -> Self {

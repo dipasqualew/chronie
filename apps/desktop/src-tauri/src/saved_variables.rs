@@ -42,6 +42,8 @@ pub struct RawSavedVariables {
     pub holdings: BTreeMap<String, RawHoldingSnapshot>,
     #[serde(deserialize_with = "tolerant_default")]
     pub warband: RawWarband,
+    #[serde(deserialize_with = "tolerant_default")]
+    pub census: RawCensus,
     pub custom_sets: Value,
     pub custom_set_requests: Value,
     pub character_look: Value,
@@ -956,6 +958,80 @@ optional_fields!(RawStanding {
 });
 
 optional_fields!(RawWarband { gold: i64, at: i64 });
+
+/// What the account holds, as the addon's census wrote it down.
+///
+/// A separate feed from the segments, with a version of its own. `docs/saved-variables.md` scopes
+/// `segmentSchemaVersion` to the segment feed alone, and this is the other half of that sentence:
+/// a domain added here must not force every reader to re-import every segment.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RawCensus {
+    #[serde(deserialize_with = "tolerant_option")]
+    pub version: Option<i64>,
+    /// Domains every character answers the same for, kept once. Keyed by the addon's own name for
+    /// the domain — "mounts", "achievements".
+    #[serde(deserialize_with = "tolerant_map")]
+    pub account: BTreeMap<String, RawCensusState>,
+    /// Domains that belong to one character, keyed by "Name-Realm" and then by domain, the way
+    /// `holdings` is keyed. Empty until the first character-scoped domain ships.
+    #[serde(deserialize_with = "tolerant_nested_map")]
+    pub characters: BTreeMap<String, BTreeMap<String, RawCensusState>>,
+}
+
+/// One domain's standing: what was found, and how much of a claim that is.
+///
+/// **`complete` is the field everything else turns on.** It is the addon saying that the walk
+/// asked about every id the client named, which is the only circumstance in which an id's absence
+/// from `entries` means the account does not hold it. A walk a logout cut short arrives here with
+/// the flag down and is read as a set of positive observations — nothing is ever deleted on the
+/// strength of one.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RawCensusState {
+    #[serde(deserialize_with = "tolerant_option")]
+    pub complete: Option<bool>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub revision: Option<i64>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub held: Option<i64>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub counted: Option<i64>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub build: Option<String>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub by: Option<String>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub started_at: Option<i64>,
+    #[serde(deserialize_with = "tolerant_option")]
+    pub completed_at: Option<i64>,
+    /// Keyed by the client's own id for the thing, which arrives as a Lua table key and so as a
+    /// string. The value's fields belong to the domain that wrote them, so this stays a `Value`
+    /// and each domain's reader in `collector::census` takes what it knows.
+    #[serde(deserialize_with = "tolerant_map")]
+    pub entries: BTreeMap<String, Value>,
+}
+
+optional_fields!(RawCensusMount {
+    name: String,
+    spell: i64,
+    source: i64,
+    favourite: bool,
+    hidden: bool,
+    faction: i64,
+    seen: i64,
+});
+
+optional_fields!(RawCensusAchievement {
+    name: String,
+    points: i64,
+    year: i64,
+    month: i64,
+    day: i64,
+    mine: bool,
+    by: String,
+    seen: i64,
+});
 
 #[cfg(test)]
 mod tests {

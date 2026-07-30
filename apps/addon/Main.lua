@@ -52,6 +52,11 @@ local addonName, ns = ...
 ---faction, by its localised name: the level, and how far into it they are.
 ---@field heldSweep fun(): HeldSweep Everything the character is holding, read off the client's
 ---currency and reputation panes rather than out of what the addon watched it earn.
+---@field censusClients fun(): table The client namespaces `ns.censusDomains` builds the account
+---census out of. Handed over as a bag rather than called here, so a build missing one of them
+---leaves that domain out instead of raising.
+---@field clientBuild fun(): string? Which build of the game this is. What says a census was
+---taken of a different game than the one now running.
 ---@field ownedItemCount fun(itemID: integer): integer Grand total owned across bags and every bank,
 ---the warband bank included, so internal transfers leave it unchanged.
 ---@field getCursorItem fun(): (integer?, string?) Item held on the cursor: id and name, or nil.
@@ -224,6 +229,50 @@ function ns.main(env)
             return
         end
         holdings.record(currentCharacter(), env.heldSweep())
+    end
+
+    ---What the account holds, as opposed to what it was watched collecting.
+    ---
+    ---The same argument `HoldingsStore` makes about currencies, taken to its conclusion. A
+    ---segment only ever knows about a thing the client announced, so on events alone the record
+    ---of an account's mounts and achievements begins empty and fills in one at a time over
+    ---years — and never at all for anything earned before Chronie was installed, on another
+    ---machine's install, or in a session a crash took with it.
+    ---
+    ---The census is what closes that, and it is deliberately not a thing that runs on a
+    ---schedule. Every domain it covers is *also* fed by a client event while the addon is
+    ---loaded, so between two passes the record keeps itself; a pass is provoked rather than
+    ---timed, by `census.audit` finding a domain that was never whole, one taken against a
+    ---different client build, or one whose count the client itself disagrees with.
+    local census = ns.newCensus({
+        db = env.db,
+        now = env.now,
+        after = env.after,
+        character = currentCharacter,
+        build = env.clientBuild,
+        domains = ns.censusDomains(env.censusClients and env.censusClients() or {}),
+    })
+
+    ---How long after the world arrives before a census may start.
+    ---
+    ---The walk itself is spread a slice per frame and costs the player nothing, but *starting*
+    ---it in the same instant the world does is asking the client questions it has not been told
+    ---the answers to. The achievement tree in particular is sent by the server after login, and
+    ---a walk that began before it landed would find nothing and then claim, in writing, that the
+    ---account had earned nothing. Long enough to be past that, short enough that an evening's
+    ---play still finishes a pass.
+    local CENSUS_SETTLE_SECONDS = 10
+
+    ---Takes a census of anything that needs one, a little after the world has settled.
+    ---
+    ---Called on the far side of every loading screen, and cheap on every one of them but the
+    ---first: `audit` is a handful of calls, and in the steady state it names nothing and no pass
+    ---is started at all. `run` refuses to begin a second pass while one is in flight, so zoning
+    ---about during a long walk cannot restart or double it.
+    local function sweepCensus()
+        env.after(CENSUS_SETTLE_SECONDS, function()
+            census.run()
+        end)
     end
 
     -- Both panels hand the same one out, so a click on a collected appearance in either of
@@ -991,6 +1040,11 @@ function ns.main(env)
         -- costs a walk of two short lists and keeps the snapshot current through the session
         -- rather than only at its ends.
         sweepHoldings()
+        -- The same argument one step further out. The sweep above reads two panes and is done
+        -- within the frame; this walks thousands of ids and so is spread across frames and
+        -- started late — but it is provoked from here for exactly the reason the sweep is, and
+        -- names nothing to do on the overwhelming majority of load screens.
+        sweepCensus()
         -- Beside the sweep and for its reason: the wardrobe the server sends at login has
         -- often not arrived by PLAYER_LOGIN, and reading it here means the far side of every
         -- load screen rather than one moment that may be too early. The event above keeps it
@@ -1317,6 +1371,7 @@ function ns.main(env)
         segmentLog = segmentLog,
         segmentTracker = segmentTracker,
         holdings = holdings,
+        census = census,
         segmentTable = segmentTable,
         segmentWindow = segmentWindow,
         segmentDetailWindow = segmentDetailWindow,
@@ -1728,6 +1783,38 @@ if CreateFrame then
                 local clients = reputationClients()
                 clients.currency = C_CurrencyInfo
                 return ns.readHoldings(clients)
+            end,
+            ---The client namespaces the account census is taken through.
+            ---
+            ---Every one of them is handed over rather than called, and every one is allowed to be
+            ---missing: `ns.censusDomains` leaves out a domain whose calls this build does not
+            ---have, which is the same answer `heldSweep` gives for a pane the client will not
+            ---open. The achievement side is a bag of four bare globals rather than a namespace
+            ---because that is genuinely what the client offers — the achievement tree predates
+            ---`C_` namespaces and was never moved into one.
+            censusClients = function()
+                return {
+                    mount = C_MountJournal,
+                    achievement = {
+                        categories = GetCategoryList,
+                        categoryCount = GetCategoryNumAchievements,
+                        byIndex = GetAchievementInfo,
+                        completedCount = GetNumCompletedAchievements,
+                    },
+                }
+            end,
+            ---Which game this is, as `<version>.<build>` — "12.0.5.67823".
+            ---
+            ---Both halves, because neither is enough on its own: the version alone does not move
+            ---for a hotfix that adds mounts, and the build number alone is a bare integer that
+            ---says nothing a human reading the file could check. Together they are exactly the
+            ---string the game shows on its own login screen.
+            clientBuild = function()
+                local version, build = GetBuildInfo()
+                if not version then
+                    return nil
+                end
+                return tostring(version) .. "." .. tostring(build or "?")
             end,
             -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
             -- store the character owns, so moving the item between them never shifts the total.
