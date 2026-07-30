@@ -120,8 +120,8 @@ export const CHARACTER_QUESTIONS: Record<number, CharacterQuestion[]> = {
 // The same invented sets the backend fixtures hold, so the two halves of the transmog
 // view are exercised against one story rather than two.
 export const transmog: E2EMock["transmog"] = {
-  readCount: 5,
-  declaredCount: 7,
+  readCount: 6,
+  declaredCount: 8,
   withheldCount: 2,
   sets: [
     {
@@ -162,6 +162,22 @@ export const transmog: E2EMock["transmog"] = {
       uiOrder: 5,
       patchIntroduced: 100200,
       itemCount: 6,
+    },
+    // The same clothes in another colour, which the game says by naming 201 as its parent. It
+    // has no card of its own: it is a square on 201's rail, and clicking it draws 201's card as
+    // this set instead. 1,724 of a shipping install's sets are one of these.
+    {
+      id: 211,
+      name: "Verdigris Tideglass Regalia",
+      group: "Tideglass Wardrobe",
+      groupId: 1,
+      classMask: 0x0190,
+      expansionId: 3,
+      parentId: 201,
+      flags: 1,
+      uiOrder: 6,
+      patchIntroduced: 100201,
+      itemCount: 3,
     },
     {
       id: 202,
@@ -329,6 +345,27 @@ export const transmogItems: E2EMock["transmogItems"] = {
         ...ANY_CLASS_ITEM,
         displayInfoId: 900005,
         iconFileDataId: 130005,
+        hasModel: false,
+      },
+    ],
+  },
+  // The colour of 201, which holds its own clothes: the whole reason a rail is worth clicking
+  // is that picking a variant shows a different set of armour rather than the same one twice.
+  211: {
+    setId: 211,
+    readCount: 1,
+    withheldCount: 0,
+    appearances: [
+      {
+        modifiedAppearanceId: 71020,
+        itemId: 30020,
+        name: "Verdigris Tideglass Robe",
+        appearanceId: 80020,
+        displayType: 3,
+        inventoryType: 5,
+        ...ANY_CLASS_ITEM,
+        displayInfoId: 900020,
+        iconFileDataId: 130003,
         hasModel: false,
       },
     ],

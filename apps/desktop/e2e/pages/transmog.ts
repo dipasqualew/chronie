@@ -102,6 +102,27 @@ export class SetGrid {
   }
 
   /**
+   * The rail of a card: one square per difficulty or colour the game files under the set.
+   *
+   * Found by the accessible name of the list rather than by the strip it is drawn as, because
+   * the squares are the one thing on a card that has no words on it at all — a rail a test
+   * cannot ask for by name is a rail a screen reader cannot either.
+   */
+  variants(set: string): Locator {
+    return this.card(set)
+      .getByRole("list", { name: `Difficulties and colours of ${set}` })
+      .getByRole("button");
+  }
+
+  /** Draws a card as one of the members on its rail, the way a reader does: by clicking it. */
+  async showVariant(set: string, member: string): Promise<void> {
+    await this.card(set)
+      .getByRole("button", { name: `Show ${member}`, exact: true })
+      .click();
+    await expect(this.card(member)).toBeVisible();
+  }
+
+  /**
    * One row per appearance a set names, in the order the backend sorted them.
    *
    * The rows of the outer list only. A row that several items reach carries a list of its own,

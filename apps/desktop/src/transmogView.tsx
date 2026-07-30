@@ -79,7 +79,7 @@ import {
 import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
 import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "./qualities";
-import { Qualities } from "./qualitiesChips";
+import { Qualities, Swatch } from "./qualitiesChips";
 import { withTerm } from "./terms";
 import {
   CLASSES,
@@ -87,10 +87,13 @@ import {
   classLabel,
   classNames,
   expansionName,
-  filterSets,
-  groupSets,
+  filterFamilies,
+  foldFamilies,
+  groupFamilies,
   patchName,
+  variantLabel,
 } from "./transmog";
+import type { Family } from "./transmog";
 import {
   appearanceRows,
   appearanceSummary,
@@ -298,6 +301,14 @@ export function TransmogView({
   /** The sets a reader has opened, which stay open: comparing two of them is the ordinary use. */
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
   /**
+   * Which member of a family its card is currently drawn as, by the family's own card.
+   *
+   * Empty until somebody clicks a swatch on the rail, which is what the whole grid opens on: a
+   * family is drawn as the set the game calls its root — see `foldFamilies` — and this is the
+   * reader saying they meant the heroic one, or the copper one.
+   */
+  const [chosen, setChosen] = useState<ReadonlyMap<number, number>>(new Map());
+  /**
    * Whether the cards are drawn as the character wearing each set.
    *
    * Off until asked for, the same way the wardrobe's is and for a stronger reason: a card
@@ -435,8 +446,12 @@ export function TransmogView({
     [index, payload],
   );
 
-  const sets = payload
-    ? filterSets(payload.sets, {
+  // The game's own statement about which of its rows are one set of clothes — see
+  // `foldFamilies`. Worked out once per payload rather than per keystroke: it is a walk of
+  // several thousand rows and the search box re-filters on every letter.
+  const families = useMemo(() => foldFamilies(payload?.sets ?? []), [payload]);
+  const shownFamilies = payload
+    ? filterFamilies(families, {
         search,
         expansion,
         klass,
@@ -448,7 +463,7 @@ export function TransmogView({
       })
     : [];
   // Paged only once there is a body behind each card — see `shown`.
-  const drawn = asModels ? sets.slice(0, shown) : sets;
+  const drawn = asModels ? shownFamilies.slice(0, shown) : shownFamilies;
 
   // The pictures, by the set each is of. Kept outside React for the reason the set contents
   // are — one arriving is not a redraw, the counter above is what says one happened — and kept
@@ -462,7 +477,11 @@ export function TransmogView({
     drawnOf.current = look;
     bodies.clear();
   }
-  const wantedSets = asModels ? drawn.map((set) => set.id) : [];
+  /** Which set a family's card is currently showing, which is the root until somebody says. */
+  const memberOf = (family: Family): TransmogSet =>
+    family.members.find((one) => one.id === chosen.get(family.shown.id)) ?? family.shown;
+
+  const wantedSets = asModels ? drawn.map((family) => memberOf(family).id) : [];
   const wantedKey = wantedSets.join(",");
   useEffect(() => {
     const missing = stillWantedSets(wantedSets, bodies);
@@ -526,6 +545,14 @@ export function TransmogView({
     foldedCount > 0
       ? ` · ${plural(foldedCount, "set")} shown under another holding the same appearances`
       : "";
+  // And shorter again for the other fold, which is much the larger of the two: 1,724 sets of a
+  // shipping install are a difficulty or a colour of one the game names as their parent, and
+  // they are on the card's rail rather than cards of their own — see `foldFamilies`.
+  const variantCount = families.reduce((count, family) => count + family.members.length - 1, 0);
+  const variants =
+    variantCount > 0
+      ? ` · ${plural(variantCount, "set")} shown as a variant on another's card`
+      : "";
 
   return (
     <>
@@ -533,7 +560,7 @@ export function TransmogView({
         <h1>Transmog</h1>
         <div className="sub" id="transmog-meta">
           {payload
-            ? `${plural(payload.sets.length, "set")} from the installed game${withheld}${folded}`
+            ? `${plural(payload.sets.length, "set")} from the installed game${withheld}${folded}${variants}`
             : status}
           {/* Only ever drawn over a failure the backend gave a code to, which is what keeps it
               from appearing beside "Reading the game's transmog tables…" or beside a sentence
@@ -680,52 +707,71 @@ export function TransmogView({
                   role="status"
                   aria-label="How much of the grid is shown"
                 >
-                  {payload ? shownCount(drawn.length, sets.length) : ""}
+                  {payload ? shownCount(drawn.length, shownFamilies.length) : ""}
                 </span>
               </div>
             </div>
             <div id="transmog-list" className="mog-list" data-models={asModels}>
-              {groupSets(drawn).map((group) => (
+              {groupFamilies(drawn).map((group) => (
                 <section className="mog-group" key={group.group}>
                   <h3>
                     {group.group}
-                    <span className="muted"> · {plural(group.sets.length, "set")}</span>
+                    <span className="muted"> · {plural(group.families.length, "set")}</span>
                   </h3>
                   <div className="mog-grid">
-                    {group.sets.map((set) => (
-                      <Card
-                        key={set.id}
-                        set={set}
-                        open={open.has(set.id)}
-                        onToggle={() => openSet(set)}
-                        contents={known.get(set.id)}
-                        icons={icons}
-                        outfit={outfit}
-                        hideUnwearable={hideUnwearable}
-                        marks={marks}
-                        markOf={markOf}
-                        quality={setQualities.of(set.id)}
-                        onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
-                        body={asModels ? bodies.get(set.id) : undefined}
-                        paint={paint}
-                        onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
-                        onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
-                      />
-                    ))}
+                    {group.families.map((family) => {
+                      const set = memberOf(family);
+                      return (
+                        <Card
+                          key={family.shown.id}
+                          set={set}
+                          family={family}
+                          open={open.has(set.id)}
+                          onToggle={() => openSet(set)}
+                          // A rail of one member is a rail of the card itself, so picking one is
+                          // only ever a swap. What follows it is what the card was already
+                          // showing: a set opened stays open on the member picked instead, which
+                          // is what makes the rail a way of comparing them rather than a way of
+                          // losing your place.
+                          onShow={(member) => {
+                            setChosen((had) => new Map(had).set(family.shown.id, member.id));
+                            if (!open.has(set.id)) return;
+                            setOpen((had) => new Set(had).add(member.id));
+                            read(member.id);
+                          }}
+                          contents={known.get(set.id)}
+                          icons={icons}
+                          outfit={outfit}
+                          hideUnwearable={hideUnwearable}
+                          marks={marks}
+                          markOf={markOf}
+                          qualityOf={(setId) => setQualities.of(setId)}
+                          onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
+                          body={asModels ? bodies.get(set.id) : undefined}
+                          paint={paint}
+                          onWear={(row) => setOutfit((was) => toggleWorn(was, row, setLabel(set)))}
+                          onWearAll={(rows) => setOutfit((was) => wearSet(was, rows, set))}
+                        />
+                      );
+                    })}
                   </div>
                 </section>
               ))}
               {/* What is left, and the way to it — the same button the wardrobe has, and only ever
               here for the same reason: a grid of pictures is paged and a grid of names is not. */}
-              {sets.length > drawn.length ? (
+              {shownFamilies.length > drawn.length ? (
                 <button
                   type="button"
                   className="mog-more"
                   onClick={() => setShown((was) => was + SET_PAGE)}
-                >{`Show ${Math.min(SET_PAGE, sets.length - drawn.length)} more of ${plural(sets.length - drawn.length, "set")}`}</button>
+                >{`Show ${Math.min(SET_PAGE, shownFamilies.length - drawn.length)} more of ${plural(shownFamilies.length - drawn.length, "set")}`}</button>
               ) : null}
             </div>
-            <div className="empty" id="transmog-empty" hidden={!payload || sets.length > 0}>
+            <div
+              className="empty"
+              id="transmog-empty"
+              hidden={!payload || shownFamilies.length > 0}
+            >
               <p className="empty-title">Nothing matches</p>
               <p>Try a different search, class or expansion.</p>
             </div>
@@ -817,6 +863,11 @@ export function TransmogView({
  * open and take a piece out of each. The card is a heading and a button because a heading
  * cannot live inside a button.
  *
+ * **A card is a family rather than a set**, and the rail under the chips is the rest of it: the
+ * difficulties and the colours the game itself files under this one — see `foldFamilies`.
+ * Everything above the rail is about whichever member is being shown, and clicking a square is
+ * what changes which that is.
+ *
  * **The picture goes above the name, and is not part of the button that opens the set.** Above,
  * because a reader with the pictures on is choosing by eye and the name is what they check
  * afterwards; outside the button, because the picture is something to drag — a click that
@@ -825,24 +876,31 @@ export function TransmogView({
  */
 function Card({
   set,
+  family,
   open,
   onToggle,
+  onShow,
   contents,
   icons,
   outfit,
   hideUnwearable,
   marks,
   markOf,
-  quality,
+  qualityOf,
   onFilter,
   body,
   paint,
   onWear,
   onWearAll,
 }: {
+  /** The member of the family this card is currently drawn as. */
   set: TransmogSet;
+  /** And every member of it, which is the rail under the chips — see `foldFamilies`. */
+  family: Family;
   open: boolean;
   onToggle: () => void;
+  /** A member picked off that rail, which the card is then drawn as instead. */
+  onShow: (member: TransmogSet) => void;
   /** What the set holds, the sentence saying why it could not be read, or nothing yet. */
   contents: TransmogSetItemsPayload | string | undefined;
   icons: Map<number, string>;
@@ -851,8 +909,14 @@ function Card({
   hideUnwearable: boolean;
   marks: MarkActions;
   markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
-  /** What the committed store measured the whole set to be, or nothing where it holds none. */
-  quality: Quality | undefined;
+  /**
+   * What the committed store measured a whole set to be, or nothing where it holds none.
+   *
+   * A lookup rather than the one measurement, because the rail is a strip of the family's
+   * colours: eighteen `Earthen Copper Regalia` under one root are eighteen shades, and the
+   * squares are the only thing on the card that tells them apart at a glance.
+   */
+  qualityOf: (setId: number) => Quality | undefined;
   /**
    * What a chip on the card asks of the grid when it is clicked — see `terms.ts`.
    *
@@ -905,8 +969,14 @@ function Card({
             game states the class, the expansion and the patch, and this was measured off the
             artwork of the looks the set holds. There is no size — a set is a body's worth of
             clothes whatever is in it. */}
-        <Qualities quality={quality} onFilter={onFilter} />
+        <Qualities quality={qualityOf(set.id)} onFilter={onFilter} />
       </div>
+      {/* The difficulties and the colours the game itself files under this set, as the squares
+          they differ by. 1,724 of the game's sets are one of these, and a card each is a raid
+          tier shown thirteen times over — Nerub-ar Palace is 52 sets and 13 things to wear.
+          Under the facts because it says which set the facts above are about, and above the
+          reader's own mark because a star belongs to the member that is starred. */}
+      <Variants family={family} showing={set} onShow={onShow} qualityOf={qualityOf} />
       {/* Under the game's own facts and on their own line, because they are a different kind
           of statement: everything above is true of this build for everybody, and this is what
           one reader said. Available with the card shut — starring a set is not a reason to
@@ -985,6 +1055,71 @@ function Card({
         </div>
       ) : null}
     </article>
+  );
+}
+
+/**
+ * The rail of a family: one square per member, and the one the card is drawn as pressed.
+ *
+ * **Squares rather than names, because the names are mostly the same word.** 1,026 of the 1,724
+ * variants a shipping install holds are called exactly what their root is called — four
+ * difficulties of one raid set are one name four times — and a rail of four identical strings is
+ * four buttons a reader cannot choose between. What does differ is the artwork, which the
+ * committed store has already measured: the square is the colour, drawn the one way the packaged
+ * app's Content Security Policy allows an arbitrary colour to be drawn at all — see
+ * `qualitiesChips.tsx`.
+ *
+ * The name is still the whole of what the button is *called*, because a square is nothing a
+ * screen reader can read out and a reader who cannot see the colours has to be able to pick a
+ * member all the same. Where the family holds two of a name, the id goes on the end of both —
+ * see [`variantLabel`], which is the same fallback the card's own foot makes.
+ *
+ * Nothing at all for a set the game files under no parent, which is two thirds of them.
+ */
+function Variants({
+  family,
+  showing,
+  onShow,
+  qualityOf,
+}: {
+  family: Family;
+  showing: TransmogSet;
+  onShow: (member: TransmogSet) => void;
+  qualityOf: (setId: number) => Quality | undefined;
+}): ReactNode {
+  if (family.members.length < 2) return null;
+  // The member being shown rather than the family's root, so that the rail is named after the
+  // card it is on however far down it a reader has clicked: a list called after a set whose
+  // name is no longer above it is a list nobody could find twice.
+  const name = showing.name || "Unnamed set";
+  return (
+    <ul className="mog-variants" aria-label={`Difficulties and colours of ${name}`}>
+      {family.members.map((member) => {
+        const quality = qualityOf(member.id);
+        const said = variantLabel(member, family);
+        return (
+          <li key={member.id}>
+            <button
+              type="button"
+              className="mog-variant"
+              aria-pressed={member.id === showing.id}
+              aria-label={`Show ${said}`}
+              title={said}
+              onClick={() => onShow(member)}
+            >
+              {/* An empty square rather than none, for the 213 sets of a shipping install the
+                  store measured nothing of: a rail that lost a member wherever a colour was
+                  missing would be a rail a reader could not count. */}
+              {quality ? (
+                <Swatch colour={quality.primary} />
+              ) : (
+                <span className="mog-variant-blank" aria-hidden="true" />
+              )}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

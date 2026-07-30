@@ -93,6 +93,36 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect(sets.sets()).toHaveCount(4);
   });
 
+  // The other fold, and much the larger of the two. A set's difficulties and colours are rows of
+  // the game's own table with a parent named on them — Nerub-ar Palace is 52 of those and 13
+  // things anybody would call a set of clothes — so they are squares on one card's rail rather
+  // than cards of their own, and picking one draws the card as that set.
+  await test.step("a set's colours are one card, and picking one redraws it", async () => {
+    await expect(sets.sets()).not.toContainText(["Verdigris Tideglass Regalia"]);
+    await expect(sets.variants("Tideglass Regalia")).toHaveCount(2);
+    await expect(transmog.saying(/1 set shown as a variant on another's card/)).toBeVisible();
+
+    await sets.showVariant("Tideglass Regalia", "Verdigris Tideglass Regalia");
+    // Everything above the rail is about the member being shown, and the grid is no longer.
+    await expect(sets.card("Verdigris Tideglass Regalia")).toContainText("3 items");
+    await expect(sets.sets()).toHaveCount(4);
+    await expect(sets.variants("Verdigris Tideglass Regalia")).toHaveCount(2);
+
+    // And the card goes back to the set it opened on, which is the one the rest of this
+    // scenario is about.
+    await sets.showVariant("Verdigris Tideglass Regalia", "Tideglass Regalia");
+    await expect(sets.card("Tideglass Regalia")).toContainText("6 items");
+  });
+
+  // The whole risk of folding a set away, asked of the larger fold: a reader who types the name
+  // of a colour has to land on the card carrying it.
+  await test.step("a variant is still found by its own name", async () => {
+    await sets.search().fill("verdigris");
+    await expect(sets.sets()).toHaveText(["Tideglass Regalia"]);
+    await sets.search().fill("");
+    await expect(sets.sets()).toHaveCount(4);
+  });
+
   // What a card cannot say in words. A set is a set of clothes and the grid is names, counts
   // and chips — so this is the switch that draws each card as the character wearing that set,
   // out of one request for the whole page.
