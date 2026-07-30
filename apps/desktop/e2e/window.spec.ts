@@ -41,7 +41,7 @@ test("is served the policy the packaged window is, and says which build it is", 
   await test.step("and the page survives it, stylesheet and all", async () => {
     // A body drawn in the browser default is what a mis-stamped nonce looks like, and it would
     // take every assertion about colour in this suite with it.
-    await expect(shell.background()).resolves.toBe("rgb(246, 245, 242)");
+    await shell.background().toBe("rgb(246, 245, 242)");
   });
 
   await test.step("and grants everything the packaged policy grants", async () => {
@@ -86,14 +86,12 @@ test("is served the policy the packaged window is, and says which build it is", 
     await shell.build().getByRole("link", { name: "Commit 95b5e08 on GitHub" }).click();
     await shell.build().getByRole("link", { name: "The dev release on GitHub" }).click();
 
-    await expect
-      .poll(() => shell.openedUrls())
-      .toEqual([
-        // The whole sha, which is the only form GitHub resolves — the seven on screen are for
-        // reading, and a link built out of them would be a link to nothing.
-        "https://github.com/dipasqualew/chronie/commit/95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c",
-        "https://github.com/dipasqualew/chronie/releases/tag/dev",
-      ]);
+    await shell.openedUrls().toEqual([
+      // The whole sha, which is the only form GitHub resolves — the seven on screen are for
+      // reading, and a link built out of them would be a link to nothing.
+      "https://github.com/dipasqualew/chronie/commit/95b5e08d2f1a4c3b6e7d8a9f0b1c2d3e4f5a6b7c",
+      "https://github.com/dipasqualew/chronie/releases/tag/dev",
+    ]);
   });
 
   await test.step("and the window is still the window afterwards", async () => {

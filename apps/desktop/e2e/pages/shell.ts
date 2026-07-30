@@ -9,6 +9,9 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { eventually } from "./eventually";
+import type { Eventually } from "./eventually";
+
 /** The six tabs, by the words on them. */
 export type ViewName = "Timeline" | "Characters" | "Details" | "Query" | "Transmog" | "Settings";
 
@@ -64,8 +67,10 @@ export class Shell {
    * stamped with the nonce the policy above carries, and a body in the browser default is what
    * a mis-stamped one looks like.
    */
-  background(): Promise<string> {
-    return this.page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  background(): Eventually<string> {
+    return eventually(() =>
+      this.page.evaluate(() => getComputedStyle(document.body).backgroundColor),
+    );
   }
 
   /** The build, in the corner of the bar, which says what it is in its own tooltip. */
@@ -79,8 +84,8 @@ export class Shell {
    * A real browser opening is the one outcome a browser test cannot see, so this stands in for
    * it: the app has done its part when it has handed the url over.
    */
-  openedUrls(): Promise<string[]> {
-    return this.page.evaluate(() => window.__Chronie_E2E__?.openedUrls ?? []);
+  openedUrls(): Eventually<string[]> {
+    return eventually(() => this.page.evaluate(() => window.__Chronie_E2E__?.openedUrls ?? []));
   }
 
   /** Where the window itself is, which every link out of it has to leave alone. */

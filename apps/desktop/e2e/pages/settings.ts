@@ -8,12 +8,15 @@
  *
  * What the backend was actually told is read back beside what the panel says, and that pairing
  * is the point: a control that reports a setting it never saved looks identical on screen to
- * one that did.
+ * one that did. Those readings come back as `Eventually` rather than as promises, because a
+ * write lands when the command answers and not when the box was ticked — see `eventually.ts`.
  */
 
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { eventually } from "./eventually";
+import type { Eventually } from "./eventually";
 import { Shell } from "./shell";
 
 /** The categories on the rail, by the words on them. */
@@ -109,12 +112,14 @@ export class CaptureSettings {
   }
 
   /** And what the backend was actually told to store, which is the other half of every claim. */
-  stored(): Promise<{ triggers: string[]; quality?: string; keepOriginals?: boolean }> {
-    return this.page.evaluate(() => ({
-      triggers: window.__Chronie_E2E__?.settings.captureTriggers ?? [],
-      quality: window.__Chronie_E2E__?.settings.captureQuality,
-      keepOriginals: window.__Chronie_E2E__?.settings.keepOriginalScreenshots,
-    }));
+  stored(): Eventually<{ triggers: string[]; quality?: string; keepOriginals?: boolean }> {
+    return eventually(() =>
+      this.page.evaluate(() => ({
+        triggers: window.__Chronie_E2E__?.settings.captureTriggers ?? [],
+        quality: window.__Chronie_E2E__?.settings.captureQuality,
+        keepOriginals: window.__Chronie_E2E__?.settings.keepOriginalScreenshots,
+      })),
+    );
   }
 }
 
@@ -149,8 +154,10 @@ export class CombatLogging {
   }
 
   /** What the backend was told, as against what the switch on screen drew. */
-  stored(): Promise<boolean | undefined> {
-    return this.page.evaluate(() => window.__Chronie_E2E__?.settings.combatLogging);
+  stored(): Eventually<boolean | undefined> {
+    return eventually(() =>
+      this.page.evaluate(() => window.__Chronie_E2E__?.settings.combatLogging),
+    );
   }
 }
 
@@ -183,7 +190,9 @@ export class LogRetention {
   }
 
   /** What was stored, which is `null` while Chronie is told to keep every log. */
-  stored(): Promise<number | null | undefined> {
-    return this.page.evaluate(() => window.__Chronie_E2E__?.settings.retainLogDays ?? null);
+  stored(): Eventually<number | null | undefined> {
+    return eventually(() =>
+      this.page.evaluate(() => window.__Chronie_E2E__?.settings.retainLogDays ?? null),
+    );
   }
 }

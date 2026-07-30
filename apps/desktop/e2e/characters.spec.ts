@@ -40,10 +40,7 @@ test("gives every character a page of their own", async ({ page }) => {
   // The same rail a segment row wears, for the same reason: the roster is a list of people,
   // and the colour is what tells them apart before the name has been read.
   await test.step("each of them wears their own class colour", async () => {
-    await expect(railColours(roster.entries())).resolves.toEqual([
-      "rgb(255, 124, 10)",
-      "rgb(63, 199, 235)",
-    ]);
+    await railColours(roster.entries()).toEqual(["rgb(255, 124, 10)", "rgb(63, 199, 235)"]);
   });
 
   await test.step("and the one the view opened on is the one it is showing", async () => {

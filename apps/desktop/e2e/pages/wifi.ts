@@ -11,6 +11,8 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { eventually } from "./eventually";
+import type { Eventually } from "./eventually";
 import { openSettings } from "./settings";
 
 export class Wifi {
@@ -58,8 +60,15 @@ export class Wifi {
     return this[half].getByRole("button", { name });
   }
 
-  /** The addresses this window has offered its history to, in the order it offered. */
-  sentTo(): Promise<string[]> {
-    return this.page.evaluate(() => window.__Chronie_E2E__?.wifi.sentTo ?? []);
+  /**
+   * The addresses this window has offered its history to, in the order it offered.
+   *
+   * Sending is a command rather than a repaint, so what it wrote is true only once it has
+   * answered — asserting on this keeps asking until then. Asserting that the list is still
+   * *empty* passes on the first reading, as it must; what holds that step up is the assertion
+   * before it, which has already waited for the click to have been answered.
+   */
+  sentTo(): Eventually<string[]> {
+    return eventually(() => this.page.evaluate(() => window.__Chronie_E2E__?.wifi.sentTo ?? []));
   }
 }

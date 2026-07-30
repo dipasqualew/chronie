@@ -41,10 +41,7 @@ test("stitches segments into play sessions and leads with what happened", async 
   // says it in the colour the game uses. A ring drawn in the fallback grey is the failure
   // this catches: everyone the same colour is the same as nobody named.
   await test.step("each character is drawn in their own class colour", async () => {
-    await expect(borderColours(timeline.cast(first))).resolves.toEqual([
-      "rgb(63, 199, 235)",
-      "rgb(255, 124, 10)",
-    ]);
+    await borderColours(timeline.cast(first)).toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
   });
 
   // The version of the step above that only read the border was green for as long as the
@@ -58,8 +55,8 @@ test("stitches segments into play sessions and leads with what happened", async 
   await test.step("and filled with it, not merely ringed in it", async () => {
     const played = timeline.cast(first);
 
-    await expect(fillColours(played)).resolves.toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
-    await expect(inkColours(played)).resolves.toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
+    await fillColours(played).toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
+    await inkColours(played).toEqual(["rgb(11, 11, 11)", "rgb(11, 11, 11)"]);
   });
 
   // Filling the circles cost them the ring that used to be their outer edge: they now wear
@@ -246,9 +243,6 @@ test("stitches segments into play sessions and leads with what happened", async 
   // is what it does if a row forgets to name its own class, since the property is inherited
   // — would come out cyan twice and say nothing about who played what.
   await test.step("and each row wears the class colour of whoever played it", async () => {
-    await expect(railColours(timeline.segments(first))).resolves.toEqual([
-      "rgb(63, 199, 235)",
-      "rgb(255, 124, 10)",
-    ]);
+    await railColours(timeline.segments(first)).toEqual(["rgb(63, 199, 235)", "rgb(255, 124, 10)"]);
   });
 });

@@ -26,7 +26,7 @@ test("finds another Chronie on the network and offers this history to it", async
     await wifi.button("sending", /Study desktop/).click();
 
     await expect(wifi.address()).toHaveValue("192.168.1.20:51571");
-    await expect(wifi.sentTo()).resolves.toEqual([]);
+    await wifi.sentTo().toEqual([]);
   });
 
   await test.step("and the second click is what hands the history over", async () => {
@@ -35,7 +35,7 @@ test("finds another Chronie on the network and offers this history to it", async
     await expect(wifi.sendStatus()).toHaveText(
       "Sent to 192.168.1.20:51571: it now holds 1204 segments.",
     );
-    await expect(wifi.sentTo()).resolves.toEqual(["192.168.1.20:51571"]);
+    await wifi.sentTo().toEqual(["192.168.1.20:51571"]);
   });
 });
 

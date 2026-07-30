@@ -200,10 +200,6 @@ What is *not* a locator is still fair game: reading a computed colour, a
 accessibility tree has no opinion about — see `e2e/pages/paint.ts`. Keep those
 readings in a page object too, on a locator that was found by name.
 
-One consequence worth knowing before it bites: `toHaveAttribute` retries and
-`expect(somePromise).resolves` does not. Anything that arrives from the backend —
-a body on the stage, a picture in a tile — wants `expect.poll`.
-
 ## Checks
 
 `./scripts/check.sh` runs luacheck, busted, the Rust collector tests, the TypeScript

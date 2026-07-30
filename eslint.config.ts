@@ -88,4 +88,30 @@ export default tseslint.config(
     files: ["apps/desktop/e2e/**/*.ts", "scripts/**/*.ts", "**/*.config.ts"],
     languageOptions: { globals: { ...globals.node } },
   },
+
+  {
+    // The one thing in the browser suite that fails silently rather than loudly.
+    //
+    // `expect(locator).toHaveText(…)` keeps asking until the page agrees. `expect(promise)
+    // .resolves.toBe(…)` reads once and compares once, and the two are a line apart at a call
+    // site. Written against anything the backend answers — a body on the stage, a setting a
+    // command has just stored — the second one is a test that passes on the timing it happened
+    // to get. It has cost this repository a green suite over a broken page once already.
+    //
+    // So it is not available here. `e2e/pages/eventually.ts` is what a reading comes back as
+    // instead, and every matcher on one of those retries. This rule is why that note is no
+    // longer a paragraph in `CLAUDE.md` asking people to remember.
+    files: ["apps/desktop/e2e/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "MemberExpression[property.name='resolves']",
+          message:
+            "`.resolves` reads a promise once, so it cannot wait for anything. Have the page " +
+            "object hand back `Eventually<…>` from e2e/pages/eventually.ts, and assert on that.",
+        },
+      ],
+    },
+  },
 );
