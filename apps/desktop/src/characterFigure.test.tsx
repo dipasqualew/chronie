@@ -2,14 +2,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CharacterFigure } from "./characterFigure";
-import type { GalleryStage } from "./galleryStage";
+import type { ModelStage } from "./modelViewer";
+import type { MakeStage } from "./stage";
 import { ANY_CLASS } from "./transmogModal";
 import type {
+  CharacterWornSetPayload,
   InGameSet,
   InGameSetAppearancesPayload,
   TransmogAppearance,
   WornPiece,
-  WornSetPayload,
 } from "./types";
 
 afterEach(cleanup);
@@ -80,12 +81,28 @@ const CONTENTS: Record<string, InGameSetAppearancesPayload> = {
 
 const GLB = "data:model/gltf-binary;base64,AAAA";
 
-/** A stage that paints nothing, so the tests need no WebGL and no `.glb` to parse. */
-const stage = (): GalleryStage =>
-  ({
-    paint: () => Promise.resolve(),
-    dispose: () => {},
-  }) as unknown as GalleryStage;
+/** The body drawn on a character the addon has read at a barber's chair, which is the good case. */
+const HERSELF: CharacterWornSetPayload = { model: GLB, likeness: "themselves" };
+
+/**
+ * A stage that draws nothing, so the tests need no WebGL and no `.glb` to parse.
+ *
+ * It names its canvas the way `createModelStage` does, because that is the whole of what anything
+ * outside the pane can see of what is on it — and what the assertions below are written against.
+ */
+const stage =
+  (): MakeStage =>
+  (container: HTMLElement, label?: string): ModelStage => {
+    const canvas = container.ownerDocument.createElement("canvas");
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", label ?? "The model, drawn");
+    container.replaceChildren(canvas);
+    return {
+      show: () => Promise.resolve(),
+      resetCamera: () => {},
+      dispose: () => {},
+    };
+  };
 
 interface Shown {
   loadAppearances: ReturnType<typeof vi.fn>;
@@ -95,13 +112,15 @@ interface Shown {
 function show(
   sets: InGameSet[] | null,
   {
-    drawn = { model: GLB } as WornSetPayload,
+    drawn = HERSELF,
     appearances = CONTENTS,
     failWith,
+    createStage = stage(),
   }: {
-    drawn?: WornSetPayload;
+    drawn?: CharacterWornSetPayload;
     appearances?: Record<string, InGameSetAppearancesPayload>;
     failWith?: string;
+    createStage?: MakeStage;
   } = {},
 ): Shown {
   const loadAppearances = vi.fn((ids: number[]) =>
@@ -118,7 +137,7 @@ function show(
       sets={sets}
       loadAppearances={loadAppearances}
       loadWorn={loadWorn}
-      createGalleryStage={stage}
+      createStage={createStage}
     />,
   );
   return { loadAppearances, loadWorn };
@@ -209,9 +228,85 @@ describe("CharacterFigure", () => {
 
   /** The pieces have places and this install has no model to put in them. */
   it("says so where the install can draw the set on nobody", async () => {
-    show([TIDEGLASS], { drawn: { model: null } });
+    show([TIDEGLASS], { drawn: { model: null, likeness: "race" } });
 
     await expect(screen.findByText(/holds nothing to draw this set/)).resolves.toBeTruthy();
+  });
+
+  /**
+   * The fault behind #222, as a reader met it.
+   *
+   * The backend used to fall back to the *reader's* own invented body for a character it could not
+   * recognise, so a page whose whole job is "who is this" answered it with a stranger and said
+   * nothing at all about having done so. On the machine that reported it, no character had ever
+   * had a look stored, which made that every character on the roster.
+   */
+  it("draws nobody, and says so, where it has not read who the character is", async () => {
+    show([TIDEGLASS], { drawn: { model: null, likeness: "nobody" } });
+
+    await expect(
+      screen.findByText(/Chronie has not read who Aster-Vale is yet/),
+    ).resolves.toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  /**
+   * Most of a roster, and the other half of #222's third complaint: the race is readable wherever
+   * a character is standing and their colouring is only readable at a barber's chair, so the body
+   * is the right shape at the game's own default skin. That is worth drawing and it is worth
+   * saying, because a reader who is not told reads the default skin as Chronie being wrong.
+   */
+  it("says the colouring is the game's own where only the race has been read", async () => {
+    show([TIDEGLASS], { drawn: { model: GLB, likeness: "race" } });
+
+    await expect(
+      screen.findByText(/at the colours the game itself opens on/),
+    ).resolves.toBeTruthy();
+  });
+
+  /** And says nothing of the sort about a character the addon caught at a barber's chair. */
+  it("says nothing about colouring for a character read as themselves", async () => {
+    show([TIDEGLASS]);
+
+    await screen.findByRole("img", { name: "Aster-Vale wearing Tideglass, drawn" });
+    expect(screen.queryByText(/at the colours the game itself opens on/)).toBeNull();
+  });
+
+  /**
+   * A live pane, not a gallery tile — the other half of #222.
+   *
+   * A gallery stage draws a 256-pixel bitmap onto a plain 2D canvas because a grid cannot afford
+   * twenty WebGL contexts; a portrait is one picture and can afford the real thing, which is what
+   * makes it big, sharp, and a model rather than a bitmap when the reader drags it. The observable
+   * difference is that it is the app's one live stage doing the drawing, and that it offers the way
+   * back out of a drag that only a live camera has.
+   */
+  it("draws on the app's own live pane, with a way back out of a drag", async () => {
+    const made: string[] = [];
+    const reset = vi.fn();
+    const createStage: MakeStage = (container, label) => {
+      made.push(label ?? "");
+      container.replaceChildren(container.ownerDocument.createElement("canvas"));
+      return { show: () => Promise.resolve(), resetCamera: reset, dispose: () => {} };
+    };
+    show([TIDEGLASS], { createStage });
+
+    const back = await screen.findByRole("button", { name: "Reset camera" });
+    fireEvent.click(back);
+
+    expect(made).toEqual(["Aster-Vale wearing Tideglass, drawn"]);
+    expect(reset).toHaveBeenCalled();
+  });
+
+  /**
+   * A machine with no working 3D at all — a remote desktop, a virtual machine, a driver the
+   * browser has blocklisted — is told why rather than shown an empty rectangle.
+   */
+  it("says why out loud when the pane cannot be made at all", async () => {
+    const createStage: MakeStage = () => Promise.reject(new Error("WebGL is not available here."));
+    show([TIDEGLASS], { createStage });
+
+    await expect(screen.findByText("WebGL is not available here.")).resolves.toBeTruthy();
   });
 
   /**

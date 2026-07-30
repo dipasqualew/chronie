@@ -169,6 +169,28 @@ Two numberings meet at that seam and they disagree. `UnitSex` answers 1 for a un
 business claiming to know what one says, and `look.rs` translates it beside the table it is
 translating into.
 
+**What that limit costs is a skin colour, and it is worth saying which of two things "the
+character does not look like the one in the game" is.** #222 reported it as the customization being
+wrong, and it is not: the chain from a swatch to a picture was checked against the game's own
+answer, which is `ChrCustomizationChoice.SwatchColor` — a column nothing in this app reads, so it
+is a genuinely independent statement of what a swatch should come out as. On 12.0.5.67823 the Night
+Elf Female's skin option (`ChrCustomizationOption` 49) offers 27 swatches, and rendering them
+`--unlit` through the app's own pipeline lands on the colour that column states: swatch 819 is
+`0x56586D` in the table and `#586274` on the body, swatch 801 — the one the screen opens on, by
+`OrderIndex` *and* by `UiOrderIndex` — is `0xCE9CAB` and comes out the dusty pink that is. Read as
+`0xRRGGBB` in both cases; there is no offset anywhere on the chain, per race or otherwise. The late
+ids on that option (8294–8296, which are where a Death Knight's pallor lives) are ordinary rows of
+the same table filed after the rest, gated in the game's own screen by `ChrCustomizationReqID` and
+not by anything about their numbering.
+
+So the wrongness is an absence rather than a mistake: a character nobody has had a haircut on has
+no answers at all, and the app draws the swatch the game itself opens on. That is right, and it is
+not the player's character. What made it read as a bug was the *fallback* — `character_worn_set`
+answering a character it could not recognise with the reader's own invented body, which on the
+machine that reported it was a Kul Tiran Male standing in for a roster of night elves, with nothing
+on screen saying so. `character::Likeness` is that, made explicit: nobody, their race, or
+themselves, said out loud beside the picture.
+
 **A swatch's geoset can decline in two opposite ways, and one of them is a row to drop.**
 `ChrCustomizationGeoset` states a group and a value, and `0` means the group is switched off —
 which has to be kept, or a character wears the necklace she declined. `-1` is the other thing,

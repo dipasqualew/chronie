@@ -7,9 +7,9 @@
  * not a slow drift in memory — it is a picture somewhere else that stops working, several clicks
  * later, for no reason anybody can see on screen.
  *
- * That is why the two live panes in this app — the outfit pane and the appearance modal — share
- * this rather than each keeping their own copy of the arrangement. They had the same one, twice,
- * and it was subtly wrong in both:
+ * That is why the three live panes in this app — the outfit pane, the appearance modal and a
+ * character's portrait — share this rather than each keeping their own copy of the arrangement.
+ * Two of them had the same one, twice, and it was subtly wrong in both:
  *
  *  - **The promise is what is held, not the stage.** Making one is asynchronous, because three.js
  *    and its loader are imported on demand, so there is a window between "something asked for a
@@ -30,8 +30,18 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Focus } from "./gallery";
 import type { ModelStage } from "./modelViewer";
 
-/** Makes a stage inside `container`. Asynchronous because three.js is imported on demand. */
-export type MakeStage = (container: HTMLElement) => ModelStage | Promise<ModelStage>;
+/**
+ * Makes a stage inside `container`. Asynchronous because three.js is imported on demand.
+ *
+ * `label` is what the picture on it is of, as a screen reader is told it — a canvas says nothing
+ * about itself, so this is the whole of what anything but a pair of eyes has to go on. Two of the
+ * three panes name themselves for what they are and ignore it; a portrait names itself for *whom*
+ * it is of, which is not known where the stage is made.
+ */
+export type MakeStage = (
+  container: HTMLElement,
+  label?: string,
+) => ModelStage | Promise<ModelStage>;
 
 export interface PaneStage {
   /**
@@ -57,8 +67,12 @@ export interface PaneStage {
  *
  * Made on demand rather than on mount: the appearance modal is mounted for the whole life of the
  * window and holds a context only once somebody has clicked through to a picture.
+ *
+ * `label` is read once, when the stage is made, because that is when the canvas it names is made.
+ * A pane whose label outlives its picture — a portrait moving to another outfit — is a pane that
+ * should be remounted rather than renamed, and `characterFigure.tsx` keys it so that it is.
  */
-export function usePaneStage(createStage: MakeStage): PaneStage {
+export function usePaneStage(createStage: MakeStage, label?: string): PaneStage {
   /** The stage, or the promise of one. See the note above on why this rather than the stage. */
   const starting = useRef<Promise<ModelStage> | null>(null);
   /** The one that has finished being made, for the things a click has to do straight away. */
@@ -84,7 +98,7 @@ export function usePaneStage(createStage: MakeStage): PaneStage {
       const mine = era.current;
       // One stage, and one attempt to make one: two quick clicks would otherwise each start a
       // renderer and the second would be left running with nothing pointing at it.
-      starting.current ??= Promise.resolve(createStage(container));
+      starting.current ??= Promise.resolve(createStage(container, label));
       const stage = await starting.current;
       // Given back while it was being made, which is exactly what a torn-down effect does. The
       // teardown disposed this stage already; drawing on it now would be drawing on a dead
@@ -94,7 +108,7 @@ export function usePaneStage(createStage: MakeStage): PaneStage {
       await stage.show(glb, focus);
       return mine === era.current;
     },
-    [createStage],
+    [createStage, label],
   );
 
   const resetCamera = useCallback(() => made.current?.resetCamera(), []);

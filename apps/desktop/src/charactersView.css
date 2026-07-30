@@ -2,6 +2,24 @@
  * The roster and the character it opens: a list down one side, a profile down the other.
  */
 
+/* Wider than the measure, because this is a desktop application and this view is three columns of
+   substance side by side rather than a column of prose (#222): a roster, a page of facts and a
+   person. 1180px is the width a page of text wants; at that width the character had to be either
+   small or on top of everything else, and a maximised window left a field of background down each
+   side of it.
+ *
+ * It reaches *out* of `.wrap` rather than widening it, so the bar above and every other view keep
+ * the measure they were designed at — and so the tabs do not jump sideways when a reader arrives
+ * here. `--reach` is how far past that measure it may go on each side, and it is the reason this is
+ * arithmetic rather than a number: 0 in a window no wider than the measure, capped at 190px so the
+ * roster does not end up half a screen from the character it opens, and 16px short of the window's
+ * own edge in between. That margin also absorbs a classic scrollbar, which `100vw` counts and the
+ * page's own width does not — the difference being a horizontal scrollbar on Windows. */
+#characters-view {
+  --reach: clamp(0px, calc((100vw - 1180px) / 2 - 16px), 190px);
+  margin-inline: calc(-1 * var(--reach));
+}
+
 /* The roster stays beside its character rather than above them: picking somebody is a
    thing a reader does repeatedly, and a list that scrolled away on every pick would make
    comparing two characters a matter of memory. It stacks below 900px, where two columns
@@ -40,6 +58,25 @@
 .roster-numbers .muted { font-size: 11px; }
 
 .roster-detail { padding: 16px; }
+
+/* The character beside their own facts, rather than under a band holding a picture of them.
+   Two columns because the two are different kinds of thing and neither is a caption for the
+   other: the left is a page to read down, the right is a person to look at, and the person does
+   not change when the reader switches from Summary to Activity.
+
+   The portrait column is a proportion with a floor and a ceiling, which is what makes it a
+   portrait at every width the window has: below about 300px a standing character is a stripe,
+   and past 460px it starts taking the column of facts' measure without getting any more
+   readable. It stacks at 1000px, where two columns leave neither of them anything. */
+.profile { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 32%, 460px); gap: 18px; align-items: start; }
+.profile-facts { min-width: 0; }
+@media (max-width: 1000px) {
+  .profile { grid-template-columns: 1fr; }
+  /* And above the facts again once it is the only column, because a picture of somebody is what
+     a reader arriving on their page is looking for first. */
+  .profile > .figure { grid-row: 1; }
+}
+
 .profile-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .profile-head .circle { width: 40px; height: 40px; font-size: 13px; }
 .profile-head h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
@@ -59,7 +96,7 @@
    inside a panel that is itself inside a view somebody already chose with the tabs at the top
    of the window — a second row of the same weight would read as a second application. */
 .profile-pages {
-  display: flex; gap: 4px; margin: 14px 0 12px;
+  display: flex; gap: 4px; margin: 0 0 12px;
   border-bottom: 1px solid var(--border);
 }
 .profile-pages button {

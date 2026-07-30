@@ -774,24 +774,25 @@ async fn worn_set(
 /// what does this Tauren I play look like in the set she saved — and answering it with the
 /// Human Female the transmog screen happens to be set to would be answering somebody else's.
 ///
-/// Falls back to the reader's own body for a character this install cannot draw. That is not a
-/// failure worth reporting: a race the game does not have, and — far more often — a character
-/// the addon has never read a race off at all, because a look is only stored once the addon has
-/// seen one. A picture on the wrong body is still a picture of the clothes, which is most of
-/// what the pane is for, and the alternative is an empty stage on most of a roster.
+/// **Which is exactly what it used to do.** A character this install cannot recognise fell back
+/// to the reader's own body, on the argument that a picture on the wrong body is still a picture
+/// of the clothes. That argument belongs to the wardrobe and not to a portrait: on the machine
+/// that reported #222 there was no look stored for anybody, so every night elf on the roster was
+/// drawn as the Kul Tiran Male the transmog screen happened to be set to, and nothing said so.
+/// So the fallback is gone, and what comes back instead says how much of the body is really the
+/// character's — see [`character::Likeness`], and `look.rs` for why it is so often so little.
 #[tauri::command]
 #[specta::specta]
 async fn character_worn_set(
     character: String,
     pieces: Vec<dto::WornPiece>,
     state: State<'_, AppState>,
-) -> Result<dto::WornSetPayload, String> {
+) -> Result<dto::CharacterWornSetPayload, String> {
     let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
-    let fallback = character_look_of(&state)?;
     let looks = collector::character_looks(&state.database_path())?;
     read_game_files(&state, move |files| {
-        let who = character::who_is(files, &looks, &character)?.unwrap_or(fallback);
-        character::worn_set_of(files, &pieces, &who)
+        let who = character::who_is(files, &looks, &character)?;
+        character::own_worn_set_of(files, &pieces, who.as_ref())
     })
     .await
     .and_then(dto::convert)

@@ -17,6 +17,7 @@ import type {
   CharacterChosen,
   CharacterModelPayload,
   CharacterPick,
+  CharacterWornSetPayload,
   CombatLogStatus,
   CustomSetPiece,
   CustomSetsPayload,
@@ -325,10 +326,21 @@ export const e2eDesktop = {
     mock ? Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null }) : missingMock(),
   // The same outfit on a named character's body. The fixture holds one model, so it records
   // whose body was requested and answers the picture for the clothes.
-  characterWornSet: (character: string, pieces: WornPiece[]): Promise<WornSetPayload> => {
+  //
+  // The likeness comes off the same list the transmog panel's shortcut is drawn from, because that
+  // is the list the real backend resolves against too — `character_looks`, by way of `who_is`. So
+  // a character the addon has read at a barber is themselves, one it has only seen standing about
+  // is their race, and one it has never seen at all is nobody and gets no picture: a mock that
+  // answered a body for everybody would hide the whole of what #222 was about.
+  characterWornSet: (character: string, pieces: WornPiece[]): Promise<CharacterWornSetPayload> => {
     if (!mock) return missingMock();
     mock.wornSetsAskedFor.push(character);
-    return Promise.resolve({ model: mock.wornSets[wornSetKey(pieces)] ?? null });
+    const known = mock.characterLook.characters.find((one) => one.character === character);
+    if (!known) return Promise.resolve({ model: null, likeness: "nobody" });
+    return Promise.resolve({
+      model: mock.wornSets[wornSetKey(pieces)] ?? null,
+      likeness: known.picked.length ? "themselves" : "race",
+    });
   },
   // A page of the wardrobe, each look on a body of its own. A page at a time rather than a row
   // at a time because the two cost almost the same: the body, her skin and the game's six tables

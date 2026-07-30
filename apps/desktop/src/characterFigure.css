@@ -1,21 +1,65 @@
 /*
- * The portrait at the top of a character's page.
+ * The portrait on a character's page.
  *
- * A fixed frame rather than one that grows with its contents: the picture arrives a second after
- * the rest of the page and everything below it would jump down when it did. So the frame is the
- * frame whether it holds a body, a sentence or a wait, and only what is inside it changes.
+ * **A tall pane rather than a wide band**, which is the whole of what #222 asked for here. It was
+ * a 260-pixel strip across the top of the page holding a 256-pixel bitmap letterboxed into the
+ * middle of it, so the character was small, soft, and had an empty field of background either
+ * side. A person is taller than they are wide; a pane for looking at one should be too.
+ *
+ * The size is stated here and nowhere else. `modelViewer.ts` sizes the *drawing buffer* in device
+ * pixels and deliberately sets no inline style — the packaged window's policy drops those — so how
+ * large the canvas is laid out is the stylesheet's to say, once per pane, and a pane that does not
+ * say it grows itself off the screen a frame at a time. That is #146, and `.model-canvas` in
+ * `modelViewer.css` is the rule that answers it; `min-height: 0` below is the other half, so that
+ * nothing inside the pane can add to the height the pane was given.
  */
-.figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
+.figure { margin: 0; display: grid; gap: 8px; }
+
+/* Fixed rather than grown from its contents: the picture arrives a second after the rest of the
+   page, and a frame that sized itself to a sentence and then to a body would move everything
+   beside it when it did. Tall enough to be worth looking at on a desktop, and capped so that a
+   maximised window on a large screen does not hand over a portrait nobody can see the whole of
+   without scrolling. */
 .figure-stage {
-  width: 100%; height: 260px; display: grid; place-items: center;
+  position: relative;
+  width: 100%; height: clamp(360px, 62vh, 620px); min-height: 0;
+  display: grid; place-items: center;
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2);
   overflow: hidden;
 }
-.figure-stage .mog-shot { width: 100%; height: 100%; }
-.figure-stage canvas { width: 100%; height: 100%; display: block; cursor: grab; }
-.figure-stage canvas:active { cursor: grabbing; }
-.figure-note { margin: 0; padding: 0 16px; text-align: center; font-size: 12px; }
+/* The pane the renderer draws into, filling the frame. Turning her is a drag, so the pointer
+   says so — and the browser is told not to read the same gesture as a scroll, which on a
+   trackpad it otherwise will. */
+.figure-pane {
+  position: absolute; inset: 0; min-height: 0;
+  touch-action: none; cursor: grab;
+}
+.figure-stage[data-state="empty"] .figure-pane { cursor: default; }
+.figure-pane:active { cursor: grabbing; }
+/* Over the note rather than under it: an empty pane still holds a canvas, and the sentence
+   saying why it is empty has to be the thing in front of it. */
+.figure-note {
+  position: relative; margin: 0; padding: 0 20px;
+  text-align: center; font-size: 12px; max-width: 40ch;
+}
+
+/* The way back out of a drag, in the corner of the picture it belongs to — the same control the
+   outfit pane carries, and drawn the same way. */
+.figure-reset {
+  position: absolute; right: 8px; bottom: 8px;
+  padding: 4px 9px; font-size: 11px;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  color: var(--text-muted); cursor: pointer;
+}
+.figure-reset:hover { color: var(--text-primary); border-color: var(--series-1); }
 
 .figure-pick { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .figure-pick label { color: var(--text-muted); }
-.figure-pick select { max-width: 220px; }
+.figure-pick select { max-width: 220px; flex: 1; min-width: 0; }
+
+/* Why the body is the right shape in the game's own colours rather than the player's. Quiet and
+   below everything else, because it is a fact about the picture rather than about the character —
+   but present, because a reader who is not told reads the default skin as Chronie being wrong
+   about their alt, which is exactly what happened in #222. */
+.figure-caveat { margin: 0; font-size: 11.5px; line-height: 1.45; }
