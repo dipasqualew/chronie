@@ -1826,14 +1826,18 @@ fn start_automatic_updates(app: AppHandle) {
         loop {
             let handle = app.clone();
             let _ = tauri::async_runtime::block_on(async move {
-                let updater = handle.updater().map_err(|error| error.to_string())?;
-                if let Some(update) = updater.check().await.map_err(|error| error.to_string())? {
+                let updater = handle.updater().context("asking Tauri for the updater")?;
+                if let Some(update) = updater
+                    .check()
+                    .await
+                    .context("asking the update endpoint what it has")?
+                {
                     update
                         .download_and_install(|_, _| {}, || {})
                         .await
-                        .map_err(|error| error.to_string())?;
+                        .context("downloading and installing the update")?;
                 }
-                Ok::<(), String>(())
+                Ok::<(), Failure>(())
             });
             std::thread::sleep(Duration::from_secs(4 * 60 * 60));
         }
