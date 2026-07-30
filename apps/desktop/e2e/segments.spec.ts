@@ -63,6 +63,12 @@ test("digs from a session down into a single segment and back out again", async 
     // short window narrowed the header instead of cropping it — and only the browser does layout,
     // which is why this is out here rather than in a component test.
     await expect.poll(() => detail.heroSpan("Glass Caverns")).toBeCloseTo(1, 2);
+
+    // And the whole picture, which is the other half of the same report. The band used to have a
+    // shape of its own and crop whatever arrived to fit it; the game hands over two shapes and
+    // only two, and neither is that one, so it cut a fifth off every banner. This place is a
+    // scenario, so what it is being asked to hold here is a banner's 2:1.
+    await expect.poll(() => detail.heroShown("Glass Caverns")).toBeCloseTo(1, 2);
   });
 
   // A fight arrives as the id the client handed `ENCOUNTER_END` and the name it was called at
@@ -203,6 +209,13 @@ test("digs from a session down into a single segment and back out again", async 
   await test.step("and says none of it when the client never said", async () => {
     await detail.next().click();
     await expect(detail.title()).toHaveText("Copperwood Depths");
+
+    // The other shape, and the one the old band treated worst. This place is open world, so it has
+    // no banner and comes as the map the game draws of it — 3:2, against a band that was 5:2, so
+    // two fifths of its height went. Two fifths of a map is its border, its coastlines and half
+    // its labels: Isle of Dorn arrived as a strip of parchment with the middle of an island on it.
+    await expect.poll(() => detail.heroShown("Copperwood Depths")).toBeCloseTo(1, 2);
+    await expect.poll(() => detail.heroSpan("Copperwood Depths")).toBeCloseTo(1, 2);
 
     await expect(detail.gainFor("Rustward Scrip")).toContainText("+2");
     await expect(detail.gainFor("Rustward Scrip")).not.toContainText("(");

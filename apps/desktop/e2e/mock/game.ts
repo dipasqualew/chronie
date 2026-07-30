@@ -57,20 +57,34 @@ export const placeIcons: E2EMock["placeIcons"] = {
     "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
-// The picture of each place, as the header a segment's modal opens with. The scenario has one of
-// its own and every other place is answered with the stand-in beside it — which is what the real
-// backend does with a place it has neither a banner nor a map of, so every segment's modal opens
-// with a header and only one of them opens with the place's own. Split in two rather than keyed by
-// a magic name because a fixture cannot list every place a test might ask about.
+// The picture of each place, as the header a segment's modal opens with. Every place is answered —
+// the two the scenario names with pictures of their own, and anything else a test asks about with
+// the stand-in beside them, which is what the real backend does with a place it has neither a
+// banner nor a map of. Split in two rather than keyed by a magic name because a fixture cannot
+// list every place a test might ask about.
+//
+// **The shapes are the point of these and are not arbitrary.** Measured against a real install on
+// 12.0.5.67823, the game hands over exactly two: a dungeon's banner is 2:1, every one of them, and
+// a zone — which has no banner and comes as the map the game draws of it — is 3:2. The header is
+// built to take the shape of whatever is in it rather than to impose one, so a fixture where
+// everything was the same shape could not tell a band that adapts from a band that crops. Glass
+// Caverns is a scenario and so carries the banner's 2:1; Copperwood Depths is open world and so
+// carries a map's 3:2; the stand-in is itself a banner and is 2:1. See `heroes::heroes_of`.
 export const placeHeroes: E2EMock["placeHeroes"] = {
   own: {
+    // 16×8.
     "Glass Caverns":
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
-      "QVR42mM4dGjTfxhmGBkKALEUmVjkZBLdAAAAAElFTkSuQmCC",
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAAE0lE" +
+      "QVR42mOw8KsgCTGMaqCFBgAjN38BDxj7fwAAAABJRU5ErkJggg==",
+    // 12×8.
+    "Copperwood Depths":
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAICAIAAABChommAAAAEUlE" +
+      "QVR42mOY1hBCEDGMKgIAmXqHwaAfH/4AAAAASUVORK5CYII=",
   },
+  // 16×8.
   standIn:
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
-    "QVR42mNwbjn2Hx9mGBkKAOaSooFOMlBLAAAAAElFTkSuQmCC",
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAAEUlE" +
+    "QVR42mNIIBEwjGqghQYAR/qQAZWVqNoAAAAASUVORK5CYII=",
 };
 
 // The portrait each boss is drawn with, keyed by the encounter id the segment recorded — the same
