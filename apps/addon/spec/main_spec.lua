@@ -3411,6 +3411,32 @@ describe("addon integration", function()
             assert.is_false(app.tally.summary().encounters[1].success)
         end)
 
+        -- The whole of dipasqualew/chronie#231, wired up: Trial of the Crusader 25 Heroic sent
+        -- five failed ENCOUNTER_ENDs for the one Northrend Beasts pull that killed it, and the
+        -- report showed four wipes of a boss that died on the first try. The saved-instance
+        -- state the addon already scans is what knows better, so this proves the addon reaches
+        -- for it — one kill, from five failures and a lockout that has the boss down.
+        it("reads a phased encounter its lockout has down as a single kill", function()
+            local app, recorded = zonedIn({
+                savedInstances = {
+                    {
+                        name = "Trial of the Crusader", difficultyId = 6, isRaid = true,
+                        maxPlayers = 25, difficultyName = "25 Player (Heroic)", reset = 500000,
+                        bosses = { { name = "Northrend Beasts", killed = true } },
+                    },
+                },
+            })
+
+            for _ = 1, 5 do
+                recorded.frame:fire("ENCOUNTER_END", 1088, "Northrend Beasts", 6, 25, 0)
+            end
+
+            local encounters = app.tally.summary().encounters
+            assert.equal(1, #encounters)
+            assert.equal("Northrend Beasts", encounters[1].name)
+            assert.is_true(encounters[1].success)
+        end)
+
         it("reads the keystone off the client when a run starts", function()
             local app, recorded = zonedIn({
                 activeKeystone = { level = 14, mapId = 378, affixes = { 9, 6 } },

@@ -180,6 +180,11 @@ local _, ns = ...
 ---@field factionState fun(faction: string): FactionStanding? Where the character stands with
 ---one faction right now. Absent, or nil for a faction the client cannot place, leaves the
 ---gain as a bare amount.
+---@field bossSavedAsKilled fun(name: string, difficultyId: integer?): boolean? Whether the
+---character's own saved-instance state has that boss down. This is the server's account of
+---the outcome, and it is the only one available for the encounters the client never credits
+---— see `resolveEncounters`. nil for a boss no lockout mentions, which is not the same as
+---false: a dungeon leaves no save, so nothing is claimed either way.
 
 -- Lua-pattern magic characters, escaped so literal chunks of a printf template match verbatim.
 local MAGIC = "([%^%$%(%)%.%[%]%*%+%-%?%%])"
@@ -277,12 +282,87 @@ function ns.formatMoney(copper)
     return sign .. table.concat(parts, " ")
 end
 
+---How long after a fight ended another end for the same boss is still the same pull.
+---
+---The encounter engine re-arms itself while a phased fight's leftovers are alive, and each
+---re-arm sends its own ENCOUNTER_END. Trial of the Crusader 25 Heroic sends five for one
+---Northrend Beasts pull, and the gaps between them were 0, 2, 8, 9, 11, 12, 14 and 19
+---seconds across four clears. Thirty seconds sits clear of all of them and still well under
+---what a real second pull costs, because a wipe means dying, releasing, running back and
+---re-engaging — minutes, not seconds.
+local ENCOUNTER_REARM_SECONDS = 30
+
+---The fight an incoming end belongs to, when it is a re-arm of one already recorded rather
+---than a pull of its own. Same boss at the same difficulty, ended moments ago.
+---@param encounters EncounterEvent[]
+---@param event EncounterEvent
+---@return EncounterEvent?
+local function rearmedPull(encounters, event)
+    local latest = encounters[#encounters]
+    for index = #encounters, 1, -1 do
+        if encounters[index].id == event.id then
+            latest = encounters[index]
+            break
+        end
+    end
+    if not latest or latest.id ~= event.id or latest.difficultyId ~= event.difficultyId then
+        return nil
+    end
+    if not latest.at or not event.at or event.at - latest.at > ENCOUNTER_REARM_SECONDS then
+        return nil
+    end
+    return latest
+end
+
+---Settles what each fight's outcome actually was, which is not always what the client said.
+---
+---`success` answers "did the client credit a kill", and for some encounters it never does.
+---Across four Trial of the Crusader clears the client reported failure for every Northrend
+---Beasts and Faction Champions end it sent — seventeen and four of them — while the
+---character's own saved-instance state had both bosses down the whole time. Calling those
+---wipes is not a wipe count, it is a fabrication (dipasqualew/chronie#231). So where the
+---client never credited a kill for a boss anywhere in the segment and the lockout has that
+---boss saved as killed, the lockout is believed: it is the server's own record of what died.
+---
+---Only where it never credited one. A boss the raid wiped on and then killed has the client's
+---own account of which pull was which, and that beats a flag which says only that the boss is
+---dead by now — promoting the earlier wipe there would invent a kill that never happened.
+---@param encounters EncounterEvent[]
+---@param bossSavedAsKilled fun(name: string, difficultyId: integer?): boolean?
+---@return EncounterEvent[]
+local function resolveEncounters(encounters, bossSavedAsKilled)
+    local credited = {}
+    for _, fight in ipairs(encounters) do
+        if fight.success then
+            credited[fight.id] = true
+        end
+    end
+
+    local resolved = {}
+    for index, fight in ipairs(encounters) do
+        local success = fight.success
+        if not success and not credited[fight.id] and fight.name then
+            success = bossSavedAsKilled(fight.name, fight.difficultyId) == true
+        end
+        resolved[index] = {
+            id = fight.id,
+            name = fight.name,
+            at = fight.at,
+            difficultyId = fight.difficultyId,
+            groupSize = fight.groupSize,
+            success = success,
+        }
+    end
+    return resolved
+end
+
 ---@param deps SegmentTallyDeps
 ---@return SegmentTally
 function ns.newSegmentTally(deps)
     deps = deps or {}
     local itemSellPrice = deps.itemSellPrice or function() return 0 end
     local factionState = deps.factionState or function() return nil end
+    local bossSavedAsKilled = deps.bossSavedAsKilled or function() return nil end
 
     local lootPatterns = compileAll(deps.lootFormats)
     local factionPatterns = compileAll(deps.factionFormats)
@@ -648,9 +728,23 @@ function ns.newSegmentTally(deps)
 
         ---A boss fight that ended. Wipes are recorded alongside kills, so the ratio between
         ---them survives into the record; a reader that only wants kills filters on success.
+        ---
+        ---One pull, not one event: an end that only re-arms a fight already recorded extends
+        ---that fight rather than appending another. What the outcome then was is settled at
+        ---summary time — see `resolveEncounters`.
         ---@param event EncounterEvent
         encounter = function(event)
             if not segment.active or not event or not event.id then
+                return
+            end
+            local rearmed = rearmedPull(segment.encounters, event)
+            if rearmed then
+                rearmed.at = event.at or rearmed.at
+                -- Any credited kill among a pull's ends is the pull's outcome: the client
+                -- sent a 309ms failure and then the kill for one Icecrown Gunship pull.
+                rearmed.success = rearmed.success or (event.success and true or false)
+                rearmed.name = rearmed.name or event.name
+                rearmed.groupSize = rearmed.groupSize or event.groupSize
                 return
             end
             segment.encounters[#segment.encounters + 1] = {
@@ -1046,7 +1140,10 @@ function ns.newSegmentTally(deps)
                 housingItems = ns.copyEventList(specs.housingItems, segment.housingItems),
                 housingXP = segment.housingXP,
                 housingLevelUps = ns.copyEventList(specs.housingLevelUps, segment.housingLevelUps),
-                encounters = ns.copyEventList(specs.encounters, segment.encounters),
+                encounters = ns.copyEventList(
+                    specs.encounters,
+                    resolveEncounters(segment.encounters, bossSavedAsKilled)
+                ),
                 equipsetChanges = ns.copyEventList(specs.equipsetChanges, segment.equipsetChanges),
                 keystone = ns.copyDetail(details.keystone, segment.keystone),
                 delve = ns.copyDetail(details.delve, segment.delve),
