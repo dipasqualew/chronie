@@ -9,7 +9,7 @@
  * `SegmentHead` and `SegmentBody`, which are the whole of what the two frames a reader meets one
  * in have in common. This file holds the frame the roster and the table open: a modal over
  * whatever the reader was reading. The timeline opens the other one, docked beside the spine —
- * see `segmentRail.tsx`.
+ * see `segmentPanel.tsx`.
  */
 
 import "./segmentModal.css";
@@ -907,9 +907,9 @@ export function SegmentHead({
 /**
  * Everything the segment holds, in the one box on the screen that scrolls.
  *
- * The frame around it is capped — at a share of the window in a modal, at the height of the
- * window in the rail — so this is what gives way, and the `ref` is how the frame puts it back to
- * the top when the reader steps to another segment.
+ * The frame around it is capped — at a share of the window in the modal, at the height of the
+ * window in the panel — so this is what gives way, and the `ref` is how the frame puts it back
+ * to the top when the reader steps to another segment.
  */
 export function SegmentBody({
   segment,
