@@ -7,10 +7,13 @@ import {
   classLabel,
   classNames,
   expansionName,
-  filterSets,
-  groupSets,
+  filterFamilies,
+  foldFamilies,
+  groupFamilies,
   patchName,
+  variantLabel,
 } from "./transmog";
+import type { Family } from "./transmog";
 import type { Alternate, TransmogSet } from "./types";
 
 /** A set with only the fields a test cares about spelled out. */
@@ -36,6 +39,18 @@ const alternate = (fields: Partial<Alternate> & Pick<Alternate, "id" | "name">):
   reason: "faction",
   ...fields,
 });
+
+/**
+ * The grid, as the view builds it: the game's sets folded into families and then filtered.
+ *
+ * Both halves in one call because they are one answer — a filter reads the whole family, so a
+ * test that filtered a list of sets would be testing a thing the window never does.
+ */
+const filtered = (sets: TransmogSet[], filters: Parameters<typeof filterFamilies>[1]): Family[] =>
+  filterFamilies(foldFamilies(sets), filters);
+
+/** The card each surviving family draws, which is what the grid shows. */
+const ids = (families: Family[]): number[] => families.map((one) => one.shown.id);
 
 // The four masks below are the game's own armour classes, and between them they cover most
 // of the sets in it; the numbers are the ones the fixtures and the real tables both carry.
@@ -105,7 +120,7 @@ describe("patchName", () => {
   });
 });
 
-describe("filterSets", () => {
+describe("filtering the grid", () => {
   const SETS = [
     set({ id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire", expansionId: 5 }),
     set({
@@ -150,35 +165,32 @@ describe("filterSets", () => {
     }),
   ];
   const none = { search: "", expansion: "", klass: "" };
-  const ids = (sets: TransmogSet[]): number[] => sets.map((found) => found.id);
 
   it("keeps every set when nothing is filled in", () => {
-    expect(ids(filterSets(SETS, none))).toEqual([205, 203, 201, 202]);
+    expect(ids(filtered(SETS, none))).toEqual([205, 203, 201, 202]);
   });
 
   it("searches the collection as well as the set", () => {
-    expect(ids(filterSets(SETS, { ...none, search: "tideglass" }))).toEqual([201, 202]);
-    expect(ids(filterSets(SETS, { ...none, search: "shroud" }))).toEqual([205]);
-    expect(ids(filterSets(SETS, { ...none, search: "  EMBERFORGE  " }))).toEqual([203]);
-    expect(filterSets(SETS, { ...none, search: "nothing like it" })).toEqual([]);
+    expect(ids(filtered(SETS, { ...none, search: "tideglass" }))).toEqual([201, 202]);
+    expect(ids(filtered(SETS, { ...none, search: "shroud" }))).toEqual([205]);
+    expect(ids(filtered(SETS, { ...none, search: "  EMBERFORGE  " }))).toEqual([203]);
+    expect(filtered(SETS, { ...none, search: "nothing like it" })).toEqual([]);
   });
 
   it("narrows to one expansion", () => {
-    expect(ids(filterSets(SETS, { ...none, expansion: "3" }))).toEqual([201, 202]);
+    expect(ids(filtered(SETS, { ...none, expansion: "3" }))).toEqual([201, 202]);
   });
 
   // Priest is a cloth class, and a set with no class of its own is for everyone — which is
   // the case a plain mask test gets wrong.
   it("keeps a class-agnostic set alongside the class asked for", () => {
-    expect(ids(filterSets(SETS, { ...none, klass: "4" }))).toEqual([205, 201]);
-    expect(ids(filterSets(SETS, { ...none, klass: "0" }))).toEqual([205, 203]);
+    expect(ids(filtered(SETS, { ...none, klass: "4" }))).toEqual([205, 201]);
+    expect(ids(filtered(SETS, { ...none, klass: "0" }))).toEqual([205, 203]);
   });
 
   it("applies search, expansion and class together", () => {
-    expect(ids(filterSets(SETS, { search: "tideglass", expansion: "3", klass: "9" }))).toEqual([
-      202,
-    ]);
-    expect(filterSets(SETS, { search: "tideglass", expansion: "4", klass: "" })).toEqual([]);
+    expect(ids(filtered(SETS, { search: "tideglass", expansion: "3", klass: "9" }))).toEqual([202]);
+    expect(filtered(SETS, { search: "tideglass", expansion: "4", klass: "" })).toEqual([]);
   });
 
   // Everything the card itself already shows is searchable, because a reader looking at
@@ -190,15 +202,15 @@ describe("filterSets", () => {
     ["the patch", "4.0.1", [203]],
     ["the set's own id", "205", [205]],
   ])("searches %s", (_what, search, expected) => {
-    expect(ids(filterSets(WITH_METADATA, { ...none, search }))).toEqual(expected);
+    expect(ids(filtered(WITH_METADATA, { ...none, search }))).toEqual(expected);
   });
 
   // Word by word rather than as a phrase, so a reader can narrow by two facts at once without
   // learning what order the metadata happens to be written in.
   it("takes every word of a search, in any order", () => {
-    expect(ids(filterSets(WITH_METADATA, { ...none, search: "plate cataclysm" }))).toEqual([203]);
-    expect(ids(filterSets(WITH_METADATA, { ...none, search: "cataclysm plate" }))).toEqual([203]);
-    expect(filterSets(WITH_METADATA, { ...none, search: "plate pandaria" })).toEqual([]);
+    expect(ids(filtered(WITH_METADATA, { ...none, search: "plate cataclysm" }))).toEqual([203]);
+    expect(ids(filtered(WITH_METADATA, { ...none, search: "cataclysm plate" }))).toEqual([203]);
+    expect(filtered(WITH_METADATA, { ...none, search: "plate pandaria" })).toEqual([]);
   });
 
   /**
@@ -299,7 +311,7 @@ describe("filterSets", () => {
   ];
 
   it("leaves out every set that is another set's clothes", () => {
-    expect(ids(filterSets(CLUSTERS, none))).toEqual([301, 311, 321, 331]);
+    expect(ids(filtered(CLUSTERS, none))).toEqual([301, 311, 321, 331]);
   });
 
   // A folded set matching a filter on its own account is the case worth pinning down: the grid
@@ -309,7 +321,7 @@ describe("filterSets", () => {
     ["by its expansion", { search: "", expansion: "5", klass: "" }, [301, 321]],
     ["by its class", { search: "", expansion: "", klass: "9" }, [311, 321]],
   ])("never shows a folded set even when it matches %s", (_what, filters, expected) => {
-    expect(ids(filterSets(CLUSTERS, filters))).toEqual(expected);
+    expect(ids(filtered(CLUSTERS, filters))).toEqual(expected);
   });
 
   // The whole risk of folding sets away is a reader typing the name of one and getting nothing.
@@ -320,14 +332,14 @@ describe("filterSets", () => {
     ["an alternate's collection", "vanguard", [311]],
     ["an alternate's id", "322", [321]],
   ])("finds the set shown in place of one searched by %s", (_what, search, expected) => {
-    expect(ids(filterSets(CLUSTERS, { ...none, search }))).toEqual(expected);
+    expect(ids(filtered(CLUSTERS, { ...none, search }))).toEqual(expected);
   });
 
   // Every word has to be found somewhere in the cluster rather than all in one set of it, so a
   // reader who half-remembers both halves of a faction pair still lands on the card.
   it("ands the words of a search across the whole cluster", () => {
-    expect(ids(filterSets(CLUSTERS, { ...none, search: "wild warmongering" }))).toEqual([301]);
-    expect(filterSets(CLUSTERS, { ...none, search: "wild vanguard" })).toEqual([]);
+    expect(ids(filtered(CLUSTERS, { ...none, search: "wild warmongering" }))).toEqual([301]);
+    expect(filtered(CLUSTERS, { ...none, search: "wild vanguard" })).toEqual([]);
   });
 
   /**
@@ -338,20 +350,20 @@ describe("filterSets", () => {
    * class at all, which the game means as everyone rather than as nobody.
    */
   it("keeps a cluster whose only wearer of the class asked for was folded away", () => {
-    expect(ids(filterSets(CLUSTERS, { ...none, klass: "9" }))).toEqual([311, 321]);
+    expect(ids(filtered(CLUSTERS, { ...none, klass: "9" }))).toEqual([311, 321]);
   });
 
   it.each<[string, string, number[]]>([
     ["Warrior", "0", [301, 321]],
     ["Priest", "4", [311, 321, 331]],
   ])("still reads the shown set's own classes when narrowed to %s", (_what, klass, expected) => {
-    expect(ids(filterSets(CLUSTERS, { ...none, klass }))).toEqual(expected);
+    expect(ids(filtered(CLUSTERS, { ...none, klass }))).toEqual(expected);
   });
 
   // A set reissued a few expansions later is the same clothes from a different era, and the
   // reader narrowing to the later one is looking for exactly the card that swallowed it.
   it("keeps a cluster whose only set from an expansion was folded away", () => {
-    expect(ids(filterSets(CLUSTERS, { ...none, expansion: "9" }))).toEqual([321]);
+    expect(ids(filtered(CLUSTERS, { ...none, expansion: "9" }))).toEqual([321]);
   });
 
   // Four thousand of the game's sets are in no cluster at all, and the fields the backend
@@ -368,13 +380,303 @@ describe("filterSets", () => {
         sameLookAs: undefined,
       }),
     ];
-    expect(ids(filterSets(plain, none))).toEqual([331]);
-    expect(ids(filterSets(plain, { search: "duskwoven", expansion: "3", klass: "4" }))).toEqual([
+    expect(ids(filtered(plain, none))).toEqual([331]);
+    expect(ids(filtered(plain, { search: "duskwoven", expansion: "3", klass: "4" }))).toEqual([
       331,
     ]);
-    expect(filterSets(plain, { ...none, search: "warmongering" })).toEqual([]);
-    expect(filterSets(plain, { ...none, expansion: "9" })).toEqual([]);
-    expect(filterSets(plain, { ...none, klass: "9" })).toEqual([]);
+    expect(filtered(plain, { ...none, search: "warmongering" })).toEqual([]);
+    expect(filtered(plain, { ...none, expansion: "9" })).toEqual([]);
+    expect(filtered(plain, { ...none, klass: "9" })).toEqual([]);
+  });
+});
+
+/**
+ * A raid tier and a recolour, which between them are the whole of what the game's own
+ * `ParentTransmogSetID` says.
+ *
+ * 401 is the shape every modern tier has: one base set with its two harder difficulties under
+ * it, all three called the same thing, differing only in the order the game lists them and in
+ * what the artwork was measured to be. 411 is the other shape: a colour of a set, named for its
+ * colour, out of the same collection. 421 is in no family at all, which two thirds of the game's
+ * sets are not.
+ */
+const FAMILIES: TransmogSet[] = [
+  set({
+    id: 401,
+    name: "Scourgelord's Battlegear",
+    group: "Icecrown Citadel",
+    classMask: 0x0023,
+    expansionId: 2,
+    uiOrder: 2510,
+  }),
+  set({
+    id: 402,
+    name: "Scourgelord's Battlegear",
+    group: "Icecrown Citadel",
+    classMask: 0x0023,
+    expansionId: 2,
+    uiOrder: 2640,
+    parentId: 401,
+  }),
+  set({
+    id: 403,
+    name: "Scourgelord's Battlegear",
+    group: "Icecrown Citadel",
+    classMask: 0x0023,
+    expansionId: 2,
+    uiOrder: 2770,
+    parentId: 401,
+  }),
+  set({
+    id: 411,
+    name: "Earthen Copper Regalia",
+    group: "Earthen Regalia",
+    classMask: 0x0190,
+    expansionId: 10,
+  }),
+  set({
+    id: 412,
+    name: "Stonebound Earthen Regalia",
+    group: "Earthen Regalia",
+    classMask: 0x0190,
+    expansionId: 10,
+    parentId: 411,
+  }),
+  set({
+    id: 421,
+    name: "Duskwoven Shroud",
+    group: "Duskwoven Attire",
+    classMask: 0x0190,
+    expansionId: 3,
+  }),
+];
+
+describe("foldFamilies", () => {
+  const members = (families: Family[]): number[][] =>
+    families.map((one) => one.members.map((member) => member.id));
+
+  // The whole of the change: 4,911 rows of a shipping install are 2,766 things anybody would
+  // call a set of clothes, and the game says which is which.
+  it("draws one card per family, as the set the game calls its root", () => {
+    expect(ids(foldFamilies(FAMILIES))).toEqual([401, 411, 421]);
+    expect(members(foldFamilies(FAMILIES))).toEqual([[401, 402, 403], [411, 412], [421]]);
+  });
+
+  // Four of the 1,960 children a shipping install holds are a variant of a variant, and a walk
+  // that stopped at the first parent would give those a card of their own.
+  it("gathers a chain two deep under the root at the top of it", () => {
+    const chain = [
+      set({ id: 501, name: "Base" }),
+      set({ id: 502, name: "Heroic", parentId: 501 }),
+      set({ id: 503, name: "Mythic", parentId: 502 }),
+    ];
+    expect(members(foldFamilies(chain))).toEqual([[501, 502, 503]]);
+  });
+
+  // Fifteen roots of the whole table gather sets for different classes. A card standing for
+  // both would answer `class:warrior` with a body no Warrior can wear, so they stay two cards —
+  // and the mail one keeps the family's *root* out of its own members, which is the case the
+  // fallback below exists for.
+  it("splits a family whose members are not for the same classes", () => {
+    const crossing = [
+      set({ id: 601, name: "Brute of the Wastes", classMask: 0x0023 }),
+      set({ id: 602, name: "Reshii Brute's Bastion", classMask: 0x1044, parentId: 601 }),
+      set({ id: 603, name: "Void-Scarred Captain's Plate", classMask: 0x0023, parentId: 601 }),
+    ];
+    expect(members(foldFamilies(crossing))).toEqual([[601, 603], [602]]);
+  });
+
+  // A set that is another set's clothes is already spoken for by the card carrying it as an
+  // alternate, so a family must never pick it up and show it a second time.
+  it("leaves out a set that is another set's clothes", () => {
+    const folded = [
+      set({ id: 701, name: "Wild Combatant's Plate Armor" }),
+      set({
+        id: 702,
+        name: "Warmongering Combatant's Plate Armor",
+        parentId: 701,
+        sameLookAs: 701,
+      }),
+    ];
+    expect(members(foldFamilies(folded))).toEqual([[701]]);
+  });
+
+  // One family of a shipping install is headed by a root the other fold took. The card has to
+  // be one of the members that are actually there rather than a set nothing can draw.
+  it("shows the first member left when the root itself was folded away", () => {
+    const orphaned = [
+      set({ id: 711, name: "Root", sameLookAs: 999 }),
+      set({ id: 712, name: "Heroic", parentId: 711 }),
+      set({ id: 713, name: "Mythic", parentId: 711 }),
+    ];
+    const folded = foldFamilies(orphaned);
+    expect(ids(folded)).toEqual([712]);
+    expect(members(folded)).toEqual([[712, 713]]);
+  });
+
+  // A parent this install cannot read is no parent. The set is its own root rather than the
+  // head of a family with an invisible set in it.
+  it("makes a set its own root when the parent it names is not there", () => {
+    expect(members(foldFamilies([set({ id: 721, name: "Orphan", parentId: 999 })]))).toEqual([
+      [721],
+    ]);
+  });
+
+  // Nothing in the game's tables promises a set is not its own ancestor. A circle costs a card
+  // too many, which is what the grid looked like before any of this; a walk with no end costs a
+  // window that never draws.
+  it("does not walk for ever up a table that says a set is its own parent", () => {
+    const circular = [
+      set({ id: 731, name: "Round", parentId: 732 }),
+      set({ id: 732, name: "About", parentId: 731 }),
+    ];
+    expect(ids(foldFamilies(circular))).toEqual([731, 732]);
+  });
+
+  // The backend sorts the sets and the grid draws them in that order; folding must leave the
+  // cards where they were rather than gathering the families at the end.
+  it("keeps the order the backend sorted the cards into", () => {
+    const shuffled = [FAMILIES[3]!, FAMILIES[5]!, FAMILIES[0]!, FAMILIES[1]!, FAMILIES[4]!];
+    expect(ids(foldFamilies(shuffled))).toEqual([411, 421, 401]);
+  });
+
+  it("has nothing to fold when the game read nothing", () => {
+    expect(foldFamilies([])).toEqual([]);
+  });
+});
+
+describe("variantLabel", () => {
+  const family = foldFamilies(FAMILIES);
+
+  // 698 of the 1,724 variants a shipping install holds differ from their root by name, and the
+  // name is what a reader is looking at everywhere else on the card.
+  it("names a variant by what the game calls it", () => {
+    expect(variantLabel(FAMILIES[4]!, family[1]!)).toBe("Stonebound Earthen Regalia");
+  });
+
+  // The other thousand do not: a raid tier's three difficulties are one name three times, and
+  // three buttons reading the same string are three a reader cannot choose between.
+  it("adds the id where the family holds two of a name", () => {
+    expect(variantLabel(FAMILIES[0]!, family[0]!)).toBe("Scourgelord's Battlegear · #401");
+    expect(variantLabel(FAMILIES[2]!, family[0]!)).toBe("Scourgelord's Battlegear · #403");
+  });
+
+  // The game withholds the names of sets it has not shipped, and a rail of blanks is a rail
+  // nobody can use — so the id carries the whole label rather than none of it.
+  it("says what an unnamed set is by its id", () => {
+    const unnamed = foldFamilies([
+      set({ id: 801, name: "" }),
+      set({ id: 802, name: "", parentId: 801 }),
+    ]);
+    expect(variantLabel(unnamed[0]!.members[1]!, unnamed[0]!)).toBe("Unnamed set · #802");
+  });
+});
+
+/**
+ * A variant is reachable by everything it says, which is the whole risk of folding it away.
+ *
+ * The same claim the `sameLookAs` fold has to answer, asked of the larger of the two folds: a
+ * reader who types the name of a difficulty, or narrows to the expansion a recolour came out
+ * in, has to land on the card that swallowed it.
+ */
+describe("filtering a family by what only a variant says", () => {
+  const none = { search: "", expansion: "", klass: "" };
+  const REACHED: TransmogSet[] = [
+    set({
+      id: 401,
+      name: "Scourgelord's Battlegear",
+      group: "Icecrown Citadel",
+      classMask: 0x0023,
+      expansionId: 2,
+    }),
+    // The variant, out of another collection and — as 22 families of a shipping install are —
+    // out of another expansion. It also stands in for a set of its own, because the two folds
+    // stack: a variant can be the one shown of a `sameLookAs` cluster, and what that cluster
+    // says has to reach the family's card as well.
+    set({
+      id: 402,
+      name: "Sanctified Scourgelord's Battlegear",
+      group: "Icecrown Trophies",
+      classMask: 0x0023,
+      expansionId: 9,
+      patchIntroduced: 100200,
+      parentId: 401,
+      alternates: [
+        alternate({
+          id: 403,
+          name: "Ebon Blade Battlegear",
+          group: "Knightly Vanguard",
+          classMask: 1 << 5,
+          expansionId: 9,
+          reason: "class",
+        }),
+      ],
+    }),
+    set({ id: 421, name: "Duskwoven Shroud", group: "Duskwoven Attire", expansionId: 3 }),
+  ];
+
+  it.each<[string, { search: string; expansion: string; klass: string }, number[]]>([
+    ["its name", { ...none, search: "sanctified" }, [401]],
+    ["its collection", { ...none, search: "trophies" }, [401]],
+    ["its id", { ...none, search: "402" }, [401]],
+    ["its patch", { ...none, search: "10.2.0" }, [401]],
+    ["the expansion it came out in", { ...none, expansion: "9" }, [401]],
+    ["the class of a set folded into it", { ...none, klass: "5" }, [401, 421]],
+  ])("answers %s with the card standing in for it", (_what, filters, expected) => {
+    expect(ids(filtered(REACHED, filters))).toEqual(expected);
+  });
+
+  it.each<[string, string, number[]]>([
+    ["its name", "name:sanctified", [401]],
+    ["its collection", "collection:trophies", [401]],
+    ["the class of a set folded into it", "class:death knight", [401]],
+    ["its expansion", "expansion:dragonflight", [401]],
+  ])("answers a term asking for %s the same way", (_what, search, expected) => {
+    expect(ids(filtered(REACHED, { ...none, search }))).toEqual(expected);
+  });
+
+  // Every word somewhere in the family rather than all of them in one member, so a reader who
+  // half-remembers the base set and half the heroic one still lands on the card.
+  it("ands the words of a search across the whole family", () => {
+    expect(ids(filtered(REACHED, { ...none, search: "scourgelord trophies" }))).toEqual([401]);
+    expect(filtered(REACHED, { ...none, search: "duskwoven trophies" })).toEqual([]);
+  });
+
+  // The one thing families do that clusters cannot. A set folded away by `sameLookAs` never
+  // reaches the grid, so nobody can star one; a variant is on the card's own rail, so a reader
+  // can pick it and star exactly that — and the grid then has to keep the card it is on.
+  it("keeps a card whose star is against a variant rather than the set shown", () => {
+    const marks = indexMarks({
+      marks: [{ kind: "set", id: 402, favourite: true, tags: [{ key: "wishlist", value: null }] }],
+    });
+    const asked = (filter: MarkFilter, search = ""): number[] =>
+      ids(
+        filtered(REACHED, {
+          ...none,
+          search,
+          marks: { filter, of: (id) => marks.of("set", id) },
+        }),
+      );
+    expect(asked({ favourite: true, tag: "" })).toEqual([401]);
+    expect(asked({ favourite: false, tag: tokenOf("wishlist", null) })).toEqual([401]);
+    expect(asked(NO_MARK_FILTER, "wishlist")).toEqual([401]);
+  });
+
+  // And the same for what nobody typed: the colours are measured per set, and a family of
+  // eighteen shades is eighteen answers to "which of these is brown".
+  it("finds a card by the colour measured of one of its variants", () => {
+    const measured = indexQualities({
+      build: "12.0.5.67823",
+      sets: [
+        { id: 401, primary: "#2060e0" },
+        { id: 402, primary: "#4a3b2c" },
+      ],
+    });
+    const asked = (search: string): number[] =>
+      ids(filtered(REACHED, { ...none, search, qualities: (id) => measured.of(id) }));
+    expect(asked("colour:brown")).toEqual([401]);
+    expect(asked("colour:blue")).toEqual([401]);
+    expect(asked("colour:pink")).toEqual([]);
   });
 });
 
@@ -461,25 +763,27 @@ describe("alternateLabel", () => {
   });
 });
 
-describe("groupSets", () => {
+describe("groupFamilies", () => {
   it("gathers a collection without reordering it", () => {
-    const grouped = groupSets([
-      set({ id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire" }),
-      set({ id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe" }),
-      set({ id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe" }),
-    ]);
+    const grouped = groupFamilies(
+      foldFamilies([
+        set({ id: 205, name: "Duskwoven Shroud", group: "Duskwoven Attire" }),
+        set({ id: 201, name: "Tideglass Regalia", group: "Tideglass Wardrobe" }),
+        set({ id: 202, name: "Tideglass Hide", group: "Tideglass Wardrobe" }),
+      ]),
+    );
     expect(grouped.map((group) => group.group)).toEqual(["Duskwoven Attire", "Tideglass Wardrobe"]);
-    expect(grouped[1]?.sets.map((found) => found.id)).toEqual([201, 202]);
+    expect(grouped[1]?.families.map((found) => found.shown.id)).toEqual([201, 202]);
   });
 
   // A collection the tables do not name still has to land somewhere on screen.
   it("files a set with no collection under one of its own", () => {
-    const grouped = groupSets([set({ id: 900, name: "Orphan" })]);
+    const grouped = groupFamilies(foldFamilies([set({ id: 900, name: "Orphan" })]));
     expect(grouped.map((group) => group.group)).toEqual(["Ungrouped"]);
   });
 
   it("has nothing to group when nothing is left", () => {
-    expect(groupSets([])).toEqual([]);
+    expect(groupFamilies([])).toEqual([]);
   });
 });
 
@@ -499,12 +803,12 @@ describe("narrowing the grid to what the reader said about it", () => {
   });
   const marked = (filter: MarkFilter) => ({ filter, of: (id: number) => marks.of("set", id) });
   const shown = (filter: MarkFilter): number[] =>
-    filterSets(sets, {
+    filtered(sets, {
       search: "",
       expansion: "",
       klass: "",
       marks: marked(filter),
-    }).map((one) => one.id);
+    }).map((one) => one.shown.id);
 
   it("leaves the grid alone until it is asked something", () => {
     expect(shown(NO_MARK_FILTER)).toEqual([201, 202, 203]);
@@ -528,29 +832,29 @@ describe("narrowing the grid to what the reader said about it", () => {
   // The whole argument for folding the marks into the searchable text: a reader looking at a
   // chip saying "horde" types the word rather than hunting for the picker beside the box.
   it("finds a set by a word the reader filed it under", () => {
-    const found = filterSets(sets, {
+    const found = filtered(sets, {
       search: "horde",
       expansion: "",
       klass: "",
       marks: marked(NO_MARK_FILTER),
     });
-    expect(found.map((one) => one.id)).toEqual([201]);
+    expect(found.map((one) => one.shown.id)).toEqual([201]);
   });
 
   it("finds the starred sets by the word for them", () => {
-    const found = filterSets(sets, {
+    const found = filtered(sets, {
       search: "favourite",
       expansion: "",
       klass: "",
       marks: marked(NO_MARK_FILTER),
     });
-    expect(found.map((one) => one.id)).toEqual([201]);
+    expect(found.map((one) => one.shown.id)).toEqual([201]);
   });
 
   // Every caller that predates marks passes none, and must keep getting the whole grid.
   it("says nothing about marks when it was given none", () => {
-    expect(filterSets(sets, { search: "", expansion: "", klass: "" })).toHaveLength(3);
-    expect(filterSets(sets, { search: "horde", expansion: "", klass: "" })).toHaveLength(0);
+    expect(filtered(sets, { search: "", expansion: "", klass: "" })).toHaveLength(3);
+    expect(filtered(sets, { search: "horde", expansion: "", klass: "" })).toHaveLength(0);
   });
 });
 
@@ -604,13 +908,13 @@ describe("asking the grid for one thing a set says", () => {
     ],
   });
   const found = (search: string): number[] =>
-    filterSets(sets, {
+    filtered(sets, {
       search,
       expansion: "",
       klass: "",
       marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("set", id) },
       qualities: (id) => measured.of(id),
-    }).map((one) => one.id);
+    }).map((one) => one.shown.id);
 
   // Everything the card already shows, asked for one at a time: a reader looking at "Plate ·
   // Warlords of Draenor · Patch 6.2.0" can now say which of the three they meant.

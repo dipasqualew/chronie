@@ -246,6 +246,45 @@ const WARDROBE: Record<string, WardrobePayload> = {
 const CONTENTS: Record<number, TransmogSetItemsPayload> = {
   201: { setId: 201, appearances: [HELM, ROBE, ARROWS], readCount: 3, withheldCount: 0 },
   203: { setId: 203, appearances: [OTHER_HELM, WITHHELD], readCount: 1, withheldCount: 1 },
+  // The two members of the family below, which hold different clothes: the whole reason a rail
+  // is worth clicking is that the harder difficulty is a different set of armour.
+  401: { setId: 401, appearances: [HELM], readCount: 1, withheldCount: 0 },
+  402: { setId: 402, appearances: [ROBE], readCount: 1, withheldCount: 0 },
+};
+
+/**
+ * A raid tier as the game files one, and a set that is in no family at all.
+ *
+ * 402 names 401 as its parent, which is the game saying they are one set of clothes at two
+ * difficulties — Icecrown Citadel is 30 rows and 10 of these. They differ by name, by what they
+ * are made of and by what the artwork was measured to be, which is everything the card has to
+ * redraw when a reader picks one off the rail.
+ */
+const FAMILY: TransmogPayload = {
+  sets: [
+    set({
+      id: 401,
+      name: "Scourgelord's Battlegear",
+      group: "Icecrown Citadel",
+      classMask: 0x0023,
+      expansionId: 2,
+      itemCount: 5,
+    }),
+    set({
+      id: 402,
+      name: "Sanctified Scourgelord's Battlegear",
+      group: "Icecrown Citadel",
+      classMask: 0x0023,
+      expansionId: 2,
+      patchIntroduced: 30300,
+      itemCount: 9,
+      parentId: 401,
+    }),
+    set({ id: 421, name: "Duskwoven Shroud", group: "Duskwoven Attire" }),
+  ],
+  readCount: 3,
+  declaredCount: 3,
+  withheldCount: 0,
 };
 
 /** The one box above the grid, which decides what every open set lists. */
@@ -627,7 +666,12 @@ const MEASURED: Record<number, QualitiesFile> = {
 
 const SET_QUALITIES: SetQualitiesFile = {
   build: "12.0.5.67823",
-  sets: [{ id: 201, primary: "#2060e0", accent: "#f6f6f6" }],
+  // 402 is deliberately absent: 213 sets of a shipping install were measured of nothing, and a
+  // rail that lost a member wherever a colour was missing would be a rail nobody could count.
+  sets: [
+    { id: 201, primary: "#2060e0", accent: "#f6f6f6" },
+    { id: 401, primary: "#4a3b2c" },
+  ],
 };
 
 /**
@@ -1345,6 +1389,146 @@ describe("TransmogView", () => {
     fireEvent.change(screen.getByLabelText("Filter appearances"), { target: { value: "coif" } });
     await waitFor(() => expect(screen.queryByText("Emberforge Helm")).toBeNull());
     expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
+  });
+});
+
+/**
+ * A set and the difficulties and colours the game itself files under it.
+ *
+ * The largest fold the grid makes: 1,724 of a shipping install's rows are one of these, and a
+ * card each is a raid tier shown thirteen times over. What the card owes the reader in exchange
+ * is a way back to every one of them, which is the rail — see `foldFamilies`.
+ */
+describe("a set's variants", () => {
+  afterEach(cleanup);
+
+  /** The rail on a card, which is the one list on it that is not appearances. */
+  function rail(card: HTMLElement): HTMLElement {
+    return within(card).getByRole("list", {
+      name: /^Difficulties and colours of /,
+    });
+  }
+
+  /** The card a family draws, found by whichever member it is currently drawn as. */
+  function cardOf(name: string): HTMLElement {
+    const card = screen.getByRole("button", { name }).closest("article");
+    if (!card) throw new Error(`${name} is on no card`);
+    return card as HTMLElement;
+  }
+
+  it("draws one card for the family, as the set the game calls its root", () => {
+    view({ payload: FAMILY });
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Scourgelord's Battlegear" })).toBeTruthy();
+    // The variant is on the rail rather than on a card, and the heading it would have had is
+    // nowhere on the screen.
+    expect(
+      screen.queryByRole("button", { name: "Sanctified Scourgelord's Battlegear" }),
+    ).toBeNull();
+  });
+
+  // The grid is shorter than the count above it, and a reader counting cards against that
+  // number has to be told why — the same sentence the other fold already earns.
+  it("says how much of the game the rails are carrying", () => {
+    view({ payload: FAMILY });
+    expect(screen.getByText(/1 set shown as a variant on another's card/)).toBeTruthy();
+  });
+
+  it("names every member on the rail, and marks the one being shown", () => {
+    view({ payload: FAMILY });
+    const card = cardOf("Scourgelord's Battlegear");
+    const picks = within(rail(card)).getAllByRole("button");
+    expect(picks.map((pick) => pick.getAttribute("aria-label"))).toEqual([
+      "Show Scourgelord's Battlegear",
+      "Show Sanctified Scourgelord's Battlegear",
+    ]);
+    expect(picks.map((pick) => pick.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+  });
+
+  // A set the game files under no parent is the ordinary case — two thirds of them — and its
+  // card is exactly the card it was before any of this existed.
+  it("draws no rail on a set with no variants", () => {
+    view({ payload: FAMILY });
+    const card = cardOf("Duskwoven Shroud");
+    expect(within(card).queryByRole("list", { name: /^Difficulties and colours of / })).toBeNull();
+  });
+
+  it("redraws the card as the member picked off the rail", () => {
+    view({ payload: FAMILY });
+    const card = cardOf("Scourgelord's Battlegear");
+    expect(card.textContent).toContain("5 items");
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Show Sanctified Scourgelord's Battlegear" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Sanctified Scourgelord's Battlegear" }),
+    ).toBeTruthy();
+    const swapped = cardOf("Sanctified Scourgelord's Battlegear");
+    // Everything above the rail is about the member being shown: its name, what it is made of,
+    // and the patch it arrived in.
+    expect(swapped.textContent).toContain("9 items");
+    expect(swapped.textContent).toContain("Patch 3.3.0");
+    expect(swapped.textContent).toContain("#402");
+    // And the rail is still the whole family, now pressed the other way round.
+    const picks = within(rail(swapped)).getAllByRole("button");
+    expect(picks.map((pick) => pick.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
+    // Still one card: picking a member swaps what is drawn rather than unfolding the family.
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+  });
+
+  // The rail is for comparing the difficulties of a set, and a reader who has to open the card
+  // again after every click is comparing nothing.
+  it("keeps an open card open on the member picked, and reads what that one holds", async () => {
+    const { loadSet } = view({ payload: FAMILY });
+    const card = await open("Scourgelord's Battlegear");
+    expect(within(card).getByRole("button", { name: /^Wear .*Crown of Tides$/ })).toBeTruthy();
+
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Show Sanctified Scourgelord's Battlegear" }),
+    );
+    const swapped = cardOf("Sanctified Scourgelord's Battlegear");
+    await waitFor(() =>
+      expect(within(swapped).getByRole("button", { name: /^Wear .*Robe of Tides$/ })).toBeTruthy(),
+    );
+    expect(loadSet.mock.calls.map(([setId]) => setId)).toEqual([401, 402]);
+  });
+
+  // A card shut stays shut. Reading what a set is made of costs four tables, and a reader
+  // clicking down a rail to look at the colours has asked for none of it.
+  it("reads nothing for a member picked on a card that was never opened", () => {
+    const { loadSet } = view({ payload: FAMILY });
+    const card = cardOf("Scourgelord's Battlegear");
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Show Sanctified Scourgelord's Battlegear" }),
+    );
+    expect(loadSet).not.toHaveBeenCalled();
+  });
+
+  // The picture on a card is of the set the card is drawn as, which is the whole point of the
+  // rail once the grid is pictures: eighteen shades of one robe are eighteen bodies.
+  it("draws the member picked when the cards are characters", async () => {
+    const { loadSetGallery } = view({ payload: FAMILY });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show each set worn" }));
+    await waitFor(() => expect(loadSetGallery).toHaveBeenCalled());
+    expect(loadSetGallery.mock.calls[0]?.[0]).toEqual([401, 421]);
+
+    const card = cardOf("Scourgelord's Battlegear");
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Show Sanctified Scourgelord's Battlegear" }),
+    );
+    await waitFor(() => expect(loadSetGallery).toHaveBeenCalledTimes(2));
+    expect(loadSetGallery.mock.calls[1]?.[0]).toEqual([402]);
+  });
+
+  // The whole risk of folding a set away, asked of the larger fold: a reader who types the name
+  // of a difficulty has to land on the card carrying it rather than on nothing.
+  it("finds the card by a name only the variant carries", async () => {
+    view({ payload: FAMILY });
+    fireEvent.change(screen.getByLabelText("Filter transmog sets"), {
+      target: { value: "sanctified" },
+    });
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "Scourgelord's Battlegear" })).toBeTruthy();
   });
 });
 

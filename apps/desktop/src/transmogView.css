@@ -109,6 +109,27 @@
   .mog-layout { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* The difficulties and the colours of one set, as the squares they differ by. A strip rather
+   than a list, and it wraps: eighteen shades of Earthen Copper Regalia sit under one root and a
+   rail that scrolled sideways would hide half of them behind a gesture. */
+.mog-variants {
+  list-style: none; margin: 4px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 3px;
+}
+.mog-variant {
+  display: block; padding: 2px; cursor: pointer; line-height: 0;
+  border: 1px solid var(--border); border-radius: 5px; background: none;
+}
+.mog-variant:hover { border-color: var(--series-1); }
+/* The one the card is drawn as, which has to read as pressed rather than as hovered: the rail
+   is the card's own statement about which set the name above it belongs to. */
+.mog-variant[aria-pressed="true"] { border-color: var(--text-primary); background: var(--surface-2); }
+/* A set the store measured nothing of keeps its place in the rail rather than losing it. */
+.mog-variant-blank {
+  display: block; width: 10px; height: 10px; border-radius: 3px;
+  border: 1px dashed var(--border);
+}
+
 /* The sets whose clothes these are. Quiet and under the chips: a reader is looking at one
    set, and this is the footnote saying it is also three others. */
 .mog-alternates {

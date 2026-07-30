@@ -91,7 +91,7 @@ export function Qualities({
  * nothing else. Once it is a way of narrowing the list it is a control rather than a decoration,
  * and it says which colour it would ask for.
  */
-function Swatch({
+export function Swatch({
   colour,
   onFilter,
 }: {
