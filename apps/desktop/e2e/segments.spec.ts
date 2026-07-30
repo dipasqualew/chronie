@@ -252,14 +252,12 @@ test("digs from a session down into a single segment and back out again", async 
     await detail.linkTo("Quest 81").click();
     await detail.linkTo("Into the Light").click();
     await detail.linkTo("Wanderer's Mantle").click();
-    await expect
-      .poll(() => shell.openedUrls())
-      .toEqual([
-        "https://www.wowhead.com/quest=81",
-        "https://www.wowhead.com/achievement=9",
-        // By the id the segment recorded, whatever the game ended up calling the item.
-        "https://www.wowhead.com/item=101",
-      ]);
+    await shell.openedUrls().toEqual([
+      "https://www.wowhead.com/quest=81",
+      "https://www.wowhead.com/achievement=9",
+      // By the id the segment recorded, whatever the game ended up calling the item.
+      "https://www.wowhead.com/item=101",
+    ]);
     await expect(detail.title()).toHaveText("Glass Caverns");
     expect(shell.url()).toContain("127.0.0.1:4399");
   });

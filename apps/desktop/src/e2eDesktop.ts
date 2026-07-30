@@ -61,6 +61,28 @@ const mock = globalThis.__Chronie_E2E__;
 const missingMock = <Value>(): Promise<Value> =>
   Promise.reject(new Error("The end-to-end mock is not installed."));
 
+/**
+ * How long a write takes to land, for the six commands whose effect the browser suite reads
+ * back out of the mock's own record rather than off the page.
+ *
+ * Every other command is read through the window, where a locator retries until the page has
+ * caught up. These six are not: `wifi.sentTo()`, `shell.openedUrls()` and the three
+ * `stored()` readings ask the mock directly what the backend was told. Mutating the mock's
+ * object inside the call makes that answer true before the promise the window is awaiting has
+ * even resolved — so a test that reads it without waiting passes here and fails against a
+ * backend that has to cross a process boundary first. It has already happened once, which is
+ * what #171 was about.
+ *
+ * So the write lands when the promise resolves, the way the real one does. Long enough to
+ * outlast a round trip from the test to the page, short enough that a spec's worth of clicks
+ * costs no one anything.
+ */
+const WRITE_MS = 50;
+
+/** A write that has not happened yet, and happens when what it answers with resolves. */
+const written = <Value>(write: () => Value): Promise<Value> =>
+  new Promise<void>((resolve) => setTimeout(resolve, WRITE_MS)).then(write);
+
 /** Picks the segment an edit belongs to. */
 type Locate = (segment: Segment) => boolean;
 
@@ -391,8 +413,9 @@ export const e2eDesktop = {
   // is the only way a page in a Tauri window reaches the reader's browser.
   openUrl: (url: string): Promise<void> => {
     if (mock) {
-      mock.openedUrls.push(url);
-      return Promise.resolve();
+      return written(() => {
+        mock.openedUrls.push(url);
+      });
     }
     return openUrl(url);
   },
@@ -421,10 +444,12 @@ export const e2eDesktop = {
   // the backend does: the setting moves, and nothing about the game's config moves with it.
   setCombatLogging: (enabled: boolean): Promise<CombatLogStatus> => {
     if (mock) {
-      mock.settings.combatLogging = enabled;
-      mock.combatLog.requested = enabled;
-      mock.combatLog.state = mockCombatLogState(mock.combatLog);
-      return Promise.resolve(structuredClone(mock.combatLog));
+      return written(() => {
+        mock.settings.combatLogging = enabled;
+        mock.combatLog.requested = enabled;
+        mock.combatLog.state = mockCombatLogState(mock.combatLog);
+        return structuredClone(mock.combatLog);
+      });
     }
     return missingMock();
   },
@@ -443,10 +468,12 @@ export const e2eDesktop = {
   // is in the folder does not change just because somebody ticked a box.
   setLogRetention: (days: number | null): Promise<LogRetention> => {
     if (mock) {
-      mock.settings.retainLogDays = days;
-      mock.logRetention.enabled = days !== null;
-      if (days !== null) mock.logRetention.days = days;
-      return Promise.resolve(structuredClone(mock.logRetention));
+      return written(() => {
+        mock.settings.retainLogDays = days;
+        mock.logRetention.enabled = days !== null;
+        if (days !== null) mock.logRetention.days = days;
+        return structuredClone(mock.logRetention);
+      });
     }
     return missingMock();
   },
@@ -455,8 +482,10 @@ export const e2eDesktop = {
   // the panel repaints from what was stored. The mock records the same list the real one saves.
   setCaptureTriggers: (triggers: string[]): Promise<Settings> => {
     if (mock) {
-      mock.settings.captureTriggers = triggers;
-      return Promise.resolve(structuredClone(mock.settings));
+      return written(() => {
+        mock.settings.captureTriggers = triggers;
+        return structuredClone(mock.settings);
+      });
     }
     return missingMock();
   },
@@ -464,9 +493,11 @@ export const e2eDesktop = {
   // because they are one decision about disk, and neither reaches the addon at all.
   setCaptureStorage: (quality: CaptureQuality, keepOriginals: boolean): Promise<Settings> => {
     if (mock) {
-      mock.settings.captureQuality = quality;
-      mock.settings.keepOriginalScreenshots = keepOriginals;
-      return Promise.resolve(structuredClone(mock.settings));
+      return written(() => {
+        mock.settings.captureQuality = quality;
+        mock.settings.keepOriginalScreenshots = keepOriginals;
+        return structuredClone(mock.settings);
+      });
     }
     return missingMock();
   },
@@ -564,8 +595,10 @@ export const e2eDesktop = {
   // is measured in minutes rather than milliseconds.
   wifiSend: (address: string): Promise<WifiReceipt> => {
     if (mock) {
-      mock.wifi.sentTo.push(address);
-      return Promise.resolve(structuredClone(mock.wifi.receipt));
+      return written(() => {
+        mock.wifi.sentTo.push(address);
+        return structuredClone(mock.wifi.receipt);
+      });
     }
     return missingMock();
   },

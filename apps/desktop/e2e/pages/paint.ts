@@ -9,21 +9,36 @@
  * reaches the screen through a custom property and a rule in the stylesheet that names it, and
  * only the browser can say the two ever met — a rule that washed the colour down to nothing, or
  * never named it at all, is invisible from the markup and plain here.
+ *
+ * The four that are asserted on directly come back as `Eventually`, like every other reading in
+ * this suite: nothing here waits on a backend, so they settle on the first look, and having one
+ * shape for every reading means nobody has to work out which kind they are holding. The fifth
+ * is measured rather than asserted — the test does arithmetic on the numbers — so it is a value
+ * and stays one.
  */
 
 import type { Locator } from "@playwright/test";
 
+import { eventually } from "./eventually";
+import type { Eventually } from "./eventually";
+
 /** The colour each of a set of elements is ringed in. */
-export const borderColours = (elements: Locator): Promise<string[]> =>
-  elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).borderTopColor));
+export const borderColours = (elements: Locator): Eventually<string[]> =>
+  eventually(() =>
+    elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).borderTopColor)),
+  );
 
 /** The colour each of them is filled with, which is where a 22% wash would show. */
-export const fillColours = (elements: Locator): Promise<string[]> =>
-  elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).backgroundColor));
+export const fillColours = (elements: Locator): Eventually<string[]> =>
+  eventually(() =>
+    elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).backgroundColor)),
+  );
 
 /** The colour each writes its text in, which is the half that has to read against the fill. */
-export const inkColours = (elements: Locator): Promise<string[]> =>
-  elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+export const inkColours = (elements: Locator): Eventually<string[]> =>
+  eventually(() =>
+    elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color)),
+  );
 
 /**
  * The colour of the rail down the left edge of each of a set of elements.
@@ -32,9 +47,11 @@ export const inkColours = (elements: Locator): Promise<string[]> =>
  * priest's white apart from the card can sit inside it. Its first layer is the class colour
  * and the second is that hairline, which is why only the first is read.
  */
-export const railColours = (elements: Locator): Promise<string[]> =>
-  elements.evaluateAll((nodes) =>
-    nodes.map((node) => getComputedStyle(node).boxShadow.match(/rgba?\([^)]*\)/)?.[0] ?? ""),
+export const railColours = (elements: Locator): Eventually<string[]> =>
+  eventually(() =>
+    elements.evaluateAll((nodes) =>
+      nodes.map((node) => getComputedStyle(node).boxShadow.match(/rgba?\([^)]*\)/)?.[0] ?? ""),
+    ),
   );
 
 /**

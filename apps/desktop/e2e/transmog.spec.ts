@@ -350,7 +350,7 @@ test("browses the game's transmog sets and dresses the character in them", async
 
     // A link out of the window has to reach the reader's browser the way every other one does.
     await sets.link("Tideglass Regalia", "Tideglass Mantle").click();
-    await expect.poll(() => shell.openedUrls()).toContain("https://www.wowhead.com/item=30002");
+    await shell.openedUrls().toContain("https://www.wowhead.com/item=30002");
   });
 
   // Nothing is lost by collapsing: every item is still there, one click further in, and the
@@ -460,7 +460,7 @@ test("browses the game's transmog sets and dresses the character in them", async
     // items give that look and none of them is the one the row means — and its items carry
     // their own, which the step above followed.
     await sets.link("Tideglass Regalia", "Tideglass Mantle").click();
-    await expect.poll(() => shell.openedUrls()).toContain("https://www.wowhead.com/item=30002");
+    await shell.openedUrls().toContain("https://www.wowhead.com/item=30002");
     await expect.poll(() => outfit.worn()).toEqual(["Tideglass Robe · Chest · Tideglass Regalia"]);
   });
 

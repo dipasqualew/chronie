@@ -27,7 +27,7 @@ test("says what combat logging would cost, and what deleting old logs would take
     await expect(combat.panel).toContainText(
       "Chronie deletes nothing out of the game's Logs folder unless the panel",
     );
-    await expect(combat.stored()).resolves.toBe(false);
+    await combat.stored().toBe(false);
   });
 
   // Ticking it moves the setting and nothing else: the game's own config already has advanced
@@ -41,7 +41,7 @@ test("says what combat logging would cost, and what deleting old logs would take
     await expect(combat.state()).toContainText("no combat log at all yet");
     // The line is coloured from this, and the colour is half of what the sentence means.
     await expect(combat.state()).toHaveAttribute("data-state", "stale");
-    await expect(combat.stored()).resolves.toBe(true);
+    await combat.stored().toBe(true);
   });
 
   // The sentence is a claim about this install, so the panel shows what it read it from.
@@ -61,7 +61,7 @@ test("says what combat logging would cost, and what deleting old logs would take
     await expect(retention.panel).toContainText("Would go on the next sync:");
     await expect(retention.panel).toContainText("WoWCombatLog-071026_201500.txt");
     await expect(retention.panel).toContainText("WoWCombatLog-071126_193000.txt");
-    await expect(retention.stored()).resolves.toBeNull();
+    await retention.stored().toBeNull();
   });
 
   // The gigabyte nothing has ever read is the file this whole feature is careful about. It is
@@ -81,7 +81,7 @@ test("says what combat logging would cost, and what deleting old logs would take
     await retention.toggle().check();
 
     await expect(retention.toggle()).toBeChecked();
-    await expect(retention.stored()).resolves.toBe(7);
+    await retention.stored().toBe(7);
     await expect(retention.state()).toContainText("older than 7 days");
     await expect(retention.state()).toContainText("2 logs, 384.0 MB go on the next sync");
     await expect(retention.panel).toContainText("Going on the next sync:");
@@ -93,7 +93,7 @@ test("says what combat logging would cost, and what deleting old logs would take
     await retention.days().fill("30");
     await retention.days().blur();
 
-    await expect(retention.stored()).resolves.toBe(30);
+    await retention.stored().toBe(30);
     await expect(retention.state()).toContainText("older than 30 days");
   });
 });

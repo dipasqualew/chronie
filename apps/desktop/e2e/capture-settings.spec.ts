@@ -28,7 +28,7 @@ test("says what photographs itself, and what Chronie keeps of it", async ({ page
     await expect(captures.state()).toContainText("2 kinds of moment");
     // The unrecognised name is still there: the panel writes the whole list from its own
     // boxes, and a settings file somebody edited by hand must survive being written over.
-    await expect(captures.stored()).resolves.toMatchObject({
+    await captures.stored().toMatchObject({
       triggers: ["accountFirstAchievement", "mount", "somethingNewer"],
     });
     await expect(captures.panel).toContainText("somethingNewer");
@@ -55,7 +55,7 @@ test("says what photographs itself, and what Chronie keeps of it", async ({ page
 
     await captures.quality(/Exactly what the game wrote/).check();
 
-    await expect(captures.stored()).resolves.toMatchObject({ quality: "original" });
+    await captures.stored().toMatchObject({ quality: "original" });
   });
 
   // The two opposite risks: a folder that never stops growing, and a folder somebody has
@@ -68,7 +68,7 @@ test("says what photographs itself, and what Chronie keeps of it", async ({ page
     await captures.originals().check();
 
     await expect(captures.panel).toContainText("its Screenshots folder goes on growing");
-    await expect(captures.stored()).resolves.toMatchObject({
+    await captures.stored().toMatchObject({
       quality: "original",
       keepOriginals: true,
     });
