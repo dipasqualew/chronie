@@ -4,6 +4,9 @@
 //! registry and run that, which rewrites this, the FileDataIDs the fixture generators use
 //! and the table in `docs/game-files.md` together.
 //!
+//! The few single files the app names outright rather than through a table are here too, for
+//! the same reason: a FileDataID is a fact a patch can invalidate.
+//!
 //! Nothing here is an opinion about what a value means. A column's position is mechanical
 //! and a game patch can invalidate it, which is why it is recorded once with the build it
 //! was read off; what a class mask, a geoset group or a points column *is* stays in the
@@ -289,6 +292,19 @@ pub const JOURNAL_ENCOUNTER_CREATURE: u32 = 1301155;
 ///
 /// Verified on 12.0.5.67823 with `examples/dump_currencies`.
 pub const CURRENCY_TYPES: u32 = 1095531;
+
+/// The banner the group finder shows when it will not say which dungeon it is sending a
+/// player to — a door with a crest on it, 256×128, the same shape as the banners the two
+/// journal tables name.
+///
+/// Which is what makes it the picture for a place the game draws none for. Most places are
+/// that: an evening in Durotar is a name neither journal table has heard of, and a modal
+/// whose header appeared only for dungeons would be two different modals.
+///
+/// `interface/lfgframe/ui-lfg-background-randomdungeon.blp`
+///
+/// Verified on 12.0.5.67823 with `examples/dump_journal`.
+pub const UNKNOWN_PLACE_BANNER: u32 = 337493;
 
 /// Columns of `TransmogSet` that this app reads.
 pub mod transmog_set {
@@ -831,6 +847,13 @@ pub mod journal_instance {
     /// table names decodes at 128×128, which is what makes this the one of the four files
     /// an icon can be.
     pub const BUTTON_SMALL_FILE_DATA_ID: usize = 5;
+
+    /// `ButtonFileDataID`
+    ///
+    /// The wide banner the game draws the place across, decoded through [`crate::icons`].
+    /// Every one of the 209 the table names decodes at 256×128 — the only one of the four
+    /// files shaped like a header rather than like a square or a portrait.
+    pub const BUTTON_FILE_DATA_ID: usize = 4;
 }
 
 /// Columns of `LFGDungeons` that this app reads.
@@ -844,6 +867,14 @@ pub mod lfg_dungeons {
     ///
     /// The picture beside it in the finder's list, as a FileDataID.
     pub const ICON_TEXTURE_FILE_ID: usize = 5;
+
+    /// `PopupBgTextureFileID`
+    ///
+    /// The wide banner the finder puts behind the dungeon it is offering. 1,702 of the
+    /// 1,824 rows name one and every one of those decodes at 256×128, the same shape
+    /// `JournalInstance.ButtonFileDataID` holds — which is what lets the two tables fill in
+    /// for each other for a delve or a scenario the journal has no row for.
+    pub const POPUP_BG_TEXTURE_FILE_ID: usize = 7;
 }
 
 /// Columns of `JournalEncounter` that this app reads.

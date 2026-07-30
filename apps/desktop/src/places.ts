@@ -23,3 +23,21 @@ export type PlaceIcons = IconBook<string>;
 export function createPlaceIcons(options: PlaceIconsOptions): PlaceIcons {
   return createIconBook<string>(options);
 }
+
+/**
+ * The wide banner a place is drawn across, which is the header the segment modal opens with.
+ *
+ * A second book rather than more of the first, because the two pictures are wanted at different
+ * times and in different numbers: an icon goes beside every row of the timeline, a banner above
+ * the one segment somebody opened. One book for both would have a page of forty evenings decoding
+ * forty headers nobody asked to see.
+ *
+ * Unlike an icon, this always answers: the places the game draws no art for — which is most of
+ * them — come back with the banner it shows when it will not say which dungeon. See
+ * `journal::heroes_of`.
+ */
+export type PlaceHeroes = IconBook<string>;
+
+export function createPlaceHeroes(options: PlaceIconsOptions): PlaceHeroes {
+  return createIconBook<string>(options);
+}

@@ -19,6 +19,10 @@
 //! Together they answer for 805 places. Everywhere else draws no picture, and most names are
 //! everywhere else: an open-world zone is a name neither table has heard of.
 //!
+//! Both tables hold a second picture of a place beside the icon — a 256×128 banner rather than a
+//! 128×128 button — and that is the header the segment modal opens with. [`heroes_of`] reads it,
+//! and it reads the two tables in the other order for a reason measured off the art itself.
+//!
 //! An expansion and a zone are still drawn without a picture — `JournalTier` and `UiMap` have no
 //! icon column between them — so those rows read as they always did. `docs/game-files.md` records
 //! what was looked at.
@@ -43,6 +47,7 @@ use crate::tables::journal_instance as journal_column;
 use crate::tables::lfg_dungeons as lfg_column;
 use crate::tables::{
     JOURNAL_ENCOUNTER, JOURNAL_ENCOUNTER_CREATURE, JOURNAL_INSTANCE, LFG_DUNGEONS,
+    UNKNOWN_PLACE_BANNER,
 };
 
 /// The icon each of the places asked for is drawn with, as a FileDataID, keyed by the name it was
@@ -66,6 +71,91 @@ use crate::tables::{
 /// client handed over, and it costs nothing to stop a stray space at the end of one blanking the
 /// row.
 pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<String, u32>, String> {
+    pictures_of(
+        files,
+        wanted,
+        [
+            (
+                JOURNAL_INSTANCE,
+                journal_column::NAME,
+                journal_column::BUTTON_SMALL_FILE_DATA_ID,
+            ),
+            (
+                LFG_DUNGEONS,
+                lfg_column::NAME,
+                lfg_column::ICON_TEXTURE_FILE_ID,
+            ),
+        ],
+    )
+}
+
+/// The wide banner each of the places asked for is drawn across, as a FileDataID, keyed by the
+/// name it was asked for under — and [`UNKNOWN_PLACE_BANNER`] for the ones the game draws none.
+///
+/// The same two tables and the same join as [`icons_of`], one column over in each: a place worth
+/// a picture at all has a 256×128 header as well as a 128×128 button, and the header is what the
+/// segment modal opens with. `docs/game-files.md` records which column of each and what shape
+/// they came out at.
+///
+/// **The two tables are read in the opposite order to [`icons_of`], and that is measured rather
+/// than preferred.** Every one of the group finder's banners fills its 256×128 file; every one of
+/// the journal's is 166×88 of art inset at (4,4) into a file of the same size, because the
+/// Adventure Guide draws it at that size and composites it. Held on 12.0.5.67823 for Naxxramas,
+/// Deadmines, Shadowfang Keep and Nerub-ar Palace, each identical to the pixel. So the finder's is
+/// the one that can be a header without a transparent margin down two sides of it, and the
+/// journal's fills in behind it for the places the finder has no row for. The trade is the mirror
+/// of the icon's: the finder shows one banner for a whole kind of thing here and there — every
+/// delve shares one — where the journal's is always that dungeon's own.
+///
+/// **The other difference is what happens to a name neither table has heard of.** An icon beside a
+/// row is worth leaving off, and most rows do without one — an evening in Durotar is a name
+/// neither table knows. A header is not: a modal that had one for a raid and a bare line of text
+/// for the zone outside it would read as two different modals, and the reader would learn nothing
+/// from the difference except that the game ships more art for raids. So every name gets a banner,
+/// and the ones the game says nothing about get the one it shows when it will not say which
+/// dungeon a player is being sent to.
+///
+/// The follow-up is to draw those from the world map instead, which is a picture of the place
+/// rather than a stand-in for one — see the issue this was split from.
+pub fn heroes_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<String, u32>, String> {
+    let mut found = pictures_of(
+        files,
+        wanted,
+        [
+            (
+                LFG_DUNGEONS,
+                lfg_column::NAME,
+                lfg_column::POPUP_BG_TEXTURE_FILE_ID,
+            ),
+            (
+                JOURNAL_INSTANCE,
+                journal_column::NAME,
+                journal_column::BUTTON_FILE_DATA_ID,
+            ),
+        ],
+    )?;
+    for name in wanted {
+        if !name.trim().is_empty() {
+            found.entry(name.clone()).or_insert(UNKNOWN_PLACE_BANNER);
+        }
+    }
+    Ok(found)
+}
+
+/// One picture per place, out of whichever column of the two tables holds the one wanted.
+///
+/// Only the names asked for, because a window is showing the handful of places one evening was
+/// spent in — and because what costs here is opening the game's storage at all, which is why this
+/// takes every name a caller wants at once.
+///
+/// The tables are read in the order given and the first to name a place wins, so which of them
+/// takes precedence is the caller's to say: [`icons_of`] and [`heroes_of`] disagree about it, and
+/// each says why.
+fn pictures_of(
+    files: &dyn GameFiles,
+    wanted: &[String],
+    tables: [(u32, usize, usize); 2],
+) -> Result<HashMap<String, u32>, String> {
     let keys: Vec<(String, &String)> = wanted
         .iter()
         .map(|name| (key_of(name), name))
@@ -76,18 +166,7 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
         return Ok(found);
     }
 
-    for (table, name_column, icon_column) in [
-        (
-            JOURNAL_INSTANCE,
-            journal_column::NAME,
-            journal_column::BUTTON_SMALL_FILE_DATA_ID,
-        ),
-        (
-            LFG_DUNGEONS,
-            lfg_column::NAME,
-            lfg_column::ICON_TEXTURE_FILE_ID,
-        ),
-    ] {
+    for (table, name_column, icon_column) in tables {
         let table = Db2::parse(files.read(table)?)?;
         for row in table.rows() {
             let icon = row.number(icon_column);
@@ -263,6 +342,69 @@ mod tests {
     fn answers_nothing_when_nothing_was_asked_about() {
         assert!(icons_of(&journal_fixture_files(), &[]).unwrap().is_empty());
         assert!(icons_of(&journal_fixture_files(), &names(&["", "  "]))
+            .unwrap()
+            .is_empty());
+    }
+
+    /* ---------- the headers ---------- */
+
+    /// The wide banners the same fixture rows name, beside the icons above. See
+    /// `scripts/make-journal-fixtures.ts`.
+    const DEADMINES_FINDER_BANNER: u32 = 180037;
+    const DELVE_BANNER: u32 = 180035;
+    /// A place the journal draws and the group finder has no row for at all.
+    const JOURNAL_ONLY_BANNER: u32 = 180022;
+    const DISPUTED_FINDER_BANNER: u32 = 180036;
+
+    /// The header is a different column of the same two tables, and reading the icon's column for
+    /// it would put a 128×128 button where a 256×128 banner goes.
+    #[test]
+    fn answers_the_wide_banner_each_place_names() {
+        let found = heroes_of(&journal_fixture_files(), &names(&[DEADMINES, DELVE])).unwrap();
+        assert_eq!(found.get(DEADMINES), Some(&DEADMINES_FINDER_BANNER));
+        assert_eq!(found.get(DELVE), Some(&DELVE_BANNER));
+    }
+
+    /// The opposite order to the icons, and the reason is the art rather than the taste: the
+    /// finder's banner fills its file and the journal's is 166×88 of picture inset into one the
+    /// same size, so only the finder's can be a header without a transparent margin down two
+    /// sides of it.
+    #[test]
+    fn prefers_the_group_finders_banner_over_the_journals() {
+        let found = heroes_of(&journal_fixture_files(), &names(&[DISPUTED])).unwrap();
+        assert_eq!(found.get(DISPUTED), Some(&DISPUTED_FINDER_BANNER));
+    }
+
+    /// And the journal fills in behind it: a raid the finder cannot queue anybody for still has a
+    /// header, drawn with the art the Adventure Guide gives it.
+    #[test]
+    fn falls_back_to_the_journals_banner_where_the_finder_has_no_row() {
+        let found = heroes_of(&journal_fixture_files(), &names(&[CITADEL])).unwrap();
+        assert_eq!(found.get(CITADEL), Some(&JOURNAL_ONLY_BANNER));
+    }
+
+    /// Unlike an icon, a header is never left off. Most places the app is asked about are zones
+    /// neither table has heard of, and a modal that opened with a banner for a raid and with a
+    /// bare line of text for the zone outside it would read as two different modals.
+    #[test]
+    fn answers_with_the_stand_in_banner_for_a_place_the_game_draws_none() {
+        let found = heroes_of(
+            &journal_fixture_files(),
+            &names(&[UNDRAWN, "Durotar", DEADMINES]),
+        )
+        .unwrap();
+        assert_eq!(found.get(UNDRAWN), Some(&UNKNOWN_PLACE_BANNER));
+        assert_eq!(found.get("Durotar"), Some(&UNKNOWN_PLACE_BANNER));
+        assert_eq!(found.get(DEADMINES), Some(&DEADMINES_FINDER_BANNER));
+    }
+
+    /// A stand-in for every name is not a stand-in for no name: a segment with no place at all is
+    /// nothing to draw a header of, and asking for one would have the window decoding a picture to
+    /// put above an empty title.
+    #[test]
+    fn answers_nothing_at_all_when_no_place_was_named() {
+        assert!(heroes_of(&journal_fixture_files(), &[]).unwrap().is_empty());
+        assert!(heroes_of(&journal_fixture_files(), &names(&["", "  "]))
             .unwrap()
             .is_empty());
     }

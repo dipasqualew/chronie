@@ -17,12 +17,17 @@
  * a modal that does not open.
  *
  * The reverse direction is not here, because it belongs to whoever is showing the dialog: Escape
- * and the backdrop close a dialog without asking anybody, and the browser fires `close` either
- * way. Every caller listens for that and puts its own state back — `onClose` on the element.
+ * closes a dialog without asking anybody, and the browser fires `close` when it does. Every caller
+ * listens for that and puts its own state back — `onClose` on the element.
+ *
+ * A click on the backdrop, on the other hand, does *nothing* at all: `showModal` paints the page
+ * behind the dialog and swallows the click, and every browser leaves closing on it to the page.
+ * [`lightDismiss`] is that, for the dialogs where clicking away is what a reader expects — see the
+ * comment on it for why it is not simply "the click was not inside".
  */
 
 import { useEffect, useRef } from "react";
-import type { RefObject } from "react";
+import type { MouseEvent, RefObject } from "react";
 
 /**
  * A ref for a `<dialog>`, kept open exactly while `open` says so.
@@ -31,6 +36,30 @@ import type { RefObject } from "react";
  * nothing at all. That is what makes it safe to run twice, which is the only guarantee the
  * `<dialog>` element itself does not offer.
  */
+/**
+ * Whether a click on a dialog landed outside the dialog itself, and should therefore close it.
+ *
+ * Read off the pointer rather than off `event.target`, and that is the whole of the difference
+ * between this working and not. The backdrop is not an element: a click on it arrives with the
+ * `<dialog>` as its target, which makes `target === dialog` look like the test — until a reader
+ * drags a selection across the modal's own padding, or releases the mouse on the gap between two
+ * sections, and the same target closes a modal they were reading. Both of those land *inside* the
+ * dialog's box, and the pointer is what says so.
+ *
+ * A click with no coordinates at all — the keyboard's own, which is what a `<button>` fires for
+ * Enter and Space — reports 0,0 and is never a dismissal. So it is checked for first.
+ */
+export function lightDismiss(event: MouseEvent<HTMLDialogElement>): boolean {
+  if (event.detail === 0) return false;
+  const box = event.currentTarget.getBoundingClientRect();
+  return (
+    event.clientX < box.left ||
+    event.clientX > box.right ||
+    event.clientY < box.top ||
+    event.clientY > box.bottom
+  );
+}
+
 export function useModalDialog(open: boolean): RefObject<HTMLDialogElement | null> {
   const dialog = useRef<HTMLDialogElement>(null);
 

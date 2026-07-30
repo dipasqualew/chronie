@@ -34,6 +34,30 @@ export class SegmentDetail {
     return this.dialog.getByRole("heading", { level: 2 });
   }
 
+  /**
+   * The banner the modal opens with, found by the place it is of.
+   *
+   * Every place has one — where the game draws no art the backend answers with its own stand-in
+   * — so unlike the icons inside the modal this is a thing to assert the presence of rather than
+   * the absence.
+   */
+  hero(place: string): Locator {
+    return this.dialog.getByRole("img", { name: `Banner for ${place}` });
+  }
+
+  /**
+   * Clicks the backdrop, which is the page behind the modal and not an element of its own.
+   *
+   * The top-left corner of the window: the modal is centred and no part of it reaches there, and
+   * a click that lands on the backdrop is delivered to the dialog. Driven from the mouse rather
+   * than from a locator because there is nothing to locate — the backdrop belongs to no element,
+   * which is the whole reason closing on it has to be written by hand.
+   */
+  async clickAway(): Promise<void> {
+    await this.page.mouse.click(4, 4);
+    await expect(this.dialog).toBeHidden();
+  }
+
   /** Where in the list the reader is, which the modal announces as they step through it. */
   position(): Locator {
     return this.dialog.getByRole("status", { name: "Which segment" });

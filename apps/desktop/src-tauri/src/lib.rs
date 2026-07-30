@@ -876,6 +876,44 @@ async fn place_icons(
     dto::convert(serde_json::json!({ "icons": icons }))
 }
 
+/// The wide banner each of a list of places is drawn across, keyed by the name rather than the
+/// file.
+///
+/// The same errand as [`place_icons`] one column over, and the reason it is a second command
+/// rather than more of that one is what each is for: an icon goes beside every row of the
+/// timeline, a banner above the one segment somebody opened. Asking for hundreds of headers to
+/// draw one would decode a picture per evening on screen.
+///
+/// Nothing comes back empty here. Most places are zones the game draws no art for at all, and
+/// those are answered with the banner the group finder shows when it will not say which dungeon —
+/// see [`journal::heroes_of`], which is where that choice is made and explained.
+#[tauri::command]
+#[specta::specta]
+async fn place_heroes(
+    places: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<dto::IconsPayload, String> {
+    let cache = Arc::clone(&state.icons);
+    let named = read_game_files(&state, move |files| journal::heroes_of(files, &places)).await?;
+    let wanted: Vec<u32> = named.values().copied().collect();
+    let missing = cache.missing(&wanted);
+    if !missing.is_empty() {
+        let decoded =
+            read_game_files(&state, move |files| Ok(icons::decode(files, &missing))).await?;
+        cache.store(decoded);
+    }
+    // Re-keyed by the place rather than by the file, and a fan-out rather than a rename: every
+    // place the game draws nothing for shares the one stand-in banner, and the delves share theirs.
+    let by_file = cache.answer(&wanted);
+    let mut icons = serde_json::Map::new();
+    for (place, file) in named {
+        if let Some(url) = by_file["icons"].get(file.to_string()) {
+            icons.insert(place, url.clone());
+        }
+    }
+    dto::convert(serde_json::json!({ "icons": icons }))
+}
+
 /// The pictures a list of factions is drawn with, keyed by the name rather than the file.
 ///
 /// Keyed by the name for the same reason [`place_icons`] is: a reputation arrives from the addon
@@ -1937,6 +1975,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         item_details,
         log_retention,
         place_icons,
+        place_heroes,
         boss_portraits,
         reputation_icons,
         query_schema,

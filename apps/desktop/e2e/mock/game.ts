@@ -57,6 +57,22 @@ export const placeIcons: E2EMock["placeIcons"] = {
     "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
+// The wide banner each place is drawn across. The scenario has one of its own and every other
+// place is answered with the stand-in beside it — which is what the real backend does with a zone
+// the game draws no art for, so every segment's modal opens with a header and only one of them
+// opens with the place's own. Split in two rather than keyed by a magic name because a fixture
+// cannot list every place a test might ask about.
+export const placeHeroes: E2EMock["placeHeroes"] = {
+  own: {
+    "Glass Caverns":
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
+      "QVR42mM4dGjTfxhmGBkKALEUmVjkZBLdAAAAAElFTkSuQmCC",
+  },
+  standIn:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEklE" +
+    "QVR42mNwbjn2Hx9mGBkKAOaSooFOMlBLAAAAAElFTkSuQmCC",
+};
+
 // The portrait each boss is drawn with, keyed by the encounter id the segment recorded — the same
 // shape as the places above, and the same two backend hops behind it. The scenario's one fight has
 // a portrait and the raid's second does not, which is the pair a row has to survive: the game has a

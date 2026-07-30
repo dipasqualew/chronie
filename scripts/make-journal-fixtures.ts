@@ -69,10 +69,10 @@ const MAP_PIN = 1052443809;
  * `JournalInstance` — the Encounter Journal's dungeons and raids.
  *
  * The four files the real table holds side by side are all here, in their places: a background, a
- * wide button banner, the small button icon, and a lore illustration. Only the third of them is an
- * icon, and a reader that took one of its neighbours would hand the window a picture several times
- * too large — so the neighbours hold plausible FileDataIDs of their own that this fixture writes
- * no file for.
+ * wide button banner, the small button icon, and a lore illustration. Two of them are read — the
+ * banner is the header a segment modal opens with and the small button is the icon beside a row —
+ * and a reader that took one of the other two would hand the window a picture several times too
+ * large, so all four hold FileDataIDs of their own and each place's differ.
  */
 const journalInstance: TableSpec = {
   fileDataId: JOURNAL_INSTANCE,
@@ -93,7 +93,7 @@ const journalInstance: TableSpec = {
           "A mine the brotherhood took.",
           36,
           180001,
-          180002,
+          180021,
           170001,
           180003,
           1,
@@ -101,21 +101,27 @@ const journalInstance: TableSpec = {
           0,
         ],
         [
+          // A place the group finder has no row for at all, which is what makes its header the
+          // journal's — the only fixture row that exercises the fallback.
           "Sunken Citadel",
           "Drowned and still occupied.",
           643,
           180001,
-          180002,
+          180022,
           170002,
           180003,
           1,
           5382,
           0,
         ],
-        // A place the group finder knows too, and draws differently. The journal's picture is
-        // hand-drawn for this one dungeon and is the one to show.
-        ["Tideglass Hollow", "", 645, 180001, 180002, 170004, 180003, 0, 0, 0],
+        // A place the group finder knows too, and draws differently in both columns. The journal's
+        // *icon* is hand-drawn for this one dungeon and is the one to show; its *banner* is the one
+        // to fall back to, because the finder's fills the file and the journal's does not. So the
+        // two readers disagree about this row on purpose.
+        ["Tideglass Hollow", "", 645, 180001, 180023, 170004, 180003, 0, 0, 0],
         // An instance the journal lists and draws nothing for, which the real table has two of.
+        // Neither an icon nor a header, and the group finder has never heard of it: this is the
+        // place a header has to be invented for.
         ["Zekvir's Lair", "", 2680, 0, 0, 0, 0, 0, 0, 0],
         // The same name on a second row, later. First one wins, so this icon is never answered
         // with — the real table has two such pairs.
@@ -124,7 +130,7 @@ const journalInstance: TableSpec = {
           "The same place, listed twice.",
           36,
           180001,
-          180002,
+          180029,
           170009,
           180003,
           1,
@@ -165,14 +171,15 @@ const lfgDungeons: TableSpec = {
       // Name, description, type, subtype, faction, icon, rewards background, popup background,
       // expansion, map.
       rows: [
-        // The two delves, drawn with the one icon the finder gives every entry of the kind.
-        ["Grubwarden's Burrow", "", 1, 3, 0, 170003, 180004, 180005, 0, 2680],
-        ["Mistvault Shafts", "", 1, 3, 0, 170003, 180004, 180005, 0, 2681],
+        // The two delves, drawn with the one icon the finder gives every entry of the kind — and
+        // with a header of their own, which is the only one either table holds for a delve.
+        ["Grubwarden's Burrow", "", 1, 3, 0, 170003, 180004, 180035, 0, 2680],
+        ["Mistvault Shafts", "", 1, 3, 0, 170003, 180004, 180035, 0, 2681],
         // The disputed one: the journal draws it its own way, and this is what the finder shows.
-        ["Tideglass Hollow", "", 1, 1, 0, 170006, 180004, 180005, 3, 645],
+        ["Tideglass Hollow", "", 1, 1, 0, 170006, 180004, 180036, 3, 645],
         // A dungeon the finder lists twice, once per difficulty. Same picture either way.
-        ["The Deadmines", "", 1, 1, 0, 170001, 180004, 180005, 0, 36],
-        ["The Deadmines", "", 1, 1, 0, 170001, 180004, 180005, 3, 36],
+        ["The Deadmines", "", 1, 1, 0, 170001, 180004, 180037, 0, 36],
+        ["The Deadmines", "", 1, 1, 0, 170001, 180004, 180037, 3, 36],
         // A row the finder names and draws nothing for, which several hundred of the real
         // table's rows are: a random-dungeon bucket rather than a place.
         ["Random Delve", "", 6, 3, 0, 0, 0, 0, 0, 0],
@@ -363,8 +370,10 @@ const journalEncounterCreature: TableSpec = {
  * Three of the ids are deliberately absent. 170005 is named by the encrypted journal row and
  * 170016 by the encrypted creature row, which is what a texture from unshipped content looks like
  * from here. 170018 is named by a perfectly readable creature row and has no bytes behind it, which
- * is what a texture this install never downloaded looks like. So are 180001 through 180005 — the
- * backgrounds and banners beside the place icons, which nothing is meant to be reading.
+ * is what a texture this install never downloaded looks like. So are 180001 through 180004 — the
+ * backgrounds and lore illustrations beside the place icons, which nothing is meant to be reading —
+ * and 180021 upwards, the wide headers, which are read as *ids* by `journal::heroes_of` and never
+ * decoded by anything the tests reach.
  */
 const icons: IconSpec[] = [
   {

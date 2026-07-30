@@ -270,6 +270,11 @@ export const e2eDesktop = {
   // is keyed by the name the segment already carries rather than by the file behind it.
   placeIcons: (places: string[]): Promise<IconsPayload> =>
     mock ? Promise.resolve({ icons: mockPlaceIcons(places) }) : missingMock(),
+  // And the wide banner one of those places is drawn across, which the segment modal opens with.
+  // Keyed by the name for the same reason, and answered for every name asked about: the real
+  // backend hands back a stand-in for a place the game draws nothing for.
+  placeHeroes: (places: string[]): Promise<IconsPayload> =>
+    mock ? Promise.resolve({ icons: mockPlaceHeroes(places) }) : missingMock(),
   // And the bosses inside them, on the same terms: the encounter id the addon recorded needs the
   // same two backend-only hops before it is a texture, so the command is keyed by the id.
   bossPortraits: (encounters: number[]): Promise<IconsPayload> =>
@@ -770,6 +775,23 @@ function mockPlaceIcons(wanted: string[]): Record<string, string> {
   const found: Record<string, string> = {};
   for (const place of wanted) {
     const url = mock.placeIcons[place];
+    if (url) found[place] = url;
+  }
+  return found;
+}
+
+/**
+ * The place banners held by the e2e mock, keyed the same way as the icons above.
+ *
+ * Every name asked about comes back, because that is what the real command does: a place the
+ * game draws no art for is answered with the banner it shows for a dungeon it will not name, so
+ * the mock gives an unlisted place the same stand-in.
+ */
+function mockPlaceHeroes(wanted: string[]): Record<string, string> {
+  if (!mock) throw new Error("The end-to-end mock is not installed.");
+  const found: Record<string, string> = {};
+  for (const place of wanted) {
+    const url = mock.placeHeroes.own[place] ?? mock.placeHeroes.standIn;
     if (url) found[place] = url;
   }
   return found;

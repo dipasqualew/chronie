@@ -1,8 +1,9 @@
 {
   "$comment": [
-    "The tables this app reads out of the game's own storage, and where each mechanical fact",
-    "came from. Authoritative: nothing else in the tree may declare a table's FileDataID or a",
-    "consumed column's position, and `scripts/make-game-tables.ts` writes the constants that do.",
+    "The tables this app reads out of the game's own storage, and the handful of single files it",
+    "names outright, with where each mechanical fact came from. Authoritative: nothing else in",
+    "the tree may declare a FileDataID or a consumed column's position, and",
+    "`scripts/make-game-tables.ts` writes the constants that do.",
     "",
     "What belongs here is what a game patch can invalidate — a FileDataID, a column index, how",
     "many elements an array column holds and how wide one of them is — together with the build",
@@ -19,6 +20,23 @@
   ],
   "version": 1,
   "listfile": "https://github.com/wowdev/wow-listfile",
+  "files": [
+    {
+      "rust": "UNKNOWN_PLACE_BANNER",
+      "path": "interface/lfgframe/ui-lfg-background-randomdungeon.blp",
+      "fileDataId": 337493,
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_journal" },
+      "doc": [
+        "The banner the group finder shows when it will not say which dungeon it is sending a",
+        "player to — a door with a crest on it, 256×128, the same shape as the banners the two",
+        "journal tables name.",
+        "",
+        "Which is what makes it the picture for a place the game draws none for. Most places are",
+        "that: an evening in Durotar is a name neither journal table has heard of, and a modal",
+        "whose header appeared only for dungeons would be two different modals."
+      ]
+    }
+  ],
   "tables": [
     {
       "table": "TransmogSet",
@@ -983,6 +1001,16 @@
             "table names decodes at 128×128, which is what makes this the one of the four files",
             "an icon can be."
           ]
+        },
+        {
+          "rust": "BUTTON_FILE_DATA_ID",
+          "index": 4,
+          "field": "ButtonFileDataID",
+          "doc": [
+            "The wide banner the game draws the place across, decoded through [`crate::icons`].",
+            "Every one of the 209 the table names decodes at 256×128 — the only one of the four",
+            "files shaped like a header rather than like a square or a portrait."
+          ]
         }
       ]
     },
@@ -1012,6 +1040,17 @@
           "index": 5,
           "field": "IconTextureFileID",
           "doc": ["The picture beside it in the finder's list, as a FileDataID."]
+        },
+        {
+          "rust": "POPUP_BG_TEXTURE_FILE_ID",
+          "index": 7,
+          "field": "PopupBgTextureFileID",
+          "doc": [
+            "The wide banner the finder puts behind the dungeon it is offering. 1,702 of the",
+            "1,824 rows name one and every one of those decodes at 256×128, the same shape",
+            "`JournalInstance.ButtonFileDataID` holds — which is what lets the two tables fill in",
+            "for each other for a delve or a scenario the journal has no row for."
+          ]
         }
       ]
     },

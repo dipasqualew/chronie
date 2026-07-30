@@ -963,6 +963,46 @@ and the finder's is often `136349`, `interface/lfgframe/lfgicon-quest.blp`, whic
 good many entries at once — including every delve, which all share it. Between them the two
 tables answer for **805 places** on 12.0.5.67823.
 
+### And the wide banner, which is the segment modal's header
+
+The same two tables one column over: `JournalInstance` col4 and `LFGDungeons` col7 both hold a
+**256×128** banner, and the shape is the point — it is the only one of the four files either table
+names that is drawn as a header rather than as a square or a portrait. All 209 of the journal's
+decode at that size and 1,702 of the finder's 1,824 rows hold one, so between them they answer for
+the same 805 places. `journal::heroes_of` is the reader, and it differs from the icon's in two
+ways.
+
+**It reads the finder first, which is the opposite order, and the art is what decided it.** The
+opaque part of every banner, measured on 12.0.5.67823:
+
+| Place | `JournalInstance` col4 | `LFGDungeons` col7 |
+|---|---|---|
+| Naxxramas | `1396587`, 166×88 at (4,4) | `340679`, 256×128 full |
+| Deadmines | `522352`, 166×88 at (4,4) | `337488`, 256×128 full |
+| Shadowfang Keep | `522358`, 166×88 at (4,4) | `340687`, 256×128 full |
+| Nerub-ar Palace | `5912550`, 166×88 at (4,4) | `5912523`, 256×128 full |
+
+The journal's is 166×88 of picture inset into a file of twice the area — the Adventure Guide draws
+it at that size and composites it — so a header cut from one has a transparent margin down two
+sides. The finder's fills its file. So the finder's is preferred and the journal's fills in behind
+it for the places the finder has no row for; the trade is the mirror of the icon's, in that the
+finder shows one banner for a whole kind of thing here and there (`615222` is every delve's) where
+the journal's is always that dungeon's own.
+
+**And every name it is asked about comes back.** A place the game draws nothing for is answered
+with `337493`, `interface/lfgframe/ui-lfg-background-randomdungeon.blp` — the banner the finder
+shows when it will not say which dungeon a player is being sent to, which is the same size and the
+same style as the real ones, and fully opaque. The alternative was a modal that opened with a
+header for a raid and with a bare line of text for the zone outside it, which reads as two
+different modals. Drawing those from the world map instead is the follow-up issue #223 asked for
+and is not done here. `615222`'s neighbour `337490`,
+`ui-lfg-background-genericdungeon.blp`, is worth knowing about as a trap: it decodes at 256×128 and
+is **entirely transparent**, so it cannot be the stand-in however much its name suggests it.
+
+Two more of the four files are worth knowing about even though nothing reads them: col3 and col6
+are 512×512, framed art with transparent margins of their own — the Adventure Guide composites
+them too, so neither crops into a band without a hole in it.
+
 **Everywhere else draws no picture, and most places are everywhere else.** An open-world zone is
 a name neither table has heard of. That is not a gap in the reader:
 
@@ -985,6 +1025,8 @@ failing:
 |---|---|
 | `JournalInstance` col0 | reads "Deadmines", "Shadowfang Keep", "Throne of the Tides" in order |
 | `JournalInstance` col5 | all 209 icons decode, every one of them 128×128; its neighbours come out 512×512, 256×128 and 512×512 |
+| `JournalInstance` col4 | all 209 decode, every one of them 256×128 — Naxxramas reads `1396587` and Deadmines `522352` |
+| `LFGDungeons` col7 | 1,702 rows hold a value and the ones checked all decode at 256×128 — Naxxramas `340679`, Deadmines `337488` |
 | `LFGDungeons` col0 | reads "Earthcrawl Mines" for 2522, which is a delve |
 | `LFGDungeons` col5 | exactly 1,657 rows hold a value, which is the count the community schema gives `IconTextureFileID`, and all 1,657 decode |
 | the two together | Deadmines reads `136332` out of both, Nerub-ar Palace `5912511` out of both |
