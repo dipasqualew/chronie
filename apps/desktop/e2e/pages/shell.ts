@@ -73,6 +73,17 @@ export class Shell {
     );
   }
 
+  /**
+   * How far down the window itself the reader has got, in pixels.
+   *
+   * The window and not a view, because there is one scrolling page here and every view is drawn
+   * inside it — which is why anything on the page that scrolls for itself has to say so, and why
+   * this is the reading that catches one that does not.
+   */
+  scrolledBy(): Eventually<number> {
+    return eventually(() => this.page.evaluate(() => window.scrollY));
+  }
+
   /** The build, in the corner of the bar, which says what it is in its own tooltip. */
   build(): Locator {
     return this.page.getByTitle(/^Chronie /);

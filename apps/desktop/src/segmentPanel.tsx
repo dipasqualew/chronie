@@ -17,14 +17,66 @@
 
 import "./segmentPanel.css";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { SegmentBody, SegmentHead, useSegmentStep, walkOnArrows } from "./segmentModal";
 import type { SegmentViewProps } from "./segmentModal";
 
+/**
+ * How long the panel is left standing after the window has closed it, in milliseconds.
+ *
+ * The going is an animation and an element out of the document does not animate, so the window
+ * holds the column open for this long after the last click on it — `useDock` below, and the
+ * `segment-panel-out` keyframes in `segmentPanel.css`, which may not run for longer than this.
+ * They are two numbers in two languages and there is no third place to put the one: what a
+ * mismatch costs is a frame left standing still after it has faded, so this is the generous
+ * side of the animation rather than the exact length of it.
+ */
+export const PANEL_LEAVE_MS = 190;
+
+/**
+ * What the timeline draws beside itself: the segment the window has open, or the one it just
+ * closed for as long as that one takes to go.
+ *
+ * The window's rather than the panel's, because the column the panel stands in is the window's —
+ * `#timeline-view[data-panel]` in `app.css` — and a column that collapsed the moment a reader
+ * pressed Escape would drop the panel into the flow above the timeline and slide it out from
+ * there. Both have to last exactly as long, so both read this.
+ *
+ * Derived while rendering rather than in an effect, which is the difference between a frame that
+ * goes and a frame that blinks: an effect runs after the paint that has already taken the panel
+ * out of the document, and putting it back would play the *opening* animation on its way out.
+ */
+export function useDock<Open extends object>(
+  open: Open | null,
+): {
+  showing: Open | null;
+  leaving: boolean;
+} {
+  const [seen, setSeen] = useState<Open | null>(open);
+  const [going, setGoing] = useState<Open | null>(null);
+
+  if (open !== seen) {
+    setSeen(open);
+    // Opening, or being handed a redrawn copy of what is already open, ends any going in
+    // progress — a reader who reopens within the beat gets the panel back rather than watching
+    // the last one's timer take the new one away.
+    setGoing(open ? null : seen);
+  }
+
+  useEffect(() => {
+    if (!going) return;
+    const timer = window.setTimeout(() => setGoing(null), PANEL_LEAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [going]);
+
+  return open ? { showing: open, leaving: false } : { showing: going, leaving: going !== null };
+}
+
 export function SegmentPanel({
   showing,
+  leaving,
   onStep,
   onClose,
   onEditActivities,
@@ -37,10 +89,14 @@ export function SegmentPanel({
   album,
   captures,
   onShowAppearance,
-}: SegmentViewProps): ReactNode {
+}: SegmentViewProps & {
+  /** Whether the window has closed it and it is on its way out. See `useDock`. */
+  leaving?: boolean;
+}): ReactNode {
   const segment = showing?.order[showing.index];
-  const { body, step } = useSegmentStep(onStep);
-  const frame = useRef<HTMLElement>(null);
+  // The whole frame is what scrolls here rather than the body inside it, so the ref that puts
+  // the reading back to the top on a step is the same element the focus goes to.
+  const { scroller: frame, step } = useSegmentStep<HTMLElement>(onStep);
   const open = segment !== undefined;
 
   // What `showModal` would have done, done by hand, because nothing else about this is a modal.
@@ -50,7 +106,8 @@ export function SegmentPanel({
   // the keyboard is put down where they were rather than at the top of the document.
   //
   // Keyed on whether anything is open rather than on which segment is, so stepping through a
-  // session does not drag the focus out of whatever the reader is reading.
+  // session does not drag the focus out of whatever the reader is reading — the ref beside it is
+  // the same object for the life of the panel and never re-runs this.
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement;
@@ -61,13 +118,16 @@ export function SegmentPanel({
     return () => {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, [open]);
+  }, [open, frame]);
 
   if (!segment) return null;
 
   return (
     <aside
       className="panel segment-panel"
+      // Which of the two animations in `segmentPanel.css` is running, and — while it is the one
+      // going out — that nothing may be clicked on a frame the reader has already dismissed.
+      data-closing={leaving ? "" : undefined}
       aria-labelledby="segment-panel-title"
       // Focusable but not in the tab order: it is a place to put the focus rather than a control,
       // and Tab from here goes on into the panel's own buttons.
@@ -89,7 +149,6 @@ export function SegmentPanel({
         onClose={onClose}
       />
       <SegmentBody
-        ref={body}
         segment={segment}
         book={book}
         items={items}

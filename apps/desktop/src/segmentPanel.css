@@ -14,14 +14,70 @@
    would have to come back up the page to read the thing they just opened.
    `align-items: start` on the grid is what leaves it room to slide inside its own column.
 
-   A flex column for the same reason the modal is one: the head is a picture that may not be
-   cropped and may therefore not shrink, so the part that gives way is the body, and it gives way
-   by scrolling. See the note on `.detail-hero`. */
+   **The frame is what scrolls, and not the body inside it.** The modal scrolls its body and keeps
+   its head, which is right for a box floating in the middle of a darkened page — but here it made
+   the top of the panel dead to the wheel. A reader with the pointer over the picture, or over the
+   name of the place, turned the wheel and the *timeline* moved underneath: the two things on
+   screen answer to the same gesture, and which one you got depended on a boundary nothing draws.
+   So the whole frame takes it, the picture scrolls away with everything else, and the head is
+   pinned below — issue #241.
+
+   `overscroll-behavior: contain` is the other half of that. Without it the wheel runs out of
+   segment and carries straight on into the page behind, so reading to the bottom of a segment
+   scrolled the evening it came from off the screen. The panel is a thing to read, not a lid on
+   the timeline; reaching the end of it is the end of it. */
 .segment-panel {
   position: sticky; top: 12px;
   display: flex; flex-direction: column;
   max-height: calc(100vh - 24px);
-  overflow: hidden;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  animation: segment-panel-in 170ms ease-out;
+}
+
+/* Nothing inside it takes the scrolling for itself. The body is the modal's scrolling box and
+   here it is laid out at its whole height, so that what overflows is the frame — a flex item
+   that could shrink would swallow the overflow and put the wheel back where it was. */
+.segment-panel .detail-body { flex: none; overflow: visible; }
+
+/* And the head is pinned to the top of the frame it names, so what the picture's height costs is
+   the picture rather than the way out of the segment: the title, where in the evening it sits and
+   the buttons to either side of it stay put however far down the reader has gone. Opaque, because
+   the segment goes under it, and the panel's own fill is what it goes under. */
+.segment-panel .detail-head {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-1);
+}
+
+/* Opened and closed rather than appearing and vanishing. A panel that is *there* on the next
+   frame reads as the page having been replaced; one that comes in from the edge it lives on says
+   where it came from and leaves the timeline where the reader's eye already was.
+
+   It goes out under `useDock` in `segmentPanel.tsx`, which is what keeps it in the document long
+   enough for these keyframes to run — an element React has removed animates nothing. `forwards`
+   holds the last frame, so what is left standing for the millisecond after is the faded one and
+   not the panel back at full opacity.
+
+   Nothing may be clicked on it once the reader has dismissed it: it is drawn over the timeline
+   for those few frames, and a click that landed on a closing panel would go to a segment that is
+   already gone rather than to the card underneath. */
+@keyframes segment-panel-in {
+  from { opacity: 0; transform: translateX(22px); }
+}
+@keyframes segment-panel-out {
+  to { opacity: 0; transform: translateX(22px); }
+}
+.segment-panel[data-closing] {
+  animation: segment-panel-out 170ms ease-in forwards;
+  pointer-events: none;
+}
+
+/* A reader who has asked for no motion gets none — and gets it *immediately* rather than getting
+   the same wait with nothing drawn in it, which is why the duration goes to nothing rather than
+   the animation. The frame still leaves when `useDock` takes it away; it is simply already out
+   of sight by then. */
+@media (prefers-reduced-motion: reduce) {
+  .segment-panel, .segment-panel[data-closing] { animation-duration: 1ms; }
 }
 
 /* Narrower than the modal it replaces, so the head has to be allowed to come apart: a place with
