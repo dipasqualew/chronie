@@ -49,6 +49,7 @@ import type {
   TransmogPayload,
   TransmogSetItemsPayload,
   WardrobePayload,
+  WearersPayload,
   WifiPeer,
   WifiReceipt,
   WifiReceiveStatus,
@@ -98,6 +99,11 @@ export const e2eDesktop = {
   // of transient memory, so the window asks only when the view is first opened.
   transmogSets: (): Promise<TransmogPayload> =>
     mock ? Promise.resolve(structuredClone(mock.transmog)) : missingMock(),
+  // Who can really wear each set, read off every item in the game that gives one of its
+  // looks. Its own read rather than part of the grid, because it costs the walk of `Item` and
+  // `ItemSparse` the item browser pays for one slot at a time — see `wearers.rs`.
+  transmogWearers: (): Promise<WearersPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.transmogWearers)) : missingMock(),
   // Opening a set walks four more of the game's tables, so it is asked for per set rather
   // than loaded with the grid — a wardrobe's worth of joins nobody has clicked on is waste.
   transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> =>

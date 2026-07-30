@@ -272,6 +272,10 @@ const itemModifiedAppearance: TableSpec = {
         // What both faction sets are made of.
         [71022, 30022, 0, 80019, 0, 1],
         [71023, 30023, 0, 80020, 1, 1],
+        // The row no set points at, and the reason who can wear a set is read off every item
+        // in the game rather than off the ones the set names: appearance 80009 is set 203's
+        // Paladin-only legs, and this item gives the same look to anybody.
+        [71025, 30025, 0, 80009, 0, 1],
       ],
     },
     {
@@ -424,8 +428,11 @@ const item: TableSpec = {
         [ARMOR, 1, 7, 1, 0, 255, 130001, 11, 0, 0], // Tideglass Crown
         [ARMOR, 1, 7, 3, 0, 255, 130002, 11, 0, 0], // Tideglass Mantle
         [ARMOR, 1, 7, 5, 0, 255, 130003, 11, 0, 0], // Tideglass Robe
-        [ARMOR, 1, 7, 8, 0, 255, 130004, 11, 0, 0], // Tideglass Sandals
-        [ARMOR, 1, 7, 10, 0, 255, 130005, 11, 0, 0], // Tideglass Gloves
+        // Set 202's own two pieces, and leather rather than cloth like the three above them:
+        // which of the four kinds of armour a piece is decides who can wear the look at all,
+        // and a set of leather whose items said cloth would be a set for Priests.
+        [ARMOR, 2, 7, 8, 0, 255, 130004, 11, 0, 0], // Tideglass Sandals
+        [ARMOR, 2, 7, 10, 0, 255, 130005, 11, 0, 0], // Tideglass Gloves
         [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Emberforge Helm
         [ARMOR, 4, 6, 3, 0, 255, 130002, 11, 0, 0], // Emberforge Pauldrons
         [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Emberforge Breastplate
@@ -445,10 +452,13 @@ const item: TableSpec = {
         [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Breastplate of the Tempest
         [ARMOR, 4, 6, 1, 0, 255, 130001, 11, 0, 0], // Stormbreaker's Helm
         [ARMOR, 4, 6, 5, 0, 255, 130003, 11, 0, 0], // Stormbreaker's Breastplate
+        // The leggings that belong to no set at all and sell set 203's own look to anybody —
+        // see the row that reaches them in `ItemModifiedAppearance`.
+        [ARMOR, 4, 6, 7, 0, 255, 130006, 11, 0, 0], // Greaves of the Wanderer
       ],
       idList: [
         30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015, 30016,
-        30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
+        30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023, 30025,
       ],
     },
     {
@@ -1087,12 +1097,27 @@ const itemSparse: TableSpec = {
           quality: 4,
           inventoryType: 5,
         }),
-        sparseRow("Tideglass Sandals", "", { quality: 3, inventoryType: 8 }),
+        // The one piece in the fixture nothing in the game sells around: set 202's sandals are
+        // Druid-only and no other item gives that look, so the whole set is a Druid's however
+        // open the gloves beside them are. Bit 10 is the Druid.
+        sparseRow("Tideglass Sandals", "", {
+          quality: 3,
+          inventoryType: 8,
+          allowableClass: 0b100_0000_0000,
+        }),
         sparseRow("Tideglass Gloves", "", { quality: 3, inventoryType: 10 }),
         sparseRow("Emberforge Helm", "", { quality: 4, inventoryType: 1 }),
         sparseRow("Emberforge Pauldrons", "", { quality: 4, inventoryType: 3 }),
         sparseRow("Emberforge Breastplate", "", { quality: 5, inventoryType: 5 }),
-        sparseRow("Emberforge Greaves", "", { quality: 4, inventoryType: 7 }),
+        // And the piece something does sell around: set 203's legs are the Paladin's own, and
+        // an item belonging to no set gives the same look to anybody — which is what the set's
+        // own rows cannot see and why who can wear a set is read off every item in the game.
+        // Bit 1 is the Paladin.
+        sparseRow("Emberforge Greaves", "", {
+          quality: 4,
+          inventoryType: 7,
+          allowableClass: 0b10,
+        }),
         // The weapon rack, and the whole reason this column is read: four appearances the
         // game files under three display types and would otherwise say nothing else about.
         // 13 is a one-hander, 17 a two-hander, 14 a shield and 23 a thing held in the other
@@ -1135,10 +1160,13 @@ const itemSparse: TableSpec = {
           inventoryType: 5,
           requiredLevel: 60,
         }),
+        // The world drop that undoes set 203's class lock: the same look as the Paladin's own
+        // greaves, sold to anybody, and in no set for the set view to have found it in.
+        sparseRow("Greaves of the Wanderer", "", { quality: 3, inventoryType: 7 }),
       ],
       idList: [
         30001, 30002, 30003, 30004, 30005, 30006, 30007, 30008, 30009, 30010, 30014, 30015, 30016,
-        30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023,
+        30013, 30017, 30018, 30019, 30020, 30021, 30022, 30023, 30025,
       ],
     },
     {

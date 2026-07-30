@@ -34,14 +34,31 @@ test("browses the game's transmog sets and dresses the character in them", async
 
   await test.step("a card says who the set is for and where it came from", async () => {
     const card = sets.card("Tideglass Regalia");
-    await expect(card).toContainText("Cloth");
+    // Who the *items* allow rather than what mask the set was filed under — a second command
+    // walking every item in the game that gives one of these looks, arriving after the grid.
+    await expect(card).toContainText("Any cloth wearer");
     await expect(card).toContainText("Cataclysm");
     await expect(card).toContainText("Patch 10.2.0");
     // Items, because items is what the game's own table counts. How many looks they come to
     // takes four more tables and is what opening the set is for.
     await expect(card).toContainText("6 items");
-    // A set for nobody in particular is for everybody, and says so.
+    // A set for nobody in particular is for everybody, and says so. It is also the set the
+    // wearers read says nothing about — every item behind it sits in a section this install
+    // holds no key to — so this card is the one still drawing the game's own mask.
     await expect(sets.card("Duskwoven Shroud")).toContainText("Any class");
+  });
+
+  // The whole of issue #244, and both ends of it. The game's own `ClassMask` answers two
+  // different questions in one voice: "Plate" is an armour type and "Paladin" is a lock, and the
+  // card said them the same way. What a reader wants to know is whether they can wear the thing,
+  // and only the items behind the looks can say — see `wearers.rs` and `whoWears`.
+  await test.step("a card says who can really wear the set", async () => {
+    // The lock lifted: nothing keeps a Warrior or a Death Knight out of these clothes, and the
+    // chip is now an invitation where the mask was a wall.
+    await expect(sets.cardSaying("Emberforge Plate", "Any plate wearer")).toBeVisible();
+    // And the lock standing, narrower than the armour the game filed it under: the sandals in
+    // this set are the Druid's own, so no other leather wearer can put the whole of it on.
+    await expect(sets.cardSaying("Tideglass Hide", "Druid only")).toBeVisible();
   });
 
   // The one thing on the card that no install and no reader supplied: what the artwork was
@@ -336,6 +353,18 @@ test("browses the game's transmog sets and dresses the character in them", async
   await test.step("a set no class owns survives a class filter", async () => {
     await sets.expansion().selectOption({ label: "All expansions" });
     await expect(sets.sets()).toHaveText(["Duskwoven Shroud", "Tideglass Regalia"]);
+  });
+
+  // And the dropdown asks the same question the chip answers. Tideglass Hide is filed under the
+  // leather mask, which every Rogue is in, so the filter reading that mask handed a Rogue a set
+  // no Rogue can wear — and hid it from the one class that can.
+  await test.step("the class filter narrows to what a class can really wear", async () => {
+    await sets.klass().selectOption({ label: "Rogue" });
+    await expect(sets.sets()).toHaveText(["Duskwoven Shroud"]);
+
+    await sets.klass().selectOption({ label: "Druid" });
+    await expect(sets.sets()).toHaveText(["Duskwoven Shroud", "Tideglass Hide"]);
+    await sets.klass().selectOption("");
   });
 
   await test.step("a filter that matches nothing says so", async () => {

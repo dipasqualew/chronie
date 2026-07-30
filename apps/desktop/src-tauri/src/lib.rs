@@ -37,6 +37,7 @@ mod saved_variables;
 pub mod tables;
 pub mod transmog;
 pub mod wardrobe;
+pub mod wearers;
 pub mod wifi;
 pub mod worn;
 
@@ -353,6 +354,18 @@ async fn transmog_sets(state: State<'_, AppState>) -> Result<dto::TransmogPayloa
     Ok(dto::convert(
         read_game_files(&state, transmog::sets).await?,
     )?)
+}
+
+/// Who can really wear each set, read off the items behind it.
+///
+/// Apart from the grid's own payload and asked for after it, because the two cost different
+/// things: the sets are 34 ms and this is the walk of `Item` and `ItemSparse` the items browser
+/// pays for a slot at a time. The cards draw the mask the game filed each set under until this
+/// arrives and then say what the items say — see `wearers.rs` for why the two differ.
+#[tauri::command]
+#[specta::specta]
+async fn transmog_wearers(state: State<'_, AppState>) -> Result<dto::WearersPayload, CommandError> {
+    Ok(dto::convert(read_game_files(&state, wearers::sets).await?)?)
 }
 
 /// What one transmog set is made of, walked out of the same files.
@@ -2075,6 +2088,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         transmog_marks,
         transmog_set_items,
         transmog_sets,
+        transmog_wearers,
         update_activity,
         wifi_answer_offer,
         wifi_discover,

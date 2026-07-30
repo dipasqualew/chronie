@@ -49,6 +49,7 @@ import {
   transmog,
   transmogItems,
   transmogMarks,
+  transmogWearers,
   wardrobe,
   wornSets,
   wornSetsAskedFor,
@@ -77,6 +78,7 @@ export {
 export const mockDesktop: E2EMock = {
   dashboard,
   transmog,
+  transmogWearers,
   transmogItems,
   wardrobe,
   transmogMarks,

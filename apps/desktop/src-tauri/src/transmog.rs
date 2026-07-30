@@ -1059,7 +1059,10 @@ mod tests {
                     "modifiedAppearanceId": 71009, "itemId": 30009, "name": "Emberforge Greaves",
                     "appearanceId": 80009,
                     "displayType": 5, "inventoryType": 7,
-                    "allowableClass": 0xffff, "requiredLevel": 0, "quality": 4,
+                    // The set's own legs are the Paladin's; what says the look is not is an
+                    // item outside the set, which this walk has no reason to look for and
+                    // `wearers.rs` does.
+                    "allowableClass": 0b10, "requiredLevel": 0, "quality": 4,
                     "displayInfoId": 900006, "iconFileDataId": 130006,
                     "hasModel": false,
                 },

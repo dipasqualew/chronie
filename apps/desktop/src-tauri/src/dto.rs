@@ -446,6 +446,21 @@ dto!(TransmogPayload {
     pub withheld_count: usize,
 });
 
+dto!(SetWearers {
+    pub set_id: u32,
+    /// A bit per class, in the game's class order — the classes that can wear every look the
+    /// set holds. Never zero, and never the game's "zero means everybody": this is the answer
+    /// itself rather than a mask to be interpreted.
+    pub class_mask: u32,
+});
+
+dto!(WearersPayload {
+    /// Only the sets this install can describe an item of. A set whose every look sits in a
+    /// section the game keeps encrypted is absent rather than reported as open to everybody.
+    pub wearers: Vec<SetWearers>,
+    pub read_count: usize,
+});
+
 dto!(TransmogAppearance {
     pub modified_appearance_id: u32,
     pub item_id: u32,

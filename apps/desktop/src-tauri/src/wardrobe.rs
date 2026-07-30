@@ -79,15 +79,18 @@ pub struct WardrobeAppearance {
 }
 
 /// What one row of the two item tables says, gathered before a row is named.
+///
+/// Shared with [`crate::wearers`], which asks the same two tables the same question about the
+/// items behind a whole set rather than about the items behind one place on the body.
 #[derive(Debug, Clone, Default)]
-struct ItemFacts {
-    name: String,
-    inventory_type: u32,
-    allowable_class: u32,
-    required_level: u32,
-    quality: u32,
-    class_id: u32,
-    subclass_id: u32,
+pub struct ItemFacts {
+    pub name: String,
+    pub inventory_type: u32,
+    pub allowable_class: u32,
+    pub required_level: u32,
+    pub quality: u32,
+    pub class_id: u32,
+    pub subclass_id: u32,
 }
 
 /// Every appearance filling one of `display_types`, named by an item and sorted for reading.
@@ -132,21 +135,7 @@ pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value
 
     // And which items reach each of them, which is the hop that makes a row a look rather
     // than an item: half the appearances in the game are sold by more than one item.
-    let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
-    let mut items_of: HashMap<u32, Vec<u32>> = HashMap::new();
-    for row in modified.rows() {
-        let appearance_id = row.number(modified_appearance_column::APPEARANCE_ID);
-        let item_id = row.number(modified_appearance_column::ITEM_ID);
-        if item_id == 0 || !looks.contains_key(&appearance_id) {
-            continue;
-        }
-        let reached = items_of.entry(appearance_id).or_default();
-        // The game stores one item's row twice where it sold the same look at two
-        // difficulties, and a look counted twice for one item is a count nobody can act on.
-        if !reached.contains(&item_id) {
-            reached.push(item_id);
-        }
-    }
+    let items_of = reaching(files, &|appearance_id| looks.contains_key(&appearance_id))?;
 
     let facts = describe(files, &items_of)?;
 
@@ -250,6 +239,35 @@ fn lifts_restriction(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> bool {
     reached.iter().any(open) && reached.iter().any(locked)
 }
 
+/// Every item of the game that reaches an appearance `keep` says yes to.
+///
+/// The hop that makes a row a look rather than an item: half the appearances in the game are
+/// sold by more than one item, and 55,198 readable appearances of a 12.0.5.67 install are
+/// reached by 156,683 items between them. Which appearances are worth the entry is the
+/// caller's question — this list is browsed by the kind of place a look fills, and
+/// [`crate::wearers`] wants only the appearances some set names.
+pub fn reaching(
+    files: &dyn GameFiles,
+    keep: &dyn Fn(u32) -> bool,
+) -> Result<HashMap<u32, Vec<u32>>, String> {
+    let modified = Db2::parse(files.read(ITEM_MODIFIED_APPEARANCE)?)?;
+    let mut items_of: HashMap<u32, Vec<u32>> = HashMap::new();
+    for row in modified.rows() {
+        let appearance_id = row.number(modified_appearance_column::APPEARANCE_ID);
+        let item_id = row.number(modified_appearance_column::ITEM_ID);
+        if item_id == 0 || !keep(appearance_id) {
+            continue;
+        }
+        let reached = items_of.entry(appearance_id).or_default();
+        // The game stores one item's row twice where it sold the same look at two
+        // difficulties, and a look counted twice for one item is a count nobody can act on.
+        if !reached.contains(&item_id) {
+            reached.push(item_id);
+        }
+    }
+    Ok(items_of)
+}
+
 /// What the game says about every item that reaches one of these appearances.
 ///
 /// Two tables, in the order that costs least. `Item` is two megabytes and is read for the one
@@ -257,7 +275,7 @@ fn lifts_restriction(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> bool {
 /// holds everything else a row draws. Both are walked once, and only the rows an appearance
 /// here is reached by are kept: an install's `ItemSparse` describes two hundred thousand
 /// items and one kind of place is filled by a few thousand of them.
-fn describe(
+pub fn describe(
     files: &dyn GameFiles,
     items_of: &HashMap<u32, Vec<u32>>,
 ) -> Result<HashMap<u32, ItemFacts>, String> {
