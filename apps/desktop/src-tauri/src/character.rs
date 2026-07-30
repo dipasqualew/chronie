@@ -954,7 +954,7 @@ mod tests {
         let geosets = drawn(&body);
         assert_eq!(
             geosets,
-            vec![0, 801, 1101, 2001, 2701, 2, 1001, 1301, 501, 3202, 702, 1701, 2101]
+            vec![0, 801, 1101, 2001, 2701, 1, 1001, 1301, 501, 3202, 702, 1701, 2101]
         );
 
         // One group, one part — for every group but the hair's, which is group 0 and which
@@ -993,9 +993,11 @@ mod tests {
             !geosets.contains(&3601),
             "she is wearing jewellery nobody chose: {geosets:?}"
         );
-        // And the hairstyle she was given rather than the first the file happens to hold.
-        assert!(geosets.contains(&2), "{geosets:?}");
-        assert!(!geosets.contains(&1), "{geosets:?}");
+        // And the hairstyle she was given rather than the first the file happens to hold. Which
+        // is `1` and not `2`: her hair style is the fixture's one question whose two order
+        // columns disagree, and the screen's is `UiOrderIndex` — see `customization::on_screen`.
+        assert!(geosets.contains(&1), "{geosets:?}");
+        assert!(!geosets.contains(&2), "{geosets:?}");
     }
 
     /* ---------- the other body ---------- */
@@ -1088,9 +1090,12 @@ mod tests {
         let herself = crate::customization::of(
             &files,
             &hers,
+            // 132 rather than 133, because 133 is the swatch the screen opens on: her hair style
+            // is the fixture's one question whose two order columns disagree, and asking for the
+            // default would leave this asserting only that nothing happened.
             &[Picked {
                 question: 16,
-                swatch: 133,
+                swatch: 132,
             }],
         )
         .unwrap();
@@ -1100,9 +1105,9 @@ mod tests {
 
         let geosets = drawn(&dressed(&body, None, herself.as_ref()));
 
-        assert!(geosets.contains(&1), "the hairstyle she chose: {geosets:?}");
+        assert!(geosets.contains(&2), "the hairstyle she chose: {geosets:?}");
         assert!(
-            !geosets.contains(&2),
+            !geosets.contains(&1),
             "and not the one the game opens on: {geosets:?}"
         );
         assert!(geosets.contains(&3202), "she has no head: {geosets:?}");
@@ -1441,18 +1446,18 @@ mod tests {
         // Sleeves in place of bare arms, a chest in place of the bare torso.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(CHESTPIECE))),
-            vec![0, 802, 1101, 2001, 2701, 2, 1002, 1301, 501, 3202, 702, 1701, 2101]
+            vec![0, 802, 1101, 2001, 2701, 1, 1002, 1301, 501, 3202, 702, 1701, 2101]
         );
         // The boot itself and the booted feet: two groups from one item, and the feet group is
         // the one whose zero means booted rather than bare.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(BOOTS))),
-            vec![0, 801, 1101, 2002, 2701, 2, 1001, 1301, 502, 3202, 702, 1701, 2101]
+            vec![0, 801, 1101, 2002, 2701, 1, 1001, 1301, 502, 3202, 702, 1701, 2101]
         );
         // The robe leaves the chest bare and hangs a skirt over the legs instead.
         assert_eq!(
             drawn(&worn_mesh(&worn_of(ROBE))),
-            vec![0, 802, 1101, 2001, 2701, 2, 1001, 1302, 501, 3202, 702, 1701, 2101]
+            vec![0, 802, 1101, 2001, 2701, 1, 1001, 1302, 501, 3202, 702, 1701, 2101]
         );
     }
 
@@ -1694,15 +1699,15 @@ mod tests {
     fn a_helm_that_hides_hair_hides_it_and_leaves_the_body_on() {
         let bare = drawn(&mesh());
         assert!(
-            bare.contains(&2),
+            bare.contains(&1),
             "a bare body wears the hairstyle she was given"
         );
 
         let helmed = drawn(&worn_mesh(&worn_of(HELM)));
-        assert!(!helmed.contains(&2), "the helm covers the hair");
+        assert!(!helmed.contains(&1), "the helm covers the hair");
         assert!(helmed.contains(&0), "and not the body it is attached to");
         // The whole hundred, not only the one variant a bare body happened to draw.
-        assert!(!helmed.contains(&1));
+        assert!(!helmed.contains(&2));
         // And nothing else: the helm's own group swaps as any item's does, and every other
         // group is where a bare body left it.
         assert_eq!(
@@ -1716,7 +1721,7 @@ mod tests {
     #[test]
     fn taking_the_helm_off_puts_the_hair_back() {
         assert_eq!(drawn(&worn_mesh(&Worn::default())), drawn(&mesh()));
-        assert!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&2));
+        assert!(drawn(&worn_mesh(&worn_of(CHESTPIECE))).contains(&1));
     }
 
     // The acceptance for a weapon: it is *held* rather than hanging in mid-air beside her, and

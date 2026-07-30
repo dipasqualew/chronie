@@ -1760,7 +1760,7 @@ const chrCustomizationGeoset: TableSpec = {
  * swatch of.
  *
  * These are what say *which* swatch of each option a body opens on, which is the first swatch
- * by `OrderIndex` — and which options belong to this body at all, out of `ChrModelID`. A
+ * by `UiOrderIndex` — and which options belong to this body at all, out of `ChrModelID`. A
  * reader that skipped the model would give a Human Female another race's head.
  *
  * Both keep their ids **inside** the row, unlike the three tables above — which is why the
@@ -1794,13 +1794,21 @@ const chrCustomizationChoice: TableSpec = {
       // Two swatches of most options, and the second is never the answer: the swatches are
       // listed second-first here and there, so a reader that took the row order rather than
       // the order index gets a different face and a different hairstyle.
+      //
+      // **Which order index, though.** The hair style's two disagree, and that is the shape
+      // most of the game's bodies actually have: `UiOrderIndex` is where the swatch sits on the
+      // character creation screen and `OrderIndex` is not, so 133 is the one this body opens on
+      // even though 132 comes first by the column beside it. The skin's two agree, at 40 and 41
+      // rather than at 0 and 1, because a real option's UI order is banded rather than counted
+      // from zero — and a reader that sorted on the wrong one of these would still find the
+      // right skin, which is exactly how the disagreement went unnoticed.
       rows: [
         ["", 85, 14, 318, 0, 0, 40, 0, 90001, 0, [0, 0]],
         ["", 86, 14, 318, 0, 1, 41, 0, 90001, 0, [0, 0]],
         ["", 103, 15, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
         ["", 102, 15, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
-        ["", 133, 16, 0, 0, 1, 1, 0, 90001, 0, [0, 0]],
-        ["", 132, 16, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
+        ["", 133, 16, 0, 0, 1, 0, 0, 90001, 0, [0, 0]],
+        ["", 132, 16, 0, 0, 0, 1, 0, 90001, 0, [0, 0]],
         ["", 156, 17, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
         ["", 4150, 464, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],
         ["", 4908, 510, 0, 0, 0, 0, 0, 90001, 0, [0, 0]],

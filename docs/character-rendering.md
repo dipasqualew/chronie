@@ -191,6 +191,21 @@ machine that reported it was a Kul Tiran Male standing in for a roster of night 
 on screen saying so. `character::Likeness` is that, made explicit: nobody, their race, or
 themselves, said out loud beside the picture.
 
+**And then #235, which was the mistake after all — in the sentence above rather than in the
+chain.** "The swatch the game itself opens on" was read as the first by `OrderIndex`, and the
+screen's order is `UiOrderIndex`. The paragraph above is where that hid: swatch 801 is a Night Elf
+Female's first skin by *both* columns, so the one option this document held up as evidence is one of
+the few where the wrong reading gives the right answer. Across the build the two disagree on 92
+options and 50 of the 51 bodies — see [game-files.md](game-files.md#every-swatch-not-only-the-first-verified)
+for the bands, which is where the report's own observation lands: the swatches are grouped on
+screen, and the grouping *is* `UiOrderIndex`.
+
+What that changed is only which swatch is the default, so it changed nothing about a character the
+addon has real answers for and everything about the ones it has not — which is most of a roster.
+A Blood Elf Female was drawn with a mid-tan skin, blonde hair and fel-green eyes; the body the game
+opens her on is the palest tone, red hair and gold eyes. The caveat under the picture says the body
+is "drawn from their race, at the colours the game itself opens on", and until this it was not.
+
 **A swatch's geoset can decline in two opposite ways, and one of them is a row to drop.**
 `ChrCustomizationGeoset` states a group and a value, and `0` means the group is switched off —
 which has to be kept, or a character wears the necklace she declined. `-1` is the other thing,

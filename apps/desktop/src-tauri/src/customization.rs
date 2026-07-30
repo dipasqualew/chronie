@@ -21,7 +21,8 @@
 //!      ▼
 //! ChrCustomizationChoice          the swatches of one of them; ids kept inline
 //!   col2 = ChrCustomizationOptionID
-//!   col5 = OrderIndex              ← the first is the one the screen opens on
+//!   col6 = UiOrderIndex            ← the first is the one the screen opens on
+//!   col5 = OrderIndex              ── which is *not* col5, and that was issue #235
 //!      │
 //!      ▼
 //! ChrCustomizationElement         what picking that swatch actually does
@@ -47,8 +48,11 @@
 //! once, and a Dracthyr's face shape is a row of exactly the same shape as a Human's. Filtering
 //! on `ChrModelID` is what keeps group 32 from having two owners.
 //!
-//! **The swatch is the first by `OrderIndex`, not the first row.** The rows sit in id order and
-//! the ids are historical; the order index is what the character creation screen reads.
+//! **The swatch is the first by `UiOrderIndex`, not the first row and not the first by
+//! `OrderIndex`.** The rows sit in id order and the ids are historical. So is `OrderIndex`, near
+//! enough — the column the character creation screen actually lays its swatches out by is the one
+//! named after it, and the two disagree about which swatch comes first on 92 of this build's
+//! options. See [`on_screen`], which is where that is set out.
 //!
 //! **An element can be conditional.** A face is authored per *skin*, so choosing one face names
 //! a material for every swatch of the skin option and only the one whose
@@ -234,11 +238,42 @@ pub fn of(
     Ok(Some(found))
 }
 
+/// Where one swatch sits on the character creation screen: what [`on_screen`] reads it as.
+///
+/// A tuple rather than a named struct because the whole of its meaning is that it sorts, and
+/// `Ord` on a tuple is that meaning already — the parts are in the order they are compared in.
+type OnScreen = (u32, u32, u32);
+
+/// Where one swatch sits on the character creation screen, as something to sort by.
+///
+/// **`UiOrderIndex` and not `OrderIndex`, and that distinction is issue #235.** The two read
+/// alike and the second one is the trap: `OrderIndex` is closer to the order the swatches were
+/// authored in, and on this build the two name a different first swatch for 92 of the game's
+/// options, across 50 of its 51 playable bodies. What makes the difference visible is that
+/// `UiOrderIndex` is *banded* rather than counted — a Blood Elf Female's skins run 1–14 for the
+/// elven tones, 50–55 and 70–72 for the two sets borrowed off other races, and 100 upwards for
+/// the Death Knight pallors and the transmog swatch. Those bands are the groups the game's own
+/// screen lays out and highlights together, which is how the report described them; `OrderIndex`
+/// cuts across them, so sorting on it interleaves a Death Knight's grey with the living tones and
+/// opens the body on whichever landed first.
+///
+/// `OrderIndex` is still read, as a tie-break under it, and only for that: two of the shipping
+/// table's options give every swatch a `UiOrderIndex` of zero, and where the game states no order
+/// for its screen the order the rows were authored in is the only order there is. The id breaks
+/// the last tie so that two runs of this agree.
+fn on_screen(row: &crate::db2::Row<'_>) -> OnScreen {
+    (
+        row.number(choice_column::UI_ORDER),
+        row.number(choice_column::ORDER),
+        row.id(),
+    )
+}
+
 /// The swatch of every one of this body's options that is to be applied to her.
 ///
 /// The reader's answer where they gave one, and otherwise the swatch the game itself opens on —
-/// the first by `OrderIndex`, which is the order the character creation screen lists them in and
-/// not the order the rows sit in. Ties fall to the lower id so that two runs agree.
+/// the first by [`on_screen`], which is where the character creation screen puts it and not the
+/// order the rows sit in.
 ///
 /// **An answer is checked against the table rather than believed.** It comes out of a settings
 /// file that outlives patches, and the two ways it can be wrong are worth telling apart from
@@ -255,7 +290,7 @@ fn chosen_by(files: &dyn GameFiles, body: u32, picked: &[Picked]) -> Result<Vec<
     }
 
     let choices = Db2::parse(files.read(CHR_CUSTOMIZATION_CHOICE)?)?;
-    let mut first: HashMap<u32, (u32, u32)> = HashMap::new();
+    let mut first: HashMap<u32, OnScreen> = HashMap::new();
     // Which question each of this body's swatches belongs to, which is what an answer is checked
     // against. Only hers: the table holds every body's, and the whole point of the check is that
     // another body's swatch must not resolve.
@@ -267,7 +302,7 @@ fn chosen_by(files: &dyn GameFiles, body: u32, picked: &[Picked]) -> Result<Vec<
         }
         belongs.insert(row.id(), option);
         // Held per option, so the count here is the body's options and not the table's rows.
-        let swatch = (row.number(choice_column::ORDER), row.id());
+        let swatch = on_screen(&row);
         let held = first.entry(option).or_insert(swatch);
         if swatch < *held {
             *held = swatch;
@@ -281,7 +316,7 @@ fn chosen_by(files: &dyn GameFiles, body: u32, picked: &[Picked]) -> Result<Vec<
         .collect();
     let mut chosen: Vec<u32> = first
         .into_iter()
-        .map(|(option, (_, opens_on))| answered.get(&option).copied().unwrap_or(opens_on))
+        .map(|(option, (.., opens_on))| answered.get(&option).copied().unwrap_or(opens_on))
         .collect();
     chosen.sort_unstable();
     Ok(chosen)
@@ -291,8 +326,9 @@ fn chosen_by(files: &dyn GameFiles, body: u32, picked: &[Picked]) -> Result<Vec<
 ///
 /// This is the whole of what a reader may personalise, read out of the installed game rather
 /// than listed anywhere: a patch that adds a hairstyle adds a swatch here, and one that adds a
-/// question adds a question. The order is the screen's — `OrderIndex` on both tables, ties to
-/// the lower id so that two runs agree.
+/// question adds a question. The order is the screen's: `OrderIndex` for the questions, and
+/// [`on_screen`] for the swatches within one — which is a different column, for the reason that
+/// function exists to state.
 ///
 /// **A question none of whose swatches does anything is left out.** The game asks a body several
 /// things that a still picture cannot answer with — an eye style, an eyesight — and their
@@ -309,17 +345,16 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
 
     let choices = Db2::parse(files.read(CHR_CUSTOMIZATION_CHOICE)?)?;
     // Keyed by question, and each list kept in the screen's order below.
-    let mut swatches: HashMap<u32, Vec<(u32, u32, String)>> = HashMap::new();
+    let mut swatches: HashMap<u32, Vec<(OnScreen, String)>> = HashMap::new();
     for row in choices.rows() {
         let option = row.number(choice_column::OPTION);
         if !mine.contains_key(&option) {
             continue;
         }
-        swatches.entry(option).or_default().push((
-            row.number(choice_column::ORDER),
-            row.id(),
-            row.text(choice_column::NAME),
-        ));
+        swatches
+            .entry(option)
+            .or_default()
+            .push((on_screen(&row), row.text(choice_column::NAME)));
     }
 
     let doing = doing_something(files, &swatches)?;
@@ -328,10 +363,10 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
         let Some(mut hers) = swatches.remove(&id) else {
             continue;
         };
-        if !hers.iter().any(|(_, swatch, _)| doing.contains(swatch)) {
+        if !hers.iter().any(|((.., swatch), _)| doing.contains(swatch)) {
             continue;
         }
-        hers.sort_by_key(|entry| (entry.0, entry.1));
+        hers.sort_by_key(|hers| hers.0);
         found.push((
             order,
             id,
@@ -340,7 +375,7 @@ pub fn questions(files: &dyn GameFiles, body: u32) -> Result<Vec<Question>, Stri
                 name,
                 swatches: hers
                     .into_iter()
-                    .map(|(_, id, name)| Swatch { id, name })
+                    .map(|((.., id), name)| Swatch { id, name })
                     .collect(),
             },
         ));
@@ -378,12 +413,12 @@ fn questions_of(files: &dyn GameFiles, body: u32) -> Result<HashMap<u32, (u32, S
 /// before yielding the first.
 fn doing_something(
     files: &dyn GameFiles,
-    swatches: &HashMap<u32, Vec<(u32, u32, String)>>,
+    swatches: &HashMap<u32, Vec<(OnScreen, String)>>,
 ) -> Result<HashSet<u32>, String> {
     let hers: HashSet<u32> = swatches
         .values()
         .flatten()
-        .map(|(_, swatch, _)| *swatch)
+        .map(|((.., swatch), _)| *swatch)
         .collect();
     let elements = Db2::parse(files.read(CHR_CUSTOMIZATION_ELEMENT)?)?;
     Ok(elements
@@ -701,8 +736,8 @@ mod tests {
                 geosets: vec![
                     Geoset {
                         group: 0,
-                        geoset: 2
-                    }, // her hairstyle, and not the first
+                        geoset: 1
+                    }, // her hairstyle: the swatch the screen opens on, not the first row
                     Geoset {
                         group: 36,
                         geoset: 3600
@@ -764,14 +799,43 @@ mod tests {
         );
     }
 
-    // Which swatch is the first one is the order index and not the row order. The fixture lists
+    // Which swatch is the first one is an order index and not the row order. The fixture lists
     // the face, the hairstyle and the face shape second-swatch-first for exactly this reason,
     // and every one of those rows resolves.
     #[test]
     fn opens_on_the_first_swatch_of_each_option_by_order_rather_than_by_row() {
         assert_eq!(
             chosen(),
-            vec![85, 102, 132, 156, 4150, 4908, 5059, 54_353, 56653]
+            vec![85, 102, 133, 156, 4150, 4908, 5059, 54_353, 56653]
+        );
+    }
+
+    // And *which* order index, because there are two of them and only one is the screen's.
+    // `OrderIndex` is closer to the order the swatches were authored in; `UiOrderIndex` is where
+    // the swatch sits on the character creation and barbershop screens, and so is what says the
+    // one a body opens on. They disagree on 92 options across fifty of the game's fifty-one
+    // playable bodies — a Blood Elf Female opens on a mid-tan skin and blonde hair by `OrderIndex`
+    // and on the palest tone and red hair by `UiOrderIndex` — so reading the wrong one is the
+    // wrong skin, the wrong hair and the wrong eyes on very nearly every character there is.
+    //
+    // What let it survive is that a Human Female's own skin is one of the few where the two
+    // columns agree, so the body this app opens on looked right while the rest did not.
+    #[test]
+    fn opens_on_the_swatch_the_screen_opens_on_rather_than_the_one_authored_first() {
+        let hers = herself().geosets;
+        assert!(
+            hers.contains(&Geoset {
+                group: 0,
+                geoset: 1
+            }),
+            "the hairstyle of the swatch the screen opens on: {hers:?}"
+        );
+        assert!(
+            !hers.contains(&Geoset {
+                group: 0,
+                geoset: 2
+            }),
+            "and not the one that comes first by OrderIndex"
         );
     }
 
@@ -939,14 +1003,21 @@ mod tests {
 
     /* ---------- what the reader is asked, and what their answer does ---------- */
 
-    /// The fixture's second swatch of three of her questions, each of which resolves as fully as
-    /// the first — a second skin with a face authored for it, a second hairstyle, a second head.
+    /// The swatch of three of her questions that is *not* the one the screen opens on, each of
+    /// which resolves as fully as the one that is — a second skin with a face authored for it, a
+    /// second hairstyle, a second head.
+    ///
+    /// The hairstyle is 132 rather than 133 because the hair style question is the fixture's one
+    /// option whose two order columns disagree: 133 is the swatch the screen opens on despite
+    /// sitting second by `OrderIndex`, so 132 is the answer that has to be *asked for*. Naming the
+    /// default here would leave every test below asserting that the body it already was is the
+    /// body it became.
     const HAIR_STYLE: u32 = 16;
     /// The question of hers that drives nothing at all, which is the one she is not asked.
     const INERT_QUESTION: u32 = 8523;
     const ANOTHER_HAIRSTYLE: Picked = Picked {
         question: HAIR_STYLE,
-        swatch: 133,
+        swatch: 132,
     };
     const ANOTHER_SKIN_SWATCH: Picked = Picked {
         question: 14,
@@ -993,8 +1064,9 @@ mod tests {
         );
     }
 
-    // And the swatches of one, in the screen's order rather than the table's. The fixture lists
-    // the hairstyles second-swatch-first for exactly this reason.
+    // And the swatches of one, in the screen's order rather than the table's — which is
+    // `UiOrderIndex` and not the `OrderIndex` beside it. The fixture's two hairstyles disagree
+    // about which comes first for exactly this reason.
     #[test]
     fn lists_the_swatches_of_a_question_in_the_order_the_screen_offers_them() {
         let ids: Vec<u32> = question(HAIR_STYLE)
@@ -1002,7 +1074,7 @@ mod tests {
             .iter()
             .map(|swatch| swatch.id)
             .collect();
-        assert_eq!(ids, vec![132, 133]);
+        assert_eq!(ids, vec![133, 132]);
     }
 
     // The one thing this app must not offer: another body's question. `ChrCustomizationOption`
@@ -1034,7 +1106,7 @@ mod tests {
         assert!(
             hers.geosets.contains(&Geoset {
                 group: 0,
-                geoset: 1
+                geoset: 2
             }),
             "the hairstyle she chose: {:?}",
             hers.geosets
@@ -1042,9 +1114,9 @@ mod tests {
         assert!(
             !hers.geosets.contains(&Geoset {
                 group: 0,
-                geoset: 2
+                geoset: 1
             }),
-            "and not the first one"
+            "and not the one the screen opens on"
         );
         // Her head, her ears and her skin are not what was asked about and do not move.
         assert_eq!(hers.base, herself().base);
@@ -1105,14 +1177,14 @@ mod tests {
             ANOTHER_HAIRSTYLE,
             Picked {
                 question: HAIR_STYLE,
-                swatch: 132,
+                swatch: 133,
             },
         ];
         assert_eq!(
             clean(twice),
             Ok(vec![Picked {
                 question: HAIR_STYLE,
-                swatch: 132
+                swatch: 133
             }])
         );
         let both = vec![ANOTHER_HAIRSTYLE, ANOTHER_SKIN_SWATCH];
