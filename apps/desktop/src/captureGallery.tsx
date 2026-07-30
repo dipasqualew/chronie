@@ -33,6 +33,7 @@ import {
 } from "./captures";
 import type { CaptureAlbum, CapturedMoment } from "./captures";
 import type { CaptureImagePayload, DashboardPayload, Segment } from "./types";
+import { StepButton } from "./ui";
 
 /** Everything the gallery needs a backend for. Injected, so it is drivable without one. */
 export interface CaptureActions {
@@ -285,22 +286,15 @@ function CaptureViewer({
           </span>
         </div>
         <div className="detail-nav">
-          <button
-            type="button"
-            aria-label="Previous screenshot"
-            disabled={index === 0}
-            onClick={() => onStep(-1)}
-          >
+          {/* Both ends say they are spent without giving up the focus they are holding, which is
+              what keeps the arrow keys above working once the reader has walked to one of them.
+              See `StepButton`. */}
+          <StepButton label="Previous screenshot" spent={index === 0} onStep={() => onStep(-1)}>
             ‹
-          </button>
-          <button
-            type="button"
-            aria-label="Next screenshot"
-            disabled={index >= count - 1}
-            onClick={() => onStep(1)}
-          >
+          </StepButton>
+          <StepButton label="Next screenshot" spent={index >= count - 1} onStep={() => onStep(1)}>
             ›
-          </button>
+          </StepButton>
           <button type="button" aria-label="Close screenshot" onClick={onClose}>
             Close
           </button>

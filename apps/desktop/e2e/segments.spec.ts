@@ -56,6 +56,13 @@ test("digs from a session down into a single segment and back out again", async 
   // scenario its own, and a zone the stand-in the game keeps for a dungeon it will not name.
   await test.step("the place it happened in is drawn across the top of it", async () => {
     await expect(detail.hero("Glass Caverns")).toBeVisible();
+
+    // Across the whole of it, which is what issue #230 said it was not: the band stopped a fifth
+    // short of the modal's right edge and left a bare white column beside itself. A box with an
+    // `aspect-ratio` and no width of its own back-computes its width from a clamped height, so a
+    // short window narrowed the header instead of cropping it — and only the browser does layout,
+    // which is why this is out here rather than in a component test.
+    await expect.poll(() => detail.heroSpan("Glass Caverns")).toBeCloseTo(1, 2);
   });
 
   // A fight arrives as the id the client handed `ENCOUNTER_END` and the name it was called at
@@ -74,6 +81,12 @@ test("digs from a session down into a single segment and back out again", async 
     // this is the whole hop — the id the addon recorded, two of the game's tables, and a texture
     // decoded into something the window can put in an `<img>`.
     await expect(detail.iconsIn("Encounters")).toHaveCount(1);
+
+    // And the frame around it draws no box of its own. The art is a creature cut out on
+    // transparency, so a filled and bordered rectangle behind it read as a grey tile with a boss
+    // stuck to it rather than as a portrait — issue #230. The space is still held; only the box
+    // is gone.
+    await expect.poll(() => detail.portraitFills()).toEqual(["rgba(0, 0, 0, 0)"]);
   });
 
   // The segment carries an id and a name; everything else about an achievement is read out
@@ -219,6 +232,18 @@ test("digs from a session down into a single segment and back out again", async 
     await detail.previous().click();
     await expect(detail.title()).toHaveText("Glass Caverns");
     await expect(detail.previous()).toBeDisabled();
+  });
+
+  // And the keys do the same, including after the walk has run out at one end — which is the
+  // half issue #230 caught. Arriving at the first segment is exactly the moment the button under
+  // the reader's finger stops being pressable, and a `disabled` button loses the focus it was
+  // holding: the focus leaves the dialog for the page behind it, and every key the modal listens
+  // for after that is delivered somewhere the modal never sees.
+  await test.step("and the arrow keys go on walking it once an end has been reached", async () => {
+    await detail.arrow("Right");
+    await expect(detail.title()).toHaveText("Copperwood Depths");
+    await detail.arrow("Left");
+    await expect(detail.title()).toHaveText("Glass Caverns");
   });
 
   // The window is not a browser and cannot become one: a link has to be handed out to the

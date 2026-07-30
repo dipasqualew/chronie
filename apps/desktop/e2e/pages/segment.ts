@@ -46,6 +46,37 @@ export class SegmentDetail {
   }
 
   /**
+   * How much of the modal's width that picture covers, as a fraction of it.
+   *
+   * A reading rather than a locator, because the claim is about two boxes rather than about
+   * anything either one of them says: the band is the modal's *header*, and a header that stops
+   * short of the edge it is a header of is the thing to catch. Measured against the dialog's
+   * content box, which is the box the band is laid out inside.
+   */
+  async heroSpan(place: string): Promise<number> {
+    const band = await this.hero(place).boundingBox();
+    if (!band) return 0;
+    const across = await this.dialog.evaluate((modal) => modal.clientWidth);
+    return across === 0 ? 0 : band.width / across;
+  }
+
+  /**
+   * What the frame around each boss portrait is filled with.
+   *
+   * Read off the frame rather than asked for by name, because the frame says nothing to a screen
+   * reader and should not — the row names the boss beside it. So it is reached through the
+   * picture it holds, which is found by its own empty alternative text. Only the browser can
+   * answer this: a frame that draws no box of its own is invisible from the markup.
+   */
+  portraitFills(): Promise<string[]> {
+    return this.iconsIn("Encounters").evaluateAll((pictures) =>
+      pictures.map((picture) =>
+        picture.parentElement ? getComputedStyle(picture.parentElement).backgroundColor : "",
+      ),
+    );
+  }
+
+  /**
    * Clicks the backdrop, which is the page behind the modal and not an element of its own.
    *
    * The top-left corner of the window: the modal is centred and no part of it reaches there, and
@@ -150,6 +181,17 @@ export class SegmentDetail {
 
   previous(): Locator {
     return this.dialog.getByRole("button", { name: "Previous segment" });
+  }
+
+  /**
+   * The same walk done from the keyboard, which is what a reader reaches for once they realise
+   * the modal walks a list at all.
+   *
+   * Pressed at the window rather than at a locator on purpose: the whole question is whether the
+   * modal still hears the key wherever the focus happens to have ended up.
+   */
+  arrow(towards: "Left" | "Right"): Promise<void> {
+    return this.page.keyboard.press(`Arrow${towards}`);
   }
 
   async close(): Promise<void> {

@@ -42,6 +42,7 @@ import {
   FactionIcon,
   HighlightList,
   StandingBar,
+  StepButton,
   className,
   locationType,
   shownHighlights,
@@ -880,22 +881,23 @@ export function SegmentModal({
           </span>
         </div>
         <div className="detail-nav">
-          <button
-            type="button"
-            aria-label="Previous segment"
-            disabled={!showing || showing.index === 0}
-            onClick={() => step(-1)}
+          {/* Both ends say they are spent without giving up the focus they are holding, which is
+              what keeps the arrow keys below working once the reader has walked to one of them.
+              See `StepButton`. */}
+          <StepButton
+            label="Previous segment"
+            spent={!showing || showing.index === 0}
+            onStep={() => step(-1)}
           >
             ‹
-          </button>
-          <button
-            type="button"
-            aria-label="Next segment"
-            disabled={!showing || showing.index >= showing.order.length - 1}
-            onClick={() => step(1)}
+          </StepButton>
+          <StepButton
+            label="Next segment"
+            spent={!showing || showing.index >= showing.order.length - 1}
+            onStep={() => step(1)}
           >
             ›
-          </button>
+          </StepButton>
           <button type="button" aria-label="Close segment" onClick={onClose}>
             Close
           </button>

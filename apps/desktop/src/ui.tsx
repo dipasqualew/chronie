@@ -90,6 +90,54 @@ export const ClassDot = ({ classFile }: { classFile?: string | null }): ReactNod
 );
 
 /**
+ * One way through a list a modal is walking, which stops working without giving up the focus it
+ * was holding.
+ *
+ * The two modals that walk a list — a segment, a screenshot — each draw a pair of these beside
+ * the position, and each also listens for the arrow keys, because a reader who has noticed the
+ * modal walks a list reaches for those next. The two halves are the same errand and they used to
+ * break each other: the buttons said `disabled` at the end of the list, and a `disabled` button
+ * does not merely stop being pressable — it stops being focusable, and the browser hands the
+ * focus it was holding to the page behind the modal rather than to anything inside it. So the
+ * reader who clicked back to the first of seven segments lost the arrow keys in the same motion,
+ * because every key after that was delivered somewhere the modal never sees. That is issue #230.
+ *
+ * `aria-disabled` is the same claim said in a way that keeps the focus: a screen reader announces
+ * it as unavailable, this app's own stylesheet fades it the way it fades a `disabled` one, and
+ * anything asking the accessibility tree whether the control is disabled — including the browser
+ * suite — is told that it is. What it does not do is silence the click, so the guard is here.
+ *
+ * Both directions are one component because "spent" is the whole of what differs between them,
+ * and a pair where only one end had been thought about is exactly how this arrived.
+ */
+export function StepButton({
+  label,
+  spent,
+  onStep,
+  children,
+}: {
+  /** What the control does, said in full — "Previous segment", "Next screenshot". */
+  label: string;
+  /** Whether there is anything left that way. */
+  spent: boolean;
+  onStep: () => void;
+  children: ReactNode;
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-disabled={spent || undefined}
+      onClick={() => {
+        if (!spent) onStep();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
  * A character as a circle filled with their class colour, carrying everything the hover card
  * needs.
  *
