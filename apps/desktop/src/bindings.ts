@@ -762,6 +762,22 @@ async transmogSets() : Promise<Result<TransmogPayload, CommandError>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Who can really wear each set, read off the items behind it.
+ *
+ * Apart from the grid's own payload and asked for after it, because the two cost different
+ * things: the sets are 34 ms and this is the walk of `Item` and `ItemSparse` the items browser
+ * pays for a slot at a time. The cards draw the mask the game filed each set under until this
+ * arrives and then say what the items say — see `wearers.rs` for why the two differ.
+ */
+async transmogWearers() : Promise<Result<WearersPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transmog_wearers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateActivity(activityId: number, kind: string, metadata: Partial<{ [key in string]: ActivityValue }>) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_activity", { activityId, kind, metadata }) };
@@ -1314,6 +1330,13 @@ export type SameLookReason = "faction" | "class" | "reissue"
 export type Segment = { segmentId: number; id: string; character: string; classFile?: string | null; level?: number | null; day: string; instance: string; difficulty: string; instanceType: string; difficultyId?: number | null; startedAt: number; endedAt: number; seconds: number; lootValue: number; goldDiff: number; currencyTotal?: number | null; reputationTotal?: number | null; housingXP: number; expansionTier?: number | null; latestExpansionTier?: number | null; experience?: ExperienceGain | null; keystone?: KeystoneRun | null; activities?: Activity[]; captures?: Capture[]; encounters?: EncounterEvent[]; equipsetChanges?: EquipsetChangeEvent[]; transmogs?: TransmogEvent[]; currencies?: CurrencyGain[]; reputation?: ReputationGain[]; achievements?: AchievementEvent[]; levelUps?: LevelUpEvent[]; mounts?: CollectibleEvent[]; pets?: PetEvent[]; quests?: QuestEvent[]; toys?: CollectibleEvent[]; housingItems?: HousingItemEvent[]; housingLevelUps?: LevelUpEvent[] }
 export type SetGalleryModel = { setId: number; model: string | null }
 export type SetGalleryPayload = { models: SetGalleryModel[] }
+export type SetWearers = { setId: number;
+/**
+ * A bit per class, in the game's class order — the classes that can wear every look the
+ * set holds. Never zero, and never the game's "zero means everybody": this is the answer
+ * itself rather than a mask to be interpreted.
+ */
+classMask: number }
 export type SettingsPayload = { wowPath?: string | null; lastSync?: string | null; combatLogging?: boolean; retainLogDays?: number | null; keepOriginalScreenshots?: boolean; captureQuality?: Quality; captureTriggers?: string[]; characterLook?: CharacterPick[]; characterBody?: number }
 /**
  * One appearance in a set, and where on the character it sits.
@@ -1426,6 +1449,12 @@ from: string;
 receiving: boolean }
 export type WardrobeAppearance = { appearanceId: number; itemId: number; name: string; displayType: number; inventoryType: number; classId: number; subclassId: number; allowableClass: number; requiredLevel: number; quality: number; displayInfoId: number; iconFileDataId: number; hasModel: boolean; itemCount: number; liftsRestriction: boolean }
 export type WardrobePayload = { displayTypes: number[]; appearances: WardrobeAppearance[]; readCount: number; withheldCount: number }
+export type WearersPayload = {
+/**
+ * Only the sets this install can describe an item of. A set whose every look sits in a
+ * section the game keeps encrypted is absent rather than reported as open to everybody.
+ */
+wearers: SetWearers[]; readCount: number }
 export type WornPiece = { displayInfoId: number; displayType: number; inventoryType: number }
 export type WornSetPayload = { model: string | null }
 

@@ -526,6 +526,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           loadWorn={desktop.wornSet}
           loadGallery={desktop.galleryModels}
           loadSetGallery={desktop.gallerySets}
+          loadWearers={desktop.transmogWearers}
           herself={{
             load: desktop.characterLook,
             save: desktop.saveCharacterLook,

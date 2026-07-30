@@ -92,6 +92,7 @@ import {
   groupFamilies,
   patchName,
   variantLabel,
+  whoWears,
 } from "./transmog";
 import type { Family } from "./transmog";
 import {
@@ -132,6 +133,7 @@ import type {
   TransmogSet,
   TransmogSetItemsPayload,
   WardrobePayload,
+  WearersPayload,
   WornPiece,
   WornSetPayload,
 } from "./types";
@@ -245,7 +247,26 @@ export interface TransmogViewProps {
    */
   loadQualities?: (displayType: number) => Promise<QualitiesFile | null>;
   loadSetQualities?: () => Promise<SetQualitiesFile | null>;
+  /**
+   * Who the items behind each set say can really wear it — see `wearers.rs` and [`whoWears`].
+   *
+   * Its own read rather than part of the grid's payload, and asked for after it, because the
+   * two cost different things: the sets are 34 ms of three small tables and this is the walk
+   * of `Item` and `ItemSparse` the item browser pays for one slot at a time. Until it lands —
+   * and for a set this install can describe no item of — the cards say what the game's own
+   * mask says, which is what they said before any of this existed.
+   */
+  loadWearers?: () => Promise<WearersPayload>;
 }
+
+/**
+ * What the view asks when nobody wired the read up: nothing, answered with nothing.
+ *
+ * Every card then draws the mask the game filed its set under, which is what the grid drew
+ * before any of this existed and what it still draws for a set no item of which this install
+ * can describe.
+ */
+const NOBODY_ASKED = (): Promise<WearersPayload> => Promise.resolve({ wearers: [], readCount: 0 });
 
 /**
  * Which of the four browsers the reader is in.
@@ -276,6 +297,7 @@ export function TransmogView({
   createGalleryStage = lazyGalleryStage,
   loadQualities,
   loadSetQualities = loadSetStore,
+  loadWearers = NOBODY_ASKED,
 }: TransmogViewProps): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
   /**
@@ -427,6 +449,26 @@ export function TransmogView({
     };
   }, [loadSetQualities]);
 
+  // Who the items behind each set say can really wear it. Read once the grid itself has
+  // arrived — there is no install to read it out of when the sets could not be read — and
+  // held as a lookup for the reason the marks below are: the search box re-filters several
+  // thousand cards on every keystroke and each of them asks this once.
+  const [wearers, setWearers] = useState<Map<number, number> | null>(null);
+  useEffect(() => {
+    if (!payload) return;
+    let stale = false;
+    void loadWearers()
+      .then((answer) => {
+        if (!stale) setWearers(new Map(answer.wearers.map((row) => [row.setId, row.classMask])));
+      })
+      // The cards drew the game's own mask before any of this existed, and they draw it now.
+      .catch(() => undefined);
+    return () => {
+      stale = true;
+    };
+  }, [payload, loadWearers]);
+  const wearersOf = useCallback((setId: number) => wearers?.get(setId), [wearers]);
+
   // A lookup per row rather than a scan of the list, because the search box re-filters several
   // thousand sets on every keystroke and each of them asks this once.
   const index = useMemo(() => indexMarks(marks.payload), [marks.payload]);
@@ -460,6 +502,9 @@ export function TransmogView({
         // beside this: the card draws the same measured chip, and a chip the box cannot be asked
         // about is a chip that raises a question and will not answer it.
         qualities: (id) => setQualities.of(id),
+        // And so that the class dropdown narrows to what a class can actually wear rather than
+        // to what the game filed under it — the same fact the chip on the card now draws.
+        wearers: wearersOf,
       })
     : [];
   // Paged only once there is a body behind each card — see `shown`.
@@ -746,6 +791,7 @@ export function TransmogView({
                           marks={marks}
                           markOf={markOf}
                           qualityOf={(setId) => setQualities.of(setId)}
+                          wearersOf={wearersOf}
                           onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
                           body={asModels ? bodies.get(set.id) : undefined}
                           paint={paint}
@@ -887,6 +933,7 @@ function Card({
   marks,
   markOf,
   qualityOf,
+  wearersOf,
   onFilter,
   body,
   paint,
@@ -918,6 +965,14 @@ function Card({
    */
   qualityOf: (setId: number) => Quality | undefined;
   /**
+   * Who the items behind this set say can really wear it, or nothing — see [`whoWears`].
+   *
+   * Nothing means two different things and the card treats them alike, because the honest
+   * answer to both is the game's own mask: the read has not landed yet, or it landed and this
+   * install can describe no item of the set.
+   */
+  wearersOf: (setId: number) => number | undefined;
+  /**
    * What a chip on the card asks of the grid when it is clicked — see `terms.ts`.
    *
    * The card's own chips only. The rows inside an opened set carry chips of their own and are
@@ -936,7 +991,11 @@ function Card({
   onWearAll: (rows: AppearanceRow[]) => void;
 }): ReactNode {
   const patch = patchName(set.patchIntroduced);
-  const classes = classNames(set.classMask);
+  // Who the items say, where that has been read, and the game's own mask until then — one
+  // decision for the chip below and the list of classes the card is titled with, so the two
+  // can never be about different things.
+  const wearers = wearersOf(set.id);
+  const classes = classNames(wearers ?? set.classMask);
   const rows = typeof contents === "object" ? appearanceRows(contents, set.name) : [];
   // Whatever is hidden is still worn by "wear all of", because that puts the set on rather
   // than what happens to be listed, and it is still counted below so nothing goes quietly.
@@ -962,7 +1021,13 @@ function Card({
         </button>
       </h4>
       <div className="mog-facts">
-        <span className="chip">{classLabel(set.classMask)}</span>
+        {/* Who can wear it, which is a harder question than the game's own mask and a more
+            useful answer: "Any plate wearer" is a Paladin set a Warrior can have after all,
+            and "Paladin only" is a wall. The mask until that read lands — see `wearers.rs`,
+            and [`whoWears`] for the three sentences it comes to. */}
+        <span className="chip">
+          {wearers === undefined ? classLabel(set.classMask) : whoWears(wearers)}
+        </span>
         <span className="chip">{expansionName(set.expansionId)}</span>
         {patch ? <span className="chip">Patch {patch}</span> : null}
         {/* Last of the facts and dashed, because it is the one of them nobody wrote down: the

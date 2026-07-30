@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,7 @@ import type {
   TransmogSetItemsPayload,
   WardrobeAppearance,
   WardrobePayload,
+  WearersPayload,
   WornPiece,
   WornSetPayload,
 } from "./types";
@@ -690,6 +691,14 @@ function view(
     status?: string;
     /** And what it offers about it, which only a coded failure ever produces. */
     statusRecourse?: StatusRecourse | null;
+    /**
+     * Who the items behind each set say can really wear it — see `wearers.rs`.
+     *
+     * Left out by default, which is the view's own default too: nothing is read, every card
+     * draws the mask the game filed its set under, and every test that predates any of this is
+     * looking at the grid it was written against.
+     */
+    wearers?: () => Promise<WearersPayload>;
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
@@ -766,6 +775,7 @@ function view(
       createGalleryStage={createGalleryStage}
       loadQualities={loadQualities}
       loadSetQualities={loadSetQualities}
+      loadWearers={options.wearers}
     />,
   );
   return {
@@ -1529,6 +1539,158 @@ describe("a set's variants", () => {
     });
     await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(1));
     expect(screen.getByRole("button", { name: "Scourgelord's Battlegear" })).toBeTruthy();
+  });
+});
+
+/**
+ * The first chip on a card: who can really wear the set, rather than what mask it was filed under.
+ *
+ * The card used to draw `classLabel(set.classMask)` and so said "Cloth" and "Paladin" in one
+ * voice, as though an armour type and a class lock were the same kind of fact. They are not: the
+ * backend works out, from every item in the game that gives one of the set's looks, who can put
+ * the whole thing on — see `wearers.rs` and `whoWears` — and that read is its own command,
+ * arriving after the grid. So the chip has three states and this is all three: the mask before
+ * the read lands, the phrase once it has, and the mask again for the sets it says nothing about.
+ */
+describe("who a card says can wear the set", () => {
+  afterEach(cleanup);
+
+  /**
+   * Two sets whose masks say one thing and whose items say another.
+   *
+   * 601 is the case that motivated the issue: the game locks it to Paladins, and every one of
+   * its looks is sold by something else to every class that can wear plate. 602 is the control —
+   * the read says nothing about it, because this install can describe no item of it.
+   */
+  const WEARABLE: TransmogPayload = {
+    sets: [
+      set({ id: 601, name: "Emberforge Bulwark", group: "Emberforge Armory", classMask: 1 << 1 }),
+      set({ id: 602, name: "Duskwoven Shroud", group: "Duskwoven Attire", classMask: 0x0190 }),
+    ],
+    readCount: 2,
+    declaredCount: 2,
+    withheldCount: 0,
+  };
+
+  const SAID: WearersPayload = { wearers: [{ setId: 601, classMask: 0x0023 }], readCount: 1 };
+
+  /**
+   * The read, held open until the test lets it answer — or refuses it.
+   *
+   * Held rather than resolved, because two thirds of what this describe is about happens while
+   * it is still in flight: a card that drew nothing, or drew the wrong thing, in the second
+   * between the grid arriving and this landing is a card a reader has already looked at.
+   */
+  function heldWearers() {
+    let hand: ((payload: WearersPayload) => void) | null = null;
+    let refuse: ((error: unknown) => void) | null = null;
+    return {
+      loadWearers: vi.fn(
+        () =>
+          new Promise<WearersPayload>((resolve, reject) => {
+            hand = resolve;
+            refuse = reject;
+          }),
+      ),
+      answer: (payload: WearersPayload): void => {
+        if (!hand) throw new Error("nothing has asked who can wear anything");
+        hand(payload);
+      },
+      /** What a machine mid-patch does: the tables are there and cannot be read. */
+      refuse: (): void => {
+        if (!refuse) throw new Error("nothing has asked who can wear anything");
+        refuse(new Error("The game is being patched."));
+      },
+    };
+  }
+
+  /** The card a set is drawn on, found by the heading a reader opens it with. */
+  function cardOf(name: string): HTMLElement {
+    const card = screen.getByRole("button", { name }).closest("article");
+    if (!card) throw new Error(`${name} is on no card`);
+    return card as HTMLElement;
+  }
+
+  // The whole of the change, seen from the reader's side: a set the game calls a Paladin's says
+  // a Warrior can have the clothes.
+  it("draws what the items say once the read has landed", async () => {
+    const held = heldWearers();
+    view({ payload: WEARABLE, wearers: held.loadWearers });
+    await waitFor(() => expect(held.loadWearers).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      held.answer(SAID);
+    });
+    expect(within(cardOf("Emberforge Bulwark")).getByText("Any plate wearer")).toBeTruthy();
+    expect(within(cardOf("Emberforge Bulwark")).queryByText("Paladin")).toBeNull();
+  });
+
+  // And the classes themselves, which the chip has no room for and the card can carry: the
+  // title is the list of who, and it has to be the same fact the chip is about.
+  it("titles the card with the classes the items really allow", async () => {
+    const held = heldWearers();
+    view({ payload: WEARABLE, wearers: held.loadWearers });
+    await waitFor(() => expect(held.loadWearers).toHaveBeenCalledTimes(1));
+    // The game's own mask until then, which is three names shorter than the truth.
+    expect(cardOf("Emberforge Bulwark").getAttribute("title")).toBe("Paladin");
+
+    await act(async () => {
+      held.answer(SAID);
+    });
+    expect(cardOf("Emberforge Bulwark").getAttribute("title")).toBe(
+      "Warrior, Paladin, Death Knight",
+    );
+  });
+
+  // The second the grid is up and this is not. A card drawn blank, or drawn as though nobody
+  // could wear anything, is a card a reader reads before the answer arrives.
+  it("draws the game's own mask while the read is still in flight", async () => {
+    const held = heldWearers();
+    view({ payload: WEARABLE, wearers: held.loadWearers });
+    await waitFor(() => expect(held.loadWearers).toHaveBeenCalledTimes(1));
+
+    expect(within(cardOf("Emberforge Bulwark")).getByText("Paladin")).toBeTruthy();
+    expect(screen.queryByText("Any plate wearer")).toBeNull();
+  });
+
+  // And a set the answer says nothing about keeps the mask for good, because that is the whole
+  // of what is known about it: every item behind it sits in a section this install has no key to.
+  it("keeps the game's own mask on a set the read says nothing about", async () => {
+    const held = heldWearers();
+    view({ payload: WEARABLE, wearers: held.loadWearers });
+    await waitFor(() => expect(held.loadWearers).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      held.answer(SAID);
+    });
+    expect(within(cardOf("Duskwoven Shroud")).getByText("Cloth")).toBeTruthy();
+    expect(cardOf("Duskwoven Shroud").getAttribute("title")).toBe("Priest, Mage, Warlock");
+  });
+
+  // The read is a walk of `Item` and `ItemSparse` and can fail on its own, and the grid it is
+  // about arrived without it. Every card is exactly the card it was before any of this existed.
+  it("leaves every card as it was when the read fails", async () => {
+    const held = heldWearers();
+    view({ payload: WEARABLE, wearers: held.loadWearers });
+    await waitFor(() => expect(held.loadWearers).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      held.refuse();
+    });
+    expect(within(cardOf("Emberforge Bulwark")).getByText("Paladin")).toBeTruthy();
+    expect(within(cardOf("Duskwoven Shroud")).getByText("Cloth")).toBeTruthy();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+  });
+
+  // Nothing to ask about. The read walks the game's own tables and there is no install to walk
+  // when the grid itself could not be read, so it waits for the payload rather than for the view.
+  it("asks nobody who can wear anything until there are sets to ask about", async () => {
+    const held = heldWearers();
+    view({ payload: null, wearers: held.loadWearers });
+    await waitFor(() =>
+      expect(screen.getByText("Reading the game's transmog tables…")).toBeTruthy(),
+    );
+    expect(held.loadWearers).not.toHaveBeenCalled();
   });
 });
 

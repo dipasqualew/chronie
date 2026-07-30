@@ -225,6 +225,27 @@ export const transmog: E2EMock["transmog"] = {
   ],
 };
 
+/**
+ * And who the items behind each of them say can really wear it — see `wearers.rs`.
+ *
+ * The three sentences the card can draw, one of each. The plate set and the cloth set are the
+ * ordinary case: nobody is locked out beyond the people who cannot wear that armour, and the
+ * chip says so rather than repeating the mask. `Tideglass Hide` is the other case — the game
+ * files it under the leather mask and its sandals are the Druid's own, so no Rogue can wear the
+ * set however much leather it is. And `Duskwoven Shroud` is absent, because its every item sits
+ * in a section this install holds no key to: the card falls back to the game's own mask.
+ */
+export const transmogWearers: E2EMock["transmogWearers"] = {
+  readCount: 5,
+  wearers: [
+    { setId: 201, classMask: 0x0190 },
+    { setId: 211, classMask: 0x0190 },
+    { setId: 202, classMask: 0x0400 },
+    { setId: 210, classMask: 0x0400 },
+    { setId: 203, classMask: 0x0023 },
+  ],
+};
+
 // And what those sets are made of, which the window asks for a set at a time. The item
 // ids, slots and the one appearance the game withholds are the backend fixtures' own, so
 // a change to the chain the Rust tests hold still shows up here too.

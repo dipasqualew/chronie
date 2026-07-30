@@ -1372,6 +1372,8 @@ mod tests {
                 (30021, "Breastplate of the Tempest".into()),
                 (30022, "Stormbreaker's Helm".into()),
                 (30023, "Stormbreaker's Breastplate".into()),
+                // The world drop that belongs to no set, and gives a set's own look anyway.
+                (30025, "Greaves of the Wanderer".into()),
             ]
         );
     }
@@ -1407,12 +1409,16 @@ mod tests {
                 // The one row with a description, so it is longer than the rest and every
                 // column behind its strings sits somewhere else in the file.
                 ("Tideglass Robe".into(), ANY, 0, 5, 4),
-                ("Tideglass Sandals".into(), ANY, 0, 8, 3),
+                // Locked to the Druid, which is what makes set 202 a Druid's set however
+                // open the gloves beside these are — see `wearers.rs`.
+                ("Tideglass Sandals".into(), 0b100_0000_0000, 0, 8, 3),
                 ("Tideglass Gloves".into(), ANY, 0, 10, 3),
                 ("Emberforge Helm".into(), ANY, 0, 1, 4),
                 ("Emberforge Pauldrons".into(), ANY, 0, 3, 4),
                 ("Emberforge Breastplate".into(), ANY, 0, 5, 5),
-                ("Emberforge Greaves".into(), ANY, 0, 7, 4),
+                // Locked to the Paladin, and sold to anybody by the world drop at the end of
+                // this list — a lock the set's own rows cannot see lifted.
+                ("Emberforge Greaves".into(), 0b10, 0, 7, 4),
                 ("Emberforge Blade".into(), ANY, 0, 13, 5),
                 ("Emberforge Greatsword".into(), ANY, 0, 17, 5),
                 ("Emberforge Aegis".into(), ANY, 0, 14, 5),
@@ -1427,6 +1433,7 @@ mod tests {
                 ("Breastplate of the Tempest".into(), ANY, 60, 5, 4),
                 ("Stormbreaker's Helm".into(), ANY, 60, 1, 4),
                 ("Stormbreaker's Breastplate".into(), ANY, 60, 5, 4),
+                ("Greaves of the Wanderer".into(), ANY, 0, 7, 3),
             ]
         );
     }
@@ -1452,8 +1459,8 @@ mod tests {
     #[test]
     fn skips_the_variable_records_of_a_section_it_cannot_decrypt() {
         let table = sparse_table();
-        assert_eq!(table.rows().count(), 21);
-        assert_eq!(table.declared_rows(), 24);
+        assert_eq!(table.rows().count(), 22);
+        assert_eq!(table.declared_rows(), 25);
         for id in [30011, 30012, 30900] {
             assert!(
                 !table.rows().any(|row| row.id() == id),
@@ -1468,7 +1475,7 @@ mod tests {
     #[test]
     fn reads_a_variable_table_no_further_than_its_first_string_when_told_of_none() {
         let table = Db2::parse(fixture_files().read(ITEM_SPARSE).unwrap()).unwrap();
-        assert_eq!(table.rows().count(), 21);
+        assert_eq!(table.rows().count(), 22);
         assert_eq!(
             table
                 .rows()

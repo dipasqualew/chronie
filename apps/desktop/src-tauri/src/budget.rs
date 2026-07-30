@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn walks_no_more_rows_than_it_used_to() {
         let (_, work) = cost();
-        assert!(work.rows <= 407, "a click walks {} rows", work.rows);
+        assert!(work.rows <= 409, "a click walks {} rows", work.rows);
     }
 
     // What the body ships now depends on what is worn, and that is the point: a body holds
@@ -931,7 +931,7 @@ mod tests {
             "a page of sets reads {} files",
             work.reads
         );
-        assert!(work.rows <= 352, "a page of sets walks {} rows", work.rows);
+        assert!(work.rows <= 354, "a page of sets walks {} rows", work.rows);
     }
 
     /* ---------- the counting itself ---------- */

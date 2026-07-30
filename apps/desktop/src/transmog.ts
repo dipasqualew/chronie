@@ -81,6 +81,39 @@ export function classNames(mask: number): string[] {
   return CLASSES.filter((_, index) => (mask & (1 << index)) !== 0);
 }
 
+/**
+ * Who can really wear a set, as a phrase — the three kinds of statement the mask above is not.
+ *
+ * [`classLabel`] reads `TransmogSet.ClassMask`, and that mask answers two different questions
+ * with the same shape. This reads what the *items* behind the set allow, which the backend
+ * works out of every item in the game that gives one of its looks — see `wearers.rs` — and it
+ * comes out as one of three sentences:
+ *
+ * - **Anyone**, which is a set nothing about restricts: a rack of weapons, a tabard, a cloak.
+ * - **Any plate wearer**, which is the interesting one. The class lock lifted — something in
+ *   the game sells every one of the set's looks to everybody — and what is left is the armour,
+ *   because the game will not transmogrify plate into cloth. 586 of the game's single-class
+ *   sets land here, and a reader whose class was not on the card is being told they can have
+ *   the clothes after all.
+ * - **Paladin only**, which is the lock standing: nothing in the game gives one of these looks
+ *   to anybody else. 2,019 sets, and the card is now saying so rather than saying "Paladin"
+ *   in the same voice it says "Cloth".
+ *
+ * The masks it recognises are the game's own: a mask of exactly the three plate classes is
+ * what a plate item leaves, which is why [`ARMOUR`] does for both. "Nobody" is not a hedge
+ * either — two sets of a shipping install are internal bundles holding every class's tier at
+ * once, and no class can wear the whole of one.
+ */
+export function whoWears(mask: number): string {
+  if (mask === ALL_CLASSES) return "Anyone";
+  const armour = ARMOUR.get(mask);
+  if (armour) return `Any ${armour.toLowerCase()} wearer`;
+  const names = classNames(mask);
+  if (names.length === 0) return "Nobody";
+  if (names.length <= 2) return `${names.join(" & ")} only`;
+  return `${names.length} classes only`;
+}
+
 /** A short label for who a set is for. */
 export function classLabel(mask: number): string {
   if (mask === 0 || mask === ALL_CLASSES) return "Any class";
@@ -208,6 +241,8 @@ function everyNamed(family: Family): Named[] {
 interface Said {
   mark: (setId: number) => TransmogMark | undefined;
   quality: (setId: number) => Quality | undefined;
+  /** And who the items say can wear one, where the backend has answered — see [`whoWears`]. */
+  wearers: (setId: number) => number | undefined;
 }
 
 /**
@@ -227,6 +262,10 @@ function searchable(family: Family, said: Said): string {
       one.group,
       classLabel(one.classMask),
       ...classNames(one.classMask),
+      // And who the items say, which is the chip the card actually draws once the backend has
+      // answered: a reader looking at "Any plate wearer" types "plate", and a Warrior looking
+      // for what a Warrior can wear types their class and means this rather than the mask.
+      ...wearerWords(one, said),
       expansionName(one.expansionId),
       patchName(one.patchIntroduced),
       String(one.id),
@@ -263,6 +302,7 @@ function facetsOf(family: Family, said: Said): Facet[] {
       { key: "collection", value: one.group },
       { key: "class", value: classLabel(one.classMask) },
       ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
+      ...wearerWords(one, said).map((word) => ({ key: "class", value: word })),
       { key: "expansion", value: expansionName(one.expansionId) },
       { key: "patch", value: patchName(one.patchIntroduced) },
     ])
@@ -274,18 +314,38 @@ function facetsOf(family: Family, said: Said): Facet[] {
   return [...game, ...mine];
 }
 
+/** The phrase the card draws for who can wear a set, and the classes in it, where it is known. */
+function wearerWords(one: Named, said: Said): string[] {
+  const wearers = said.wearers(one.id);
+  if (wearers === undefined) return [];
+  return [whoWears(wearers), ...classNames(wearers)];
+}
+
+/**
+ * Whether one of a family's sets is for a class, as the dropdown above the grid asks it.
+ *
+ * **The items where they have been read, and the mask until then.** They disagree about a
+ * fifth of the game's single-class sets — a Paladin set whose every look something else sells
+ * to everybody is a set a Warrior can wear, and the dropdown that answered off the mask hid
+ * exactly those from exactly that reader. Where the backend has said nothing this is the test
+ * it has always been, mask of zero and all.
+ */
+function wearableBy(one: Named, klass: number, said: Said): boolean {
+  const wearers = said.wearers(one.id);
+  if (wearers !== undefined) return (wearers & (1 << klass)) !== 0;
+  return one.classMask === 0 || (one.classMask & (1 << klass)) !== 0;
+}
+
 /**
  * What a folded set brings with it, which the card it folded into has to answer for.
  *
  * A set shown in place of two others is standing in for their names, their classes and their
  * expansions as well as its own, and a filter that only read its own would hide the look from
  * exactly the reader looking for it — someone typing "Warmongering", or narrowing to the class
- * whose version of the armour got folded away. So every filter reads the whole cluster.
+ * whose version of the armour got folded away. So every filter reads the whole cluster —
+ * this one by the list it maps, and the class filter by asking [`wearableBy`] about each of
+ * [`everyNamed`] in turn.
  */
-function everyClass(family: Family): number[] {
-  return everyNamed(family).map((one) => one.classMask);
-}
-
 function everyExpansion(family: Family): number[] {
   return everyNamed(family).map((one) => one.expansionId);
 }
@@ -353,6 +413,9 @@ export function filterFamilies(
     /** What the committed store measured a whole set to be — see `qualities.ts`. Absent where
      * the file has not arrived, which is what the first draw of the view passes. */
     qualities?: (setId: number) => Quality | undefined;
+    /** Who the items behind a set say can wear it — see [`whoWears`]. Absent for a set the
+     * install can describe no item of, and for every set until that read lands. */
+    wearers?: (setId: number) => number | undefined;
   },
 ): Family[] {
   const query = parseQuery(filters.search);
@@ -363,13 +426,13 @@ export function filterFamilies(
   const said: Said = {
     mark: (setId) => marks?.of(setId),
     quality: (setId) => filters.qualities?.(setId),
+    wearers: (setId) => filters.wearers?.(setId),
   };
   return families.filter((family) => {
     if (expansion !== null && !everyExpansion(family).includes(expansion)) return false;
-    // A set with no class of its own is for everyone, so it survives a class filter.
-    const wearers = everyClass(family);
-    if (klass !== null && !wearers.some((mask) => mask === 0 || (mask & (1 << klass)) !== 0))
+    if (klass !== null && !everyNamed(family).some((one) => wearableBy(one, klass, said))) {
       return false;
+    }
     if (marks && !family.members.some((one) => survivesMarks(marks.of(one.id), marks.filter))) {
       return false;
     }

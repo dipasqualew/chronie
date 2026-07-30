@@ -83,6 +83,8 @@ export type {
   TransmogSetItemsPayload,
   WardrobeAppearance,
   WardrobePayload,
+  SetWearers,
+  WearersPayload,
   WornPiece,
   WornSetPayload,
   Piece as CustomSetPiece,
@@ -139,6 +141,7 @@ import type {
   Verdict,
   Waiting,
   WardrobePayload,
+  WearersPayload,
 } from "./bindings";
 
 import type { commands } from "./bindings";
@@ -175,6 +178,8 @@ export interface SetQualitiesFile {
 export interface E2EMock {
   dashboard: DashboardPayload;
   transmog: TransmogPayload;
+  /** Who the items behind each set say can really wear it — see `wearers.rs`. */
+  transmogWearers: WearersPayload;
   transmogItems: Record<number, TransmogSetItemsPayload>;
   wardrobe: Record<string, WardrobePayload>;
   transmogMarks: TransmogMarksPayload;

@@ -12,6 +12,7 @@ import {
   groupFamilies,
   patchName,
   variantLabel,
+  whoWears,
 } from "./transmog";
 import type { Family } from "./transmog";
 import type { Alternate, TransmogSet } from "./types";
@@ -82,6 +83,62 @@ describe("classLabel", () => {
   // "NaN classes" would be worse than saying nothing useful.
   it("falls back to any class for a mask it cannot read", () => {
     expect(classLabel(1 << 20)).toBe("Any class");
+  });
+});
+
+/**
+ * The other question about a mask, which is the one a reader actually has: can I wear this.
+ *
+ * `classLabel` reads `TransmogSet.ClassMask` and answers "Cloth" and "Paladin" in the same voice;
+ * this reads what every item behind the set allows — see `wearers.rs` — and says which of three
+ * kinds of statement that comes to.
+ */
+describe("whoWears", () => {
+  // Nothing about the set restricts it: a rack of weapons, a tabard, a cloak. The game writes
+  // that as every bit at once rather than as zero, which is the mask this is asked about.
+  it("says anyone can wear a set nothing restricts", () => {
+    expect(whoWears(0x1fff)).toBe("Anyone");
+  });
+
+  // The interesting one, and 586 of the game's single-class sets land here: the class lock is
+  // lifted and what is left is the armour, because the game will not transmogrify plate into
+  // cloth. A reader whose class was not on the card is being told they can have the clothes.
+  it.each<[number, string]>([
+    [0x0190, "Any cloth wearer"],
+    [0x0e08, "Any leather wearer"],
+    [0x1044, "Any mail wearer"],
+    [0x0023, "Any plate wearer"],
+  ])("reads mask %i as the armour anybody wearing it can have", (mask, expected) => {
+    expect(whoWears(mask)).toBe(expected);
+  });
+
+  // The lock standing, which 2,019 sets do — and the card is now saying so rather than saying
+  // "Paladin" in the voice it says "Cloth" in.
+  it("names one or two classes outright and counts more", () => {
+    expect(whoWears(1 << 1)).toBe("Paladin only");
+    expect(whoWears((1 << 0) | (1 << 12))).toBe("Warrior & Evoker only");
+    expect(whoWears((1 << 0) | (1 << 1) | (1 << 2))).toBe("3 classes only");
+  });
+
+  // Not a hedge: two sets of a shipping install are internal bundles holding every class's tier
+  // at once, and no one class can wear the whole of one.
+  it("says nobody can wear a set no class can wear the whole of", () => {
+    expect(whoWears(0)).toBe("Nobody");
+  });
+
+  // A bit past the last class this build knows is nobody it can name, which is the honest
+  // answer — where the game's own mask falls back to "Any class", this one cannot.
+  it("says nobody for a mask holding no class it can name", () => {
+    expect(whoWears(1 << 20)).toBe("Nobody");
+  });
+
+  // The two labels are about different questions, and the whole point of the change is that
+  // they now read differently for the same number.
+  it("answers a mask differently from the label the game's own mask draws", () => {
+    expect(classLabel(0x0023)).toBe("Plate");
+    expect(whoWears(0x0023)).toBe("Any plate wearer");
+    expect(classLabel(1 << 1)).toBe("Paladin");
+    expect(whoWears(1 << 1)).toBe("Paladin only");
   });
 });
 
@@ -977,5 +1034,161 @@ describe("asking the grid for one thing a set says", () => {
   it("leaves an empty grid for a term nothing carries", () => {
     expect(found("size:large")).toEqual([]);
     expect(found("colour:pink")).toEqual([]);
+  });
+});
+
+/**
+ * Narrowing the grid to what a class can really wear, rather than to what the game filed under it.
+ *
+ * The dropdown above the grid used to test `TransmogSet.ClassMask`, and that mask answers two
+ * different questions with one shape — see [`whoWears`]. The backend now works out, from every
+ * item in the game that gives one of a set's looks, who can actually put the whole set on, and
+ * they disagree about a fifth of the game's single-class sets. Both directions of that
+ * disagreement are here, because both are a reader being shown the wrong grid.
+ */
+describe("narrowing the grid to who can really wear a set", () => {
+  const none = { search: "", expansion: "", klass: "" };
+  const SETS = [
+    // The set that motivated the issue. The game locks it to Paladins, and every one of its
+    // looks is sold by something else to every class that can wear plate — so a Warrior can
+    // have the clothes, and the dropdown reading the mask hid them from exactly that reader.
+    set({ id: 601, name: "Emberforge Bulwark", classMask: 1 << 1 }),
+    // And the other way round. The game files it under the leather mask, but its sandals are
+    // the Druid's own, so no Rogue can wear the set however much leather it is.
+    set({ id: 602, name: "Tideglass Hide", classMask: 0x0e08 }),
+    // A set the install can describe no item of, which is the state every card is in until the
+    // read lands and the state some stay in — the mask is all there is to go on.
+    set({ id: 603, name: "Duskwoven Shroud", classMask: 0x0190 }),
+    // And one the game files under nobody in particular, which it means as everybody.
+    set({ id: 604, name: "Sunwarmed Tabard", classMask: 0 }),
+  ];
+  const SAID = new Map<number, number>([
+    [601, 0x0023],
+    [602, 0x0400],
+  ]);
+  /** The grid as the view now asks for it: the items where they have been read. */
+  const asked = (klass: string): number[] =>
+    ids(filtered(SETS, { ...none, klass, wearers: (setId) => SAID.get(setId) }));
+  /** And as it asked before any of this existed, which is what a card falls back to. */
+  const byMask = (klass: string): number[] => ids(filtered(SETS, { ...none, klass }));
+
+  // The whole of the issue in one line: the Paladin set is on a Warrior's grid now.
+  it("keeps a set the game locks to one class when its items are sold to another", () => {
+    expect(asked("0")).toEqual([601, 604]);
+    expect(byMask("0")).toEqual([604]);
+  });
+
+  it("drops a set the game files under an armour its items do not really give", () => {
+    expect(asked("3")).toEqual([604]);
+    expect(byMask("3")).toEqual([602, 604]);
+  });
+
+  // And says yes to the class the items really do give it to, which is the half a narrowing
+  // filter could pass by saying no to everything.
+  it("keeps a set for the one class its items are for", () => {
+    expect(asked("10")).toEqual([602, 604]);
+  });
+
+  // A set the backend said nothing about is filtered by exactly the test it always was, mask of
+  // zero and all — which is what lets a read that lands late, or not at all, still leave a grid.
+  it.each<[string, string, number[]]>([
+    ["Priest, whose armour it is", "4", [603, 604]],
+    ["Mage, whose armour it is", "7", [603, 604]],
+    ["Hunter, whose armour it is not", "2", [604]],
+  ])("filters a set nothing was read of by its own mask, for %s", (_what, klass, expected) => {
+    expect(asked(klass)).toEqual(expected);
+    expect(byMask(klass)).toEqual(expected);
+  });
+
+  /**
+   * The folds, which every filter here has to read through — see [`foldFamilies`].
+   *
+   * A card stands for its family's members and for every set folded into any of them, so the
+   * lookup has to be asked about each of those and not only about the set whose name is on the
+   * card. 621 is kept by its harder difficulty, 611 by the other faction's copy of it, and 631
+   * is the control: the same plate mask, and nothing widening it.
+   */
+  const FOLDED: TransmogSet[] = [
+    set({ id: 621, name: "Scourgelord's Battlegear", classMask: 0x0023 }),
+    set({ id: 622, name: "Sanctified Scourgelord's Battlegear", classMask: 0x0023, parentId: 621 }),
+    set({
+      id: 611,
+      name: "Sunwarmed Finery",
+      classMask: 0x0023,
+      alternates: [alternate({ id: 612, name: "Sunbound Regalia", classMask: 0x0023 })],
+    }),
+    set({ id: 612, name: "Sunbound Regalia", classMask: 0x0023, sameLookAs: 611 }),
+    set({ id: 631, name: "Duskwoven Shroud", classMask: 0x0023 }),
+  ];
+  const FOLDED_SAID = new Map<number, number>([
+    [621, 0x0023],
+    [622, 0x1fff],
+    [611, 0x0023],
+    [612, 0x1fff],
+    [631, 0x0023],
+  ]);
+
+  it("reads what the items say about a variant and about a set folded away", () => {
+    const found = ids(
+      filtered(FOLDED, { ...none, klass: "7", wearers: (setId) => FOLDED_SAID.get(setId) }),
+    );
+    expect(found).toEqual([621, 611]);
+    // And nothing about the masks would have kept any of them: all three cards are plate.
+    expect(ids(filtered(FOLDED, { ...none, klass: "7" }))).toEqual([]);
+  });
+});
+
+/**
+ * The phrase the card draws is a thing a reader can type, and so are the classes inside it.
+ *
+ * The chip says "Any plate wearer" over a set the game calls a Paladin's, and a reader looking at
+ * it types "plate" — or, being a Warrior, types their own class and means this rather than the
+ * mask. Neither word is anywhere in what the game wrote down about the set.
+ */
+describe("searching for who can really wear a set", () => {
+  const none = { search: "", expansion: "", klass: "" };
+  // Named so that nothing but the computed phrase can answer for the armour: "Emberforge
+  // Bulwark" holds no armour word, and the mask's own label is "Paladin".
+  const SETS = [
+    set({ id: 601, name: "Emberforge Bulwark", group: "Emberforge Armory", classMask: 1 << 1 }),
+    set({ id: 602, name: "Tideglass Hide", group: "Tideglass Wardrobe", classMask: 0x0e08 }),
+  ];
+  const SAID = new Map<number, number>([
+    [601, 0x0023],
+    [602, 0x0400],
+  ]);
+  const found = (search: string): number[] =>
+    ids(filtered(SETS, { ...none, search, wearers: (setId) => SAID.get(setId) }));
+
+  it.each<[string, string, number[]]>([
+    ["the armour the phrase names", "plate", [601]],
+    ["a class inside the computed mask", "warrior", [601]],
+    ["the whole phrase", "any plate wearer", [601]],
+    ["the phrase over a set nothing widened", "druid only", [602]],
+  ])("finds a set by %s", (_what, search, expected) => {
+    expect(found(search)).toEqual(expected);
+  });
+
+  // The same question under a name, which is what the chips on the card write into the box.
+  it.each<[string, string, number[]]>([
+    ["the armour the phrase names", "class:plate", [601]],
+    ["a class inside the computed mask", "class:warrior", [601]],
+    ["the class the items really lock it to", "class:druid", [602]],
+  ])("answers a term asking for %s", (_what, search, expected) => {
+    expect(found(search)).toEqual(expected);
+  });
+
+  // What the game itself said is still there beside it: the two labels are two facts about the
+  // set, and dropping the mask's own would lose the reader who typed what the game calls it.
+  it("still answers for the mask the game filed the set under", () => {
+    expect(found("class:paladin")).toEqual([601]);
+    expect(found("class:leather")).toEqual([602]);
+  });
+
+  // And the word only the mask carries stays absent from the sets the items widened, so this is
+  // the computed phrase answering rather than everything answering everything.
+  it("does not answer for an armour neither the mask nor the items name", () => {
+    expect(found("class:mail")).toEqual([]);
+    expect(found("plate druid")).toEqual([]);
   });
 });
