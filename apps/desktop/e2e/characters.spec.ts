@@ -221,10 +221,21 @@ test("gives every character a page of their own", async ({ page }) => {
     await detail.close();
   });
 
+  // The roster opens a segment over itself rather than beside itself, because what a reader is
+  // working through here is a page about one character and the segment is not part of it — the
+  // timeline is the view where the two belong side by side. So this is the frame that closes on
+  // a click away, which `showModal` does not give: the backdrop swallows the click and nothing
+  // happens, so it is the app's own doing and the click has to land where no part of it is.
+  await test.step("and it is a modal here, which clicking away from closes", async () => {
+    await roster.unfolded("Into the Light").click();
+    await expect(detail.panel).toBeVisible();
+    await detail.clickAway();
+  });
+
   // The segments are the least of it and are folded away as such — a fortnight is forty of
   // them, and forty rows above the two facts a reader came for is why they moved down here.
   // The point of the whole thing is that opening one still lands where it always did: the row
-  // is the timeline's row and the modal is the timeline's modal.
+  // is the timeline's row and what it opens is the timeline's segment, drawn the same way.
   await test.step("the segments are folded away, and one still opens the detail", async () => {
     await roster.pick("Brin-Hearth");
     await roster.show("Activity");

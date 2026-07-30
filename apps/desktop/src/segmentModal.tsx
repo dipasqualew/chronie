@@ -4,12 +4,18 @@
  * The timeline, the roster and the details table each hand this the list a segment sits in —
  * a play session, a character's history, the current sort and filter — so "next" always means
  * the next one in whatever the reader was already looking at.
+ *
+ * The segment itself — the picture, the head, and the dozen lists under it — is drawn by
+ * `SegmentHead` and `SegmentBody`, which are the whole of what the two frames a reader meets one
+ * in have in common. This file holds the frame the roster and the table open: a modal over
+ * whatever the reader was reading. The timeline opens the other one, docked beside the spine —
+ * see `segmentPanel.tsx`.
  */
 
 import "./segmentModal.css";
 
 import { useCallback, useRef } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, Ref, RefObject } from "react";
 
 import { achievementIds, achievementLine } from "./achievements";
 import type { AchievementBook } from "./achievements";
@@ -51,8 +57,8 @@ import {
 /** No place on screen is nothing to look a picture up for, and the same empty list every time. */
 const NOTHING_NAMED: string[] = [];
 
-/** Everything the modal is showing, or nothing at all when it is closed. */
-export interface SegmentModalState {
+/** Everything a frame is showing, or nothing at all when it is closed. */
+export interface SegmentViewState {
   /** The list to walk, which is whichever list the segment was opened from. */
   order: Segment[];
   index: number;
@@ -738,14 +744,14 @@ function Experience({ segment }: { segment: Segment }): ReactNode {
   );
 }
 
-export interface SegmentModalProps {
-  /** What the modal is showing, or null when it is closed. */
-  showing: SegmentModalState | null;
+export interface SegmentViewProps {
+  /** What the frame is showing, or null when it is closed. */
+  showing: SegmentViewState | null;
   onStep: (by: number) => void;
   onClose: () => void;
   onEditActivities: (segmentId: number) => void;
   /**
-   * What the game says about the achievements a segment names. Passed in so the modal is
+   * What the game says about the achievements a segment names. Passed in so the frame is
    * drivable without a backend, and asked only for the segment on screen.
    */
   achievements: AchievementBook;
@@ -755,9 +761,9 @@ export interface SegmentModalProps {
    */
   items: ItemBook;
   /**
-   * The wide banner the game draws a place across, which is this modal's header and nothing
-   * else's. Absent where nothing can draw one — a window with no game install behind it — which
-   * leaves the modal opening on its heading, the way it did before there were any pictures.
+   * The wide banner the game draws a place across, which is the header a segment opens on and
+   * nothing else. Absent where nothing can draw one — a window with no game install behind it —
+   * which leaves the segment opening on its heading, the way it did before there were pictures.
    */
   heroes?: PlaceHeroes;
   /**
@@ -766,10 +772,10 @@ export interface SegmentModalProps {
    */
   factions?: FactionIcons;
   /**
-   * The portraits the game draws a boss with. The modal is the only place a fight is named, so
-   * this is not shared with anything — but it is a book for the same reason the others are: a
-   * raid night is the same eight bosses over and over, and a reader stepping through its segments
-   * meets each of them on every one.
+   * The portraits the game draws a boss with. An opened segment is the only place a fight is
+   * named, so this is not shared with anything — but it is a book for the same reason the others
+   * are: a raid night is the same eight bosses over and over, and a reader stepping through its
+   * segments meets each of them on every one.
    */
   bosses?: BossPortraits;
   /**
@@ -793,6 +799,226 @@ export interface SegmentModalProps {
 /** No segment on screen is nothing to look up, and the same empty list every time it happens. */
 const NOTHING_WANTED: number[] = [];
 
+/**
+ * Stepping to the next segment, with the reading put back to the top where it belongs.
+ *
+ * A frame's own business rather than the window's: `onStep` moves the index, and this is the
+ * part that says a reader who was eleven sections down the last segment is at the top of this
+ * one. Shared because both frames have a body that scrolls and neither would be right without
+ * it.
+ */
+export function useSegmentStep(onStep: (by: number) => void): {
+  body: RefObject<HTMLDivElement | null>;
+  step: (by: number) => void;
+} {
+  const body = useRef<HTMLDivElement>(null);
+  const step = useCallback(
+    (by: number) => {
+      onStep(by);
+      body.current?.scrollTo({ top: 0 });
+    },
+    [onStep],
+  );
+  return { body, step };
+}
+
+/**
+ * The arrow keys walking the list, wherever inside the frame the focus has ended up.
+ *
+ * What a reader reaches for once they realise a segment is one of several, and nothing inside a
+ * frame wants them: the body scrolls, it does not select. Handed to the frame rather than to
+ * anything in it, because a key event is only heard by an ancestor of whatever has the focus.
+ */
+export const walkOnArrows =
+  (step: (by: number) => void) =>
+  (event: KeyboardEvent<Element>): void => {
+    if (event.key === "ArrowLeft") step(-1);
+    if (event.key === "ArrowRight") step(1);
+  };
+
+/**
+ * The head of an opened segment: the picture of the place, its name, where in the list it is,
+ * and the way to either side of it.
+ *
+ * This and `SegmentBody` are the whole of what the two frames share, and they are two components
+ * rather than one for the same reason the modal is a flex column: a wrapper around the pair would
+ * be a box each frame then had to teach to behave like its own, and the header inside it has
+ * already been through one argument about what may shrink.
+ *
+ * The title's id is the frame's to give, because both frames are in the document at once and an
+ * id belongs to one element. Each names itself after the heading it holds.
+ */
+export function SegmentHead({
+  showing,
+  segment,
+  heroes,
+  titleId,
+  onStep,
+  onClose,
+}: {
+  showing: SegmentViewState | null;
+  segment: Segment | undefined;
+  heroes?: PlaceHeroes;
+  titleId: string;
+  onStep: (by: number) => void;
+  onClose: () => void;
+}): ReactNode {
+  return (
+    <>
+      {segment ? <PlaceHero place={segment.instance} heroes={heroes} /> : null}
+      <div className="detail-head">
+        <div className="detail-named">
+          <h2 className="detail-title" id={titleId}>
+            {segment?.instance ?? ""}
+          </h2>
+          {/* Where in the list the reader is, announced as it changes — stepping to the next
+              segment is exactly the moment "2 of 2" is worth hearing. */}
+          <span className="detail-position" role="status" aria-label="Which segment">
+            {showing ? `${showing.index + 1} of ${showing.order.length}` : ""}
+          </span>
+        </div>
+        <div className="detail-nav">
+          {/* Both ends say they are spent without giving up the focus they are holding, which is
+              what keeps the arrow keys working once the reader has walked to one of them.
+              See `StepButton`. */}
+          <StepButton
+            label="Previous segment"
+            spent={!showing || showing.index === 0}
+            onStep={() => onStep(-1)}
+          >
+            ‹
+          </StepButton>
+          <StepButton
+            label="Next segment"
+            spent={!showing || showing.index >= showing.order.length - 1}
+            onStep={() => onStep(1)}
+          >
+            ›
+          </StepButton>
+          <button type="button" aria-label="Close segment" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Everything the segment holds, in the one box on the screen that scrolls.
+ *
+ * The frame around it is capped — at a share of the window in the modal, at the height of the
+ * window in the panel — so this is what gives way, and the `ref` is how the frame puts it back
+ * to the top when the reader steps to another segment.
+ */
+export function SegmentBody({
+  segment,
+  book,
+  items,
+  bosses,
+  factions,
+  holdings,
+  album,
+  captures,
+  onEditActivities,
+  onShowAppearance,
+  ref,
+}: {
+  segment: Segment | undefined;
+  book: AchievementBook;
+  items: ItemBook;
+  bosses?: BossPortraits;
+  factions?: FactionIcons;
+  holdings?: AccountHoldings;
+  album: CaptureAlbum;
+  captures: CaptureActions;
+  onEditActivities: (segmentId: number) => void;
+  onShowAppearance?: (showing: AppearanceModalState) => void;
+  ref?: Ref<HTMLDivElement>;
+}): ReactNode {
+  // The lookup runs after the segment is on screen, because reading the game's own files takes
+  // about a second and everything else about the segment is already in hand. Each half of it —
+  // the words, then the pictures — redraws when it lands.
+  //
+  // The book is not state: it is a cache outside React, shared with every other segment the reader
+  // opens, so a lookup landing has nothing to change that React would notice. `useBook` is the
+  // subscription that tells it, and it is what makes closing the segment inside that second the
+  // end of the matter rather than a redraw of something that has gone. See `book.ts`.
+  //
+  // Asking again costs nothing: the book keeps what it has already been told and what it has
+  // already asked about, so a repeat is filtered down to nothing before it reaches a backend.
+  useBook(book, segment ? achievementIds(segment) : NOTHING_WANTED);
+
+  const facts = segment
+    ? [
+        `${dayLabel(segment.day)} · ${clock(segment.startedAt)} – ${clock(segment.endedAt)}`,
+        duration(segment.seconds),
+      ]
+    : [];
+
+  const summary = segment ? highlights([segment]) : [];
+  const activities = segment?.activities || [];
+
+  return (
+    <div className="detail-body" ref={ref}>
+      {segment ? (
+        <>
+          <p className="detail-who">
+            <ClassDot classFile={segment.classFile} />
+            <strong>{segment.character}</strong>{" "}
+            <span className="muted">
+              {className(segment.classFile)}
+              {segment.level == null ? "" : ` · level ${segment.level}`}
+            </span>
+          </p>
+          <p className="detail-facts">
+            {facts.join(" · ")} · <span className="badge">{locationType(segment)}</span>
+            {segment.difficulty ? ` · ${segment.difficulty}` : ""}
+          </p>
+          <div className="detail-activities">
+            {activities.length ? (
+              activities.map((activity, index) => (
+                <ActivityChip key={activity.id ?? index} activity={activity} />
+              ))
+            ) : (
+              <span className="muted">No activity recorded</span>
+            )}
+            <button type="button" onClick={() => onEditActivities(segment.segmentId)}>
+              Edit activities
+            </button>
+          </div>
+          <Keystone segment={segment} />
+          <Experience segment={segment} />
+          <div className="detail-highlights">
+            {shownHighlights(summary, { milestones: false }).length ? (
+              <HighlightList entries={summary} milestones={false} interactive={false} />
+            ) : (
+              <p className="muted">Nothing was gained or collected in this segment.</p>
+            )}
+          </div>
+          {/* Above the lists, because a photograph of the evening is what somebody opens a
+              segment for when there is one, and the lists are what they read afterwards. */}
+          {(segment.captures || []).length ? (
+            <Section title="Screenshots">
+              <CaptureGallery segments={[segment]} album={album} actions={captures} />
+            </Section>
+          ) : null}
+          <Lists
+            segment={segment}
+            book={book}
+            items={items}
+            bosses={bosses}
+            onShowAppearance={onShowAppearance}
+          />
+          <Gold segment={segment} holdings={holdings} />
+          <Currencies segment={segment} holdings={holdings} />
+          <Reputation segment={segment} holdings={holdings} factions={factions} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function SegmentModal({
   showing,
   onStep,
@@ -807,9 +1033,9 @@ export function SegmentModal({
   album,
   captures,
   onShowAppearance,
-}: SegmentModalProps): ReactNode {
-  const body = useRef<HTMLDivElement>(null);
+}: SegmentViewProps): ReactNode {
   const segment = showing?.order[showing.index];
+  const { body, step } = useSegmentStep(onStep);
 
   // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
   // element is driven from an effect — opened when there is a segment to show, and closed when
@@ -817,49 +1043,13 @@ export function SegmentModal({
   // dialog without asking anybody.
   const dialog = useModalDialog(segment !== undefined);
 
-  // The lookup runs after the segment is on screen, because reading the game's own files takes
-  // about a second and everything else about the segment is already in hand. Each half of it —
-  // the words, then the pictures — redraws when it lands.
-  //
-  // The book is not state: it is a cache outside React, shared with every other segment the reader
-  // opens, so a lookup landing has nothing to change that React would notice. `useBook` is the
-  // subscription that tells it, and it is what makes closing the modal inside that second the end
-  // of the matter rather than a redraw of something that has gone. See `book.ts`.
-  //
-  // Asking again costs nothing: the book keeps what it has already been told and what it has
-  // already asked about, so a repeat is filtered down to nothing before it reaches a backend.
-  useBook(book, segment ? achievementIds(segment) : NOTHING_WANTED);
-
-  const step = useCallback(
-    (by: number) => {
-      onStep(by);
-      body.current?.scrollTo({ top: 0 });
-    },
-    [onStep],
-  );
-
-  const facts = segment
-    ? [
-        `${dayLabel(segment.day)} · ${clock(segment.startedAt)} – ${clock(segment.endedAt)}`,
-        duration(segment.seconds),
-      ]
-    : [];
-
-  const summary = segment ? highlights([segment]) : [];
-  const activities = segment?.activities || [];
-
   return (
     <dialog
       id="segment-detail"
       aria-labelledby="segment-detail-title"
       ref={dialog}
       onClose={onClose}
-      // Arrow keys are what a reader reaches for once they realise the modal walks a list, and
-      // nothing inside it wants them: the body scrolls, it does not select.
-      onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") step(-1);
-        if (event.key === "ArrowRight") step(1);
-      }}
+      onKeyDown={walkOnArrows(step)}
       // Clicking away closes it, which is what a reader who opened it by clicking expects and
       // what `showModal` does not give: the backdrop swallows the click and nothing happens.
       // `lightDismiss` is what tells a click on the backdrop from one on the modal's own
@@ -868,97 +1058,27 @@ export function SegmentModal({
         if (lightDismiss(event)) onClose();
       }}
     >
-      {segment ? <PlaceHero place={segment.instance} heroes={heroes} /> : null}
-      <div className="detail-head">
-        <div>
-          <h2 className="detail-title" id="segment-detail-title">
-            {segment?.instance ?? ""}
-          </h2>
-          {/* Where in the list the reader is, announced as it changes — stepping to the next
-              segment is exactly the moment "2 of 2" is worth hearing. */}
-          <span className="detail-position" role="status" aria-label="Which segment">
-            {showing ? `${showing.index + 1} of ${showing.order.length}` : ""}
-          </span>
-        </div>
-        <div className="detail-nav">
-          {/* Both ends say they are spent without giving up the focus they are holding, which is
-              what keeps the arrow keys below working once the reader has walked to one of them.
-              See `StepButton`. */}
-          <StepButton
-            label="Previous segment"
-            spent={!showing || showing.index === 0}
-            onStep={() => step(-1)}
-          >
-            ‹
-          </StepButton>
-          <StepButton
-            label="Next segment"
-            spent={!showing || showing.index >= showing.order.length - 1}
-            onStep={() => step(1)}
-          >
-            ›
-          </StepButton>
-          <button type="button" aria-label="Close segment" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-      <div className="detail-body" ref={body}>
-        {segment ? (
-          <>
-            <p className="detail-who">
-              <ClassDot classFile={segment.classFile} />
-              <strong>{segment.character}</strong>{" "}
-              <span className="muted">
-                {className(segment.classFile)}
-                {segment.level == null ? "" : ` · level ${segment.level}`}
-              </span>
-            </p>
-            <p className="detail-facts">
-              {facts.join(" · ")} · <span className="badge">{locationType(segment)}</span>
-              {segment.difficulty ? ` · ${segment.difficulty}` : ""}
-            </p>
-            <div className="detail-activities">
-              {activities.length ? (
-                activities.map((activity, index) => (
-                  <ActivityChip key={activity.id ?? index} activity={activity} />
-                ))
-              ) : (
-                <span className="muted">No activity recorded</span>
-              )}
-              <button type="button" onClick={() => onEditActivities(segment.segmentId)}>
-                Edit activities
-              </button>
-            </div>
-            <Keystone segment={segment} />
-            <Experience segment={segment} />
-            <div className="detail-highlights">
-              {shownHighlights(summary, { milestones: false }).length ? (
-                <HighlightList entries={summary} milestones={false} interactive={false} />
-              ) : (
-                <p className="muted">Nothing was gained or collected in this segment.</p>
-              )}
-            </div>
-            {/* Above the lists, because a photograph of the evening is what somebody opens a
-              segment for when there is one, and the lists are what they read afterwards. */}
-            {(segment.captures || []).length ? (
-              <Section title="Screenshots">
-                <CaptureGallery segments={[segment]} album={album} actions={captures} />
-              </Section>
-            ) : null}
-            <Lists
-              segment={segment}
-              book={book}
-              items={items}
-              bosses={bosses}
-              onShowAppearance={onShowAppearance}
-            />
-            <Gold segment={segment} holdings={holdings} />
-            <Currencies segment={segment} holdings={holdings} />
-            <Reputation segment={segment} holdings={holdings} factions={factions} />
-          </>
-        ) : null}
-      </div>
+      <SegmentHead
+        showing={showing}
+        segment={segment}
+        heroes={heroes}
+        titleId="segment-detail-title"
+        onStep={step}
+        onClose={onClose}
+      />
+      <SegmentBody
+        ref={body}
+        segment={segment}
+        book={book}
+        items={items}
+        bosses={bosses}
+        factions={factions}
+        holdings={holdings}
+        album={album}
+        captures={captures}
+        onEditActivities={onEditActivities}
+        onShowAppearance={onShowAppearance}
+      />
     </dialog>
   );
 }

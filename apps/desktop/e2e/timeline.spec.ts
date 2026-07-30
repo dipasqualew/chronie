@@ -211,7 +211,7 @@ test("stitches segments into play sessions and leads with what happened", async 
   });
 
   // A segment reads the same way its session does, and clicking it is how its summary comes
-  // apart — the modal below is the list, so the row itself needs no controls of its own.
+  // apart — the panel beside it is the list, so the row itself needs no controls of its own.
   await test.step("the fold opens into rows summarised the same way", async () => {
     await timeline.fold(first, "2 segments").click();
 

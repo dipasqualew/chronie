@@ -135,7 +135,7 @@ test("shows an evening's screenshots, and lets one be annotated or deleted", asy
     await timeline.fold(card, "2 segments").click();
     await detail.openFor("Brin-Hearth", "Copperwood Depths");
 
-    await expect(shots.tilesIn(detail.dialog)).toHaveCount(1);
+    await expect(shots.tilesIn(detail.panel)).toHaveCount(1);
     await detail.close();
   });
 });
