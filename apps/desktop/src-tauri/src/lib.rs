@@ -43,7 +43,7 @@ pub mod worn;
 use achievements::AchievementBook;
 use chrono::Utc;
 use collector::{dashboard as load_dashboard, SyncResult};
-use failure::CommandError;
+use failure::{CommandError, Context as _, Failure, FailureCode};
 use icons::IconCache;
 use items::ItemBook;
 use serde::{Deserialize, Serialize};
@@ -268,15 +268,21 @@ fn load_settings(path: &Path) -> Settings {
         .unwrap_or_default()
 }
 
-fn configured_wow_path(settings: &Settings) -> Result<PathBuf, String> {
+/// Where the game is, according to the settings file, or why nothing can say.
+///
+/// Two conditions rather than one sentence, because they are two different things to do about it.
+/// Nothing configured is what a fresh install is. A folder that was configured and is not there
+/// any more is a folder somebody moved. Both are a click away in Setup, and neither used to be
+/// reachable from the screen that reported them.
+fn configured_wow_path(settings: &Settings) -> Result<PathBuf, Failure> {
     let configured = settings
         .wow_path
         .as_deref()
-        .ok_or_else(|| "Choose the game folder in Setup first.".to_string())?;
+        .ok_or_else(|| Failure::of(FailureCode::NotConfigured))?;
     collector::resolve_wow_path(Path::new(configured))
 }
 
-fn perform_sync(state: &AppState) -> Result<SyncResult, String> {
+fn perform_sync(state: &AppState) -> Result<SyncResult, Failure> {
     let (wow_path, options) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         (
@@ -349,9 +355,9 @@ async fn query_schema(state: State<'_, AppState>) -> Result<dto::QuerySchema, Co
 #[tauri::command]
 #[specta::specta]
 async fn transmog_sets(state: State<'_, AppState>) -> Result<dto::TransmogPayload, CommandError> {
-    Ok(read_game_files(&state, transmog::sets)
-        .await
-        .and_then(dto::convert)?)
+    Ok(dto::convert(
+        read_game_files(&state, transmog::sets).await?,
+    )?)
 }
 
 /// What one transmog set is made of, walked out of the same files.
@@ -364,11 +370,9 @@ async fn transmog_set_items(
     set_id: u32,
     state: State<'_, AppState>,
 ) -> Result<dto::TransmogSetItemsPayload, CommandError> {
-    Ok(
-        read_game_files(&state, move |files| transmog::set_items(files, set_id))
-            .await
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(
+        read_game_files(&state, move |files| transmog::set_items(files, set_id)).await?,
+    )?)
 }
 
 /// Every appearance the game holds for one kind of place, whether or not a set names it.
@@ -383,11 +387,12 @@ async fn transmog_appearances(
     display_types: Vec<u32>,
     state: State<'_, AppState>,
 ) -> Result<dto::WardrobePayload, CommandError> {
-    Ok(read_game_files(&state, move |files| {
-        wardrobe::appearances(files, &display_types)
-    })
-    .await
-    .and_then(dto::convert)?)
+    Ok(dto::convert(
+        read_game_files(&state, move |files| {
+            wardrobe::appearances(files, &display_types)
+        })
+        .await?,
+    )?)
 }
 
 /// Everything anybody has said about the game's wardrobe with their own hands.
@@ -526,17 +531,18 @@ async fn in_game_set_appearances(
     appearance_ids: Vec<u32>,
     state: State<'_, AppState>,
 ) -> Result<dto::InGameSetAppearancesPayload, CommandError> {
-    Ok(read_game_files(&state, move |files| {
-        let found = transmog::appearances_of(files, &appearance_ids)?;
-        let named = found.iter().filter(|row| row.item_id != 0).count();
-        Ok(serde_json::json!({
-            "readCount": named,
-            "withheldCount": found.len() - named,
-            "appearances": found,
-        }))
-    })
-    .await
-    .and_then(dto::convert)?)
+    Ok(dto::convert(
+        read_game_files(&state, move |files| {
+            let found = transmog::appearances_of(files, &appearance_ids)?;
+            let named = found.iter().filter(|row| row.item_id != 0).count();
+            Ok(serde_json::json!({
+                "readCount": named,
+                "withheldCount": found.len() - named,
+                "appearances": found,
+            }))
+        })
+        .await?,
+    )?)
 }
 
 /// Asks the game to save an outfit into the account's own transmog sets.
@@ -666,11 +672,9 @@ async fn character_model(
     state: State<'_, AppState>,
 ) -> Result<dto::CharacterModelPayload, CommandError> {
     let who = character_look_of(&state)?;
-    Ok(
-        read_game_files(&state, move |files| character::model_of(files, &who))
-            .await
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(
+        read_game_files(&state, move |files| character::model_of(files, &who)).await?,
+    )?)
 }
 
 /// What the reader may be asked about her, what they have answered so far, and who they play.
@@ -778,11 +782,12 @@ async fn worn_set(
 ) -> Result<dto::WornSetPayload, CommandError> {
     let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
     let who = character_look_of(&state)?;
-    Ok(read_game_files(&state, move |files| {
-        character::worn_set_of(files, &pieces, &who)
-    })
-    .await
-    .and_then(dto::convert)?)
+    Ok(dto::convert(
+        read_game_files(&state, move |files| {
+            character::worn_set_of(files, &pieces, &who)
+        })
+        .await?,
+    )?)
 }
 
 /// The same, on a body belonging to somebody the reader actually plays.
@@ -810,12 +815,13 @@ async fn character_worn_set(
 ) -> Result<dto::CharacterWornSetPayload, CommandError> {
     let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
     let looks = collector::character_looks(&state.database_path())?;
-    Ok(read_game_files(&state, move |files| {
-        let who = character::who_is(files, &looks, &character)?;
-        character::own_worn_set_of(files, &pieces, who.as_ref())
-    })
-    .await
-    .and_then(dto::convert)?)
+    Ok(dto::convert(
+        read_game_files(&state, move |files| {
+            let who = character::who_is(files, &looks, &character)?;
+            character::own_worn_set_of(files, &pieces, who.as_ref())
+        })
+        .await?,
+    )?)
 }
 
 /// The pictures a list of currencies is drawn with, keyed by the currency rather than the file.
@@ -1045,11 +1051,9 @@ async fn gallery_models(
 ) -> Result<dto::GalleryPayload, CommandError> {
     let pieces: Vec<worn::Piece> = dto::convert(pieces)?;
     let who = character_look_of(&state)?;
-    Ok(
-        read_game_files(&state, move |files| gallery::of(files, &pieces, &who))
-            .await
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(
+        read_game_files(&state, move |files| gallery::of(files, &pieces, &who)).await?,
+    )?)
 }
 
 /// A page of the set grid, each set worn whole on a body of its own.
@@ -1066,11 +1070,9 @@ async fn gallery_sets(
     state: State<'_, AppState>,
 ) -> Result<dto::SetGalleryPayload, CommandError> {
     let who = character_look_of(&state)?;
-    Ok(
-        read_game_files(&state, move |files| gallery::sets(files, &set_ids, &who))
-            .await
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(
+        read_game_files(&state, move |files| gallery::sets(files, &set_ids, &who)).await?,
+    )?)
 }
 
 /// The look a list of items carries, as the three numbers a render is asked for by.
@@ -1089,11 +1091,9 @@ async fn item_appearances(
     item_ids: Vec<u32>,
     state: State<'_, AppState>,
 ) -> Result<dto::ItemAppearancesPayload, CommandError> {
-    Ok(
-        read_game_files(&state, move |files| appearances::of_items(files, &item_ids))
-            .await
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(
+        read_game_files(&state, move |files| appearances::of_items(files, &item_ids)).await?,
+    )?)
 }
 
 /// Runs a read of the installed game's own files, off the main thread.
@@ -1106,7 +1106,12 @@ async fn item_appearances(
 /// means inflating a couple of hundred megabytes and would freeze the window for as long as
 /// it took. Every read after that is handed the handle the first one left behind — see
 /// [`casc::OpenStorage`] — which is what took a click from over a second to under half of one.
-async fn read_game_files<T, F>(state: &State<'_, AppState>, read: F) -> Result<T, String>
+///
+/// The closure still answers with a `String`: the thirty-odd modules that read the game's tables
+/// are their own domain and their own migration. What is typed here is everything in front of
+/// them — which folder, whether it is an install, and whether the storage under it would open,
+/// which are the three things a reader can actually do something about.
+async fn read_game_files<T, F>(state: &State<'_, AppState>, read: F) -> Result<T, Failure>
 where
     T: Send + 'static,
     F: FnOnce(&dyn casc::GameFiles) -> Result<T, String> + Send + 'static,
@@ -1117,13 +1122,19 @@ where
     };
     let storage = Arc::clone(&state.storage);
     tauri::async_runtime::spawn_blocking(move || {
-        let install = retail
-            .parent()
-            .ok_or("The game folder has no parent to look for Data in.")?;
-        read(storage.files(install)?.as_ref())
+        let install = retail.parent().ok_or_else(|| {
+            Failure::new(
+                FailureCode::InstallNotFound,
+                "Chronie could not find World of Warcraft's Data folder beside the game folder \
+                 in Setup.",
+            )
+            .context(format!("looking beside {}", retail.display()))
+        })?;
+        let files = storage.files(install)?;
+        read(files.as_ref()).map_err(Failure::from)
     })
     .await
-    .map_err(|error| format!("Reading the game's files did not finish: {error}"))?
+    .context("waiting for a read of the game's files")?
 }
 
 #[tauri::command]
@@ -1679,7 +1690,7 @@ fn replace_addon(
 }
 
 /// Installs the shipped addon into the configured game folder.
-fn install_bundled_addon(state: &AppState) -> Result<InstallResult, String> {
+fn install_bundled_addon(state: &AppState) -> Result<InstallResult, Failure> {
     let (wow_path, settings) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         (configured_wow_path(&settings)?, settings.clone())
@@ -1688,6 +1699,7 @@ fn install_bundled_addon(state: &AppState) -> Result<InstallResult, String> {
     // survives an install rather than being replaced by the shipped empty file.
     let waiting = collector::waiting_set_requests(&state.database_path()).unwrap_or_default();
     replace_addon(&wow_path, &settings, &waiting, Utc::now().timestamp())
+        .context("laying the addon into the game folder")
 }
 
 #[tauri::command]

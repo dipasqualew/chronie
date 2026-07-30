@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 
 use flate2::read::ZlibDecoder;
 
+use crate::failure::{Context, Failure, FailureCode};
+
 /// A source of game files, addressed the way the client addresses them.
 ///
 /// The real implementation walks the install's CASC storage; the fixture one reads a
@@ -200,14 +202,26 @@ impl CascFiles {
     ///
     /// `install` is the folder holding `Data/` — the parent of `_retail_`, not `_retail_`
     /// itself, which is the path the rest of the app carries around.
+    /// Every way this can fail is [`FailureCode::GameFilesUnreadable`], which is why the whole
+    /// body is reclassified in one place rather than each `?` naming a condition of its own. No
+    /// `Data` folder, a half-written `.build.info`, index files the launcher is rewriting, a build
+    /// config that will not parse — on an install that worked yesterday all of those mean the game
+    /// is being patched, and the answer to all of them is to try again in a minute. The specific
+    /// sentence each one produced stays in the report; see [`Failure::or_code`].
     #[tracing::instrument(name = "casc.open", skip_all)]
-    pub fn open(install: &Path) -> Result<Self, String> {
+    pub fn open(install: &Path) -> Result<Self, Failure> {
+        Self::opened(install)
+            .or_code(FailureCode::GameFilesUnreadable)
+            .with_context(|| format!("opening the game's storage under {}", install.display()))
+    }
+
+    fn opened(install: &Path) -> Result<Self, Failure> {
         let data_dir = install.join("Data");
         if !data_dir.is_dir() {
-            return Err(format!(
+            return Err(Failure::from(format!(
                 "No Data folder under {}; that is where the game keeps its files.",
                 install.display()
-            ));
+            )));
         }
 
         let build_key = live_build_key(install)?;
@@ -553,8 +567,8 @@ impl<T> Cached<T> {
         &self,
         key: &Path,
         current: impl Fn(&T, &Path) -> bool,
-        open: impl FnOnce(&Path) -> Result<T, String>,
-    ) -> Result<Arc<T>, String> {
+        open: impl FnOnce(&Path) -> Result<T, Failure>,
+    ) -> Result<Arc<T>, Failure> {
         // A poisoned lock means a panic while something was being opened. What is behind it
         // is either nothing or a value that was fully built before the panic, so taking it
         // back is safe — and wedging every later read of the game's files because one of them
@@ -601,7 +615,7 @@ impl Cached<Remembered<CascFiles>> {
     /// patched while the app sat in the tray would otherwise keep answering about the old one.
     /// What was remembered goes with it, for the same reason and by the same act — the bytes
     /// behind a FileDataID are a fact about a build.
-    pub fn files(&self, install: &Path) -> Result<Arc<Remembered<CascFiles>>, String> {
+    pub fn files(&self, install: &Path) -> Result<Arc<Remembered<CascFiles>>, Failure> {
         self.get(
             install,
             |held, install| held.storage().is_current(install),
@@ -1512,7 +1526,7 @@ mod tests {
 
     /// An open that counts how many times it was asked to do the work, and answers with that
     /// count — so a test can tell "opened again" from "handed back" by the value alone.
-    fn counted(opens: &std::cell::Cell<u32>) -> impl FnOnce(&Path) -> Result<u32, String> + '_ {
+    fn counted(opens: &std::cell::Cell<u32>) -> impl FnOnce(&Path) -> Result<u32, Failure> + '_ {
         move |_| {
             opens.set(opens.get() + 1);
             Ok(opens.get())
@@ -1835,5 +1849,35 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = DirFiles::new(temp.path()).read(1376213).unwrap_err();
         assert!(error.contains("1376213.db2"), "{error}");
+    }
+
+    /// Storage that will not open is the condition a reader is told to wait out, whatever the
+    /// particular reason was — and the particular reason still reaches the log. A folder with no
+    /// `Data` in it stands for the whole family here: an install mid-patch reaches the same code
+    /// through `.build.info` or the index files instead, and this is the one shape a test can
+    /// arrange without 123GB of game behind it.
+    #[test]
+    fn a_storage_that_will_not_open_is_a_condition_worth_trying_again() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let Err(failure) = CascFiles::open(temp.path()) else {
+            panic!("an empty folder is not a game install");
+        };
+
+        assert_eq!(failure.code(), FailureCode::GameFilesUnreadable);
+        assert!(failure.code().retryable());
+        assert_eq!(
+            failure.message(),
+            FailureCode::GameFilesUnreadable.sentence()
+        );
+        let report = failure.report();
+        assert!(report.contains("No Data folder under"), "{report}");
+        assert!(
+            report.contains(&format!(
+                "while opening the game's storage under {}",
+                temp.path().display()
+            )),
+            "{report}"
+        );
     }
 }

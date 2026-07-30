@@ -153,9 +153,10 @@ impl FailureCode {
 pub struct Failure {
     code: FailureCode,
     message: String,
-    /// What was being attempted, innermost first. Log-only — this is where the path, the file id
-    /// and the statement live, and none of them are the window's business.
-    operations: Vec<String>,
+    /// Everything known about this that the window is not being told: what was being attempted,
+    /// innermost first, and any message a reclassification replaced. Log-only — this is where the
+    /// path, the file id and the statement live, and none of them are the window's business.
+    notes: Vec<String>,
     source: Option<Box<dyn Error + Send + Sync>>,
 }
 
@@ -165,7 +166,7 @@ impl Failure {
         Self {
             code,
             message: message.into(),
-            operations: Vec::new(),
+            notes: Vec::new(),
             source: None,
         }
     }
@@ -187,20 +188,29 @@ impl Failure {
     /// then `opening the game's storage`, then `drawing the character`. Nothing is deduplicated
     /// and nothing is truncated: a chain that is repetitive is telling you the call graph is.
     pub fn context(mut self, operation: impl Into<String>) -> Self {
-        self.operations.push(operation.into());
+        self.notes.push(format!("while {}", operation.into()));
         self
     }
 
     /// Names the condition, if nothing below has already named it.
     ///
-    /// For the layer that can recognise something the layer beneath it could not:
-    /// `Connection::open` has no idea whether a missing file is a fresh install or a deleted
-    /// history, and the caller that knows what it was opening does. A failure that already has a
-    /// code keeps it, so a specific answer found deep down is never coarsened by something above.
+    /// For the layer that can recognise something the layer beneath it could not: a `String` from
+    /// somewhere not yet migrated arrives as [`FailureCode::Internal`], and the caller that knows
+    /// it was opening the game's storage knows what that means. A failure that already has a code
+    /// keeps it, so a specific answer found deep down is never coarsened by something above.
+    ///
+    /// The sentence being replaced is not thrown away. It was the most specific thing anybody knew
+    /// about this failure, and it goes to the front of the notes — which is how
+    /// `No Data folder under /Applications/World of Warcraft` stays in the log while the window is
+    /// told something it can act on. Unless it was only [`FailureCode::Internal`]'s own fallback,
+    /// which nobody wrote about anything and which would be a line of noise in every report.
     pub fn or_code(mut self, code: FailureCode) -> Self {
         if self.code == FailureCode::Internal {
             self.code = code;
-            self.message = code.sentence().to_string();
+            let replaced = std::mem::replace(&mut self.message, code.sentence().to_string());
+            if replaced != FailureCode::Internal.sentence() {
+                self.notes.insert(0, replaced);
+            }
         }
         self
     }
@@ -221,11 +231,7 @@ impl Failure {
     /// `: ` in the order a reader wants them — what failed, then what it was doing, then why.
     pub fn report(&self) -> String {
         let mut parts = vec![format!("[{}] {}", self.code.name(), self.message)];
-        parts.extend(
-            self.operations
-                .iter()
-                .map(|operation| format!("while {operation}")),
-        );
+        parts.extend(self.notes.iter().cloned());
         let mut cause = self.source.as_deref().map(|error| error as &dyn Error);
         while let Some(error) = cause {
             parts.push(error.to_string());
@@ -290,6 +296,17 @@ impl From<rusqlite::Error> for Failure {
 
 impl From<std::io::Error> for Failure {
     fn from(error: std::io::Error) -> Self {
+        Self::of(FailureCode::Internal).caused_by(error)
+    }
+}
+
+/// Tauri's own, which is what a `spawn_blocking` that never came back answers with.
+///
+/// Always [`FailureCode::Internal`]: a blocking task failing to join means it panicked or the
+/// runtime went away, and neither is a condition a reader can be told anything useful about beyond
+/// that something went wrong. The panic's own message is in the source chain, where the log gets it.
+impl From<tauri::Error> for Failure {
+    fn from(error: tauri::Error) -> Self {
         Self::of(FailureCode::Internal).caused_by(error)
     }
 }
@@ -535,6 +552,31 @@ mod tests {
 
         assert_eq!(known.code(), FailureCode::HistoryTooNew);
         assert_eq!(known.message(), FailureCode::HistoryTooNew.sentence());
+    }
+
+    /// Reclassifying replaces the sentence the window sees and keeps the one it replaced, which is
+    /// the difference between giving somebody advice they can act on and losing the only line that
+    /// said which folder was actually looked in.
+    #[test]
+    fn or_code_keeps_the_sentence_it_replaced_for_the_log() {
+        let opening = Failure::from(
+            "No Data folder under /Applications/World of Warcraft; that is where the game keeps \
+             its files."
+                .to_string(),
+        )
+        .or_code(FailureCode::GameFilesUnreadable)
+        .context("drawing a character");
+
+        assert_eq!(
+            opening.message(),
+            FailureCode::GameFilesUnreadable.sentence()
+        );
+        assert_eq!(
+            opening.report(),
+            "[gameFilesUnreadable] Chronie could not read the game's files. If the game is \
+             updating, try again once it has finished.: No Data folder under /Applications/World \
+             of Warcraft; that is where the game keeps its files.: while drawing a character"
+        );
     }
 
     /// The sentences that already carried recovery instructions have to arrive unchanged, which is
