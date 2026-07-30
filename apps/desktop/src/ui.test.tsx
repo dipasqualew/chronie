@@ -12,6 +12,7 @@ import {
   FactionIcon,
   HighlightList,
   SegmentButton,
+  StepButton,
 } from "./ui";
 import { createPlaceIcons } from "./places";
 import { createFactionIcons } from "./reputations";
@@ -488,6 +489,51 @@ describe("HighlightList", () => {
  * there is the one disagreement told twice. The row is where a reader is likeliest to meet a
  * transmog variant at all, and it is the only one of the three that was never handed the book.
  */
+/**
+ * The way through a list a modal is walking, at the end where there is nothing left that way.
+ *
+ * What the reader sees of that end is out in the browser suite, because it is a fact about the
+ * focus: a `disabled` button hands the focus it was holding to the page behind the modal, which
+ * takes the arrow keys away from the reader in the same motion that runs the list out. What is
+ * here is the half that had to be written by hand once the button stopped being `disabled` —
+ * `aria-disabled` says the control is unavailable and does nothing whatever to stop a click, so
+ * the guard against the press is the app's own and belongs to a test of its own.
+ */
+describe("StepButton", () => {
+  it("does not step when there is nothing left that way", () => {
+    const steps: number[] = [];
+    render(
+      <StepButton label="Previous segment" spent onStep={() => steps.push(-1)}>
+        ‹
+      </StepButton>,
+    );
+    const button = screen.getByRole("button", { name: "Previous segment" });
+
+    fireEvent.click(button);
+
+    expect(steps).toEqual([]);
+    // Said in the one way that keeps the control focusable. Anything asking the accessibility
+    // tree — a screen reader, the browser suite — is told the same thing `disabled` would say.
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("steps, and says nothing about being spent, while there is somewhere to go", () => {
+    const steps: number[] = [];
+    render(
+      <StepButton label="Next segment" spent={false} onStep={() => steps.push(1)}>
+        ›
+      </StepButton>,
+    );
+    const button = screen.getByRole("button", { name: "Next segment" });
+
+    fireEvent.click(button);
+
+    expect(steps).toEqual([1]);
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+  });
+});
+
 describe("SegmentButton", () => {
   it("names the piece its summary stands for, the way the rest of the app does", async () => {
     const view = render(

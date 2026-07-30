@@ -1003,6 +1003,16 @@ and the same style as the real ones, and fully opaque. The alternative was a mod
 a header for a raid and with a bare line of text for the zone outside it, which reads as two
 different modals. What the stand-in was for when it was written was every open-world zone, which is
 most places; since "Zone maps, verified" below it is what almost nothing falls through to.
+
+**And 256×128 is as sharp as a header can be.** Swept over both columns on 12.0.5.67823, every one
+of the journal's 209 and 1,686 of the finder's 1,702 decode at exactly that; the remaining 16 of
+the finder's are 512×256, and nothing at all comes back larger. `icons::decode` already asks for
+mipmap level 0, which is the largest level a BLP holds, so none of them is refused by its 512 cap
+and none of them has a better copy to be had. The modal draws that across 680 pixels, which is an
+upscale of somewhere between two and three, and there is no way to improve on it short of art the
+game does not ship — issue #230 asked, and this is the answer. An assembled zone map is the
+opposite case: it is scaled *down* to 1,024 wide on the way out (`maps::WIDEST_MAP`), so a zone's
+header is the one that is drawn at something like its own resolution.
 `615222`'s neighbour `337490`,
 `ui-lfg-background-genericdungeon.blp`, is worth knowing about as a trap: it decodes at 256×128 and
 is **entirely transparent**, so it cannot be the stand-in however much its name suggests it.

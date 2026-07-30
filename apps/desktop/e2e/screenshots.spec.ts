@@ -77,6 +77,16 @@ test("shows an evening's screenshots, and lets one be annotated or deleted", asy
     await expect(shots.viewer).toContainText("Taken for an account first");
     await shots.step("Previous screenshot").click();
     await expect(shots.position()).toHaveText("1 of 4");
+
+    // The arrow keys walk it too, and go on doing so once an end has been reached: arriving back
+    // at the first picture is the moment the button under the reader's finger stops being
+    // pressable, and a `disabled` button takes the focus it was holding out of the dialog with
+    // it. The same defect the segment modal had — issue #230.
+    await expect(shots.step("Previous screenshot")).toBeDisabled();
+    await shots.arrow("Right");
+    await expect(shots.position()).toHaveText("2 of 4");
+    await shots.arrow("Left");
+    await expect(shots.position()).toHaveText("1 of 4");
   });
 
   await test.step("the note can be rewritten, and the tile says what was stored", async () => {

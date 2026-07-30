@@ -76,6 +76,14 @@ export class Screenshots {
     return this.viewer.getByRole("button", { name });
   }
 
+  /**
+   * The same walk done from the keyboard, pressed at the window rather than at a locator: the
+   * question is whether the viewer still hears the key wherever the focus has ended up.
+   */
+  arrow(towards: "Left" | "Right"): Promise<void> {
+    return this.page.keyboard.press(`Arrow${towards}`);
+  }
+
   /** What deleting would take with it, which is asked before it is done. */
   warning(): Locator {
     return this.viewer.getByRole("alert");

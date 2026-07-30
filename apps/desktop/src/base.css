@@ -91,7 +91,11 @@ button {
 }
 button:hover { background: var(--surface-2); }
 button.primary { color: white; background: var(--series-1); border-color: var(--series-1); }
-button:disabled { cursor: default; opacity: .4; }
+/* A control that says it is unavailable, however it says it. `aria-disabled` is the wording a
+   control uses when it has to keep the focus it was given — see `StepButton` in `ui.tsx` — and it
+   has to look exactly like a `disabled` one, because a reader is being told the same thing. */
+button:disabled, button[aria-disabled="true"] { cursor: default; opacity: .4; }
+button[aria-disabled="true"]:hover { background: var(--surface-1); }
 
 /* `.circle` carries the other half of this rule, beside the circle itself. */
 button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
