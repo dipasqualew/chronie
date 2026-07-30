@@ -14,7 +14,7 @@ export const commands = {
  * icons are: a list of achievements is worth reading while the tables that describe them
  * are still being opened.
  */
-async achievementDetails(ids: number[]) : Promise<Result<AchievementDetailsPayload, string>> {
+async achievementDetails(ids: number[]) : Promise<Result<AchievementDetailsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("achievement_details", { ids }) };
 } catch (e) {
@@ -28,7 +28,7 @@ async achievementDetails(ids: number[]) : Promise<Result<AchievementDetailsPaylo
  * Each one returns the whole dashboard rather than an acknowledgement, so the window
  * repaints from stored state instead of from what the frontend hoped the write did.
  */
-async addActivity(segmentId: number, kind: string, metadata: Partial<{ [key in string]: ActivityValue }>) : Promise<Result<DashboardPayload, string>> {
+async addActivity(segmentId: number, kind: string, metadata: Partial<{ [key in string]: ActivityValue }>) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_activity", { segmentId, kind, metadata }) };
 } catch (e) {
@@ -39,7 +39,7 @@ async addActivity(segmentId: number, kind: string, metadata: Partial<{ [key in s
 /**
  * One capture at the size it was taken, which is what opening a picture asks for.
  */
-async captureImage(captureId: number) : Promise<Result<CaptureImagePayload, string>> {
+async captureImage(captureId: number) : Promise<Result<CaptureImagePayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("capture_image", { captureId }) };
 } catch (e) {
@@ -55,7 +55,7 @@ async captureImage(captureId: number) : Promise<Result<CaptureImagePayload, stri
  * thread for the length of the grid. Every one after that is a file read, because the
  * thumbnails are kept beside the images they were made from.
  */
-async captureThumbnails(captureIds: number[]) : Promise<Result<CaptureThumbnailsPayload, string>> {
+async captureThumbnails(captureIds: number[]) : Promise<Result<CaptureThumbnailsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("capture_thumbnails", { captureIds }) };
 } catch (e) {
@@ -76,7 +76,7 @@ async captureThumbnails(captureIds: number[]) : Promise<Result<CaptureThumbnails
  * it separately would be making two round trips to draw one panel. It is re-read whenever the
  * body changes, which costs a query against a table with one row per character.
  */
-async characterLook() : Promise<Result<CharacterLookPayload, string>> {
+async characterLook() : Promise<Result<CharacterLookPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("character_look") };
 } catch (e) {
@@ -95,7 +95,7 @@ async characterLook() : Promise<Result<CharacterLookPayload, string>> {
  * draw her, and because a window that had to remember to pass it could forget in one of them —
  * which would be a wardrobe of strangers.
  */
-async characterModel() : Promise<Result<CharacterModelPayload, string>> {
+async characterModel() : Promise<Result<CharacterModelPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("character_model") };
 } catch (e) {
@@ -121,7 +121,7 @@ async characterModel() : Promise<Result<CharacterModelPayload, string>> {
  * So the fallback is gone, and what comes back instead says how much of the body is really the
  * character's — see [`character::Likeness`], and `look.rs` for why it is so often so little.
  */
-async characterWornSet(character: string, pieces: WornPiece[]) : Promise<Result<CharacterWornSetPayload, string>> {
+async characterWornSet(character: string, pieces: WornPiece[]) : Promise<Result<CharacterWornSetPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("character_worn_set", { character, pieces }) };
 } catch (e) {
@@ -129,7 +129,7 @@ async characterWornSet(character: string, pieces: WornPiece[]) : Promise<Result<
     else return { status: "error", error: e  as any };
 }
 },
-async checkForAppUpdate() : Promise<Result<AppUpdateResult, string>> {
+async checkForAppUpdate() : Promise<Result<AppUpdateResult, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("check_for_app_update") };
 } catch (e) {
@@ -149,7 +149,7 @@ async checkForAppUpdate() : Promise<Result<AppUpdateResult, string>> {
 async chooseWowPath() : Promise<string | null> {
     return await TAURI_INVOKE("choose_wow_path");
 },
-async combatLogging() : Promise<Result<Status, string>> {
+async combatLogging() : Promise<Result<Status, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("combat_logging") };
 } catch (e) {
@@ -168,7 +168,7 @@ async combatLogging() : Promise<Result<Status, string>> {
  * The textures themselves go through the same cache every other icon does, so a second
  * character holding the same currency costs the table read and nothing else.
  */
-async currencyIcons(currencyIds: number[]) : Promise<Result<IconsPayload, string>> {
+async currencyIcons(currencyIds: number[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("currency_icons", { currencyIds }) };
 } catch (e) {
@@ -184,7 +184,7 @@ async currencyIcons(currencyIds: number[]) : Promise<Result<IconsPayload, string
  * game at large, saved under a name and browsed beside Blizzard's own ever after. Read whole
  * for the reason the marks are — see `collector::custom_sets`.
  */
-async customSets() : Promise<Result<CustomSetsPayload, string>> {
+async customSets() : Promise<Result<CustomSetsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("custom_sets") };
 } catch (e) {
@@ -192,7 +192,7 @@ async customSets() : Promise<Result<CustomSetsPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async dashboard() : Promise<Result<DashboardPayload, string>> {
+async dashboard() : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("dashboard") };
 } catch (e) {
@@ -200,7 +200,7 @@ async dashboard() : Promise<Result<DashboardPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async deleteActivity(activityId: number) : Promise<Result<DashboardPayload, string>> {
+async deleteActivity(activityId: number) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_activity", { activityId }) };
 } catch (e) {
@@ -208,7 +208,7 @@ async deleteActivity(activityId: number) : Promise<Result<DashboardPayload, stri
     else return { status: "error", error: e  as any };
 }
 },
-async deleteCapture(captureId: number) : Promise<Result<DashboardPayload, string>> {
+async deleteCapture(captureId: number) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_capture", { captureId }) };
 } catch (e) {
@@ -216,7 +216,7 @@ async deleteCapture(captureId: number) : Promise<Result<DashboardPayload, string
     else return { status: "error", error: e  as any };
 }
 },
-async deleteCustomSet(id: number) : Promise<Result<CustomSetsPayload, string>> {
+async deleteCustomSet(id: number) : Promise<Result<CustomSetsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_custom_set", { id }) };
 } catch (e) {
@@ -224,7 +224,7 @@ async deleteCustomSet(id: number) : Promise<Result<CustomSetsPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async deleteTransmogTag(kind: MarkSubjectKind, id: number, key: string) : Promise<Result<TransmogMarksPayload, string>> {
+async deleteTransmogTag(kind: MarkSubjectKind, id: number, key: string) : Promise<Result<TransmogMarksPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_transmog_tag", { kind, id, key }) };
 } catch (e) {
@@ -242,7 +242,7 @@ async deleteTransmogTag(kind: MarkSubjectKind, id: number, key: string) : Promis
  * row adds only its own textures and geometry. See [`gallery::of`], and `budget.rs` for what
  * that claim is held to.
  */
-async galleryModels(pieces: WornPiece[]) : Promise<Result<GalleryPayload, string>> {
+async galleryModels(pieces: WornPiece[]) : Promise<Result<GalleryPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("gallery_models", { pieces }) };
 } catch (e) {
@@ -259,7 +259,7 @@ async galleryModels(pieces: WornPiece[]) : Promise<Result<GalleryPayload, string
  * page out of one walk of each table, rather than by opening a dozen sets one at a time. See
  * [`gallery::sets`].
  */
-async gallerySets(setIds: number[]) : Promise<Result<SetGalleryPayload, string>> {
+async gallerySets(setIds: number[]) : Promise<Result<SetGalleryPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("gallery_sets", { setIds }) };
 } catch (e) {
@@ -278,7 +278,7 @@ async gallerySets(setIds: number[]) : Promise<Result<SetGalleryPayload, string>>
  * memory, which is what makes the second set of a collection cost nothing — so this only
  * reaches the game's storage when the request holds something genuinely new.
  */
-async gameIcons(iconFileDataIds: number[]) : Promise<Result<IconsPayload, string>> {
+async gameIcons(iconFileDataIds: number[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("game_icons", { iconFileDataIds }) };
 } catch (e) {
@@ -299,7 +299,7 @@ async gameIcons(iconFileDataIds: number[]) : Promise<Result<IconsPayload, string
  * other read of the game's tables here is deferred: a roster's worth of wardrobes is a lot of
  * walking for rows nobody has looked at.
  */
-async inGameSetAppearances(appearanceIds: number[]) : Promise<Result<InGameSetAppearancesPayload, string>> {
+async inGameSetAppearances(appearanceIds: number[]) : Promise<Result<InGameSetAppearancesPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("in_game_set_appearances", { appearanceIds }) };
 } catch (e) {
@@ -316,7 +316,7 @@ async inGameSetAppearances(appearanceIds: number[]) : Promise<Result<InGameSetAp
  * database rather than the install, so a machine without the game still lists them — see
  * `0018_in_game_sets.sql` for why listing is as far as that goes.
  */
-async inGameSets() : Promise<Result<InGameSetsPayload, string>> {
+async inGameSets() : Promise<Result<InGameSetsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("in_game_sets") };
 } catch (e) {
@@ -324,7 +324,7 @@ async inGameSets() : Promise<Result<InGameSetsPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async installAddon() : Promise<Result<InstallResult, string>> {
+async installAddon() : Promise<Result<InstallResult, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("install_addon") };
 } catch (e) {
@@ -344,7 +344,7 @@ async installAddon() : Promise<Result<InstallResult, string>> {
  * thirty sources would otherwise walk three of the game's tables to fill in pictures nobody
  * asked to see.
  */
-async itemAppearances(itemIds: number[]) : Promise<Result<ItemAppearancesPayload, string>> {
+async itemAppearances(itemIds: number[]) : Promise<Result<ItemAppearancesPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("item_appearances", { itemIds }) };
 } catch (e) {
@@ -361,7 +361,7 @@ async itemAppearances(itemIds: number[]) : Promise<Result<ItemAppearancesPayload
  * answers with is numbers rather than words; which subclass of armour is "Leather" is the
  * window's business.
  */
-async itemDetails(ids: number[]) : Promise<Result<ItemDetailsPayload, string>> {
+async itemDetails(ids: number[]) : Promise<Result<ItemDetailsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("item_details", { ids }) };
 } catch (e) {
@@ -369,7 +369,7 @@ async itemDetails(ids: number[]) : Promise<Result<ItemDetailsPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async logRetention() : Promise<Result<Report, string>> {
+async logRetention() : Promise<Result<Report, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("log_retention") };
 } catch (e) {
@@ -389,7 +389,7 @@ async logRetention() : Promise<Result<Report, string>> {
  * those simply do not come back. See [`journal::icons_of`], and the same cache every other icon
  * goes through, so a second evening in the same dungeon costs the table reads and nothing else.
  */
-async placeIcons(places: string[]) : Promise<Result<IconsPayload, string>> {
+async placeIcons(places: string[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("place_icons", { places }) };
 } catch (e) {
@@ -415,7 +415,7 @@ async placeIcons(places: string[]) : Promise<Result<IconsPayload, string>> {
  * it goes through the same texture cache every icon in the app goes through and a second evening
  * in the same raid costs nothing; an assembled map has no file behind it to be cached under.
  */
-async placeHeroes(places: string[]) : Promise<Result<IconsPayload, string>> {
+async placeHeroes(places: string[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("place_heroes", { places }) };
 } catch (e) {
@@ -434,7 +434,7 @@ async placeHeroes(places: string[]) : Promise<Result<IconsPayload, string>> {
  * A raid night is the same eight or ten bosses over and over, so this and the cache behind it are
  * what stop a modal opened twice reading the game's storage twice. See [`journal::portraits_of`].
  */
-async bossPortraits(encounters: number[]) : Promise<Result<IconsPayload, string>> {
+async bossPortraits(encounters: number[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("boss_portraits", { encounters }) };
 } catch (e) {
@@ -453,7 +453,7 @@ async bossPortraits(encounters: number[]) : Promise<Result<IconsPayload, string>
  * achievement for reaching Exalted with that faction. Most of what it is asked about comes back
  * with nothing: the modern renown factions have no such achievement. See [`reputations::icons_of`].
  */
-async reputationIcons(factions: string[]) : Promise<Result<IconsPayload, string>> {
+async reputationIcons(factions: string[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("reputation_icons", { factions }) };
 } catch (e) {
@@ -464,7 +464,7 @@ async reputationIcons(factions: string[]) : Promise<Result<IconsPayload, string>
 /**
  * What is in the history, so that a query can be written without reading the migrations.
  */
-async querySchema() : Promise<Result<QuerySchema, string>> {
+async querySchema() : Promise<Result<QuerySchema, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("query_schema") };
 } catch (e) {
@@ -479,7 +479,7 @@ async querySchema() : Promise<Result<QuerySchema, string>> {
 async release() : Promise<Release> {
     return await TAURI_INVOKE("release");
 },
-async resetActivities(segmentId: number) : Promise<Result<DashboardPayload, string>> {
+async resetActivities(segmentId: number) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("reset_activities", { segmentId }) };
 } catch (e) {
@@ -495,7 +495,7 @@ async resetActivities(segmentId: number) : Promise<Result<DashboardPayload, stri
  * one runs whatever somebody typed. `query::TIME_BUDGET` bounds how long that can take, but
  * ten seconds of a frozen window would still be ten seconds of a frozen window.
  */
-async runQuery(sql: string, limit: number) : Promise<Result<QueryAnswer, string>> {
+async runQuery(sql: string, limit: number) : Promise<Result<QueryAnswer, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("run_query", { sql, limit }) };
 } catch (e) {
@@ -513,7 +513,7 @@ async runQuery(sql: string, limit: number) : Promise<Result<QueryAnswer, string>
  * time a body is drawn rather than here, because an install can change under a settings file —
  * see [`customization::of`].
  */
-async saveCharacterLook(body: number, picked: CharacterPick[]) : Promise<Result<CharacterChosen, string>> {
+async saveCharacterLook(body: number, picked: CharacterPick[]) : Promise<Result<CharacterChosen, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_character_look", { body, picked }) };
 } catch (e) {
@@ -525,7 +525,7 @@ async saveCharacterLook(body: number, picked: CharacterPick[]) : Promise<Result<
  * The two ways a saved set changes, each answering with every saved set rather than an
  * acknowledgement — the same rule the marks and the activity edits follow.
  */
-async saveCustomSet(name: string, pieces: CustomSetPiece[]) : Promise<Result<CustomSetsPayload, string>> {
+async saveCustomSet(name: string, pieces: CustomSetPiece[]) : Promise<Result<CustomSetsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_custom_set", { name, pieces }) };
 } catch (e) {
@@ -533,7 +533,7 @@ async saveCustomSet(name: string, pieces: CustomSetPiece[]) : Promise<Result<Cus
     else return { status: "error", error: e  as any };
 }
 },
-async saveWowPath(wowPath: string) : Promise<Result<SettingsPayload, string>> {
+async saveWowPath(wowPath: string) : Promise<Result<SettingsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_wow_path", { wowPath }) };
 } catch (e) {
@@ -556,7 +556,7 @@ async saveWowPath(wowPath: string) : Promise<Result<SettingsPayload, string>> {
  * stored, every later install and every later send writes the file again, and telling somebody
  * their outfit was not saved when it is queued would be the wrong sentence.
  */
-async sendSetToGame(name: string, icon: number | null, slots: InGameSetSlot[]) : Promise<Result<Request[], string>> {
+async sendSetToGame(name: string, icon: number | null, slots: InGameSetSlot[]) : Promise<Result<Request[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("send_set_to_game", { name, icon, slots }) };
 } catch (e) {
@@ -564,7 +564,7 @@ async sendSetToGame(name: string, icon: number | null, slots: InGameSetSlot[]) :
     else return { status: "error", error: e  as any };
 }
 },
-async sessionGap() : Promise<Result<Verdict, string>> {
+async sessionGap() : Promise<Result<Verdict, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("session_gap") };
 } catch (e) {
@@ -578,7 +578,7 @@ async sessionGap() : Promise<Result<Verdict, string>> {
  * window hoped the write did. Which matters more here than anywhere — a note that looked
  * saved and was not is a sentence somebody will not think to type again.
  */
-async setCaptureNote(captureId: number, note: string) : Promise<Result<DashboardPayload, string>> {
+async setCaptureNote(captureId: number, note: string) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_capture_note", { captureId, note }) };
 } catch (e) {
@@ -596,7 +596,7 @@ async setCaptureNote(captureId: number, note: string) : Promise<Result<Dashboard
  * was taken custody of, which is the honest behaviour: nothing here goes back and recompresses
  * something the player already has.
  */
-async setCaptureStorage(quality: Quality, keepOriginals: boolean) : Promise<Result<SettingsPayload, string>> {
+async setCaptureStorage(quality: Quality, keepOriginals: boolean) : Promise<Result<SettingsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_capture_storage", { quality, keepOriginals }) };
 } catch (e) {
@@ -616,7 +616,7 @@ async setCaptureStorage(quality: Quality, keepOriginals: boolean) : Promise<Resu
  * Answers with the whole of the settings, so the page repaints from what was stored rather
  * than from what the click hoped.
  */
-async setCaptureTriggers(triggers: string[]) : Promise<Result<SettingsPayload, string>> {
+async setCaptureTriggers(triggers: string[]) : Promise<Result<SettingsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_capture_triggers", { triggers }) };
 } catch (e) {
@@ -633,7 +633,7 @@ async setCaptureTriggers(triggers: string[]) : Promise<Result<SettingsPayload, s
  * hoped. The game reads addon files once, at load, so this takes effect at the next login or
  * `/reload`; the panel is what says so.
  */
-async setCombatLogging(enabled: boolean) : Promise<Result<Status, string>> {
+async setCombatLogging(enabled: boolean) : Promise<Result<Status, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_combat_logging", { enabled }) };
 } catch (e) {
@@ -649,7 +649,7 @@ async setCombatLogging(enabled: boolean) : Promise<Result<Status, string>> {
  * answer is the report again, so the panel repaints from what is now true rather than from
  * what the click hoped.
  */
-async setLogRetention(days: number | null) : Promise<Result<Report, string>> {
+async setLogRetention(days: number | null) : Promise<Result<Report, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_log_retention", { days }) };
 } catch (e) {
@@ -660,7 +660,7 @@ async setLogRetention(days: number | null) : Promise<Result<Report, string>> {
 /**
  * Every outfit this app has asked the game for, and what became of each.
  */
-async setRequests() : Promise<Result<Request[], string>> {
+async setRequests() : Promise<Result<Request[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_requests") };
 } catch (e) {
@@ -673,7 +673,7 @@ async setRequests() : Promise<Result<Request[], string>> {
  * acknowledgement — the same rule the activity and capture edits follow, so what the browser
  * draws is what the database holds and never what the window hoped a write did.
  */
-async setTransmogFavourite(kind: MarkSubjectKind, id: number, favourite: boolean) : Promise<Result<TransmogMarksPayload, string>> {
+async setTransmogFavourite(kind: MarkSubjectKind, id: number, favourite: boolean) : Promise<Result<TransmogMarksPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_transmog_favourite", { kind, id, favourite }) };
 } catch (e) {
@@ -681,7 +681,7 @@ async setTransmogFavourite(kind: MarkSubjectKind, id: number, favourite: boolean
     else return { status: "error", error: e  as any };
 }
 },
-async setTransmogTag(kind: MarkSubjectKind, id: number, key: string, value: string | null) : Promise<Result<TransmogMarksPayload, string>> {
+async setTransmogTag(kind: MarkSubjectKind, id: number, key: string, value: string | null) : Promise<Result<TransmogMarksPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_transmog_tag", { kind, id, key, value }) };
 } catch (e) {
@@ -689,7 +689,7 @@ async setTransmogTag(kind: MarkSubjectKind, id: number, key: string, value: stri
     else return { status: "error", error: e  as any };
 }
 },
-async settings() : Promise<Result<SettingsPayload, string>> {
+async settings() : Promise<Result<SettingsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("settings") };
 } catch (e) {
@@ -697,7 +697,7 @@ async settings() : Promise<Result<SettingsPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async syncNow() : Promise<Result<SyncResult, string>> {
+async syncNow() : Promise<Result<SyncResult, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("sync_now") };
 } catch (e) {
@@ -713,7 +713,7 @@ async syncNow() : Promise<Result<SyncResult, string>> {
  * type and everything held in a hand is five. Asked for a kind at a time — the whole
  * wardrobe is fourteen megabytes and nobody browses fifty-five thousand rows at once.
  */
-async transmogAppearances(displayTypes: number[]) : Promise<Result<WardrobePayload, string>> {
+async transmogAppearances(displayTypes: number[]) : Promise<Result<WardrobePayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("transmog_appearances", { displayTypes }) };
 } catch (e) {
@@ -729,7 +729,7 @@ async transmogAppearances(displayTypes: number[]) : Promise<Result<WardrobePaylo
  * it is what one person typed rather than what Blizzard shipped — see
  * `collector::transmog_marks`.
  */
-async transmogMarks() : Promise<Result<TransmogMarksPayload, string>> {
+async transmogMarks() : Promise<Result<TransmogMarksPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("transmog_marks") };
 } catch (e) {
@@ -743,7 +743,7 @@ async transmogMarks() : Promise<Result<TransmogMarksPayload, string>> {
  * The window already has the set from the grid, so only its id crosses over; everything a
  * row shows is resolved here rather than assembled from two halves.
  */
-async transmogSetItems(setId: number) : Promise<Result<TransmogSetItemsPayload, string>> {
+async transmogSetItems(setId: number) : Promise<Result<TransmogSetItemsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("transmog_set_items", { setId }) };
 } catch (e) {
@@ -754,7 +754,7 @@ async transmogSetItems(setId: number) : Promise<Result<TransmogSetItemsPayload, 
 /**
  * The transmog sets the installed game knows about.
  */
-async transmogSets() : Promise<Result<TransmogPayload, string>> {
+async transmogSets() : Promise<Result<TransmogPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("transmog_sets") };
 } catch (e) {
@@ -762,7 +762,7 @@ async transmogSets() : Promise<Result<TransmogPayload, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async updateActivity(activityId: number, kind: string, metadata: Partial<{ [key in string]: ActivityValue }>) : Promise<Result<DashboardPayload, string>> {
+async updateActivity(activityId: number, kind: string, metadata: Partial<{ [key in string]: ActivityValue }>) : Promise<Result<DashboardPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_activity", { activityId, kind, metadata }) };
 } catch (e) {
@@ -773,7 +773,7 @@ async updateActivity(activityId: number, kind: string, metadata: Partial<{ [key 
 /**
  * The answer to the offer on screen. `false` is a first-class outcome, not a cancel.
  */
-async wifiAnswerOffer(accepted: boolean) : Promise<Result<ReceiveStatus, string>> {
+async wifiAnswerOffer(accepted: boolean) : Promise<Result<ReceiveStatus, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("wifi_answer_offer", { accepted }) };
 } catch (e) {
@@ -787,7 +787,7 @@ async wifiAnswerOffer(accepted: boolean) : Promise<Result<ReceiveStatus, string>
  * Async because it spends a second or so listening for answers, which on the main thread
  * would be a second of frozen window.
  */
-async wifiDiscover() : Promise<Result<Peer[], string>> {
+async wifiDiscover() : Promise<Result<Peer[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("wifi_discover") };
 } catch (e) {
@@ -802,7 +802,7 @@ async wifiDiscover() : Promise<Result<Peer[], string>> {
  * does in the background: a machine that is always listening is one that can always be
  * asked to throw its history away.
  */
-async wifiReceiveStart() : Promise<Result<ReceiveStatus, string>> {
+async wifiReceiveStart() : Promise<Result<ReceiveStatus, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("wifi_receive_start") };
 } catch (e) {
@@ -815,7 +815,7 @@ async wifiReceiveStart() : Promise<Result<ReceiveStatus, string>> {
  * rather than pushed because the whole of it is three fields, and a window that asks is a
  * window that cannot miss the one event that mattered.
  */
-async wifiReceiveStatus() : Promise<Result<ReceiveStatus, string>> {
+async wifiReceiveStatus() : Promise<Result<ReceiveStatus, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("wifi_receive_status") };
 } catch (e) {
@@ -823,7 +823,7 @@ async wifiReceiveStatus() : Promise<Result<ReceiveStatus, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async wifiReceiveStop() : Promise<Result<ReceiveStatus, string>> {
+async wifiReceiveStop() : Promise<Result<ReceiveStatus, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("wifi_receive_stop") };
 } catch (e) {
@@ -837,7 +837,7 @@ async wifiReceiveStop() : Promise<Result<ReceiveStatus, string>> {
  * Async and off the main thread for the same reason, only more so: this waits on somebody
  * walking to another computer.
  */
-async wifiSend(address: string) : Promise<Result<Receipt, string>> {
+async wifiSend(address: string) : Promise<Result<Receipt, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("wifi_send", { address }) };
 } catch (e) {
@@ -864,7 +864,7 @@ async wifiSend(address: string) : Promise<Result<Receipt, string>> {
  * weapon is held in. `null` is the ordinary answer for an outfit this install can say nothing
  * about, and leaves the window showing the icons.
  */
-async wornSet(pieces: WornPiece[]) : Promise<Result<WornSetPayload, string>> {
+async wornSet(pieces: WornPiece[]) : Promise<Result<WornSetPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("worn_set", { pieces }) };
 } catch (e) {
@@ -923,6 +923,27 @@ export type CharacterWornSetPayload = { model: string | null;
  */
 likeness: Likeness }
 export type CollectibleEvent = { id: number; name?: string | null; at?: number | null; guid?: string | null }
+/**
+ * What a command hands back to the webview when it could not do what was asked.
+ *
+ * Three fields, all meant to be read: a code to branch on, a sentence to show, and whether
+ * offering to try again would be honest. No path, no SQLite wording, no operation list — those
+ * went to the log, which is where the person diagnosing it is looking and where a screenshot of
+ * an alert cannot leak them from.
+ */
+export type CommandError = {
+/**
+ * The condition. Stable, and the only part of this the frontend may switch on.
+ */
+code: FailureCode;
+/**
+ * The sentence to put in front of whoever is looking at the window.
+ */
+message: string;
+/**
+ * Whether offering to try the same thing again would be honest.
+ */
+retryable: boolean }
 export type CurrencyGain = { id: number; name: string; amount: number; at?: number | null; total?: number | null }
 export type CurrencyHolder = { character: string; total: number; at?: number | null }
 /**
@@ -952,6 +973,60 @@ export type EquipsetChangeEvent = { setId: number; name: string; kind: EquipsetC
 export type EquipsetChangeKind = "created" | "deleted" | "updated"
 export type EquipsetSlotChange = { slot: number; itemId?: number | null; itemLevel?: number | null; itemName?: string | null; previousItemId?: number | null; previousItemLevel?: number | null; previousItemName?: string | null }
 export type ExperienceGain = { gained: number; percent: number; startLevel?: number | null; endLevel?: number | null }
+/**
+ * The domain conditions this app distinguishes, and the contract the webview branches on.
+ *
+ * A code exists when something downstream would genuinely do a different thing about it — point
+ * the reader at Setup, offer to try again, put the message beside the query editor. A condition
+ * nobody would act on differently is [`FailureCode::Internal`] and stays there; adding a variant
+ * nothing branches on is how an error enum grows into a second copy of the log.
+ *
+ * Serialized as `camelCase`, like every other name crossing this boundary, and generated into
+ * `bindings.ts` as a union — so a code the frontend no longer handles, or one it invents, is a
+ * type error rather than a comparison that quietly never matches.
+ */
+export type FailureCode =
+/**
+ * Nothing has said where the game is yet. The reader has to go to Setup, and until they do
+ * this is not a fault to report — it is the state a fresh install is in.
+ */
+"notConfigured" |
+/**
+ * A folder was chosen and it is not a World of Warcraft install, or the install has moved
+ * out from under a path that was right when it was saved.
+ */
+"installNotFound" |
+/**
+ * The game's own storage would not answer. Ordinarily temporary and ordinarily nobody's
+ * mistake: the client rewrites `.build.info` and the index files while it patches, and a
+ * read landing in that window sees a half-written build. Worth trying again.
+ */
+"gameFilesUnreadable" |
+/**
+ * Something else holds the history right now — a sync writing while the window reads, or a
+ * second copy of the app. Also worth trying again.
+ */
+"historyBusy" |
+/**
+ * The history was written by a newer Chronie than this one. Trying again will not help and
+ * neither will anything else this build can do; the app has to be updated.
+ */
+"historyTooNew" |
+/**
+ * What was asked for cannot be run as asked — a query that writes, two statements where one
+ * was allowed, a value out of range. The reader's own input is what has to change, which is
+ * why the message belongs beside the thing they typed rather than in an alert.
+ */
+"invalidInput" |
+/**
+ * What was asked for is not there. Distinct from a fault, because an id that has gone is an
+ * ordinary thing for a window holding a list from a minute ago.
+ */
+"notFound" |
+/**
+ * Everything nobody has given a name yet. Reported, logged, and not branched on.
+ */
+"internal"
 export type GalleryKind = "worn" | "held"
 export type GalleryModel = { displayInfoId: number; kind: GalleryKind; model: string | null }
 export type GalleryPayload = { models: GalleryModel[] }

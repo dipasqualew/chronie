@@ -1,7 +1,7 @@
 //! What went wrong, kept whole until something has to be said about it.
 //!
-//! Before this module every failure in the backend was a `String`, made at the point the
-//! failure happened. Three things came out of that, and all three are what this module is for.
+//! Before this module every failure in the backend was a `String`, made at the point the failure
+//! happened. Three things came out of that, and all three are what this module is for.
 //!
 //! - **The cause was thrown away.** `error.to_string()` on a `rusqlite::Error` is the last link
 //!   of a chain and the chain is gone; a locked file, a missing column and a corrupt page all
@@ -16,17 +16,17 @@
 //!
 //! So there are two types here rather than one.
 //!
-//! [`Failure`] is the internal one. It carries a [`Kind`] — the domain condition, which is what
-//! a code is made from — a sentence written deliberately for whoever reads it, the operations it
-//! passed through on its way up, and the error it started as. It converts from the error types
-//! the backend actually meets, so ordinary code is `?` and not a `map_err` adapter, and
-//! [`Context`] is how a `?` says what it was doing without inventing a variant for it.
+//! [`Failure`] is the internal one. It carries a [`FailureCode`] — the domain condition — a
+//! sentence written deliberately for whoever reads it, the operations it passed through on its
+//! way up, and the error it started as. It converts from the error types the backend actually
+//! meets, so ordinary code is `?` rather than a `map_err` adapter, and [`Context`] is how a `?`
+//! says what it was doing without inventing a variant for it.
 //!
-//! [`CommandError`] is what crosses to the webview: a stable code and the deliberate sentence,
-//! and nothing else. The projection happens once, at the Tauri boundary, and
-//! [`Failure::report`] — the full account, causes and operations included — goes to the log on
-//! the way past. That is the whole point of two types: the log gets everything and the window
-//! gets what it can act on.
+//! [`CommandError`] is what crosses to the webview: the code, the deliberate sentence, and
+//! whether trying again would be honest. Nothing else. The projection happens once, at the Tauri
+//! boundary, and [`Failure::report`] — the full account, causes and operations included — goes to
+//! the log on the way past. That is the whole point of two types: the log gets everything and the
+//! window gets what it can act on.
 
 use std::error::Error;
 use std::fmt::{self, Display};
@@ -35,16 +35,21 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use specta::Type;
 
-/// The domain conditions this app distinguishes.
+/// The domain conditions this app distinguishes, and the contract the webview branches on.
 ///
-/// A kind exists when something downstream would genuinely do a different thing about it —
-/// point the reader at Setup, offer to try again, put the message beside the query editor. A
-/// condition nobody would act on differently is [`Kind::Internal`] and stays there; adding a
-/// variant nothing branches on is how an error enum grows into a second copy of the log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    /// Nothing has said where the game is yet. The reader has to go to Setup, and until they
-    /// do this is not a fault to report — it is the state a fresh install is in.
+/// A code exists when something downstream would genuinely do a different thing about it — point
+/// the reader at Setup, offer to try again, put the message beside the query editor. A condition
+/// nobody would act on differently is [`FailureCode::Internal`] and stays there; adding a variant
+/// nothing branches on is how an error enum grows into a second copy of the log.
+///
+/// Serialized as `camelCase`, like every other name crossing this boundary, and generated into
+/// `bindings.ts` as a union — so a code the frontend no longer handles, or one it invents, is a
+/// type error rather than a comparison that quietly never matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum FailureCode {
+    /// Nothing has said where the game is yet. The reader has to go to Setup, and until they do
+    /// this is not a fault to report — it is the state a fresh install is in.
     NotConfigured,
     /// A folder was chosen and it is not a World of Warcraft install, or the install has moved
     /// out from under a path that was right when it was saved.
@@ -53,109 +58,121 @@ pub enum Kind {
     /// mistake: the client rewrites `.build.info` and the index files while it patches, and a
     /// read landing in that window sees a half-written build. Worth trying again.
     GameFilesUnreadable,
-    /// Something else holds the history right now — a sync writing while the window reads, or
-    /// a second copy of the app. Also worth trying again.
+    /// Something else holds the history right now — a sync writing while the window reads, or a
+    /// second copy of the app. Also worth trying again.
     HistoryBusy,
     /// The history was written by a newer Chronie than this one. Trying again will not help and
     /// neither will anything else this build can do; the app has to be updated.
     HistoryTooNew,
-    /// What was asked for cannot be run as asked — a query that writes, two statements where
-    /// one was allowed, a value out of range. The reader's own input is what has to change,
-    /// which is why the message belongs beside the thing they typed rather than in an alert.
+    /// What was asked for cannot be run as asked — a query that writes, two statements where one
+    /// was allowed, a value out of range. The reader's own input is what has to change, which is
+    /// why the message belongs beside the thing they typed rather than in an alert.
     InvalidInput,
-    /// What was asked for is not there. Distinct from a fault, because an id that has gone is
-    /// an ordinary thing for a window holding a list from a minute ago.
+    /// What was asked for is not there. Distinct from a fault, because an id that has gone is an
+    /// ordinary thing for a window holding a list from a minute ago.
     NotFound,
     /// Everything nobody has given a name yet. Reported, logged, and not branched on.
     Internal,
 }
 
-impl Kind {
-    /// The stable string the webview branches on.
-    ///
-    /// `camelCase`, like every other name crossing this boundary, and part of the contract the
-    /// moment it ships: the frontend compares against these literally, so renaming one is
-    /// changing an API and not tidying an enum.
-    pub const fn code(self) -> &'static str {
+impl FailureCode {
+    /// Every code, so a test can walk them and nothing can be added without being considered.
+    pub const ALL: [FailureCode; 8] = [
+        FailureCode::NotConfigured,
+        FailureCode::InstallNotFound,
+        FailureCode::GameFilesUnreadable,
+        FailureCode::HistoryBusy,
+        FailureCode::HistoryTooNew,
+        FailureCode::InvalidInput,
+        FailureCode::NotFound,
+        FailureCode::Internal,
+    ];
+
+    /// The wire name, for the log line. Serde produces the same string for the webview, and
+    /// `the_wire_name_matches_what_serde_writes` is what keeps the two from drifting.
+    pub const fn name(self) -> &'static str {
         match self {
-            Kind::NotConfigured => "notConfigured",
-            Kind::InstallNotFound => "installNotFound",
-            Kind::GameFilesUnreadable => "gameFilesUnreadable",
-            Kind::HistoryBusy => "historyBusy",
-            Kind::HistoryTooNew => "historyTooNew",
-            Kind::InvalidInput => "invalidInput",
-            Kind::NotFound => "notFound",
-            Kind::Internal => "internal",
+            FailureCode::NotConfigured => "notConfigured",
+            FailureCode::InstallNotFound => "installNotFound",
+            FailureCode::GameFilesUnreadable => "gameFilesUnreadable",
+            FailureCode::HistoryBusy => "historyBusy",
+            FailureCode::HistoryTooNew => "historyTooNew",
+            FailureCode::InvalidInput => "invalidInput",
+            FailureCode::NotFound => "notFound",
+            FailureCode::Internal => "internal",
         }
     }
 
     /// Whether doing exactly the same thing again could reasonably work.
     ///
-    /// Two of these are races against something else holding what was wanted, and the answer to
-    /// a race is to ask again. The rest need somebody to change something first, and a window
+    /// Two of these are races against something else holding what was wanted, and the answer to a
+    /// race is to ask again. The rest need somebody to change something first, and a window
     /// offering "try again" for those is a window lying to whoever clicks it.
     pub const fn retryable(self) -> bool {
-        matches!(self, Kind::GameFilesUnreadable | Kind::HistoryBusy)
+        matches!(
+            self,
+            FailureCode::GameFilesUnreadable | FailureCode::HistoryBusy
+        )
     }
 
     /// What to say when the failure site had nothing better.
     ///
-    /// A caller that knows more says more — [`Failure::new`] is the way to write the sentence
-    /// that belongs to one particular condition. These are the fallbacks, and they are written
-    /// rather than generated so that the worst case is still a sentence somebody chose.
+    /// A caller that knows more says more — [`Failure::new`] is the way to write the sentence that
+    /// belongs to one particular condition. These are the fallbacks, and they are written rather
+    /// than generated so that the worst case is still a sentence somebody chose.
     pub const fn sentence(self) -> &'static str {
         match self {
-            Kind::NotConfigured => "Choose the game folder in Setup first.",
-            Kind::InstallNotFound => {
+            FailureCode::NotConfigured => "Choose the game folder in Setup first.",
+            FailureCode::InstallNotFound => {
                 "Chronie could not find World of Warcraft where Setup says it is."
             }
-            Kind::GameFilesUnreadable => {
+            FailureCode::GameFilesUnreadable => {
                 "Chronie could not read the game's files. If the game is updating, try again \
                  once it has finished."
             }
-            Kind::HistoryBusy => "Chronie's history is busy. Try again in a moment.",
-            Kind::HistoryTooNew => {
+            FailureCode::HistoryBusy => "Chronie's history is busy. Try again in a moment.",
+            FailureCode::HistoryTooNew => {
                 "This history was written by a newer version of Chronie. Update Chronie to \
                  open it."
             }
-            Kind::InvalidInput => "Chronie could not use that.",
-            Kind::NotFound => "Chronie could not find that.",
-            Kind::Internal => "Chronie hit a problem it did not expect.",
+            FailureCode::InvalidInput => "Chronie could not use that.",
+            FailureCode::NotFound => "Chronie could not find that.",
+            FailureCode::Internal => "Chronie hit a problem it did not expect.",
         }
     }
 }
 
 /// One failure, with everything known about it still attached.
 ///
-/// Not an enum of variants each carrying their own fields, which is the shape this would take
+/// Not an enum whose variants each carry their own fields, which is the shape this would take
 /// with `thiserror`, and deliberately so: the interesting axis here is not "which of eleven
-/// errors" but "what was being done when it happened", and that is a list that grows on the way
+/// errors" but "what was being done when it happened", and that is a list which grows on the way
 /// up rather than a variant chosen at the bottom. A struct lets [`Context::context`] add to a
 /// failure it did not create without every layer having to know a variant to re-wrap it in.
 #[derive(Debug)]
 pub struct Failure {
-    kind: Kind,
+    code: FailureCode,
     message: String,
-    /// What was being attempted, innermost first. Log-only — this is where the path, the file
-    /// id and the statement live, and none of them are the window's business.
+    /// What was being attempted, innermost first. Log-only — this is where the path, the file id
+    /// and the statement live, and none of them are the window's business.
     operations: Vec<String>,
     source: Option<Box<dyn Error + Send + Sync>>,
 }
 
 impl Failure {
-    /// A failure of `kind`, saying `message` to whoever ends up reading it.
-    pub fn new(kind: Kind, message: impl Into<String>) -> Self {
+    /// A failure of `code`, saying `message` to whoever ends up reading it.
+    pub fn new(code: FailureCode, message: impl Into<String>) -> Self {
         Self {
-            kind,
+            code,
             message: message.into(),
             operations: Vec::new(),
             source: None,
         }
     }
 
-    /// A failure of `kind` saying the sentence that kind was given.
-    pub fn of(kind: Kind) -> Self {
-        Self::new(kind, kind.sentence())
+    /// A failure of `code` saying the sentence that code was given.
+    pub fn of(code: FailureCode) -> Self {
+        Self::new(code, code.sentence())
     }
 
     /// The same failure, carrying `error` as what it started as.
@@ -166,35 +183,31 @@ impl Failure {
 
     /// The same failure, knowing one more thing about what was going on.
     ///
-    /// Called on the way up, so the operations read innermost first — `reading file 1376213`
-    /// then `opening the game's storage` then `drawing the character`. Nothing is deduplicated
+    /// Called on the way up, so the operations read innermost first — `reading file 1376213`,
+    /// then `opening the game's storage`, then `drawing the character`. Nothing is deduplicated
     /// and nothing is truncated: a chain that is repetitive is telling you the call graph is.
     pub fn context(mut self, operation: impl Into<String>) -> Self {
         self.operations.push(operation.into());
         self
     }
 
-    /// Reclassifies a failure that arrived as [`Kind::Internal`].
+    /// Names the condition, if nothing below has already named it.
     ///
-    /// For the layer that can recognise a condition the layer below could not — `Connection::open`
-    /// has no idea whether a locked file is a second app or a stuck sync, and the caller that
-    /// knows it is opening the history does. A failure that already has a kind keeps it, so a
-    /// specific answer found deep down is never coarsened by something above it.
-    pub fn or_kind(mut self, kind: Kind) -> Self {
-        if self.kind == Kind::Internal {
-            self.kind = kind;
-            self.message = kind.sentence().to_string();
+    /// For the layer that can recognise something the layer beneath it could not:
+    /// `Connection::open` has no idea whether a missing file is a fresh install or a deleted
+    /// history, and the caller that knows what it was opening does. A failure that already has a
+    /// code keeps it, so a specific answer found deep down is never coarsened by something above.
+    pub fn or_code(mut self, code: FailureCode) -> Self {
+        if self.code == FailureCode::Internal {
+            self.code = code;
+            self.message = code.sentence().to_string();
         }
         self
     }
 
-    pub const fn kind(&self) -> Kind {
-        self.kind
-    }
-
-    /// The stable code, for whoever has to decide what to do next.
-    pub const fn code(&self) -> &'static str {
-        self.kind.code()
+    /// The condition, for whoever has to decide what to do next.
+    pub const fn code(&self) -> FailureCode {
+        self.code
     }
 
     /// The sentence written for whoever reads it.
@@ -202,13 +215,12 @@ impl Failure {
         &self.message
     }
 
-    /// The whole account, for the log: the message, what was being done, and every cause under
-    /// it.
+    /// The whole account, for the log: the message, what was being done, and every cause under it.
     ///
     /// One line, because the log this goes to is one stamped line per entry, and separated by
     /// `: ` in the order a reader wants them — what failed, then what it was doing, then why.
     pub fn report(&self) -> String {
-        let mut parts = vec![format!("[{}] {}", self.code(), self.message)];
+        let mut parts = vec![format!("[{}] {}", self.code.name(), self.message)];
         parts.extend(
             self.operations
                 .iter()
@@ -244,46 +256,47 @@ impl Error for Failure {
 ///
 /// The bridge for everything not yet migrated. It keeps the sentence exactly as it was — several
 /// of those sentences carry the only recovery instruction the app gives anywhere — and files it
-/// under [`Kind::Internal`], which is the truth: nobody has said what kind of thing it is yet.
+/// under [`FailureCode::Internal`], which is the truth: nobody has said what kind of thing it is
+/// yet.
 impl From<String> for Failure {
     fn from(message: String) -> Self {
-        Self::new(Kind::Internal, message)
+        Self::new(FailureCode::Internal, message)
     }
 }
 
 impl From<&str> for Failure {
     fn from(message: &str) -> Self {
-        Self::new(Kind::Internal, message)
+        Self::new(FailureCode::Internal, message)
     }
 }
 
 /// SQLite's own errors, kept as causes rather than flattened into messages.
 ///
-/// The kind is read off the error code where SQLite is specific enough to be worth trusting —
+/// The code is read off the error code where SQLite is specific enough to be worth trusting —
 /// `SQLITE_BUSY` and `SQLITE_LOCKED` are the two that mean "somebody else has it, ask again" —
-/// and everything else stays [`Kind::Internal`] with the driver's wording safely in the source
-/// chain instead of on screen.
+/// and everything else stays [`FailureCode::Internal`] with the driver's wording safely in the
+/// source chain instead of on screen.
 impl From<rusqlite::Error> for Failure {
     fn from(error: rusqlite::Error) -> Self {
-        let kind = match error.sqlite_error_code() {
+        let code = match error.sqlite_error_code() {
             Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
-                Kind::HistoryBusy
+                FailureCode::HistoryBusy
             }
-            _ => Kind::Internal,
+            _ => FailureCode::Internal,
         };
-        Self::of(kind).caused_by(error)
+        Self::of(code).caused_by(error)
     }
 }
 
 impl From<std::io::Error> for Failure {
     fn from(error: std::io::Error) -> Self {
-        Self::of(Kind::Internal).caused_by(error)
+        Self::of(FailureCode::Internal).caused_by(error)
     }
 }
 
 impl From<serde_json::Error> for Failure {
     fn from(error: serde_json::Error) -> Self {
-        Self::of(Kind::Internal).caused_by(error)
+        Self::of(FailureCode::Internal).caused_by(error)
     }
 }
 
@@ -303,8 +316,8 @@ pub trait Context<T> {
     /// hundred allocations nobody reads.
     fn with_context<S: Into<String>>(self, operation: impl FnOnce() -> S) -> Result<T, Failure>;
 
-    /// Says which domain condition this is, if nothing below it already has.
-    fn or_kind(self, kind: Kind) -> Result<T, Failure>;
+    /// Names the condition, if nothing below has already named it.
+    fn or_code(self, code: FailureCode) -> Result<T, Failure>;
 }
 
 impl<T, E: Into<Failure>> Context<T> for Result<T, E> {
@@ -316,46 +329,40 @@ impl<T, E: Into<Failure>> Context<T> for Result<T, E> {
         self.map_err(|error| error.into().context(operation().into()))
     }
 
-    fn or_kind(self, kind: Kind) -> Result<T, Failure> {
-        self.map_err(|error| error.into().or_kind(kind))
+    fn or_code(self, code: FailureCode) -> Result<T, Failure> {
+        self.map_err(|error| error.into().or_code(code))
     }
 }
 
 /// What a command hands back to the webview when it could not do what was asked.
 ///
-/// Two fields, both meant to be read: a code to branch on and a sentence to show. No path, no
-/// SQLite wording, no operation list — those went to the log, which is where the person
-/// diagnosing it is looking and where a screenshot of an alert cannot leak them from.
+/// Three fields, all meant to be read: a code to branch on, a sentence to show, and whether
+/// offering to try again would be honest. No path, no SQLite wording, no operation list — those
+/// went to the log, which is where the person diagnosing it is looking and where a screenshot of
+/// an alert cannot leak them from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandError {
-    /// One of [`Kind::code`]. Stable, and the only part of this the frontend may switch on.
-    pub code: String,
+    /// The condition. Stable, and the only part of this the frontend may switch on.
+    pub code: FailureCode,
     /// The sentence to put in front of whoever is looking at the window.
     pub message: String,
     /// Whether offering to try the same thing again would be honest.
     pub retryable: bool,
 }
 
-impl CommandError {
-    fn of(failure: &Failure) -> Self {
-        Self {
-            code: failure.code().to_string(),
-            message: failure.message().to_string(),
-            retryable: failure.kind().retryable(),
-        }
-    }
-}
-
 /// The boundary itself: a failure becomes a code and a sentence, and its full account is logged.
 ///
 /// Every `?` in a command goes through here, which is why the logging lives here rather than in
-/// each command — there is exactly one place a failure can leave the backend, and it is this
-/// one.
+/// each command — there is exactly one place a failure can leave the backend, and it is this one.
 impl From<Failure> for CommandError {
     fn from(failure: Failure) -> Self {
         report(&failure.report());
-        CommandError::of(&failure)
+        Self {
+            code: failure.code,
+            message: failure.message,
+            retryable: failure.code.retryable(),
+        }
     }
 }
 
@@ -379,15 +386,15 @@ impl Display for CommandError {
 
 /// Where the full account of a failure goes as it crosses the boundary.
 ///
-/// A function pointer set once at startup rather than a `tracing` event, because nothing
+/// A function pointer set once at startup rather than only a `tracing` event, because nothing
 /// installs a subscriber in the shipped app — `tracing` is here for spans that
-/// `examples/trace_render` collects, and an `error!` in a release build would be a branch on a
-/// global and then nothing. `run()` points this at the same `chronie.log` the startup lines go
-/// to, which is the file somebody is asked for when the window says something went wrong.
+/// `examples/trace_render` collects, and an `error!` in a release build is a branch on a global
+/// and then nothing. `run()` points this at the same `chronie.log` the startup lines go to, which
+/// is the file somebody is asked for when the window says something went wrong.
 ///
 /// A `OnceLock`, so there is no window in which two threads disagree about the sink and no test
-/// can change it out from under another one. Unset in the test binary and in every example,
-/// where the report is a return value and a file would only be litter.
+/// can change it out from under another one. Unset in the test binary and in every example, where
+/// the report is a return value and a file would only be litter.
 static SINK: OnceLock<fn(&str)> = OnceLock::new();
 
 /// Points every future report at `sink`. The first call wins; later ones are ignored.
@@ -410,16 +417,19 @@ mod tests {
     /// show, and nothing from underneath either of them.
     #[test]
     fn a_command_error_carries_the_code_the_sentence_and_nothing_else() {
-        let failure = Failure::new(Kind::HistoryTooNew, "Update Chronie to open this history.")
-            .caused_by(rusqlite::Error::ExecuteReturnedResults)
-            .context("migrating /Users/someone/history.sqlite3");
+        let failure = Failure::new(
+            FailureCode::HistoryTooNew,
+            "Update Chronie to open this history.",
+        )
+        .caused_by(rusqlite::Error::ExecuteReturnedResults)
+        .context("migrating /Users/someone/history.sqlite3");
 
         let crossed = CommandError::from(failure);
 
         assert_eq!(
             crossed,
             CommandError {
-                code: "historyTooNew".to_string(),
+                code: FailureCode::HistoryTooNew,
                 message: "Update Chronie to open this history.".to_string(),
                 retryable: false,
             }
@@ -430,7 +440,7 @@ mod tests {
     /// contract the rest of this boundary keeps.
     #[test]
     fn a_command_error_serializes_to_a_code_a_message_and_a_retry_flag() {
-        let crossed = CommandError::from(Failure::of(Kind::GameFilesUnreadable));
+        let crossed = CommandError::from(Failure::of(FailureCode::GameFilesUnreadable));
 
         assert_eq!(
             serde_json::to_value(&crossed).unwrap(),
@@ -443,12 +453,36 @@ mod tests {
         );
     }
 
-    /// What the old `error.to_string()` threw away: three layers of "what was being done" and
-    /// the driver's own words underneath them, all in one line.
+    /// The log line names the code with [`FailureCode::name`] and the webview gets whatever serde
+    /// writes. Two spellings of one contract, so they are held against each other here.
+    #[test]
+    fn the_wire_name_matches_what_serde_writes() {
+        for code in FailureCode::ALL {
+            assert_eq!(
+                serde_json::to_value(code).unwrap(),
+                serde_json::Value::String(code.name().to_string()),
+                "{code:?}"
+            );
+        }
+    }
+
+    /// Every code says something a person could read, and none of them leaks the enum's own
+    /// spelling into a window.
+    #[test]
+    fn every_code_has_a_sentence_written_for_a_person() {
+        for code in FailureCode::ALL {
+            let sentence = code.sentence();
+            assert!(sentence.ends_with('.'), "{code:?}: {sentence}");
+            assert!(!sentence.contains(code.name()), "{code:?}: {sentence}");
+        }
+    }
+
+    /// What the old `error.to_string()` threw away: three layers of "what was being done" and the
+    /// driver's own words underneath them, all in one line.
     #[test]
     fn a_report_keeps_every_operation_and_every_cause() {
         let inner = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
-        let failure = Failure::of(Kind::GameFilesUnreadable)
+        let failure = Failure::of(FailureCode::GameFilesUnreadable)
             .caused_by(inner)
             .context("reading file 1376213")
             .context("opening the game's storage")
@@ -477,14 +511,14 @@ mod tests {
         }
         fn outermost() -> Result<(), Failure> {
             middle()
-                .or_kind(Kind::GameFilesUnreadable)
+                .or_code(FailureCode::GameFilesUnreadable)
                 .context("opening the install")?;
             Ok(())
         }
 
         let failure = outermost().unwrap_err();
 
-        assert_eq!(failure.code(), "gameFilesUnreadable");
+        assert_eq!(failure.code(), FailureCode::GameFilesUnreadable);
         assert_eq!(
             failure.report(),
             "[gameFilesUnreadable] Chronie could not read the game's files. If the game is \
@@ -493,28 +527,28 @@ mod tests {
         );
     }
 
-    /// A kind found deep down survives a caller that guesses at a coarser one, because the
-    /// deeper answer is the better one.
+    /// A code found deep down survives a caller that guesses at a coarser one, because the deeper
+    /// answer is the better one.
     #[test]
-    fn or_kind_does_not_overwrite_a_kind_something_already_knew() {
-        let known = Failure::of(Kind::HistoryTooNew).or_kind(Kind::HistoryBusy);
+    fn or_code_does_not_overwrite_a_code_something_already_knew() {
+        let known = Failure::of(FailureCode::HistoryTooNew).or_code(FailureCode::HistoryBusy);
 
-        assert_eq!(known.code(), "historyTooNew");
-        assert_eq!(known.message(), Kind::HistoryTooNew.sentence());
+        assert_eq!(known.code(), FailureCode::HistoryTooNew);
+        assert_eq!(known.message(), FailureCode::HistoryTooNew.sentence());
     }
 
-    /// The sentences that already carried recovery instructions have to arrive unchanged, which
-    /// is the whole reason a `String` converts rather than being refused.
+    /// The sentences that already carried recovery instructions have to arrive unchanged, which is
+    /// the whole reason a `String` converts rather than being refused.
     #[test]
     fn a_string_failure_keeps_its_sentence_word_for_word() {
         let crossed = CommandError::from("Choose the game folder in Setup first.".to_string());
 
-        assert_eq!(crossed.code, "internal");
+        assert_eq!(crossed.code, FailureCode::Internal);
         assert_eq!(crossed.message, "Choose the game folder in Setup first.");
     }
 
-    /// SQLite says "somebody else has this" with an error code, and that is the one place its
-    /// own classification is worth reading. Its wording still never leaves the log.
+    /// SQLite says "somebody else has this" with an error code, and that is the one place its own
+    /// classification is worth reading. Its wording still never leaves the log.
     #[test]
     fn a_busy_database_is_recognised_from_sqlites_own_code() {
         let busy = rusqlite::Error::SqliteFailure(
@@ -527,8 +561,8 @@ mod tests {
 
         let failure = Failure::from(busy);
 
-        assert_eq!(failure.code(), "historyBusy");
-        assert_eq!(failure.message(), Kind::HistoryBusy.sentence());
+        assert_eq!(failure.code(), FailureCode::HistoryBusy);
+        assert_eq!(failure.message(), FailureCode::HistoryBusy.sentence());
         assert!(failure.report().contains("database is locked"));
     }
 }

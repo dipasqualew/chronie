@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useModalDialog } from "./dialog";
+import { message } from "./failure";
 import { focusOf } from "./gallery";
 import { REASONS, glbBytes } from "./modelPreview";
 import { usePaneStage } from "./stage";
@@ -187,7 +188,3 @@ const lazyStage: MakeStage = (container) =>
   import("./modelViewer").then((viewer) =>
     viewer.createModelStage(container, { label: "The appearance, drawn" }),
   );
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

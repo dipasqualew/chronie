@@ -52,6 +52,7 @@ import { CustomSetList } from "./customSetList";
 import { rowsOf } from "./customSets";
 import { InGameSetList } from "./inGameSetList";
 import { setLabel as inGameSetLabel } from "./inGameSets";
+import { message } from "./failure";
 import { plural } from "./format";
 import { SET_PAGE, WHOLE, stillWantedSets } from "./gallery";
 import type { Thumbnail } from "./gallery";
@@ -132,11 +133,26 @@ import type {
   WornSetPayload,
 } from "./types";
 
+/**
+ * The one thing a reader can do about a status that is a failure.
+ *
+ * Null far more often than not. It is here because the two most common reasons this view has no
+ * wardrobe on it — the game folder has never been chosen, and the game is mid-patch — are both
+ * one click from being resolved, and for as long as a failed command answered with a string this
+ * view could only print the sentence and leave the reader to work the rest out.
+ */
+export interface StatusRecourse {
+  label: string;
+  act: () => void;
+}
+
 export interface TransmogViewProps {
   /** The loaded sets, or null while they are still being read out of the game. */
   payload: TransmogPayload | null;
   /** What the view says instead, when there is no payload: reading, or why there is not. */
   status: string;
+  /** What to offer beside that sentence, when the failure is one somebody can act on. */
+  statusRecourse?: StatusRecourse | null;
   /** Asks the backend what a set is made of, when a reader opens one. */
   loadSet: (setId: number) => Promise<TransmogSetItemsPayload>;
   /** Asks it for every look filling a kind of place, when a reader browses by item. */
@@ -241,6 +257,7 @@ type Browsing = "sets" | "items" | "yours" | "ingame";
 export function TransmogView({
   payload,
   status,
+  statusRecourse = null,
   loadSet,
   loadAppearances,
   loadIcons,
@@ -518,6 +535,14 @@ export function TransmogView({
           {payload
             ? `${plural(payload.sets.length, "set")} from the installed game${withheld}${folded}`
             : status}
+          {/* Only ever drawn over a failure the backend gave a code to, which is what keeps it
+              from appearing beside "Reading the game's transmog tables…" or beside a sentence
+              nothing can be done about. */}
+          {!payload && statusRecourse ? (
+            <button type="button" onClick={statusRecourse.act}>
+              {statusRecourse.label}
+            </button>
+          ) : null}
         </div>
       </header>
       <div className="mog-layout">
@@ -1134,8 +1159,4 @@ function Sources({ row }: { row: AppearanceRow }): ReactNode {
 function shownCount(shown: number, total: number): string {
   if (shown >= total) return `${plural(total, "set")} shown`;
   return `${shown} of ${plural(total, "set")}`;
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

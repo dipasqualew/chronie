@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { piecesFrom, setNamed } from "./customSets";
+import { message } from "./failure";
 import { Herself } from "./herselfPanel";
 import type { HerselfProps } from "./herselfPanel";
 import { iconFrom, requestSummary, slotsFrom } from "./inGameSets";
@@ -478,7 +479,3 @@ const lazyStage: MakeStage = (container) =>
   import("./modelViewer").then((viewer) =>
     viewer.createModelStage(container, { label: "The character, drawn" }),
   );
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

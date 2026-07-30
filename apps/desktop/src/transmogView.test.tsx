@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { REASONS } from "./modelPreview";
 import { TransmogView } from "./transmogView";
-import type { TransmogViewProps } from "./transmogView";
+import type { StatusRecourse, TransmogViewProps } from "./transmogView";
 import type { Focus } from "./gallery";
 import type { GalleryStage } from "./galleryStage";
 import type { ModelStage } from "./modelViewer";
@@ -642,6 +642,10 @@ function view(
     herself?: FakeHerself;
     /** Reads the test answers by hand, for the moments that only exist while one is in flight. */
     bodies?: HeldBodies;
+    /** What the view says instead of a wardrobe. Reading, by default. */
+    status?: string;
+    /** And what it offers about it, which only a coded failure ever produces. */
+    statusRecourse?: StatusRecourse | null;
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
@@ -702,7 +706,8 @@ function view(
   const rendered = render(
     <Marked
       payload={options.payload === undefined ? SETS : options.payload}
-      status="Reading the game's transmog tables…"
+      status={options.status ?? "Reading the game's transmog tables…"}
+      statusRecourse={options.statusRecourse ?? null}
       loadSet={loadSet}
       loadAppearances={loadAppearances}
       loadIcons={() => Promise.resolve({ icons: {} })}
@@ -2747,4 +2752,58 @@ describe("the sets the reader puts together themselves", () => {
     });
     fireEvent.click(within(host).getByRole("button", { name: "Add" }));
   }
+});
+
+/**
+ * The one thing on this screen the backend's failure codes are for.
+ *
+ * There is no wardrobe here for two ordinary reasons — nobody has said where the game is, and the
+ * game is being patched — and both of them have an answer a reader can reach in one click. For as
+ * long as a failed command came back as a string, this view could only print the sentence: the
+ * three cases below are the same failure shape distinguished by nothing but its code.
+ */
+describe("what the view offers about a wardrobe it could not read", () => {
+  it("offers Setup when nothing has said where the game is", () => {
+    const opened = vi.fn();
+    view({
+      payload: null,
+      status: "Choose the game folder in Setup first.",
+      statusRecourse: { label: "Open Setup", act: opened },
+    });
+
+    expect(screen.getByText("Choose the game folder in Setup first.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Setup" }));
+
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers another go when the game's files were only temporarily unreadable", () => {
+    const asked = vi.fn();
+    view({
+      payload: null,
+      status: "Chronie could not read the game's files.",
+      statusRecourse: { label: "Try again", act: asked },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(asked).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers nothing at all when there is nothing honest to offer", () => {
+    view({
+      payload: null,
+      status: "Chronie hit a problem it did not expect.",
+      statusRecourse: null,
+    });
+
+    const meta = screen.getByText("Chronie hit a problem it did not expect.");
+    expect(within(meta).queryByRole("button")).toBeNull();
+  });
+
+  it("says nothing about recourse once the wardrobe has arrived", () => {
+    view({ statusRecourse: { label: "Open Setup", act: vi.fn() } });
+
+    expect(screen.queryByRole("button", { name: "Open Setup" })).toBeNull();
+  });
 });

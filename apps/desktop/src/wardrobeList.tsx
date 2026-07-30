@@ -41,6 +41,7 @@ import "./wardrobeList.css";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { message } from "./failure";
 import { plural } from "./format";
 import { PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted } from "./gallery";
 import type { Thumbnail } from "./gallery";
@@ -628,8 +629,4 @@ function groups(): Array<{ name: string; kinds: Kind[] }> {
     else groups.push({ name: kind.group, kinds: [kind] });
   }
   return groups;
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
