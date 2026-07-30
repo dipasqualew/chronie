@@ -39,7 +39,8 @@ import type { StillWanted } from "./resource";
 import { AppearanceModal } from "./appearanceModal";
 import type { AppearanceModalState } from "./appearanceModal";
 import { SegmentModal } from "./segmentModal";
-import type { SegmentModalState } from "./segmentModal";
+import type { SegmentViewState } from "./segmentModal";
+import { SegmentPanel } from "./segmentPanel";
 import { buildSessions } from "./sessions";
 import { Settings as SettingsView } from "./settings";
 import { Timeline } from "./timeline";
@@ -63,6 +64,18 @@ const TAB_LABELS: Record<View, string> = {
 /** How often the window looks for segments it has not seen. */
 const DASHBOARD_POLL_MS = 30_000;
 
+/**
+ * The segment the window has open, and which of the two frames is holding it.
+ *
+ * Where a segment was opened from decides how it opens. The timeline docks it in the column
+ * beside the spine, because the evening it came out of is the thing the reader is working
+ * through and it must stay on screen; the roster and the table open it over themselves, because
+ * what a reader is working through there is a page of rows the segment is not one of. One piece
+ * of state either way — only one segment is ever open — so the two frames can never both be
+ * showing something.
+ */
+type OpenedSegment = SegmentViewState & { docked: boolean };
+
 export interface AppProps {
   payload: DashboardPayload;
   settings: Settings;
@@ -75,7 +88,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // Nothing can be collected until the game folder is known, so a first run opens on the one
   // screen that can do anything about it rather than on an empty timeline.
   const [view, setView] = useState<View>(settings.wowPath ? "timeline" : "settings");
-  const [showing, setShowing] = useState<SegmentModalState | null>(null);
+  const [showing, setShowing] = useState<OpenedSegment | null>(null);
   const [gap, setGap] = useState<SessionGap | null>(null);
   // The one transmog source a reader has clicked through to a picture of, which is nothing
   // until they do: the tables behind it are the game's largest and are opened on that click.
@@ -268,26 +281,61 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     );
   }
 
-  // The modal walks the list it was opened from, and that list is re-resolved against the
-  // segments on screen — so an activity edit, or a note, lands in the open modal too.
-  const walking = useMemo((): SegmentModalState | null => {
+  // An open segment walks the list it was opened from, and that list is re-resolved against the
+  // segments on screen — so an activity edit, or a note, lands in what is open too.
+  const walking = useMemo((): OpenedSegment | null => {
     if (!showing) return null;
     const byId = new Map(segments.map((segment) => [segment.segmentId, segment]));
     return {
-      index: showing.index,
+      ...showing,
       order: showing.order.map((segment) => byId.get(segment.segmentId) ?? segment),
     };
   }, [showing, segments]);
 
-  const openSegment = (segmentId: number, order: Segment[]): void => {
-    if (!order.length) return;
-    setShowing({
-      order,
-      index: Math.max(
-        order.findIndex((s) => s.segmentId === segmentId),
-        0,
-      ),
-    });
+  const openSegment =
+    (docked: boolean) =>
+    (segmentId: number, order: Segment[]): void => {
+      if (!order.length) return;
+      setShowing({
+        order,
+        docked,
+        index: Math.max(
+          order.findIndex((s) => s.segmentId === segmentId),
+          0,
+        ),
+      });
+    };
+
+  // Whichever frame the open segment belongs to gets it, and the other is handed nothing —
+  // which is what closes it, so the two can never be showing the same segment twice.
+  const docked = walking?.docked ? walking : null;
+  const overlaid = walking && !walking.docked ? walking : null;
+  // The panel stays open behind a reader who wanders off to another view and comes back, the
+  // same way an unfolded summary does. The width the page takes for it does not travel with
+  // them: a roster drawn across 1,720 pixels because a segment is open on a screen nobody is
+  // looking at is a window that resizes itself for no reason a reader could name.
+  const widened = docked && view === "timeline";
+
+  // What the two frames have in common, which is everything except the frame: one book per kind
+  // for the life of the window, and the same way through to the editor and the picture.
+  const opened = {
+    achievements,
+    items,
+    heroes: placeHeroes,
+    bosses: bossPortraits,
+    factions: factionIcons,
+    holdings: payload.holdings,
+    album,
+    captures: captureActions,
+    onStep: (by: number) =>
+      setShowing((was) => {
+        if (!was) return was;
+        const next = was.index + by;
+        return next < 0 || next >= was.order.length ? was : { ...was, index: next };
+      }),
+    onClose: () => setShowing(null),
+    onEditActivities: setEditing,
+    onShowAppearance: setDrawing,
   };
 
   const editingSegment =
@@ -336,8 +384,11 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
       ].join(" · ")
     : "Nothing collected yet.";
 
+  // The page takes the width it has rather than a single column's measure while there is a
+  // segment standing beside the timeline — that empty margin is the room the panel is drawn in.
+  // See `app.css`.
   return (
-    <div className="wrap">
+    <div className="wrap" data-panel={widened ? "" : undefined}>
       <nav className="appbar" aria-label="Application">
         <span className="brand">Chronie</span>
         <VersionTag release={release} />
@@ -359,7 +410,14 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           reachable — by a screen reader jumping between regions, and by the browser suite,
           which addresses every view the same way. The hidden ones are out of the tree
           entirely, so the name only ever belongs to the view on screen. */}
-      <main id="timeline-view" aria-label={TAB_LABELS.timeline} hidden={view !== "timeline"}>
+      <main
+        id="timeline-view"
+        aria-label={TAB_LABELS.timeline}
+        hidden={view !== "timeline"}
+        // The view is one column or two depending on whether there is a segment to stand in the
+        // second, and it says so where the stylesheet can read it — `app.css`.
+        data-panel={docked ? "" : undefined}
+      >
         <header className="view-head">
           <h1>Timeline</h1>
           {/* A live region, because it is recomputed as segments arrive and it is the one line
@@ -386,10 +444,15 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             </div>
           )}
         </header>
+        {/* Before the spine rather than after it, which is what it is: the thing the reader
+            just asked for. On a window too narrow to hold two columns the panel is drawn above
+            the timeline rather than beside it, and this is the order that gives — and it is the
+            order a screen reader reads either way. */}
+        <SegmentPanel showing={docked} {...opened} />
         <div id="timeline">
           <Timeline
             sessions={sessions}
-            onOpenSegment={openSegment}
+            onOpenSegment={openSegment(true)}
             items={items}
             places={placeIcons}
             album={album}
@@ -416,7 +479,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         </header>
         <Characters
           profiles={profiles}
-          onOpenSegment={openSegment}
+          onOpenSegment={openSegment(false)}
           items={items}
           inGameSets={inGameSets.value}
           currencyIcons={currencyIcons}
@@ -434,7 +497,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             Every segment on its own row. Click a column to sort, a row to open it.
           </div>
         </header>
-        <Details segments={segments} onOpenSegment={openSegment} items={items} />
+        <Details segments={segments} onOpenSegment={openSegment(false)} items={items} />
       </section>
 
       <section id="query-view" aria-label={TAB_LABELS.query} hidden={view !== "query"}>
@@ -539,27 +602,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
       <Tooltip />
 
-      <SegmentModal
-        showing={walking}
-        achievements={achievements}
-        items={items}
-        heroes={placeHeroes}
-        bosses={bossPortraits}
-        factions={factionIcons}
-        holdings={payload.holdings}
-        album={album}
-        captures={captureActions}
-        onStep={(by) =>
-          setShowing((was) => {
-            if (!was) return was;
-            const next = was.index + by;
-            return next < 0 || next >= was.order.length ? was : { ...was, index: next };
-          })
-        }
-        onClose={() => setShowing(null)}
-        onEditActivities={setEditing}
-        onShowAppearance={setDrawing}
-      />
+      <SegmentModal showing={overlaid} {...opened} />
 
       {/* Over the segment rather than instead of it: the reader is looking at one row of a
           list they are part way through, and closing the picture puts them back on it. */}

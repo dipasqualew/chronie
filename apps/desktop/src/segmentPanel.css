@@ -1,0 +1,32 @@
+/*
+ * The segment the timeline has open, standing in the column beside it.
+ *
+ * The frame only; everything inside it is the `.detail-*` shapes the modal draws, which is the
+ * point of the two frames sharing a head and a body. What is here is the box: where it sits, how
+ * tall it is allowed to be, and which part of it gives way when it cannot all fit.
+ *
+ * Which column it stands in is `app.css` — the two-column timeline is the *view's* layout and
+ * belongs to whatever owns the view, the same way the width the page takes does.
+ */
+
+/* As tall as the window and no taller, and it stays there as the timeline scrolls under it: a
+   panel that scrolled away with the spine would be a modal with extra steps, since the reader
+   would have to come back up the page to read the thing they just opened.
+   `align-items: start` on the grid is what leaves it room to slide inside its own column.
+
+   A flex column for the same reason the modal is one: the head is a picture that may not be
+   cropped and may therefore not shrink, so the part that gives way is the body, and it gives way
+   by scrolling. See the note on `.detail-hero`. */
+.segment-panel {
+  position: sticky; top: 12px;
+  display: flex; flex-direction: column;
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
+}
+
+/* Narrower than the modal it replaces, so the head has to be allowed to come apart: a place with
+   a long name gets the line to itself and the buttons drop under it, rather than the name being
+   squeezed to nothing beside them. */
+.segment-panel .detail-head { flex-wrap: wrap; }
+.segment-panel .detail-named { min-width: 0; }
+.segment-panel .detail-title { overflow-wrap: anywhere; }

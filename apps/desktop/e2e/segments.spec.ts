@@ -32,23 +32,29 @@ test("digs from a session down into a single segment and back out again", async 
     await detail.close();
   });
 
-  // What the reader who opened it that way expects to get out of it. `showModal` paints the page
-  // behind the modal and swallows the click, so this is the app's own doing rather than the
-  // browser's — and the click has to land where no part of the modal is.
-  await test.step("and clicking away from it closes it again", async () => {
+  // And the card it came from is still there beside it, which is the whole of issue #239: the
+  // reader who opened the wrong one clicks the right one rather than closing anything, and the
+  // evening they are working through does not go dark while they read one hour of it.
+  await test.step("the evening it came out of stays open beside it", async () => {
     await timeline.activities(first).first().click();
-    await expect(detail.dialog).toBeVisible();
-    await detail.clickAway();
+    await expect(detail.panel).toBeVisible();
+    await expect(first).toBeVisible();
+    expect(await detail.standsRightOf(first)).toBe(true);
   });
 
-  await test.step("and so does the segment row underneath it", async () => {
+  // And because it is beside the card rather than over it, the way to the other segment of the
+  // evening is the card itself: the panel is swapped for the one that was clicked, with nothing
+  // closed and nothing to reopen.
+  await test.step("and the rows underneath swap it for another without closing it", async () => {
     await timeline.fold(first, "2 segments").click();
-    await detail.openFor("Aster-Vale", "Glass Caverns");
+    await detail.openFor("Brin-Hearth", "Copperwood Depths");
+    await expect(detail.title()).toHaveText("Copperwood Depths");
 
+    await detail.openFor("Aster-Vale", "Glass Caverns");
     await expect(detail.title()).toHaveText("Glass Caverns");
     await expect(detail.position()).toHaveText("1 of 2");
-    await expect(detail.dialog).toContainText("The Curator");
-    await expect(detail.dialog).toContainText("+14");
+    await expect(detail.panel).toContainText("The Curator");
+    await expect(detail.panel).toContainText("+14");
   });
 
   // The header, which is two table hops off the name the segment was filed under and arrives
@@ -250,8 +256,8 @@ test("digs from a session down into a single segment and back out again", async 
   // And the keys do the same, including after the walk has run out at one end — which is the
   // half issue #230 caught. Arriving at the first segment is exactly the moment the button under
   // the reader's finger stops being pressable, and a `disabled` button loses the focus it was
-  // holding: the focus leaves the dialog for the page behind it, and every key the modal listens
-  // for after that is delivered somewhere the modal never sees.
+  // holding: the focus leaves the frame for the page around it, and every key the frame listens
+  // for after that is delivered somewhere it never sees.
   await test.step("and the arrow keys go on walking it once an end has been reached", async () => {
     await detail.arrow("Right");
     await expect(detail.title()).toHaveText("Copperwood Depths");
@@ -442,8 +448,8 @@ test("lets the player correct what Chronie guessed a segment was", async ({ page
     await editor.field("Beat the timer").selectOption("no");
     await editor.done();
 
-    await expect(detail.dialog).toContainText("+18");
-    await expect(detail.dialog).toContainText("depleted");
+    await expect(detail.panel).toContainText("+18");
+    await expect(detail.panel).toContainText("depleted");
     await detail.close();
     await expect(timeline.view).toContainText("+18");
   });

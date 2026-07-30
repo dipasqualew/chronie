@@ -4,6 +4,53 @@
 
 .wrap { max-width: 1180px; margin: 0 auto; }
 
+/* Two things on screen at once want more of the screen than one does.
+   1,180 is a measure chosen for a single column of reading, and on the monitor a desktop
+   application is actually run on there are several hundred pixels of nothing either side of it.
+   That is the space the segment panel is drawn in — issue #239 — and the page is allowed to
+   reach for it only while there is something to put there. A window narrower than this never
+   notices, because a max-width is a cap and not a width. */
+.wrap[data-panel] { max-width: 1720px; }
+
+/* The timeline with a segment open beside it: the spine keeps the column it had, and the panel
+   takes a third of what is left, between a floor it stops being readable under and a ceiling
+   past which it is just a wide modal. The head of the view stays over the spine, and the panel
+   spans both rows so it can slide the height of the whole thing. */
+#timeline-view[data-panel] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 34%, 620px);
+  /* The second row is `1fr` so that the panel, which spans both, is not allowed to push the
+     first one open. A spanning item's height is otherwise shared out across the rows it covers,
+     and a panel taller than the view's heading stood that heading in the middle of a hundred
+     pixels of nothing. An item spanning a flexible track contributes to none of the fixed ones
+     — CSS Grid §12.5 — and a `1fr` row in a container this tall is its own content anyway. */
+  grid-template-rows: auto 1fr;
+  column-gap: 22px;
+  align-items: start;
+  /* And the view is at least a window tall while the panel is in it, which is what guarantees
+     the page can be scrolled far enough for the panel to reach the top it sticks to. It starts
+     below the app bar, and a panel as tall as the window that starts eighty pixels down ends
+     eighty pixels below the fold — on a history too short to scroll, that is a strip of the
+     segment nobody can ever reach. */
+  min-height: calc(100vh - 24px);
+}
+#timeline-view[data-panel] > .view-head,
+#timeline-view[data-panel] > #timeline { grid-column: 1; }
+#timeline-view[data-panel] > .segment-panel { grid-column: 2; grid-row: 1 / span 2; }
+
+/* Below this there is no second column left to have. The panel's floor is 360 and a session
+   card stops being a card somewhere under 420, which with the gutter is the width below —
+   the window may be dragged down to 760, so this is a real state and not a hypothetical.
+   There the panel goes back to being one thing above another: above the spine rather than
+   below it, because it is what the reader just asked for, and no wider than the picture in
+   its head can be drawn without swallowing the window. */
+@media (max-width: 850px) {
+  #timeline-view[data-panel] { display: block; min-height: 0; }
+  #timeline-view[data-panel] > .segment-panel {
+    position: static; max-width: 560px; max-height: 70vh; margin-bottom: 18px;
+  }
+}
+
 /* Wrapping, because the bar now carries the build as well as a tab for every view, and the
    two together clear the narrowest window the app allows by about thirty pixels. That is
    close enough that a longer channel name or a larger system font would not, and a tab

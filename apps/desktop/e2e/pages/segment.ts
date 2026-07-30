@@ -1,11 +1,15 @@
 /**
- * One segment in full: the modal every view opens, the editor behind it, and the picture one
- * of its rows opens into.
+ * One segment in full: the frame every view opens it in, the editor behind it, and the picture
+ * one of its rows opens into.
  *
- * The modal is a dialog and its sections are landmarks named after their headings — so "the
- * achievements" and "the equipment sets" are things to ask for rather than places to count to.
- * Three dialogs can be open at once here, and each is found by the one control only it has: a
- * modal is named after whatever it is showing, which changes as the reader walks the list.
+ * There are two frames and this page object addresses both, because every question below is
+ * about the segment rather than about what is holding it. The timeline docks a segment in the
+ * panel beside its spine; the roster and the table open one as a modal over themselves. So the
+ * frame is found by the one control that only an opened segment has — the way out of it — and
+ * not by being a dialog, which only one of the two is.
+ *
+ * Its sections are landmarks named after their headings, so "the achievements" and "the
+ * equipment sets" are things to ask for rather than places to count to.
  */
 
 import { expect } from "@playwright/test";
@@ -13,50 +17,64 @@ import type { Locator, Page } from "@playwright/test";
 
 export class SegmentDetail {
   readonly page: Page;
-  readonly dialog: Locator;
+  readonly panel: Locator;
 
   constructor(page: Page) {
     this.page = page;
-    this.dialog = page
+    this.panel = page
       .getByRole("dialog")
+      .or(page.getByRole("complementary"))
       .filter({ has: page.getByRole("button", { name: "Close segment" }) });
   }
 
-  /** Opens the modal from a row for a given character and location, wherever the row is. */
+  /** Opens a segment from a row for a given character and location, wherever the row is. */
   async openFor(character: string, instance: string): Promise<void> {
     await this.page
       .getByRole("button", { name: new RegExp(`Open segment: ${character} in ${instance}`) })
       .click();
-    await expect(this.dialog).toBeVisible();
+    await expect(this.panel).toBeVisible();
   }
 
   title(): Locator {
-    return this.dialog.getByRole("heading", { level: 2 });
+    return this.panel.getByRole("heading", { level: 2 });
   }
 
   /**
-   * The picture the modal opens with, found by the place it is of.
+   * Whether the segment is standing clear to the right of something rather than over it.
+   *
+   * The whole of what issue #239 asked for, and only the browser can answer it: "beside" is a
+   * fact about two boxes, and a modal that covered the timeline would say every word this one
+   * says. Read against the timeline's own spine, because that is what may not be hidden.
+   */
+  async standsRightOf(other: Locator): Promise<boolean> {
+    const [mine, theirs] = [await this.panel.boundingBox(), await other.boundingBox()];
+    if (!mine || !theirs) return false;
+    return mine.x >= theirs.x + theirs.width;
+  }
+
+  /**
+   * The picture a segment opens with, found by the place it is of.
    *
    * Every place has one — the banner the game paints, or the map it draws, or the backend's own
-   * stand-in for the few with neither — so unlike the icons inside the modal this is a thing to
+   * stand-in for the few with neither — so unlike the icons further down this is a thing to
    * assert the presence of rather than the absence.
    */
   hero(place: string): Locator {
-    return this.dialog.getByRole("img", { name: `Picture of ${place}` });
+    return this.panel.getByRole("img", { name: `Picture of ${place}` });
   }
 
   /**
-   * How much of the modal's width that picture covers, as a fraction of it.
+   * How much of the frame's width that picture covers, as a fraction of it.
    *
    * A reading rather than a locator, because the claim is about two boxes rather than about
-   * anything either one of them says: the band is the modal's *header*, and a header that stops
-   * short of the edge it is a header of is the thing to catch. Measured against the dialog's
+   * anything either one of them says: the band is the frame's *header*, and a header that stops
+   * short of the edge it is a header of is the thing to catch. Measured against the frame's
    * content box, which is the box the band is laid out inside.
    */
   async heroSpan(place: string): Promise<number> {
     const band = await this.hero(place).boundingBox();
     if (!band) return 0;
-    const across = await this.dialog.evaluate((modal) => modal.clientWidth);
+    const across = await this.panel.evaluate((frame) => frame.clientWidth);
     return across === 0 ? 0 : band.width / across;
   }
 
@@ -106,22 +124,22 @@ export class SegmentDetail {
    */
   async clickAway(): Promise<void> {
     await this.page.mouse.click(4, 4);
-    await expect(this.dialog).toBeHidden();
+    await expect(this.panel).toBeHidden();
   }
 
-  /** Where in the list the reader is, which the modal announces as they step through it. */
+  /** Where in the list the reader is, announced as they step through it. */
   position(): Locator {
-    return this.dialog.getByRole("status", { name: "Which segment" });
+    return this.panel.getByRole("status", { name: "Which segment" });
   }
 
   /**
-   * One section of the modal, by the heading it is filed under.
+   * One section of the segment, by the heading it is filed under.
    *
-   * The modal is a dozen lists of unrelated things — achievements, transmog, currency, the
-   * equipment sets — and every question about one of them is a question about its section.
+   * An opened segment is a dozen lists of unrelated things — achievements, transmog, currency,
+   * the equipment sets — and every question about one of them is a question about its section.
    */
   section(title: string): Locator {
-    return this.dialog.getByRole("region", { name: title, exact: true });
+    return this.panel.getByRole("region", { name: title, exact: true });
   }
 
   /** The rows of one of those sections. */
@@ -151,12 +169,12 @@ export class SegmentDetail {
    * so.
    */
   factionIcon(faction: string): Locator {
-    return this.dialog.getByRole("img", { name: `Icon for ${faction}` });
+    return this.panel.getByRole("img", { name: `Icon for ${faction}` });
   }
 
   /** A link out of the window, named by the text it shows. */
   linkTo(name: string): Locator {
-    return this.dialog.getByRole("link", { name });
+    return this.panel.getByRole("link", { name });
   }
 
   /**
@@ -166,7 +184,7 @@ export class SegmentDetail {
    * and the name on it is the only thing a reader would use to find it.
    */
   gainFor(name: string): Locator {
-    return this.dialog.getByRole("listitem").filter({ hasText: name });
+    return this.panel.getByRole("listitem").filter({ hasText: name });
   }
 
   /**
@@ -178,8 +196,8 @@ export class SegmentDetail {
    */
   standingBars(name?: string | RegExp): Locator {
     return name === undefined
-      ? this.dialog.getByRole("progressbar")
-      : this.dialog.getByRole("progressbar", { name });
+      ? this.panel.getByRole("progressbar")
+      : this.panel.getByRole("progressbar", { name });
   }
 
   /** One equipment set the segment changed, on the line that says what happened to it. */
@@ -194,37 +212,39 @@ export class SegmentDetail {
       .getByRole("listitem");
   }
 
-  /** The way on to the next segment of whatever list the modal was opened from. */
+  /** The way on to the next segment of whatever list this one was opened from. */
   next(): Locator {
-    return this.dialog.getByRole("button", { name: "Next segment" });
+    return this.panel.getByRole("button", { name: "Next segment" });
   }
 
   previous(): Locator {
-    return this.dialog.getByRole("button", { name: "Previous segment" });
+    return this.panel.getByRole("button", { name: "Previous segment" });
   }
 
   /**
    * The same walk done from the keyboard, which is what a reader reaches for once they realise
-   * the modal walks a list at all.
+   * the frame walks a list at all.
    *
    * Pressed at the window rather than at a locator on purpose: the whole question is whether the
-   * modal still hears the key wherever the focus happens to have ended up.
+   * frame still hears the key wherever the focus happens to have ended up.
    */
   arrow(towards: "Left" | "Right"): Promise<void> {
     return this.page.keyboard.press(`Arrow${towards}`);
   }
 
   async close(): Promise<void> {
-    await this.dialog.getByRole("button", { name: "Close segment" }).click();
-    await expect(this.dialog).toBeHidden();
+    await this.panel.getByRole("button", { name: "Close segment" }).click();
+    await expect(this.panel).toBeHidden();
   }
 }
 
 /**
- * The editor behind the modal, which is the only place an activity can be corrected.
+ * The editor behind an opened segment, which is the only place an activity can be corrected.
  *
  * Reachable through a segment and nowhere else, which is where editing lives — so opening it
- * is two clicks written down once.
+ * is two clicks written down once. A dialog whichever frame it was reached from: correcting
+ * what Chronie guessed is a question waiting to be answered, and nothing else may be done
+ * until it is.
  */
 export class ActivityEditor {
   readonly page: Page;
@@ -238,7 +258,7 @@ export class ActivityEditor {
   }
 
   async open(): Promise<void> {
-    await new SegmentDetail(this.page).dialog
+    await new SegmentDetail(this.page).panel
       .getByRole("button", { name: "Edit activities" })
       .click();
     await expect(this.dialog).toBeVisible();
@@ -272,8 +292,8 @@ export class ActivityEditor {
 /**
  * A picture of one transmog source, over the segment it was collected in.
  *
- * Its own dialog rather than part of the modal under it, and found by the stage it holds: the
- * segment's modal is open behind it and both are named after whatever they are showing.
+ * Its own dialog rather than part of the segment under it, and found by the stage it holds: the
+ * segment is still open behind it and both are named after whatever they are showing.
  */
 export class AppearancePicture {
   readonly page: Page;
