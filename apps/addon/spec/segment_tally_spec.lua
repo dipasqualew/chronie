@@ -48,16 +48,22 @@ describe("ns.newSegmentTally", function()
     ---`factions` maps a faction name to the standing the client reports for it, or to a
     ---list of standings to hand back one per call, which is how a faction that levels up
     ---part way through a segment is modelled.
-    ---@param options table? `{ prices, lootFormats, factionFormats, factions }`
+    ---`savedBosses` maps a boss name to whether the character's lockout says that boss is
+    ---already killed, which is what settles the outcome of a fight the client never credited.
+    ---@param options table? `{ prices, lootFormats, factionFormats, factions, savedBosses }`
     ---@return SegmentTally
     local function newTally(options)
         options = options or {}
         local prices = options.prices or {}
         local factions = options.factions or {}
+        local savedBosses = options.savedBosses or {}
         local asked = {}
         return ns.newSegmentTally({
             lootFormats = options.lootFormats or LOOT_FORMATS,
             factionFormats = options.factionFormats or FACTION_FORMATS,
+            bossSavedAsKilled = function(name)
+                return savedBosses[name]
+            end,
             itemSellPrice = function(itemID)
                 return prices[itemID]
             end,
@@ -1135,19 +1141,91 @@ describe("ns.newSegmentTally", function()
 
         -- Wipes are the whole point of keeping both outcomes: a night of eight pulls and
         -- one kill is a progression raid, while eight kills and no wipes is a farm clear.
+        -- The pulls are minutes apart, which is what a wipe costs: the raid has to die, run
+        -- back and re-engage. Ends seconds apart are not pulls at all — see the re-arm test.
         it("keeps wipes alongside kills, in the order they ended", function()
             local tally = newTally()
             tally.begin(0)
 
             tally.encounter(encounter({ at = 5000, success = false }))
-            tally.encounter(encounter({ at = 5100, success = false }))
-            tally.encounter(encounter({ at = 5200, success = true }))
+            tally.encounter(encounter({ at = 5400, success = false }))
+            tally.encounter(encounter({ at = 5800, success = true }))
 
             local encounters = tally.summary().encounters
             assert.equal(3, #encounters)
             assert.same({ false, false, true }, {
                 encounters[1].success, encounters[2].success, encounters[3].success,
             })
+        end)
+
+        -- Trial of the Crusader, 25 Heroic, as the client actually reported it: the encounter
+        -- engine re-arms itself while the beasts' leftovers are still up, so one pull arrives
+        -- as five ENCOUNTER_ENDs within twenty-four seconds. Five rows for one fight is the
+        -- first half of dipasqualew/chronie#231; the ends below are the real timestamps.
+        it("folds a phased encounter's re-arms into the one pull they belong to", function()
+            local tally = newTally({ savedBosses = { ["Northrend Beasts"] = true } })
+            tally.begin(0)
+
+            for _, endedAt in ipairs({
+                1785271799, 1785271812, 1785271814, 1785271823, 1785271823,
+            }) do
+                tally.encounter(encounter({
+                    id = 1088, name = "Northrend Beasts", difficultyId = 6,
+                    at = endedAt, success = false,
+                }))
+            end
+
+            local encounters = tally.summary().encounters
+            assert.equal(1, #encounters)
+            assert.equal(1785271823, encounters[1].at)
+        end)
+
+        -- The second half of #231, and the reason the flag alone cannot be trusted: across
+        -- four clears the client never once reported success for Northrend Beasts or Faction
+        -- Champions, yet the character's own saved-instance state has both saved as killed.
+        -- The server's lockout is the authority on whether a boss died; `success` only says
+        -- whether the client credited the kill, which for these encounters it never does.
+        it("reads a boss its lockout has saved as killed as a kill, not a wipe", function()
+            local tally = newTally({ savedBosses = { ["Faction Champions"] = true } })
+            tally.begin(0)
+
+            tally.encounter(encounter({
+                id = 1086, name = "Faction Champions", difficultyId = 6,
+                at = 1785272034, success = false,
+            }))
+
+            local encounters = tally.summary().encounters
+            assert.equal(1, #encounters)
+            assert.is_true(encounters[1].success)
+        end)
+
+        -- A boss the raid genuinely never beat is still a wipe. Nothing about the fix may
+        -- turn a failed night into a clear: the lockout says not killed, so it stays a wipe.
+        it("leaves a wipe alone when the lockout has that boss still alive", function()
+            local tally = newTally({ savedBosses = { ["Flame Leviathan"] = false } })
+            tally.begin(0)
+
+            tally.encounter(encounter({ at = 5000, success = false }))
+            tally.encounter(encounter({ at = 5400, success = false }))
+
+            local encounters = tally.summary().encounters
+            assert.equal(2, #encounters)
+            assert.same({ false, false }, { encounters[1].success, encounters[2].success })
+        end)
+
+        -- A boss the raid wiped on and then killed keeps both, even though the lockout now
+        -- has it saved: the client credited the kill itself, so its own account of which pull
+        -- was which is the better one, and promoting the earlier wipe would invent a kill.
+        it("keeps an earlier wipe once the client has credited a kill of its own", function()
+            local tally = newTally({ savedBosses = { ["Flame Leviathan"] = true } })
+            tally.begin(0)
+
+            tally.encounter(encounter({ at = 5000, success = false }))
+            tally.encounter(encounter({ at = 5400, success = true }))
+
+            local encounters = tally.summary().encounters
+            assert.equal(2, #encounters)
+            assert.same({ false, true }, { encounters[1].success, encounters[2].success })
         end)
 
         it("normalises the client's truthy success flag to a boolean", function()

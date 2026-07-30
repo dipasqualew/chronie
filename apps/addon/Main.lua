@@ -145,11 +145,36 @@ function ns.main(env)
         name = "ChronieCharacterDetailWindow",
     })
 
+    ---What this character's own saves say about a boss, which for a phased encounter is the
+    ---only account of the outcome there is: the client credits no kill for some of them.
+    ---
+    ---Scanned rather than read from a cache because it is asked once, as a segment closes,
+    ---and by then the refresh that BOSS_KILL sends RequestRaidInfo off for has long landed.
+    ---nil for a boss no save mentions — a dungeon leaves none — which the tally reads as
+    ---"nothing known" rather than as "still alive".
+    ---@param name string
+    ---@param difficultyId integer?
+    ---@return boolean?
+    local function bossSavedAsKilled(name, difficultyId)
+        local saved
+        for _, lockout in ipairs(scanner.scan()) do
+            if difficultyId == nil or lockout.difficultyId == difficultyId then
+                for _, encounter in ipairs(lockout.encounters or {}) do
+                    if encounter.name == name then
+                        saved = saved or encounter.killed
+                    end
+                end
+            end
+        end
+        return saved
+    end
+
     local tally = ns.newSegmentTally({
         lootFormats = env.lootSelfFormats,
         factionFormats = env.factionIncreaseFormats,
         itemSellPrice = env.itemSellPrice,
         factionState = env.factionState,
+        bossSavedAsKilled = bossSavedAsKilled,
     })
     local currencyItems = ns.newCurrencyItems({ db = env.db })
     local questBaselines = {}
