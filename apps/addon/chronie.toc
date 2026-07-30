@@ -19,6 +19,8 @@ src/AccountIdentity.lua
 src/AccountTooltip.lua
 src/CaptureBurst.lua
 src/CaptureTriggers.lua
+src/Census.lua
+src/CensusDomains.lua
 src/CharacterLook.lua
 src/ClassDisplay.lua
 src/CombatLogging.lua

@@ -17,6 +17,7 @@
 
 mod activities;
 mod captures;
+mod census;
 mod custom_sets;
 mod database;
 mod holdings;
@@ -48,7 +49,8 @@ use crate::failure::Failure;
 use crate::ingamesets;
 use crate::look;
 use crate::retention;
-use crate::saved_variables::{self, RawHoldingSnapshot, RawWarband, Segment};
+use crate::saved_variables::{self, RawCensus, RawHoldingSnapshot, RawWarband, Segment};
+use census::sync_census;
 use captures::{deleted_captures, ingest_images, link_capture_achievements, link_captures};
 use captures::{place_captures, record_images, store_root, upsert_capture};
 use database::open_database;
@@ -100,6 +102,8 @@ struct Incoming {
     lockouts: LockoutFeed,
     holdings: BTreeMap<String, RawHoldingSnapshot>,
     warband: RawWarband,
+    /// What the account holds, as opposed to what it was watched collecting. See `census`.
+    census: RawCensus,
     in_game_sets: Vec<ingamesets::CharacterSets>,
     /// Who each character of this account is: their race, and what they were last seen made of.
     looks: Vec<look::Look>,
@@ -148,6 +152,7 @@ pub fn collect(
         let lockouts = LockoutFeed::take(&mut saved);
         let holdings = std::mem::take(&mut saved.holdings);
         let warband = std::mem::take(&mut saved.warband);
+        let census = std::mem::take(&mut saved.census);
         let in_game_sets = ingamesets::read(&saved.custom_sets);
         let set_request_outcomes = ingamesets::outcomes(&saved.custom_set_requests);
         let looks = look::read(&saved.character_look);
@@ -163,6 +168,10 @@ pub fn collect(
             // `holdings` by character, and a warband entry in there would arrive here as a
             // character named "warband".
             warband,
+            // The account's own standing, beside the per-character holdings and kept apart from
+            // them for the same reason the warband pot is: a mount is the account's, and filing
+            // it per character would be the same answer stored once per alt.
+            census,
             // `customSets` is the addon's word, because the addon is talking to the game and
             // that is what the game calls them. In here they are in-game sets, so that the
             // reader's own saved sets can keep the name they have had since before the game
@@ -222,6 +231,7 @@ pub fn collect(
         sync_lockouts(&transaction, account_id, &account.lockouts, now)?;
         sync_holdings(&transaction, account_id, &account.holdings, now)?;
         sync_warband(&transaction, account_id, &account.warband)?;
+        sync_census(&transaction, account_id, &account.census, now)?;
         sync_in_game_sets(&transaction, account_id, &account.in_game_sets, now)?;
         sync_character_looks(&transaction, account_id, &account.looks, now)?;
         sync_set_request_outcomes(&transaction, &account.set_request_outcomes, now)?;

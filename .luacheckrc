@@ -77,6 +77,15 @@ read_globals = {
     "GetCVar",
     "SetCVar",
     "GetAchievementInfo",
+    -- The achievement tree, which is the only way to enumerate achievements: there is no id
+    -- list, so `ns.achievementCensus` walks categories and offsets. Read out of Blizzard's own
+    -- Blizzard_AchievementUI on 12.0.5.67823, where GetNumCompletedAchievements is used as
+    -- `numAchievements, numCompleted = GetNumCompletedAchievements(IN_GUILD_VIEW)`.
+    "GetCategoryList",
+    "GetCategoryNumAchievements",
+    "GetNumCompletedAchievements",
+    -- Which client build this is, so a census can say which game it was taken of. Fourth return.
+    "GetBuildInfo",
     "AchievementFrame_LoadUI",
     "AchievementFrame",
     "AchievementFrame_SelectAchievement",
