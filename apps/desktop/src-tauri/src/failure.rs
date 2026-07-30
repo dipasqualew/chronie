@@ -311,6 +311,15 @@ impl From<tauri::Error> for Failure {
     }
 }
 
+/// And the updater plugin's, for the same reason: what it went looking for and what it found are
+/// the log's business, and "Chronie hit a problem it did not expect" is all a window can honestly
+/// say about an endpoint that would not answer.
+impl From<tauri_plugin_updater::Error> for Failure {
+    fn from(error: tauri_plugin_updater::Error) -> Self {
+        Self::of(FailureCode::Internal).caused_by(error)
+    }
+}
+
 impl From<serde_json::Error> for Failure {
     fn from(error: serde_json::Error) -> Self {
         Self::of(FailureCode::Internal).caused_by(error)

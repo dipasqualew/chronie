@@ -12,6 +12,8 @@ use crate::look;
 use rusqlite::{params, Transaction};
 use std::path::Path;
 
+use crate::failure::Failure;
+
 /// Who each character was last seen to be, replacing whatever they last said.
 ///
 /// Wholesale per character, for the reason [`super::ingame_sets`] is: this is one statement about
@@ -27,32 +29,26 @@ pub(super) fn sync_character_looks(
     account_id: i64,
     looks: &[look::Look],
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for look in looks {
         let character_id =
             upsert_character_key(transaction, account_id, &look.character, None, None, now)?;
         // The choices go with the look by way of the cascade the migration declares.
-        transaction
-            .execute(
-                "DELETE FROM character_looks WHERE character_id = ?1",
-                [character_id],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "INSERT INTO character_looks (character_id, race, sex, observed_at)
+        transaction.execute(
+            "DELETE FROM character_looks WHERE character_id = ?1",
+            [character_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO character_looks (character_id, race, sex, observed_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![character_id, look.race, look.sex, look.observed_at],
-            )
-            .map_err(|error| error.to_string())?;
+            params![character_id, look.race, look.sex, look.observed_at],
+        )?;
         for answer in &look.picked {
-            transaction
-                .execute(
-                    "INSERT INTO character_look_choices (character_id, option_id, choice_id)
+            transaction.execute(
+                "INSERT INTO character_look_choices (character_id, option_id, choice_id)
                      VALUES (?1, ?2, ?3)",
-                    params![character_id, answer.question, answer.swatch],
-                )
-                .map_err(|error| error.to_string())?;
+                params![character_id, answer.question, answer.swatch],
+            )?;
         }
     }
     Ok(())
@@ -67,55 +63,47 @@ pub(super) fn sync_character_looks(
 /// A roster is tens of characters with at most a few dozen answers each, which is why the choices
 /// come back in a second query rather than a join: a character with no answers is the ordinary
 /// case here, and a join would have to invent a row to say so.
-pub fn character_looks(database_path: &Path) -> Result<Vec<look::Look>, String> {
+pub fn character_looks(database_path: &Path) -> Result<Vec<look::Look>, Failure> {
     let connection = open_database(database_path)?;
-    let mut statement = connection
-        .prepare(
-            // `source_key` rather than `name`, for the reason the sets below select it: `name`
-            // is the half before the hyphen, and two Asters on two realms are two people.
-            "SELECT c.source_key, l.race, l.sex, l.observed_at
+    let mut statement = connection.prepare(
+        // `source_key` rather than `name`, for the reason the sets below select it: `name`
+        // is the half before the hyphen, and two Asters on two realms are two people.
+        "SELECT c.source_key, l.race, l.sex, l.observed_at
              FROM character_looks l
              JOIN characters c ON c.id = l.character_id
              ORDER BY c.source_key",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok(look::Look {
-                character: row.get(0)?,
-                race: row.get(1)?,
-                sex: row.get(2)?,
-                observed_at: row.get(3)?,
-                picked: Vec::new(),
-            })
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(look::Look {
+            character: row.get(0)?,
+            race: row.get(1)?,
+            sex: row.get(2)?,
+            observed_at: row.get(3)?,
+            picked: Vec::new(),
         })
-        .map_err(|error| error.to_string())?;
+    })?;
     let mut looks: Vec<look::Look> = Vec::new();
     for row in rows {
-        looks.push(row.map_err(|error| error.to_string())?);
+        looks.push(row?);
     }
 
-    let mut chosen = connection
-        .prepare(
-            "SELECT c.source_key, h.option_id, h.choice_id
+    let mut chosen = connection.prepare(
+        "SELECT c.source_key, h.option_id, h.choice_id
              FROM character_look_choices h
              JOIN characters c ON c.id = h.character_id
              ORDER BY c.source_key, h.option_id",
-        )
-        .map_err(|error| error.to_string())?;
-    let answers = chosen
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                customization::Picked {
-                    question: row.get(1)?,
-                    swatch: row.get(2)?,
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let answers = chosen.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            customization::Picked {
+                question: row.get(1)?,
+                swatch: row.get(2)?,
+            },
+        ))
+    })?;
     for row in answers {
-        let (character, answer) = row.map_err(|error| error.to_string())?;
+        let (character, answer) = row?;
         if let Some(found) = looks.iter_mut().find(|look| look.character == character) {
             found.picked.push(answer);
         }

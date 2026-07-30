@@ -6,6 +6,7 @@
 //! routes: from a segment, which knows what class and race it was played as, and from a bare
 //! "Name-Realm" key, which is all a lockout or a holding carries.
 
+use crate::failure::Failure;
 use crate::saved_variables::Segment;
 use rusqlite::{params, Transaction};
 use std::path::Path;
@@ -27,26 +28,22 @@ pub(super) fn upsert_account(
     source_modified_ns: Option<i64>,
     source_size: Option<i64>,
     now: i64,
-) -> Result<i64, String> {
-    transaction
-        .execute(
-            "INSERT INTO accounts (
+) -> Result<i64, Failure> {
+    transaction.execute(
+        "INSERT INTO accounts (
                  source_key, first_seen_at, last_seen_at, source_modified_ns, source_size
              ) VALUES (?1, ?2, ?2, ?3, ?4)
              ON CONFLICT(source_key) DO UPDATE SET
                  last_seen_at = excluded.last_seen_at,
                  source_modified_ns = excluded.source_modified_ns,
                  source_size = excluded.source_size",
-            params![source_key, now, source_modified_ns, source_size],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .query_row(
-            "SELECT id FROM accounts WHERE source_key = ?1",
-            [source_key],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())
+        params![source_key, now, source_modified_ns, source_size],
+    )?;
+    Ok(transaction.query_row(
+        "SELECT id FROM accounts WHERE source_key = ?1",
+        [source_key],
+        |row| row.get(0),
+    )?)
 }
 
 pub(super) fn upsert_character(
@@ -54,7 +51,7 @@ pub(super) fn upsert_character(
     account_id: i64,
     segment: &Segment,
     now: i64,
-) -> Result<i64, String> {
+) -> Result<i64, Failure> {
     upsert_character_key(
         transaction,
         account_id,
@@ -77,11 +74,10 @@ pub(super) fn upsert_character_key(
     class_file: Option<&str>,
     level: Option<i64>,
     now: i64,
-) -> Result<i64, String> {
+) -> Result<i64, Failure> {
     let (name, realm) = split_character(source_key);
-    transaction
-        .execute(
-            "INSERT INTO characters (
+    transaction.execute(
+        "INSERT INTO characters (
                  account_id, source_key, name, realm, class_file, last_level,
                  first_seen_at, last_seen_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
@@ -91,14 +87,11 @@ pub(super) fn upsert_character_key(
                  class_file = COALESCE(excluded.class_file, characters.class_file),
                  last_level = COALESCE(excluded.last_level, characters.last_level),
                  last_seen_at = excluded.last_seen_at",
-            params![account_id, source_key, name, realm, class_file, level, now],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .query_row(
-            "SELECT id FROM characters WHERE account_id = ?1 AND source_key = ?2",
-            params![account_id, source_key],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())
+        params![account_id, source_key, name, realm, class_file, level, now],
+    )?;
+    Ok(transaction.query_row(
+        "SELECT id FROM characters WHERE account_id = ?1 AND source_key = ?2",
+        params![account_id, source_key],
+        |row| row.get(0),
+    )?)
 }

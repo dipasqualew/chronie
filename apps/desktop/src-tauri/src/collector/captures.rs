@@ -21,6 +21,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::failure::Failure;
+
 /// Where Chronie keeps the images it has taken custody of: its own folder beside its own
 /// database, so that a backup of one is a backup of the other.
 pub(super) fn store_root(database_path: &Path) -> PathBuf {
@@ -49,10 +51,8 @@ pub(super) struct Ingested {
 /// A row an earlier sync could not find a file for is, on the other hand, worth another look:
 /// the client writes an image asynchronously and may not have finished when the folder was
 /// read, and a folder can be restored.
-fn wanted_images(connection: &Connection, markers: &[&Marker]) -> Result<Vec<Wanted>, String> {
-    let mut state = connection
-        .prepare("SELECT image_state FROM captures WHERE source_id = ?1")
-        .map_err(|error| error.to_string())?;
+fn wanted_images(connection: &Connection, markers: &[&Marker]) -> Result<Vec<Wanted>, Failure> {
+    let mut state = connection.prepare("SELECT image_state FROM captures WHERE source_id = ?1")?;
     let mut wanted = Vec::new();
     let mut seen = HashSet::new();
     for marker in markers {
@@ -64,8 +64,7 @@ fn wanted_images(connection: &Connection, markers: &[&Marker]) -> Result<Vec<Wan
         }
         let stored = state
             .query_row([&marker.source_id], |row| row.get::<_, String>(0))
-            .optional()
-            .map_err(|error| error.to_string())?
+            .optional()?
             .is_some_and(|found| found == "stored");
         if !stored {
             wanted.push(Wanted {
@@ -76,22 +75,18 @@ fn wanted_images(connection: &Connection, markers: &[&Marker]) -> Result<Vec<Wan
     }
     drop(state);
 
-    let mut unresolved = connection
-        .prepare(
-            "SELECT source_id, stamp FROM captures
+    let mut unresolved = connection.prepare(
+        "SELECT source_id, stamp FROM captures
              WHERE image_state = 'missing' AND stamp IS NOT NULL",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = unresolved
-        .query_map([], |row| {
-            Ok(Wanted {
-                source_id: row.get(0)?,
-                stamp: row.get(1)?,
-            })
+    )?;
+    let rows = unresolved.query_map([], |row| {
+        Ok(Wanted {
+            source_id: row.get(0)?,
+            stamp: row.get(1)?,
         })
-        .map_err(|error| error.to_string())?;
+    })?;
     for row in rows {
-        let row = row.map_err(|error| error.to_string())?;
+        let row = row?;
         if seen.insert(row.source_id.clone()) {
             wanted.push(row);
         }
@@ -117,7 +112,7 @@ pub(super) fn ingest_images(
     store_root: &Path,
     markers: &[&Marker],
     quality: captures::Quality,
-) -> Result<HashMap<String, Ingested>, String> {
+) -> Result<HashMap<String, Ingested>, Failure> {
     let wanted = wanted_images(connection, markers)?;
     if wanted.is_empty() {
         return Ok(HashMap::new());
@@ -159,15 +154,14 @@ pub(super) fn upsert_capture(
     character_id: Option<i64>,
     marker: &Marker,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let state = if marker.wants_image {
         "missing"
     } else {
         "none"
     };
-    transaction
-        .execute(
-            "INSERT INTO captures (
+    transaction.execute(
+        "INSERT INTO captures (
                  account_id, source_id, schema, character_id, author, segment_source_id,
                  captured_at, stamp, ui_map_id, map_x, map_y, image_state,
                  trigger_name, achievement_source_id, note, first_seen_at, last_seen_at
@@ -198,26 +192,25 @@ pub(super) fn upsert_capture(
                      ELSE COALESCE(excluded.note, captures.note)
                  END,
                  last_seen_at = excluded.last_seen_at",
-            params![
-                account_id,
-                marker.source_id,
-                marker.schema,
-                character_id,
-                marker.author,
-                marker.segment,
-                marker.captured_at,
-                marker.stamp,
-                marker.ui_map_id,
-                marker.x,
-                marker.y,
-                state,
-                marker.trigger,
-                marker.achievement,
-                now,
-                marker.note,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        params![
+            account_id,
+            marker.source_id,
+            marker.schema,
+            character_id,
+            marker.author,
+            marker.segment,
+            marker.captured_at,
+            marker.stamp,
+            marker.ui_map_id,
+            marker.x,
+            marker.y,
+            state,
+            marker.trigger,
+            marker.achievement,
+            now,
+            marker.note,
+        ],
+    )?;
     Ok(())
 }
 
@@ -225,16 +218,12 @@ pub(super) fn upsert_capture(
 ///
 /// Read once per sync rather than asked per marker: an account's entries are read in full every
 /// time its file changes, and the deletions are a handful of rows against thousands of markers.
-pub(super) fn deleted_captures(connection: &Connection) -> Result<HashSet<String>, String> {
-    let mut statement = connection
-        .prepare("SELECT source_id FROM capture_deletions")
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
+pub(super) fn deleted_captures(connection: &Connection) -> Result<HashSet<String>, Failure> {
+    let mut statement = connection.prepare("SELECT source_id FROM capture_deletions")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     let mut deleted = HashSet::new();
     for row in rows {
-        deleted.insert(row.map_err(|error| error.to_string())?);
+        deleted.insert(row?);
     }
     Ok(deleted)
 }
@@ -246,11 +235,10 @@ pub(super) fn record_images(
     transaction: &Transaction<'_>,
     ingested: &HashMap<String, Ingested>,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for (source_id, image) in ingested {
-        transaction
-            .execute(
-                "UPDATE captures SET
+        transaction.execute(
+            "UPDATE captures SET
                      image_state = 'stored',
                      file_path = ?2,
                      source_name = ?3,
@@ -259,16 +247,15 @@ pub(super) fn record_images(
                      ingested_at = ?6,
                      last_seen_at = ?6
                  WHERE source_id = ?1",
-                params![
-                    source_id,
-                    image.stored.file_path,
-                    image.source_name,
-                    image.stored.byte_size,
-                    image.stored.content_hash,
-                    now,
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                source_id,
+                image.stored.file_path,
+                image.source_name,
+                image.stored.byte_size,
+                image.stored.content_hash,
+                now,
+            ],
+        )?;
     }
     Ok(())
 }
@@ -280,10 +267,9 @@ pub(super) fn record_images(
 /// screenshot taken in a segment the client had not finished filing arrives beside a segment
 /// list that does not mention it yet. So resolving is not part of writing the capture. It is
 /// this, run after every sync's segments are in, over every capture still waiting for one.
-pub(super) fn link_captures(transaction: &Transaction<'_>) -> Result<(), String> {
-    transaction
-        .execute(
-            "UPDATE captures SET segment_id = (
+pub(super) fn link_captures(transaction: &Transaction<'_>) -> Result<(), Failure> {
+    transaction.execute(
+        "UPDATE captures SET segment_id = (
                  SELECT segments.id FROM segments
                  WHERE segments.character_id = captures.character_id
                    AND segments.source_id = captures.segment_source_id
@@ -291,9 +277,8 @@ pub(super) fn link_captures(transaction: &Transaction<'_>) -> Result<(), String>
              WHERE segment_id IS NULL
                AND segment_source_id IS NOT NULL
                AND character_id IS NOT NULL",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
+        [],
+    )?;
     Ok(())
 }
 
@@ -313,10 +298,9 @@ pub(super) fn link_captures(transaction: &Transaction<'_>) -> Result<(), String>
 /// does not move.
 ///
 /// Run after `link_captures`, because the segment is half of what identifies the achievement.
-pub(super) fn link_capture_achievements(transaction: &Transaction<'_>) -> Result<(), String> {
-    transaction
-        .execute(
-            "UPDATE captures SET achievement_id = (
+pub(super) fn link_capture_achievements(transaction: &Transaction<'_>) -> Result<(), Failure> {
+    transaction.execute(
+        "UPDATE captures SET achievement_id = (
                  SELECT achievements.id FROM achievements
                  WHERE achievements.segment_id = captures.segment_id
                    AND achievements.achievement_id = captures.achievement_source_id
@@ -324,9 +308,8 @@ pub(super) fn link_capture_achievements(transaction: &Transaction<'_>) -> Result
                  LIMIT 1
              )
              WHERE achievement_source_id IS NOT NULL",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
+        [],
+    )?;
     Ok(())
 }
 
@@ -351,36 +334,32 @@ pub(super) fn link_capture_achievements(transaction: &Transaction<'_>) -> Result
 /// The decision itself is [`placement::place`] and is not here. The query below only narrows:
 /// it is allowed to be generous, because the rule re-checks the map and the reach on everything
 /// it is handed.
-pub(super) fn place_captures(connection: &mut Connection) -> Result<(), String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT c.id, c.captured_at, c.ui_map_id, p.at_ms, p.ui_map_id, p.map_x, p.map_y
+pub(super) fn place_captures(connection: &mut Connection) -> Result<(), Failure> {
+    let mut statement = connection.prepare(
+        "SELECT c.id, c.captured_at, c.ui_map_id, p.at_ms, p.ui_map_id, p.map_x, p.map_y
              FROM captures c
              JOIN log_positions p
                ON p.at_ms BETWEEN c.captured_at * 1000 - ?1 AND c.captured_at * 1000 + ?1
              WHERE c.map_x IS NULL AND c.ui_map_id IS NOT NULL",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([placement::REACH_MS], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                placement::Moment {
-                    at_ms: row.get::<_, i64>(1)? * 1000,
-                    ui_map_id: row.get(2)?,
-                },
-                placement::Point {
-                    at_ms: row.get(3)?,
-                    ui_map_id: row.get(4)?,
-                    map_x: row.get(5)?,
-                    map_y: row.get(6)?,
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([placement::REACH_MS], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            placement::Moment {
+                at_ms: row.get::<_, i64>(1)? * 1000,
+                ui_map_id: row.get(2)?,
+            },
+            placement::Point {
+                at_ms: row.get(3)?,
+                ui_map_id: row.get(4)?,
+                map_x: row.get(5)?,
+                map_y: row.get(6)?,
+            },
+        ))
+    })?;
     let mut wanting: HashMap<i64, (placement::Moment, Vec<placement::Point>)> = HashMap::new();
     for row in rows {
-        let (capture, moment, point) = row.map_err(|error| error.to_string())?;
+        let (capture, moment, point) = row?;
         wanting
             .entry(capture)
             .or_insert_with(|| (moment, Vec::new()))
@@ -389,21 +368,17 @@ pub(super) fn place_captures(connection: &mut Connection) -> Result<(), String> 
     }
     drop(statement);
 
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
+    let transaction = connection.transaction()?;
     for (capture, (moment, points)) in wanting {
         let Some(placed) = placement::place(moment, &points) else {
             continue;
         };
-        transaction
-            .execute(
-                "UPDATE captures SET map_x = ?2, map_y = ?3 WHERE id = ?1",
-                params![capture, placed.map_x, placed.map_y],
-            )
-            .map_err(|error| error.to_string())?;
+        transaction.execute(
+            "UPDATE captures SET map_x = ?2, map_y = ?3 WHERE id = ?1",
+            params![capture, placed.map_x, placed.map_y],
+        )?;
     }
-    transaction.commit().map_err(|error| error.to_string())?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -422,14 +397,12 @@ pub fn set_capture_note(
     capture_id: i64,
     note: &str,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let connection = open_database(database_path)?;
-    let changed = connection
-        .execute(
-            "UPDATE captures SET note = ?2, note_edited_at = ?3 WHERE id = ?1",
-            params![capture_id, captures::note_text(note), now],
-        )
-        .map_err(|error| error.to_string())?;
+    let changed = connection.execute(
+        "UPDATE captures SET note = ?2, note_edited_at = ?3 WHERE id = ?1",
+        params![capture_id, captures::note_text(note), now],
+    )?;
     if changed == 0 {
         return Err("That screenshot is no longer in Chronie's history.".into());
     }
@@ -455,7 +428,7 @@ pub fn set_capture_note(
 ///    survives is a file nothing points at — which wastes space and shows nobody a
 ///    photograph they deleted. The other order would leave a row pointing at nothing, which
 ///    the window draws as a picture that failed to load.
-pub fn delete_capture(database_path: &Path, capture_id: i64, now: i64) -> Result<(), String> {
+pub fn delete_capture(database_path: &Path, capture_id: i64, now: i64) -> Result<(), Failure> {
     let store = store_root(database_path);
     let mut connection = open_database(database_path)?;
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
@@ -465,34 +438,27 @@ pub fn delete_capture(database_path: &Path, capture_id: i64, now: i64) -> Result
             [capture_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     // Deleting something that is already gone is what was asked for, so it is not an error.
     let Some((source_id, file_path, content_hash)) = found else {
         return Ok(());
     };
 
-    transaction
-        .execute("DELETE FROM captures WHERE id = ?1", [capture_id])
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "INSERT INTO capture_deletions (source_id, deleted_at) VALUES (?1, ?2)
+    transaction.execute("DELETE FROM captures WHERE id = ?1", [capture_id])?;
+    transaction.execute(
+        "INSERT INTO capture_deletions (source_id, deleted_at) VALUES (?1, ?2)
              ON CONFLICT(source_id) DO UPDATE SET deleted_at = excluded.deleted_at",
-            params![source_id, now],
-        )
-        .map_err(|error| error.to_string())?;
+        params![source_id, now],
+    )?;
     let shared: i64 = match file_path.as_deref() {
-        Some(path) => transaction
-            .query_row(
-                "SELECT COUNT(*) FROM captures WHERE file_path = ?1",
-                [path],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?,
+        Some(path) => transaction.query_row(
+            "SELECT COUNT(*) FROM captures WHERE file_path = ?1",
+            [path],
+            |row| row.get(0),
+        )?,
         None => 0,
     };
-    transaction.commit().map_err(|error| error.to_string())?;
+    transaction.commit()?;
 
     if let Some(path) = file_path.filter(|_| shared == 0) {
         captures::discard(&store, &path, content_hash.as_deref()).map_err(|error| {
@@ -516,7 +482,7 @@ pub fn delete_capture(database_path: &Path, capture_id: i64, now: i64) -> Result
 /// `None` is an ordinary answer: an entry that never asked for a picture, and a marker whose
 /// file was never found, are both rows with nothing to show. So is a file that has gone missing
 /// underneath a row that says `stored` — which is exactly why the row carries a hash and a size.
-pub fn capture_image(database_path: &Path, capture_id: i64) -> Result<Value, String> {
+pub fn capture_image(database_path: &Path, capture_id: i64) -> Result<Value, Failure> {
     let connection = open_database(database_path)?;
     let Some(image) = stored_image(&connection, capture_id)? else {
         return Ok(serde_json::json!({ "id": capture_id, "image": Value::Null }));
@@ -540,7 +506,7 @@ pub fn capture_image(database_path: &Path, capture_id: i64) -> Result<Value, Str
 ///
 /// A capture this cannot produce one for is left out rather than sent as null, because a row
 /// with no image and a row whose image will not decode draw the same placeholder.
-pub fn capture_thumbnails(database_path: &Path, ids: &[i64]) -> Result<Value, String> {
+pub fn capture_thumbnails(database_path: &Path, ids: &[i64]) -> Result<Value, Failure> {
     let connection = open_database(database_path)?;
     let store = store_root(database_path);
     let mut thumbnails = Map::new();
@@ -571,8 +537,8 @@ struct StoredImage {
     content_hash: Option<String>,
 }
 
-fn stored_image(connection: &Connection, capture_id: i64) -> Result<Option<StoredImage>, String> {
-    connection
+fn stored_image(connection: &Connection, capture_id: i64) -> Result<Option<StoredImage>, Failure> {
+    Ok(connection
         .query_row(
             "SELECT file_path, content_hash FROM captures
              WHERE id = ?1 AND image_state = 'stored' AND file_path IS NOT NULL",
@@ -584,8 +550,7 @@ fn stored_image(connection: &Connection, capture_id: i64) -> Result<Option<Store
                 })
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())
+        .optional()?)
 }
 
 #[cfg(test)]
@@ -1349,7 +1314,10 @@ mod tests {
 
         let error =
             set_capture_note(&install.database, 9999, "nothing to say", 2_000_000_200).unwrap_err();
-        assert!(error.contains("no longer in Chronie's history"), "{error}");
+        assert!(
+            error.report().contains("no longer in Chronie's history"),
+            "{error}"
+        );
     }
 
     // Deleting is the row and the file together, and it stays deleted: `db.entries` never

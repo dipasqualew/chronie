@@ -44,6 +44,7 @@ pub use marks::{delete_transmog_tag, set_transmog_favourite, set_transmog_tag, t
 pub use read_model::{dashboard, newest_segment_end};
 
 use crate::captures::Marker;
+use crate::failure::Failure;
 use crate::ingamesets;
 use crate::look;
 use crate::retention;
@@ -113,7 +114,7 @@ pub fn collect(
     database_path: &Path,
     now: i64,
     options: Options,
-) -> Result<SyncResult, String> {
+) -> Result<SyncResult, Failure> {
     let mut connection = open_database(database_path)?;
     let mut incoming = Vec::new();
     for path in account_files(wow_path) {
@@ -135,8 +136,7 @@ pub fn collect(
                 [&source_key],
                 |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
             )
-            .optional()
-            .map_err(|error| error.to_string())?;
+            .optional()?;
         if previous == Some((source_modified_ns, source_size)) {
             continue;
         }
@@ -200,9 +200,7 @@ pub fn collect(
     )?;
     drop(markers);
 
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
+    let transaction = connection.transaction()?;
     let mut added = 0;
     let mut updated = 0;
     for account in incoming {
@@ -248,7 +246,7 @@ pub fn collect(
     record_images(&transaction, &ingested, now)?;
     link_captures(&transaction)?;
     link_capture_achievements(&transaction)?;
-    transaction.commit().map_err(|error| error.to_string())?;
+    transaction.commit()?;
 
     // After the segments are in, because attaching a position to the visit it was recorded
     // during needs that visit to exist — and a sync that read a log first would leave every
@@ -284,9 +282,8 @@ pub fn collect(
         }
     }
 
-    let segment_count: usize = connection
-        .query_row("SELECT COUNT(*) FROM segments", [], |row| row.get(0))
-        .map_err(|error| error.to_string())?;
+    let segment_count: usize =
+        connection.query_row("SELECT COUNT(*) FROM segments", [], |row| row.get(0))?;
     Ok(SyncResult {
         added,
         updated,

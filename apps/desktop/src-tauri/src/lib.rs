@@ -206,13 +206,10 @@ impl AppState {
         self.data_dir.join("chronie.sqlite3")
     }
 
-    fn save(&self, settings: &Settings) -> Result<(), String> {
-        fs::create_dir_all(&self.data_dir).map_err(|error| error.to_string())?;
-        fs::write(
-            self.settings_path(),
-            serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())
+    fn save(&self, settings: &Settings) -> Result<(), Failure> {
+        fs::create_dir_all(&self.data_dir)?;
+        fs::write(self.settings_path(), serde_json::to_vec_pretty(settings)?)
+            .context("writing the settings file")
     }
 }
 
@@ -313,7 +310,7 @@ fn perform_sync(state: &AppState) -> Result<SyncResult, Failure> {
 #[tauri::command]
 #[specta::specta]
 fn dashboard(state: State<'_, AppState>) -> Result<dto::DashboardPayload, CommandError> {
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 /// One query, typed by the reader, run against their own history.
@@ -330,12 +327,11 @@ async fn run_query(
     state: State<'_, AppState>,
 ) -> Result<dto::QueryAnswer, CommandError> {
     let path = state.database_path();
-    Ok(
+    Ok(dto::convert(
         tauri::async_runtime::spawn_blocking(move || query::run(&path, &sql, limit))
             .await
-            .map_err(|error| format!("That query did not finish: {error}"))?
-            .and_then(dto::convert)?,
-    )
+            .map_err(|error| format!("That query did not finish: {error}"))??,
+    )?)
 }
 
 /// What is in the history, so that a query can be written without reading the migrations.
@@ -343,12 +339,11 @@ async fn run_query(
 #[specta::specta]
 async fn query_schema(state: State<'_, AppState>) -> Result<dto::QuerySchema, CommandError> {
     let path = state.database_path();
-    Ok(
+    Ok(dto::convert(
         tauri::async_runtime::spawn_blocking(move || query::schema(&path))
             .await
-            .map_err(|error| format!("Reading the schema did not finish: {error}"))?
-            .and_then(dto::convert)?,
-    )
+            .map_err(|error| format!("Reading the schema did not finish: {error}"))??,
+    )?)
 }
 
 /// The transmog sets the installed game knows about.
@@ -404,7 +399,9 @@ async fn transmog_appearances(
 #[tauri::command]
 #[specta::specta]
 fn transmog_marks(state: State<'_, AppState>) -> Result<dto::TransmogMarksPayload, CommandError> {
-    Ok(collector::transmog_marks(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(collector::transmog_marks(
+        &state.database_path(),
+    )?)?)
 }
 
 /// The three ways a mark changes, each answering with every mark rather than an
@@ -418,14 +415,13 @@ fn set_transmog_favourite(
     favourite: bool,
     state: State<'_, AppState>,
 ) -> Result<dto::TransmogMarksPayload, CommandError> {
-    Ok(collector::set_transmog_favourite(
+    Ok(dto::convert(collector::set_transmog_favourite(
         &state.database_path(),
         kind.as_str(),
         id,
         favourite,
         Utc::now().timestamp(),
-    )
-    .and_then(dto::convert)?)
+    )?)?)
 }
 
 #[tauri::command]
@@ -437,15 +433,14 @@ fn set_transmog_tag(
     value: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<dto::TransmogMarksPayload, CommandError> {
-    Ok(collector::set_transmog_tag(
+    Ok(dto::convert(collector::set_transmog_tag(
         &state.database_path(),
         kind.as_str(),
         id,
         &key,
         value.as_deref(),
         Utc::now().timestamp(),
-    )
-    .and_then(dto::convert)?)
+    )?)?)
 }
 
 #[tauri::command]
@@ -456,10 +451,12 @@ fn delete_transmog_tag(
     key: String,
     state: State<'_, AppState>,
 ) -> Result<dto::TransmogMarksPayload, CommandError> {
-    Ok(
-        collector::delete_transmog_tag(&state.database_path(), kind.as_str(), id, &key)
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(collector::delete_transmog_tag(
+        &state.database_path(),
+        kind.as_str(),
+        id,
+        &key,
+    )?)?)
 }
 
 /// The sets the reader put together on the character themselves.
@@ -1140,12 +1137,13 @@ where
 #[tauri::command]
 #[specta::specta]
 fn settings(state: State<'_, AppState>) -> Result<dto::SettingsPayload, CommandError> {
-    Ok(state
-        .settings
-        .lock()
-        .map(|settings| settings.clone())
-        .map_err(|_| "Settings lock failed.".to_string())
-        .and_then(dto::convert)?)
+    Ok(dto::convert(
+        state
+            .settings
+            .lock()
+            .map(|settings| settings.clone())
+            .map_err(|_| "Settings lock failed.".to_string())?,
+    )?)
 }
 
 /// Asks the user for the game folder.
@@ -1256,7 +1254,7 @@ fn set_combat_logging(
 /// the database reaches — and nothing else. An install with no game folder chosen has nothing
 /// to look at and says so rather than failing: the timeline is drawn before Setup is finished,
 /// and a view that errors because a folder is missing is worse than one that stays quiet.
-fn session_gap_now(state: &AppState) -> Result<gap::Verdict, String> {
+fn session_gap_now(state: &AppState) -> Result<gap::Verdict, Failure> {
     let wow_path = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         configured_wow_path(&settings).ok()
@@ -1298,7 +1296,7 @@ fn session_gap(state: State<'_, AppState>) -> Result<gap::Verdict, CommandError>
 /// Answered whether or not the sweeper is on, because this is the dry run: the panel shows the
 /// files and the size before the switch is thrown, so the first sweep on somebody's machine is
 /// a thing they agreed to rather than a thing they discovered afterwards.
-fn retention_report(state: &AppState) -> Result<retention::Report, String> {
+fn retention_report(state: &AppState) -> Result<retention::Report, Failure> {
     let (wow_path, retain_days) = {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         (
@@ -1407,7 +1405,7 @@ fn add_activity(
     metadata: dto::ActivityMetadata,
     state: State<'_, AppState>,
 ) -> Result<dto::DashboardPayload, CommandError> {
-    let metadata = serde_json::to_value(metadata).map_err(|error| error.to_string())?;
+    let metadata = serde_json::to_value(metadata).context("reading an activity's metadata")?;
     collector::add_activity(
         &state.database_path(),
         segment_id,
@@ -1415,7 +1413,7 @@ fn add_activity(
         &metadata,
         Utc::now().timestamp(),
     )?;
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 #[tauri::command]
@@ -1426,7 +1424,7 @@ fn update_activity(
     metadata: dto::ActivityMetadata,
     state: State<'_, AppState>,
 ) -> Result<dto::DashboardPayload, CommandError> {
-    let metadata = serde_json::to_value(metadata).map_err(|error| error.to_string())?;
+    let metadata = serde_json::to_value(metadata).context("reading an activity's metadata")?;
     collector::update_activity(
         &state.database_path(),
         activity_id,
@@ -1434,7 +1432,7 @@ fn update_activity(
         &metadata,
         Utc::now().timestamp(),
     )?;
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 #[tauri::command]
@@ -1444,7 +1442,7 @@ fn delete_activity(
     state: State<'_, AppState>,
 ) -> Result<dto::DashboardPayload, CommandError> {
     collector::delete_activity(&state.database_path(), activity_id, Utc::now().timestamp())?;
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 #[tauri::command]
@@ -1454,7 +1452,7 @@ fn reset_activities(
     state: State<'_, AppState>,
 ) -> Result<dto::DashboardPayload, CommandError> {
     collector::reset_activities(&state.database_path(), segment_id, Utc::now().timestamp())?;
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 /// The two ways somebody changes a capture, answering with the whole dashboard for the same
@@ -1474,7 +1472,7 @@ fn set_capture_note(
         &note,
         Utc::now().timestamp(),
     )?;
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 #[tauri::command]
@@ -1484,7 +1482,7 @@ fn delete_capture(
     state: State<'_, AppState>,
 ) -> Result<dto::DashboardPayload, CommandError> {
     collector::delete_capture(&state.database_path(), capture_id, Utc::now().timestamp())?;
-    Ok(load_dashboard(&state.database_path()).and_then(dto::convert)?)
+    Ok(dto::convert(load_dashboard(&state.database_path())?)?)
 }
 
 /// The pictures a grid of captures needs, asked for once the rows are drawn.
@@ -1499,10 +1497,10 @@ async fn capture_thumbnails(
     capture_ids: Vec<i64>,
     state: State<'_, AppState>,
 ) -> Result<dto::CaptureThumbnailsPayload, CommandError> {
-    Ok(
-        collector::capture_thumbnails(&state.database_path(), &capture_ids)
-            .and_then(dto::convert)?,
-    )
+    Ok(dto::convert(collector::capture_thumbnails(
+        &state.database_path(),
+        &capture_ids,
+    )?)?)
 }
 
 /// One capture at the size it was taken, which is what opening a picture asks for.
@@ -1512,7 +1510,10 @@ async fn capture_image(
     capture_id: i64,
     state: State<'_, AppState>,
 ) -> Result<dto::CaptureImagePayload, CommandError> {
-    Ok(collector::capture_image(&state.database_path(), capture_id).and_then(dto::convert)?)
+    Ok(dto::convert(collector::capture_image(
+        &state.database_path(),
+        capture_id,
+    )?)?)
 }
 
 /// The one file in the addon the app writes rather than copies: what it has been asked to do.
@@ -1584,11 +1585,11 @@ fn stage_addon(
     settings: &Settings,
     requests: &[ingamesets::Request],
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for (relative, contents) in BUNDLED_ADDON {
         let output = destination.join(relative);
         if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            fs::create_dir_all(parent)?;
         }
         if *relative == SETTINGS_MODULE {
             fs::write(
@@ -1600,7 +1601,7 @@ fn stage_addon(
         } else {
             fs::write(&output, contents)
         }
-        .map_err(|error| error.to_string())?;
+        .with_context(|| format!("writing {}", output.display()))?;
     }
     Ok(())
 }
@@ -1656,33 +1657,37 @@ fn replace_addon(
     settings: &Settings,
     requests: &[ingamesets::Request],
     now: i64,
-) -> Result<InstallResult, String> {
+) -> Result<InstallResult, Failure> {
     let addons = wow_path.join("Interface").join("AddOns");
     if !addons.is_dir() {
-        return Err(format!("AddOns folder not found at {}.", addons.display()));
+        return Err(Failure::new(
+            FailureCode::InstallNotFound,
+            "Chronie could not find the game's AddOns folder. Check the game folder in Setup.",
+        )
+        .context(format!("looking for {}", addons.display())));
     }
     let staging = tempfile::Builder::new()
         .prefix(".chronie-install-")
         .tempdir_in(&addons)
-        .map_err(|error| error.to_string())?;
+        .context("making a staging folder beside the game's AddOns")?;
     stage_addon(staging.path(), settings, requests, now)?;
     let target = addons.join("chronie");
     let backup = addons.join(".chronie-backup");
     if backup.exists() {
-        fs::remove_dir_all(&backup).map_err(|error| error.to_string())?;
+        fs::remove_dir_all(&backup)?;
     }
     if target.exists() {
-        fs::rename(&target, &backup).map_err(|error| error.to_string())?;
+        fs::rename(&target, &backup)?;
     }
     let staged_path = staging.keep();
     if let Err(error) = fs::rename(&staged_path, &target) {
         if backup.exists() {
             let _ = fs::rename(&backup, &target);
         }
-        return Err(format!("Could not activate the staged addon: {error}"));
+        return Err(Failure::from(error).context("moving the staged addon into place"));
     }
     if backup.exists() {
-        fs::remove_dir_all(backup).map_err(|error| error.to_string())?;
+        fs::remove_dir_all(backup)?;
     }
     Ok(InstallResult {
         version: bundled_addon_version(),
@@ -1794,10 +1799,10 @@ async fn check_for_app_update(
     }
     let Some(update) = app
         .updater()
-        .map_err(|error| error.to_string())?
+        .context("asking Tauri for the updater")?
         .check()
         .await
-        .map_err(|error| error.to_string())?
+        .context("asking the update endpoint what it has")?
     else {
         return Ok(AppUpdateResult {
             updated: false,
@@ -1808,7 +1813,7 @@ async fn check_for_app_update(
     update
         .download_and_install(|_, _| {}, || {})
         .await
-        .map_err(|error| error.to_string())?;
+        .context("downloading and installing the update")?;
     Ok(AppUpdateResult {
         updated: true,
         version,
@@ -2683,7 +2688,10 @@ mod tests {
 
         let error = replace_addon(root.path(), &Settings::default(), &[], 0).unwrap_err();
 
-        assert!(error.contains("AddOns"), "unhelpful error: {error}");
+        assert!(
+            error.report().contains("AddOns"),
+            "unhelpful error: {error}"
+        );
         assert_eq!(tree(root.path()), Vec::<String>::new());
         assert!(
             bystander.is_dir(),

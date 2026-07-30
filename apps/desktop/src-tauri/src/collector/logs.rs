@@ -19,6 +19,8 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
 
+use crate::failure::Failure;
+
 /// How many new bytes of combat log one sync will get through.
 ///
 /// A first pass over a season of logs is gigabytes, and doing it in one go is a sync that
@@ -32,7 +34,7 @@ const LOG_BYTES_PER_SYNC: u64 = 64 * 1024 * 1024;
 /// The cursor comes off the log's own row; the map and the sample clock are read back out of
 /// the rows the last read wrote, rather than kept a second time on the cursor. One place for
 /// each fact is one place for it to be wrong.
-fn log_resume(connection: &Connection, name: &str) -> Result<(Option<i64>, Resume), String> {
+fn log_resume(connection: &Connection, name: &str) -> Result<(Option<i64>, Resume), Failure> {
     let Some((log_id, cursor)) = connection
         .query_row(
             "SELECT id, byte_offset, byte_size, head_hash, head_bytes
@@ -50,8 +52,7 @@ fn log_resume(connection: &Connection, name: &str) -> Result<(Option<i64>, Resum
                 ))
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())?
+        .optional()?
     else {
         return Ok((None, Resume::default()));
     };
@@ -72,8 +73,7 @@ fn log_resume(connection: &Connection, name: &str) -> Result<(Option<i64>, Resum
                 })
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     let sampled = connection
         .query_row(
             "SELECT at_ms, ui_map_id FROM log_positions
@@ -86,8 +86,7 @@ fn log_resume(connection: &Connection, name: &str) -> Result<(Option<i64>, Resum
                 })
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     Ok((
         Some(log_id),
         Resume {
@@ -108,11 +107,10 @@ fn upsert_log(
     name: &str,
     reading: &Reading,
     now: i64,
-) -> Result<i64, String> {
+) -> Result<i64, Failure> {
     let facts = &reading.facts;
-    transaction
-        .execute(
-            "INSERT INTO combat_logs (
+    transaction.execute(
+        "INSERT INTO combat_logs (
                  name, byte_offset, byte_size, head_hash, head_bytes, lines_read, restarts,
                  advanced, first_event_at, last_event_at, first_seen_at, last_seen_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
@@ -138,53 +136,48 @@ fn upsert_log(
                  first_event_at = COALESCE(combat_logs.first_event_at, excluded.first_event_at),
                  last_event_at = COALESCE(excluded.last_event_at, combat_logs.last_event_at),
                  last_seen_at = excluded.last_seen_at",
-            params![
-                name,
-                reading.cursor.offset as i64,
-                reading.cursor.size as i64,
-                reading.cursor.head,
-                reading.cursor.head_bytes as i64,
-                facts.lines as i64,
-                i64::from(reading.restarted.is_some()),
-                // Nothing to say until a line has been read that could have carried them.
-                (facts.lines > 0).then(|| i64::from(facts.advanced_seen)),
-                facts.first_at,
-                facts.last_at,
-                now,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .query_row(
-            "SELECT id FROM combat_logs WHERE name = ?1",
-            [name],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())
+        params![
+            name,
+            reading.cursor.offset as i64,
+            reading.cursor.size as i64,
+            reading.cursor.head,
+            reading.cursor.head_bytes as i64,
+            facts.lines as i64,
+            i64::from(reading.restarted.is_some()),
+            // Nothing to say until a line has been read that could have carried them.
+            (facts.lines > 0).then(|| i64::from(facts.advanced_seen)),
+            facts.first_at,
+            facts.last_at,
+            now,
+        ],
+    )?;
+    Ok(transaction.query_row(
+        "SELECT id FROM combat_logs WHERE name = ?1",
+        [name],
+        |row| row.get(0),
+    )?)
 }
 
 fn insert_map(
     transaction: &Transaction<'_>,
     log_id: i64,
     bounds: &MapBounds,
-) -> Result<(), String> {
-    transaction
-        .execute(
-            "INSERT INTO log_maps (log_id, ui_map_id, name, x0, x1, y0, y1, changed_at)
+) -> Result<(), Failure> {
+    transaction.execute(
+        "INSERT INTO log_maps (log_id, ui_map_id, name, x0, x1, y0, y1, changed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(log_id, changed_at, ui_map_id) DO NOTHING",
-            params![
-                log_id,
-                bounds.ui_map_id,
-                bounds.name,
-                bounds.x0,
-                bounds.x1,
-                bounds.y0,
-                bounds.y1,
-                bounds.at,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        params![
+            log_id,
+            bounds.ui_map_id,
+            bounds.name,
+            bounds.x0,
+            bounds.x1,
+            bounds.y0,
+            bounds.y1,
+            bounds.at,
+        ],
+    )?;
     Ok(())
 }
 
@@ -197,30 +190,28 @@ fn insert_position(
     transaction: &Transaction<'_>,
     log_id: i64,
     point: &Position,
-) -> Result<(), String> {
-    transaction
-        .execute(
-            "INSERT INTO log_positions (
+) -> Result<(), Failure> {
+    transaction.execute(
+        "INSERT INTO log_positions (
                  log_id, at_ms, actor_guid, actor_name, ui_map_id,
                  world_x, world_y, map_x, map_y, facing
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(log_id, at_ms, actor_guid) DO UPDATE SET
                  map_x = COALESCE(excluded.map_x, log_positions.map_x),
                  map_y = COALESCE(excluded.map_y, log_positions.map_y)",
-            params![
-                log_id,
-                point.at,
-                point.actor_guid,
-                point.actor_name,
-                point.ui_map_id,
-                point.world_x,
-                point.world_y,
-                point.map_x,
-                point.map_y,
-                point.facing,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        params![
+            log_id,
+            point.at,
+            point.actor_guid,
+            point.actor_name,
+            point.ui_map_id,
+            point.world_x,
+            point.world_y,
+            point.map_x,
+            point.map_y,
+            point.facing,
+        ],
+    )?;
     Ok(())
 }
 
@@ -235,7 +226,7 @@ fn store_fight(
     log_id: i64,
     fight: &Fight,
     now: i64,
-) -> Result<Option<i64>, String> {
+) -> Result<Option<i64>, Failure> {
     let kind = match fight.kind {
         Fought::Encounter => "encounter",
         Fought::Keystone => "keystone",
@@ -255,18 +246,15 @@ fn store_fight(
                 params![log_id, kind, fight.encounter_id],
                 |row| row.get(0),
             )
-            .optional()
-            .map_err(|error| error.to_string())?;
+            .optional()?;
         if let Some(id) = open {
-            transaction
-                .execute(
-                    "UPDATE log_fights SET
+            transaction.execute(
+                "UPDATE log_fights SET
                          ended_at = ?2, success = ?3, duration_ms = ?4,
                          name = CASE WHEN ?5 = '' THEN name ELSE ?5 END
                      WHERE id = ?1",
-                    params![id, ended_at, fight.success, fight.duration_ms, fight.name],
-                )
-                .map_err(|error| error.to_string())?;
+                params![id, ended_at, fight.success, fight.duration_ms, fight.name],
+            )?;
             return Ok(Some(id));
         }
         // Nothing open to close, so this is a fight whose beginning was never read. Written
@@ -278,15 +266,13 @@ fn store_fight(
                 params![log_id, kind, fight.encounter_id, ended_at],
                 |row| row.get(0),
             )
-            .optional()
-            .map_err(|error| error.to_string())?;
+            .optional()?;
         if let Some(id) = existing {
             return Ok(Some(id));
         }
     }
-    transaction
-        .execute(
-            "INSERT INTO log_fights (
+    transaction.execute(
+        "INSERT INTO log_fights (
                  log_id, kind, encounter_id, name, difficulty_id, group_size, instance_id,
                  keystone_level, affixes_json, started_at, ended_at, success, duration_ms,
                  recorded_at
@@ -304,25 +290,24 @@ fn store_fight(
                  ended_at = COALESCE(excluded.ended_at, log_fights.ended_at),
                  success = COALESCE(excluded.success, log_fights.success),
                  duration_ms = COALESCE(excluded.duration_ms, log_fights.duration_ms)",
-            params![
-                log_id,
-                kind,
-                fight.encounter_id,
-                fight.name,
-                fight.difficulty_id,
-                fight.group_size,
-                fight.instance_id,
-                fight.keystone_level,
-                affixes.to_string(),
-                fight.started_at,
-                fight.ended_at,
-                fight.success,
-                fight.duration_ms,
-                now,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
+        params![
+            log_id,
+            kind,
+            fight.encounter_id,
+            fight.name,
+            fight.difficulty_id,
+            fight.group_size,
+            fight.instance_id,
+            fight.keystone_level,
+            affixes.to_string(),
+            fight.started_at,
+            fight.ended_at,
+            fight.success,
+            fight.duration_ms,
+            now,
+        ],
+    )?;
+    Ok(transaction
         .query_row(
             // Ordered, because the row just written is the only one this can mean and a fight
             // with no beginning is not covered by the unique key that would otherwise say so.
@@ -332,19 +317,17 @@ fn store_fight(
             params![log_id, kind, fight.encounter_id, fight.started_at],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(|error| error.to_string())
+        .optional()?)
 }
 
 fn insert_combatants(
     transaction: &Transaction<'_>,
     fight_row: i64,
     fight: &Fight,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for combatant in &fight.combatants {
-        transaction
-            .execute(
-                "INSERT INTO log_combatants (
+        transaction.execute(
+            "INSERT INTO log_combatants (
                      fight_id, guid, faction, spec_id, talents_json, equipment_json
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(fight_id, guid) DO UPDATE SET
@@ -352,16 +335,15 @@ fn insert_combatants(
                      spec_id = COALESCE(excluded.spec_id, log_combatants.spec_id),
                      talents_json = excluded.talents_json,
                      equipment_json = excluded.equipment_json",
-                params![
-                    fight_row,
-                    combatant.guid,
-                    combatant.faction,
-                    combatant.spec_id,
-                    combatant.talents.to_string(),
-                    combatant.equipment.to_string(),
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                fight_row,
+                combatant.guid,
+                combatant.faction,
+                combatant.spec_id,
+                combatant.talents.to_string(),
+                combatant.equipment.to_string(),
+            ],
+        )?;
     }
     Ok(())
 }
@@ -376,13 +358,12 @@ fn insert_combatants(
 /// A point prefers the segment whose character the log named — every position carries the
 /// name the client wrote — and falls back on the time alone, which is enough whenever only
 /// one character was being played, and that is always.
-fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
+fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), Failure> {
     // Ranked in a CTE rather than ordered inside a correlated subquery, because SQLite will
     // not resolve a reference to the row being updated from a subquery's ORDER BY — and the
     // preference is exactly the sort of thing that belongs in an ORDER BY.
-    transaction
-        .execute(
-            "WITH ranked AS (
+    transaction.execute(
+        "WITH ranked AS (
                  SELECT
                      p.id AS point,
                      s.id AS segment,
@@ -408,16 +389,14 @@ fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
                  WHERE ranked.point = log_positions.id AND ranked.rank = 1
              )
              WHERE segment_id IS NULL",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
+        [],
+    )?;
     // A fight has no character on it, so it goes to the visit it overlaps most. A boss pulled
     // at the very end of one segment and finished at the start of the next belongs to
     // whichever of them it spent longer inside, which is the only answer that does not need
     // somebody to pick a tie-break rule out of the air.
-    transaction
-        .execute(
-            "WITH bounded AS (
+    transaction.execute(
+        "WITH bounded AS (
                  SELECT
                      id,
                      COALESCE(started_at, ended_at) / 1000 AS from_second,
@@ -445,9 +424,8 @@ fn place_log_facts(transaction: &Transaction<'_>) -> Result<(), String> {
                  WHERE ranked.fight = log_fights.id AND ranked.rank = 1
              )
              WHERE segment_id IS NULL",
-            [],
-        )
-        .map_err(|error| error.to_string())?;
+        [],
+    )?;
     Ok(())
 }
 
@@ -479,15 +457,14 @@ pub(super) fn compact_positions(
     connection: &Connection,
     retain_days: u32,
     now: i64,
-) -> Result<usize, String> {
+) -> Result<usize, Failure> {
     let window = i64::from(retain_days.max(retention::MIN_RETAIN_DAYS)) * 86_400;
     let cutoff_ms = (now - window) * 1000;
-    connection
-        .execute(
-            // The bounds on the anchor are in seconds, because that is what `captures` stores and
-            // what its index is over, and they are widened by a second at each end so that the
-            // truncating division cannot narrow the window it is protecting.
-            "DELETE FROM log_positions
+    Ok(connection.execute(
+        // The bounds on the anchor are in seconds, because that is what `captures` stores and
+        // what its index is over, and they are widened by a second at each end so that the
+        // truncating division cannot narrow the window it is protecting.
+        "DELETE FROM log_positions
              WHERE at_ms < ?1
                AND NOT EXISTS (
                    SELECT 1 FROM captures
@@ -495,9 +472,8 @@ pub(super) fn compact_positions(
                          BETWEEN (log_positions.at_ms - ?2) / 1000 - 1
                              AND (log_positions.at_ms + ?2) / 1000 + 1
                )",
-            params![cutoff_ms, placement::KEEP_MS],
-        )
-        .map_err(|error| error.to_string())
+        params![cutoff_ms, placement::KEEP_MS],
+    )?)
 }
 
 /// Reads what is new in every combat log this install has, and files what it finds.
@@ -513,7 +489,7 @@ pub(super) fn ingest_logs(
     connection: &mut Connection,
     wow_path: &Path,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let mut budget = LOG_BYTES_PER_SYNC;
     let mut anything = false;
     for found in combatlog::logs(wow_path) {
@@ -529,9 +505,7 @@ pub(super) fn ingest_logs(
         budget = budget.saturating_sub(reading.consumed);
         anything = true;
 
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
+        let transaction = connection.transaction()?;
         let log_id = upsert_log(&transaction, &found.file.name, &reading, now)?;
         for bounds in &reading.facts.maps {
             insert_map(&transaction, log_id, bounds)?;
@@ -544,14 +518,12 @@ pub(super) fn ingest_logs(
                 insert_combatants(&transaction, row, fight)?;
             }
         }
-        transaction.commit().map_err(|error| error.to_string())?;
+        transaction.commit()?;
     }
     if anything {
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
+        let transaction = connection.transaction()?;
         place_log_facts(&transaction)?;
-        transaction.commit().map_err(|error| error.to_string())?;
+        transaction.commit()?;
     }
     Ok(())
 }
@@ -563,25 +535,22 @@ pub(super) fn ingest_logs(
 /// This is the whole of what the retention rule is allowed to believe about what has been
 /// ingested. It comes off the same row the incremental reader keeps its cursor on, so "read to
 /// the end" here and "read to the end" there cannot drift apart into two different claims.
-fn log_cursors(connection: &Connection) -> Result<HashMap<String, retention::Cursor>, String> {
-    let mut statement = connection
-        .prepare("SELECT name, byte_offset, byte_size, lines_read FROM combat_logs")
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                retention::Cursor {
-                    offset: row.get::<_, i64>(1)?.max(0) as u64,
-                    size: row.get::<_, i64>(2)?.max(0) as u64,
-                    lines: row.get(3)?,
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+fn log_cursors(connection: &Connection) -> Result<HashMap<String, retention::Cursor>, Failure> {
+    let mut statement =
+        connection.prepare("SELECT name, byte_offset, byte_size, lines_read FROM combat_logs")?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            retention::Cursor {
+                offset: row.get::<_, i64>(1)?.max(0) as u64,
+                size: row.get::<_, i64>(2)?.max(0) as u64,
+                lines: row.get(3)?,
+            },
+        ))
+    })?;
     let mut cursors = HashMap::new();
     for row in rows {
-        let (name, cursor) = row.map_err(|error| error.to_string())?;
+        let (name, cursor) = row?;
         cursors.insert(name, cursor);
     }
     Ok(cursors)
@@ -604,7 +573,7 @@ pub(super) fn sweep_logs(
     wow_path: &Path,
     retain_days: u32,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let cursors = log_cursors(connection)?;
     let plan = retention::plan(&combatlog::logs(wow_path), &cursors, retain_days, now);
     for found in &plan.doomed {
@@ -615,21 +584,19 @@ pub(super) fn sweep_logs(
             .get(&found.file.name)
             .map(|cursor| cursor.lines)
             .unwrap_or_default();
-        connection
-            .execute(
-                "INSERT INTO log_deletions (
+        connection.execute(
+            "INSERT INTO log_deletions (
                      name, bytes, modified_at, lines_read, retain_days, deleted_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    found.file.name,
-                    found.file.bytes as i64,
-                    found.file.modified,
-                    lines,
-                    retain_days,
-                    now,
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                found.file.name,
+                found.file.bytes as i64,
+                found.file.modified,
+                lines,
+                retain_days,
+                now,
+            ],
+        )?;
     }
     Ok(())
 }
@@ -646,32 +613,28 @@ pub fn retention_report(
     wow_path: Option<&Path>,
     retain_days: Option<u32>,
     now: i64,
-) -> Result<retention::Report, String> {
+) -> Result<retention::Report, Failure> {
     let days = retain_days.unwrap_or(retention::DEFAULT_RETAIN_DAYS);
     let connection = open_database(database_path)?;
     let logs = wow_path.map(combatlog::logs).unwrap_or_default();
     let plan = retention::plan(&logs, &log_cursors(&connection)?, days, now);
     let mut report = retention::Report::of(&plan, retain_days.is_some(), days);
-    let mut statement = connection
-        .prepare(
-            "SELECT name, bytes, modified_at, lines_read, retain_days, deleted_at
+    let mut statement = connection.prepare(
+        "SELECT name, bytes, modified_at, lines_read, retain_days, deleted_at
              FROM log_deletions ORDER BY deleted_at DESC, id DESC LIMIT ?1",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([retention::SHOWN as i64], |row| {
-            Ok(retention::Gone {
-                name: row.get(0)?,
-                bytes: row.get::<_, i64>(1)?.max(0) as u64,
-                modified: row.get(2)?,
-                lines_read: row.get(3)?,
-                retain_days: row.get::<_, i64>(4)?.max(0) as u32,
-                deleted_at: row.get(5)?,
-            })
+    )?;
+    let rows = statement.query_map([retention::SHOWN as i64], |row| {
+        Ok(retention::Gone {
+            name: row.get(0)?,
+            bytes: row.get::<_, i64>(1)?.max(0) as u64,
+            modified: row.get(2)?,
+            lines_read: row.get(3)?,
+            retain_days: row.get::<_, i64>(4)?.max(0) as u32,
+            deleted_at: row.get(5)?,
         })
-        .map_err(|error| error.to_string())?;
+    })?;
     for row in rows {
-        report.removed.push(row.map_err(|error| error.to_string())?);
+        report.removed.push(row?);
     }
     Ok(report)
 }

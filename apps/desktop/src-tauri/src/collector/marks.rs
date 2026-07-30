@@ -10,6 +10,8 @@ use crate::marks;
 use rusqlite::{params, Connection};
 use std::{collections::HashMap, path::Path};
 
+use crate::failure::Failure;
+
 /// Every mark anybody has made, as one payload.
 ///
 /// All of them, rather than the ones a browser is about to draw. These are the rows one person
@@ -21,7 +23,7 @@ use std::{collections::HashMap, path::Path};
 /// A subject with nothing said about it is simply absent. Ordered by subject and then by key,
 /// so two reads of an unchanged database are the same bytes and a list of chips does not
 /// reshuffle itself under somebody adding an unrelated tag.
-pub fn transmog_marks(database_path: &Path) -> Result<marks::MarksPayload, String> {
+pub fn transmog_marks(database_path: &Path) -> Result<marks::MarksPayload, Failure> {
     let connection = open_database(database_path)?;
     read_marks(&connection)
 }
@@ -37,26 +39,22 @@ pub fn set_transmog_favourite(
     id: i64,
     favourite: bool,
     now: i64,
-) -> Result<marks::MarksPayload, String> {
+) -> Result<marks::MarksPayload, Failure> {
     let kind = marks::subject_kind(kind)?;
     let id = marks::subject_id(id)?;
     let connection = open_database(database_path)?;
     if favourite {
-        connection
-            .execute(
-                "INSERT INTO transmog_favourites (subject_kind, subject_id, created_at)
+        connection.execute(
+            "INSERT INTO transmog_favourites (subject_kind, subject_id, created_at)
                  VALUES (?1, ?2, ?3)
                  ON CONFLICT(subject_kind, subject_id) DO NOTHING",
-                params![kind, id, now],
-            )
-            .map_err(|error| error.to_string())?;
+            params![kind, id, now],
+        )?;
     } else {
-        connection
-            .execute(
-                "DELETE FROM transmog_favourites WHERE subject_kind = ?1 AND subject_id = ?2",
-                params![kind, id],
-            )
-            .map_err(|error| error.to_string())?;
+        connection.execute(
+            "DELETE FROM transmog_favourites WHERE subject_kind = ?1 AND subject_id = ?2",
+            params![kind, id],
+        )?;
     }
     read_marks(&connection)
 }
@@ -75,21 +73,19 @@ pub fn set_transmog_tag(
     key: &str,
     value: Option<&str>,
     now: i64,
-) -> Result<marks::MarksPayload, String> {
+) -> Result<marks::MarksPayload, Failure> {
     let kind = marks::subject_kind(kind)?;
     let id = marks::subject_id(id)?;
     let key = marks::clean_key(key)?;
     let value = marks::clean_value(value)?;
     let connection = open_database(database_path)?;
-    connection
-        .execute(
-            "INSERT INTO transmog_tags (subject_kind, subject_id, key, value, created_at)
+    connection.execute(
+        "INSERT INTO transmog_tags (subject_kind, subject_id, key, value, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(subject_kind, subject_id, key)
              DO UPDATE SET key = excluded.key, value = excluded.value",
-            params![kind, id, key, value, now],
-        )
-        .map_err(|error| error.to_string())?;
+        params![kind, id, key, value, now],
+    )?;
     read_marks(&connection)
 }
 
@@ -100,18 +96,16 @@ pub fn delete_transmog_tag(
     kind: &str,
     id: i64,
     key: &str,
-) -> Result<marks::MarksPayload, String> {
+) -> Result<marks::MarksPayload, Failure> {
     let kind = marks::subject_kind(kind)?;
     let id = marks::subject_id(id)?;
     let key = marks::clean_key(key)?;
     let connection = open_database(database_path)?;
-    connection
-        .execute(
-            "DELETE FROM transmog_tags
+    connection.execute(
+        "DELETE FROM transmog_tags
              WHERE subject_kind = ?1 AND subject_id = ?2 AND key = ?3",
-            params![kind, id, key],
-        )
-        .map_err(|error| error.to_string())?;
+        params![kind, id, key],
+    )?;
     read_marks(&connection)
 }
 
@@ -122,23 +116,19 @@ pub fn delete_transmog_tag(
 /// on one side to say so. The order of the marks is the order the favourites and then the tags
 /// arrive in — both sorted by subject — so a subject reached from either half lands in the
 /// same place.
-fn read_marks(connection: &Connection) -> Result<marks::MarksPayload, String> {
+fn read_marks(connection: &Connection) -> Result<marks::MarksPayload, Failure> {
     let mut marks: Vec<marks::Mark> = Vec::new();
     let mut at: HashMap<(String, i64), usize> = HashMap::new();
 
-    let mut starred = connection
-        .prepare(
-            "SELECT subject_kind, subject_id FROM transmog_favourites
+    let mut starred = connection.prepare(
+        "SELECT subject_kind, subject_id FROM transmog_favourites
              ORDER BY subject_kind, subject_id",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = starred
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = starred.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
     for row in rows {
-        let (kind, id) = row.map_err(|error| error.to_string())?;
+        let (kind, id) = row?;
         let index = *at.entry((kind.clone(), id)).or_insert_with(|| {
             marks.push(marks::Mark {
                 kind,
@@ -151,26 +141,22 @@ fn read_marks(connection: &Connection) -> Result<marks::MarksPayload, String> {
         marks[index].favourite = true;
     }
 
-    let mut tagged = connection
-        .prepare(
-            "SELECT subject_kind, subject_id, key, value FROM transmog_tags
+    let mut tagged = connection.prepare(
+        "SELECT subject_kind, subject_id, key, value FROM transmog_tags
              ORDER BY subject_kind, subject_id, key",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = tagged
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                marks::Tag {
-                    key: row.get(2)?,
-                    value: row.get(3)?,
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = tagged.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            marks::Tag {
+                key: row.get(2)?,
+                value: row.get(3)?,
+            },
+        ))
+    })?;
     for row in rows {
-        let (kind, id, tag) = row.map_err(|error| error.to_string())?;
+        let (kind, id, tag) = row?;
         let index = *at.entry((kind.clone(), id)).or_insert_with(|| {
             marks.push(marks::Mark {
                 kind,
