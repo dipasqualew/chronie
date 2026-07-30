@@ -13,6 +13,7 @@ pub mod customization;
 pub mod customsets;
 pub mod db2;
 mod dto;
+pub mod failure;
 pub mod gallery;
 pub mod gap;
 pub mod glb;
