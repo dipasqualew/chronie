@@ -859,6 +859,9 @@ end
 ---  `playerGUID` is the client's unique id for the logged-in character; `race` and `sex` are
 ---  what UnitRace and UnitSex say about them, and `customizations` is what a barber's screen
 ---  would enumerate — nil, as the real client answers everywhere else. See setCustomizations.
+---  `censusMounts` maps a mount id to `{ name, spell, source, collected, ... }` and `censusTrees`
+---  maps an achievement category to the rows inside it, both being what the account *holds*
+---  rather than what it was watched collecting; `clientBuild` is the game this is a census of.
 ---  `cvars` maps a client setting to its value; `protectedCVars` names the ones this client
 ---  refuses to let an addon write, mapping each to "raise" or to any truthy value for a write
 ---  that is silently dropped. `combatLogging` is whether the client starts out logging.
@@ -937,6 +940,32 @@ function fake.newEnv(options)
     local held = options.held or {}
     local achievementNames = options.achievements or {}
     local mountNames = options.mounts or {}
+    -- What the account *holds*, for the census to walk — as opposed to `achievements` and
+    -- `mounts` above, which are the names the addon looks up when it watches one being
+    -- collected. Small on purpose: the walk is covered against fake domains in census_spec.lua,
+    -- and what a booted addon has to prove is only that the client's real calls are wired to it.
+    -- Keyed the way the client keys them: a mount by its id, an achievement by its category and
+    -- then by the offset inside it, because the tree has no id list to be walked by.
+    local censusMounts = options.censusMounts or {
+        [6] = { name = "Swift Zhevra", spell = 37719, source = 4, collected = true },
+        [9] = { name = "Kua'fon", spell = 253058, source = 2, collected = false },
+    }
+    local censusTrees = options.censusTrees or {
+        [92] = {
+            {
+                id = 4842, name = "Herald of the Titans", points = 25,
+                month = 8, day = 4, year = 9, completed = true, mine = true,
+            },
+            { id = 2144, name = "The Immortal", points = 25, completed = false },
+        },
+    }
+    -- Which game this is, as GetBuildInfo's version and build joined. A census taken against
+    -- another one is a census of a different game, so this is what a test changes to model a
+    -- patch having landed between two sessions.
+    local clientBuild = options.clientBuild
+    if clientBuild == nil then
+        clientBuild = "12.0.5.67823"
+    end
     local pets = options.pets or {}
     local toyNames = options.toys or {}
     local housingItems = options.housingItems or {}
@@ -1006,6 +1035,40 @@ function fake.newEnv(options)
     local protectedCVars = options.protectedCVars or {}
     local logging = options.combatLogging == true
     local setCVarCalls = {}
+
+    ---What `GetNumCompletedAchievements` would answer: the whole tree, and then the account's
+    ---own completed total.
+    ---
+    ---Counted off the same rows the walk reads, and skipping a guild's achievements exactly as
+    ---`ns.achievementCensus` does, so that the census's own audit agrees with the client it just
+    ---walked. A fake that disagreed would have every booted addon walking the tree again at
+    ---every single loading screen, which is the behaviour the counter exists to prevent.
+    ---@return integer total, integer completed
+    local function completedAchievements()
+        local total, completed = 0, 0
+        for _, rows in pairs(censusTrees) do
+            for _, row in ipairs(rows) do
+                total = total + 1
+                if row.completed and not row.guild then
+                    completed = completed + 1
+                end
+            end
+        end
+        return total, completed
+    end
+
+    ---The keys of a table as a sorted list, which is what both of the client's enumerations
+    ---hand over: the mount journal's ids, and the achievement tree's categories.
+    ---@param source table
+    ---@return integer[]
+    local function sortedKeys(source)
+        local keys = {}
+        for key in pairs(source) do
+            keys[#keys + 1] = key
+        end
+        table.sort(keys)
+        return keys
+    end
 
     local env = {
         createFrame = createFrame,
@@ -1161,6 +1224,52 @@ function fake.newEnv(options)
                 currencies = held.currencies or {},
                 reputation = held.reputation or {},
             }
+        end,
+        -- Handed over as a bag rather than called, which is the seam's whole point: a build
+        -- missing one of these leaves that domain out instead of raising, so a test can model
+        -- one by removing a key here.
+        censusClients = function()
+            return {
+                mount = {
+                    GetMountIDs = function()
+                        return sortedKeys(censusMounts)
+                    end,
+                    -- Eleven returns, of which the domain reads six. The three between the
+                    -- spell and the source — the icon, whether the mount is active, whether it
+                    -- is usable here — are written out rather than skipped, or a fake would
+                    -- agree with a domain that read the wrong positions.
+                    GetMountInfoByID = function(id)
+                        local mount = censusMounts[id]
+                        if not mount then
+                            return nil
+                        end
+                        return mount.name, mount.spell, "interface/icon", false, true,
+                            mount.source, mount.favourite, mount.factionSpecific, mount.faction,
+                            mount.hidden, mount.collected
+                    end,
+                },
+                achievement = {
+                    categories = function()
+                        return sortedKeys(censusTrees)
+                    end,
+                    categoryCount = function(category)
+                        return #(censusTrees[category] or {})
+                    end,
+                    byIndex = function(category, index)
+                        local row = (censusTrees[category] or {})[index]
+                        if not row then
+                            return nil
+                        end
+                        return row.id, row.name, row.points, row.completed, row.month, row.day,
+                            row.year, "description", 0, "interface/icon", "a reward",
+                            row.guild, row.mine, row.by
+                    end,
+                    completedCount = completedAchievements,
+                },
+            }
+        end,
+        clientBuild = function()
+            return clientBuild
         end,
         ownedItemCount = function(itemID)
             local item = currencyItems[itemID]

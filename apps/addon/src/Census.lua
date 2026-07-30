@@ -185,11 +185,23 @@ function ns.newCensus(deps)
     ---appearances between categories, and a census taken on the build before it is a census of a
     ---different game. The build string is exact, so this costs nothing and never fires spuriously.
     ---
-    ---**The client's own count disagrees.** Only for a domain whose client offers a counter whose
-    ---meaning is settled — see `ns.censusDomains`, where each one is wired or deliberately left
-    ---nil. This is the case that catches what the events cannot: a session a crash took with it,
-    ---an evening played on another machine's install, or anything at all that happened before
-    ---Chronie was here.
+    ---**The client's own count is higher than ours.** Only for a domain whose client offers a
+    ---counter — see `ns.censusDomains`, where each one is wired or deliberately left nil. This is
+    ---the case that catches what the events cannot: a session a crash took with it, an evening
+    ---played on another machine's install, or anything at all that happened before Chronie was
+    ---here.
+    ---
+    ---**Higher, rather than merely different, and that asymmetry is deliberate.** A count above
+    ---what is written down means things are missing, which is exactly what a pass is for. A count
+    ---*below* it is ambiguous, because the counter need not be counting the same set: the
+    ---achievement counter's treatment of guild achievements — which `ns.achievementCensus`
+    ---deliberately refuses to record, since they belong to a guild rather than to the account —
+    ---could not be settled from the install, and if it does include them then every login of a
+    ---guilded character would provoke a full thirteen-thousand-call walk that changes nothing.
+    ---A walk that is never provoked when it should have been is a stale reading the next earned
+    ---achievement corrects; one provoked every login forever is a tax on every session. **This is
+    ---worth confirming against a running client** — `GetNumCompletedAchievements(false)` beside a
+    ---finished census of the same account settles it in one comparison.
     ---
     ---A domain that is none of those three needs no pass, because between passes the record keeps
     ---itself: every domain in here is also fed by a client event — `NEW_MOUNT_ADDED`,
@@ -202,7 +214,7 @@ function ns.newCensus(deps)
             local state = stateOf(domain)
             local counter = domain.count
             local counted = counter and counter() or nil
-            local wrongCount = type(counted) == "number" and state.held ~= counted
+            local wrongCount = type(counted) == "number" and counted > state.held
             if not state.complete or (build and state.build ~= build) or wrongCount then
                 stale[#stale + 1] = name
             end
@@ -291,9 +303,48 @@ function ns.newCensus(deps)
         return true
     end
 
+    ---How much of what is written down this pass actually put there.
+    ---
+    ---Everything carrying a stamp from before the pass began belongs to the reading before it;
+    ---what is left is this pass's own, and how much of that there is turns out to be the one
+    ---thing that says whether the walk was answered at all.
+    ---@param state CensusState
+    ---@param startedAt integer
+    ---@return integer
+    local function observed(state, startedAt)
+        local count = 0
+        for _, entry in pairs(state.entries) do
+            if type(entry) == "table" and (entry.seen or 0) >= startedAt then
+                count = count + 1
+            end
+        end
+        return count
+    end
+
     ---Finishes the domain in hand: prunes what it did not see, and makes the claim.
+    ---
+    ---**Unless the walk found nothing where something was known.** A census is provoked at a
+    ---loading screen, and a loading screen is exactly the moment the server has not finished
+    ---telling the client what this account has: the achievement tree in particular arrives after
+    ---login, and `GetCategoryList` will happily answer before it does. A walk that runs then is
+    ---not told the account owns nothing — it is told nothing at all, and the two are
+    ---indistinguishable from in here except by what was already written down.
+    ---
+    ---So a pass that ends having observed not one thing, against a reading that held something,
+    ---is refused the claim: it leaves the entries alone, leaves `complete` down, and does not
+    ---bump the revision, which makes it exactly an interrupted pass — the case this whole design
+    ---already handles safely, and the case it very probably is. The cost of being wrong is one
+    ---census walked again; the cost of believing it would be an account's entire achievement
+    ---history deleted by one unlucky login.
+    ---
+    ---An account that holds nothing and has always held nothing is untouched by this, because
+    ---there is no reading to protect: `held` is zero, the pass completes, and a brand new
+    ---account gets its empty census like anything else.
     local function finish()
         local state, domain = pass.state, pass.domain
+        if observed(state, pass.startedAt) == 0 and state.held > 0 then
+            return
+        end
         prune(state, pass.startedAt)
         state.complete = true
         state.completedAt = now()
