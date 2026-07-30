@@ -125,6 +125,13 @@ pub fn journal_fixture_files() -> DirFiles {
     fixtures("journal")
 }
 
+/// The fixtures for the seven tables a zone map is assembled out of and the fragments they name,
+/// written by `scripts/make-map-fixtures.ts`.
+#[cfg(test)]
+pub fn map_fixture_files() -> DirFiles {
+    fixtures("maps")
+}
+
 /* ---------- the real thing ---------- */
 
 /// The 30-byte record CASC writes in front of every BLTE payload inside a `data.NNN`.

@@ -398,17 +398,22 @@ async placeIcons(places: string[]) : Promise<Result<IconsPayload, string>> {
 }
 },
 /**
- * The wide banner each of a list of places is drawn across, keyed by the name rather than the
+ * The header each of a list of places opens its modal with, keyed by the name rather than the
  * file.
  *
- * The same errand as [`place_icons`] one column over, and the reason it is a second command
- * rather than more of that one is what each is for: an icon goes beside every row of the
- * timeline, a banner above the one segment somebody opened. Asking for hundreds of headers to
- * draw one would decode a picture per evening on screen.
+ * The same errand as [`place_icons`] over a different picture, and the reason it is a second
+ * command rather than more of that one is what each is for: an icon goes beside every row of the
+ * timeline, a header above the one segment somebody opened. Asking for hundreds of headers to draw
+ * one would decode a picture per evening on screen — and here it would assemble a zone map per
+ * evening as well.
  *
- * Nothing comes back empty here. Most places are zones the game draws no art for at all, and
- * those are answered with the banner the group finder shows when it will not say which dungeon —
- * see [`journal::heroes_of`], which is where that choice is made and explained.
+ * Nothing comes back empty. A place the game paints a banner of gets the banner, a place it draws
+ * a map of gets the map, and the handful with neither get a stand-in — see [`heroes::heroes_of`],
+ * which is where that order is decided and explained.
+ *
+ * The two kinds are carried on differently for one reason: a banner is a file the game named, so
+ * it goes through the same texture cache every icon in the app goes through and a second evening
+ * in the same raid costs nothing; an assembled map has no file behind it to be cached under.
  */
 async placeHeroes(places: string[]) : Promise<Result<IconsPayload, string>> {
     try {

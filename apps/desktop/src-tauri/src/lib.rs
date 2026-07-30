@@ -16,6 +16,7 @@ mod dto;
 pub mod gallery;
 pub mod gap;
 pub mod glb;
+pub mod heroes;
 pub mod icons;
 pub mod ingamesets;
 pub mod items;
@@ -23,6 +24,7 @@ pub mod journal;
 pub mod logfile;
 pub mod look;
 pub mod m2;
+pub mod maps;
 pub mod marks;
 pub mod models;
 pub mod placement;
@@ -876,17 +878,22 @@ async fn place_icons(
     dto::convert(serde_json::json!({ "icons": icons }))
 }
 
-/// The wide banner each of a list of places is drawn across, keyed by the name rather than the
+/// The header each of a list of places opens its modal with, keyed by the name rather than the
 /// file.
 ///
-/// The same errand as [`place_icons`] one column over, and the reason it is a second command
-/// rather than more of that one is what each is for: an icon goes beside every row of the
-/// timeline, a banner above the one segment somebody opened. Asking for hundreds of headers to
-/// draw one would decode a picture per evening on screen.
+/// The same errand as [`place_icons`] over a different picture, and the reason it is a second
+/// command rather than more of that one is what each is for: an icon goes beside every row of the
+/// timeline, a header above the one segment somebody opened. Asking for hundreds of headers to draw
+/// one would decode a picture per evening on screen — and here it would assemble a zone map per
+/// evening as well.
 ///
-/// Nothing comes back empty here. Most places are zones the game draws no art for at all, and
-/// those are answered with the banner the group finder shows when it will not say which dungeon —
-/// see [`journal::heroes_of`], which is where that choice is made and explained.
+/// Nothing comes back empty. A place the game paints a banner of gets the banner, a place it draws
+/// a map of gets the map, and the handful with neither get a stand-in — see [`heroes::heroes_of`],
+/// which is where that order is decided and explained.
+///
+/// The two kinds are carried on differently for one reason: a banner is a file the game named, so
+/// it goes through the same texture cache every icon in the app goes through and a second evening
+/// in the same raid costs nothing; an assembled map has no file behind it to be cached under.
 #[tauri::command]
 #[specta::specta]
 async fn place_heroes(
@@ -894,8 +901,14 @@ async fn place_heroes(
     state: State<'_, AppState>,
 ) -> Result<dto::IconsPayload, String> {
     let cache = Arc::clone(&state.icons);
-    let named = read_game_files(&state, move |files| journal::heroes_of(files, &places)).await?;
-    let wanted: Vec<u32> = named.values().copied().collect();
+    let found = read_game_files(&state, move |files| heroes::heroes_of(files, &places)).await?;
+    let wanted: Vec<u32> = found
+        .values()
+        .filter_map(|hero| match hero {
+            heroes::Hero::Named(file) => Some(*file),
+            heroes::Hero::Drawn(_) => None,
+        })
+        .collect();
     let missing = cache.missing(&wanted);
     if !missing.is_empty() {
         let decoded =
@@ -903,12 +916,20 @@ async fn place_heroes(
         cache.store(decoded);
     }
     // Re-keyed by the place rather than by the file, and a fan-out rather than a rename: every
-    // place the game draws nothing for shares the one stand-in banner, and the delves share theirs.
+    // place with neither a banner nor a map shares the one stand-in, and the delves share theirs.
     let by_file = cache.answer(&wanted);
     let mut icons = serde_json::Map::new();
-    for (place, file) in named {
-        if let Some(url) = by_file["icons"].get(file.to_string()) {
-            icons.insert(place, url.clone());
+    for (place, hero) in found {
+        match hero {
+            heroes::Hero::Named(file) => {
+                if let Some(url) = by_file["icons"].get(file.to_string()) {
+                    icons.insert(place, url.clone());
+                }
+            }
+            heroes::Hero::Drawn(drawing) => {
+                let url = icons::data_url(drawing.kind, &drawing.bytes);
+                icons.insert(place, serde_json::json!(url));
+            }
         }
     }
     dto::convert(serde_json::json!({ "icons": icons }))

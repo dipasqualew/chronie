@@ -12,17 +12,27 @@
 /* Beside the time on a transmog row, and quiet: the row is a name and a link out, and this
    is a third errand that most readers will not be on. */
 .appearance-show { padding: 2px 8px; font-size: 11.5px; line-height: 1.5; }
-/* The picture the game draws the place across, as the header the modal opens with.
+/* The picture of the place, as the header the modal opens with.
 
-   The art is 256×128 — that is the shape both of the game's own tables keep it in — so the band
-   holds that ratio and crops rather than stretches: at the modal's 680 pixels a 2:1 banner is
-   340 tall, which is half the modal, so what is drawn is the middle strip of it. `cover` is the
-   whole of that, and `object-position` centres what gets kept.
+   Two shapes arrive here and the band has to hold both. A dungeon's banner is 256×128, which is
+   the shape both of the game's own tables keep it in; a zone has no banner and comes as the map
+   the game draws of it, which is 3:2. So the band is 5:2 — at the modal's 680 pixels that is 272
+   tall — and crops rather than stretches, which keeps four fifths of a banner's height and three
+   fifths of a map's. It was 132 when the banner was the only thing that could arrive, and a map
+   through a band that thin is a strip of parchment with nothing on it: what makes a header worth
+   having is that the place is recognisable in it.
+
+   `aspect-ratio` rather than a height so a narrow window shrinks the band with the modal, and
+   `max-height` so a short one does not give a third of itself to a picture. `cover` crops and
+   `object-position` centres what gets kept.
 
    Its own bottom border rather than the head's, because the head keeps one either way: on a
    window with no game install behind it there is no band at all, and the modal opens on its
    heading the way it always did. */
-.detail-hero { flex: none; height: 132px; overflow: hidden; border-bottom: 1px solid var(--border); }
+.detail-hero {
+  flex: none; aspect-ratio: 5 / 2; max-height: 30vh;
+  overflow: hidden; border-bottom: 1px solid var(--border);
+}
 .detail-hero img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .detail-head {
   display: flex; align-items: center; gap: 12px;

@@ -37,6 +37,7 @@ const GENERATORS: Record<string, string> = {
   currencies: "scripts/make-currency-fixtures.ts",
   items: "scripts/make-item-fixtures.ts",
   journal: "scripts/make-journal-fixtures.ts",
+  maps: "scripts/make-map-fixtures.ts",
   transmog: "scripts/make-transmog-fixtures.ts",
 };
 

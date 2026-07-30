@@ -293,6 +293,94 @@ pub const JOURNAL_ENCOUNTER_CREATURE: u32 = 1301155;
 /// Verified on 12.0.5.67823 with `examples/dump_currencies`.
 pub const CURRENCY_TYPES: u32 = 1095531;
 
+/// `UiMap` — every place the game will draw a map of, from the cosmos down to a cave, keyed
+/// by the same localised name the client reports a player's position under. 1,922 rows on
+/// 12.0.5.67823, and that is where the zones are: the two journal tables between them know
+/// 805 places and Durotar is not one of them.
+///
+/// Keeps its id **inside** the row, so [`crate::db2::Row::id`] answers with the map id and no
+/// column has to be read for it. A name is on several rows more often than not, which is what
+/// columns 4 and 5 are read for.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const UI_MAP: u32 = 1957206;
+
+/// `UiMapXMapArt` — which art a map is drawn with, and when. The map it belongs to is in the
+/// relationship block, so [`crate::db2::Row::foreign_id`] is what reads it.
+///
+/// 1,928 rows for 1,922 maps: fourteen maps have art of their own for a phase of a campaign,
+/// and every one of the fourteen also has an unphased row. Nothing here can tell whether a
+/// phase is active — that is a player's own progress — so the unphased row is the one taken.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const UI_MAP_X_MAP_ART: u32 = 1957217;
+
+/// `UiMapArt` — one map's art, which is 188 rows and almost no content of its own: what it
+/// holds worth having is which style it is drawn in, and the style is what says how large the
+/// finished picture is and how the fragments are laid out inside it.
+///
+/// Its other two columns are a highlight texture and that texture's atlas entry, neither of
+/// which is the map — the highlight is the shape the game paints over a zone under the
+/// pointer.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const UI_MAP_ART: u32 = 1957202;
+
+/// `UiMapArtStyleLayer` — how one style's fragments make a picture: how large the whole is,
+/// and how large one fragment of it is. Nine rows for the whole game, and the style they
+/// belong to is in the relationship block.
+///
+/// Both sizes are read and neither can be worked out from the other end. The classic zones
+/// are 1,002×668 out of 256-pixel fragments, which is a 4×3 grid holding 1,024×768 — so a
+/// reader that took the grid's own size would hand over 22 pixels of nothing down one side
+/// and 100 along the bottom. The modern ones are 3,840×2,560 out of the same fragments,
+/// exactly 15×10, and the cosmic map is a single 512-pixel one.
+///
+/// The three columns past the fragment size are two floats and a zoom-step count, which is
+/// the trap here: a reader that counted past column 4 would read a float's bits as a number.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const UI_MAP_ART_STYLE_LAYER: u32 = 1957208;
+
+/// `UiMapArtTile` — the fragments themselves, one row per texture, which is 66,704 rows on
+/// 12.0.5.67823. The art each belongs to is in the relationship block.
+///
+/// A row says where its fragment goes rather than what it is of, and the two indices are the
+/// way round the game's own names put them: row before column. Reading them the other way
+/// round transposes a map, which on the classic 4×3 grid is not a subtle failure — a third of
+/// the fragments land outside the picture altogether.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const UI_MAP_ART_TILE: u32 = 1957210;
+
+/// `WorldMapOverlay` — the part of a map that only appears once a player has been there. 2,909
+/// rows on 12.0.5.67823, one per named area of a zone, each a picture pasted at a stated place
+/// over the map's own art.
+///
+/// This is what makes a map the map somebody remembers rather than a sheet of parchment. The
+/// `UiMapArt` grid underneath is the **unexplored** map: terrain, a few mountains and the
+/// neighbours' names, and nothing of Orgrimmar, Razor Hill or the roads between them. Those are
+/// here, area by area, and the game pastes each one on as its area is discovered.
+///
+/// Keeps its id **inside** the row and states the art it belongs to in column 1, inline rather
+/// than in the relationship block — the one table in this chain that does. The eight columns
+/// past the offsets are the rectangle the pointer has to be inside to name the area, a player
+/// condition, flags, and the four `AreaID`s; none of them is read.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const WORLD_MAP_OVERLAY: u32 = 1134579;
+
+/// `WorldMapOverlayTile` — the fragments an overlay is made of, which is the same arrangement
+/// `UiMapArtTile` uses for the map underneath: 20,867 rows, a row and a column index apiece, and
+/// the overlay in the relationship block.
+///
+/// Every one of the 20,867 is on layer 0 on 12.0.5.67823, so nothing here has ever had to
+/// choose a layer — but the column is read all the same, because the base art's does choose one
+/// and an overlay drawn from another layer would be a second copy of the same ground.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_maps`.
+pub const WORLD_MAP_OVERLAY_TILE: u32 = 1957212;
+
 /// The banner the group finder shows when it will not say which dungeon it is sending a
 /// player to — a door with a crest on it, 256×128, the same shape as the banners the two
 /// journal tables name.
@@ -939,4 +1027,153 @@ pub mod currency_types {
     ///
     /// The picture beside it, decoded through [`crate::icons`].
     pub const ICON_FILE_DATA_ID: usize = 3;
+}
+
+/// Columns of `UiMap` that this app reads.
+pub mod ui_map {
+    /// `Name_lang`
+    ///
+    /// What the place is called, in the locale the install is running in — the same string the
+    /// two journal tables are keyed by, and the only thing a segment arrives carrying.
+    pub const NAME: usize = 0;
+
+    /// `System`
+    ///
+    /// Which of the game's map systems the row belongs to: 0 the world map, 1 the flight map,
+    /// 2 the Adventure Guide's. Read to prefer the world's, because that is the map a player
+    /// opens with M.
+    pub const SYSTEM: usize = 4;
+
+    /// `Type`
+    ///
+    /// How deep the place sits: 0 cosmic, 1 world, 2 continent, 3 zone, 4 dungeon, 5 micro, 6
+    /// orphan. Read to break a tie between rows of one name — "Durotar" is a zone, an orphan
+    /// and an Adventure Guide zone at once, and the zone is the one worth drawing.
+    pub const TYPE: usize = 5;
+}
+
+/// Columns of `UiMapXMapArt` that this app reads.
+pub mod ui_map_x_map_art {
+    /// `PhaseID`
+    ///
+    /// Which phase the art belongs to, 0 for the art a map is drawn with the rest of the time.
+    pub const PHASE: usize = 0;
+
+    /// `UiMapArtID`
+    ///
+    /// The art itself, which is what the fragments hang off.
+    pub const ART: usize = 1;
+}
+
+/// Columns of `UiMapArt` that this app reads.
+pub mod ui_map_art {
+    /// `UiMapArtStyleID`
+    ///
+    /// The style, which `UiMapArtStyleLayer` describes.
+    pub const STYLE: usize = 2;
+}
+
+/// Columns of `UiMapArtStyleLayer` that this app reads.
+pub mod ui_map_art_style_layer {
+    /// `LayerIndex`
+    ///
+    /// Which layer of the style this describes. Layer 0 is the one drawn at the scale a map
+    /// opens at; two styles have a second layer, and both of those are the size of their
+    /// first.
+    pub const LAYER_INDEX: usize = 0;
+
+    /// `LayerWidth`
+    ///
+    /// How wide the finished picture is, which is less than the grid holding it.
+    pub const WIDTH: usize = 1;
+
+    /// `LayerHeight`
+    ///
+    /// And how tall.
+    pub const HEIGHT: usize = 2;
+
+    /// `TileWidth`
+    ///
+    /// How wide one fragment is — 256 for every style but the cosmic map's, which is 512.
+    pub const TILE_WIDTH: usize = 3;
+
+    /// `TileHeight`
+    ///
+    /// And how tall one is.
+    pub const TILE_HEIGHT: usize = 4;
+}
+
+/// Columns of `UiMapArtTile` that this app reads.
+pub mod ui_map_art_tile {
+    /// `RowIndex`
+    ///
+    /// Which row of the grid the fragment sits in, counting from the top.
+    pub const ROW_INDEX: usize = 0;
+
+    /// `ColIndex`
+    ///
+    /// And which column, counting from the left.
+    pub const COL_INDEX: usize = 1;
+
+    /// `LayerIndex`
+    ///
+    /// Which layer of the style it belongs to.
+    pub const LAYER_INDEX: usize = 2;
+
+    /// `FileDataID`
+    ///
+    /// The texture, decoded through [`crate::icons`] like every other picture the app draws.
+    pub const FILE_DATA_ID: usize = 3;
+}
+
+/// Columns of `WorldMapOverlay` that this app reads.
+pub mod world_map_overlay {
+    /// `UiMapArtID`
+    ///
+    /// Which map's art the overlay belongs to.
+    pub const ART: usize = 1;
+
+    /// `TextureWidth`
+    ///
+    /// How wide the overlay's own picture is — and, like the map it goes on, less than the grid
+    /// of fragments holding it.
+    pub const WIDTH: usize = 2;
+
+    /// `TextureHeight`
+    ///
+    /// And how tall.
+    pub const HEIGHT: usize = 3;
+
+    /// `OffsetX`
+    ///
+    /// Where its left edge goes, in the pixels of the finished map rather than in fragments.
+    pub const LEFT: usize = 4;
+
+    /// `OffsetY`
+    ///
+    /// And its top edge.
+    pub const TOP: usize = 5;
+}
+
+/// Columns of `WorldMapOverlayTile` that this app reads.
+pub mod world_map_overlay_tile {
+    /// `RowIndex`
+    ///
+    /// Which row of the overlay's own grid the fragment sits in.
+    pub const ROW_INDEX: usize = 0;
+
+    /// `ColIndex`
+    ///
+    /// And which column.
+    pub const COL_INDEX: usize = 1;
+
+    /// `LayerIndex`
+    ///
+    /// Which layer of the map's style it belongs to.
+    pub const LAYER_INDEX: usize = 2;
+
+    /// `FileDataID`
+    ///
+    /// The texture, decoded through [`crate::icons`] like the rest.
+    pub const FILE_DATA_ID: usize = 3;
 }

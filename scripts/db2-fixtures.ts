@@ -626,6 +626,26 @@ export function bodyPixels(top: Paint, bottom: Paint): Bytes {
 }
 
 /**
+ * A texture of one flat colour, uncompressed, for one fragment of a map.
+ *
+ * A map is not stored as a picture: it is a grid of fragments, one texture each, and what has
+ * to be provable about an assembled one is *which fragment landed where*. So each fragment is
+ * a single colour of its own and a test reads the pixel at a place in the finished picture
+ * that only one fragment can have painted. Flat rather than banded, unlike the body textures
+ * above, because here the grid is what is under test rather than the filtering.
+ */
+export function flatPixels([red, green, blue, alpha]: Paint): Bytes {
+  const body = new Bytes();
+  for (let pixel = 0; pixel < ICON_SIZE * ICON_SIZE; pixel += 1) {
+    body.u8(blue);
+    body.u8(green);
+    body.u8(red);
+    body.u8(alpha);
+  }
+  return body;
+}
+
+/**
  * A DXT icon's blocks, one 4×4 block per quadrant.
  *
  * Every block is a flat colour, which is the one case S3TC reproduces exactly: both
@@ -733,7 +753,14 @@ export const fixtureRoot = (): string =>
   join(dirname(fileURLToPath(import.meta.url)), "..", "apps", "desktop", "fixtures");
 
 /** Every area a generator writes, which is what `check-fixtures.ts` walks. */
-export const AREAS = ["achievements", "currencies", "items", "journal", "transmog"] as const;
+export const AREAS = [
+  "achievements",
+  "currencies",
+  "items",
+  "journal",
+  "maps",
+  "transmog",
+] as const;
 
 /** Writes one area's tables, textures and raw files into `<root>/<area>`. */
 export function emit(

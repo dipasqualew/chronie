@@ -180,27 +180,29 @@ function BossPortrait({
 }
 
 /**
- * The picture the game draws the place across, as the header the modal opens with.
+ * The picture of the place, as the header the modal opens with.
  *
  * A band rather than the 20-pixel icon that used to sit beside the heading, because the picture
  * is the one thing on this screen that says where the reader is at a glance — the difference
  * between Naxxramas and Nerub-ar Palace is a colour and a shape long before it is a word. The
- * game's own art for a place is 256×128, so the band is drawn at that ratio and cropped rather
- * than stretched: a banner that filled the modal's width by squashing its own art would be
- * worse than a small one.
+ * band crops rather than stretches whatever arrives, which a picture that filled the modal's
+ * width by squashing its own art would not.
  *
- * Every place gets one. Where the game draws none — which is most places, because most places
- * are open-world zones — the backend answers with the banner the group finder shows for a
- * dungeon it will not name, so the modal opens the same way whatever the segment was. See
- * `journal::heroes_of`.
+ * Every place gets one, and which picture it is the backend's to decide: the banner the game
+ * paints a dungeon with, or, for the open-world zone that most segments happened in, the map the
+ * game draws of that place — assembled out of the fragments it stores a map in, town by town, as
+ * somebody who has been everywhere would see it. Only a place with neither falls through to a
+ * stand-in. See `heroes::heroes_of`.
  *
  * Named after the place it is of, the same way the icon beside a segment row is: the band is a
- * picture and nothing else, so "Banner for Naxxramas" is the whole of what there is to say about
- * it — and it is what lets a reader who cannot see it know the header is there, and a test ask
- * for it. The `<img>` inside says nothing, because the band has already said it.
+ * picture and nothing else, so "Picture of Naxxramas" is the whole of what there is to say about
+ * it — and it is what lets a reader who cannot see it know the header is there, and a test ask for
+ * it. Named that way rather than "Banner", because whether it is a painted banner or the zone's own
+ * map is a fact about which tables the game happens to hold art in, and nobody reading it needs to
+ * be told. The `<img>` inside says nothing, because the band has already said it.
  *
  * Nothing at all is drawn before the picture lands or where there is no game install behind the
- * window — an empty 132-pixel band would be a hole in the modal rather than a header.
+ * window — an empty band would be a hole in the modal rather than a header.
  */
 function PlaceHero({ place, heroes }: { place: string; heroes?: PlaceHeroes }): ReactNode {
   // The book is a cache outside React, so a picture landing changes nothing React would notice.
@@ -211,7 +213,7 @@ function PlaceHero({ place, heroes }: { place: string; heroes?: PlaceHeroes }): 
   const picture = place ? heroes?.icon(place) : undefined;
   if (!picture) return null;
   return (
-    <div className="detail-hero" role="img" aria-label={`Banner for ${place}`}>
+    <div className="detail-hero" role="img" aria-label={`Picture of ${place}`}>
       <img src={picture} alt="" />
     </div>
   );
