@@ -15,6 +15,9 @@
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { eventually } from "./eventually";
+import type { Eventually } from "./eventually";
+
 export class SegmentDetail {
   readonly page: Page;
   readonly panel: Locator;
@@ -50,6 +53,41 @@ export class SegmentDetail {
     const [mine, theirs] = [await this.panel.boundingBox(), await other.boundingBox()];
     if (!mine || !theirs) return false;
     return mine.x >= theirs.x + theirs.width;
+  }
+
+  /**
+   * Turns the wheel with the pointer over the head of the frame.
+   *
+   * The head and not the middle of it, because that is the half of issue #241 nothing smaller
+   * could catch: the frame used to scroll its body only, so the picture and the name at the top
+   * of it were dead to the wheel and the page underneath took the gesture instead. Driven from
+   * the mouse rather than from a locator for the same reason — which element is under the
+   * pointer is the whole question, and `Locator.scroll` would answer it by fiat.
+   */
+  async wheelOverHead(by: number): Promise<void> {
+    const box = await this.title().boundingBox();
+    if (!box) throw new Error("there is no segment open to turn the wheel over");
+    await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await this.page.mouse.wheel(0, by);
+  }
+
+  /** How far down the segment the reader has got, in pixels of the frame's own scrolling. */
+  scrolledBy(): Eventually<number> {
+    return eventually(() => this.panel.evaluate((frame) => frame.scrollTop));
+  }
+
+  /**
+   * How far below the top of the frame the title bar is sitting, in pixels.
+   *
+   * What says the head is pinned there rather than scrolling away with the picture above it: it
+   * starts a picture's height down and ends up against the top edge, and the way out of the
+   * segment goes with it. Only the browser lays any of that out.
+   */
+  headBelowTop(): Eventually<number> {
+    return eventually(async () => {
+      const [head, frame] = [await this.title().boundingBox(), await this.panel.boundingBox()];
+      return head && frame ? head.y - frame.y : Number.NaN;
+    });
   }
 
   /**

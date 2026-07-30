@@ -804,22 +804,28 @@ const NOTHING_WANTED: number[] = [];
  *
  * A frame's own business rather than the window's: `onStep` moves the index, and this is the
  * part that says a reader who was eleven sections down the last segment is at the top of this
- * one. Shared because both frames have a body that scrolls and neither would be right without
- * it.
+ * one. Shared because both frames scroll and neither would be right without it.
+ *
+ * Which box scrolls is the frame's to say, which is why the ref comes back rather than being
+ * fixed here: the modal is a capped box whose body gives way inside it, and the panel scrolls
+ * as a whole so that the wheel reads the segment wherever over it the pointer happens to be —
+ * over the picture at the top of it as much as over the lists. See `segmentPanel.css`.
  */
-export function useSegmentStep(onStep: (by: number) => void): {
-  body: RefObject<HTMLDivElement | null>;
+export function useSegmentStep<Frame extends HTMLElement>(
+  onStep: (by: number) => void,
+): {
+  scroller: RefObject<Frame | null>;
   step: (by: number) => void;
 } {
-  const body = useRef<HTMLDivElement>(null);
+  const scroller = useRef<Frame>(null);
   const step = useCallback(
     (by: number) => {
       onStep(by);
-      body.current?.scrollTo({ top: 0 });
+      scroller.current?.scrollTo({ top: 0 });
     },
     [onStep],
   );
-  return { body, step };
+  return { scroller, step };
 }
 
 /**
@@ -905,11 +911,13 @@ export function SegmentHead({
 }
 
 /**
- * Everything the segment holds, in the one box on the screen that scrolls.
+ * Everything the segment holds, under the head that names it.
  *
- * The frame around it is capped — at a share of the window in the modal, at the height of the
- * window in the panel — so this is what gives way, and the `ref` is how the frame puts it back
- * to the top when the reader steps to another segment.
+ * Both frames are capped — at a share of the window in the modal, at the height of the window in
+ * the panel — and they give way differently. The modal scrolls this and keeps its head; the panel
+ * scrolls the whole of itself, and this is laid out at its full height inside it. So the box that
+ * takes a `ref` and gets put back to the top on a step is the modal's, and in the panel it is the
+ * panel; see `useSegmentStep`.
  */
 export function SegmentBody({
   segment,
@@ -1035,7 +1043,7 @@ export function SegmentModal({
   onShowAppearance,
 }: SegmentViewProps): ReactNode {
   const segment = showing?.order[showing.index];
-  const { body, step } = useSegmentStep(onStep);
+  const { scroller, step } = useSegmentStep<HTMLDivElement>(onStep);
 
   // `showModal` and `close` are the dialog's own state and React has no prop for them, so the
   // element is driven from an effect — opened when there is a segment to show, and closed when
@@ -1067,7 +1075,7 @@ export function SegmentModal({
         onClose={onClose}
       />
       <SegmentBody
-        ref={body}
+        ref={scroller}
         segment={segment}
         book={book}
         items={items}

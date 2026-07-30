@@ -327,6 +327,59 @@ test("digs from a session down into a single segment and back out again", async 
 });
 
 /**
+ * Reading down a docked segment, which is a thing the timeline underneath must not answer for.
+ *
+ * Two boxes that scroll, one on top of the other, and a wheel gesture that has to go to the
+ * right one. It went to the wrong one twice — over the head of the panel, where there was
+ * nothing scrollable under the pointer at all, and at the bottom of the panel, where the
+ * gesture ran out of segment and carried on into the page. Both took the evening the reader
+ * was working through off the screen while they were reading one hour of it. Issue #241.
+ *
+ * Only the browser can be asked any of this: it is compositor behaviour over a real layout,
+ * and every piece of it — `overscroll-behavior`, a sticky head, which element is under the
+ * pointer — is invisible from the markup.
+ */
+test("reads down a docked segment without taking the evening with it", async ({ page }) => {
+  const shell = new Shell(page);
+  const timeline = new Timeline(page);
+  const detail = new SegmentDetail(page);
+  await timeline.open();
+
+  await timeline.activities(timeline.sessions().first()).first().click();
+  await expect(detail.title()).toHaveText("Glass Caverns");
+  // The head is a picture that arrives after the words do, and how far down the head starts is
+  // the measurement below — so the reading waits for it rather than racing it.
+  await expect(detail.hero("Glass Caverns")).toBeVisible();
+  await detail.headBelowTop().toBeGreaterThan(100);
+
+  await test.step("the wheel over the head of it moves the segment and nothing else", async () => {
+    await detail.wheelOverHead(600);
+    await detail.scrolledBy().toBeGreaterThan(0);
+    await shell.scrolledBy().toBe(0);
+  });
+
+  // And what the picture's height cost is the picture. The title bar carries the name, the place
+  // in the evening and the way to either side of it, so a reader six sections down is still a
+  // click from the next segment and from closing this one.
+  await test.step("the picture scrolls away and the title bar stays at the top", async () => {
+    await detail.headBelowTop().toBeLessThan(40);
+    await expect(detail.next()).toBeVisible();
+  });
+
+  await test.step("and running out of segment does not carry on into the evening", async () => {
+    await detail.wheelOverHead(6000);
+    await shell.scrolledBy().toBe(0);
+  });
+
+  // Closing it puts the reader back on the evening it came from, still at the top of it.
+  await test.step("closing it leaves the timeline where it was", async () => {
+    await detail.close();
+    await shell.scrolledBy().toBe(0);
+    await expect(timeline.sessions().first()).toBeVisible();
+  });
+});
+
+/**
  * Turning one appearance, which is what the pane is for and what issue #142 said it was bad at.
  *
  * Two complaints, one cause. The pane orbits its target and its target is the origin, so what

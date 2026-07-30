@@ -40,7 +40,7 @@ import { AppearanceModal } from "./appearanceModal";
 import type { AppearanceModalState } from "./appearanceModal";
 import { SegmentModal } from "./segmentModal";
 import type { SegmentViewState } from "./segmentModal";
-import { SegmentPanel } from "./segmentPanel";
+import { SegmentPanel, useDock } from "./segmentPanel";
 import { buildSessions } from "./sessions";
 import { Settings as SettingsView } from "./settings";
 import { Timeline } from "./timeline";
@@ -308,13 +308,16 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
   // Whichever frame the open segment belongs to gets it, and the other is handed nothing —
   // which is what closes it, so the two can never be showing the same segment twice.
-  const docked = walking?.docked ? walking : null;
   const overlaid = walking && !walking.docked ? walking : null;
+  // The panel's is held open for the beat it takes to go, and the column it stands in is held
+  // with it — the column is drawn from this, so a panel sliding out of a column that had already
+  // collapsed would be sliding out of the middle of the timeline. See `useDock`.
+  const docked = useDock(walking?.docked ? walking : null);
   // The panel stays open behind a reader who wanders off to another view and comes back, the
   // same way an unfolded summary does. The width the page takes for it does not travel with
   // them: a roster drawn across 1,720 pixels because a segment is open on a screen nobody is
   // looking at is a window that resizes itself for no reason a reader could name.
-  const widened = docked && view === "timeline";
+  const widened = docked.showing && view === "timeline";
 
   // What the two frames have in common, which is everything except the frame: one book per kind
   // for the life of the window, and the same way through to the editor and the picture.
@@ -416,7 +419,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         hidden={view !== "timeline"}
         // The view is one column or two depending on whether there is a segment to stand in the
         // second, and it says so where the stylesheet can read it — `app.css`.
-        data-panel={docked ? "" : undefined}
+        data-panel={docked.showing ? "" : undefined}
       >
         <header className="view-head">
           <h1>Timeline</h1>
@@ -448,7 +451,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             just asked for. On a window too narrow to hold two columns the panel is drawn above
             the timeline rather than beside it, and this is the order that gives — and it is the
             order a screen reader reads either way. */}
-        <SegmentPanel showing={docked} {...opened} />
+        <SegmentPanel showing={docked.showing} leaving={docked.leaving} {...opened} />
         <div id="timeline">
           <Timeline
             sessions={sessions}
