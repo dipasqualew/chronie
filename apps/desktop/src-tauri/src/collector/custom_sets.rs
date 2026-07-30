@@ -10,6 +10,8 @@ use crate::customsets;
 use rusqlite::{params, Connection};
 use std::{collections::HashMap, path::Path};
 
+use crate::failure::Failure;
+
 /// Every set the reader has saved, whole.
 ///
 /// Whole rather than as cards to open later, because there is nothing to open: a Blizzard set is
@@ -17,7 +19,7 @@ use std::{collections::HashMap, path::Path};
 /// a saved set *is* the list of looks. Tens of sets of a dozen pieces is a payload smaller than
 /// one set's icons, and the window re-reads it after every write — the same "repaint from
 /// storage" rule the marks follow.
-pub fn custom_sets(database_path: &Path) -> Result<customsets::CustomSetsPayload, String> {
+pub fn custom_sets(database_path: &Path) -> Result<customsets::CustomSetsPayload, Failure> {
     let connection = open_database(database_path)?;
     read_custom_sets(&connection)
 }
@@ -38,58 +40,48 @@ pub fn save_custom_set(
     name: &str,
     pieces: Vec<customsets::Piece>,
     now: i64,
-) -> Result<customsets::CustomSetsPayload, String> {
+) -> Result<customsets::CustomSetsPayload, Failure> {
     let name = customsets::clean_name(name)?;
     let pieces = customsets::clean_pieces(pieces)?;
     let mut connection = open_database(database_path)?;
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "INSERT INTO transmog_custom_sets (name, created_at, updated_at)
+    let transaction = connection.transaction()?;
+    transaction.execute(
+        "INSERT INTO transmog_custom_sets (name, created_at, updated_at)
              VALUES (?1, ?2, ?2)
              ON CONFLICT(name)
              DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at",
-            params![name, now],
-        )
-        .map_err(|error| error.to_string())?;
-    let set_id: i64 = transaction
-        .query_row(
-            "SELECT id FROM transmog_custom_sets WHERE name = ?1",
-            params![name],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM transmog_custom_set_pieces WHERE set_id = ?1",
-            params![set_id],
-        )
-        .map_err(|error| error.to_string())?;
+        params![name, now],
+    )?;
+    let set_id: i64 = transaction.query_row(
+        "SELECT id FROM transmog_custom_sets WHERE name = ?1",
+        params![name],
+        |row| row.get(0),
+    )?;
+    transaction.execute(
+        "DELETE FROM transmog_custom_set_pieces WHERE set_id = ?1",
+        params![set_id],
+    )?;
     for piece in &pieces {
-        transaction
-            .execute(
-                "INSERT INTO transmog_custom_set_pieces (
+        transaction.execute(
+            "INSERT INTO transmog_custom_set_pieces (
                      set_id, place, appearance_id, item_id, name, display_type, inventory_type,
                      display_info_id, icon_file_data_id, has_model
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
-                    set_id,
-                    piece.place,
-                    piece.appearance_id,
-                    piece.item_id,
-                    piece.name,
-                    piece.display_type,
-                    piece.inventory_type,
-                    piece.display_info_id,
-                    piece.icon_file_data_id,
-                    i64::from(piece.has_model),
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                set_id,
+                piece.place,
+                piece.appearance_id,
+                piece.item_id,
+                piece.name,
+                piece.display_type,
+                piece.inventory_type,
+                piece.display_info_id,
+                piece.icon_file_data_id,
+                i64::from(piece.has_model),
+            ],
+        )?;
     }
-    transaction.commit().map_err(|error| error.to_string())?;
+    transaction.commit()?;
     read_custom_sets(&connection)
 }
 
@@ -105,33 +97,25 @@ pub fn save_custom_set(
 pub fn delete_custom_set(
     database_path: &Path,
     id: i64,
-) -> Result<customsets::CustomSetsPayload, String> {
+) -> Result<customsets::CustomSetsPayload, Failure> {
     let id = customsets::set_id(id)?;
     let mut connection = open_database(database_path)?;
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
+    let transaction = connection.transaction()?;
     // The pieces go with it, by the cascade the migration declares and `PRAGMA foreign_keys`
     // turns on in `open_database`.
-    transaction
-        .execute(
-            "DELETE FROM transmog_custom_sets WHERE id = ?1",
-            params![id],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM transmog_favourites WHERE subject_kind = ?1 AND subject_id = ?2",
-            params![customsets::KIND, id],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM transmog_tags WHERE subject_kind = ?1 AND subject_id = ?2",
-            params![customsets::KIND, id],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())?;
+    transaction.execute(
+        "DELETE FROM transmog_custom_sets WHERE id = ?1",
+        params![id],
+    )?;
+    transaction.execute(
+        "DELETE FROM transmog_favourites WHERE subject_kind = ?1 AND subject_id = ?2",
+        params![customsets::KIND, id],
+    )?;
+    transaction.execute(
+        "DELETE FROM transmog_tags WHERE subject_kind = ?1 AND subject_id = ?2",
+        params![customsets::KIND, id],
+    )?;
+    transaction.commit()?;
     read_custom_sets(&connection)
 }
 
@@ -143,60 +127,52 @@ pub fn delete_custom_set(
 /// in the order they happened to be saved. The pieces come back in a fixed order rather than a
 /// meaningful one — which place is worn above which is `outfit.ts`'s question, and it is asked
 /// of a set of the reader's own exactly as it is asked of the character herself.
-fn read_custom_sets(connection: &Connection) -> Result<customsets::CustomSetsPayload, String> {
+fn read_custom_sets(connection: &Connection) -> Result<customsets::CustomSetsPayload, Failure> {
     let mut sets: Vec<customsets::CustomSet> = Vec::new();
     let mut at: HashMap<i64, usize> = HashMap::new();
 
-    let mut saved = connection
-        .prepare(
-            "SELECT id, name, created_at, updated_at FROM transmog_custom_sets
+    let mut saved = connection.prepare(
+        "SELECT id, name, created_at, updated_at FROM transmog_custom_sets
              ORDER BY name COLLATE NOCASE, id",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = saved
-        .query_map([], |row| {
-            Ok(customsets::CustomSet {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                created_at: row.get(2)?,
-                updated_at: row.get(3)?,
-                pieces: Vec::new(),
-            })
+    )?;
+    let rows = saved.query_map([], |row| {
+        Ok(customsets::CustomSet {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            created_at: row.get(2)?,
+            updated_at: row.get(3)?,
+            pieces: Vec::new(),
         })
-        .map_err(|error| error.to_string())?;
+    })?;
     for row in rows {
-        let set = row.map_err(|error| error.to_string())?;
+        let set = row?;
         at.insert(set.id, sets.len());
         sets.push(set);
     }
 
-    let mut worn = connection
-        .prepare(
-            "SELECT set_id, place, appearance_id, item_id, name, display_type, inventory_type,
+    let mut worn = connection.prepare(
+        "SELECT set_id, place, appearance_id, item_id, name, display_type, inventory_type,
                     display_info_id, icon_file_data_id, has_model
              FROM transmog_custom_set_pieces ORDER BY set_id, place",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = worn
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                customsets::Piece {
-                    place: row.get(1)?,
-                    appearance_id: row.get(2)?,
-                    item_id: row.get(3)?,
-                    name: row.get(4)?,
-                    display_type: row.get(5)?,
-                    inventory_type: row.get(6)?,
-                    display_info_id: row.get(7)?,
-                    icon_file_data_id: row.get(8)?,
-                    has_model: row.get::<_, i64>(9)? != 0,
-                },
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = worn.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            customsets::Piece {
+                place: row.get(1)?,
+                appearance_id: row.get(2)?,
+                item_id: row.get(3)?,
+                name: row.get(4)?,
+                display_type: row.get(5)?,
+                inventory_type: row.get(6)?,
+                display_info_id: row.get(7)?,
+                icon_file_data_id: row.get(8)?,
+                has_model: row.get::<_, i64>(9)? != 0,
+            },
+        ))
+    })?;
     for row in rows {
-        let (set_id, piece) = row.map_err(|error| error.to_string())?;
+        let (set_id, piece) = row?;
         if let Some(index) = at.get(&set_id) {
             sets[*index].pieces.push(piece);
         }

@@ -28,6 +28,7 @@
 //! `WHERE` clause cannot cost somebody their history, and so that a mistake reads as a
 //! sentence rather than as a frozen window.
 
+use crate::failure::{Context as _, Failure, FailureCode};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, ErrorCode};
 use serde::Serialize;
@@ -115,7 +116,7 @@ pub struct Column {
 const OPENERS: [&str; 4] = ["SELECT", "WITH", "VALUES", "EXPLAIN"];
 
 /// Runs one read against the history and answers with at most `limit` rows.
-pub fn run(database_path: &Path, sql: &str, limit: usize) -> Result<Answer, String> {
+pub fn run(database_path: &Path, sql: &str, limit: usize) -> Result<Answer, Failure> {
     run_within(database_path, sql, limit, TIME_BUDGET)
 }
 
@@ -130,13 +131,13 @@ pub fn run_within(
     sql: &str,
     limit: usize,
     budget: Duration,
-) -> Result<Answer, String> {
+) -> Result<Answer, Failure> {
     let statement = single_statement(sql)?;
     let opener = opening_word(statement);
     if !OPENERS.contains(&opener.as_str()) {
-        return Err(format!(
+        return Err(refused(format!(
             "Chronie only runs queries that read. Start with SELECT or WITH — \"{opener}\" would change the history rather than ask it something."
-        ));
+        )));
     }
     let wanted = limit.clamp(1, MAX_ROWS);
 
@@ -149,14 +150,16 @@ pub fn run_within(
         .prepare(statement)
         .map_err(|error| explain(&error, budget))?;
     if !prepared.readonly() {
-        return Err("That statement would change the history, so Chronie did not run it.".into());
+        return Err(refused(
+            "That statement would change the history, so Chronie did not run it.",
+        ));
     }
     // A query with a `?` in it has nothing to bind to here, and SQLite would answer it with
     // NULL rather than complain — which looks like a working query returning empty rows.
     if prepared.parameter_count() > 0 {
-        return Err(
-            "That query is waiting for a value to be bound to a placeholder. Write the value into the query itself.".into(),
-        );
+        return Err(refused(
+            "That query is waiting for a value to be bound to a placeholder. Write the value into the query itself.",
+        ));
     }
     let columns: Vec<String> = prepared
         .column_names()
@@ -178,8 +181,8 @@ pub fn run_within(
         }
         rows.push(
             (0..columns.len())
-                .map(|at| row.get_ref(at).map(cell).map_err(|error| error.to_string()))
-                .collect::<Result<Vec<Value>, String>>()?,
+                .map(|at| row.get_ref(at).map(cell))
+                .collect::<Result<Vec<Value>, rusqlite::Error>>()?,
         );
     }
 
@@ -193,27 +196,21 @@ pub fn run_within(
 
 /// Every table and view in the database, with their columns and — for the tables — how much
 /// is in them.
-pub fn schema(database_path: &Path) -> Result<Schema, String> {
+pub fn schema(database_path: &Path) -> Result<Schema, Failure> {
     let connection = open_reading(database_path)?;
-    let mut listing = connection
-        .prepare(
-            "SELECT name, type FROM sqlite_schema
+    let mut listing = connection.prepare(
+        "SELECT name, type FROM sqlite_schema
              WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
              ORDER BY name",
-        )
-        .map_err(|error| error.to_string())?;
+    )?;
     let named: Vec<(String, String)> = listing
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(|error| error.to_string())?
-        .collect::<Result<_, _>>()
-        .map_err(|error| error.to_string())?;
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     drop(listing);
 
     // The table-valued form of `PRAGMA table_info`, so the table's name is bound rather than
     // pasted into a statement — the pragma statement itself takes no parameters.
-    let mut describing = connection
-        .prepare("SELECT name, type, pk FROM pragma_table_info(?1)")
-        .map_err(|error| error.to_string())?;
+    let mut describing = connection.prepare("SELECT name, type, pk FROM pragma_table_info(?1)")?;
 
     let mut tables = Vec::with_capacity(named.len());
     for (name, kind) in named {
@@ -225,10 +222,8 @@ pub fn schema(database_path: &Path) -> Result<Schema, String> {
                     kind: row.get::<_, String>(1)?.to_uppercase(),
                     primary_key: row.get::<_, i64>(2)? > 0,
                 })
-            })
-            .map_err(|error| error.to_string())?
-            .collect::<Result<Vec<Column>, _>>()
-            .map_err(|error| error.to_string())?;
+            })?
+            .collect::<Result<Vec<Column>, _>>()?;
         // Counted per table rather than in one statement, because the names are only known
         // once the listing has been read and a count has to name its table literally.
         let row_count = if view {
@@ -259,15 +254,10 @@ pub fn schema(database_path: &Path) -> Result<Schema, String> {
 /// so the honest-looking flag is the one that fails on a machine where the app has not yet
 /// written anything. `query_only` is SQLite's own switch for the same intent and holds
 /// whatever mode the file is in.
-fn open_reading(database_path: &Path) -> Result<Connection, String> {
-    let connection = Connection::open(database_path)
-        .map_err(|error| format!("Could not open the history: {error}"))?;
-    connection
-        .busy_timeout(Duration::from_secs(5))
-        .map_err(|error| error.to_string())?;
-    connection
-        .execute_batch("PRAGMA query_only = ON;")
-        .map_err(|error| error.to_string())?;
+fn open_reading(database_path: &Path) -> Result<Connection, Failure> {
+    let connection = Connection::open(database_path).context("opening the history to read it")?;
+    connection.busy_timeout(Duration::from_secs(5))?;
+    connection.execute_batch("PRAGMA query_only = ON;")?;
     Ok(connection)
 }
 
@@ -277,10 +267,10 @@ fn open_reading(database_path: &Path) -> Result<Connection, String> {
 /// second statement would look like it ran and would not have. Finding the semicolon means
 /// stepping over the places one can legitimately appear — inside a string, inside a quoted
 /// identifier, inside a comment — which is why this is a scanner rather than a `split(';')`.
-pub fn single_statement(sql: &str) -> Result<&str, String> {
+pub fn single_statement(sql: &str) -> Result<&str, Failure> {
     let trimmed = sql.trim();
     if blank(trimmed) {
-        return Err("Write a query first.".into());
+        return Err(refused("Write a query first."));
     }
     let bytes = trimmed.as_bytes();
     let mut at = 0;
@@ -293,9 +283,9 @@ pub fn single_statement(sql: &str) -> Result<&str, String> {
             b';' => {
                 let rest = &trimmed[at + 1..];
                 if !blank(rest) {
-                    return Err(
-                        "Chronie runs one query at a time, and there is a second statement after the semicolon.".into(),
-                    );
+                    return Err(refused(
+                        "Chronie runs one query at a time, and there is a second statement after the semicolon.",
+                    ));
                 }
                 return Ok(trimmed[..at].trim_end());
             }
@@ -322,7 +312,7 @@ fn blank(sql: &str) -> bool {
 }
 
 /// Steps over a quoted run, doubling — `'it''s'` — being an escape rather than an end.
-fn past_quoted(bytes: &[u8], opens_at: usize, closer: u8) -> Result<usize, String> {
+fn past_quoted(bytes: &[u8], opens_at: usize, closer: u8) -> Result<usize, Failure> {
     let mut at = opens_at + 1;
     while at < bytes.len() {
         if bytes[at] == closer {
@@ -334,7 +324,7 @@ fn past_quoted(bytes: &[u8], opens_at: usize, closer: u8) -> Result<usize, Strin
         }
         at += 1;
     }
-    Err("That query has a quote that is never closed.".into())
+    Err(refused("That query has a quote that is never closed."))
 }
 
 fn past_line_comment(bytes: &[u8], at: usize) -> usize {
@@ -407,14 +397,32 @@ fn clipped(text: &str) -> String {
 /// column: charater" says exactly what to fix — so they are passed through. The interrupt is
 /// the one that needs translating: it reads as "interrupted", which says nothing about who
 /// interrupted it or why.
-fn explain(error: &rusqlite::Error, budget: Duration) -> String {
+/// The reader's own query, and the reason it will not run.
+///
+/// [`FailureCode::InvalidInput`] every time, because every one of these is something the reader
+/// wrote and can change — which is what lets the query screen put the sentence beside the editor
+/// rather than in an alert about the app. The sentences themselves are the point of this module and
+/// are kept word for word.
+fn refused(message: impl Into<String>) -> Failure {
+    Failure::new(FailureCode::InvalidInput, message)
+}
+
+/// One of SQLite's own complaints, in terms the person who typed the query can use.
+///
+/// The interrupt is the one worth translating: `interrupted` is what SQLite says when the progress
+/// handler stopped a runaway query, and "narrow it down" is the thing to do about it. Everything
+/// else is a syntax error or a name that does not exist, and SQLite's own wording — `no such
+/// column: instanc` — is more useful to somebody editing SQL than anything this could write over
+/// it. Both are [`FailureCode::InvalidInput`]: the query is what has to change, and this is the one
+/// place in the backend where SQLite's own words are the right thing to show.
+fn explain(error: &rusqlite::Error, budget: Duration) -> Failure {
     if error.sqlite_error_code() == Some(ErrorCode::OperationInterrupted) {
-        return format!(
+        return refused(format!(
             "That query was still running after {} seconds, so Chronie stopped it. Narrow it down — a WHERE clause, or a LIMIT.",
             budget.as_secs()
-        );
+        ));
     }
-    error.to_string()
+    refused(error.to_string())
 }
 
 #[cfg(test)]
@@ -447,7 +455,7 @@ mod tests {
         (directory, path)
     }
 
-    fn ask(sql: &str) -> Result<Answer, String> {
+    fn ask(sql: &str) -> Result<Answer, Failure> {
         let (_held, path) = history();
         run(&path, sql, 500)
     }
@@ -518,7 +526,7 @@ mod tests {
         ] {
             let refused = ask(sql).expect_err(sql);
             assert!(
-                refused.contains("only runs queries that read"),
+                refused.report().contains("only runs queries that read"),
                 "{sql}: {refused}"
             );
         }
@@ -535,7 +543,7 @@ mod tests {
         ] {
             let refused = ask(sql).expect_err(sql);
             assert!(
-                refused.contains("only runs queries that read"),
+                refused.report().contains("only runs queries that read"),
                 "{sql}: {refused}"
             );
         }
@@ -558,7 +566,10 @@ mod tests {
     #[test]
     fn refuses_a_second_statement_rather_than_silently_dropping_it() {
         let refused = ask("SELECT 1; DELETE FROM segments").unwrap_err();
-        assert!(refused.contains("one query at a time"), "{refused}");
+        assert!(
+            refused.report().contains("one query at a time"),
+            "{refused}"
+        );
     }
 
     #[test]
@@ -600,7 +611,10 @@ mod tests {
     fn an_empty_query_is_asked_for_rather_than_run() {
         for sql in ["", "   \n  ", "-- nothing but a thought\n"] {
             assert!(
-                ask(sql).unwrap_err().contains("Write a query first"),
+                ask(sql)
+                    .unwrap_err()
+                    .report()
+                    .contains("Write a query first"),
                 "{sql:?}"
             );
         }
@@ -609,14 +623,17 @@ mod tests {
     #[test]
     fn a_placeholder_is_refused_rather_than_answered_with_nulls() {
         let refused = ask("SELECT * FROM segments WHERE id = ?").unwrap_err();
-        assert!(refused.contains("placeholder"), "{refused}");
+        assert!(refused.report().contains("placeholder"), "{refused}");
     }
 
     /// SQLite's own words, because "no such column: charater" is the whole answer.
     #[test]
     fn passes_sqlites_complaint_through_untranslated() {
         let refused = ask("SELECT charater FROM segments").unwrap_err();
-        assert!(refused.contains("no such column: charater"), "{refused}");
+        assert!(
+            refused.report().contains("no such column: charater"),
+            "{refused}"
+        );
     }
 
     #[test]
@@ -632,7 +649,7 @@ mod tests {
             Duration::from_millis(50),
         )
         .unwrap_err();
-        assert!(refused.contains("still running"), "{refused}");
+        assert!(refused.report().contains("still running"), "{refused}");
     }
 
     #[test]
@@ -703,5 +720,40 @@ mod tests {
             .tables
             .iter()
             .any(|table| table.name.starts_with("sqlite_")));
+    }
+
+    /// Everything this gate turns away is the reader's own query, and the code says so — which is
+    /// what lets the query screen put the sentence beside the editor rather than in an alert about
+    /// the app. The sentences themselves are unchanged, which matters: they are instructions.
+    #[test]
+    fn every_refusal_says_it_is_the_query_that_has_to_change() {
+        let (_held, path) = history();
+        for sql in [
+            "",
+            "DELETE FROM segments",
+            "SELECT 1; SELECT 2",
+            "SELECT * FROM segments WHERE note = 'unclosed",
+            "SELECT * FROM segments WHERE id = ?",
+            "SELECT * FROM no_such_table",
+        ] {
+            let failure = run(&path, sql, 100).expect_err(sql);
+            assert_eq!(failure.code(), FailureCode::InvalidInput, "{sql:?}");
+            assert!(!failure.code().retryable(), "{sql:?}");
+        }
+    }
+
+    /// A query stopped for outstaying its welcome is still the reader's to fix, and the sentence
+    /// says how. Fifty milliseconds rather than ten seconds, for the reason `run_within` exists.
+    #[test]
+    fn an_interrupted_query_asks_the_reader_to_narrow_it_down() {
+        let (_held, path) = history();
+        let runaway =
+            "WITH RECURSIVE forever(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM forever) \
+                       SELECT COUNT(*) FROM forever";
+
+        let failure = run_within(&path, runaway, 100, Duration::from_millis(50)).unwrap_err();
+
+        assert_eq!(failure.code(), FailureCode::InvalidInput);
+        assert!(failure.message().contains("Narrow it down"), "{failure}");
     }
 }

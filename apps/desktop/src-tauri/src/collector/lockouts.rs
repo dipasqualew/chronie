@@ -11,6 +11,8 @@ use crate::saved_variables::{self, RawLockout, RawLockoutActivity, RawRosterEntr
 use rusqlite::{params, Transaction};
 use std::collections::{BTreeMap, HashMap};
 
+use crate::failure::Failure;
+
 /// One account's lockout tables, which only mean anything read together: `activities` says
 /// what is true of each lockable thing, `characters` says who is locked to what, and
 /// `roster` names the characters themselves — including ones with nothing saved at all,
@@ -81,7 +83,7 @@ fn upsert_lockout_activity(
     record: &RawLockoutActivity,
     fallback: Option<&RawLockout>,
     now: i64,
-) -> Result<i64, String> {
+) -> Result<i64, Failure> {
     let name = record
         .activity
         .as_deref()
@@ -89,9 +91,8 @@ fn upsert_lockout_activity(
         .or_else(|| fallback.and_then(|value| value.instance.as_deref()))
         .unwrap_or(source_key);
     let kind = lockout_kind(record, fallback);
-    transaction
-        .execute(
-            "INSERT INTO lockout_activities (
+    transaction.execute(
+        "INSERT INTO lockout_activities (
                  account_id, source_key, name, kind, reset_period,
                  first_seen_at, last_seen_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
@@ -105,23 +106,20 @@ fn upsert_lockout_activity(
                      ELSE excluded.reset_period
                  END,
                  last_seen_at = excluded.last_seen_at",
-            params![
-                account_id,
-                source_key,
-                name,
-                kind,
-                lockout_period(record, kind),
-                now
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .query_row(
-            "SELECT id FROM lockout_activities WHERE account_id = ?1 AND source_key = ?2",
-            params![account_id, source_key],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())
+        params![
+            account_id,
+            source_key,
+            name,
+            kind,
+            lockout_period(record, kind),
+            now
+        ],
+    )?;
+    Ok(transaction.query_row(
+        "SELECT id FROM lockout_activities WHERE account_id = ?1 AND source_key = ?2",
+        params![account_id, source_key],
+        |row| row.get(0),
+    )?)
 }
 
 fn insert_lockout(
@@ -131,42 +129,38 @@ fn insert_lockout(
     lockout: &RawLockout,
     expires_at: i64,
     now: i64,
-) -> Result<(), String> {
-    transaction
-        .execute(
-            "INSERT INTO lockouts (
+) -> Result<(), Failure> {
+    transaction.execute(
+        "INSERT INTO lockouts (
                  activity_id, character_id, difficulty_id, difficulty, max_players,
                  expires_at, recorded_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                activity_id,
-                character_id,
-                lockout.difficulty_id.unwrap_or(0),
-                lockout.difficulty.as_deref().unwrap_or(""),
-                lockout.max_players.unwrap_or(0),
-                expires_at,
-                now
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        params![
+            activity_id,
+            character_id,
+            lockout.difficulty_id.unwrap_or(0),
+            lockout.difficulty.as_deref().unwrap_or(""),
+            lockout.max_players.unwrap_or(0),
+            expires_at,
+            now
+        ],
+    )?;
     let lockout_id = transaction.last_insert_rowid();
 
     for (position, encounter) in lockout.encounters.iter().enumerate() {
         let Some(name) = encounter.name.as_deref() else {
             continue;
         };
-        transaction
-            .execute(
-                "INSERT INTO lockout_encounters (lockout_id, position, name, killed)
+        transaction.execute(
+            "INSERT INTO lockout_encounters (lockout_id, position, name, killed)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    lockout_id,
-                    position as i64,
-                    name,
-                    i64::from(encounter.killed.unwrap_or(false))
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                lockout_id,
+                position as i64,
+                name,
+                i64::from(encounter.killed.unwrap_or(false))
+            ],
+        )?;
     }
     Ok(())
 }
@@ -182,7 +176,7 @@ pub(super) fn sync_lockouts(
     account_id: i64,
     feed: &LockoutFeed,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for (character, info) in &feed.roster {
         upsert_character_key(
             transaction,
@@ -203,12 +197,10 @@ pub(super) fn sync_lockouts(
     for (character, lockouts) in &feed.characters {
         let character_id =
             upsert_character_key(transaction, account_id, character, None, None, now)?;
-        transaction
-            .execute(
-                "DELETE FROM lockouts WHERE character_id = ?1",
-                [character_id],
-            )
-            .map_err(|error| error.to_string())?;
+        transaction.execute(
+            "DELETE FROM lockouts WHERE character_id = ?1",
+            [character_id],
+        )?;
 
         for (slot, lockout) in lockouts {
             let Some(expires_at) = lockout.expiry else {

@@ -14,6 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::failure::{Failure, FailureCode};
+
 #[derive(Debug, Clone, PartialEq)]
 enum Key {
     Text(String),
@@ -321,7 +323,15 @@ pub fn read_saved_variable(text: &str, variable: &str) -> Result<Option<Value>, 
     Ok(None)
 }
 
-pub fn resolve_wow_path(input: &Path) -> Result<PathBuf, String> {
+/// The `_retail_` folder under whatever somebody pointed at, given either.
+///
+/// A folder that is not one is [`FailureCode::InstallNotFound`] rather than a sentence, because
+/// two screens ask this and they ask it for different reasons: Setup is checking a folder somebody
+/// just chose, and every read afterwards is checking one saved months ago that the install may
+/// have moved out from under. The window can tell those apart from the code; the path it looked in
+/// goes to the log, where it is a diagnostic rather than a line of somebody's home directory in an
+/// alert.
+pub fn resolve_wow_path(input: &Path) -> Result<PathBuf, Failure> {
     if input.join("WTF").is_dir() {
         return Ok(input.to_path_buf());
     }
@@ -329,10 +339,12 @@ pub fn resolve_wow_path(input: &Path) -> Result<PathBuf, String> {
     if retail.join("WTF").is_dir() {
         return Ok(retail);
     }
-    Err(format!(
-        "No WTF folder found under {} or its _retail_ folder.",
-        input.display()
-    ))
+    Err(Failure::new(
+        FailureCode::InstallNotFound,
+        "That is not a World of Warcraft folder — Chronie looked for a WTF folder in it and in \
+         its _retail_ folder.",
+    )
+    .context(format!("resolving the game folder {}", input.display())))
 }
 
 pub(super) fn account_files(wow_path: &Path) -> Vec<PathBuf> {
@@ -416,6 +428,31 @@ ChronieDB = { ["segments"] = { { ["id"] = "synthetic-1", ["enabled"] = true, ["s
         assert_eq!(
             resolve_wow_path(&temp.path().join("_retail_")).unwrap(),
             temp.path().join("_retail_")
+        );
+    }
+
+    /// A folder that is not an install is a condition the window can act on rather than a sentence
+    /// it can only print — and the path it looked in stays in the log rather than going on screen.
+    #[test]
+    fn says_a_folder_is_not_an_install_without_putting_the_path_on_screen() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let failure = resolve_wow_path(temp.path()).unwrap_err();
+
+        assert_eq!(failure.code(), FailureCode::InstallNotFound);
+        assert!(
+            !failure
+                .message()
+                .contains(&temp.path().display().to_string()),
+            "{}",
+            failure.message()
+        );
+        assert!(
+            failure
+                .report()
+                .contains(&temp.path().display().to_string()),
+            "{}",
+            failure.report()
         );
     }
 }

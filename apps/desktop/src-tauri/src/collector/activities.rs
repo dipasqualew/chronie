@@ -13,6 +13,8 @@ use rusqlite::{params, OptionalExtension, Transaction};
 use serde_json::Value;
 use std::path::Path;
 
+use crate::failure::Failure;
+
 /// Rebuilds the guesses for one segment, leaving everything the user did untouched.
 ///
 /// Only 'inferred' rows are thrown away and recomputed, so a better rule set reaches all of
@@ -24,41 +26,34 @@ pub(super) fn refresh_activities(
     segment_id: i64,
     segment: &Segment,
     now: i64,
-) -> Result<(), String> {
-    transaction
-        .execute(
-            "DELETE FROM activities WHERE segment_id = ?1 AND source = 'inferred'",
-            [segment_id],
-        )
-        .map_err(|error| error.to_string())?;
-    let mut suppressed = transaction
-        .prepare("SELECT kind FROM activity_suppressions WHERE segment_id = ?1")
-        .map_err(|error| error.to_string())?;
+) -> Result<(), Failure> {
+    transaction.execute(
+        "DELETE FROM activities WHERE segment_id = ?1 AND source = 'inferred'",
+        [segment_id],
+    )?;
+    let mut suppressed =
+        transaction.prepare("SELECT kind FROM activity_suppressions WHERE segment_id = ?1")?;
     let kinds = suppressed
-        .query_map([segment_id], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+        .query_map([segment_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     drop(suppressed);
 
     for guess in activity::infer(segment) {
         if kinds.contains(&guess.kind) {
             continue;
         }
-        transaction
-            .execute(
-                "INSERT INTO activities (
+        transaction.execute(
+            "INSERT INTO activities (
                      segment_id, kind, source, confidence, metadata_json, created_at, updated_at
                  ) VALUES (?1, ?2, 'inferred', ?3, ?4, ?5, ?5)",
-                params![
-                    segment_id,
-                    guess.kind,
-                    guess.confidence,
-                    guess.metadata.to_string(),
-                    now
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                guess.kind,
+                guess.confidence,
+                guess.metadata.to_string(),
+                now
+            ],
+        )?;
     }
     Ok(())
 }
@@ -74,28 +69,24 @@ pub fn add_activity(
     kind: &str,
     metadata: &Value,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let mut connection = open_database(database_path)?;
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
     // Adding a kind by hand also suppresses the guess for it, so the next sync cannot end up
     // with the user's version and the inferred one sitting side by side.
     suppress(&transaction, segment_id, kind, now)?;
-    transaction
-        .execute(
-            "DELETE FROM activities
+    transaction.execute(
+        "DELETE FROM activities
              WHERE segment_id = ?1 AND kind = ?2 AND source = 'inferred'",
-            params![segment_id, kind],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "INSERT INTO activities (
+        params![segment_id, kind],
+    )?;
+    transaction.execute(
+        "INSERT INTO activities (
                  segment_id, kind, source, confidence, metadata_json, created_at, updated_at
              ) VALUES (?1, ?2, 'manual', 1, ?3, ?4, ?4)",
-            params![segment_id, kind, metadata.to_string(), now],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
+        params![segment_id, kind, metadata.to_string(), now],
+    )?;
+    Ok(transaction.commit()?)
 }
 
 /// Edits an activity. Editing a guess adopts it: the row becomes the user's, and the guess
@@ -106,7 +97,7 @@ pub fn update_activity(
     kind: &str,
     metadata: &Value,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let mut connection = open_database(database_path)?;
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
     let existing: Option<(i64, String)> = transaction
@@ -115,37 +106,32 @@ pub fn update_activity(
             [activity_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     let Some((segment_id, previous_kind)) = existing else {
         return Err("That activity no longer exists.".into());
     };
     suppress(&transaction, segment_id, &previous_kind, now)?;
     if previous_kind != kind {
         suppress(&transaction, segment_id, kind, now)?;
-        transaction
-            .execute(
-                "DELETE FROM activities
+        transaction.execute(
+            "DELETE FROM activities
                  WHERE segment_id = ?1 AND kind = ?2 AND source = 'inferred'",
-                params![segment_id, kind],
-            )
-            .map_err(|error| error.to_string())?;
+            params![segment_id, kind],
+        )?;
     }
-    transaction
-        .execute(
-            "UPDATE activities
+    transaction.execute(
+        "UPDATE activities
              SET kind = ?2, source = 'manual', confidence = 1,
                  metadata_json = ?3, updated_at = ?4
              WHERE id = ?1",
-            params![activity_id, kind, metadata.to_string(), now],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
+        params![activity_id, kind, metadata.to_string(), now],
+    )?;
+    Ok(transaction.commit()?)
 }
 
 /// Removes an activity for good. A guess is suppressed as well as deleted, or the next sync
 /// would simply put it back and the deletion would look like it never happened.
-pub fn delete_activity(database_path: &Path, activity_id: i64, now: i64) -> Result<(), String> {
+pub fn delete_activity(database_path: &Path, activity_id: i64, now: i64) -> Result<(), Failure> {
     let mut connection = open_database(database_path)?;
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
     let existing: Option<(i64, String)> = transaction
@@ -154,36 +140,29 @@ pub fn delete_activity(database_path: &Path, activity_id: i64, now: i64) -> Resu
             [activity_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     let Some((segment_id, kind)) = existing else {
         return Ok(());
     };
     suppress(&transaction, segment_id, &kind, now)?;
-    transaction
-        .execute("DELETE FROM activities WHERE id = ?1", [activity_id])
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
+    transaction.execute("DELETE FROM activities WHERE id = ?1", [activity_id])?;
+    Ok(transaction.commit()?)
 }
 
 /// Throws away everything the user did to one segment's activities and re-runs the guesses.
 /// The way back from an edit the user regrets, and the only way a suppressed kind ever
 /// returns.
-pub fn reset_activities(database_path: &Path, segment_id: i64, now: i64) -> Result<(), String> {
+pub fn reset_activities(database_path: &Path, segment_id: i64, now: i64) -> Result<(), Failure> {
     let mut connection = open_database(database_path)?;
     let transaction = connection.transaction().map_err(|e| e.to_string())?;
-    transaction
-        .execute(
-            "DELETE FROM activity_suppressions WHERE segment_id = ?1",
-            [segment_id],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute("DELETE FROM activities WHERE segment_id = ?1", [segment_id])
-        .map_err(|error| error.to_string())?;
+    transaction.execute(
+        "DELETE FROM activity_suppressions WHERE segment_id = ?1",
+        [segment_id],
+    )?;
+    transaction.execute("DELETE FROM activities WHERE segment_id = ?1", [segment_id])?;
     let segment = segment_for_inference(&transaction, segment_id)?;
     refresh_activities(&transaction, segment_id, &segment, now)?;
-    transaction.commit().map_err(|error| error.to_string())
+    Ok(transaction.commit()?)
 }
 
 fn suppress(
@@ -191,16 +170,15 @@ fn suppress(
     segment_id: i64,
     kind: &str,
     now: i64,
-) -> Result<(), String> {
-    transaction
+) -> Result<(), Failure> {
+    Ok(transaction
         .execute(
             "INSERT INTO activity_suppressions (segment_id, kind, created_at)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(segment_id, kind) DO NOTHING",
             params![segment_id, kind, now],
         )
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map(|_| ())?)
 }
 
 /// Rebuilds just enough of a stored segment for the inference to read, so a reset can
@@ -209,7 +187,7 @@ fn suppress(
 fn segment_for_inference(
     transaction: &Transaction<'_>,
     segment_id: i64,
-) -> Result<Segment, String> {
+) -> Result<Segment, Failure> {
     let mut segment = transaction
         .query_row(
             "SELECT instance_name, instance_type, difficulty_name, difficulty_id,
@@ -238,13 +216,11 @@ fn segment_for_inference(
                 })
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())?
+        .optional()?
         .ok_or_else(|| "That segment no longer exists.".to_string())?;
 
     let mut statement = transaction
-        .prepare("SELECT success FROM encounters WHERE segment_id = ?1 ORDER BY position")
-        .map_err(|error| error.to_string())?;
+        .prepare("SELECT success FROM encounters WHERE segment_id = ?1 ORDER BY position")?;
     segment.encounters = statement
         .query_map([segment_id], |row| {
             Ok(EncounterEvent {
@@ -255,18 +231,14 @@ fn segment_for_inference(
                 difficulty_id: None,
                 group_size: None,
             })
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
-    let levels: i64 = transaction
-        .query_row(
-            "SELECT COUNT(*) FROM level_ups WHERE segment_id = ?1",
-            [segment_id],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
+    let levels: i64 = transaction.query_row(
+        "SELECT COUNT(*) FROM level_ups WHERE segment_id = ?1",
+        [segment_id],
+        |row| row.get(0),
+    )?;
     segment.level_ups = vec![LevelUpEvent { level: 0, at: None }; levels as usize];
 
     segment.keystone = transaction
@@ -288,8 +260,7 @@ fn segment_for_inference(
                 })
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
 
     segment.delve = transaction
         .query_row(
@@ -306,8 +277,7 @@ fn segment_for_inference(
                 })
             },
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     Ok(segment)
 }
 

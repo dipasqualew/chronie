@@ -930,7 +930,3 @@ function mockEdit(locate: Locate, apply: Apply): DashboardPayload {
   if (target) apply((target.activities ??= []), nextId);
   return structuredClone(mock.dashboard);
 }
-
-export function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

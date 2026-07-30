@@ -36,6 +36,8 @@
 use crate::collector::{self, Summary};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use specta::Type;
+
+use crate::failure::Failure;
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, Read, Write},
@@ -172,42 +174,46 @@ pub struct ReceiveStatus {
 
 /* ---------- the wire ---------- */
 
-fn write_line(stream: &mut impl Write, value: &impl Serialize) -> Result<(), String> {
-    let mut line = serde_json::to_vec(value).map_err(|error| error.to_string())?;
+fn write_line(stream: &mut impl Write, value: &impl Serialize) -> Result<(), Failure> {
+    let mut line = serde_json::to_vec(value)?;
     line.push(b'\n');
     stream
         .write_all(&line)
         .and_then(|()| stream.flush())
-        .map_err(|error| format!("The connection went away: {error}"))
+        .map_err(|error| {
+            Failure::from(format!("The connection went away: {error}")).caused_by(error)
+        })
 }
 
 /// Reads one JSON line, refusing a peer that sends an endless one.
-fn read_line<T: DeserializeOwned>(reader: &mut impl BufRead, what: &str) -> Result<T, String> {
+fn read_line<T: DeserializeOwned>(reader: &mut impl BufRead, what: &str) -> Result<T, Failure> {
     let mut line = Vec::new();
     let read = reader
         .by_ref()
         .take(LONGEST_LINE)
         .read_until(b'\n', &mut line)
-        .map_err(|error| format!("Could not read the {what}: {error}"))?;
+        .map_err(|error| {
+            Failure::from(format!("Could not read the {what}: {error}")).caused_by(error)
+        })?;
     if read == 0 {
-        return Err(format!(
+        return Err(Failure::from(format!(
             "The other Chronie closed before sending the {what}."
-        ));
+        )));
     }
     if !line.ends_with(b"\n") {
-        return Err(format!("The {what} never ended."));
+        return Err(Failure::from(format!("The {what} never ended.")));
     }
     serde_json::from_slice(&line)
-        .map_err(|_| format!("The {what} was not something Chronie sends."))
+        .map_err(|_| Failure::from(format!("The {what} was not something Chronie sends.")))
 }
 
 /// The rules an offer has to pass before a person is even shown it.
-fn vet(offer: &Offer) -> Result<(), String> {
+fn vet(offer: &Offer) -> Result<(), Failure> {
     if offer.protocol != PROTOCOL {
-        return Err(format!(
+        return Err(Failure::from(format!(
             "That Chronie speaks version {} and this one speaks {PROTOCOL}. Update them both.",
             offer.protocol
-        ));
+        )));
     }
     if offer.bytes == 0 {
         return Err("That Chronie offered an empty database.".into());
@@ -287,7 +293,7 @@ fn local_ips() -> Vec<String> {
 /* ---------- sending ---------- */
 
 /// Reads `address` the way a person types it: a bare host means Chronie's own port.
-fn resolve(address: &str) -> Result<SocketAddr, String> {
+fn resolve(address: &str) -> Result<SocketAddr, Failure> {
     let trimmed = address.trim();
     if trimmed.is_empty() {
         return Err("No address to send to.".into());
@@ -299,9 +305,13 @@ fn resolve(address: &str) -> Result<SocketAddr, String> {
     };
     with_port
         .to_socket_addrs()
-        .map_err(|error| format!("Chronie could not make sense of {trimmed}: {error}"))?
+        .map_err(|error| {
+            Failure::from(format!(
+                "Chronie could not make sense of {trimmed}: {error}"
+            ))
+        })?
         .next()
-        .ok_or_else(|| format!("Nothing answers to {trimmed}."))
+        .ok_or_else(|| Failure::from(format!("Nothing answers to {trimmed}.")))
 }
 
 /// Offers this machine's database to a Chronie waiting at `address`, and sends it if the
@@ -319,7 +329,7 @@ pub fn send(
     device: &str,
     address: &str,
     database: &Mutex<()>,
-) -> Result<Receipt, String> {
+) -> Result<Receipt, Failure> {
     let destination = resolve(address)?;
     let outgoing = scratch_dir.join(".chronie-outgoing.sqlite3");
     let result = send_snapshot(database_path, &outgoing, device, destination, database);
@@ -333,15 +343,13 @@ fn send_snapshot(
     device: &str,
     destination: SocketAddr,
     database: &Mutex<()>,
-) -> Result<Receipt, String> {
+) -> Result<Receipt, Failure> {
     {
         let _held = database.lock().map_err(|_| "Database lock failed.")?;
         collector::snapshot(database_path, outgoing)?;
     }
     let summary = collector::summarize(outgoing)?;
-    let bytes = std::fs::metadata(outgoing)
-        .map_err(|error| error.to_string())?
-        .len();
+    let bytes = std::fs::metadata(outgoing)?.len();
     let offer = Offer {
         protocol: PROTOCOL,
         device: device.to_string(),
@@ -351,17 +359,16 @@ fn send_snapshot(
         bytes,
     };
 
-    let mut stream = TcpStream::connect_timeout(&destination, HANDSHAKE_TIMEOUT)
-        .map_err(|error| format!("Chronie could not reach {destination}: {error}"))?;
-    stream
-        .set_write_timeout(Some(TRANSFER_TIMEOUT))
-        .map_err(|error| error.to_string())?;
+    let mut stream =
+        TcpStream::connect_timeout(&destination, HANDSHAKE_TIMEOUT).map_err(|error| {
+            Failure::from(format!("Chronie could not reach {destination}: {error}"))
+                .caused_by(error)
+        })?;
+    stream.set_write_timeout(Some(TRANSFER_TIMEOUT))?;
     // The offer sits on somebody else's screen until they answer it, so the read that waits
     // for their answer is the one read here that is allowed to take minutes.
-    stream
-        .set_read_timeout(Some(DECISION_TIMEOUT))
-        .map_err(|error| error.to_string())?;
-    let mut reader = BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
+    stream.set_read_timeout(Some(DECISION_TIMEOUT))?;
+    let mut reader = BufReader::new(stream.try_clone()?);
 
     write_line(&mut stream, &offer)?;
     let decision: Decision = read_line(&mut reader, "answer")?;
@@ -377,18 +384,17 @@ fn send_snapshot(
         });
     }
 
-    let mut file = File::open(outgoing).map_err(|error| error.to_string())?;
-    let sent = io::copy(&mut file, &mut stream)
-        .map_err(|error| format!("The transfer stopped early: {error}"))?;
+    let mut file = File::open(outgoing)?;
+    let sent = io::copy(&mut file, &mut stream).map_err(|error| {
+        Failure::from(format!("The transfer stopped early: {error}")).caused_by(error)
+    })?;
     if sent != bytes {
-        return Err(format!(
+        return Err(Failure::from(format!(
             "Chronie sent {sent} bytes of a {bytes}-byte database."
-        ));
+        )));
     }
-    stream.flush().map_err(|error| error.to_string())?;
-    stream
-        .set_read_timeout(Some(TRANSFER_TIMEOUT))
-        .map_err(|error| error.to_string())?;
+    stream.flush()?;
+    stream.set_read_timeout(Some(TRANSFER_TIMEOUT))?;
     read_line(&mut reader, "receipt")
 }
 
@@ -398,18 +404,22 @@ fn send_snapshot(
 /// looks like a port scan to anything watching, while one datagram to the broadcast address
 /// reaches all of them at once. Only machines that are waiting answer, so the list is short
 /// and every entry in it is actionable.
-pub fn discover() -> Result<Vec<Peer>, String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|error| format!("Chronie could not open a socket to look with: {error}"))?;
-    socket
-        .set_broadcast(true)
-        .map_err(|error| format!("This machine does not allow broadcasts: {error}"))?;
-    socket
-        .set_read_timeout(Some(POLL))
-        .map_err(|error| error.to_string())?;
+pub fn discover() -> Result<Vec<Peer>, Failure> {
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|error| {
+        Failure::from(format!(
+            "Chronie could not open a socket to look with: {error}"
+        ))
+        .caused_by(error)
+    })?;
+    socket.set_broadcast(true).map_err(|error| {
+        Failure::from(format!("This machine does not allow broadcasts: {error}")).caused_by(error)
+    })?;
+    socket.set_read_timeout(Some(POLL))?;
     socket
         .send_to(PROBE, ("255.255.255.255", PORT))
-        .map_err(|error| format!("Chronie could not ask the network: {error}"))?;
+        .map_err(|error| {
+            Failure::from(format!("Chronie could not ask the network: {error}")).caused_by(error)
+        })?;
 
     // A broadcast comes back to the machine that sent it, so a Chronie that is itself
     // waiting would otherwise find itself and offer to replace its own history.
@@ -465,7 +475,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inbox>, String> {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inbox>, Failure> {
         self.inbox.lock().map_err(|_| "Receive lock failed.".into())
     }
 
@@ -522,26 +532,24 @@ impl Station {
     /// socket at all, because then there is nothing to receive with. A missing beacon is
     /// survivable: the addresses below are what a sender types in when discovery is blocked,
     /// which on a network with client isolation it will be.
-    pub fn start(&self) -> Result<ReceiveStatus, String> {
+    pub fn start(&self) -> Result<ReceiveStatus, Failure> {
         self.start_on(PORT)
     }
 
     /// The above, on a port the caller names. Only the tests name one: they run alongside
     /// each other and cannot all have Chronie's.
-    fn start_on(&self, wanted: u16) -> Result<ReceiveStatus, String> {
+    fn start_on(&self, wanted: u16) -> Result<ReceiveStatus, Failure> {
         if self.shared.running.load(Ordering::SeqCst) {
             return self.status();
         }
         let listener = TcpListener::bind(("0.0.0.0", wanted))
             .or_else(|_| TcpListener::bind(("0.0.0.0", 0)))
-            .map_err(|error| format!("Chronie could not listen for a database: {error}"))?;
-        let port = listener
-            .local_addr()
-            .map_err(|error| error.to_string())?
-            .port();
-        listener
-            .set_nonblocking(true)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                Failure::from(format!("Chronie could not listen for a database: {error}"))
+                    .caused_by(error)
+            })?;
+        let port = listener.local_addr()?.port();
+        listener.set_nonblocking(true)?;
         // The beacon answers on whatever port the transfer got, so the two halves of a
         // station are always reachable as a pair.
         let beacon = UdpSocket::bind(("0.0.0.0", port)).ok();
@@ -637,7 +645,7 @@ impl Station {
     /// are the ones [`start`](Self::start) would want to bind again — a station that could be
     /// stopped and started twice in a second and fail the second time would be a button that
     /// works intermittently.
-    pub fn stop(&self) -> Result<ReceiveStatus, String> {
+    pub fn stop(&self) -> Result<ReceiveStatus, Failure> {
         self.shared.running.store(false, Ordering::SeqCst);
         {
             let mut inbox = self.shared.lock()?;
@@ -665,7 +673,7 @@ impl Station {
     }
 
     /// Answers the offer on the table. Anything else is a click on a stale screen.
-    pub fn answer(&self, accepted: bool) -> Result<ReceiveStatus, String> {
+    pub fn answer(&self, accepted: bool) -> Result<ReceiveStatus, Failure> {
         {
             let mut inbox = self.shared.lock()?;
             if inbox.offer.is_none() {
@@ -680,7 +688,7 @@ impl Station {
         self.status()
     }
 
-    pub fn status(&self) -> Result<ReceiveStatus, String> {
+    pub fn status(&self) -> Result<ReceiveStatus, Failure> {
         let inbox = self.shared.lock()?;
         Ok(ReceiveStatus {
             listening: inbox.listening,
@@ -755,12 +763,12 @@ struct Desk {
 }
 
 /// Turns a sender away before its offer ever reaches somebody's screen.
-fn refuse(stream: &mut TcpStream, reason: String) {
+fn refuse(stream: &mut TcpStream, reason: Failure) {
     let _ = write_line(
         stream,
         &Decision {
             accepted: false,
-            reason,
+            reason: reason.message().to_string(),
         },
     );
 }
@@ -786,7 +794,7 @@ fn decide_and_store(
     if let Err(error) = told {
         return Outcome {
             stored: false,
-            message: error,
+            message: error.message().to_string(),
         };
     }
     if !accepted {
@@ -806,7 +814,9 @@ fn decide_and_store(
     // background sync runs on its own clock and would otherwise be doing exactly that.
     let stored = match desk.database.lock() {
         Ok(_held) => store(reader, &desk.database_path, &desk.data_dir, offer),
-        Err(_) => Err("This Chronie could not get at its own database.".to_string()),
+        Err(_) => Err(Failure::from(
+            "This Chronie could not get at its own database.",
+        )),
     };
     let receipt = match &stored {
         Ok(summary) => Receipt {
@@ -816,7 +826,7 @@ fn decide_and_store(
         },
         Err(error) => Receipt {
             stored: false,
-            reason: error.clone(),
+            reason: error.message().to_string(),
             segment_count: 0,
         },
     };
@@ -831,7 +841,7 @@ fn decide_and_store(
         },
         Err(error) => Outcome {
             stored: false,
-            message: error,
+            message: error.message().to_string(),
         },
     }
 }
@@ -868,8 +878,8 @@ fn store(
     database_path: &Path,
     data_dir: &Path,
     offer: &Offer,
-) -> Result<Summary, String> {
-    std::fs::create_dir_all(data_dir).map_err(|error| error.to_string())?;
+) -> Result<Summary, Failure> {
+    std::fs::create_dir_all(data_dir)?;
     let incoming = data_dir.join(".chronie-incoming.sqlite3");
     let result = receive_into(&incoming, reader, offer)
         .and_then(|()| collector::install_database(&incoming, database_path));
@@ -877,17 +887,18 @@ fn store(
     result
 }
 
-fn receive_into(incoming: &Path, reader: &mut impl BufRead, offer: &Offer) -> Result<(), String> {
-    let mut file = File::create(incoming).map_err(|error| error.to_string())?;
-    let read = io::copy(&mut reader.take(offer.bytes), &mut file)
-        .map_err(|error| format!("The transfer stopped early: {error}"))?;
-    file.flush().map_err(|error| error.to_string())?;
+fn receive_into(incoming: &Path, reader: &mut impl BufRead, offer: &Offer) -> Result<(), Failure> {
+    let mut file = File::create(incoming)?;
+    let read = io::copy(&mut reader.take(offer.bytes), &mut file).map_err(|error| {
+        Failure::from(format!("The transfer stopped early: {error}")).caused_by(error)
+    })?;
+    file.flush()?;
     drop(file);
     if read != offer.bytes {
-        return Err(format!(
+        return Err(Failure::from(format!(
             "Only {read} of the {} bytes offered arrived.",
             offer.bytes
-        ));
+        )));
     }
     Ok(())
 }
@@ -977,7 +988,10 @@ mod tests {
 
         let error = read_line::<Offer>(&mut reader, "offer").unwrap_err();
 
-        assert!(error.contains("never ended"), "unhelpful error: {error}");
+        assert!(
+            error.report().contains("never ended"),
+            "unhelpful error: {error}"
+        );
     }
 
     #[test]
@@ -1032,7 +1046,10 @@ mod tests {
             ),
         ] {
             let error = vet(&offer).unwrap_err();
-            assert!(error.contains(expected), "unhelpful error: {error}");
+            assert!(
+                error.report().contains(expected),
+                "unhelpful error: {error}"
+            );
         }
     }
 
@@ -1132,7 +1149,7 @@ mod tests {
         let error = send(&mine, &sending, "Desktop", &address, &Mutex::default()).unwrap_err();
 
         assert!(
-            error.contains("could not reach"),
+            error.report().contains("could not reach"),
             "unhelpful error: {error}"
         );
         // A station that has been stopped can be started again on the same socket, which a
@@ -1187,11 +1204,10 @@ mod tests {
 
         let sender = {
             let address = address.clone();
-            thread::spawn(move || -> Result<Receipt, String> {
+            thread::spawn(move || -> Result<Receipt, Failure> {
                 let destination = resolve(&address)?;
                 let mut stream = TcpStream::connect(destination).map_err(|e| e.to_string())?;
-                let mut reader =
-                    BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
+                let mut reader = BufReader::new(stream.try_clone()?);
                 write_line(
                     &mut stream,
                     &Offer {
@@ -1299,7 +1315,7 @@ mod tests {
         let error = station.answer(true).unwrap_err();
 
         assert!(
-            error.contains("no database waiting"),
+            error.report().contains("no database waiting"),
             "unhelpful error: {error}"
         );
     }

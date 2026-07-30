@@ -29,7 +29,8 @@ import { Details } from "./details";
 import { duration, plural } from "./format";
 import { gapEvidence, gapSentence } from "./gap";
 import { createAchievementBook } from "./achievements";
-import { desktop, message } from "./desktop";
+import { desktop } from "./desktop";
+import { message, recourse } from "./failure";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
 import { QueryView } from "./queryView";
@@ -310,6 +311,20 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   const setsStatus =
     sets.state === "loading" ? READING_SETS : sets.state === "failed" ? message(sets.error) : "";
 
+  // And the one thing that can be done about it, when the backend named a condition somebody can
+  // act on. The two reasons this read fails on a working install are the two that have an answer:
+  // nobody has said where the game is, which is a click away in Setup, and the game is being
+  // patched, which is a click away in a minute. Everything else gets its sentence and no button,
+  // because a button that cannot help is worse than none.
+  const setsRecourse =
+    sets.state === "failed"
+      ? {
+          setup: { label: "Open Setup", act: () => setView("settings") },
+          retry: { label: "Try again", act: sets.retry },
+          none: null,
+        }[recourse(sets.error)]
+      : null;
+
   const rosterMeta = profiles.length
     ? [
         plural(profiles.length, "character"),
@@ -437,6 +452,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         <TransmogView
           payload={sets.value}
           status={setsStatus}
+          statusRecourse={setsRecourse}
           loadSet={desktop.transmogSetItems}
           loadAppearances={desktop.transmogAppearances}
           loadIcons={desktop.gameIcons}

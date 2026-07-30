@@ -733,6 +733,11 @@ dto!(QuerySchema {
     pub tables: Vec<QueryTable>,
 });
 
+/// One value re-read as the shape the boundary declares, by way of JSON.
+///
+/// A failure here means the two shapes disagree, which is a bug in this crate rather than anything
+/// a reader did — so it stays a string, and the boundary files it under
+/// [`crate::failure::FailureCode::Internal`] like every other condition nobody has named.
 pub fn convert<T: Serialize, U: DeserializeOwned>(value: T) -> Result<U, String> {
     serde_json::to_value(value)
         .map_err(|error| error.to_string())

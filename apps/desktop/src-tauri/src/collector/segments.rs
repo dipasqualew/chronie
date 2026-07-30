@@ -7,10 +7,14 @@
 //! somewhere this module does not touch. See [`super::activities`].
 
 use super::activities::refresh_activities;
+use crate::failure::Failure;
 use crate::saved_variables::Segment;
 use rusqlite::{params, OptionalExtension, Transaction};
 
-pub(super) fn clear_outcomes(transaction: &Transaction<'_>, segment_id: i64) -> Result<(), String> {
+pub(super) fn clear_outcomes(
+    transaction: &Transaction<'_>,
+    segment_id: i64,
+) -> Result<(), Failure> {
     for table in [
         "transmogs",
         "achievements",
@@ -29,12 +33,10 @@ pub(super) fn clear_outcomes(transaction: &Transaction<'_>, segment_id: i64) -> 
         // equipset_slots hang off the change row and go with it.
         "equipset_changes",
     ] {
-        transaction
-            .execute(
-                &format!("DELETE FROM {table} WHERE segment_id = ?1"),
-                [segment_id],
-            )
-            .map_err(|error| error.to_string())?;
+        transaction.execute(
+            &format!("DELETE FROM {table} WHERE segment_id = ?1"),
+            [segment_id],
+        )?;
     }
     Ok(())
 }
@@ -44,7 +46,7 @@ fn insert_outcomes(
     character_id: i64,
     segment_id: i64,
     segment: &Segment,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     clear_outcomes(transaction, segment_id)?;
 
     for (position, event) in segment.transmogs.iter().enumerate() {
@@ -53,227 +55,200 @@ fn insert_outcomes(
             Some(false) => "source",
             None => "unknown",
         };
-        transaction
-            .execute(
-                "INSERT INTO transmogs (
+        transaction.execute(
+            "INSERT INTO transmogs (
                      segment_id, position, item_id, source_id, appearance_id,
                      collected_at, acquisition_kind
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.source_id,
-                    event.appearance_id,
-                    event.at,
-                    acquisition_kind
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.source_id,
+                event.appearance_id,
+                event.at,
+                acquisition_kind
+            ],
+        )?;
     }
 
     for (position, event) in segment.achievements.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO achievements (
+        transaction.execute(
+            "INSERT INTO achievements (
                      segment_id, position, achievement_id, name, earned_at, account_first
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at,
-                    event.account_first.map(i64::from)
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at,
+                event.account_first.map(i64::from)
+            ],
+        )?;
     }
 
     for (position, event) in segment.quests.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO quests (
+        transaction.execute(
+            "INSERT INTO quests (
                      segment_id, position, quest_id, name, completed_at,
                      character_first, account_first
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at,
-                    event.character_first.map(i64::from),
-                    event.account_first.map(i64::from)
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at,
+                event.character_first.map(i64::from),
+                event.account_first.map(i64::from)
+            ],
+        )?;
     }
 
     for event in &segment.currencies {
-        transaction
-            .execute(
-                "INSERT INTO currency_gains (segment_id, currency_id, name, amount, total)
+        transaction.execute(
+            "INSERT INTO currency_gains (segment_id, currency_id, name, amount, total)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![segment_id, event.id, event.name, event.amount, event.total],
-            )
-            .map_err(|error| error.to_string())?;
+            params![segment_id, event.id, event.name, event.amount, event.total],
+        )?;
     }
 
     for event in &segment.reputation {
-        transaction
-            .execute(
-                "INSERT INTO reputation_gains (
+        transaction.execute(
+            "INSERT INTO reputation_gains (
                      segment_id, faction, amount, standing, standing_current, standing_max
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    segment_id,
-                    event.faction,
-                    event.amount,
-                    event.standing.as_deref(),
-                    event.current,
-                    event.max
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                event.faction,
+                event.amount,
+                event.standing.as_deref(),
+                event.current,
+                event.max
+            ],
+        )?;
     }
 
     for (position, event) in segment.level_ups.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO level_ups (segment_id, position, level, reached_at)
+        transaction.execute(
+            "INSERT INTO level_ups (segment_id, position, level, reached_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![segment_id, position as i64, event.level, event.at],
-            )
-            .map_err(|error| error.to_string())?;
+            params![segment_id, position as i64, event.level, event.at],
+        )?;
     }
 
     for (position, event) in segment.mounts.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO mounts (segment_id, position, mount_id, name, collected_at)
+        transaction.execute(
+            "INSERT INTO mounts (segment_id, position, mount_id, name, collected_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at
+            ],
+        )?;
     }
 
     for (position, event) in segment.pets.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO pets (
+        transaction.execute(
+            "INSERT INTO pets (
                      segment_id, position, species_id, name, collected_at, pet_guid,
                      species_first
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at,
-                    event.guid.as_deref(),
-                    event.species_first.map(i64::from)
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at,
+                event.guid.as_deref(),
+                event.species_first.map(i64::from)
+            ],
+        )?;
     }
 
     for (position, event) in segment.toys.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO toys (segment_id, position, item_id, name, collected_at)
+        transaction.execute(
+            "INSERT INTO toys (segment_id, position, item_id, name, collected_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at
+            ],
+        )?;
     }
 
     for (position, event) in segment.housing_items.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO housing_items (
+        transaction.execute(
+            "INSERT INTO housing_items (
                      segment_id, position, decor_id, name, collected_at, warband_first
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at,
-                    event.warband_first.map(i64::from)
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at,
+                event.warband_first.map(i64::from)
+            ],
+        )?;
     }
 
     for (position, event) in segment.housing_level_ups.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO housing_level_ups (segment_id, position, level, reached_at)
+        transaction.execute(
+            "INSERT INTO housing_level_ups (segment_id, position, level, reached_at)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![segment_id, position as i64, event.level, event.at],
-            )
-            .map_err(|error| error.to_string())?;
+            params![segment_id, position as i64, event.level, event.at],
+        )?;
     }
 
     for (position, event) in segment.encounters.iter().enumerate() {
-        transaction
-            .execute(
-                "INSERT INTO encounters (
+        transaction.execute(
+            "INSERT INTO encounters (
                      segment_id, position, encounter_id, name, ended_at,
                      difficulty_id, group_size, success
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    segment_id,
-                    position as i64,
-                    event.id,
-                    event.name.as_deref(),
-                    event.at,
-                    event.difficulty_id,
-                    event.group_size,
-                    i64::from(event.success)
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                event.id,
+                event.name.as_deref(),
+                event.at,
+                event.difficulty_id,
+                event.group_size,
+                i64::from(event.success)
+            ],
+        )?;
     }
 
     if let Some(keystone) = &segment.keystone {
         // A run with no level is not one the app can say anything useful about, and the
         // column is NOT NULL for exactly that reason.
         if let Some(level) = keystone.level {
-            transaction
-                .execute(
-                    "INSERT INTO keystone_runs (
+            transaction.execute(
+                "INSERT INTO keystone_runs (
                          segment_id, level, map_id, affixes_json, started_at,
                          completed_at, completed, duration_ms, on_time, upgrades
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
-                        segment_id,
-                        level,
-                        keystone.map_id,
-                        serde_json::to_string(&keystone.affixes)
-                            .map_err(|error| error.to_string())?,
-                        keystone.started_at,
-                        keystone.completed_at,
-                        i64::from(keystone.completed),
-                        keystone.duration_ms,
-                        keystone.on_time.map(i64::from),
-                        keystone.upgrades
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+                params![
+                    segment_id,
+                    level,
+                    keystone.map_id,
+                    serde_json::to_string(&keystone.affixes)?,
+                    keystone.started_at,
+                    keystone.completed_at,
+                    i64::from(keystone.completed),
+                    keystone.duration_ms,
+                    keystone.on_time.map(i64::from),
+                    keystone.upgrades
+                ],
+            )?;
         }
     }
 
@@ -281,21 +256,19 @@ fn insert_outcomes(
         // Every column but the segment is nullable here, unlike a keystone run: a delve the
         // addon saw start is worth recording even when the client had not yet said which
         // tier or which story it was, because the segment names the delve either way.
-        transaction
-            .execute(
-                "INSERT INTO delve_runs (
+        transaction.execute(
+            "INSERT INTO delve_runs (
                      segment_id, tier, scenario_id, started_at, completed_at, completed
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    segment_id,
-                    delve.tier,
-                    delve.scenario_id,
-                    delve.started_at,
-                    delve.completed_at,
-                    i64::from(delve.completed)
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                delve.tier,
+                delve.scenario_id,
+                delve.started_at,
+                delve.completed_at,
+                i64::from(delve.completed)
+            ],
+        )?;
     }
 
     insert_equipset_changes(transaction, character_id, segment_id, segment)?;
@@ -315,47 +288,43 @@ fn insert_equipset_changes(
     character_id: i64,
     segment_id: i64,
     segment: &Segment,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for (position, event) in segment.equipset_changes.iter().enumerate() {
         let changed_at = event.at;
-        transaction
-            .execute(
-                "INSERT INTO equipset_changes (
+        transaction.execute(
+            "INSERT INTO equipset_changes (
                      segment_id, position, character_id, set_id, name, kind, changed_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    segment_id,
-                    position as i64,
-                    character_id,
-                    event.set_id,
-                    event.name,
-                    event.kind.as_str(),
-                    changed_at
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                segment_id,
+                position as i64,
+                character_id,
+                event.set_id,
+                event.name,
+                event.kind.as_str(),
+                changed_at
+            ],
+        )?;
         let change_id = transaction.last_insert_rowid();
 
         for item in &event.items {
-            transaction
-                .execute(
-                    "INSERT INTO equipset_slots (
+            transaction.execute(
+                "INSERT INTO equipset_slots (
                          change_id, character_id, set_id, slot,
                          item_id, item_level, item_name, changed_at
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(change_id, slot) DO NOTHING",
-                    params![
-                        change_id,
-                        character_id,
-                        event.set_id,
-                        item.slot,
-                        item.item_id,
-                        item.item_level,
-                        item.item_name.as_deref(),
-                        changed_at
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+                params![
+                    change_id,
+                    character_id,
+                    event.set_id,
+                    item.slot,
+                    item.item_id,
+                    item.item_level,
+                    item.item_name.as_deref(),
+                    changed_at
+                ],
+            )?;
         }
     }
     Ok(())
@@ -366,7 +335,7 @@ pub(super) fn upsert_segment(
     character_id: i64,
     segment: &Segment,
     now: i64,
-) -> Result<bool, String> {
+) -> Result<bool, Failure> {
     let source_id = &segment.id;
     let existing: Option<i64> = transaction
         .query_row(
@@ -374,12 +343,10 @@ pub(super) fn upsert_segment(
             params![character_id, source_id],
             |row| row.get(0),
         )
-        .optional()
-        .map_err(|error| error.to_string())?;
+        .optional()?;
     let experience = segment.experience.as_ref();
-    transaction
-        .execute(
-            "INSERT INTO segments (
+    transaction.execute(
+        "INSERT INTO segments (
                  character_id, source_id, ended_day, instance_name, instance_type,
                  difficulty_name, difficulty_id, started_at, ended_at, duration_seconds,
                  character_level, loot_value, gold_diff, currency_total, reputation_total,
@@ -413,33 +380,32 @@ pub(super) fn upsert_segment(
                  experience_percent = excluded.experience_percent,
                  experience_start_level = excluded.experience_start_level,
                  experience_end_level = excluded.experience_end_level",
-            params![
-                character_id,
-                source_id,
-                segment.day,
-                segment.instance,
-                segment.instance_type,
-                segment.difficulty,
-                segment.difficulty_id,
-                segment.started_at,
-                segment.ended_at,
-                segment.seconds,
-                segment.level,
-                segment.loot_value,
-                segment.gold_diff,
-                segment.currency_total,
-                segment.reputation_total,
-                segment.housing_xp,
-                now,
-                segment.expansion_tier,
-                segment.latest_expansion_tier,
-                experience.map(|value| value.gained).unwrap_or(0),
-                experience.map(|value| value.percent).unwrap_or(0.0),
-                experience.and_then(|value| value.start_level),
-                experience.and_then(|value| value.end_level),
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        params![
+            character_id,
+            source_id,
+            segment.day,
+            segment.instance,
+            segment.instance_type,
+            segment.difficulty,
+            segment.difficulty_id,
+            segment.started_at,
+            segment.ended_at,
+            segment.seconds,
+            segment.level,
+            segment.loot_value,
+            segment.gold_diff,
+            segment.currency_total,
+            segment.reputation_total,
+            segment.housing_xp,
+            now,
+            segment.expansion_tier,
+            segment.latest_expansion_tier,
+            experience.map(|value| value.gained).unwrap_or(0),
+            experience.map(|value| value.percent).unwrap_or(0.0),
+            experience.and_then(|value| value.start_level),
+            experience.and_then(|value| value.end_level),
+        ],
+    )?;
     let segment_id = existing.unwrap_or_else(|| transaction.last_insert_rowid());
     insert_outcomes(transaction, character_id, segment_id, segment)?;
     refresh_activities(transaction, segment_id, segment, now)?;

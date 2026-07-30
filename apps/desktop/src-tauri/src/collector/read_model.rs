@@ -8,6 +8,7 @@
 use super::database::open_database;
 use super::holdings::account_holdings;
 use crate::activity;
+use crate::failure::Failure;
 use chrono::Utc;
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
@@ -27,11 +28,10 @@ fn push_event(
     }
 }
 
-pub fn dashboard(database_path: &Path) -> Result<Value, String> {
+pub fn dashboard(database_path: &Path) -> Result<Value, Failure> {
     let connection = open_database(database_path)?;
-    let mut statement = connection
-        .prepare(
-            "SELECT
+    let mut statement = connection.prepare(
+        "SELECT
                  s.id, s.source_id, c.source_key, c.class_file, s.character_level,
                  s.ended_day, s.instance_name, s.difficulty_name, s.instance_type,
                  s.difficulty_id, s.started_at, s.ended_at, s.duration_seconds,
@@ -42,118 +42,107 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
              FROM segments s
              JOIN characters c ON c.id = s.character_id
              ORDER BY s.ended_at DESC, s.source_id ASC",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let experience_gained: i64 = row.get(20)?;
-            let experience_percent: f64 = row.get(21)?;
-            let experience_start: Option<i64> = row.get(22)?;
-            let experience_end: Option<i64> = row.get(23)?;
-            Ok((
-                row.get::<_, i64>(0)?,
-                serde_json::json!({
-                    // The database row id, which is what an activity is filed against. The
-                    // `id` beside it is the addon's own identity for the segment; the editor
-                    // needs the one that survives a rename of the other.
-                    "segmentId": row.get::<_, i64>(0)?,
-                    "id": row.get::<_, String>(1)?,
-                    "character": row.get::<_, String>(2)?,
-                    "classFile": row.get::<_, Option<String>>(3)?,
-                    "level": row.get::<_, Option<i64>>(4)?,
-                    "day": row.get::<_, String>(5)?,
-                    "instance": row.get::<_, String>(6)?,
-                    "difficulty": row.get::<_, String>(7)?,
-                    "instanceType": row.get::<_, String>(8)?,
-                    "difficultyId": row.get::<_, Option<i64>>(9)?,
-                    "startedAt": row.get::<_, i64>(10)?,
-                    "endedAt": row.get::<_, i64>(11)?,
-                    "seconds": row.get::<_, i64>(12)?,
-                    "lootValue": row.get::<_, i64>(13)?,
-                    "goldDiff": row.get::<_, i64>(14)?,
-                    "currencyTotal": row.get::<_, i64>(15)?,
-                    "reputationTotal": row.get::<_, i64>(16)?,
-                    "housingXP": row.get::<_, i64>(17)?,
-                    "expansionTier": row.get::<_, Option<i64>>(18)?,
-                    "latestExpansionTier": row.get::<_, Option<i64>>(19)?,
-                    // Absent, not zeroed, when the character never earned any: the same
-                    // rule the ingest side follows, so a reader can trust the absence.
-                    "experience": (experience_gained != 0).then(|| serde_json::json!({
-                        "gained": experience_gained,
-                        "percent": experience_percent,
-                        "startLevel": experience_start,
-                        "endLevel": experience_end,
-                    })),
-                    "activities": [],
-                    "captures": [],
-                    "encounters": [],
-                    "equipsetChanges": [],
-                    "transmogs": [],
-                    "currencies": [],
-                    "reputation": [],
-                    "achievements": [],
-                    "levelUps": [],
-                    "mounts": [],
-                    "pets": [],
-                    "quests": [],
-                    "toys": [],
-                    "housingItems": [],
-                    "housingLevelUps": []
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        let experience_gained: i64 = row.get(20)?;
+        let experience_percent: f64 = row.get(21)?;
+        let experience_start: Option<i64> = row.get(22)?;
+        let experience_end: Option<i64> = row.get(23)?;
+        Ok((
+            row.get::<_, i64>(0)?,
+            serde_json::json!({
+                // The database row id, which is what an activity is filed against. The
+                // `id` beside it is the addon's own identity for the segment; the editor
+                // needs the one that survives a rename of the other.
+                "segmentId": row.get::<_, i64>(0)?,
+                "id": row.get::<_, String>(1)?,
+                "character": row.get::<_, String>(2)?,
+                "classFile": row.get::<_, Option<String>>(3)?,
+                "level": row.get::<_, Option<i64>>(4)?,
+                "day": row.get::<_, String>(5)?,
+                "instance": row.get::<_, String>(6)?,
+                "difficulty": row.get::<_, String>(7)?,
+                "instanceType": row.get::<_, String>(8)?,
+                "difficultyId": row.get::<_, Option<i64>>(9)?,
+                "startedAt": row.get::<_, i64>(10)?,
+                "endedAt": row.get::<_, i64>(11)?,
+                "seconds": row.get::<_, i64>(12)?,
+                "lootValue": row.get::<_, i64>(13)?,
+                "goldDiff": row.get::<_, i64>(14)?,
+                "currencyTotal": row.get::<_, i64>(15)?,
+                "reputationTotal": row.get::<_, i64>(16)?,
+                "housingXP": row.get::<_, i64>(17)?,
+                "expansionTier": row.get::<_, Option<i64>>(18)?,
+                "latestExpansionTier": row.get::<_, Option<i64>>(19)?,
+                // Absent, not zeroed, when the character never earned any: the same
+                // rule the ingest side follows, so a reader can trust the absence.
+                "experience": (experience_gained != 0).then(|| serde_json::json!({
+                    "gained": experience_gained,
+                    "percent": experience_percent,
+                    "startLevel": experience_start,
+                    "endLevel": experience_end,
+                })),
+                "activities": [],
+                "captures": [],
+                "encounters": [],
+                "equipsetChanges": [],
+                "transmogs": [],
+                "currencies": [],
+                "reputation": [],
+                "achievements": [],
+                "levelUps": [],
+                "mounts": [],
+                "pets": [],
+                "quests": [],
+                "toys": [],
+                "housingItems": [],
+                "housingLevelUps": []
+            }),
+        ))
+    })?;
     let mut segments = Vec::new();
     let mut indices = HashMap::new();
     for row in rows {
-        let (id, segment) = row.map_err(|error| error.to_string())?;
+        let (id, segment) = row?;
         indices.insert(id, segments.len());
         segments.push(segment);
     }
     drop(statement);
 
-    let mut statement = connection
-        .prepare(
-            "SELECT segment_id, item_id, source_id, appearance_id, collected_at,
+    let mut statement = connection.prepare(
+        "SELECT segment_id, item_id, source_id, appearance_id, collected_at,
                     acquisition_kind
              FROM transmogs ORDER BY segment_id, position",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let kind: String = row.get(5)?;
-            Ok((
-                row.get::<_, i64>(0)?,
-                serde_json::json!({
-                    "id": row.get::<_, i64>(1)?,
-                    "sourceID": row.get::<_, Option<i64>>(2)?,
-                    "appearanceID": row.get::<_, Option<i64>>(3)?,
-                    "at": row.get::<_, Option<i64>>(4)?,
-                    "newAppearance": match kind.as_str() {
-                        "appearance" => Some(true),
-                        "source" => Some(false),
-                        _ => None,
-                    }
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        let kind: String = row.get(5)?;
+        Ok((
+            row.get::<_, i64>(0)?,
+            serde_json::json!({
+                "id": row.get::<_, i64>(1)?,
+                "sourceID": row.get::<_, Option<i64>>(2)?,
+                "appearanceID": row.get::<_, Option<i64>>(3)?,
+                "at": row.get::<_, Option<i64>>(4)?,
+                "newAppearance": match kind.as_str() {
+                    "appearance" => Some(true),
+                    "source" => Some(false),
+                    _ => None,
+                }
+            }),
+        ))
+    })?;
     for row in rows {
-        let (segment_id, event) = row.map_err(|error| error.to_string())?;
+        let (segment_id, event) = row?;
         push_event(&mut segments, &indices, segment_id, "transmogs", event);
     }
     drop(statement);
 
     macro_rules! load_rows {
         ($sql:expr, $key:expr, $mapper:expr) => {{
-            let mut child_statement = connection
-                .prepare($sql)
-                .map_err(|error| error.to_string())?;
-            let child_rows = child_statement
-                .query_map([], $mapper)
-                .map_err(|error| error.to_string())?;
+            let mut child_statement = connection.prepare($sql)?;
+            let child_rows = child_statement.query_map([], $mapper)?;
             for child_row in child_rows {
-                let (segment_id, event) = child_row.map_err(|error| error.to_string())?;
+                let (segment_id, event) = child_row?;
                 push_event(&mut segments, &indices, segment_id, $key, event);
             }
         }};
@@ -374,9 +363,8 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     // for the same character, set and slot — which is what `LAG` is doing. That is the whole
     // reason the table stores only the state after a change: the before is already written
     // down, once, as somebody else's after.
-    let mut statement = connection
-        .prepare(
-            "WITH history AS (
+    let mut statement = connection.prepare(
+        "WITH history AS (
                  SELECT id, change_id, slot, item_id, item_level, item_name,
                         LAG(item_id)    OVER slot_history AS previous_item_id,
                         LAG(item_level) OVER slot_history AS previous_item_level,
@@ -395,39 +383,36 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
              FROM equipset_changes AS changes
              LEFT JOIN history ON history.change_id = changes.id
              ORDER BY changes.segment_id, changes.position, history.slot",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            serde_json::json!({
+                "setId": row.get::<_, i64>(2)?,
+                "name": row.get::<_, String>(3)?,
+                "kind": row.get::<_, String>(4)?,
+                "at": row.get::<_, Option<i64>>(5)?,
+            }),
+            row.get::<_, Option<i64>>(6)?.map(|slot| {
                 serde_json::json!({
-                    "setId": row.get::<_, i64>(2)?,
-                    "name": row.get::<_, String>(3)?,
-                    "kind": row.get::<_, String>(4)?,
-                    "at": row.get::<_, Option<i64>>(5)?,
-                }),
-                row.get::<_, Option<i64>>(6)?.map(|slot| {
-                    serde_json::json!({
-                        "slot": slot,
-                        "itemId": row.get::<_, Option<i64>>(7).unwrap_or(None),
-                        "itemLevel": row.get::<_, Option<i64>>(8).unwrap_or(None),
-                        "itemName": row.get::<_, Option<String>>(9).unwrap_or(None),
-                        "previousItemId": row.get::<_, Option<i64>>(10).unwrap_or(None),
-                        "previousItemLevel": row.get::<_, Option<i64>>(11).unwrap_or(None),
-                        "previousItemName": row.get::<_, Option<String>>(12).unwrap_or(None),
-                    })
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+                    "slot": slot,
+                    "itemId": row.get::<_, Option<i64>>(7).unwrap_or(None),
+                    "itemLevel": row.get::<_, Option<i64>>(8).unwrap_or(None),
+                    "itemName": row.get::<_, Option<String>>(9).unwrap_or(None),
+                    "previousItemId": row.get::<_, Option<i64>>(10).unwrap_or(None),
+                    "previousItemLevel": row.get::<_, Option<i64>>(11).unwrap_or(None),
+                    "previousItemName": row.get::<_, Option<String>>(12).unwrap_or(None),
+                })
+            }),
+        ))
+    })?;
     // The join hands back one row per slot, so a change with three slots arrives three
     // times. Changes come out grouped and in order, so the last one built is the one a
     // slot belongs to and no lookup table is needed.
     let mut open: Option<(i64, i64, Value)> = None;
     for row in rows {
-        let (segment_id, change_id, change, slot) = row.map_err(|error| error.to_string())?;
+        let (segment_id, change_id, change, slot) = row?;
         if open
             .as_ref()
             .is_none_or(|(_, open_id, _)| *open_id != change_id)
@@ -464,35 +449,31 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
 
     // A keystone run is one per segment rather than a list, so it is attached directly
     // instead of pushed onto an event array.
-    let mut statement = connection
-        .prepare(
-            "SELECT segment_id, level, map_id, affixes_json, started_at, completed_at,
+    let mut statement = connection.prepare(
+        "SELECT segment_id, level, map_id, affixes_json, started_at, completed_at,
                     completed, duration_ms, on_time, upgrades
              FROM keystone_runs",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            let affixes: String = row.get(3)?;
-            Ok((
-                row.get::<_, i64>(0)?,
-                serde_json::json!({
-                    "level": row.get::<_, i64>(1)?,
-                    "mapId": row.get::<_, Option<i64>>(2)?,
-                    "affixes": serde_json::from_str::<Value>(&affixes)
-                        .unwrap_or_else(|_| Value::Array(Vec::new())),
-                    "startedAt": row.get::<_, Option<i64>>(4)?,
-                    "completedAt": row.get::<_, Option<i64>>(5)?,
-                    "completed": row.get::<_, i64>(6)? != 0,
-                    "durationMs": row.get::<_, Option<i64>>(7)?,
-                    "onTime": row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
-                    "upgrades": row.get::<_, Option<i64>>(9)?,
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        let affixes: String = row.get(3)?;
+        Ok((
+            row.get::<_, i64>(0)?,
+            serde_json::json!({
+                "level": row.get::<_, i64>(1)?,
+                "mapId": row.get::<_, Option<i64>>(2)?,
+                "affixes": serde_json::from_str::<Value>(&affixes)
+                    .unwrap_or_else(|_| Value::Array(Vec::new())),
+                "startedAt": row.get::<_, Option<i64>>(4)?,
+                "completedAt": row.get::<_, Option<i64>>(5)?,
+                "completed": row.get::<_, i64>(6)? != 0,
+                "durationMs": row.get::<_, Option<i64>>(7)?,
+                "onTime": row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
+                "upgrades": row.get::<_, Option<i64>>(9)?,
+            }),
+        ))
+    })?;
     for row in rows {
-        let (segment_id, keystone) = row.map_err(|error| error.to_string())?;
+        let (segment_id, keystone) = row?;
         if let Some(index) = indices.get(&segment_id) {
             segments[*index]["keystone"] = keystone;
         }
@@ -500,28 +481,24 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
     drop(statement);
 
     // A delve run is one per segment too, and goes on the same way.
-    let mut statement = connection
-        .prepare(
-            "SELECT segment_id, tier, scenario_id, started_at, completed_at, completed
+    let mut statement = connection.prepare(
+        "SELECT segment_id, tier, scenario_id, started_at, completed_at, completed
              FROM delve_runs",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                serde_json::json!({
-                    "tier": row.get::<_, Option<i64>>(1)?,
-                    "scenarioId": row.get::<_, Option<i64>>(2)?,
-                    "startedAt": row.get::<_, Option<i64>>(3)?,
-                    "completedAt": row.get::<_, Option<i64>>(4)?,
-                    "completed": row.get::<_, i64>(5)? != 0,
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            serde_json::json!({
+                "tier": row.get::<_, Option<i64>>(1)?,
+                "scenarioId": row.get::<_, Option<i64>>(2)?,
+                "startedAt": row.get::<_, Option<i64>>(3)?,
+                "completedAt": row.get::<_, Option<i64>>(4)?,
+                "completed": row.get::<_, i64>(5)? != 0,
+            }),
+        ))
+    })?;
     for row in rows {
-        let (segment_id, delve) = row.map_err(|error| error.to_string())?;
+        let (segment_id, delve) = row?;
         if let Some(index) = indices.get(&segment_id) {
             segments[*index]["delve"] = delve;
         }
@@ -544,9 +521,7 @@ pub fn dashboard(database_path: &Path) -> Result<Value, String> {
 /// window: it is [`crate::gap`], asking how far the record reaches so it can be held against
 /// how far the client's own combat log reaches. `None` is an empty history, which that rule
 /// treats as nothing to compare rather than as a hole.
-pub fn newest_segment_end(database_path: &Path) -> Result<Option<i64>, String> {
+pub fn newest_segment_end(database_path: &Path) -> Result<Option<i64>, Failure> {
     let connection = open_database(database_path)?;
-    connection
-        .query_row("SELECT MAX(ended_at) FROM segments", [], |row| row.get(0))
-        .map_err(|error| error.to_string())
+    Ok(connection.query_row("SELECT MAX(ended_at) FROM segments", [], |row| row.get(0))?)
 }

@@ -13,6 +13,8 @@ use rusqlite::{params, Connection, Transaction};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
+use crate::failure::Failure;
+
 /// What each character was last seen holding, replacing whatever it last said.
 ///
 /// Wholesale per character rather than row by row, for the same reason the addon writes it
@@ -25,22 +27,18 @@ pub(super) fn sync_holdings(
     account_id: i64,
     holdings: &BTreeMap<String, RawHoldingSnapshot>,
     now: i64,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     for (character, snapshot) in holdings {
         let character_id =
             upsert_character_key(transaction, account_id, character, None, None, now)?;
-        transaction
-            .execute(
-                "DELETE FROM character_currencies WHERE character_id = ?1",
-                [character_id],
-            )
-            .map_err(|error| error.to_string())?;
-        transaction
-            .execute(
-                "DELETE FROM character_standings WHERE character_id = ?1",
-                [character_id],
-            )
-            .map_err(|error| error.to_string())?;
+        transaction.execute(
+            "DELETE FROM character_currencies WHERE character_id = ?1",
+            [character_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM character_standings WHERE character_id = ?1",
+            [character_id],
+        )?;
 
         for (key, held) in &snapshot.currencies {
             // The addon keys these by the client's own currency id, which arrives as a Lua
@@ -51,59 +49,53 @@ pub(super) fn sync_holdings(
             let Some(total) = held.total else {
                 continue;
             };
-            transaction
-                .execute(
-                    "INSERT INTO character_currencies (
+            transaction.execute(
+                "INSERT INTO character_currencies (
                          character_id, currency_id, name, total, observed_at, account_wide
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        character_id,
-                        currency_id,
-                        held.name.as_deref(),
-                        total,
-                        held.at,
-                        // The addon writes the flag only when it is set, so an absent one is
-                        // a currency this character's own — which is what the column's
-                        // default already says for every row written before it existed.
-                        i64::from(held.account_wide.unwrap_or(false))
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+                params![
+                    character_id,
+                    currency_id,
+                    held.name.as_deref(),
+                    total,
+                    held.at,
+                    // The addon writes the flag only when it is set, so an absent one is
+                    // a currency this character's own — which is what the column's
+                    // default already says for every row written before it existed.
+                    i64::from(held.account_wide.unwrap_or(false))
+                ],
+            )?;
         }
 
         // Absent rather than zero when the character has never reported one: a row saying a
         // character holds nothing is a claim, and an old history has simply never been asked.
         if let Some(gold) = &snapshot.gold {
             if let Some(total) = gold.total {
-                transaction
-                    .execute(
-                        "INSERT OR REPLACE INTO character_gold (character_id, total, observed_at)
+                transaction.execute(
+                    "INSERT OR REPLACE INTO character_gold (character_id, total, observed_at)
                          VALUES (?1, ?2, ?3)",
-                        params![character_id, total, gold.at],
-                    )
-                    .map_err(|error| error.to_string())?;
+                    params![character_id, total, gold.at],
+                )?;
             }
         }
 
         for (faction, held) in &snapshot.factions {
-            transaction
-                .execute(
-                    "INSERT INTO character_standings (
+            transaction.execute(
+                "INSERT INTO character_standings (
                          character_id, faction, standing, standing_current, standing_max,
                          ladder_rank, ladder, observed_at
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![
-                        character_id,
-                        faction,
-                        held.standing.as_deref(),
-                        held.current,
-                        held.max,
-                        held.rank,
-                        held.system.as_deref(),
-                        held.at
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+                params![
+                    character_id,
+                    faction,
+                    held.standing.as_deref(),
+                    held.current,
+                    held.max,
+                    held.rank,
+                    held.system.as_deref(),
+                    held.at
+                ],
+            )?;
         }
     }
     Ok(())
@@ -118,17 +110,15 @@ pub(super) fn sync_warband(
     transaction: &Transaction<'_>,
     account_id: i64,
     warband: &RawWarband,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let Some(gold) = warband.gold else {
         return Ok(());
     };
-    transaction
-        .execute(
-            "INSERT OR REPLACE INTO account_gold (account_id, warband, observed_at)
+    transaction.execute(
+        "INSERT OR REPLACE INTO account_gold (account_id, warband, observed_at)
              VALUES (?1, ?2, ?3)",
-            params![account_id, gold, warband.at],
-        )
-        .map_err(|error| error.to_string())?;
+        params![account_id, gold, warband.at],
+    )?;
     Ok(())
 }
 
@@ -139,32 +129,27 @@ pub(super) fn sync_warband(
 /// the one in front of it. The per-character rows travel with the rollup instead of being
 /// summarised away — a total that cannot be broken back down into who holds what is a number
 /// nobody can check, and the ages are what say how much of it is stale.
-pub(super) fn account_holdings(connection: &Connection) -> Result<Value, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT h.currency_id, h.name, h.total, h.observed_at, c.source_key, h.account_wide
+pub(super) fn account_holdings(connection: &Connection) -> Result<Value, Failure> {
+    let mut statement = connection.prepare(
+        "SELECT h.currency_id, h.name, h.total, h.observed_at, c.source_key, h.account_wide
              FROM character_currencies h
              JOIN characters c ON c.id = h.character_id
              ORDER BY h.currency_id, c.source_key",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)? != 0,
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, i64>(5)? != 0,
+        ))
+    })?;
 
     let mut currencies: Vec<Value> = Vec::new();
     for row in rows {
-        let (currency_id, name, total, observed_at, character, account_wide) =
-            row.map_err(|error| error.to_string())?;
+        let (currency_id, name, total, observed_at, character, account_wide) = row?;
         let holder = serde_json::json!({
             "character": character,
             "total": total,
@@ -214,35 +199,31 @@ pub(super) fn account_holdings(connection: &Connection) -> Result<Value, String>
         }
     }
 
-    let mut statement = connection
-        .prepare(
-            "SELECT s.faction, s.standing, s.standing_current, s.standing_max,
+    let mut statement = connection.prepare(
+        "SELECT s.faction, s.standing, s.standing_current, s.standing_max,
                     s.ladder_rank, s.ladder, s.observed_at, c.source_key
              FROM character_standings s
              JOIN characters c ON c.id = s.character_id
              ORDER BY s.faction, c.source_key",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                serde_json::json!({
-                    "character": row.get::<_, String>(7)?,
-                    "standing": row.get::<_, Option<String>>(1)?,
-                    "current": row.get::<_, Option<i64>>(2)?,
-                    "max": row.get::<_, Option<i64>>(3)?,
-                    "rank": row.get::<_, Option<i64>>(4)?,
-                    "system": row.get::<_, Option<String>>(5)?,
-                    "at": row.get::<_, Option<i64>>(6)?,
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            serde_json::json!({
+                "character": row.get::<_, String>(7)?,
+                "standing": row.get::<_, Option<String>>(1)?,
+                "current": row.get::<_, Option<i64>>(2)?,
+                "max": row.get::<_, Option<i64>>(3)?,
+                "rank": row.get::<_, Option<i64>>(4)?,
+                "system": row.get::<_, Option<String>>(5)?,
+                "at": row.get::<_, Option<i64>>(6)?,
+            }),
+        ))
+    })?;
 
     let mut factions: Vec<Value> = Vec::new();
     for row in rows {
-        let (faction, held) = row.map_err(|error| error.to_string())?;
+        let (faction, held) = row?;
         match factions
             .last_mut()
             .filter(|entry| entry["faction"] == faction)
@@ -319,30 +300,26 @@ fn share_one_pot(entry: &mut Value) {
 ///
 /// Null when nothing has ever been read. A total of zero is a claim about an account, and an
 /// account nobody has collected from has not made it.
-fn account_gold(connection: &Connection) -> Result<Value, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT c.source_key, g.total, g.observed_at
+fn account_gold(connection: &Connection) -> Result<Value, Failure> {
+    let mut statement = connection.prepare(
+        "SELECT c.source_key, g.total, g.observed_at
              FROM character_gold g
              JOIN characters c ON c.id = g.character_id
              ORDER BY c.source_key",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-            ))
-        })
-        .map_err(|error| error.to_string())?;
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+        ))
+    })?;
 
     let mut characters: Vec<Value> = Vec::new();
     let mut wallets = 0;
     let mut oldest: Option<i64> = None;
     for row in rows {
-        let (character, total, observed_at) = row.map_err(|error| error.to_string())?;
+        let (character, total, observed_at) = row?;
         wallets += total;
         if let Some(at) = observed_at {
             if oldest.is_none_or(|eldest| at < eldest) {
@@ -359,13 +336,11 @@ fn account_gold(connection: &Connection) -> Result<Value, String> {
 
     // Summed across accounts, the same way the wallets above are. Two accounts synced into one
     // history have two warband banks, and the roster's worth is both of them.
-    let (warband, warband_at) = connection
-        .query_row(
-            "SELECT SUM(warband), MIN(observed_at) FROM account_gold",
-            [],
-            |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
-        )
-        .map_err(|error| error.to_string())?;
+    let (warband, warband_at) = connection.query_row(
+        "SELECT SUM(warband), MIN(observed_at) FROM account_gold",
+        [],
+        |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+    )?;
 
     if characters.is_empty() && warband.is_none() {
         return Ok(Value::Null);
