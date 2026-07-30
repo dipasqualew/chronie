@@ -25,16 +25,18 @@ export function createPlaceIcons(options: PlaceIconsOptions): PlaceIcons {
 }
 
 /**
- * The wide banner a place is drawn across, which is the header the segment modal opens with.
+ * The picture of a place, which is the header the segment modal opens with.
  *
  * A second book rather than more of the first, because the two pictures are wanted at different
- * times and in different numbers: an icon goes beside every row of the timeline, a banner above
+ * times and in different numbers: an icon goes beside every row of the timeline, a header above
  * the one segment somebody opened. One book for both would have a page of forty evenings decoding
- * forty headers nobody asked to see.
+ * forty headers nobody asked to see — and, for the zones among them, assembling forty maps.
  *
- * Unlike an icon, this always answers: the places the game draws no art for — which is most of
- * them — come back with the banner it shows when it will not say which dungeon. See
- * `journal::heroes_of`.
+ * Unlike an icon, this always answers. A dungeon comes back with the banner the game paints it
+ * with; an open-world zone, which is where most segments happened and for which the game paints
+ * nothing at all, comes back with the map it draws of the place — put together out of the fragments
+ * a map is stored in, with the towns and roads a player only sees once they have been there painted
+ * on top of it. Only a place with neither gets a stand-in. See `heroes::heroes_of`.
  */
 export type PlaceHeroes = IconBook<string>;
 

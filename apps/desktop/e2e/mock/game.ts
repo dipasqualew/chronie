@@ -57,11 +57,11 @@ export const placeIcons: E2EMock["placeIcons"] = {
     "QVR42mM45uj0Hx9mGBkKADftkgFGGhUWAAAAAElFTkSuQmCC",
 };
 
-// The wide banner each place is drawn across. The scenario has one of its own and every other
-// place is answered with the stand-in beside it — which is what the real backend does with a zone
-// the game draws no art for, so every segment's modal opens with a header and only one of them
-// opens with the place's own. Split in two rather than keyed by a magic name because a fixture
-// cannot list every place a test might ask about.
+// The picture of each place, as the header a segment's modal opens with. The scenario has one of
+// its own and every other place is answered with the stand-in beside it — which is what the real
+// backend does with a place it has neither a banner nor a map of, so every segment's modal opens
+// with a header and only one of them opens with the place's own. Split in two rather than keyed by
+// a magic name because a fixture cannot list every place a test might ask about.
 export const placeHeroes: E2EMock["placeHeroes"] = {
   own: {
     "Glass Caverns":

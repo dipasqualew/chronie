@@ -35,14 +35,14 @@ export class SegmentDetail {
   }
 
   /**
-   * The banner the modal opens with, found by the place it is of.
+   * The picture the modal opens with, found by the place it is of.
    *
-   * Every place has one — where the game draws no art the backend answers with its own stand-in
-   * — so unlike the icons inside the modal this is a thing to assert the presence of rather than
-   * the absence.
+   * Every place has one — the banner the game paints, or the map it draws, or the backend's own
+   * stand-in for the few with neither — so unlike the icons inside the modal this is a thing to
+   * assert the presence of rather than the absence.
    */
   hero(place: string): Locator {
-    return this.dialog.getByRole("img", { name: `Banner for ${place}` });
+    return this.dialog.getByRole("img", { name: `Picture of ${place}` });
   }
 
   /**

@@ -163,6 +163,13 @@ here does nothing.
 | `JournalEncounter` | 1240336 | fixed | yes, **columns read**, id in col3 | 12.0.5.67823, `examples/dump_journal` |
 | `JournalEncounterCreature` | 1301155 | fixed | yes, **columns read**, id in col2 | 12.0.5.67823, `examples/dump_journal` |
 | `CurrencyTypes` | 1095531 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_currencies` |
+| `UiMap` | 1957206 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
+| `UiMapXMapArt` | 1957217 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
+| `UiMapArt` | 1957202 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
+| `UiMapArtStyleLayer` | 1957208 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
+| `UiMapArtTile` | 1957210 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
+| `WorldMapOverlay` | 1134579 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
+| `WorldMapOverlayTile` | 1957212 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_maps` |
 
 <!-- /generated -->
 
@@ -989,13 +996,14 @@ it for the places the finder has no row for; the trade is the mirror of the icon
 finder shows one banner for a whole kind of thing here and there (`615222` is every delve's) where
 the journal's is always that dungeon's own.
 
-**And every name it is asked about comes back.** A place the game draws nothing for is answered
-with `337493`, `interface/lfgframe/ui-lfg-background-randomdungeon.blp` — the banner the finder
-shows when it will not say which dungeon a player is being sent to, which is the same size and the
-same style as the real ones, and fully opaque. The alternative was a modal that opened with a
-header for a raid and with a bare line of text for the zone outside it, which reads as two
-different modals. Drawing those from the world map instead is the follow-up issue #223 asked for
-and is not done here. `615222`'s neighbour `337490`,
+**And every name it is asked about comes back.** A place with no banner and no map of its own is
+answered with `337493`, `interface/lfgframe/ui-lfg-background-randomdungeon.blp` — the banner the
+finder shows when it will not say which dungeon a player is being sent to, which is the same size
+and the same style as the real ones, and fully opaque. The alternative was a modal that opened with
+a header for a raid and with a bare line of text for the zone outside it, which reads as two
+different modals. What the stand-in was for when it was written was every open-world zone, which is
+most places; since "Zone maps, verified" below it is what almost nothing falls through to.
+`615222`'s neighbour `337490`,
 `ui-lfg-background-genericdungeon.blp`, is worth knowing about as a trap: it decodes at 256×128 and
 is **entirely transparent**, so it cannot be the stand-in however much its name suggests it.
 
@@ -1009,7 +1017,7 @@ a name neither table has heard of. That is not a gap in the reader:
 | Named on | Icon column |
 |---|---|
 | `JournalTier` — the expansions | none |
-| `UiMap` — the zones | none |
+| `UiMap` — the zones | none, and none is needed: see "Zone maps, verified" |
 
 Two rows have been struck off this list since it was written, and both were wrong in the same
 way — the table itself holds no picture, and something one join away does.
@@ -1035,6 +1043,190 @@ failing:
 company after column 8.** Column 9 should be `MapID` and reads a seven-digit number instead —
 nothing this app reads, but a warning against extending the column list by counting. Columns 0
 through 8 line up exactly.
+
+## Zone maps, verified
+
+The two tables above answer for 805 places and the open world is not among them, so the header a
+segment's modal opens with for an evening in Durotar comes from somewhere else: **the map the player
+opens with M.** The game does not store that as a picture either. It stores it as a grid of
+256-pixel fragments, one texture each, and assembles it every time somebody opens the map — seven
+tables between a name and a picture. `maps.rs` does the same assembly and `examples/dump_maps` is
+what settled it, on 12.0.5.67823. Of the 1,922 maps the game has, 1,895 have art.
+
+**Five of those seven tables give you the map nobody has walked, and that is not the map anybody
+means.** The `UiMapArtTile` grid is terrain: hills, coastline, the neighbouring zones' names around
+the edge, and nothing else. No Orgrimmar, no Razor Hill, no roads, no labels inside the zone. Every
+one of those is a `WorldMapOverlay` — a picture of one named area, pasted at a stated place over the
+art — which the game adds as its area is discovered. Assembling the base alone hands over a sheet
+of parchment that a reader would not recognise as anywhere, so the overlays are the other half of
+the job, and what this draws is the map as somebody who has been everywhere sees it.
+
+```
+"Durotar" ─▶ UiMap ─────────▶ 1,922 rows, keyed by the same localised name as the journal
+               │  id 1, System 0, Type 3
+               ▼
+             UiMapXMapArt ──▶ 1,928 rows, the map in the relationship block
+               │  art 2, PhaseID 0
+               ▼
+             UiMapArt ──────▶ 188 rows, almost nothing but a style
+               │  style 1
+               ├─▶ UiMapArtStyleLayer ─▶ 9 rows: 1002×668 out of 256×256 fragments
+               ▼
+             ├─▶ UiMapArtTile ──▶ 66,704 rows, the art in the relationship block
+             │      12 fragments at (row, column) → 271420, 271436, …   the unexplored map
+             ▼
+             WorldMapOverlay ──▶ 2,909 rows, the art in column 1
+                  13 areas, each at its own offset
+                    └─▶ WorldMapOverlayTile ─▶ 20,867 rows, the overlay in the relationship block
+                           17 fragments between the 13                  what exploring reveals
+```
+
+```
+UiMap                             (id in col1, ParentUiMapID in the relationship block)
+  col0 = Name_lang                 "Durotar", "Burning Blade Coven", "Tiragarde Keep"
+  col1 = ID
+  col2 = ParentUiMapID
+  col3 = Flags
+  col4 = System                    0 world, 1 flight, 2 Adventure Guide
+  col5 = Type                      0 cosmic, 1 world, 2 continent, 3 zone, 4 dungeon,
+                                   5 micro, 6 orphan
+
+UiMapXMapArt                      (id beside the rows, UiMapID in the relationship block)
+  col0 = PhaseID
+  col1 = UiMapArtID
+
+UiMapArt                          (id beside the rows)
+  col0 = HighlightFileDataID
+  col1 = HighlightAtlasID
+  col2 = UiMapArtStyleID
+
+UiMapArtStyleLayer                (id beside the rows, UiMapArtStyleID in the relationship block)
+  col0 = LayerIndex
+  col1 = LayerWidth               ──▶ 1002
+  col2 = LayerHeight              ──▶ 668
+  col3 = TileWidth                ──▶ 256
+  col4 = TileHeight               ──▶ 256
+  col5 = MinScale                    a float
+  col6 = MaxScale                    a float
+  col7 = AdditionalZoomSteps
+
+UiMapArtTile                      (id beside the rows, UiMapArtID in the relationship block)
+  col0 = RowIndex
+  col1 = ColIndex
+  col2 = LayerIndex
+  col3 = FileDataID               ──▶ 256×256
+
+WorldMapOverlay                   (id in col0, UiMapArtID in col1 — inline, unlike the rest)
+  col0 = ID
+  col1 = UiMapArtID
+  col2 = TextureWidth             ──▶ 254
+  col3 = TextureHeight            ──▶ 258
+  col4 = OffsetX                  ──▶ 304, in the pixels of the finished map
+  col5 = OffsetY                  ──▶ 312
+  col6..col9 = the hit rectangle     what the pointer has to be inside to name the area
+  col10 = PlayerConditionID
+  col11 = Flags
+  col12 = AreaID[4]
+
+WorldMapOverlayTile               (id beside the rows, WorldMapOverlayID in the relationship block)
+  col0 = RowIndex
+  col1 = ColIndex
+  col2 = LayerIndex
+  col3 = FileDataID               ──▶ 256×256
+```
+
+**The whole game is nine style layers**, which is the surprise in this chain: however many maps
+there are, there are four shapes among them.
+
+| Style | Layer | Picture | Fragments | Grid |
+|---|---|---|---|---|
+| 1 | 0 | 1,002×668 | 256×256 | 4×3 |
+| 2 | 0 and 1 | 3,665×2,440 | 256×256 | 15×10 |
+| 3 | 0 | 3,665×2,440 | 256×256 | 15×10 |
+| 4 | 0 | 512×512 | 512×512 | 1×1 |
+| 5 | 0 | 3,840×2,560 | 256×256 | 15×10 |
+| 106 | 0 | 3,840×2,560 | 256×256 | 15×10 |
+| 107 | 0 and 1 | 3,840×2,560 | 256×256 | 15×10 |
+
+**The picture is smaller than the grid, and that is the measurement the whole thing turns on.** A
+classic zone is 1,002×668 painted into 4×3 fragments of 256, which hold 1,024×768: a reader that
+handed over the grid's own size would hand over 22 pixels of nothing down one side and 100 along
+the bottom. Both sizes are in `UiMapArtStyleLayer` and neither can be worked out from the other end.
+
+**Four of the turns are a choice, and each one is a wrong map rather than a missing one.**
+
+- **A name is on several `UiMap` rows more often than not.** "Karazhan" is 35 floors, "Dalaran" 12,
+  "Naxxramas" 7, "Durotar" 3 — a zone, an orphan, and a copy of itself for the Adventure Guide. So
+  the rows are ranked: `System` first, so the map a player opens beats the guide's copy of it, then
+  the kind, most specific first — zone, dungeon, micro, continent, orphan, world, cosmic — then
+  the lowest id. "The Maelstrom" is the case that decided the kinds: it is a continent *and* a
+  zone, and an evening spent there was spent in the zone. The ranking is then walked rather than
+  resolved, and the first row with fragments answers: a row can name art with no tiles here.
+- **Fourteen maps have art for a phase of a campaign** as well as their ordinary art, and nothing on
+  this side of the game can tell whether a player has reached that phase. All fourteen have an
+  unphased row and that is the one taken.
+- **Two of the nine styles have a second layer**, the same size as their first — a second copy of
+  the picture for another zoom. Layer 0 is the one a map opens at, and mixing the two would draw a
+  map twice over. An overlay's fragments are matched against that same layer, and every one of the
+  20,867 is on layer 0 — so nothing has ever been dropped by that check, and it is there because an
+  overlay from another layer would be the same ground again at another scale.
+- **A hundred of the 2,909 overlays are shown only to a player who has met some condition** the game
+  keeps — a campaign reached, a war effort finished — and nothing on this side of the game can
+  evaluate one. **All of them are painted anyway**, and the count is what decided it: **78 of the
+  hundred cover ground no other overlay covers**, so leaving them out would leave a hole of bare
+  terrain in the middle of a zone somebody spent a season in. What it costs is the other 22 — a
+  conditional overlay over ground an unconditional one already covers, painted in the order the
+  table stores them, which reads as the later one having happened. Silithus is the case to look at,
+  and it comes out clean.
+
+**A modern zone has no overlays at all**, and that is worth knowing before it reads as a bug:
+Dornogal's art 1895 has none, because the maps drawn from Battle for Azeroth onwards have their
+towns and labels painted into the base art. So the overlay half is what the classic zones need and
+the modern ones do without — and both come out complete.
+
+**Coverage is the reason this was worth doing.** Thirty names spanning classic zones, capitals, the
+modern continents, delves, raids and instanced cities were resolved on 12.0.5.67823 and **every one
+of them landed** — Durotar, Elwynn Forest, Orgrimmar, Dornogal, Azj-Kahet, Hallowfall,
+Valdrakken, Boralus, Oribos, K'aresh, Tazavesh, Eco-Dome Al'dani, Twisting Nether, Argus, Gilneas.
+Between the banner and the map, a place with nothing to draw is now the rare case rather than the
+ordinary one.
+
+**What each column was checked against:**
+
+| Column | Checked against |
+|---|---|
+| `UiMap` col0 | reads "Durotar", "Burning Blade Coven", "Tiragarde Keep", "Skull Rock" in order |
+| `UiMap` col1 | agrees with the id the file's own header points at — Durotar is map 1 |
+| `UiMap` col4 | 0 for every world row and 2 for the Adventure Guide's copy of Durotar (map 1305) and of Valdrakken (2134) |
+| `UiMap` col5 | 3 for Durotar and Elwynn Forest, 4 for the six Naxxramas floors, 2 for The Maelstrom's continent row, 6 for the orphan Durotar (1535) |
+| `UiMapXMapArt` col0 | **1,895 unphased rows over 1,895 maps, and 33 phased rows over 14 maps — none of the 14 without an unphased row to fall back on.** That last count is what makes taking the unphased row safe |
+| `UiMapXMapArt` col1 | Durotar reaches art 2, whose 12 fragments decode and assemble into the zone's own map |
+| `UiMapArt` col2 | a one- to three-digit style `UiMapArtStyleLayer` has a row for — 1 for the classic zones walked and 5 for the modern ones. Its two neighbours are six-digit FileDataIDs and name no style at all, which is what says this is the column |
+| `UiMapArtStyleLayer` cols 1–4 | the four shapes tabulated above, and every fragment of every layer walked decodes at exactly the fragment size the row claims |
+| `UiMapArtTile` cols 0–1 | the 4×3 grid fills: rows 0–2 and columns 0–3, twelve fragments, no repeats |
+| `UiMapArtTile` col3 | 12 fragments for a classic zone and 150 for a modern one, all of them decoding at 256×256 |
+| the whole chain | Durotar, Stormwind City, Dornogal and Nerub-ar Palace each assemble **100% painted** — every pixel of the finished picture has art on it |
+| the whole chain, again | Durotar's twelve fragments all sit in `interface/worldmap/durotar/` in the community listfile — ten named `durotarN.blp` and two `razorhill1.blp` and `razormanegrounds1.blp`, so the names are no guide to where a fragment goes. That is the art behind the map key, not the minimap's, which lives under `world/minimaps/` and is a different chain entirely |
+| `WorldMapOverlay` col1 | Durotar's art 2 has 16 overlay rows and Elwynn Forest's art 41 has 15; a column read wrong here gathers another zone's towns onto this map, which is unmissable |
+| `WorldMapOverlay` cols 2–5 | **the whole zone's own art comes out where it belongs.** Durotar's 13 sized overlays land Orgrimmar at the top of the river valley, Razor Hill on the coast and Echo Isles offshore, and the same run puts Stormwind, Goldshire and Northshire where they belong in Elwynn Forest. 2,403 rows state a size and 506 state none; 100 name a player condition and 22 of those cover ground an unconditional overlay already covers |
+| `WorldMapOverlayTile` cols 0–3 | 17 fragments across Durotar's 13 overlays, every one decoding at 256×256, and all 20,867 of the table's rows on layer 0 |
+
+That last row is the check worth keeping. **Reading the row and column indices the wrong way round
+does not fail**, it transposes the grid: on a 4×3 grid a third of the fragments land outside the
+picture, and the percentage painted is what says so.
+
+**The trap in `UiMapArtStyleLayer` is columns 5 and 6.** They are `MinScale` and `MaxScale`, two
+floats, and a reader that counted one past the fragment height comes back with `1065353216` — the
+bits of the float 1.0 — and lays out a grid of a billion fragments.
+
+**The map goes over as a JPEG, which is the one place in the app that does.** A zone map is a
+painting a megapixel across, and PNG cannot compress a painting: Durotar is 1.4 MB as PNG and 213 KB
+as JPEG at quality 85, and it crosses the command bridge as base64 inside a JSON string. What
+makes that safe is the row above — the maps are opaque to the last pixel, and JPEG has no alpha
+channel — so `maps::draw` checks the assembled picture and only encodes a JPEG when nothing in it is
+see-through. Anything with a transparent edge stays a PNG. The pictures are also scaled down to
+1,024 across on the way out, which leaves a classic zone at its native size and a modern one at a
+quarter of its own; the header they are drawn in is 680 pixels wide.
 
 ## Bosses, verified
 
@@ -1210,6 +1402,7 @@ bun run scripts/make-achievement-fixtures.ts
 bun run scripts/make-item-fixtures.ts
 bun run scripts/make-currency-fixtures.ts
 bun run scripts/make-journal-fixtures.ts
+bun run scripts/make-map-fixtures.ts
 ```
 
 Every table on the chains above has a fixture, and between them they hold each way a hop can
@@ -1278,6 +1471,34 @@ has no bytes for, and a creature belonging to a fight no journal row describes. 
 place tables, both boss tables keep their ids **in a column** rather than in a list, and every
 column is in the storage the real table keeps it in — the portrait as a palette, the order index
 bitpacked — so the reader walks the same shape of record it walks in the game.
+
+The map fixture is seven tables and thirty textures, and it is built around the choices assembling
+a map involves rather than around the reading of a row. One name is on three
+`UiMap` rows — a dungeon stored first, the zone that should win, and an Adventure Guide copy with
+the best kind *and* the lowest id of the three — so one place proves both halves of the ranking.
+A second name's best row names art with no fragments at all and the row behind it shares another
+place's art, which is what says the ranking is walked rather than resolved once. Beside them: a map
+whose phased art is stored before its ordinary art, a style with two layers whose second layer
+paints a place the first leaves empty, an art drawn in a style no layer row describes, a row naming
+a FileDataID of zero, a map with one fragment this install does not hold, and a style declaring a
+picture wider than a window is ever handed.
+
+The fragments are flat colours, one per fragment, because what has to be provable about an
+assembled map is *which fragment landed where*: the classic fixture is a 4×3 grid of 8-pixel
+fragments whose finished picture is 30×20, in the same proportion the real 1,002×668 sits inside
+1,024×768, so a reader that handed over the grid's own size or read the two indices the wrong way
+round shows the wrong colour in a corner. The two float columns in the middle of
+`UiMapArtStyleLayer` are there holding real float bits, so a reader that counted one column too far
+lays out a grid of a billion fragments rather than reading a zero.
+
+Seven overlays hang off that grid, which is the other half of a map — the towns and labels a player
+only sees once they have been there. Between them they hold each way pasting one on can go wrong: an
+area of two fragments cropped to a picture narrower than the two of them hold, one painted on
+nothing at all (which a reader that copied rather than blended would stamp as a rectangle of nothing
+over the terrain), one with a fragment this install does not hold, one that states no size, one
+whose only fragment is on the layer the map is not assembled from, and a pair over the same piece of
+ground where the later row is the one that shows. Their colours are far from the twelve the grid is
+painted in and far from each other, so one pixel of the finished map names which of them reached it.
 
 The `ItemSparse` fixture is the only one with variable-length records, and it is where that
 half of the reader is exercised: strings written into the record, records addressed through

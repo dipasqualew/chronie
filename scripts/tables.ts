@@ -88,4 +88,18 @@ export const FILE_DATA_ID = {
   journalEncounterCreature: 1301155,
   /** `CurrencyTypes` */
   currencyTypes: 1095531,
+  /** `UiMap` */
+  uiMap: 1957206,
+  /** `UiMapXMapArt` */
+  uiMapXMapArt: 1957217,
+  /** `UiMapArt` */
+  uiMapArt: 1957202,
+  /** `UiMapArtStyleLayer` */
+  uiMapArtStyleLayer: 1957208,
+  /** `UiMapArtTile` */
+  uiMapArtTile: 1957210,
+  /** `WorldMapOverlay` */
+  worldMapOverlay: 1134579,
+  /** `WorldMapOverlayTile` */
+  worldMapOverlayTile: 1957212,
 } as const;

@@ -202,13 +202,14 @@ export interface E2EMock {
    * from one to the other happens in the backend. A place absent from here is one the game names
    * no picture for, which is most of them: the open world has none anywhere. */
   placeIcons: Record<string, string>;
-  /** The wide banner each place is drawn across, keyed the same way and answered for every name
-   * asked about — including the ones the game draws nothing for, which get the stand-in banner.
-   * That is the real command's shape too: a modal opens with a header whatever the segment was. */
+  /** The picture of each place, keyed the same way and answered for every name asked about — the
+   * ones the game paints a banner for, the ones it only draws a map of, and the few with neither,
+   * which get the stand-in. That is the real command's shape too: a modal opens with a header
+   * whatever the segment was, and where the picture came from is not something the window knows. */
   placeHeroes: {
-    /** The places the mock's install draws art of its own for. */
+    /** The places the mock's install has a picture of, whether banner or assembled map. */
     own: Record<string, string>;
-    /** What every other place is answered with, which the real backend also does. */
+    /** What a place with neither is answered with, which the real backend also does. */
     standIn: string;
   };
   /** The portrait each boss is drawn with, keyed by the encounter id the segment recorded rather

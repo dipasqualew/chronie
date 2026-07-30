@@ -8,6 +8,11 @@
 //! work needs the same decoder for the textures armour is painted with. What is BLP-specific
 //! lives in [`png_of`], which knows about one texture and nothing about icons.
 //!
+//! Encoding a picture is the other half, and it is here for the same reason: a zone map the app
+//! assembled out of the game's own fragments is not a texture it read, and it still has to reach
+//! a window as something a browser can draw. [`png_bytes`] is what [`png_of`] ends in, and
+//! [`jpeg_bytes`] is the one exception in the app to everything being a PNG — see why there.
+//!
 //! The traps are written down in `docs/character-rendering.md`. Two of them are dodged
 //! rather than handled: only mipmap level 0 is ever asked for, which is the level whose size
 //! the header states correctly, and BC5 normal maps are not something an icon can be.
@@ -49,9 +54,22 @@ pub fn data_url(kind: &str, bytes: &[u8]) -> String {
 /// unintended, and re-encoding it would cost more than everything around it put together.
 #[tracing::instrument(name = "blp.png_of", skip_all, fields(bytes = blp.len()))]
 pub fn png_of(blp: &[u8], largest: u32) -> Result<Vec<u8>, String> {
-    let decoded = pixels_of(blp, largest)?;
+    png_bytes(pixels_of(blp, largest)?)
+}
+
+/// Any picture at all as PNG, for whoever made one rather than read one.
+///
+/// [`png_of`]'s second half, split off because a picture the app *assembled* — a zone map put
+/// together out of the fragments the game stores it in, which is [`crate::maps`] — has no BLP
+/// behind it and still has to reach a window the same way. Takes the picture rather than
+/// borrowing it: an assembled map is a few tens of megabytes before it is scaled down, and the
+/// encoder wants it owned either way.
+#[tracing::instrument(name = "png_bytes", skip_all, fields(
+    width = picture.width(), height = picture.height()
+))]
+pub fn png_bytes(picture: RgbaImage) -> Result<Vec<u8>, String> {
     let mut png = Vec::new();
-    DynamicImage::ImageRgba8(decoded)
+    DynamicImage::ImageRgba8(picture)
         .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
         .map_err(|error| format!("would not re-encode: {error}"))?;
     Ok(png)
@@ -92,6 +110,36 @@ pub fn pixels_of(blp: &[u8], largest: u32) -> Result<RgbaImage, String> {
 /// stored blue first. Byte 8 of a BLP2 header is the encoding, and 1 is the palettized one.
 fn is_palettized(blp: &[u8]) -> bool {
     blp.get(8) == Some(&1)
+}
+
+/// How much of a photograph's detail a JPEG keeps, on the encoder's own 1-to-100 scale.
+///
+/// Eighty-five is the usual answer for a picture nobody will edit again, and the pictures this is
+/// for are the game's own painted maps: at a megapixel and a bit they come out at a sixth of the
+/// PNG's size with nothing a reader could point at.
+const JPEG_QUALITY: u8 = 85;
+
+/// A picture with no transparency in it as JPEG, which is what an assembled map goes over as.
+///
+/// **Only for a picture that is opaque throughout**, because JPEG has no alpha channel: the
+/// encoder is handed the colours and the transparency is dropped, so anything see-through arrives
+/// black. [`crate::maps`] checks before it asks, and hands over a PNG when the check fails.
+///
+/// It is worth the second format for one reason, which is size. A zone map is a painting a
+/// megapixel across and PNG cannot compress a painting — 1.4 MB for Durotar, and half again as
+/// much once it is base64 in a JSON string on its way to the window. The same map as JPEG is
+/// 213 KB, and the four places measured on 12.0.5.67823 came out between 194 and 237. Nothing else
+/// the app draws is remotely that large, which is why nothing else needs this.
+#[tracing::instrument(name = "jpeg_bytes", skip_all, fields(
+    width = picture.width(), height = picture.height()
+))]
+pub fn jpeg_bytes(picture: RgbaImage) -> Result<Vec<u8>, String> {
+    let mut jpeg = Vec::new();
+    let colours = DynamicImage::ImageRgba8(picture).into_rgb8();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut Cursor::new(&mut jpeg), JPEG_QUALITY)
+        .encode_image(&colours)
+        .map_err(|error| format!("would not re-encode: {error}"))?;
+    Ok(jpeg)
 }
 
 /// The icons named, decoded, one entry per id asked for.

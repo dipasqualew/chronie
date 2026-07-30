@@ -781,11 +781,12 @@ function mockPlaceIcons(wanted: string[]): Record<string, string> {
 }
 
 /**
- * The place banners held by the e2e mock, keyed the same way as the icons above.
+ * The place headers held by the e2e mock, keyed the same way as the icons above.
  *
- * Every name asked about comes back, because that is what the real command does: a place the
- * game draws no art for is answered with the banner it shows for a dungeon it will not name, so
- * the mock gives an unlisted place the same stand-in.
+ * Every name asked about comes back, because that is what the real command does: a banner where the
+ * game paints one, the zone's own map where it does not, and for the few places with neither, the
+ * banner it shows for a dungeon it will not name — so the mock gives an unlisted place the same
+ * stand-in.
  */
 function mockPlaceHeroes(wanted: string[]): Record<string, string> {
   if (!mock) throw new Error("The end-to-end mock is not installed.");
