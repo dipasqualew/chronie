@@ -651,7 +651,9 @@ pub fn stored(display_type: u32, build: &str, looks: &[(u32, Look)]) -> Value {
 ///
 /// The layout is this shape's rather than a general one: the top level is an object whose values
 /// are either a list of rows or a small thing that fits on a line, and both are written the way
-/// somebody reading the file would want them.
+/// somebody reading the file would want them. [`crate::shapes`] writes its own store — which is
+/// cached on the reader's machine rather than committed — through here for the same reason: a
+/// store nobody can open when they doubt it is a store nobody can check.
 pub fn text(file: &Value) -> String {
     let mut out = String::from("{\n");
     let object = file.as_object().expect("a stored file is an object");
