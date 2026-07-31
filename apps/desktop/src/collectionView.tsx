@@ -220,8 +220,8 @@ export function CollectionView({
           {absent.length ? (
             <>
               <p className="sub">
-                {plural(absent.length, "mount")} the game has and the account has not, by name — the
-                first {Math.min(MOUNTS_SHOWN, absent.length)} of them.
+                {plural(absent.length, "mount")} the game has and the account has not, by name
+                {absent.length > MOUNTS_SHOWN ? ` — the first ${MOUNTS_SHOWN} of them` : ""}.
               </p>
               <ul className="col-missing" aria-label="Mounts still to get">
                 {absent.slice(0, MOUNTS_SHOWN).map((mount) => (
@@ -254,9 +254,9 @@ export function CollectionView({
 /**
  * What the walk claimed about itself, above the numbers taken from it.
  *
- * Always drawn, and the alert only when the reading will not carry a subtraction. The sentence
- * is provenance and belongs on screen whatever it says; the alert is the page admitting that a
- * number under it is not what it looks like.
+ * The sentence is provenance and is drawn whatever it says, unlike the timeline's gap notice: a
+ * figure whose provenance appears only when it is bad is a figure nobody learns to check. What
+ * is conditional is the hedge under it, and how loudly — see [`Caveat`].
  */
 function Reading({
   census,
@@ -281,10 +281,19 @@ function Reading({
           {line}
         </p>
       ))}
+      {/* An alert only when the number is unsound rather than merely short — see `Caveat`. The
+          encrypted rows are true of every install forever, and a red box that never changes is
+          how a reader learns to stop reading red boxes. Both answer to the same name. */}
       {hedge ? (
-        <div className="notice" role="alert" aria-label={`What the ${noun} count is worth`}>
-          <p>{hedge}</p>
-        </div>
+        hedge.grave ? (
+          <div className="notice" role="alert" aria-label={`What the ${noun} count is worth`}>
+            <p>{hedge.text}</p>
+          </div>
+        ) : (
+          <p className="sub" role="note" aria-label={`What the ${noun} count is worth`}>
+            {hedge.text}
+          </p>
+        )
       ) : null}
     </div>
   );
@@ -305,30 +314,34 @@ function Tally({
   const left = remaining(progress);
   return (
     <dl className="col-tally" aria-label={`How many ${noun}s`}>
-      <div>
-        <dt>Held</dt>
-        <dd>{progress.held.toLocaleString()}</dd>
-      </div>
-      <div>
-        <dt>The game has</dt>
-        <dd>{progress.total == null ? "—" : progress.total.toLocaleString()}</dd>
-      </div>
-      <div>
-        <dt>Still to get</dt>
-        <dd>{left == null ? "—" : left.toLocaleString()}</dd>
-      </div>
+      <Figure label="Held">{progress.held.toLocaleString()}</Figure>
+      <Figure label="The game has">
+        {progress.total == null ? "—" : progress.total.toLocaleString()}
+      </Figure>
+      <Figure label="Still to get">{left == null ? "—" : left.toLocaleString()}</Figure>
       {points == null ? null : (
-        <div>
-          <dt>Points</dt>
-          <dd>
-            {points.toLocaleString()}
-            {available == null ? "" : ` of ${available.toLocaleString()}`}
-          </dd>
-        </div>
+        <Figure label="Points">
+          {points.toLocaleString()}
+          {available == null ? "" : ` of ${available.toLocaleString()}`}
+        </Figure>
       )}
     </dl>
   );
 }
+
+/**
+ * One figure of the tally, under the word for it.
+ *
+ * The pair is a named group, which is the one thing `<dt>`/`<dd>` cannot do for itself: a
+ * definition takes no name of its own, so nothing outside the grid could ask for "still to get"
+ * without counting along the row. The same shape the character summary's fact grid uses.
+ */
+const Figure = ({ label, children }: { label: string; children: ReactNode }): ReactNode => (
+  <div role="group" aria-label={label}>
+    <dt>{label}</dt>
+    <dd>{children}</dd>
+  </div>
+);
 
 /**
  * One branch of the game's tree, with what is left in it worth the most first.
@@ -341,8 +354,11 @@ function Category({ row }: { row: CategoryRow }): ReactNode {
   const left = row.total - row.held;
   return (
     <li>
-      <details>
-        <summary>
+      {/* Named, and the summary titled: a `<details>` takes its name from nothing a reader can
+          rely on and a `<summary>` carries no role at all, so the branch has to say which one it
+          is and the handle has to say what opening it would do. */}
+      <details aria-label={row.name}>
+        <summary title={`What is left in ${row.name}`}>
           <span className="col-name">{row.name}</span>
           <span className="sub">
             {row.held.toLocaleString()} of {row.total.toLocaleString()} ·{" "}

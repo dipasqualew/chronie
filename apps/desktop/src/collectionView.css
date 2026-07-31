@@ -121,7 +121,7 @@
   border-collapse: collapse;
   /* As wide as its three columns and no wider. A roster table stretched across a 1,700-pixel
      window puts the count a hand's width from the name it belongs to. */
-  min-width: 320px;
+  min-width: 420px;
   width: auto;
 }
 .col-cast caption {

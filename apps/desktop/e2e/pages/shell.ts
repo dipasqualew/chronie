@@ -1,5 +1,5 @@
 /**
- * The window itself: the bar across the top, the six views under it, and the one thing the app
+ * The window itself: the bar across the top, the seven views under it, and the one thing the app
  * does that a browser test cannot watch — handing a url to the operating system.
  *
  * Every other page object in this suite is about one view. This is what they all sit inside,
@@ -12,8 +12,9 @@ import type { Locator, Page } from "@playwright/test";
 import { eventually } from "./eventually";
 import type { Eventually } from "./eventually";
 
-/** The six tabs, by the words on them. */
-export type ViewName = "Timeline" | "Characters" | "Details" | "Query" | "Transmog" | "Settings";
+/** The seven tabs, by the words on them. */
+export type ViewName =
+  "Timeline" | "Characters" | "Details" | "Query" | "Transmog" | "Collection" | "Settings";
 
 export class Shell {
   readonly page: Page;
@@ -36,9 +37,9 @@ export class Shell {
   }
 
   /**
-   * One of the six views, by the name of the tab that opens it.
+   * One of the seven views, by the name of the tab that opens it.
    *
-   * The timeline is the window's `main` and the other five are regions beside it, which is
+   * The timeline is the window's `main` and the other six are regions beside it, which is
    * what they are: one of them is what the window is for at any moment and the rest are
    * hidden. A hidden view is out of the accessibility tree altogether, so this only ever
    * reaches the one on screen.

@@ -389,21 +389,44 @@ export function missingMounts(
 }
 
 /**
- * What a screen may say about a subtraction, given what the reading claims.
+ * What a screen must say about a subtraction, given what the reading claims.
  *
- * `null` when the subtraction is sound and needs no hedge. Everything else is the sentence the
- * view is obliged to put beside the number — which is the whole of the completeness rule as a
- * reader meets it.
+ * `null` when the subtraction is sound and needs no hedge at all.
  */
-export function caveat(progress: Progress): string | null {
+export interface Caveat {
+  text: string;
+  /**
+   * Whether the number under it is unsound, as against merely short.
+   *
+   * The difference is worth a type, because it decides how loudly the view says it and getting
+   * that wrong is its own failure. A reading that did not finish means the count is not what it
+   * looks like, and somebody has to notice. Rows the install could not decrypt mean the count is
+   * a little low — which is true of *every* install, permanently, because the game always ships
+   * content it has not unlocked. Drawn at the same weight, that second one is a red box nobody
+   * ever sees change, and a red box nobody ever sees change is how a reader learns to stop
+   * looking at red boxes. `gap.ts` refuses to say "no gap found" for exactly this reason.
+   */
+  grave: boolean;
+}
+
+export function caveat(progress: Progress): Caveat | null {
   if (progress.verdict === "unwalked") {
-    return "Nothing has walked this yet, so this is not a count of what the account holds — it is a count of what Chronie happens to have watched it collect.";
+    return {
+      grave: true,
+      text: "Nothing has walked this yet, so this is not a count of what the account holds — it is a count of what Chronie happens to have watched it collect.",
+    };
   }
   if (progress.verdict === "partial") {
-    return "The last walk did not finish, so this is at least what the account holds and possibly not all of it. What is left is an upper bound.";
+    return {
+      grave: true,
+      text: "The last walk did not finish, so this is at least what the account holds and possibly not all of it. What is left is an upper bound.",
+    };
   }
   if (progress.total != null && progress.withheld) {
-    return `${progress.withheld.toLocaleString()} ${progress.withheld === 1 ? "row" : "rows"} of the game's own table came through encrypted, so the total is that many short of what the game really has.`;
+    return {
+      grave: false,
+      text: `${progress.withheld.toLocaleString()} ${progress.withheld === 1 ? "row" : "rows"} of the game's own table came through encrypted, so the total is that many short of what the game really has.`,
+    };
   }
   return null;
 }
