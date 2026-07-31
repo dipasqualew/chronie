@@ -63,6 +63,8 @@ import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { REASONS, wearable as canBeWorn } from "./modelPreview";
+import { locksAnything } from "./openings";
+import { OpeningsPanel } from "./openingsPanel";
 import {
   NOTHING_ON,
   isWorn,
@@ -77,8 +79,6 @@ import {
   wearable,
 } from "./outfit";
 import type { Outfit } from "./outfit";
-import { locksAnything } from "./openings";
-import { OpeningsPanel } from "./openingsPanel";
 import { OutfitPanel } from "./outfitPanel";
 import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "./qualities";
 import { Qualities, Swatch } from "./qualitiesChips";
@@ -283,8 +283,8 @@ const NOBODY_ASKED = (): Promise<WearersPayload> => Promise.resolve({ wearers: [
 /**
  * And what an unwired window says about how anybody gets a locked look: that it read nothing.
  *
- * An empty answer rather than a rejected promise, so the panel draws its own "nothing of this
- * set could be read" rather than the sentence a failed command gets.
+ * An empty answer rather than a rejected promise, so the panel says what it says of a set whose
+ * every locked look is encrypted rather than the sentence a failed command gets.
  */
 const NOTHING_OPEN = (setId: number): Promise<OpeningsPayload> =>
   Promise.resolve({ setId, openings: [], blocked: [], readCount: 0, withheldCount: 0 });
