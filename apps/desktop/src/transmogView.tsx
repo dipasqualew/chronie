@@ -63,6 +63,7 @@ import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { REASONS, wearable as canBeWorn } from "./modelPreview";
+import type { AlternativeActions } from "./alternativesPanel";
 import { locksAnything } from "./openings";
 import { OpeningsPanel } from "./openingsPanel";
 import {
@@ -124,6 +125,9 @@ import type {
   InGameSetSlot,
   InGameSetsPayload,
   MarkSubjectKind,
+  AlternativesPayload,
+  LookalikesPayload,
+  LookalikeVerdict,
   OpeningsPayload,
   Quality,
   QualitiesFile,
@@ -269,6 +273,28 @@ export interface TransmogViewProps {
    * to answer, so nothing is asked for it.
    */
   loadOpenings?: (setId: number) => Promise<OpeningsPayload>;
+  /**
+   * And what else in the game might do for a look nothing sells around — see `alternatives.ts`.
+   *
+   * The last and least certain step of the same question, behind a button on the one row of the
+   * panel above that has no answer. Per look rather than per set, because that is the grain a
+   * reader asks it at: they are standing in front of one red row.
+   */
+  loadAlternatives?: (appearanceId: number, displayType: number) => Promise<AlternativesPayload>;
+  /**
+   * Everything anybody has decided about one of those suggestions, and deciding one.
+   *
+   * Kept apart from the marks, which live in `app.tsx` because four browsers draw them: a
+   * verdict on a suggestion is drawn in exactly one panel, so it is read when that panel first
+   * opens and held here. Every write answers with all of them, which is the rule every edit in
+   * this window follows — what was stored is what is then drawn.
+   */
+  loadLookalikes?: () => Promise<LookalikesPayload>;
+  setLookalike?: (
+    appearanceId: number,
+    alternativeId: number,
+    verdict: string | null,
+  ) => Promise<LookalikesPayload>;
 }
 
 /**
@@ -288,6 +314,22 @@ const NOBODY_ASKED = (): Promise<WearersPayload> => Promise.resolve({ wearers: [
  */
 const NOTHING_OPEN = (setId: number): Promise<OpeningsPayload> =>
   Promise.resolve({ setId, openings: [], blocked: [], readCount: 0, withheldCount: 0 });
+
+/**
+ * And what an unwired window offers in place of a look nothing sells around: nothing, having
+ * measured nothing — but with the pictures reported as read, so the panel says "nothing looks
+ * near enough" rather than "still reading", which would be a wait that never ends.
+ */
+const NOTHING_LIKE = (appearanceId: number): Promise<AlternativesPayload> =>
+  Promise.resolve({
+    appearanceId,
+    geometryAnswers: false,
+    sameMesh: [],
+    lookalikesReady: true,
+    lookalikes: [],
+  });
+
+const NOBODY_RULED = (): Promise<LookalikesPayload> => Promise.resolve({ said: [] });
 
 /**
  * Which of the four browsers the reader is in.
@@ -320,6 +362,9 @@ export function TransmogView({
   loadSetQualities = loadSetStore,
   loadWearers = NOBODY_ASKED,
   loadOpenings = NOTHING_OPEN,
+  loadAlternatives = NOTHING_LIKE,
+  loadLookalikes = NOBODY_RULED,
+  setLookalike,
 }: TransmogViewProps): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
   /**
@@ -383,6 +428,14 @@ export function TransmogView({
   // reason: it is read out of the installed game, so a set opened twice is read once.
   const openings = useRef(new Map<number, OpeningsPayload>()).current;
   const askedOpenings = useRef(new Set<number>()).current;
+  // And what else might do for each locked look somebody has actually asked about, kept the same
+  // way again. Per look rather than per set, and only for the ones a button was pressed on.
+  const alternatives = useRef(new Map<number, AlternativesPayload>()).current;
+  const askedAlternatives = useRef(new Set<number>()).current;
+  // What anybody has decided about one of those suggestions. Read once, the first time a panel
+  // is opened, and re-read from whatever every write answers with.
+  const [said, setSaid] = useState<LookalikeVerdict[]>([]);
+  const askedSaid = useRef(false);
   // Which pictures have already been sent for. Both halves of the browser ask through the same
   // door — a wardrobe list of a hundred rows and a set of twelve want the same textures often
   // enough — and this is what stops the second asker asking again while the first is in flight.
@@ -435,6 +488,57 @@ export function TransmogView({
         .catch(() => undefined);
     },
     [loadOpenings, openings, askedOpenings],
+  );
+
+  /**
+   * Reads what else in the game might do for one look nothing sells around.
+   *
+   * The dearest read on this screen and the one fewest readers want, which is why it is behind a
+   * button: it walks the wardrobe of the slot, and on a machine that has not swept the game's
+   * textures yet it also starts the half-minute that does. The pictures its rows will want are
+   * sent for as soon as the rows are known, exactly as a set's are.
+   */
+  const wantAlternatives = useCallback(
+    (appearanceId: number, displayType: number): void => {
+      if (!askedSaid.current) {
+        askedSaid.current = true;
+        void loadLookalikes()
+          .then((answer) => setSaid(answer.said))
+          .catch(() => undefined);
+      }
+      if (askedAlternatives.has(appearanceId)) return;
+      askedAlternatives.add(appearanceId);
+      void loadAlternatives(appearanceId, displayType)
+        .then((answer) => {
+          alternatives.set(appearanceId, answer);
+          redraw();
+          wantIcons([...answer.sameMesh, ...answer.lookalikes].map((one) => one.iconFileDataId));
+        })
+        .catch(() => undefined);
+    },
+    [loadAlternatives, loadLookalikes, alternatives, askedAlternatives, wantIcons],
+  );
+
+  /**
+   * Says what one thinks of a suggestion, and draws whatever came back.
+   *
+   * A look somebody has already been offered and has already ruled on is re-asked for, because
+   * the store the suggestion came out of may have been swept in the meantime — but the verdicts
+   * themselves are what the write answered with, which is the rule every edit here follows.
+   */
+  const ruleOn = useCallback(
+    (appearanceId: number, alternativeId: number, verdict: string | null): void => {
+      if (!setLookalike) return;
+      void setLookalike(appearanceId, alternativeId, verdict)
+        .then((answer) => setSaid(answer.said))
+        .catch(() => undefined);
+    },
+    [setLookalike],
+  );
+
+  const alternativeActions: AlternativeActions = useMemo(
+    () => ({ found: alternatives, want: wantAlternatives, said, rule: ruleOn }),
+    [alternatives, wantAlternatives, said, ruleOn],
   );
 
   /**
@@ -838,6 +942,7 @@ export function TransmogView({
                           }}
                           contents={known.get(set.id)}
                           openings={openings.get(set.id)}
+                          alternatives={alternativeActions}
                           icons={icons}
                           outfit={outfit}
                           hideUnwearable={hideUnwearable}
@@ -981,6 +1086,7 @@ function Card({
   onShow,
   contents,
   openings,
+  alternatives,
   icons,
   outfit,
   hideUnwearable,
@@ -1012,6 +1118,8 @@ function Card({
    * so the two never have to be told apart.
    */
   openings: OpeningsPayload | undefined;
+  /** And what else might do for the ones nothing sells around — see `alternativesPanel.tsx`. */
+  alternatives: AlternativeActions;
   icons: Map<number, string>;
   outfit: Outfit;
   /** Whether the rows with nowhere to go are left out, which the browser decides for all. */
@@ -1169,7 +1277,13 @@ function Card({
                   only for a set that locks something — for the other two thirds of the game's
                   sets there is no question to answer. See `openings.ts`. */}
               {locksAnything(rows) ? (
-                <OpeningsPanel name={name} rows={rows} openings={openings} />
+                <OpeningsPanel
+                  name={name}
+                  rows={rows}
+                  openings={openings}
+                  alternatives={alternatives}
+                  icons={icons}
+                />
               ) : null}
               <ul className="mog-items" aria-label={`Appearances in ${name}`}>
                 {shown.map((row, index) => (

@@ -201,8 +201,19 @@ export function itemLine(id: number, recorded?: string | null, detail?: ItemDeta
 /** Which armour class or which weapon, and nothing at all for the kinds that are neither. */
 function kindOf(detail?: ItemDetail): string {
   if (!detail) return "";
-  if (detail.classId === ARMOR) return ARMOR_CLASSES[detail.subclassId] ?? "";
-  if (detail.classId === WEAPON) return WEAPON_KINDS[detail.subclassId] ?? "";
+  return kindOfClass(detail.classId, detail.subclassId);
+}
+
+/**
+ * The same, from the two numbers rather than from a whole item.
+ *
+ * Shared with `alternatives.ts`, which has the pair and no item: the world drop that lifts a
+ * class lock is nearly always the same *kind* of armour as the piece it lifts it from, so a
+ * suggestion has to say which — a cloth answer is right for a Priest and useless to a Druid.
+ */
+export function kindOfClass(classId: number, subclassId: number): string {
+  if (classId === ARMOR) return ARMOR_CLASSES[subclassId] ?? "";
+  if (classId === WEAPON) return WEAPON_KINDS[subclassId] ?? "";
   return "";
 }
 

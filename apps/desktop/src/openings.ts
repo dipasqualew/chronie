@@ -49,6 +49,14 @@ export function locksAnything(rows: AppearanceRow[]): boolean {
 /** One locked look of the set, and what a reader locked out of it can do about it. */
 export interface OpeningRow {
   appearanceId: number;
+  /**
+   * Which place the look fills, as `ItemAppearance` numbers them.
+   *
+   * Carried because the row is where "show possible alternatives" is asked from, and both
+   * measures behind that answer are per slot: a chestpiece is ranked against chestpieces and
+   * cut at the threshold this install measured for chestpieces — see `alternatives.ts`.
+   */
+  displayType: number;
   /** Where on the body it goes, as the row above it already says it. */
   slot: string;
   /** The set's own item — the one the reader cannot have. */
@@ -78,6 +86,7 @@ export function openingRows(rows: AppearanceRow[], payload: OpeningsPayload): Op
     if (!way && !blocked.has(row.appearanceId)) continue;
     found.push({
       appearanceId: row.appearanceId,
+      displayType: row.displayType,
       slot: row.slot,
       own: row.label,
       open: way ?? null,

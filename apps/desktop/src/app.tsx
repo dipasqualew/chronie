@@ -528,6 +528,9 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           loadSetGallery={desktop.gallerySets}
           loadWearers={desktop.transmogWearers}
           loadOpenings={desktop.transmogOpenings}
+          loadAlternatives={desktop.transmogAlternatives}
+          loadLookalikes={desktop.transmogLookalikes}
+          setLookalike={desktop.setTransmogLookalike}
           herself={{
             load: desktop.characterLook,
             save: desktop.saveCharacterLook,

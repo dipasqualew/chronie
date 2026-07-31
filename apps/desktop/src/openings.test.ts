@@ -144,7 +144,12 @@ describe("whether a set is worth reading the panel for at all", () => {
 describe("the rows of the panel", () => {
   const HELM = row({ appearanceId: 80_006, slot: "Head", label: "Emberforge Helm" });
   const LEGS = shut({ appearanceId: 80_009, slot: "Legs", label: "Emberforge Greaves" });
-  const FEET = shut({ appearanceId: 80_004, slot: "Feet", label: "Tideglass Sandals" });
+  const FEET = shut({
+    appearanceId: 80_004,
+    slot: "Feet",
+    displayType: 6,
+    label: "Tideglass Sandals",
+  });
 
   // The point of the panel, and the reason it is not a chip: a set of eight looks where seven are
   // on a world drop and one is on nothing is eight rows of which one is the answer.
@@ -156,6 +161,7 @@ describe("the rows of the panel", () => {
     expect(shown).toEqual([
       {
         appearanceId: 80_009,
+        displayType: 5,
         slot: "Legs",
         own: "Emberforge Greaves",
         open: opening({ appearanceId: 80_009 }),
@@ -181,7 +187,15 @@ describe("the rows of the panel", () => {
   it("draws a locked look nothing sells around as a row with no way in", () => {
     const shown = openingRows([FEET], payload({ blocked: [80_004] }));
     expect(shown).toEqual([
-      { appearanceId: 80_004, slot: "Feet", own: "Tideglass Sandals", open: null },
+      {
+        appearanceId: 80_004,
+        // Carried because this is the row "show possible alternatives" is asked from, and both
+        // measures behind that answer are per slot — see `alternatives.ts`.
+        displayType: 6,
+        slot: "Feet",
+        own: "Tideglass Sandals",
+        open: null,
+      },
     ]);
   });
 
@@ -207,6 +221,7 @@ describe("the one line over the table", () => {
   const opened = (count: number) =>
     Array.from({ length: count }, (_, index) => ({
       appearanceId: 80_000 + index,
+      displayType: 5,
       slot: "Legs",
       own: "Emberforge Greaves",
       open: opening({ appearanceId: 80_000 + index }),
@@ -214,6 +229,7 @@ describe("the one line over the table", () => {
   const walls = (count: number) =>
     Array.from({ length: count }, (_, index) => ({
       appearanceId: 80_100 + index,
+      displayType: 6,
       slot: "Feet",
       own: "Tideglass Sandals",
       open: null,

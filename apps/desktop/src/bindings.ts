@@ -681,6 +681,17 @@ async setTransmogFavourite(kind: MarkSubjectKind, id: number, favourite: boolean
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Writes down that somebody agreed with a suggestion, or that they did not, or neither.
+ */
+async setTransmogLookalike(appearanceId: number, alternativeId: number, verdict: string | null) : Promise<Result<LookalikesPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_transmog_lookalike", { appearanceId, alternativeId, verdict }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async setTransmogTag(kind: MarkSubjectKind, id: number, key: string, value: string | null) : Promise<Result<TransmogMarksPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("set_transmog_tag", { kind, id, key, value }) };
@@ -706,6 +717,28 @@ async syncNow() : Promise<Result<SyncResult, CommandError>> {
 }
 },
 /**
+ * What else in the game gives a look a reader is locked out of, exactly and then approximately.
+ *
+ * The last tier of the answer the openings panel begins. That panel says *this look is on an
+ * unrestricted item* or *nothing sells around it*, and where it says the second there is nothing
+ * exact left to say — so this offers the same armour in another colour, from the geometry, and
+ * then the nearest pictures in the slot, from the fingerprints. See `alternatives.rs`.
+ *
+ * The two halves arrive apart on purpose. The geometry is half a second of walking tables and is
+ * measured on the spot; the fingerprints are half a minute of decoding the game's textures, so
+ * the first call that wants them and finds none starts a background sweep and the payload says
+ * `lookalikesReady: false` until it lands. The display type comes from the window because the
+ * window already has it, and it is what the slot's wardrobe rows are fetched by.
+ */
+async transmogAlternatives(appearanceId: number, displayType: number) : Promise<Result<AlternativesPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transmog_alternatives", { appearanceId, displayType }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Every appearance the game holds for one kind of place, whether or not a set names it.
  *
  * The display types come from the window rather than from the backend, because the kinds a
@@ -716,6 +749,20 @@ async syncNow() : Promise<Result<SyncResult, CommandError>> {
 async transmogAppearances(displayTypes: number[]) : Promise<Result<WardrobePayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("transmog_appearances", { displayTypes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Everything anybody has decided about a suggestion this app made them.
+ *
+ * Read whole rather than per look, for the reason the marks are: these are the rows one person
+ * wrote by hand, and there are a handful of them against a wardrobe of fifty thousand looks.
+ */
+async transmogLookalikes() : Promise<Result<LookalikesPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transmog_lookalikes") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -928,6 +975,46 @@ export type Activity = { id: number; kind: string; source: ActivitySource; confi
 export type ActivitySource = "inferred" | "manual"
 export type ActivityValue = null | boolean | number | string
 export type Alternate = { id: number; name: string; group: string; classMask: number; expansionId: number; patchIntroduced: number; reason: SameLookReason }
+export type Alternative = { appearanceId: number;
+/**
+ * The cheapest item nobody is locked out of that gives this look, by `wardrobe::named`.
+ */
+itemId: number; name: string; requiredLevel: number; quality: number; iconFileDataId: number;
+/**
+ * What kind of thing it is, and which kind of that kind — cloth, leather, mail or plate.
+ * Carried rather than filtered on: the world drop that lifts a class lock is nearly
+ * always the same *kind* of armour, so a cloth answer is right for a Priest and useless
+ * to a Druid, and the window is what says so.
+ */
+classId: number; subclassId: number;
+/**
+ * How unalike the two pictures are, between 0 and 1 — present only on a row the
+ * fingerprint ranked. A row the geometry answered is an equality and has no distance.
+ */
+distance?: number | null }
+export type AlternativesPayload = { appearanceId: number;
+/**
+ * Whether the geometry can speak for this look at all. False for every chestpiece,
+ * legging, bracer, glove, belt, boot, tabard and cloak in the game — those slots are paint
+ * on a body all of them share — and it is what says an empty `sameMesh` means "this
+ * measure does not apply" rather than "nothing in the game matched".
+ */
+geometryAnswers: boolean;
+/**
+ * The same piece of armour in another colour, exactly. Every row is the thing asked
+ * about, so the list is however long the family is and nothing in it is ranked.
+ */
+sameMesh: Alternative[];
+/**
+ * False while the background sweep is still decoding the game's textures, which is about
+ * half a minute the first time an install is read and after every patch.
+ */
+lookalikesReady: boolean;
+/**
+ * And the nearest pictures in the slot, nearest first, each with the distance it was
+ * ranked by. A suggestion rather than an answer — see `alternatives.rs`.
+ */
+lookalikes: Alternative[] }
 export type AppUpdateResult = { updated: boolean; version: string }
 export type Capture = { id: number; sourceId: string; at: number; stamp?: string | null; imageState: CaptureImageState; note?: string | null; trigger?: string | null; achievementId?: number | null; byteSize?: number | null; sourceName?: string | null; uiMapId?: number | null; mapX?: number | null; mapY?: number | null }
 export type CaptureImagePayload = { id: number; image: string | null; byteSize?: number | null }
@@ -1171,6 +1258,12 @@ export type LogFile = { name: string; bytes: number;
  * Epoch seconds, or `None` on a filesystem that will not say.
  */
 modified?: number | null }
+export type LookalikeVerdict = { appearanceId: number; alternativeId: number;
+/**
+ * `yes` or `no`. A pair nobody has ruled on has no row at all, which is the third state.
+ */
+verdict: string }
+export type LookalikesPayload = { said: LookalikeVerdict[] }
 export type MarkSubjectKind = "set" | "appearance" | "custom"
 /**
  * What a sender says about the database it is offering, before sending any of it.

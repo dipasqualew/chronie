@@ -1,0 +1,55 @@
+/*
+ * What else might do, for a look nothing sells around — see `alternativesPanel.tsx`.
+ *
+ * A list rather than a table, unlike the openings panel over it, and deliberately: that is a
+ * column of slots read against a column of items and this is a ranking read top to bottom. The
+ * two sit one above the other and should not look like one thing.
+ */
+
+.mog-alternatives { margin: 0 0 10px 12px; }
+.mog-alternatives .detail-facts { margin: 0 0 6px; }
+.mog-alternatives ul {
+  list-style: none; margin: 0 0 6px; padding: 0;
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.mog-alternatives li {
+  display: flex; gap: 8px; align-items: center;
+  padding: 4px 8px; font-size: 13px;
+  border-top: 1px solid var(--border);
+}
+.mog-alternatives li:first-child { border-top: none; }
+.mog-alternatives img, .mog-alternative-blank {
+  width: 24px; height: 24px; border-radius: 4px; flex: none;
+  background: var(--surface-2);
+}
+/* The name takes whatever is left, so the claim and the buttons stay put down the list and a
+   reader scanning the second column is scanning a column. */
+.mog-alternative-name { flex: 1 1 auto; min-width: 0; }
+.mog-alternative-claim { color: var(--text-secondary); white-space: nowrap; }
+.mog-alternative-kind {
+  color: var(--text-secondary); font-size: 11px; white-space: nowrap;
+  padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px;
+}
+.mog-alternative-verdict {
+  background: none; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text-secondary); font-size: 11px; padding: 2px 8px; cursor: pointer;
+  white-space: nowrap;
+}
+.mog-alternative-verdict:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+.mog-alternative-verdict[aria-pressed="true"][data-said="yes"] {
+  color: var(--ok); border-color: var(--ok);
+}
+.mog-alternative-verdict[aria-pressed="true"][data-said="no"] {
+  color: var(--bad); border-color: var(--bad);
+}
+/* What somebody decided, from across the room. A confirmed row is the answer and a rejected one
+   is left legible rather than removed — taking it out would make the button that rejected it
+   look like it had deleted something. */
+.mog-alternatives li[data-verdict="yes"] { box-shadow: inset 2px 0 var(--ok); }
+.mog-alternatives li[data-verdict="no"] { opacity: .55; }
+
+/* The button on the blocked row that opens all of this — see `openingsPanel.tsx`. */
+.mog-alternatives-open {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--series-1); font: inherit; text-align: left; text-decoration: underline;
+}

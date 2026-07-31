@@ -485,6 +485,55 @@ dto!(OpeningsPayload {
     pub withheld_count: usize,
 });
 
+dto!(Alternative {
+    pub appearance_id: u32,
+    /// The cheapest item nobody is locked out of that gives this look, by `wardrobe::named`.
+    pub item_id: u32,
+    pub name: String,
+    pub required_level: u32,
+    pub quality: u32,
+    pub icon_file_data_id: u32,
+    /// What kind of thing it is, and which kind of that kind — cloth, leather, mail or plate.
+    /// Carried rather than filtered on: the world drop that lifts a class lock is nearly
+    /// always the same *kind* of armour, so a cloth answer is right for a Priest and useless
+    /// to a Druid, and the window is what says so.
+    pub class_id: u32,
+    pub subclass_id: u32,
+    /// How unalike the two pictures are, between 0 and 1 — present only on a row the
+    /// fingerprint ranked. A row the geometry answered is an equality and has no distance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<f64>,
+});
+
+dto!(AlternativesPayload {
+    pub appearance_id: u32,
+    /// Whether the geometry can speak for this look at all. False for every chestpiece,
+    /// legging, bracer, glove, belt, boot, tabard and cloak in the game — those slots are paint
+    /// on a body all of them share — and it is what says an empty `sameMesh` means "this
+    /// measure does not apply" rather than "nothing in the game matched".
+    pub geometry_answers: bool,
+    /// The same piece of armour in another colour, exactly. Every row is the thing asked
+    /// about, so the list is however long the family is and nothing in it is ranked.
+    pub same_mesh: Vec<Alternative>,
+    /// False while the background sweep is still decoding the game's textures, which is about
+    /// half a minute the first time an install is read and after every patch.
+    pub lookalikes_ready: bool,
+    /// And the nearest pictures in the slot, nearest first, each with the distance it was
+    /// ranked by. A suggestion rather than an answer — see `alternatives.rs`.
+    pub lookalikes: Vec<Alternative>,
+});
+
+dto!(LookalikeVerdict {
+    pub appearance_id: u32,
+    pub alternative_id: u32,
+    /// `yes` or `no`. A pair nobody has ruled on has no row at all, which is the third state.
+    pub verdict: String,
+});
+
+dto!(LookalikesPayload {
+    pub said: Vec<LookalikeVerdict>,
+});
+
 dto!(TransmogAppearance {
     pub modified_appearance_id: u32,
     pub item_id: u32,

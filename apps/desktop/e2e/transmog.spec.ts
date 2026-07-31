@@ -587,6 +587,44 @@ test("browses the game's transmog sets and dresses the character in them", async
         "Nothing in the game gives this set's one locked look to another class",
       ),
     ).toBeVisible();
+
+    // And the last tier of that answer, behind a button on the very row that has none. Nothing
+    // here is the game's own word for anything: the first row is two mesh signatures being equal
+    // and the second is two thumbnails 3.9% apart under the cut this install measured for feet.
+    // The panel has to say which is which, because lending the second the first's certainty is
+    // the one thing this half of the feature must not do.
+    await sets.showAlternatives("Tideglass Hide", "Tideglass Sandals").click();
+    await expect(
+      sets.alternative("Tideglass Hide", "Tideglass Sandals", "Boots of the Tidewalker"),
+    ).toContainText("The same armour, another colour");
+    await expect(
+      sets.alternative("Tideglass Hide", "Tideglass Sandals", "Sandals of the Quiet Deep"),
+    ).toContainText("96.1% alike");
+    // The armour type on both, because the world drop that lifts a class lock nearly always
+    // lifts the class and not the kind: the cloth row is no use whatever to the Druid who asked.
+    await expect(
+      sets.alternative("Tideglass Hide", "Tideglass Sandals", "Sandals of the Quiet Deep"),
+    ).toContainText("Cloth");
+
+    // What a person decides about a suggestion is the one thing on this panel a patch cannot
+    // take away, both stores behind it being measured off the game again whenever it moves. So
+    // it is stored, and what was stored is what is then drawn — including the order, a person's
+    // answer outranking a measurement.
+    await sets
+      .ruleOn("Tideglass Hide", "Tideglass Sandals", "That is the one", "Sandals of the Quiet Deep")
+      .click();
+    await expect(
+      sets.ruleOn(
+        "Tideglass Hide",
+        "Tideglass Sandals",
+        "That is the one",
+        "Sandals of the Quiet Deep",
+      ),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      sets.alternatives("Tideglass Hide", "Tideglass Sandals").getByRole("listitem").first(),
+    ).toContainText("Sandals of the Quiet Deep");
+
     await sets.closeSet("Tideglass Hide");
   });
 

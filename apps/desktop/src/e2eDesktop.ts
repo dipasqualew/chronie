@@ -49,6 +49,8 @@ import type {
   TransmogPayload,
   TransmogSetItemsPayload,
   OpeningsPayload,
+  AlternativesPayload,
+  LookalikesPayload,
   WardrobePayload,
   WearersPayload,
   WifiPeer,
@@ -117,6 +119,40 @@ export const e2eDesktop = {
     mock
       ? Promise.resolve(structuredClone(mock.transmogOpenings[setId] ?? noOpenings(setId)))
       : missingMock(),
+  // And what else in the game might do for one look nothing sells around, which the window asks
+  // only when somebody presses the button on a red row — see `alternatives.rs`.
+  transmogAlternatives: (
+    appearanceId: number,
+    _displayType: number,
+  ): Promise<AlternativesPayload> =>
+    mock
+      ? Promise.resolve(
+          structuredClone(mock.transmogAlternatives[appearanceId] ?? nothingLike(appearanceId)),
+        )
+      : missingMock(),
+  // What anybody has decided about one of those suggestions. Read whole and re-read from every
+  // write, the same rule the marks below follow — this is one person's handful of rows.
+  transmogLookalikes: (): Promise<LookalikesPayload> =>
+    mock ? Promise.resolve({ said: structuredClone(mock.lookalikeVerdicts) }) : missingMock(),
+  setTransmogLookalike: (
+    appearanceId: number,
+    alternativeId: number,
+    verdict: string | null,
+  ): Promise<LookalikesPayload> => {
+    if (!mock) return missingMock();
+    const rest = mock.lookalikeVerdicts.filter(
+      (said) => said.appearanceId !== appearanceId || said.alternativeId !== alternativeId,
+    );
+    // Ruling replaces whatever was there and un-ruling removes the row outright, which is the
+    // third state the backend keeps: nobody has looked at this pair.
+    mock.lookalikeVerdicts = verdict
+      ? [...rest, { appearanceId, alternativeId, verdict }].sort(
+          (left, right) =>
+            left.appearanceId - right.appearanceId || left.alternativeId - right.alternativeId,
+        )
+      : rest;
+    return Promise.resolve({ said: structuredClone(mock.lookalikeVerdicts) });
+  },
   // Every look filling one kind of place, which is the other way of browsing the game: asked
   // for a kind at a time, because the whole wardrobe is fifty-five thousand rows and fourteen
   // megabytes. Kept by the caller once it arrives — what the game holds cannot change under a
@@ -706,6 +742,21 @@ const emptySet = (setId: number): TransmogSetItemsPayload => ({
   appearances: [],
   readCount: 0,
   withheldCount: 0,
+});
+
+/**
+ * A look nothing was offered for, with the pictures reported as read.
+ *
+ * Read rather than pending, because "still reading" is a state a scenario has to opt into: a
+ * panel that says it is still working is one an assertion about "nothing looks like this" would
+ * wait forever on.
+ */
+const nothingLike = (appearanceId: number): AlternativesPayload => ({
+  appearanceId,
+  geometryAnswers: false,
+  sameMesh: [],
+  lookalikesReady: true,
+  lookalikes: [],
 });
 
 /** And a set nothing was read of, which is what an install with no key to it would answer. */
