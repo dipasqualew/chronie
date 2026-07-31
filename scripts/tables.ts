@@ -68,6 +68,8 @@ export const FILE_DATA_ID = {
   achievement: 1260179,
   /** `Achievement_Category` */
   achievementCategory: 1324299,
+  /** `Mount` */
+  mount: 921760,
   /** `Faction` */
   faction: 1361972,
   /** `Criteria` */

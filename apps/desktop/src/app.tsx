@@ -1,9 +1,10 @@
 /**
- * The window: six views over one loaded dashboard, and the plumbing behind them.
+ * The window: seven views over one loaded dashboard, and the plumbing behind them.
  *
  * Timeline is what happened, Characters is who it happened to, Details is every row of it,
  * Query is the same history with the questions left open, Transmog is what the installed game
- * holds, Settings is the plumbing. The first three read the same segments, and every write goes
+ * holds, Collection is what the account holds of it, Settings is the plumbing. The first three
+ * read the same segments, and every write goes
  * through the backend and comes back as a whole dashboard — so what is on screen is always what
  * was stored, never what the page hoped a write did.
  *
@@ -33,6 +34,7 @@ import { desktop } from "./desktop";
 import { message, recourse } from "./failure";
 import { createItemBook } from "./items";
 import { installExternalLinks } from "./links";
+import { CollectionView } from "./collectionView";
 import { QueryView } from "./queryView";
 import { useAsyncResource, usePoll } from "./resource";
 import type { StillWanted } from "./resource";
@@ -49,7 +51,15 @@ import { TransmogView } from "./transmogView";
 import { VersionTag } from "./versionTag";
 import type { DashboardPayload, Release, Segment, SessionGap, Settings } from "./types";
 
-const VIEWS = ["timeline", "characters", "details", "query", "transmog", "settings"] as const;
+const VIEWS = [
+  "timeline",
+  "characters",
+  "details",
+  "query",
+  "transmog",
+  "collection",
+  "settings",
+] as const;
 type View = (typeof VIEWS)[number];
 
 const TAB_LABELS: Record<View, string> = {
@@ -58,6 +68,7 @@ const TAB_LABELS: Record<View, string> = {
   details: "Details",
   query: "Query",
   transmog: "Transmog",
+  collection: "Collection",
   settings: "Settings",
 };
 
@@ -119,6 +130,17 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   const inGameSets = useAsyncResource({
     when: view === "transmog" || view === "characters",
     load: desktop.inGameSets,
+  });
+
+  // And the two the Collection view is drawn from, which are the same split for the same reason
+  // and fail apart on purpose. The census is Chronie's own database and answers in a
+  // millisecond; the catalogue is the game's storage, costs what the sets cost, and is simply
+  // absent on a machine with no install — so the lists draw off the first and the second failing
+  // leaves a screen that still says what the account holds.
+  const census = useAsyncResource({ when: view === "collection", load: desktop.accountCensus });
+  const catalogue = useAsyncResource({
+    when: view === "collection",
+    load: desktop.collectionCatalogue,
   });
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
@@ -376,6 +398,26 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         }[recourse(sets.error)]
       : null;
 
+  // The same pair the transmog sets get, and for the same two reasons: a screen that said it was
+  // still reading over a catalogue that had arrived was what a second piece of state looked like,
+  // and a button that cannot help is worse than none. The census beside it is deliberately silent
+  // about its own failure — the lists are simply empty, and the reading sentence over them says
+  // nothing has walked.
+  const catalogueStatus =
+    catalogue.state === "loading"
+      ? READING_CATALOGUE
+      : catalogue.state === "failed"
+        ? message(catalogue.error)
+        : "";
+  const catalogueRecourse =
+    catalogue.state === "failed"
+      ? {
+          setup: { label: "Open Setup", act: () => setView("settings") },
+          retry: { label: "Try again", act: catalogue.retry },
+          none: null,
+        }[recourse(catalogue.error)]
+      : null;
+
   const rosterMeta = profiles.length
     ? [
         plural(profiles.length, "character"),
@@ -564,6 +606,19 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
         />
       </section>
 
+      <section
+        id="collection-view"
+        aria-label={TAB_LABELS.collection}
+        hidden={view !== "collection"}
+      >
+        <CollectionView
+          census={census.value}
+          catalogue={catalogue.value}
+          catalogueStatus={catalogueStatus}
+          catalogueRecourse={catalogueRecourse}
+        />
+      </section>
+
       <section id="settings-view" aria-label={TAB_LABELS.settings} hidden={view !== "settings"}>
         <SettingsView
           settings={settings}
@@ -640,6 +695,9 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
 
 /** What the transmog view says while the game's tables are being read. */
 const READING_SETS = "Reading the game's transmog tables…";
+
+/** And the Collection view, over the two tables it holds the census against. */
+const READING_CATALOGUE = "Reading the game's achievement and mount tables…";
 
 /**
  * Starting the window again, a moment later.

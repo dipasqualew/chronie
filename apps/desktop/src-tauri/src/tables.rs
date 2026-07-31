@@ -205,6 +205,25 @@ pub const ACHIEVEMENT: u32 = 1260179;
 /// Verified on 12.0.5.67 with `examples/dump_achievements`.
 pub const ACHIEVEMENT_CATEGORY: u32 = 1324299;
 
+/// `Mount` — every mount the game has, which is the half the census cannot walk. The addon
+/// asks the client what the account holds; this is the list that says how much of the game
+/// that is, and it is the only place the name of a mount nobody owns is written down.
+///
+/// **It carries no icon.** No column of it holds FileDataIDs — `examples/dump_mounts`
+/// censuses all thirteen and prints the evidence. The picture the journal draws a mount
+/// with belongs to the spell that summons it, `SpellMisc.SpellIconFileDataID` reached
+/// through `SourceSpellID`, and `SpellMisc` is some four hundred thousand rows. Nothing
+/// here makes that hop, so a mount is drawn by its name and by the sentence the game
+/// itself uses to say where it comes from.
+///
+/// 1,634 rows declared on 12.0.5.67823, 1,616 of them readable and named — which is more
+/// mounts than the journal shows, because the table also holds the ones the client never
+/// offers. Nothing here filters those out: no bit of `Flags` separates them, and a guessed
+/// one would drop real mounts out of the catalogue. See `docs/game-files.md`.
+///
+/// Verified on 12.0.5.67823 with `examples/dump_mounts`.
+pub const MOUNT: u32 = 921760;
+
 /// `Faction` — every faction the game has a standing for, and what it is called. Its id sits
 /// in a list beside the rows.
 ///
@@ -812,6 +831,19 @@ pub mod achievement_category {
 
     /// `Parent`
     pub const PARENT: usize = 2;
+}
+
+/// Columns of `Mount` that this app reads.
+pub mod mount {
+    /// `Name_lang`
+    pub const NAME: usize = 0;
+
+    /// `SourceText_lang`
+    ///
+    /// Where the mount comes from, in the game's own words — a vendor and a zone, a boss, a
+    /// quest. Written with the client's colour escapes in it, which `mounts::plain` takes
+    /// back out; that is a reading and stays out of here.
+    pub const SOURCE_TEXT: usize = 1;
 }
 
 /// Columns of `Faction` that this app reads.

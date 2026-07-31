@@ -763,6 +763,104 @@ dto!(ItemAppearancesPayload {
     pub appearances: HashMap<String, ItemAppearance>,
 });
 
+/* ---------- what the account holds ---------- */
+
+// One walk's claim about one kind of thing, as `census_domains` recorded it.
+//
+// Every number on the Collection screen is a subtraction made against one of these, so the claim
+// crosses whole rather than reduced to a boolean. `complete` is the column that licenses a reader
+// to treat an absence as a removal — see `docs/account-census.md` — and the rest is what a reader
+// needs to decide whether an old reading is still worth believing: which build it was taken on,
+// who took it, when, and what the client's own counter said at the time.
+dto!(CensusReading {
+    pub domain: String,
+    /// The character a character-scoped reading belongs to. Absent for a domain every character
+    /// answers the same — which, so far, is all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character: Option<String>,
+    pub complete: bool,
+    pub revision: i64,
+    pub held: i64,
+    /// What the client's own counter said, for a domain whose client offers one. Absent for
+    /// mounts, deliberately: see `ns.mountCensus`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counted: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub walked_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<i64>,
+    pub observed_at: i64,
+});
+
+dto!(EarnedAchievement {
+    pub id: i64,
+    /// The name the client had loaded when the walk passed it. The catalogue's title is the
+    /// better one and is what the window draws; this is what it falls back to on a machine with
+    /// no game installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<i64>,
+    /// The day the client stated, as `YYYY-MM-DD`. Absent when it stated none — which is what
+    /// the oldest achievements come back as, and is not the same as a zero date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub earned_on: Option<String>,
+    /// Who earned it: the alt the client named, or the character that did the walking when the
+    /// client said the walker earned it themselves. Absent when it said neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub earned_by: Option<String>,
+});
+
+dto!(HeldMount {
+    pub id: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub favourite: bool,
+    /// Hidden in the player's own journal, which is how somebody says a mount is not really
+    /// theirs to ride. Kept because a list that ignored it would disagree with what they see.
+    pub hidden: bool,
+});
+
+dto!(AccountCensusPayload {
+    pub readings: Vec<CensusReading>,
+    pub achievements: Vec<EarnedAchievement>,
+    pub mounts: Vec<HeldMount>,
+});
+
+dto!(CatalogueAchievement {
+    pub id: i64,
+    pub title: String,
+    pub description: String,
+    /// The tree the game files it under, outermost first. Empty for one this install can read
+    /// the achievement of but not its category.
+    pub category: Vec<String>,
+    pub points: i64,
+    pub icon_file_data_id: i64,
+    /// `0` Horde, `1` Alliance, `-1` both — the game's own numbering.
+    pub faction: i32,
+});
+
+dto!(CatalogueMount {
+    pub id: i64,
+    pub name: String,
+    /// Where it comes from, in the game's own words. Empty for the handful the table says
+    /// nothing about.
+    pub source: String,
+});
+
+dto!(CollectionCataloguePayload {
+    pub achievements: Vec<CatalogueAchievement>,
+    pub mounts: Vec<CatalogueMount>,
+    /// Rows each table declared that this install could not read. A total with a silent hole in
+    /// it is the one number on that screen a reader has no way of checking.
+    pub withheld_achievements: usize,
+    pub withheld_mounts: usize,
+});
+
 dto!(CaptureThumbnailsPayload {
     pub thumbnails: HashMap<String, String>,
 });

@@ -153,6 +153,7 @@ here does nothing.
 | `ChrCustomizationGeoset` | 3456171 | fixed | yes | 12.0.5.67, `examples/dump_customization` |
 | `Achievement` | 1260179 | fixed | yes | 12.0.5.67, `examples/dump_achievements` |
 | `Achievement_Category` | 1324299 | fixed | yes | 12.0.5.67, `examples/dump_achievements` |
+| `Mount` | 921760 | fixed | yes | 12.0.5.67823, `examples/dump_mounts` |
 | `Faction` | 1361972 | fixed | yes, **columns read**, name in col1 | 12.0.5.67823, `examples/dump_achievements` |
 | `Criteria` | 1263817 | fixed | yes, **columns read**, id in col0 | 12.0.5.67823, `examples/dump_achievements` |
 | `CriteriaTree` | 1263818 | fixed | yes, **columns read** | 12.0.5.67823, `examples/dump_achievements` |
@@ -918,6 +919,67 @@ handful of ids and is what to run after a patch — as `dump_items` is for `Item
 strings, `dump_item_facts` for the rest of what an item is, `dump_transmog` for the chain
 above and `dump_customization` for the skin.
 
+## Mounts, verified
+
+One table, and the interesting thing about it is what it has not got.
+
+`Mount` is every mount the game has. That matters because it is the half no addon can produce:
+`apps/addon/src/Census.lua` walks the client's own journal and writes down what the account
+*holds*, and the name of a mount nobody owns is written down in exactly one place, which is
+this table. The Collection view is that subtraction. `mounts.rs` reads it whole rather than by
+id — 1,616 rows is small enough to cross at once, and there is no smaller version of the
+question.
+
+```
+Mount                             (id inline, in column 3)
+  col0  = Name_lang                "Brown Horse"
+  col1  = SourceText_lang          "|cFFFFD200Vendor: |rUnger Statforth|n…" — see below
+  col2  = Description_lang         the flavour line, which is *not* the source
+  col4  = MountTypeID
+  col5  = Flags
+  col6  = SourceTypeEnum
+  col7  = SourceSpellID          ──▶ the spell that summons it
+```
+
+**There is no icon column.** This is the claim worth writing down, because "add `Mount` for the
+icons" is the obvious thing to want and it is not there. `dump_mounts` censuses all thirteen
+columns and no one of them holds FileDataIDs: on 12.0.5.67823 the only columns where most rows
+hold something six digits or larger are 0, 1 and 2, and those are string offsets — they are the
+three columns that hold text. Column 7 is the five- and six-digit one and it is `SourceSpellID`.
+The picture the journal draws a mount with belongs to that spell, through
+`SpellMisc.SpellIconFileDataID`, and `SpellMisc` is some four hundred thousand rows. Nothing in
+this app makes that hop, so a mount is drawn by its name and its source line.
+
+**The source line is written in the client's escape grammar**, and `mounts::plain` takes it
+back out: `|c…|r` colours the labels, `|n` breaks between the parts, and `|T…|t` is the coin
+in "Cost: 1". Only those five kinds appear in the column on this build, and no doubled pipe at
+all. The two that [`crate::escapes`] deliberately leaves alone are `|r` and `|n` — that stripper
+keeps the letter after the pipe, because a note somebody typed in the game has to reach the
+database in the same shape `ns.entryText` leaves it in the addon, and the addon does exactly
+that. A table Blizzard wrote is under no such obligation, so `plain` deals with those two
+itself; without it every label would end in a stray "r".
+
+**It holds more mounts than the journal shows, and nothing here filters them.** 1,634 declared
+rows on 12.0.5.67823, 1,616 readable and named; the difference is sections the client encrypts,
+and the catalogue counts those as withheld rather than dropping them silently. Beyond the
+encrypted ones the table also carries mounts the client never offers, and which flag marks them
+could not be settled from the install: no bit of column 5 separates them cleanly. A guessed one
+would either drop real mounts out of the catalogue or keep internal rows in it, and the first of
+those is the worse failure — so the count is honest about being the table's rather than the
+journal's.
+
+**What each column was checked against**, since a reordered table shows wrong values rather
+than failing:
+
+| Column | Checked against |
+|---|---|
+| `Name_lang` | the first rows read "Brown Horse", "Gray Wolf", "White Stallion" — the oldest mounts in the game |
+| `SourceText_lang` | it reads like a source and the column beside it reads like flavour: "Vendor: Ogunaro Wolfrunner. Zone: Orgrimmar. Cost: 1" against "Can howl loudly enough to be heard for miles." `dump_mounts` prints both, one under the other, for exactly this |
+| no icon | of the 1,616 named rows, no column holds a FileDataID on any meaningful share of them |
+
+`cargo run --example dump_mounts -- "<install>"` prints the census and a spread of rows, and is
+what to run after a patch.
+
 ## Currencies, verified
 
 One table and one column of it. Everything else this app knows about a currency comes from
@@ -1447,6 +1509,7 @@ bun run scripts/make-item-fixtures.ts
 bun run scripts/make-currency-fixtures.ts
 bun run scripts/make-journal-fixtures.ts
 bun run scripts/make-map-fixtures.ts
+bun run scripts/make-mount-fixtures.ts
 ```
 
 Every table on the chains above has a fixture, and between them they hold each way a hop can
@@ -1495,6 +1558,12 @@ never be painted.
 The currency fixture is one table and three textures, and it holds each way a currency can fail
 to have a picture: one the game names and draws nothing for, one naming an icon this install has
 no file for, and one whose whole row is encrypted.
+
+The mount fixture is one table and no textures at all, which is the point of it: `Mount` names
+no picture. It holds the three shapes the source column comes in — a vendor line with a colour,
+a line break and a texture escape in it, a drop line with two of the three, and a mount the
+table says nothing about — and one encrypted row, which arrives as a mount with no name and is
+the one case the reader has to drop rather than draw.
 
 The journal fixture is four tables and eleven textures. The place half holds each way the two
 place tables have to be read together: a delve only the group finder lists, a place both tables

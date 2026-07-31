@@ -1,0 +1,203 @@
+/*
+ * The Collection view: what the account holds against what the game has.
+ *
+ * Nothing here is styled from a `style` prop, and the year bars are why the rule is worth
+ * repeating: a width computed per row is exactly the thing an inline style is for, and the
+ * packaged app's CSP stamps a nonce onto `style-src` that an attribute can never carry. So the
+ * eleven widths are written out below and the component picks one with `data-share`.
+ */
+
+.col-modes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.col-half > section {
+  margin-top: 22px;
+}
+
+.col-half h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+/* The provenance of every number under it, so it reads as a preamble rather than a footnote. */
+.col-reading {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  margin-bottom: 16px;
+}
+.col-reading p {
+  margin: 0 0 4px;
+}
+.col-reading .notice {
+  margin-top: 8px;
+}
+
+.col-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin: 0;
+}
+.col-tally > div {
+  min-width: 90px;
+}
+.col-tally dt {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.col-tally dd {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.col-categories {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.col-categories summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.col-categories summary:hover {
+  background: var(--surface-2);
+}
+.col-categories details[open] summary {
+  background: var(--surface-2);
+}
+
+.col-missing {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 8px;
+  display: grid;
+  gap: 2px;
+}
+.col-missing li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.col-missing li:hover {
+  background: var(--surface-2);
+}
+/* Worth first and right-aligned, because the list is ranked by it and a ragged column of
+   one- and three-digit numbers is not a ranking anybody can read down. */
+.col-points {
+  grid-row: span 2;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+}
+.col-name {
+  font-weight: 500;
+}
+.col-source {
+  grid-column: 2;
+}
+/* The mount list has no points column, so its rows are one column wide. */
+#collection-mounts .col-missing li {
+  grid-template-columns: minmax(0, 1fr);
+}
+#collection-mounts .col-source {
+  grid-column: 1;
+}
+
+.col-cast {
+  border-collapse: collapse;
+  /* As wide as its three columns and no wider. A roster table stretched across a 1,700-pixel
+     window puts the count a hand's width from the name it belongs to. */
+  min-width: 420px;
+  width: auto;
+}
+.col-cast caption {
+  text-align: left;
+  margin-bottom: 6px;
+}
+.col-cast th,
+.col-cast td {
+  text-align: left;
+  padding: 5px 16px 5px 0;
+  border-bottom: 1px solid var(--grid);
+}
+.col-cast td {
+  font-variant-numeric: tabular-nums;
+}
+
+.col-years {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+.col-years li {
+  display: grid;
+  grid-template-columns: 48px 160px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.col-year {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.col-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The bar itself. A year with nothing in it draws a hairline rather than nothing at all, so a
+   gap in somebody's play reads as a gap instead of as a row that failed to render. */
+.col-bar {
+  height: 10px;
+  border-radius: 3px;
+  background: var(--series-1);
+  min-width: 2px;
+}
+.col-bar[data-share="0"] {
+  width: 2px;
+  background: var(--grid);
+}
+.col-bar[data-share="1"] {
+  width: 10%;
+}
+.col-bar[data-share="2"] {
+  width: 20%;
+}
+.col-bar[data-share="3"] {
+  width: 30%;
+}
+.col-bar[data-share="4"] {
+  width: 40%;
+}
+.col-bar[data-share="5"] {
+  width: 50%;
+}
+.col-bar[data-share="6"] {
+  width: 60%;
+}
+.col-bar[data-share="7"] {
+  width: 70%;
+}
+.col-bar[data-share="8"] {
+  width: 80%;
+}
+.col-bar[data-share="9"] {
+  width: 90%;
+}
+.col-bar[data-share="10"] {
+  width: 100%;
+}

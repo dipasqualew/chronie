@@ -22,10 +22,13 @@
 use rusqlite::{params, Transaction};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::path::Path;
 
+use crate::dto;
 use crate::failure::Failure;
 use crate::saved_variables::{RawCensus, RawCensusAchievement, RawCensusMount, RawCensusState};
 
+use super::database::open_database;
 use super::roster::upsert_character_key;
 
 /// The domains this build knows how to store, and the table each one lives in.
@@ -268,6 +271,119 @@ fn sync_achievements(
         )?;
     }
     Ok(())
+}
+
+/* ---------- reading it back ---------- */
+
+/// What the account holds, and how much of a claim each part of it is.
+///
+/// The whole census in one answer, because the three halves are only worth anything together:
+/// a list of earned achievements says nothing about how much of the game that is, and the claim
+/// beside it is what says whether the list is a whole reading or half of one. The window
+/// subtracts this from the game's own tables — see [`crate::achievements::catalogue`] — and
+/// there is no version of that subtraction which is honest without the claim.
+///
+/// Not folded into [`super::read_model::dashboard`], which is the segments and is re-read every
+/// thirty seconds. A census changes at a logout and is read when somebody opens the screen for
+/// it.
+pub fn account_census(database_path: &Path) -> Result<dto::AccountCensusPayload, Failure> {
+    let connection = open_database(database_path)?;
+
+    let mut statement = connection.prepare(
+        "SELECT d.domain, c.source_key, d.complete, d.revision, d.held, d.counted,
+                d.build, d.walked_by, d.started_at, d.completed_at, d.observed_at
+           FROM census_domains d
+           LEFT JOIN characters c ON c.id = d.character_id
+          ORDER BY d.domain, c.source_key",
+    )?;
+    let readings: Vec<dto::CensusReading> = statement
+        .query_map([], |row| {
+            Ok(dto::CensusReading {
+                domain: row.get(0)?,
+                character: row.get(1)?,
+                complete: row.get::<_, i64>(2)? != 0,
+                revision: row.get(3)?,
+                held: row.get(4)?,
+                counted: row.get(5)?,
+                build: row.get(6)?,
+                walked_by: row.get(7)?,
+                started_at: row.get(8)?,
+                completed_at: row.get(9)?,
+                observed_at: row.get(10)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    drop(statement);
+
+    // Who did the walking, so that "the walker earned this one" can be answered with a name.
+    // The claim is where that name lives, and it is per domain rather than per row — one
+    // character reports the whole account's history, which is the reason achievements pay for
+    // the mechanism at all.
+    let walker = readings
+        .iter()
+        .find(|reading| reading.domain == ACHIEVEMENTS)
+        .and_then(|reading| reading.walked_by.clone());
+
+    let mut statement = connection.prepare(
+        "SELECT achievement_id, name, points, earned_year, earned_month, earned_day,
+                earned_by_walker, earned_by
+           FROM account_achievements ORDER BY achievement_id",
+    )?;
+    let achievements: Vec<dto::EarnedAchievement> = statement
+        .query_map([], |row| {
+            let by_walker = row.get::<_, i64>(6)? != 0;
+            Ok(dto::EarnedAchievement {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                points: row.get(2)?,
+                earned_on: earned_on(row.get(3)?, row.get(4)?, row.get(5)?),
+                earned_by: row
+                    .get::<_, Option<String>>(7)?
+                    .or_else(|| by_walker.then(|| walker.clone()).flatten()),
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    drop(statement);
+
+    let mut statement = connection.prepare(
+        "SELECT mount_id, name, favourite, hidden FROM account_mounts ORDER BY mount_id",
+    )?;
+    let mounts: Vec<dto::HeldMount> = statement
+        .query_map([], |row| {
+            Ok(dto::HeldMount {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                favourite: row.get::<_, i64>(2)? != 0,
+                hidden: row.get::<_, i64>(3)? != 0,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+
+    Ok(dto::AccountCensusPayload {
+        readings,
+        achievements,
+        mounts,
+    })
+}
+
+/// The day the client stated, as one `YYYY-MM-DD` string.
+///
+/// `GetAchievementInfo` hands over three numbers and no clock, and its year is the years since
+/// 2000 — the 9 of "Herald of the Titans" is 2009. Resolving them here rather than in the window
+/// is the ordinary read-model rule: what the numbers mean is known where they are stored.
+///
+/// It stays a calendar day and never becomes an instant. There is no time in the client's answer
+/// and no time zone either, so any instant this invented would be a date that disagreed with the
+/// game's own achievement pane on somebody's screen.
+///
+/// `None` for a row the client dated at nothing, which is what the oldest achievements come back
+/// as. A month of 0 is not January and a day of 0 is not the first.
+fn earned_on(year: Option<i64>, month: Option<i64>, day: Option<i64>) -> Option<String> {
+    let (year, month, day) = (year?, month?, day?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(format!("{:04}-{month:02}-{day:02}", year + 2000))
 }
 
 #[cfg(test)]
@@ -642,5 +758,199 @@ mod tests {
             .unwrap();
         assert_eq!(owner, "Aster-Vale");
         assert_eq!(mount_ids(&install), vec![6]);
+    }
+
+    /* ---------- reading it back ---------- */
+
+    /// A walk of both domains at once, which is what a real logout writes: the account's whole
+    /// achievement history reported by one character, and its mounts beside it.
+    const WALKED_BOTH: &str = r#"
+        ["account"] = {
+            ["mounts"] = {
+                ["complete"] = true, ["revision"] = 3, ["held"] = 2,
+                ["build"] = "12.0.5.67823", ["by"] = "Aster-Vale",
+                ["startedAt"] = 1999990000, ["completedAt"] = 1999990060,
+                ["entries"] = {
+                    [6] = { ["name"] = "Swift Zhevra", ["favourite"] = true },
+                    [9] = { ["name"] = "Kua'fon", ["hidden"] = true },
+                },
+            },
+            ["achievements"] = {
+                ["complete"] = true, ["revision"] = 1, ["held"] = 3, ["counted"] = 3,
+                ["build"] = "12.0.5.67823", ["by"] = "Aster-Vale",
+                ["entries"] = {
+                    [4842] = {
+                        ["name"] = "Herald of the Titans", ["points"] = 25,
+                        ["month"] = 8, ["day"] = 4, ["year"] = 9, ["mine"] = true,
+                    },
+                    [2144] = {
+                        ["name"] = "The Immortal", ["points"] = 25,
+                        ["month"] = 3, ["day"] = 22, ["year"] = 9, ["by"] = "Brin",
+                    },
+                    -- The client dated this one at nothing and named nobody for it, which is
+                    -- what the oldest of them come back as.
+                    [6] = { ["name"] = "Level 10", ["points"] = 10 },
+                },
+            },
+        },
+    "#;
+
+    fn census_of(install: &Install) -> dto::AccountCensusPayload {
+        account_census(&install.database).unwrap()
+    }
+
+    /// Every reading, with the claim over it whole. The claim is not reducible to a boolean:
+    /// the build a census was taken on and who took it are what a reader needs to decide
+    /// whether a reading that says it is complete is still describing this game.
+    #[test]
+    fn hands_over_the_claim_each_reading_makes_about_itself() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_BOTH));
+        install.collect(2_000_000_100);
+
+        let census = census_of(&install);
+        let named: Vec<(&str, bool, i64, Option<i64>)> = census
+            .readings
+            .iter()
+            .map(|reading| {
+                (
+                    reading.domain.as_str(),
+                    reading.complete,
+                    reading.held,
+                    reading.counted,
+                )
+            })
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                // Achievements carry the client's own counter and mounts deliberately do not.
+                ("achievements", true, 3, Some(3)),
+                ("mounts", true, 2, None),
+            ]
+        );
+        let mounts = &census.readings[1];
+        assert_eq!(mounts.build.as_deref(), Some("12.0.5.67823"));
+        assert_eq!(mounts.walked_by.as_deref(), Some("Aster-Vale"));
+        assert_eq!(mounts.completed_at, Some(1_999_990_060));
+        assert_eq!(mounts.observed_at, 2_000_000_100);
+        // Account-wide, so no character owns it — which is the difference between a reading
+        // every alt would answer the same and a reading about one of them.
+        assert_eq!(mounts.character, None);
+    }
+
+    /// The rule the whole screen depends on, carried out to the reader. A walk that was cut
+    /// short says so here as loudly as it does in the database, because every number drawn
+    /// over these entries is a subtraction and a subtraction from half a reading is wrong.
+    #[test]
+    fn says_out_loud_when_a_reading_is_not_whole() {
+        let install = Install::of(&SavedVariables::new().census(
+            r#"["account"] = { ["mounts"] = {
+                ["complete"] = false, ["revision"] = 3, ["held"] = 1,
+                ["entries"] = { [6] = { ["name"] = "Swift Zhevra" } },
+            } },"#,
+        ));
+        install.collect(2_000_000_100);
+
+        let census = census_of(&install);
+        assert_eq!(census.readings.len(), 1);
+        assert!(!census.readings[0].complete);
+        assert_eq!(census.mounts.len(), 1);
+    }
+
+    /// The row the census exists for, read back with each line attributed. One character
+    /// walked all three, and the client said of one that the walker earned it themselves —
+    /// so the name on that line is the walker's, taken off the claim beside it.
+    #[test]
+    fn says_who_earned_each_achievement_and_the_day_they_did() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_BOTH));
+        install.collect(2_000_000_100);
+
+        let census = census_of(&install);
+        let earned: Vec<(i64, Option<&str>, Option<&str>)> = census
+            .achievements
+            .iter()
+            .map(|found| {
+                (
+                    found.id,
+                    found.earned_on.as_deref(),
+                    found.earned_by.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            earned,
+            vec![
+                // Dated at nothing by the client, and attributed to nobody — neither of
+                // which is the same as a zero: not the first of January in the year 2000,
+                // and not whoever happened to be doing the walking.
+                (6, None, None),
+                (2144, Some("2009-03-22"), Some("Brin")),
+                // `mine`, so the character that did the walking is the one that earned it.
+                (4842, Some("2009-08-04"), Some("Aster-Vale")),
+            ]
+        );
+    }
+
+    /// The client's year is the years since 2000, so an achievement earned in 2009 arrives as
+    /// a 9. A reader that took it at face value would date a decade of somebody's play to the
+    /// tenth year of the first century.
+    #[test]
+    fn reads_the_clients_year_as_the_years_since_2000() {
+        assert_eq!(
+            earned_on(Some(9), Some(8), Some(4)).as_deref(),
+            Some("2009-08-04")
+        );
+        assert_eq!(
+            earned_on(Some(25), Some(12), Some(31)).as_deref(),
+            Some("2025-12-31")
+        );
+        // Nothing a reader could act on, and none of it a date: a month of nought is not
+        // January, a day of nought is not the first, and an absent number is not a zero.
+        assert_eq!(earned_on(Some(9), Some(0), Some(4)), None);
+        assert_eq!(earned_on(Some(9), Some(8), Some(0)), None);
+        assert_eq!(earned_on(Some(9), Some(13), Some(4)), None);
+        assert_eq!(earned_on(None, Some(8), Some(4)), None);
+    }
+
+    /// What the player arranged travels with the mount, because "hidden" is how somebody says
+    /// a mount is not really theirs to ride and a list that ignored it would disagree with the
+    /// journal they can see.
+    #[test]
+    fn keeps_what_the_player_arranged_about_a_mount() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_BOTH));
+        install.collect(2_000_000_100);
+
+        let census = census_of(&install);
+        let held: Vec<(i64, Option<&str>, bool, bool)> = census
+            .mounts
+            .iter()
+            .map(|mount| {
+                (
+                    mount.id,
+                    mount.name.as_deref(),
+                    mount.favourite,
+                    mount.hidden,
+                )
+            })
+            .collect();
+        assert_eq!(
+            held,
+            vec![
+                (6, Some("Swift Zhevra"), true, false),
+                (9, Some("Kua'fon"), false, true),
+            ]
+        );
+    }
+
+    /// A database nothing has ever walked answers with nothing rather than failing — which is
+    /// every install on its first run, and is what the window has to be able to draw.
+    #[test]
+    fn answers_with_nothing_for_an_account_no_walk_has_ever_covered() {
+        let install = Install::initialized();
+
+        let census = census_of(&install);
+        assert!(census.readings.is_empty());
+        assert!(census.achievements.is_empty());
+        assert!(census.mounts.is_empty());
     }
 }

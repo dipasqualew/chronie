@@ -109,6 +109,12 @@ pub fn achievement_fixture_files() -> DirFiles {
     fixtures("achievements")
 }
 
+/// The fixtures for `Mount`, written by `scripts/make-mount-fixtures.ts`.
+#[cfg(test)]
+pub fn mount_fixture_files() -> DirFiles {
+    fixtures("mounts")
+}
+
 /// The fixtures for the item tables, written by `scripts/make-item-fixtures.ts`.
 #[cfg(test)]
 pub fn item_fixture_files() -> DirFiles {
