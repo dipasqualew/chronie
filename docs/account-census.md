@@ -228,6 +228,65 @@ see `docs/saved-variables.md`. A census is therefore not a stream but a claim ma
 teardown, which is precisely why the completeness flag has to travel in the file rather than
 be inferred from it.
 
+## Appearances, and the domain that is only ever part of an answer
+
+`appearances` is the largest thing the census lights up and the first domain that **can never be
+whole**. `wardrobe.rs` reads all 55,198 appearances of a shipping install out of `ItemAppearance`
+and `transmog.rs` reads the sets that name them; until this domain neither knew whether the reader
+owned any of it, and a look ten years in the wardrobe was drawn exactly like one nobody had ever
+seen.
+
+`C_TransmogCollection.GetCategoryAppearances(category [, transmogLocation])` is what closes it —
+the second argument is optional, which the 12.0.5.67823 client's own usage string says outright,
+so there is no transmog location to build and no slot of the player's to name. One call per
+category answers for every appearance in it with its `visualID` and its `isCollected`, which is
+about thirty calls against a walk of fifty-five thousand. The categories are
+`Enum.TransmogCollectionType`, 1 to 29 on that build, and there is no enumerator for them either —
+so the walk asks `GetCategoryInfo` about 1 to 40 and skips what does not answer.
+
+**The client shows the wardrobe through the logged-in character's class filter.** A mage is not
+shown plate, however faithfully the walk runs to the end. Issue #250 settled which way out to take:
+the account's wardrobe is the *union* of what its characters can each see, built up as they are
+played — rather than something one character forces by driving `SetClassFilter` over all thirteen
+classes, which is complete in a single login and leaves the player's own wardrobe filtered to
+somebody else's class if the session ends mid-walk. If that second way is ever wanted it should be
+an explicit, user-initiated resync rather than something that happens at a loading screen.
+
+So the domain declares `partial`, and three things follow from it:
+
+- **It never claims completeness and is never pruned.** That is the standing an interrupted pass
+  already has, and it is the "character that can only see part of what the account owns" case the
+  rule at the top of this document was written for. `census_domains.complete` for this domain is 0
+  permanently, and nothing in `collector::census` may delete one of its rows.
+- **It is never settled by an audit, so it is walked once a session.** Every other domain here is
+  also fed by a client event between passes; this one is not, and the character in front of the
+  client is a different part of the answer every time. It is affordable: the plan is fifty-five
+  thousand positions of array indexing behind thirty client calls, which is five seconds of slices
+  against the achievement walk's minute.
+- **No filter of the player's can make it wrong.** Whether `GetCategoryAppearances` applies the
+  collected, source-type and faction filters in the client or leaves them to Lua could not be
+  settled from the install — Blizzard's own `WardrobeItemsCollectionMixin:FilterVisuals` on
+  12.0.5.67823 filters `isHideVisual` and no more, which points the other way from what the call's
+  name suggests. It does not matter. Every one of those filters can only make the returned list
+  *smaller*, a smaller list is a smaller set of positive observations, and a reading that never
+  claims completeness can never delete anything on the strength of one. Nothing reads a filter and,
+  as everywhere else here, nothing writes one.
+
+`GetCategoryCollectedCount(category)` is the counter, and it is the unfiltered one — the client
+keeps a `GetFilteredCategoryCollectedCount` beside it, which is what Blizzard's own progress bar
+under the wardrobe grid draws. Summed over the categories it is the client's own opinion of how
+much of this the account has, against which `held` is how much of it the roster has managed to show
+us. That difference is the one honest measure of how far the union has got, and
+`collected.ts::collectedNote` is what turns it into the sentence the browsers carry: an unmarked
+row reads as "not collected", and on this reading that is wrong for every look nobody has logged in
+to find yet.
+
+There is no localised name, and this is the one domain that cannot carry one. The client's
+appearance list is ids and flags, and what a look is *called* is the name of one of however many
+items give it — `wardrobe.rs`'s decision, out of the game's own tables, and not one an addon is in
+a position to make. What rides along instead is the category, which is enough for a machine with no
+install to count a reader's heads.
+
 ## Adding a domain
 
 A domain is a name, a scope, and three seams:
@@ -239,6 +298,7 @@ A domain is a name, a scope, and three seams:
     list = function() ... end,   -- positions to visit; nil when this build cannot answer
     read = function(position) ... end,  -- returns id, entry — or nothing for a thing not held
     count = function() ... end,  -- the cheap audit, or nil when the client offers none
+    partial = true,              -- optional: a walk of this is only ever part of the answer
 }
 ```
 
@@ -246,6 +306,13 @@ A domain is a name, a scope, and three seams:
 per-frame budget exists to spread out. Where the client hands over ids outright a position
 *is* an id; where it does not, a position is an index into a plan the domain drew up, which is
 how the achievement tree is walked, or simply a range, which is how currencies are.
+
+A `partial = true` domain is one no single walk can finish, because the client only answers about
+the part of it the walking character can see — see appearances above. It is never pruned, never
+claims completeness, and is never settled by an audit, which is what makes the union across the
+roster happen at all. Reach for it only when the incompleteness is in the client's answer rather
+than in the walk: an interrupted pass is already handled, and a domain that could be whole and
+says it cannot be would be one nothing downstream is ever allowed to subtract from.
 
 A `scope = "character"` domain is kept per `Name-Realm` all the way down: the addon files it
 under `census.characters[key]`, the collector resolves that key to a character and stores the

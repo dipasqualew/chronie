@@ -36,7 +36,7 @@ mod testing;
 
 pub use activities::{add_activity, delete_activity, reset_activities, update_activity};
 pub use captures::{capture_image, capture_thumbnails, delete_capture, set_capture_note};
-pub use census::account_census;
+pub use census::{account_census, collected_appearances};
 pub use custom_sets::{custom_sets, delete_custom_set, save_custom_set};
 pub use database::{initialize, install_database, snapshot, summarize, Summary};
 pub use ingame_sets::{in_game_sets, request_set_in_game, set_requests, waiting_set_requests};

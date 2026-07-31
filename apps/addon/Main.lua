@@ -1807,6 +1807,11 @@ if CreateFrame then
                     -- reputation, because the pane hides those unless the player says
                     -- otherwise.
                     standing = reputationClients(),
+                    -- The same namespace the transmog preview and the custom-set writer reach
+                    -- for, asked the one question none of them asks: not "what is this look"
+                    -- but "has this account got it". See `ns.appearanceCensus` for why the
+                    -- answer is only ever the logged-in character's share of it.
+                    collection = C_TransmogCollection,
                     achievement = {
                         categories = GetCategoryList,
                         categoryCount = GetCategoryNumAchievements,

@@ -840,6 +840,34 @@ export const transmogMarks: E2EMock["transmogMarks"] = {
   ],
 };
 
+// And which of the game's looks the account has actually collected.
+//
+// Two of the three heads the wardrobe draws — one of which is also the head of a set — so the
+// mark is checkable in both browsers and, more to the point, so that some rows carry it and some
+// do not. A fixture where everything was collected would draw identically to one where nothing
+// was, which is the bug this whole feature exists to fix.
+//
+// **`complete` is false and stays false**, which is not a half-written fixture: the client only
+// ever shows the wardrobe through the logged-in character's class filter, so this reading is the
+// union of what the roster has been shown and never says it is whole — see `collected.ts`. The
+// counter is deliberately higher than the three ids below it, because that is the ordinary state
+// of an account whose plate-wearers have not been logged in since Chronie was installed, and it
+// is what makes the sentence over the list something a scenario can actually read.
+export const collectedAppearances: E2EMock["collectedAppearances"] = {
+  reading: {
+    domain: "appearances",
+    complete: false,
+    revision: 2,
+    held: 2,
+    counted: 4,
+    build: "12.0.5.67823",
+    walkedBy: "Aster-Hearth",
+    completedAt: 1_899_990_060,
+    observedAt: 1_899_990_100,
+  },
+  appearances: [80006, 80040],
+};
+
 // And the sets they put together themselves, which start at none — deliberately, where the
 // marks above start at two. A saved set is made by the page under test and by nothing else,
 // so a fixture holding one would be the one thing on this screen that never had to survive

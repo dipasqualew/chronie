@@ -41,6 +41,8 @@ import "./wardrobeList.css";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { collectedNote } from "./collected";
+import type { CollectedLooks } from "./collected";
 import { message } from "./failure";
 import { plural } from "./format";
 import { PAGE as GALLERY_PAGE, focusOf, piecesOf, stillWanted } from "./gallery";
@@ -104,6 +106,13 @@ export interface WardrobeListProps {
    * this list and the other way round.
    */
   index: MarkIndex;
+  /**
+   * And which of these looks the account owns — see `collected.ts`.
+   *
+   * Shared with the set browser for the reason the marks are, and it is the same sharing: a look
+   * collected is collected wherever it is drawn, because both halves key on the appearance.
+   */
+  owned: CollectedLooks;
   onWear: (row: AppearanceRow) => void;
   /** Asks the backend for a page of the wardrobe worn, which is what the gallery draws. */
   loadGallery: (pieces: WornPiece[]) => Promise<GalleryPayload>;
@@ -146,6 +155,7 @@ export function WardrobeList({
   onHideUnwearable,
   marks,
   index,
+  owned,
   onWear,
   loadGallery,
   look,
@@ -327,6 +337,9 @@ export function WardrobeList({
   // this one shares.
   const paint = useGalleryPaint(asModels, createGalleryStage);
 
+  /** What the marked rows do not say, where the census cannot yet account for the wardrobe. */
+  const collectedShortfall = collectedNote(owned);
+
   /** Every narrowing starts the list again from the top, where the reader is looking. */
   const narrow = (change: () => void): void => {
     change();
@@ -438,6 +451,15 @@ export function WardrobeList({
       <div className="mog-list" id="wardrobe-list" data-models={asModels}>
         {answer === undefined ? <p className="muted">{READING}</p> : null}
         {typeof answer === "string" ? <p className="muted">{answer}</p> : null}
+        {/* Said once, over the list, rather than guessed at per row. A reader looking at a
+            wardrobe where some rows say "Collected" will read the rest as "not collected", and
+            on a reading built out of what each character's class was allowed to see that is
+            wrong for every look nobody has logged in to find yet. */}
+        {collectedShortfall ? (
+          <p className="muted" id="wardrobe-collected-note" role="note">
+            {collectedShortfall}
+          </p>
+        ) : null}
         <ul className="mog-items" aria-label="Appearances">
           {drawn.map((row) => (
             <Look
@@ -447,6 +469,7 @@ export function WardrobeList({
               icon={icons.get(row.iconFileDataId)}
               marks={marks}
               mark={index.of("appearance", row.appearanceId)}
+              collected={owned.has(row.appearanceId)}
               quality={qualityOf(row.appearanceId)}
               onWear={() => onWear(row)}
               onFilter={askFor}
@@ -489,6 +512,7 @@ function Look({
   icon,
   marks,
   mark,
+  collected,
   quality,
   onWear,
   onFilter,
@@ -501,6 +525,13 @@ function Look({
   marks: MarkActions;
   /** The same mark a set's row of this look draws, because both key on the appearance. */
   mark: TransmogMark | undefined;
+  /**
+   * Whether the account has been *seen* to own it, which is not the negation of not owning it.
+   *
+   * The wardrobe Chronie knows about is the union of what the roster's characters have each been
+   * shown, so only the true case draws anything and the shortfall is said once, over the list.
+   */
+  collected: boolean;
   /** What the committed store measured of it, or nothing where it holds no row. */
   quality: Quality | undefined;
   onWear: () => void;
@@ -533,6 +564,14 @@ function Look({
   const said = (
     <>
       {worn ? <span className="chip">worn</span> : null}
+      {/* Only ever the owning. A look absent from the census is one nobody has proved the
+        account owns rather than one it does not — see `collected.ts` — so the shortfall is said
+        once over the whole list instead of guessed at five thousand times inside it. */}
+      {collected ? (
+        <span className="chip mog-collected" title="This account has collected this look">
+          Collected
+        </span>
+      ) : null}
       {/* Before what the reader said about it, because it is of the same kind as the game's own
         facts beside it — measured rather than typed — and because it is what the eye is
         actually looking for in a list of five thousand chestpieces. */}

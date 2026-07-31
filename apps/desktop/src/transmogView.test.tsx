@@ -12,6 +12,7 @@ import type { ModelStage } from "./modelViewer";
 import type {
   CharacterModelPayload,
   CharacterPick,
+  CollectedAppearancesPayload,
   CustomSet,
   CustomSetPiece,
   CustomSetsPayload,
@@ -728,6 +729,14 @@ function view(
   options: {
     payload?: TransmogPayload | null;
     marks?: FakeMarks;
+    /**
+     * Which of the game's looks the account owns — see `collected.ts`.
+     *
+     * `null` by default, which is the view's own default too: nothing is marked as collected,
+     * and every test that predates the census reaching the wardrobe is looking at the browsers
+     * it was written against.
+     */
+    collected?: CollectedAppearancesPayload | null;
     saved?: FakeCustomSets;
     herself?: FakeHerself;
     /** Reads the test answers by hand, for the moments that only exist while one is in flight. */
@@ -838,6 +847,7 @@ function view(
       loadGallery={loadGallery}
       loadSetGallery={loadSetGallery}
       herself={herself}
+      collected={options.collected ?? null}
       store={marks}
       saved={saved}
       createStage={() => stage}
@@ -1241,6 +1251,7 @@ describe("TransmogView", () => {
         loadSetGallery={() => Promise.resolve({ models: [] })}
         herself={NOT_ASKED}
         marks={UNMARKED}
+        collected={null}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => stage}
@@ -1268,6 +1279,7 @@ describe("TransmogView", () => {
         loadSetGallery={() => Promise.resolve({ models: [] })}
         herself={NOT_ASKED}
         marks={UNMARKED}
+        collected={null}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => {
@@ -2216,6 +2228,7 @@ describe("the wardrobe as models", () => {
           })
         }
         marks={UNMARKED}
+        collected={null}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => fakeStage().stage}
@@ -2381,6 +2394,7 @@ describe("the wardrobe as models", () => {
           })
         }
         marks={UNMARKED}
+        collected={null}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => fakeStage().stage}
@@ -2433,6 +2447,7 @@ describe("the wardrobe as models", () => {
         loadGallery={() => Promise.reject(new Error("The game's files are not readable."))}
         loadSetGallery={() => Promise.resolve({ models: [] })}
         marks={UNMARKED}
+        collected={null}
         inGame={NO_IN_GAME_SETS}
         custom={NO_SETS}
         createStage={() => fakeStage().stage}
@@ -2597,6 +2612,7 @@ describe("the sets as models", () => {
         }
         herself={NOT_ASKED}
         marks={UNMARKED}
+        collected={null}
         custom={NO_SETS}
         inGame={NO_IN_GAME_SETS}
         createStage={() => fakeStage().stage}
@@ -3635,5 +3651,82 @@ describe("what the view offers about a wardrobe it could not read", () => {
     view({ statusRecourse: { label: "Open Setup", act: vi.fn() } });
 
     expect(screen.queryByRole("button", { name: "Open Setup" })).toBeNull();
+  });
+
+  // What the census reaching the wardrobe is for: two lists of the game's looks, and the reader
+  // being able to see which of them are already theirs.
+  describe("what the account has already collected", () => {
+    /**
+     * A walk that found exactly one of the game's looks — the helm that is both a row of the
+     * wardrobe and a line of set 203, which is what lets one fixture prove both halves.
+     */
+    const WALKED: CollectedAppearancesPayload = {
+      reading: {
+        domain: "appearances",
+        // Down, permanently: a character is only ever shown its own class's appearances.
+        complete: false,
+        revision: 1,
+        held: 1,
+        counted: 1,
+        observedAt: 2_000_000_100,
+      },
+      appearances: [3],
+    };
+
+    it("marks the looks the account owns in the wardrobe, and only those", async () => {
+      await browseItems(view({ collected: WALKED }));
+
+      const list = screen.getByRole("list", { name: "Appearances" });
+      const owned = within(list)
+        .getAllByRole("listitem")
+        .filter((row) => within(row).queryByText("Collected"));
+      expect(owned).toHaveLength(1);
+      expect(within(owned[0]!).getByText("Emberforge Helm")).toBeTruthy();
+    });
+
+    // The same fact in the other browser, off the same id. A look owned is owned wherever it is
+    // drawn, which is what keying both halves on the appearance buys.
+    it("marks the same look inside a set", async () => {
+      view({ collected: WALKED });
+
+      const card = await open("Emberforge Plate");
+
+      expect(
+        within(rowFor(card, "Wear Head: Emberforge Helm")).getByText("Collected"),
+      ).toBeTruthy();
+    });
+
+    it("marks nothing at all where nothing has walked the wardrobe", async () => {
+      await browseItems(view({ collected: { reading: null, appearances: [] } }));
+
+      const list = screen.getByRole("list", { name: "Appearances" });
+      expect(within(list).queryByText("Collected")).toBeNull();
+      expect(screen.getAllByText(/Nothing has walked the wardrobe yet/).length).toBeGreaterThan(0);
+    });
+
+    // The sentence that keeps the marks honest. An unmarked row reads as "not collected", and
+    // on a reading assembled from what each character's class was allowed to see that is wrong
+    // for every look nobody has logged in to find — so the shortfall is said out loud.
+    it("says how much of the wardrobe the roster has not been able to see", async () => {
+      await browseItems(
+        view({
+          collected: { ...WALKED, reading: { ...WALKED.reading!, counted: 8 } },
+        }),
+      );
+
+      expect(
+        screen.getAllByText(/The game counts 7 more collected looks than this/).length,
+      ).toBeGreaterThan(0);
+    });
+
+    // And says nothing where there is nothing to say. A hedge nobody ever sees change is how a
+    // reader learns to stop reading hedges — the argument `gap.ts` makes for refusing to
+    // announce "no gap found".
+    it("says nothing where the roster has seen everything the client counts", async () => {
+      await browseItems(view({ collected: WALKED }));
+
+      expect(screen.queryByText(/more collected/)).toBeNull();
+      expect(screen.queryByText(/Nothing has walked the wardrobe yet/)).toBeNull();
+    });
   });
 });

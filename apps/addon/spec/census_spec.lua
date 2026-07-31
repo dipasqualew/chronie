@@ -15,7 +15,7 @@ describe("ns.newCensus", function()
     ---is the walk, and a real domain would put the client's own answers between the spec and it.
     ---A position is its own id, which is the mount journal's own arrangement and the shortest
     ---thing to read a test against.
-    ---@param options table? `{ name, scope, positions, holds, list, read, count }`
+    ---@param options table? `{ name, scope, positions, holds, list, read, count, partial }`
     ---@return table domain, table recorded `{ reads, lists }`
     local function newDomain(options)
         options = options or {}
@@ -50,6 +50,7 @@ describe("ns.newCensus", function()
                 return position, entry
             end,
             count = options.count,
+            partial = options.partial,
         }
         return domain, recorded
     end
@@ -406,6 +407,86 @@ describe("ns.newCensus", function()
                 assert.is_nil(state.entries[2])
                 assert.equal(1, state.held)
                 assert.is_true(state.complete)
+            end)
+    end)
+
+    -- The domain that can only ever see part of what the account holds, which on a real client
+    -- is `ns.appearanceCensus`: the wardrobe is answered for through the logged-in character's
+    -- class filter, so a mage's walk is the account's cloth and none of its plate however
+    -- faithfully it runs to the end. Everything below is what stops that reading being mistaken
+    -- for a whole one.
+    describe("a domain that can only ever be walked in part", function()
+        it("never claims to be whole, however far the pass got", function()
+            local domain = newDomain({ partial = true, positions = { 1 }, holds = { [1] = {} } })
+            local census, db = newCensus({ domains = { domain } })
+
+            sweep(census)
+
+            assert.is_false(db.census.account.things.complete)
+        end)
+
+        -- The whole point of the flag. A paladin's walk must add its plate to the cloth a mage's
+        -- walk found rather than replace it, and a prune here would empty the account's wardrobe
+        -- at every login by a character of a different armour type.
+        it("keeps what a walk was never shown, where a whole one would take it away", function()
+            local holds = { [1] = { name = "cloth" }, [2] = { name = "plate" } }
+            local domain = newDomain({ partial = true, positions = { 1, 2 }, holds = holds })
+            local census, db, clock = newCensus({ domains = { domain } })
+            sweep(census)
+
+            -- The next character cannot see the second one at all, which is not the same thing
+            -- as the account having stopped holding it.
+            holds[2] = nil
+            clock.advance(MINUTE)
+            sweep(census)
+
+            local state = db.census.account.things
+            assert.equal("cloth", state.entries[1].name)
+            assert.equal("plate", state.entries[2].name)
+            assert.equal(2, state.held)
+        end)
+
+        -- It still ran to the end, and everything about a finished pass except the claim is
+        -- worth writing down — not least `counted`, which is the client's own opinion of how
+        -- much of this there is and therefore the one measure of how far the union has got.
+        it("dates and numbers the pass that ran to the end anyway", function()
+            local domain = newDomain({
+                partial = true,
+                positions = { 1 },
+                holds = { [1] = {} },
+                count = function()
+                    return 12
+                end,
+            })
+            local census, db, clock = newCensus({ domains = { domain } })
+
+            clock.advance(MINUTE)
+            sweep(census)
+
+            local state = db.census.account.things
+            assert.equal(NOW + MINUTE, state.completedAt)
+            assert.equal(1, state.revision)
+            assert.equal(12, state.counted)
+            assert.equal(1, state.held)
+        end)
+
+        -- And so it is walked once a session. Nothing else in a session tells this domain that
+        -- the account collected a look, and the character in front of the client is a different
+        -- part of the answer every time — so unlike every other domain there is always a reason
+        -- to walk it again.
+        it("is never settled by an audit, because the next character sees something else",
+            function()
+                local domain = newDomain({ partial = true, positions = { 1 }, holds = { [1] = {} } })
+                local census = newCensus({
+                    domains = { domain },
+                    build = function()
+                        return BUILD
+                    end,
+                })
+
+                sweep(census)
+
+                assert.same({ "things" }, census.audit())
             end)
     end)
 

@@ -51,6 +51,8 @@ import "./transmogView.css";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { collectedNote, indexCollected } from "./collected";
+import type { CollectedLooks } from "./collected";
 import { CustomSetList } from "./customSetList";
 import { rowsOf } from "./customSets";
 import { InGameSetList } from "./inGameSetList";
@@ -120,6 +122,7 @@ import type {
   CharacterLookPayload,
   CharacterModelPayload,
   CharacterPick,
+  CollectedAppearancesPayload,
   CustomSetPiece,
   CustomSetsPayload,
   GalleryPayload,
@@ -210,6 +213,15 @@ export interface TransmogViewProps {
    * on the screen is then marked, and the first attempt to mark something says why.
    */
   marks: MarkActions & { payload: TransmogMarksPayload | null };
+  /**
+   * Which of these looks the account actually owns — see `collected.ts`.
+   *
+   * The other half of a wardrobe, and the half no install can answer: everything else on this
+   * screen is what the *game* holds, the same for everybody on that build. `null` until it has
+   * been read and `null` if it could not be, which draws as a browser with nothing marked —
+   * exactly what it drew before this existed.
+   */
+  collected: CollectedAppearancesPayload | null;
   /**
    * The sets the reader saved off the character, and the two ways they change.
    *
@@ -360,6 +372,7 @@ export function TransmogView({
   loadSetGallery,
   herself,
   marks,
+  collected,
   custom,
   inGame,
   createStage,
@@ -639,6 +652,12 @@ export function TransmogView({
   // A lookup per row rather than a scan of the list, because the search box re-filters several
   // thousand sets on every keystroke and each of them asks this once.
   const index = useMemo(() => indexMarks(marks.payload), [marks.payload]);
+  // And which of the game's looks the account owns, on the same terms and for the same reason:
+  // every row of every browser asks this once, and a page re-filtered on each keystroke against
+  // an array of thirty thousand ids is work a set does not do.
+  const owned = useMemo(() => indexCollected(collected), [collected]);
+  /** What the marked rows do not say, where the census cannot yet account for the wardrobe. */
+  const collectedShortfall = collectedNote(owned);
   const markOf = useCallback(
     (kind: MarkSubjectKind, id: number): TransmogMark | undefined => index.of(kind, id),
     [index],
@@ -905,6 +924,15 @@ export function TransmogView({
               </div>
             </div>
             <div id="transmog-list" className="mog-list" data-models={asModels}>
+              {/* The same sentence the wardrobe beside this carries, and it belongs in both:
+              an opened set marks the looks the account owns, so the ones it does not mark read
+              as looks the account has not got — which on a reading built out of what each
+              character's class was shown is not what an unmarked row means. */}
+              {collectedShortfall ? (
+                <p className="muted" id="transmog-collected-note" role="note">
+                  {collectedShortfall}
+                </p>
+              ) : null}
               {groupFamilies(drawn).map((group) => (
                 <section className="mog-group" key={group.group}>
                   <h3>
@@ -940,6 +968,7 @@ export function TransmogView({
                           hideUnwearable={hideUnwearable}
                           marks={marks}
                           markOf={markOf}
+                          owned={owned}
                           qualityOf={(setId) => setQualities.of(setId)}
                           wearersOf={wearersOf}
                           onFilter={(term) => narrow(() => setSearch((was) => withTerm(was, term)))}
@@ -985,6 +1014,7 @@ export function TransmogView({
             onHideUnwearable={setHideUnwearable}
             marks={marks}
             index={index}
+            owned={owned}
             loadGallery={loadGallery}
             look={look}
             createGalleryStage={createGalleryStage}
@@ -1099,6 +1129,7 @@ function Card({
   hideUnwearable,
   marks,
   markOf,
+  owned,
   qualityOf,
   wearersOf,
   onFilter,
@@ -1133,6 +1164,8 @@ function Card({
   hideUnwearable: boolean;
   marks: MarkActions;
   markOf: (kind: MarkSubjectKind, id: number) => TransmogMark | undefined;
+  /** Which of the game's looks the account owns, asked of each row an opened set draws. */
+  owned: CollectedLooks;
   /**
    * What the committed store measured a whole set to be, or nothing where it holds none.
    *
@@ -1309,6 +1342,7 @@ function Card({
                     icon={icons.get(row.iconFileDataId)}
                     marks={marks}
                     mark={markOf("appearance", row.appearanceId)}
+                    collected={owned.has(row.appearanceId)}
                     onWear={() => onWear(row)}
                   />
                 ))}
@@ -1453,6 +1487,7 @@ function Line({
   icon,
   marks,
   mark,
+  collected,
   onWear,
 }: {
   row: AppearanceRow;
@@ -1461,6 +1496,11 @@ function Line({
   marks: MarkActions;
   /** What the reader said about this *look*, which is the same mark the wardrobe draws. */
   mark: TransmogMark | undefined;
+  /**
+   * Whether the account has been *seen* to own it — which is not the negation of "does not own
+   * it", and is why only the true case draws anything. See `collected.ts`.
+   */
+  collected: boolean;
   onWear: () => void;
 }): ReactNode {
   const wanted = canBeWorn(row);
@@ -1492,6 +1532,15 @@ function Line({
         <span className="mog-name">{row.label}</span>
       </button>
       {worn ? <span className="chip">worn</span> : null}
+      {/* Only ever the owning, never the not-owning. The wardrobe here is the union of what the
+          roster's characters have each been shown — see `collected.ts` — so an unmarked row is
+          one nobody has proved the account owns rather than one it does not, and a chip saying
+          the second would be the app telling a reader something false about their collection. */}
+      {collected ? (
+        <span className="chip mog-collected" title="This account has collected this look">
+          Collected
+        </span>
+      ) : null}
       {/* The look, not the item: a piece starred inside one set is starred wherever it turns
           up, including in the wardrobe list beside this one, because both key on the
           appearance. An appearance the game withholds has no id and gets no controls. */}

@@ -120,6 +120,13 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
   // second. A failure here is left silent on purpose — the screen simply has nothing marked on
   // it, and the first attempt to mark something says why it will not.
   const marks = useAsyncResource({ when: view === "transmog", load: desktop.transmogMarks });
+  // And which of the game's looks the account actually owns, on exactly those terms: Chronie's
+  // own database, a millisecond, and silent about a failure — a screen that could not read it
+  // draws every look the way it drew all of them before the census reached the wardrobe.
+  const collected = useAsyncResource({
+    when: view === "transmog",
+    load: desktop.collectedAppearances,
+  });
   // And the sets the reader saved, on the same terms, and silent about a failure for the same
   // reason: the browser it feeds is one of three and the two beside it are the game's.
   const customSets = useAsyncResource({ when: view === "transmog", load: desktop.customSets });
@@ -590,6 +597,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             onApply: marks.put,
             onError: message,
           }}
+          collected={collected.value}
           custom={{
             payload: customSets.value,
             save: desktop.saveCustomSet,

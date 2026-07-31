@@ -169,6 +169,28 @@ async chooseWowPath() : Promise<string | null> {
     return await TAURI_INVOKE("choose_wow_path");
 },
 /**
+ * Which of the game's looks the account has actually collected.
+ *
+ * The other half of the wardrobe, and the one no install can answer: [`transmog_appearances`]
+ * reads what the game *holds* out of `ItemAppearance` and this reads what the account was seen
+ * to hold out of Chronie's own database, so the two together are what lets a look be drawn as
+ * owned or not. Its own command for the reason the marks next door are: it costs a millisecond
+ * against the second the game's storage costs, it works on a machine with no game installed, and
+ * a failure here leaves the browsers drawing everything they already drew.
+ *
+ * The claim rides along and the window is expected to say what it licenses. The addon can only
+ * read the wardrobe through the logged-in character's class filter, so this is the union of what
+ * the roster has been shown — see `ns.appearanceCensus`.
+ */
+async collectedAppearances() : Promise<Result<CollectedAppearancesPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("collected_appearances") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Every achievement and every mount the installed game has, which is the other half of that.
  *
  * The half no addon can produce. A census can only ever list what an account *has*; the names
@@ -1133,6 +1155,16 @@ export type CharacterWornSetPayload = { model: string | null;
  * recognise first and is frequently unable to.
  */
 likeness: Likeness }
+export type CollectedAppearancesPayload = {
+/**
+ * Absent where no pass has ever run — a fresh install, or an addon older than this app.
+ */
+reading?: CensusReading | null;
+/**
+ * The client's own `visualID`s, which are `ItemAppearance` ids: the same number
+ * `WardrobeAppearance.appearance_id` carries, so the window joins on it for nothing.
+ */
+appearances: number[] }
 export type CollectibleEvent = { id: number; name?: string | null; at?: number | null; guid?: string | null }
 export type CollectionCataloguePayload = { achievements: CatalogueAchievement[]; mounts: CatalogueMount[];
 /**

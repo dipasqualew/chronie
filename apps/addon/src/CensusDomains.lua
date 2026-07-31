@@ -395,13 +395,168 @@ function ns.reputationCensus(clients)
     }
 end
 
+---The highest appearance category the walk asks about.
+---
+---`C_TransmogCollection` has no enumerator for its categories either — nothing hands over a list,
+---and `GetCategoryInfo(category)` answers about one at a time. What the categories *are* is
+---`Enum.TransmogCollectionType`, which on build 12.0.5.67823 runs 0 to 29: 0 is `None`, 1 to 11
+---the armour slots down the body, and 12 to 29 everything held in a hand, wands through paired
+---weapons. Read out of the client's own `TransmogSharedDocumentation` rather than off the wiki.
+---
+---Forty is that top value with a patch's worth of headroom, and the headroom is nearly free here
+---in a way it is not for currencies: a category that does not exist costs one `GetCategoryInfo`
+---call that answers nothing and is then skipped, so the eleven spare are eleven calls once per
+---pass rather than eleven positions to walk.
+local LAST_TRANSMOG_CATEGORY = 40
+
+---Appearances: every look the account has collected, keyed by the client's own `visualID`.
+---
+---**The largest thing the census can light up, and the one that is only ever half an answer.**
+---`wardrobe.rs` reads all 55,198 appearances of a shipping install out of `ItemAppearance` and
+---`transmog.rs` reads the sets that name them; neither knows whether the reader owns any of it, so
+---a look ten years in the wardrobe is drawn exactly like one nobody has ever seen.
+---
+---`GetCategoryAppearances(category [, transmogLocation])` is what closes that — the second
+---argument is optional, which the client's own usage string says outright, so there is no
+---transmog location to build and no slot of the player's to name. One call per category answers
+---for every appearance in it with its `visualID` and its `isCollected`, which is about thirty
+---calls against a walk of fifty-five thousand.
+---
+---**Partial by construction, and that is the whole design rather than a defect in it.** The
+---client answers this question through the *class filter*, which is the logged-in character's
+---class unless somebody has changed it: a mage is not shown plate. Issue #250 settled which way
+---out to take — the account's wardrobe is the union of what its characters can each see, built up
+---as they are played, rather than something one character forces by driving
+---`C_TransmogCollection.SetClassFilter` over all thirteen classes and leaving the player's own
+---wardrobe filtered to somebody else's class if the session ends mid-walk. So the domain is
+---marked `partial`: it never claims to be whole, is never pruned, and is walked once a session,
+---which is what lets a paladin's login add the plate a mage's could not see.
+---
+---**Which also settles what the player's filters can do to it, which is nothing.** Whether
+---`GetCategoryAppearances` applies the collected, source-type and faction filters in the client or
+---leaves them to Lua could not be settled from the install — Blizzard's own
+---`WardrobeItemsCollectionMixin:FilterVisuals` on this build filters `isHideVisual` and no more,
+---which points the other way from what the call's name suggests. It does not matter here. Every
+---one of those filters can only ever make the returned list *smaller*, a smaller list is a smaller
+---set of positive observations, and a reading that never claims completeness can never delete
+---anything on the strength of one. Nothing here reads a filter, and — as everywhere else in this
+---file — nothing here writes one.
+---
+---`GetCategoryCollectedCount(category)` is the counter, and it is the unfiltered one: the client
+---keeps a `GetFilteredCategoryCollectedCount` beside it, which is what Blizzard's own progress bar
+---under the wardrobe grid draws. Summed over the categories it is the client's own opinion of how
+---much of this the account has, against which `held` is how much of it the roster has managed to
+---show us — which is the one honest measure of how far the union has got.
+---
+---A hidden visual is not written down. Those are the "hide helm" pseudo-appearances rather than
+---looks anybody collected, they answer to no row of `ItemAppearance` a reader would recognise, and
+---Blizzard's own list drops them before drawing it.
+---@param collection table? The client's `C_TransmogCollection`.
+---@return CensusDomain?
+function ns.appearanceCensus(collection)
+    local byCategory = ns.callable(collection, "GetCategoryAppearances")
+    local categoryInfo = ns.callable(collection, "GetCategoryInfo")
+    local categoryTotal = ns.callable(collection, "GetCategoryTotal")
+    if not byCategory or not categoryInfo or not categoryTotal then
+        return nil
+    end
+
+    -- The plan the positions index into, in the two flat arrays `ns.achievementCensus` uses and
+    -- for the same reason: fifty-five thousand two-key tables is a megabyte of garbage to make
+    -- for a walk that visits each position once.
+    local planCategory, planIndex = {}, {}
+    -- One category's answer, fetched by the first position that needs it and dropped when the
+    -- walk moves on. This is where `list` gets to stay a handful of calls: the thirty fetches are
+    -- spread over the slices that consume them rather than made in the frame that draws the plan.
+    local heldCategory, heldList
+
+    return {
+        name = "appearances",
+        scope = "account",
+        partial = true,
+        ---@return integer[]
+        list = function()
+            planCategory, planIndex = {}, {}
+            heldCategory, heldList = nil, nil
+            local positions = {}
+            for category = 1, LAST_TRANSMOG_CATEGORY do
+                -- A category the build does not have has no name, which is the same nothing an
+                -- id above the top of the enum answers with.
+                if categoryInfo(category) then
+                    -- The unfiltered total, which is what makes it a bound rather than a length:
+                    -- the list a position actually reads is the class filter's, and the class
+                    -- filter can only take rows away. A category answering with more than this
+                    -- would be walked as far as this and no further, which is one more corner of
+                    -- an answer this domain already says is a corner.
+                    for index = 1, categoryTotal(category) or 0 do
+                        local at = #positions + 1
+                        planCategory[at] = category
+                        planIndex[at] = index
+                        positions[at] = at
+                    end
+                end
+            end
+            return positions
+        end,
+        ---@param position integer
+        ---@return integer?, table?
+        read = function(position)
+            local category, index = planCategory[position], planIndex[position]
+            if not category then
+                return nil, nil
+            end
+            if heldCategory ~= category then
+                heldCategory = category
+                heldList = byCategory(category)
+            end
+            local visual = type(heldList) == "table" and heldList[index] or nil
+            if type(visual) ~= "table" or type(visual.visualID) ~= "number" then
+                return nil, nil
+            end
+            -- Only what is held, as everywhere else here — an uncollected look is one of the
+            -- fifty-five thousand rows the desktop already reads out of the game's own tables.
+            if not visual.isCollected or visual.isHideVisual then
+                return nil, nil
+            end
+            return visual.visualID, {
+                -- No name, and this is the one domain that cannot carry one: the client's
+                -- appearance list is ids and flags, and a look is named after one of however many
+                -- items give it, which is `wardrobe.rs`'s decision and not one an addon is in a
+                -- position to make. So this is the domain a machine with no install can say least
+                -- about — and the category is what it can still say, which is enough to count a
+                -- reader's heads without opening the game's storage.
+                category = category,
+                -- The player's own arrangement rather than a fact about the look, kept for the
+                -- reason a mount's favourite is: a list that ignored it would disagree with the
+                -- wardrobe they are looking at.
+                favourite = visual.isFavorite or nil,
+            }
+        end,
+        ---@return integer?
+        count = function()
+            local counter = ns.callable(collection, "GetCategoryCollectedCount")
+            if not counter then
+                return nil
+            end
+            local total = 0
+            for category = 1, LAST_TRANSMOG_CATEGORY do
+                if categoryInfo(category) then
+                    total = total + (counter(category) or 0)
+                end
+            end
+            return total
+        end,
+    }
+end
+
 ---Every domain this client build can answer for, in the order they are walked.
 ---
 ---A domain whose calls this build does not have reports nil and is simply left out, which is the
 ---same answer `ns.readHoldings` gives for a pane the client will not open: a census that cannot
 ---be taken is not a census of nothing.
 ---@param clients table `{ mount = C_MountJournal, currency = C_CurrencyInfo,
----standing = { reputation = C_Reputation, ... }, achievement = { ... } }`
+---standing = { reputation = C_Reputation, ... }, collection = C_TransmogCollection,
+---achievement = { ... } }`
 ---@return CensusDomain[]
 function ns.censusDomains(clients)
     clients = clients or {}
@@ -420,6 +575,9 @@ function ns.censusDomains(clients)
         end,
         function()
             return ns.reputationCensus(clients.standing)
+        end,
+        function()
+            return ns.appearanceCensus(clients.collection)
         end,
         function()
             return ns.achievementCensus(clients.achievement)

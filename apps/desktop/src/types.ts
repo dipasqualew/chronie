@@ -35,6 +35,7 @@ export type {
   CharacterStanding,
   CharacterSwatch,
   CharacterWornSetPayload,
+  CollectedAppearancesPayload,
   CollectibleEvent,
   CollectionCataloguePayload,
   CommandError,
@@ -130,6 +131,7 @@ import type {
   AppUpdateResult,
   CharacterLookPayload,
   CharacterQuestion,
+  CollectedAppearancesPayload,
   CollectionCataloguePayload,
   CustomSetsPayload,
   DashboardPayload,
@@ -215,6 +217,10 @@ export interface E2EMock {
   lookalikeVerdicts: LookalikeVerdict[];
   wardrobe: Record<string, WardrobePayload>;
   transmogMarks: TransmogMarksPayload;
+  /** Which of the game's looks the account has been seen to own — see `collected.ts`. The
+   * reading beside them never says it is whole, because the client only shows the wardrobe
+   * through the logged-in character's class filter. */
+  collectedAppearances: CollectedAppearancesPayload;
   customSets: CustomSetsPayload;
   inGameSets: InGameSetsPayload;
   inGameSetAppearances: Record<string, InGameSetAppearancesPayload>;
