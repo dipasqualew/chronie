@@ -67,12 +67,14 @@ export type {
   QueryColumn,
   QuerySchema,
   QueryTable,
+  OpeningsPayload,
   QuestEvent,
   Release,
   ReputationGain,
   SameLookReason,
   Segment,
   SetGalleryModel,
+  SetOpening,
   SetGalleryPayload,
   SettingsPayload as Settings,
   SyncResult,
@@ -123,6 +125,7 @@ import type {
   InstallResult,
   ItemAppearance,
   ItemDetail,
+  OpeningsPayload,
   Peer,
   QueryAnswer,
   QuerySchema,
@@ -181,6 +184,8 @@ export interface E2EMock {
   /** Who the items behind each set say can really wear it — see `wearers.rs`. */
   transmogWearers: WearersPayload;
   transmogItems: Record<number, TransmogSetItemsPayload>;
+  /** And which of each set's looks something outside it sells to anybody — see `openings.rs`. */
+  transmogOpenings: Record<number, OpeningsPayload>;
   wardrobe: Record<string, WardrobePayload>;
   transmogMarks: TransmogMarksPayload;
   customSets: CustomSetsPayload;

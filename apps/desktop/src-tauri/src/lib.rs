@@ -28,6 +28,7 @@ pub mod m2;
 pub mod maps;
 pub mod marks;
 pub mod models;
+pub mod openings;
 pub mod placement;
 pub mod qualities;
 pub mod query;
@@ -380,6 +381,24 @@ async fn transmog_set_items(
 ) -> Result<dto::TransmogSetItemsPayload, CommandError> {
     Ok(dto::convert(
         read_game_files(&state, move |files| transmog::set_items(files, set_id)).await?,
+    )?)
+}
+
+/// How anybody gets each of one set's looks, out of every item in the game that gives one.
+///
+/// The other grain of the same question `transmog_wearers` answers for the whole grid: that is
+/// one mask per set and this is one row per look, naming the item a reader locked out by their
+/// class would go and get instead. Asked for a set at a time and only once the set's own rows
+/// say something in it is locked — it costs the walk of `Item` and `ItemSparse`, and a set that
+/// shuts nobody out has nothing to answer. See `openings.rs`.
+#[tauri::command]
+#[specta::specta]
+async fn transmog_openings(
+    set_id: u32,
+    state: State<'_, AppState>,
+) -> Result<dto::OpeningsPayload, CommandError> {
+    Ok(dto::convert(
+        read_game_files(&state, move |files| openings::of_set(files, set_id)).await?,
     )?)
 }
 
@@ -2086,6 +2105,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         sync_now,
         transmog_appearances,
         transmog_marks,
+        transmog_openings,
         transmog_set_items,
         transmog_sets,
         transmog_wearers,

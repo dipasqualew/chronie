@@ -48,6 +48,7 @@ import type {
   TransmogMarksPayload,
   TransmogPayload,
   TransmogSetItemsPayload,
+  OpeningsPayload,
   WardrobePayload,
   WearersPayload,
   WifiPeer,
@@ -109,6 +110,12 @@ export const e2eDesktop = {
   transmogSetItems: (setId: number): Promise<TransmogSetItemsPayload> =>
     mock
       ? Promise.resolve(structuredClone(mock.transmogItems[setId] ?? emptySet(setId)))
+      : missingMock(),
+  // And which of one set's looks something outside it sells to anybody, which the window asks
+  // only for a set whose own rows lock somebody out — see `openings.rs`.
+  transmogOpenings: (setId: number): Promise<OpeningsPayload> =>
+    mock
+      ? Promise.resolve(structuredClone(mock.transmogOpenings[setId] ?? noOpenings(setId)))
       : missingMock(),
   // Every look filling one kind of place, which is the other way of browsing the game: asked
   // for a kind at a time, because the whole wardrobe is fifty-five thousand rows and fourteen
@@ -697,6 +704,15 @@ function mockReceive(advance: (status: WifiReceiveStatus) => void): WifiReceiveS
 const emptySet = (setId: number): TransmogSetItemsPayload => ({
   setId,
   appearances: [],
+  readCount: 0,
+  withheldCount: 0,
+});
+
+/** And a set nothing was read of, which is what an install with no key to it would answer. */
+const noOpenings = (setId: number): OpeningsPayload => ({
+  setId,
+  openings: [],
+  blocked: [],
   readCount: 0,
   withheldCount: 0,
 });

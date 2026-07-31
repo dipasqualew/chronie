@@ -344,6 +344,8 @@ export const transmogItems: E2EMock["transmogItems"] = {
     readCount: 2,
     withheldCount: 0,
     appearances: [
+      // The Druid's own, which is why the card above says "Druid only" — and, no other item
+      // in the game giving the look, the one row of this whole fixture that is a wall.
       {
         modifiedAppearanceId: 71004,
         itemId: 30004,
@@ -351,7 +353,9 @@ export const transmogItems: E2EMock["transmogItems"] = {
         appearanceId: 80004,
         displayType: 6,
         inventoryType: 8,
-        ...ANY_CLASS_ITEM,
+        allowableClass: 0x0400,
+        requiredLevel: 0,
+        quality: 4,
         displayInfoId: 900004,
         iconFileDataId: 130004,
         hasModel: false,
@@ -433,6 +437,9 @@ export const transmogItems: E2EMock["transmogItems"] = {
         iconFileDataId: 130003,
         hasModel: false,
       },
+      // The Paladin's own, and the reason this set's chip says "Any plate wearer" rather than
+      // "Paladin only": something in no set at all sells the same look to anybody, which is
+      // what the panel under the head of the list names — see `transmogOpenings`.
       {
         modifiedAppearanceId: 71009,
         itemId: 30009,
@@ -440,7 +447,9 @@ export const transmogItems: E2EMock["transmogItems"] = {
         appearanceId: 80009,
         displayType: 5,
         inventoryType: 7,
-        ...ANY_CLASS_ITEM,
+        allowableClass: 0x0002,
+        requiredLevel: 0,
+        quality: 4,
         displayInfoId: 900006,
         iconFileDataId: 130006,
         hasModel: false,
@@ -506,6 +515,73 @@ export const transmogItems: E2EMock["transmogItems"] = {
         displayInfoId: 0,
         iconFileDataId: 0,
         hasModel: false,
+      },
+    ],
+  },
+};
+
+/**
+ * And how anybody gets the looks those sets lock — see `openings.rs` and `openings.ts`.
+ *
+ * Keyed by set and asked for only where a set's own rows lock somebody out, which in this
+ * fixture is two of them and both answers a reader could act on:
+ *
+ * - `Emberforge Plate` locks its legs to the Paladin, and `Greaves of the Wanderer` — an item
+ *   belonging to no set at all, which is where 87% of these live — sells the same look to
+ *   everybody. That is the green row, and nothing inside the set could ever have found it.
+ * - `Tideglass Hide` locks its sandals to the Druid and nothing in the game sells them around.
+ *   That is the red row, and it is the whole reason the panel is drawn rather than a chip.
+ *
+ * A look the set already sells openly is in `openings` too — the backend answers per look and
+ * decides nothing — and the window draws no row for it, having stopped nobody.
+ *
+ * The level on `Greaves of the Wanderer` is this file's own rather than the backend fixture's,
+ * which asks for none: what a row says about the item it points at is drawn only where the game
+ * asks for something, and a fixture of all zeroes would never draw it.
+ */
+export const transmogOpenings: E2EMock["transmogOpenings"] = {
+  203: {
+    setId: 203,
+    readCount: 4,
+    withheldCount: 0,
+    blocked: [],
+    openings: [
+      { appearanceId: 80006, itemId: 30006, name: "Emberforge Helm", requiredLevel: 0, quality: 4 },
+      {
+        appearanceId: 80007,
+        itemId: 30007,
+        name: "Emberforge Pauldrons",
+        requiredLevel: 0,
+        quality: 4,
+      },
+      {
+        appearanceId: 80008,
+        itemId: 30008,
+        name: "Emberforge Breastplate",
+        requiredLevel: 0,
+        quality: 5,
+      },
+      {
+        appearanceId: 80009,
+        itemId: 30025,
+        name: "Greaves of the Wanderer",
+        requiredLevel: 30,
+        quality: 3,
+      },
+    ],
+  },
+  202: {
+    setId: 202,
+    readCount: 1,
+    withheldCount: 0,
+    blocked: [80004],
+    openings: [
+      {
+        appearanceId: 80005,
+        itemId: 30005,
+        name: "Tideglass Gloves",
+        requiredLevel: 0,
+        quality: 4,
       },
     ],
   },

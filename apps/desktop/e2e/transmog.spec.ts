@@ -547,6 +547,49 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect.poll(() => outfit.drew("vertices")).toBe("976");
   });
 
+  // The second half of the answer the chip on the card gives, and the half no chip could: "Any
+  // plate wearer" says the lock lifts and never says which slot lifted it. The greaves of this
+  // set are the Paladin's own, and the item that opens them belongs to no set at all — which is
+  // why the read walks every item in the game rather than the set's own rows. See `openings.rs`.
+  await test.step("an opened set says how anybody gets the looks it locks", async () => {
+    await expect(sets.openingRow("Emberforge Plate", "Legs")).toContainText("Emberforge Greaves");
+    await expect(sets.openingRow("Emberforge Plate", "Legs")).toContainText(
+      "Greaves of the Wanderer · Rare · Level 30",
+    );
+    // And a way out of the app to it, the same corner every other item on this card offers.
+    await expect(sets.link("Emberforge Plate", "Greaves of the Wanderer")).toHaveAttribute(
+      "href",
+      "https://www.wowhead.com/item=30025",
+    );
+    // One row rather than six: the set's other looks stop nobody, and a table where five rows
+    // say "you were never kept from this" buries the one that says they were.
+    await expect(sets.openingRows("Emberforge Plate")).toHaveCount(1);
+    await expect(
+      sets.cardSaying(
+        "Emberforge Plate",
+        "The one look this set locks is on an item anybody can wear",
+      ),
+    ).toBeVisible();
+  });
+
+  // And the row the whole panel is drawn for: a look nothing in the game sells around. The
+  // sandals are the Druid's own and no other item gives that look, so the set is a wall for
+  // everybody else — said in words, because a blank cell is a thing that failed to load.
+  await test.step("a locked look nothing sells around says so", async () => {
+    await sets.openSet("Tideglass Hide");
+    await expect(sets.openingRow("Tideglass Hide", "Feet")).toContainText("Tideglass Sandals");
+    await expect(sets.openingRow("Tideglass Hide", "Feet")).toContainText(
+      "Nothing gives this look to another class",
+    );
+    await expect(
+      sets.cardSaying(
+        "Tideglass Hide",
+        "Nothing in the game gives this set's one locked look to another class",
+      ),
+    ).toBeVisible();
+    await sets.closeSet("Tideglass Hide");
+  });
+
   // The camera belongs to the reader and not to whatever is on the stage. A new body is drawn
   // for every piece put on or taken off, and framing each of them threw the reader's view away
   // once per click: somebody comparing two helms on a face they had zoomed in on had to zoom

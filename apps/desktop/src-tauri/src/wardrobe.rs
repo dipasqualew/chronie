@@ -208,7 +208,12 @@ pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value
 /// deliberately: a look a reader met inside a set and meets again in the list of every head in
 /// the game should be the same words both times. What it is *not* is the set view's rule for
 /// picking a name, which weighs the item's name against the set's — there being no set here.
-fn named(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> u32 {
+///
+/// Shared with [`crate::openings`], which asks it the narrower question this order already
+/// answers: given only the items of a look no class is locked out of, which is the cheapest way
+/// in. That is this key with its second element constant, which is why it is this function
+/// rather than another one beside it.
+pub fn named(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> u32 {
     let key = |item_id: &&u32| {
         let item_id = **item_id;
         let about = facts.get(&item_id);

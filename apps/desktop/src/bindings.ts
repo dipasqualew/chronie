@@ -738,6 +738,23 @@ async transmogMarks() : Promise<Result<TransmogMarksPayload, CommandError>> {
 }
 },
 /**
+ * How anybody gets each of one set's looks, out of every item in the game that gives one.
+ *
+ * The other grain of the same question `transmog_wearers` answers for the whole grid: that is
+ * one mask per set and this is one row per look, naming the item a reader locked out by their
+ * class would go and get instead. Asked for a set at a time and only once the set's own rows
+ * say something in it is locked — it costs the walk of `Item` and `ItemSparse`, and a set that
+ * shuts nobody out has nothing to answer. See `openings.rs`.
+ */
+async transmogOpenings(setId: number) : Promise<Result<OpeningsPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transmog_openings", { setId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What one transmog set is made of, walked out of the same files.
  *
  * The window already has the set from the grid, so only its id crosses over; everything a
@@ -1163,6 +1180,23 @@ export type Offer = { protocol: number;
  * The sending machine, as it calls itself.
  */
 device: string; segmentCount: number; characterCount: number; newestDay?: string | null; bytes: number }
+export type OpeningsPayload = { setId: number;
+/**
+ * One per look of the set that an item nobody is locked out of also gives — the cheapest
+ * such item, by `wardrobe::named`. A look the set's own items already open to everybody
+ * is in here too, naming one of them; which of the set's rows are worth drawing against
+ * this is the window's question rather than this read's.
+ */
+openings: SetOpening[];
+/**
+ * And the looks nothing in the game sells around: read, and locked all the way down.
+ */
+blocked: number[]; readCount: number;
+/**
+ * The set's looks this install can read no item of, which are in neither list above. The
+ * game encrypts the content it has not shipped, and "nothing is known" is not "shut".
+ */
+withheldCount: number }
 /**
  * The last thing that happened, kept after the connection has gone so the window can say so.
  */
@@ -1330,6 +1364,11 @@ export type SameLookReason = "faction" | "class" | "reissue"
 export type Segment = { segmentId: number; id: string; character: string; classFile?: string | null; level?: number | null; day: string; instance: string; difficulty: string; instanceType: string; difficultyId?: number | null; startedAt: number; endedAt: number; seconds: number; lootValue: number; goldDiff: number; currencyTotal?: number | null; reputationTotal?: number | null; housingXP: number; expansionTier?: number | null; latestExpansionTier?: number | null; experience?: ExperienceGain | null; keystone?: KeystoneRun | null; activities?: Activity[]; captures?: Capture[]; encounters?: EncounterEvent[]; equipsetChanges?: EquipsetChangeEvent[]; transmogs?: TransmogEvent[]; currencies?: CurrencyGain[]; reputation?: ReputationGain[]; achievements?: AchievementEvent[]; levelUps?: LevelUpEvent[]; mounts?: CollectibleEvent[]; pets?: PetEvent[]; quests?: QuestEvent[]; toys?: CollectibleEvent[]; housingItems?: HousingItemEvent[]; housingLevelUps?: LevelUpEvent[] }
 export type SetGalleryModel = { setId: number; model: string | null }
 export type SetGalleryPayload = { models: SetGalleryModel[] }
+export type SetOpening = {
+/**
+ * The look this is a way in to, which is what joins it to the row already on screen.
+ */
+appearanceId: number; itemId: number; name: string; requiredLevel: number; quality: number }
 export type SetWearers = { setId: number;
 /**
  * A bit per class, in the game's class order — the classes that can wear every look the
