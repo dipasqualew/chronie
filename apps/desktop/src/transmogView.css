@@ -47,6 +47,14 @@
 }
 .mog-card:hover { border-color: var(--series-1); }
 .mog-facts { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Each of them narrows the grid to what it says — see `Fact`. It has to keep looking like the
+   chip it was rather than like a button, because it is still the card stating a fact; the
+   underline on hover is the whole of what says it can be clicked, the same way the measured
+   colour's is. */
+.chip.mog-ask {
+  border: 0; font: inherit; font-size: 11px; line-height: inherit; cursor: pointer;
+}
+.mog-ask:hover, .mog-ask:focus-visible { text-decoration: underline; }
 .mog-foot {
   display: flex; justify-content: space-between; align-items: baseline;
   margin-top: auto; font-size: 12px; color: var(--text-secondary);

@@ -365,29 +365,36 @@ test("browses the game's transmog sets and dresses the character in them", async
     await sets.search().fill("");
   });
 
-  await test.step("expansion and class narrow it together", async () => {
-    await sets.expansion().selectOption({ label: "Cataclysm" });
+  // The expansion and class dropdowns used to be here. They asked what the card beside them was
+  // already printing, so the chip is the control now — clicking a fact writes the term that asks
+  // for it into the one box left, and the box is the whole of what narrows the grid.
+  await test.step("a fact on a card narrows the grid to the sets that share it", async () => {
+    await sets.fact("Tideglass Regalia", "expansion: Cataclysm").click();
+    await expect(sets.search()).toHaveValue("expansion:Cataclysm");
     await expect(sets.sets()).toHaveCount(2);
 
-    await sets.klass().selectOption({ label: "Priest" });
+    // And a second click narrows rather than replaces, which is what both dropdowns being set
+    // at once used to say.
+    await sets.fact("Tideglass Regalia", "class: Any cloth wearer").click();
     await expect(sets.sets()).toHaveText(["Tideglass Regalia"]);
+    await sets.search().fill("");
   });
 
   await test.step("a set no class owns survives a class filter", async () => {
-    await sets.expansion().selectOption({ label: "All expansions" });
+    await sets.search().fill("class:priest");
     await expect(sets.sets()).toHaveText(["Duskwoven Shroud", "Tideglass Regalia"]);
   });
 
-  // And the dropdown asks the same question the chip answers. Tideglass Hide is filed under the
-  // leather mask, which every Rogue is in, so the filter reading that mask handed a Rogue a set
+  // And `class:` asks the same question the chip answers. Tideglass Hide is filed under the
+  // leather mask, which every Rogue is in, so a filter reading that mask handed a Rogue a set
   // no Rogue can wear — and hid it from the one class that can.
   await test.step("the class filter narrows to what a class can really wear", async () => {
-    await sets.klass().selectOption({ label: "Rogue" });
+    await sets.search().fill("class:rogue");
     await expect(sets.sets()).toHaveText(["Duskwoven Shroud"]);
 
-    await sets.klass().selectOption({ label: "Druid" });
+    await sets.search().fill("class:druid");
     await expect(sets.sets()).toHaveText(["Duskwoven Shroud", "Tideglass Hide"]);
-    await sets.klass().selectOption("");
+    await sets.search().fill("");
   });
 
   await test.step("a filter that matches nothing says so", async () => {
@@ -400,7 +407,6 @@ test("browses the game's transmog sets and dresses the character in them", async
   // look rather than one row per thing that happens to wear the model.
   await test.step("a set opens on its looks rather than on its items", async () => {
     await sets.search().fill("");
-    await sets.klass().selectOption("");
     await expect(sets.card("Tideglass Regalia")).toContainText("6 items");
 
     await sets.openSet("Tideglass Regalia");
@@ -775,7 +781,6 @@ test("browses the game's transmog sets and dresses the character in them", async
     await sets.closeSet("Emberforge Plate");
     await sets.closeSet("Tideglass Regalia");
     await expect(sets.sets()).toHaveCount(4);
-    await expect(sets.klass()).toHaveValue("");
     await expect(sets.search()).toHaveValue("");
     // And what she has on outlives every set it was assembled from, which is the whole point
     // of the outfit living beside the sets rather than inside one of them.

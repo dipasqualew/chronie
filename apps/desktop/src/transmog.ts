@@ -309,9 +309,7 @@ function searchable(family: Family, said: Said): string {
     .flatMap((one) => [
       one.name,
       one.group,
-      classLabel(one.classMask),
-      ...classNames(one.classMask),
-      // And who the items say, which is the chip the card actually draws once the backend has
+      // Who the items say, which is the chip the card actually draws once the backend has
       // answered: a reader looking at "Any plate wearer" types "plate", and a Warrior looking
       // for what a Warrior can wear types their class and means this rather than the mask.
       ...wearerWords(one, said),
@@ -349,9 +347,7 @@ function facetsOf(family: Family, said: Said): Facet[] {
     .flatMap((one): Facet[] => [
       { key: "name", value: one.name },
       { key: "collection", value: one.group },
-      { key: "class", value: classLabel(one.classMask) },
-      ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
-      ...wearerWords(one, said).map((word) => ({ key: "class", value: word })),
+      ...classFacets(one, said),
       // And how much of it anybody can have, which is the one thing about a set neither the
       // game's mask nor the chip drawn from it can be asked — see [`opennessWords`].
       ...openWords(one, said).map((word) => ({ key: "open", value: word })),
@@ -366,46 +362,46 @@ function facetsOf(family: Family, said: Said): Facet[] {
   return [...game, ...mine];
 }
 
-/** The phrase the card draws for who can wear a set, and the classes in it, where it is known. */
+/**
+ * Who a set is for, in the words the card itself prints.
+ *
+ * **The items where they have been read, and the game's own mask until then** — see `wearers.rs`,
+ * and the chip in `transmogView.tsx` that makes exactly this choice. The two disagree about a
+ * fifth of the game's single-class sets, and in both directions: a Paladin set whose every look
+ * something else sells to everybody is a set a Warrior can wear, and a set filed under the
+ * leather mask whose sandals are the Druid's own is not a set any Rogue can. Saying both would
+ * answer for a class the card has already told the reader is shut out.
+ */
 function wearerWords(one: Named, said: Said): string[] {
   const about = said.wearers(one.id);
-  if (about === undefined) return [];
+  if (about === undefined) return [classLabel(one.classMask), ...classNames(one.classMask)];
   return [whoWears(about.classMask), ...classNames(about.classMask)];
+}
+
+/**
+ * And the same, as the facets `class:` reads — which is the whole of what the dropdown was.
+ *
+ * The one thing a term has to say that the printed words do not: **a mask of nothing is the game
+ * writing "anybody"**, and `classNames` reads no class at all out of it. A tabard or a weapon
+ * rack answering `class:mage` with silence would hide from a reader narrowing to their own class
+ * exactly the sets that were never keeping them out. Only where the items have said nothing,
+ * because a mask the backend worked out is a count of real items and zero there means what it
+ * says — the two internal bundles of a shipping install that hold every class's tier at once and
+ * that no class can wear the whole of.
+ *
+ * They stay out of [`searchable`], where a bare word is matched against everything a set says: a
+ * reader typing "mage" wants Mage sets, not every tabard in the game.
+ */
+function classFacets(one: Named, said: Said): Facet[] {
+  const words = wearerWords(one, said);
+  const anybody = said.wearers(one.id) === undefined && one.classMask === 0 ? CLASSES : [];
+  return [...words, ...anybody].map((value) => ({ key: "class", value }));
 }
 
 /** And how much of it they can have, in the words the box asks for that — [`opennessWords`]. */
 function openWords(one: Named, said: Said): string[] {
   const about = said.wearers(one.id);
   return about === undefined ? [] : opennessWords(about);
-}
-
-/**
- * Whether one of a family's sets is for a class, as the dropdown above the grid asks it.
- *
- * **The items where they have been read, and the mask until then.** They disagree about a
- * fifth of the game's single-class sets — a Paladin set whose every look something else sells
- * to everybody is a set a Warrior can wear, and the dropdown that answered off the mask hid
- * exactly those from exactly that reader. Where the backend has said nothing this is the test
- * it has always been, mask of zero and all.
- */
-function wearableBy(one: Named, klass: number, said: Said): boolean {
-  const about = said.wearers(one.id);
-  if (about !== undefined) return (about.classMask & (1 << klass)) !== 0;
-  return one.classMask === 0 || (one.classMask & (1 << klass)) !== 0;
-}
-
-/**
- * What a folded set brings with it, which the card it folded into has to answer for.
- *
- * A set shown in place of two others is standing in for their names, their classes and their
- * expansions as well as its own, and a filter that only read its own would hide the look from
- * exactly the reader looking for it — someone typing "Warmongering", or narrowing to the class
- * whose version of the armour got folded away. So every filter reads the whole cluster —
- * this one by the list it maps, and the class filter by asking [`wearableBy`] about each of
- * [`everyNamed`] in turn.
- */
-function everyExpansion(family: Family): number[] {
-  return everyNamed(family).map((one) => one.expansionId);
 }
 
 /** How a card says why the set it stands in for is a separate set. */
@@ -447,6 +443,12 @@ export function alternateLabel(alternate: Alternate, shown: TransmogSet): string
  * word finds on its own — which is how a reader narrows a wardrobe of several thousand sets
  * without learning what order the metadata happens to be written in.
  *
+ * **The box is the whole of it.** There were two dropdowns over the grid as well, an expansion
+ * and a class, and both asked something [`facetsOf`] already answers under a name — so the same
+ * question had two controls, one of which a reader had to notice and the other of which every
+ * chip on every card already writes. `expansion:cataclysm class:priest` is what the pair of them
+ * came to, and it is one thing to read, one thing to clear, and a thing that can be asked twice.
+ *
  * **Two folds stand between the game's sets and the cards.** 436 of the game's sets hold exactly
  * the appearances another one holds, and the backend marks those; 1,724 more are a difficulty or
  * a colour of a set the game itself names as their parent, and [`foldFamilies`] gathers those.
@@ -463,8 +465,6 @@ export function filterFamilies(
   families: Family[],
   filters: {
     search: string;
-    expansion: string;
-    klass: string;
     /** What the reader has said about these sets, and what they have narrowed it to. Absent
      * where no mark is in play, which is what every caller that predates them passes. */
     marks?: { filter: MarkFilter; of: (setId: number) => TransmogMark | undefined };
@@ -479,8 +479,6 @@ export function filterFamilies(
 ): Family[] {
   const query = parseQuery(filters.search);
   const asked = asksAnything(query);
-  const expansion = filters.expansion === "" ? null : Number(filters.expansion);
-  const klass = filters.klass === "" ? null : Number(filters.klass);
   const marks = filters.marks;
   const said: Said = {
     mark: (setId) => marks?.of(setId),
@@ -488,10 +486,6 @@ export function filterFamilies(
     wearers: (setId) => filters.wearers?.(setId),
   };
   return families.filter((family) => {
-    if (expansion !== null && !everyExpansion(family).includes(expansion)) return false;
-    if (klass !== null && !everyNamed(family).some((one) => wearableBy(one, klass, said))) {
-      return false;
-    }
     if (marks && !family.members.some((one) => survivesMarks(marks.of(one.id), marks.filter))) {
       return false;
     }
@@ -501,19 +495,55 @@ export function filterFamilies(
   });
 }
 
-/** Groups families under the collection of the card each draws, keeping the backend's order. */
+/**
+ * Groups families under the collection of the card each draws, keeping the backend's order.
+ *
+ * A set the tables file under no collection falls back to [`whenItArrived`] rather than to one
+ * "Ungrouped" heading over a third of the grid — see there for why that heading was not a
+ * section anybody could read.
+ *
+ * The buckets are keyed by where the heading came from and not by the heading itself, so a
+ * collection the game happens to have named after an expansion cannot swallow the sets that
+ * landed under that expansion for want of a collection of their own.
+ */
 export function groupFamilies(families: Family[]): Array<{ group: string; families: Family[] }> {
   const groups: Array<{ group: string; families: Family[] }> = [];
-  const byName = new Map<string, Family[]>();
+  const byKey = new Map<string, Family[]>();
   for (const family of families) {
-    const name = family.shown.group || "Ungrouped";
-    let bucket = byName.get(name);
+    const named = family.shown.group !== "";
+    const name = named ? family.shown.group : whenItArrived(family.shown);
+    const key = `${named ? "collection" : "when"}:${name}`;
+    let bucket = byKey.get(key);
     if (!bucket) {
       bucket = [];
-      byName.set(name, bucket);
+      byKey.set(key, bucket);
       groups.push({ group: name, families: bucket });
     }
     bucket.push(family);
   }
   return groups;
+}
+
+/**
+ * The heading a set out of no collection is gathered under: when the game let anybody have it.
+ *
+ * `TransmogSetGroup` names 2,993 of a 12.x install's sets and says nothing about the other
+ * **1,482**, and a third of the grid under a single "Ungrouped" is a pile rather than a section.
+ * Folding by parent barely touches it either — those 1,482 sets are 1,476 families — because
+ * what is unnamed is mostly one-offs rather than the variant chains a raid tier makes.
+ *
+ * They are also not spread evenly: 566 of them are Dragonflight's, 382 Shadowlands', 243 Battle
+ * for Azeroth's. So the fallback is the expansion **and the patch**, both of which the game
+ * states about every set it has. The expansion alone would leave the largest pile very nearly
+ * whole; a patch is what a content release actually was, and it is the granularity at which
+ * these one-offs arrived — a holiday's worth of costumes, a season's worth of rewards.
+ *
+ * Neither half is invented. A build too old to know an expansion's name still gets a heading,
+ * [`expansionName`] saying which number it was, and a set whose patch the tables leave at zero
+ * gets the expansion on its own rather than a heading with a hole in it.
+ */
+function whenItArrived(set: TransmogSet): string {
+  const expansion = expansionName(set.expansionId);
+  const patch = patchName(set.patchIntroduced);
+  return patch ? `${expansion} · Patch ${patch}` : expansion;
 }
