@@ -126,6 +126,191 @@ describe("the census domains", function()
         end)
     end)
 
+    describe("ns.currencyCensus", function()
+        ---A stand-in for `C_CurrencyInfo`, answering the way the real one does.
+        ---
+        ---The important half of this fake is what it does for an id it has no row for: nothing at
+        ---all. `GetCurrencyInfo` is marked `MayReturnNothing` in the client's own documentation
+        ---and that is what the great majority of a five-thousand-id range comes back as, so a
+        ---fake that handed over an empty table instead would agree with a domain that never
+        ---checked.
+        ---@param rows table Keyed by currency id, each the `CurrencyInfo` structure the client returns.
+        ---@return table currency
+        local function newCurrencies(rows)
+            return {
+                GetCurrencyInfo = function(id)
+                    return rows[id]
+                end,
+            }
+        end
+
+        -- The same answer every other domain here gives for a client that cannot be asked: a
+        -- census that cannot be taken is not a census of nothing, so the domain declines to
+        -- exist rather than existing and reporting an empty wallet.
+        for _, case in ipairs({
+            { what = "a client with no currency API at all", currency = nil },
+            { what = "a currency API that will not describe an id", currency = { GetCurrencyListSize = print } },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                assert.is_nil(ns.currencyCensus(case.currency))
+            end)
+        end
+
+        -- `C_CurrencyInfo` has no enumerator — no id list, no counter, and the one call that
+        -- hands over ids is keyed by a category id that only lives in the game's own tables. So
+        -- the positions are a range, and the range is the whole point: it reaches the currencies
+        -- a collapsed group hides from the pane that `ns.readHoldings` walks.
+        it("walks a range of ids rather than the rows the pane happens to be drawing", function()
+            local domain = ns.currencyCensus(newCurrencies({}))
+
+            local ids = domain.list()
+
+            assert.equal("currencies", domain.name)
+            -- The first domain that is not the account's. Two alts with a wallet each must not
+            -- read as one alt whose wallet keeps being replaced.
+            assert.equal("character", domain.scope)
+            assert.equal(5000, #ids)
+            assert.equal(1, ids[1])
+            assert.equal(5000, ids[#ids])
+        end)
+
+        it("says nothing about an id the client answers nothing for", function()
+            local domain = ns.currencyCensus(newCurrencies({}))
+
+            local id, held = domain.read(3008)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- The pane's group titles come back through this same structure, which is the check
+        -- `ns.readHoldings` makes next door for the same reason.
+        it("says nothing about a header rather than a currency", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [89] = { name = "Dungeon and Raid", isHeader = true, quantity = 0 },
+            }))
+
+            local id, held = domain.read(89)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- Every id in the range that is a currency of content this character has never played is
+        -- one of five thousand absences, and writing them down per character is a saved file
+        -- spent saying nothing the desktop could not work out by subtraction.
+        it("says nothing about a currency this character has never come across", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [2245] = { name = "Flightstones", quantity = 0, discovered = false },
+            }))
+
+            local id, held = domain.read(2245)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- The balance is checked beside `discovered` rather than instead of it, so a build whose
+        -- `discovered` means something narrower than expected still cannot lose a currency
+        -- somebody is holding.
+        it("writes down one it has never been told about but is holding anyway", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [2245] = { name = "Flightstones", quantity = 400, discovered = false },
+            }))
+
+            local id, held = domain.read(2245)
+
+            assert.equal(2245, id)
+            assert.equal(400, held.total)
+        end)
+
+        -- The one count that is written whatever it is. A character that has spent everything it
+        -- had must be able to say so, or a balance goes on reporting what it was last seen with.
+        it("writes down a currency it has discovered and spent to nothing", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [1602] = { name = "Conquest", quantity = 0, discovered = true, totalEarned = 1350 },
+            }))
+
+            local id, held = domain.read(1602)
+
+            assert.equal(1602, id)
+            assert.equal(0, held.total)
+            assert.equal(1350, held.earned)
+        end)
+
+        -- What the pane row could never say, and what the whole domain exists for: the cap beside
+        -- the total earned is "am I capped", and the weekly cap beside the week's count is "have
+        -- I done my weekly", neither of which any amount of watching a balance change can answer.
+        it("carries the caps and the week's counts that say how much more may be had", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [1602] = {
+                    name = "Conquest", quantity = 1650, discovered = true,
+                    totalEarned = 5400, maxQuantity = 5500,
+                    quantityEarnedThisWeek = 750, maxWeeklyQuantity = 1350,
+                    isAccountWide = true, isAccountTransferable = true,
+                },
+            }))
+
+            local id, held = domain.read(1602)
+
+            assert.equal(1602, id)
+            assert.same({
+                name = "Conquest",
+                total = 1650,
+                earned = 5400,
+                cap = 5500,
+                week = 750,
+                weekCap = 1350,
+                accountWide = true,
+                transferable = true,
+            }, held)
+        end)
+
+        -- Nought is the client's answer for "no cap", "nothing earned yet" and "no weekly" alike,
+        -- and this census writes a key per id per character — so a nought written down is a saved
+        -- file spent saying what its absence already said. Every reader defaults them to nought.
+        it("leaves out a count the client only reported as nought", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [1166] = {
+                    name = "Timewarped Badge", quantity = 220, discovered = true,
+                    totalEarned = 0, maxQuantity = 0,
+                    quantityEarnedThisWeek = 0, maxWeeklyQuantity = 0,
+                },
+            }))
+
+            local _, held = domain.read(1166)
+
+            assert.equal(220, held.total)
+            assert.is_nil(held.earned)
+            assert.is_nil(held.cap)
+            assert.is_nil(held.week)
+            assert.is_nil(held.weekCap)
+        end)
+
+        -- And the same economy for the two flags. Most currencies are neither the warband's one
+        -- pot nor movable between characters, so the common case is the one that costs no key.
+        it("leaves the warband out of a currency that is only this character's", function()
+            local domain = ns.currencyCensus(newCurrencies({
+                [1166] = {
+                    name = "Timewarped Badge", quantity = 220, discovered = true,
+                    isAccountWide = false, isAccountTransferable = false,
+                },
+            }))
+
+            local _, held = domain.read(1166)
+
+            assert.is_nil(held.accountWide)
+            assert.is_nil(held.transferable)
+        end)
+
+        -- `GetCurrencyListSize` counts the rows the pane is drawing, which is the very number
+        -- this domain exists not to trust. So there is nothing to distrust this walk into a pass
+        -- of its own, and it is walked whenever something else provokes one.
+        it("offers no counter, because the only one the client has counts the pane", function()
+            assert.is_nil(ns.currencyCensus(newCurrencies({})).count)
+        end)
+    end)
+
     describe("ns.achievementCensus", function()
         ---A stand-in for the four bare globals the achievement tree is reached through.
         ---
@@ -317,7 +502,7 @@ describe("the census domains", function()
     end)
 
     describe("ns.censusDomains", function()
-        ---Everything a build would need to answer for both domains.
+        ---Everything a build would need to answer for every domain.
         ---@return table
         local function everything()
             return {
@@ -326,6 +511,9 @@ describe("the census domains", function()
                         return {}
                     end,
                     GetMountInfoByID = print,
+                },
+                currency = {
+                    GetCurrencyInfo = print,
                 },
                 achievement = {
                     categories = print,
@@ -345,8 +533,14 @@ describe("the census domains", function()
             return names
         end
 
-        it("names both domains on a build that can answer for both", function()
-            assert.same({ "mounts", "achievements" }, namesOf(ns.censusDomains(everything())))
+        -- Cheapest first, and the order is the assertion. A pass is interrupted by whatever ends
+        -- the session, so the two domains that finish in a fraction of a second must not be
+        -- queued behind the thirteen-thousand-call one that takes a minute.
+        it("names every domain a build can answer for, cheapest walk first", function()
+            assert.same(
+                { "mounts", "currencies", "achievements" },
+                namesOf(ns.censusDomains(everything()))
+            )
         end)
 
         it("is no domains at all on a build that can answer for none", function()
@@ -361,14 +555,24 @@ describe("the census domains", function()
             local clients = everything()
             clients.mount = nil
 
-            assert.same({ "achievements" }, namesOf(ns.censusDomains(clients)))
+            assert.same({ "currencies", "achievements" }, namesOf(ns.censusDomains(clients)))
         end)
 
         it("keeps the domains ahead of one this build cannot answer for", function()
             local clients = everything()
             clients.achievement = nil
 
-            assert.same({ "mounts" }, namesOf(ns.censusDomains(clients)))
+            assert.same({ "mounts", "currencies" }, namesOf(ns.censusDomains(clients)))
+        end)
+
+        -- And the case that would actually catch it, now there is a domain with one on each
+        -- side: a build with no `C_CurrencyInfo` leaves the achievements behind the gap and the
+        -- mounts in front of it, rather than a list that stops where the currencies would be.
+        it("keeps the domains on both sides of one this build cannot answer for", function()
+            local clients = everything()
+            clients.currency = nil
+
+            assert.same({ "mounts", "achievements" }, namesOf(ns.censusDomains(clients)))
         end)
     end)
 end)

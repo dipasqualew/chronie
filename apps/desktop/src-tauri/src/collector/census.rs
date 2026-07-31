@@ -16,8 +16,9 @@
 //! inferring completeness from how much arrived.
 //!
 //! The bookkeeping is generic and the storage is not. `census_domains` holds the claim, which is
-//! the same shape for every kind of thing; `account_mounts` and `account_achievements` hold what a
-//! mount and an achievement actually are, which is not. Adding a domain is a table and a reader.
+//! the same shape for every kind of thing; `account_mounts`, `account_achievements` and
+//! `census_currencies` hold what a mount, an achievement and a wallet actually are, which is not.
+//! Adding a domain is a table and a reader.
 
 use rusqlite::{params, Transaction};
 use serde_json::Value;
@@ -26,7 +27,9 @@ use std::path::Path;
 
 use crate::dto;
 use crate::failure::Failure;
-use crate::saved_variables::{RawCensus, RawCensusAchievement, RawCensusMount, RawCensusState};
+use crate::saved_variables::{
+    RawCensus, RawCensusAchievement, RawCensusCurrency, RawCensusMount, RawCensusState,
+};
 
 use super::database::open_database;
 use super::roster::upsert_character_key;
@@ -38,6 +41,7 @@ use super::roster::upsert_character_key;
 /// entries cannot be. So the claim is written for every domain and the entries only for these.
 const MOUNTS: &str = "mounts";
 const ACHIEVEMENTS: &str = "achievements";
+const CURRENCIES: &str = "currencies";
 
 pub(super) fn sync_census(
     transaction: &Transaction<'_>,
@@ -110,9 +114,16 @@ fn sync_domain(
         ],
     )?;
 
-    match domain {
-        MOUNTS => sync_mounts(transaction, account_id, state, complete),
-        ACHIEVEMENTS => sync_achievements(transaction, account_id, state, complete),
+    match (domain, character_id) {
+        (MOUNTS, _) => sync_mounts(transaction, account_id, state, complete),
+        (ACHIEVEMENTS, _) => sync_achievements(transaction, account_id, state, complete),
+        // A wallet belongs to a character, so a currencies reading filed against the account has
+        // nowhere to go: there is no column for "whoever's" and summing it into one of the alts
+        // would be inventing an owner. The claim above still stands, which is what says a reading
+        // arrived and was not stored.
+        (CURRENCIES, Some(character_id)) => {
+            sync_currencies(transaction, account_id, character_id, state, complete)
+        }
         // A domain a newer addon sends and this build has no table for. The claim above is kept so
         // that a later build can tell it has never imported these entries, and nothing else
         // happens — which is the same tolerance every unknown field in this file gets.
@@ -140,31 +151,39 @@ fn ids_of(state: &RawCensusState) -> BTreeSet<i64> {
 /// rather than bound one at a time because an established account's achievement census is thirteen
 /// thousand of them and SQLite's parameter limit is under a thousand; they are `i64` parsed out of
 /// the file above, so there is nothing here a string could carry into the statement.
+///
+/// `character` narrows it to one character's rows, and a character-scoped domain must pass one:
+/// a walk by an alt says what *that* alt holds and nothing whatever about the others, so a prune
+/// that reached across the account would delete every other character's currencies every time one
+/// of them logged out.
 fn prune(
     transaction: &Transaction<'_>,
     table: &str,
     key: &str,
     account_id: i64,
+    character: Option<i64>,
     ids: &BTreeSet<i64>,
 ) -> Result<(), Failure> {
-    if ids.is_empty() {
-        // A complete walk that found nothing is a real answer — a brand new account holds no
-        // mounts — and it has to be able to empty the table. `NOT IN ()` is not valid SQL, so the
-        // empty case is the statement without the clause rather than a special value inside it.
-        transaction.execute(
-            &format!("DELETE FROM {table} WHERE account_id = ?1"),
-            params![account_id],
-        )?;
-        return Ok(());
+    // A complete walk that found nothing is a real answer — a brand new account holds no mounts —
+    // so the statement has to be able to empty the table. `NOT IN ()` is not valid SQL, which is
+    // why the empty set is a clause that is not written rather than a value written into one.
+    let mut clauses = String::from("account_id = ?1");
+    let mut bound: Vec<&dyn rusqlite::ToSql> = vec![&account_id];
+    if let Some(character) = character.as_ref() {
+        clauses.push_str(" AND character_id = ?2");
+        bound.push(character);
     }
-    let kept = ids
-        .iter()
-        .map(|id| id.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    if !ids.is_empty() {
+        let kept = ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        clauses.push_str(&format!(" AND {key} NOT IN ({kept})"));
+    }
     transaction.execute(
-        &format!("DELETE FROM {table} WHERE account_id = ?1 AND {key} NOT IN ({kept})"),
-        params![account_id],
+        &format!("DELETE FROM {table} WHERE {clauses}"),
+        bound.as_slice(),
     )?;
     Ok(())
 }
@@ -216,6 +235,7 @@ fn sync_mounts(
             "account_mounts",
             "mount_id",
             account_id,
+            None,
             &ids_of(state),
         )?;
     }
@@ -267,6 +287,79 @@ fn sync_achievements(
             "account_achievements",
             "achievement_id",
             account_id,
+            None,
+            &ids_of(state),
+        )?;
+    }
+    Ok(())
+}
+
+/// Every currency one character holds, and how much more of each it may hold.
+///
+/// The first domain that belongs to a character rather than to the account, so this is the one
+/// place the account/character split in [`sync_domain`] is spent: the rows are keyed by the
+/// character that walked them and a prune reaches no further than that, because a walk by an alt
+/// says what *that* alt holds and nothing at all about the others.
+///
+/// It does not touch `character_currencies` next door, which the pane sweep writes. The two are
+/// different readings of the same thing — one live and shallow, taken at every zoning-in and again
+/// at logout; one complete and occasional, reaching the currencies a collapsed group hides and
+/// carrying the caps — and the migration says why they are kept apart.
+fn sync_currencies(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    character_id: i64,
+    state: &RawCensusState,
+    complete: bool,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(currency_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let held: RawCensusCurrency = typed(value);
+        transaction.execute(
+            "INSERT INTO census_currencies (
+                     account_id, character_id, currency_id, name, total, total_earned,
+                     max_quantity, earned_this_week, max_weekly, account_wide, transferable,
+                     seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(account_id, character_id, currency_id) DO UPDATE SET
+                     name = excluded.name,
+                     total = excluded.total,
+                     total_earned = excluded.total_earned,
+                     max_quantity = excluded.max_quantity,
+                     earned_this_week = excluded.earned_this_week,
+                     max_weekly = excluded.max_weekly,
+                     account_wide = excluded.account_wide,
+                     transferable = excluded.transferable,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                character_id,
+                currency_id,
+                held.name.as_deref(),
+                // Nought for every count the addon left out, which is what it means by leaving
+                // one out: the client says nought for "no cap" and for "nothing yet this week"
+                // alike, and writing that down per currency per character would be a saved file
+                // spent saying what the absence already says.
+                held.total.unwrap_or(0),
+                held.earned.unwrap_or(0),
+                held.cap.unwrap_or(0),
+                held.week.unwrap_or(0),
+                held.week_cap.unwrap_or(0),
+                i64::from(held.account_wide.unwrap_or(false)),
+                i64::from(held.transferable.unwrap_or(false)),
+                held.seen,
+            ],
+        )?;
+    }
+    if complete {
+        prune(
+            transaction,
+            "census_currencies",
+            "currency_id",
+            account_id,
+            Some(character_id),
             &ids_of(state),
         )?;
     }
@@ -447,6 +540,58 @@ mod tests {
         },
     "#;
 
+    /// A finished walk of one character's wallet. Two currencies, chosen so that between them
+    /// every column of `census_currencies` is carried by one and left out by the other: Conquest
+    /// is capped both ways and shared by the warband, and the Timewarped Badge is one this
+    /// character discovered and has since spent to nothing.
+    const ASTER_WALKED_CURRENCIES: &str = r#"
+        ["characters"] = {
+            ["Aster-Vale"] = {
+                ["currencies"] = {
+                    ["complete"] = true,
+                    ["revision"] = 1,
+                    ["held"] = 2,
+                    ["build"] = "12.0.5.67823",
+                    ["by"] = "Aster-Vale",
+                    ["startedAt"] = 1999990000,
+                    ["completedAt"] = 1999990010,
+                    ["entries"] = {
+                        [1602] = {
+                            ["name"] = "Conquest", ["total"] = 1650, ["earned"] = 5400,
+                            ["cap"] = 5500, ["week"] = 750, ["weekCap"] = 1350,
+                            ["accountWide"] = true, ["transferable"] = true,
+                            ["seen"] = 1999990000,
+                        },
+                        -- Discovered, spent to nothing, and never capped or weekly. Everything
+                        -- the addon leaves out of a row it does write is left out here.
+                        [1166] = {
+                            ["name"] = "Timewarped Badge", ["total"] = 0,
+                            ["seen"] = 1999990000,
+                        },
+                    },
+                },
+            },
+        },
+    "#;
+
+    /// A different character's finished walk of their own wallet, holding a currency the first
+    /// one has never seen. The pair is what the `character` on [`prune`] exists for.
+    const BRIN_WALKED_CURRENCIES: &str = r#"
+        ["characters"] = {
+            ["Brin-Vale"] = {
+                ["currencies"] = {
+                    ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                    ["entries"] = {
+                        [2245] = {
+                            ["name"] = "Flightstones", ["total"] = 4200,
+                            ["seen"] = 2000000000,
+                        },
+                    },
+                },
+            },
+        },
+    "#;
+
     /// One domain's claim as it was stored, which is the row that says how to read the entries
     /// beside it.
     #[derive(Debug, PartialEq)]
@@ -505,6 +650,62 @@ mod tests {
             install,
             "SELECT achievement_id FROM account_achievements ORDER BY achievement_id",
         )
+    }
+
+    /// The currencies stored against one character, and nobody else's. Every claim this module
+    /// makes about wallets is a claim about one character's rows, so there is no version of this
+    /// helper that reads the table whole.
+    fn currency_ids(install: &Install, character: &str) -> Vec<i64> {
+        ids_of(
+            install,
+            &format!(
+                "SELECT currency_id FROM census_currencies w
+                   JOIN characters c ON c.id = w.character_id
+                  WHERE c.source_key = '{character}' ORDER BY currency_id"
+            ),
+        )
+    }
+
+    /// One currency as it was stored, whole. Every count is `NOT NULL` in the table, so what the
+    /// addon left out has to arrive here as a nought rather than as an absence.
+    #[derive(Debug, PartialEq)]
+    struct Wallet {
+        name: Option<String>,
+        total: i64,
+        total_earned: i64,
+        max_quantity: i64,
+        earned_this_week: i64,
+        max_weekly: i64,
+        account_wide: i64,
+        transferable: i64,
+        seen_at: Option<i64>,
+    }
+
+    fn wallet_of(install: &Install, character: &str, currency_id: i64) -> Wallet {
+        install
+            .open()
+            .query_row(
+                "SELECT w.name, w.total, w.total_earned, w.max_quantity, w.earned_this_week,
+                        w.max_weekly, w.account_wide, w.transferable, w.seen_at
+                   FROM census_currencies w
+                   JOIN characters c ON c.id = w.character_id
+                  WHERE c.source_key = ?1 AND w.currency_id = ?2",
+                params![character, currency_id],
+                |row| {
+                    Ok(Wallet {
+                        name: row.get(0)?,
+                        total: row.get(1)?,
+                        total_earned: row.get(2)?,
+                        max_quantity: row.get(3)?,
+                        earned_this_week: row.get(4)?,
+                        max_weekly: row.get(5)?,
+                        account_wide: row.get(6)?,
+                        transferable: row.get(7)?,
+                        seen_at: row.get(8)?,
+                    })
+                },
+            )
+            .unwrap()
     }
 
     /// The whole of the round trip for the simplest domain: the addon's table becomes rows, and
@@ -758,6 +959,146 @@ mod tests {
             .unwrap();
         assert_eq!(owner, "Aster-Vale");
         assert_eq!(mount_ids(&install), vec![6]);
+    }
+
+    /// The whole round trip for the first domain that belongs to a character. Every column the
+    /// table has is carried by one of the two currencies, and the caps beside the totals are the
+    /// half of this the pane sweep next door could never say.
+    #[test]
+    fn files_every_column_of_a_wallet_under_the_character_that_walked_it() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_CURRENCIES));
+
+        install.collect(2_000_000_100);
+
+        assert_eq!(currency_ids(&install, "Aster-Vale"), vec![1166, 1602]);
+        assert_eq!(
+            wallet_of(&install, "Aster-Vale", 1602),
+            Wallet {
+                name: Some("Conquest".into()),
+                total: 1650,
+                total_earned: 5400,
+                max_quantity: 5500,
+                earned_this_week: 750,
+                max_weekly: 1350,
+                account_wide: 1,
+                transferable: 1,
+                seen_at: Some(1_999_990_000),
+            }
+        );
+        // Nought for every count the addon left out, which is exactly what it means by leaving
+        // one out — the client says nought for "no cap" and for "nothing yet this week" alike.
+        // The balance is the one number written whatever it is, because a character that has
+        // spent everything it had must be able to say so.
+        assert_eq!(
+            wallet_of(&install, "Aster-Vale", 1166),
+            Wallet {
+                name: Some("Timewarped Badge".into()),
+                total: 0,
+                total_earned: 0,
+                max_quantity: 0,
+                earned_this_week: 0,
+                max_weekly: 0,
+                account_wide: 0,
+                transferable: 0,
+                seen_at: Some(1_999_990_000),
+            }
+        );
+        // And the claim lands against the character rather than against the account, which is
+        // what says these rows are one alt's wallet and not the account's.
+        let claim = claim_of(&install, "currencies");
+        assert_eq!(claim.held, 2);
+        assert!(claim.character_id.is_some());
+    }
+
+    /// The property the `character` on [`prune`] exists for, and the one that costs an account
+    /// its data if it is wrong. A walk by one alt says what *that* alt holds and nothing whatever
+    /// about the others, so a prune that reached across the account would empty every other
+    /// character's wallet every time one of them logged out.
+    #[test]
+    fn a_finished_walk_by_one_character_leaves_another_characters_wallet_alone() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_CURRENCIES));
+        install.collect(2_000_000_100);
+        assert_eq!(currency_ids(&install, "Aster-Vale"), vec![1166, 1602]);
+
+        install.rewrite(&SavedVariables::new().census(BRIN_WALKED_CURRENCIES));
+        install.collect(2_000_100_100);
+
+        // Brin's walk was complete and mentioned neither of Aster's currencies. Both are still
+        // Aster's, because Brin was never in a position to say otherwise.
+        assert_eq!(currency_ids(&install, "Aster-Vale"), vec![1166, 1602]);
+        assert_eq!(currency_ids(&install, "Brin-Vale"), vec![2245]);
+        assert_eq!(wallet_of(&install, "Brin-Vale", 2245).total, 4200);
+    }
+
+    /// And the rule the module turns on, inside the one character it is allowed to apply to. A
+    /// walk that finished asked about every id in the range, so a currency it did not write down
+    /// is one this character no longer holds.
+    #[test]
+    fn a_second_finished_walk_takes_out_what_that_character_no_longer_holds() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_CURRENCIES));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["characters"] = { ["Aster-Vale"] = { ["currencies"] = {
+                ["complete"] = true, ["revision"] = 2, ["held"] = 1,
+                ["entries"] = {
+                    [1602] = { ["name"] = "Conquest", ["total"] = 20, ["seen"] = 2000000000 },
+                },
+            } } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        assert_eq!(currency_ids(&install, "Aster-Vale"), vec![1602]);
+        // The balance that came down is the new one rather than the higher one it replaced.
+        assert_eq!(wallet_of(&install, "Aster-Vale", 1602).total, 20);
+        assert_eq!(claim_of(&install, "currencies").revision, 2);
+    }
+
+    /// The same rule in the direction that does not delete. A logout in the middle of a
+    /// five-thousand-id walk is ordinary, and what arrives from one is a set of positive
+    /// observations: it can add and update, and it can never be the reason a row is taken out.
+    #[test]
+    fn a_wallet_walk_that_was_cut_short_can_only_add() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_CURRENCIES));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["characters"] = { ["Aster-Vale"] = { ["currencies"] = {
+                ["complete"] = false, ["revision"] = 2, ["held"] = 1,
+                ["entries"] = {
+                    [2245] = { ["name"] = "Flightstones", ["total"] = 90, ["seen"] = 2000000000 },
+                },
+            } } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        // The two the interrupted walk never reached are still there, and the one it found on
+        // the way is there beside them.
+        assert_eq!(currency_ids(&install, "Aster-Vale"), vec![1166, 1602, 2245]);
+        assert_eq!(claim_of(&install, "currencies").complete, 0);
+    }
+
+    /// A wallet belongs to a character, so a currencies reading filed against the account has
+    /// nowhere to go — there is no column for "whoever's", and summing it into one of the alts
+    /// would be inventing an owner. The claim is still recorded, which is what says a reading
+    /// arrived and was not stored.
+    #[test]
+    fn records_the_claim_of_a_currencies_reading_no_character_owns() {
+        let install = Install::of(&SavedVariables::new().census(
+            r#"["account"] = { ["currencies"] = {
+                ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                ["entries"] = {
+                    [1602] = { ["name"] = "Conquest", ["total"] = 1650, ["seen"] = 2000000000 },
+                },
+            } },"#,
+        ));
+
+        install.collect(2_000_000_100);
+
+        let claim = claim_of(&install, "currencies");
+        assert_eq!(claim.held, 1);
+        assert_eq!(claim.character_id, None);
+        assert_eq!(count_of(&install.database, "census_currencies"), 0);
     }
 
     /* ---------- reading it back ---------- */

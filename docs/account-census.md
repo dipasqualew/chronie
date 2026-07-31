@@ -99,12 +99,45 @@ idea how the interface is set up. `C_MountJournal.GetMountIDs` hands over every 
 game — the *filtered* pair is `GetNumDisplayedMounts`/`GetDisplayedMountID`, which is what
 Blizzard's own list is drawn from and what this deliberately is not.
 
-The same escape exists for the two domains `HoldingsSweep` currently gets wrong, and is why
-they are the obvious next adapters: on 12.0.5.67823 the client has
+The same escape exists for the two domains `HoldingsSweep` gets wrong, which is why they were
+the obvious next adapters: on 12.0.5.67823 the client has
 `C_CurrencyInfo.GetCurrencyInfo(id)` and `C_Reputation.GetFactionDataByID(id)`, both of which
-answer completely, by id, with no pane involved. Faction ids would also take
-`character_standings` off localised names, which is what `reputations.rs` currently has to
-join on.
+answer completely, by id, with no pane involved. **Currencies have been taken** — see below.
+Faction ids are still to come, and would also take `character_standings` off localised names,
+which is what `reputations.rs` currently has to join on.
+
+## Currencies, and why the sweep survived them
+
+`currencies` is the first `scope = "character"` domain, and the first one that removes a trade
+rather than making one. `GetCurrencyInfo(id)` takes an arbitrary id and hands over the whole
+row — the balance, `totalEarned`, `maxQuantity`, `quantityEarnedThisWeek`, `maxWeeklyQuantity`,
+`discovered`, `isAccountWide`, `isAccountTransferable` — so the currency under a collapsed group
+that the sweep cannot see is simply another id, and the two counts nothing else could answer,
+"am I capped" and "have I done my weekly", arrive with it.
+
+**There is no enumerator**, so the positions are a range rather than a list. `C_CurrencyInfo`
+has no `GetCurrencyIDs`, no counter, and its one call that hands over ids is keyed by a category
+id that only lives in the game's own tables. `CurrencyTypes` on 12.0.5.67823 is 1,490 rows
+running from 42 to 3513, read out of the install the same way `currencies.rs` reads it for
+icons, so the walk asks about 1 to 5,000 — that top id and half again. An id above the ceiling
+would be invisible to a walk that still called itself complete, which is the one hole left here;
+it is bounded, and raising the number costs twenty-five slices against the achievement walk's
+minute.
+
+**And no counter**, for the same reason there is no enumerator: `GetCurrencyListSize` counts the
+rows the pane is drawing, which is the very number this domain exists not to trust. So it is
+never distrusted into a pass of its own and is walked when something else provokes one.
+
+**The sweep is not made redundant by it, which is the part worth arguing for.** The census
+reading is strictly the better one and would be the obvious thing to fold `character_currencies`
+onto — but a census is spread a slice per frame and therefore cannot finish inside a logout
+handler, and a logout is exactly where `HoldingsSweep` is read: the freshest reading there will
+ever be of a character that is about to stop answering, and the one every other character's
+rollup goes on reading until it is played again. So the two are complementary. The sweep stays
+live and shallow in `character_currencies`; the census is complete and occasional in
+`census_currencies`, qualified by its claim like every other reading here. One table with two
+writers of different freshness, and no column saying which of them a row came from, would be
+worse than two tables that each say what they are.
 
 ## What is written down, and what is not
 
@@ -173,7 +206,12 @@ A domain is a name, a scope, and three seams:
 `list` must be arithmetic and a handful of calls — never the walk itself, which is what the
 per-frame budget exists to spread out. Where the client hands over ids outright a position
 *is* an id; where it does not, a position is an index into a plan the domain drew up, which is
-how the achievement tree is walked.
+how the achievement tree is walked, or simply a range, which is how currencies are.
+
+A `scope = "character"` domain is kept per `Name-Realm` all the way down: the addon files it
+under `census.characters[key]`, the collector resolves that key to a character and stores the
+entries against it, and a complete reading prunes **that character's rows and no others** — a
+walk by one alt says what that alt holds and nothing whatever about the rest of the roster.
 
 Then a table and a reader in `collector::census`. Nothing in `Census.lua` changes, and nothing
 downstream of the claim does either — `census_domains` is the same shape for every kind of

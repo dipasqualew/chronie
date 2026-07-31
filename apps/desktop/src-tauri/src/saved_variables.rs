@@ -1022,6 +1022,23 @@ optional_fields!(RawCensusMount {
     seen: i64,
 });
 
+// One currency as the census walked it, which is a longer answer than the sweep's pane row.
+//
+// Every count but the balance is absent when it is nought — the client says nought for "no cap"
+// and for "nothing yet this week" alike, and a census writes a key per id per character, so a
+// nought written down is a file spent saying what its absence already said.
+optional_fields!(RawCensusCurrency {
+    name: String,
+    total: i64,
+    earned: i64,
+    cap: i64,
+    week: i64,
+    week_cap: i64,
+    account_wide: bool,
+    transferable: bool,
+    seen: i64,
+});
+
 optional_fields!(RawCensusAchievement {
     name: String,
     points: i64,
