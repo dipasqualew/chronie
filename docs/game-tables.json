@@ -759,6 +759,46 @@
       ]
     },
     {
+      "table": "Mount",
+      "rust": "MOUNT",
+      "ts": "mount",
+      "module": "mount",
+      "fileDataId": 921760,
+      "records": "fixed",
+      "readable": "yes",
+      "provenance": { "build": "12.0.5.67823", "tool": "examples/dump_mounts" },
+      "doc": [
+        "`Mount` — every mount the game has, which is the half the census cannot walk. The addon",
+        "asks the client what the account holds; this is the list that says how much of the game",
+        "that is, and it is the only place the name of a mount nobody owns is written down.",
+        "",
+        "**It carries no icon.** No column of it holds FileDataIDs — `examples/dump_mounts`",
+        "censuses all thirteen and prints the evidence. The picture the journal draws a mount",
+        "with belongs to the spell that summons it, `SpellMisc.SpellIconFileDataID` reached",
+        "through `SourceSpellID`, and `SpellMisc` is some four hundred thousand rows. Nothing",
+        "here makes that hop, so a mount is drawn by its name and by the sentence the game",
+        "itself uses to say where it comes from.",
+        "",
+        "1,634 rows declared on 12.0.5.67823, 1,616 of them readable and named — which is more",
+        "mounts than the journal shows, because the table also holds the ones the client never",
+        "offers. Nothing here filters those out: no bit of `Flags` separates them, and a guessed",
+        "one would drop real mounts out of the catalogue. See `docs/game-files.md`."
+      ],
+      "columns": [
+        { "rust": "NAME", "index": 0, "field": "Name_lang" },
+        {
+          "rust": "SOURCE_TEXT",
+          "index": 1,
+          "field": "SourceText_lang",
+          "doc": [
+            "Where the mount comes from, in the game's own words — a vendor and a zone, a boss, a",
+            "quest. Written with the client's colour escapes in it, which `mounts::plain` takes",
+            "back out; that is a reading and stays out of here."
+          ]
+        }
+      ]
+    },
+    {
       "table": "Faction",
       "rust": "FACTION",
       "ts": "faction",

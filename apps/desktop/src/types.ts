@@ -12,6 +12,7 @@ export type {
   Activity,
   ActivitySource,
   ActivityValue,
+  AccountCensusPayload,
   AccountCurrency,
   AccountFaction,
   AccountGold,
@@ -22,6 +23,9 @@ export type {
   CaptureImagePayload,
   CaptureImageState,
   CaptureThumbnailsPayload,
+  CatalogueAchievement,
+  CatalogueMount,
+  CensusReading,
   CharacterBody,
   CharacterChosen,
   CharacterLookPayload,
@@ -32,12 +36,14 @@ export type {
   CharacterSwatch,
   CharacterWornSetPayload,
   CollectibleEvent,
+  CollectionCataloguePayload,
   CommandError,
   CurrencyGain,
   CurrencyHolder,
   CustomSet,
   CustomSetsPayload,
   DashboardPayload,
+  EarnedAchievement,
   EncounterEvent,
   EquipsetChangeEvent,
   EquipsetChangeKind,
@@ -48,6 +54,7 @@ export type {
   GalleryModel,
   GalleryPayload,
   GoldHolder,
+  HeldMount,
   HousingItemEvent,
   IconsPayload,
   InGameSet,
@@ -118,10 +125,12 @@ export type {
 } from "./bindings";
 
 import type {
+  AccountCensusPayload,
   AchievementDetail,
   AppUpdateResult,
   CharacterLookPayload,
   CharacterQuestion,
+  CollectionCataloguePayload,
   CustomSetsPayload,
   DashboardPayload,
   InGameSetAppearancesPayload,
@@ -186,6 +195,13 @@ export interface SetQualitiesFile {
  */
 export interface E2EMock {
   dashboard: DashboardPayload;
+  /** What the census walked, out of Chronie's own database — so it answers instantly and works
+   * on a machine with no game installed, which is half of what the Collection view is testing. */
+  accountCensus: AccountCensusPayload;
+  /** And the other half, out of the installed game: every achievement and every mount there is.
+   * `null` stands for a machine with no install, which is a real state that screen has to draw
+   * rather than an error — a spec sets it to make the census draw alone. */
+  collectionCatalogue: CollectionCataloguePayload | null;
   transmog: TransmogPayload;
   /** Who the items behind each set say can really wear it — see `wearers.rs`. */
   transmogWearers: WearersPayload;

@@ -6,6 +6,25 @@
 
 export const commands = {
 /**
+ * Everything the census walked, and the claim over each part of it.
+ *
+ * Chronie's own database and nothing else, so it answers in a millisecond and works on a
+ * machine with no game installed — which is half the point: the addon writes a localised name
+ * beside every id it walks precisely so that this list can be drawn without one.
+ *
+ * Its own command rather than a corner of [`dashboard`], because the two change on completely
+ * different beats. The segments are re-read every thirty seconds while somebody is playing; a
+ * census is written at a logout and read when a reader opens the screen for it.
+ */
+async accountCensus() : Promise<Result<AccountCensusPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("account_census") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What the game says about the achievements a window is showing.
  *
  * The dashboard already carries the ids, because the addon recorded them at the moment they
@@ -148,6 +167,32 @@ async checkForAppUpdate() : Promise<Result<AppUpdateResult, CommandError>> {
  */
 async chooseWowPath() : Promise<string | null> {
     return await TAURI_INVOKE("choose_wow_path");
+},
+/**
+ * Every achievement and every mount the installed game has, which is the other half of that.
+ *
+ * The half no addon can produce. A census can only ever list what an account *has*; the names
+ * of the things it has not are in the client's own tables and nowhere else, so what the
+ * Collection view actually draws is this minus the census — see [`achievements::catalogue`]
+ * and [`mounts::catalogue`].
+ *
+ * Both tables in one command, because the cost here is not the rows. It is opening the game's
+ * storage at all, which the first read of a session pays in full; asking for the two of them
+ * separately would pay it twice for a screen that draws them side by side. Thirteen thousand
+ * achievements and sixteen hundred mounts is a payload well under what a page of the wardrobe
+ * already sends.
+ *
+ * A reader with no install gets a failure with a condition they can act on, the way the
+ * transmog sets do — and the census beside it still draws, which is the whole reason the two
+ * are separate commands.
+ */
+async collectionCatalogue() : Promise<Result<CollectionCataloguePayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("collection_catalogue") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 async combatLogging() : Promise<Result<Status, CommandError>> {
     try {
@@ -964,6 +1009,7 @@ async wornSet(pieces: WornPiece[]) : Promise<Result<WornSetPayload, CommandError
 
 /** user-defined types **/
 
+export type AccountCensusPayload = { readings: CensusReading[]; achievements: EarnedAchievement[]; mounts: HeldMount[] }
 export type AccountCurrency = { id: number; name?: string | null; total: number; accountWide?: boolean | null; oldest?: number | null; characters: CurrencyHolder[] }
 export type AccountFaction = { faction: string; best?: CharacterStanding | null; characters: CharacterStanding[] }
 export type AccountGold = { characters: GoldHolder[]; wallets: number; warband?: number | null; warbandAt?: number | null; total: number; oldest?: number | null }
@@ -1020,6 +1066,33 @@ export type Capture = { id: number; sourceId: string; at: number; stamp?: string
 export type CaptureImagePayload = { id: number; image: string | null; byteSize?: number | null }
 export type CaptureImageState = "none" | "stored" | "missing"
 export type CaptureThumbnailsPayload = { thumbnails: Partial<{ [key in string]: string }> }
+export type CatalogueAchievement = { id: number; title: string; description: string;
+/**
+ * The tree the game files it under, outermost first. Empty for one this install can read
+ * the achievement of but not its category.
+ */
+category: string[]; points: number; iconFileDataId: number;
+/**
+ * `0` Horde, `1` Alliance, `-1` both — the game's own numbering.
+ */
+faction: number }
+export type CatalogueMount = { id: number; name: string;
+/**
+ * Where it comes from, in the game's own words. Empty for the handful the table says
+ * nothing about.
+ */
+source: string }
+export type CensusReading = { domain: string;
+/**
+ * The character a character-scoped reading belongs to. Absent for a domain every character
+ * answers the same — which, so far, is all of them.
+ */
+character?: string | null; complete: boolean; revision: number; held: number;
+/**
+ * What the client's own counter said, for a domain whose client offers one. Absent for
+ * mounts, deliberately: see `ns.mountCensus`.
+ */
+counted?: number | null; build?: string | null; walkedBy?: string | null; startedAt?: number | null; completedAt?: number | null; observedAt: number }
 export type CharacterBody = { id: number; name: string }
 export type CharacterChosen = { body: number; picked: CharacterPick[] }
 export type CharacterLookPayload = { bodies: CharacterBody[]; body: number; questions: CharacterQuestion[]; picked: CharacterPick[]; characters: PlayedCharacter[] }
@@ -1043,6 +1116,12 @@ export type CharacterWornSetPayload = { model: string | null;
  */
 likeness: Likeness }
 export type CollectibleEvent = { id: number; name?: string | null; at?: number | null; guid?: string | null }
+export type CollectionCataloguePayload = { achievements: CatalogueAchievement[]; mounts: CatalogueMount[];
+/**
+ * Rows each table declared that this install could not read. A total with a silent hole in
+ * it is the one number on that screen a reader has no way of checking.
+ */
+withheldAchievements: number; withheldMounts: number }
 /**
  * What a command hands back to the webview when it could not do what was asked.
  *
@@ -1088,6 +1167,23 @@ export type CustomSetPiece = { place: string; appearanceId: number; itemId: numb
  */
 export type CustomSetsPayload = { sets: CustomSet[] }
 export type DashboardPayload = { generatedAt?: string; knownActivityKinds?: string[]; segments?: Segment[]; holdings?: AccountHoldings }
+export type EarnedAchievement = { id: number;
+/**
+ * The name the client had loaded when the walk passed it. The catalogue's title is the
+ * better one and is what the window draws; this is what it falls back to on a machine with
+ * no game installed.
+ */
+name?: string | null; points?: number | null;
+/**
+ * The day the client stated, as `YYYY-MM-DD`. Absent when it stated none — which is what
+ * the oldest achievements come back as, and is not the same as a zero date.
+ */
+earnedOn?: string | null;
+/**
+ * Who earned it: the alt the client named, or the character that did the walking when the
+ * client said the walker earned it themselves. Absent when it said neither.
+ */
+earnedBy?: string | null }
 export type EncounterEvent = { id: number; name?: string | null; at?: number | null; difficultyId?: number | null; groupSize?: number | null; success: boolean }
 export type EquipsetChangeEvent = { setId: number; name: string; kind: EquipsetChangeKind; at?: number | null; items?: EquipsetSlotChange[] }
 export type EquipsetChangeKind = "created" | "deleted" | "updated"
@@ -1172,6 +1268,12 @@ export type GoldHolder = { character: string; total: number; at?: number | null 
  * One log that is gone, as the record of its going.
  */
 export type Gone = { name: string; bytes: number; modified?: number | null; linesRead: number; retainDays: number; deletedAt: number }
+export type HeldMount = { id: number; name?: string | null; favourite: boolean;
+/**
+ * Hidden in the player's own journal, which is how somebody says a mount is not really
+ * theirs to ride. Kept because a list that ignored it would disagree with what they see.
+ */
+hidden: boolean }
 export type HousingItemEvent = { id: number; name?: string | null; at?: number | null; warbandFirst?: boolean | null }
 export type IconsPayload = { icons: Partial<{ [key in string]: string }> }
 /**

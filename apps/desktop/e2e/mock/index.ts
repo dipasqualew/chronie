@@ -13,6 +13,7 @@
 import type { E2EMock } from "../../src/types";
 
 import { captureImages } from "./captures";
+import { accountCensus, collectionCatalogue } from "./collection";
 import { dashboard } from "./dashboard";
 import {
   achievementDetails,
@@ -61,6 +62,7 @@ import { wifi } from "./wifi";
 
 export { FULL_SIZE, THUMBNAIL } from "./captures";
 export { EVENING, NIGHT_BEFORE } from "./clock";
+export { ALT, DEEP_CATEGORY, RICHEST_MISSING, WALKER } from "./collection";
 export { NOTED } from "./dashboard";
 export { collapsed } from "./query";
 export {
@@ -80,6 +82,8 @@ export {
 // colourless fallback and hide the very thing the cast is coloured for.
 export const mockDesktop: E2EMock = {
   dashboard,
+  accountCensus,
+  collectionCatalogue,
   transmog,
   transmogWearers,
   transmogItems,

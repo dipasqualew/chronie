@@ -137,6 +137,67 @@ pub fn read(
         .collect())
 }
 
+/// Every achievement the table holds, filed under the tree the game keeps it in.
+///
+/// The opposite bargain to [`read`], and for the opposite question. That one is asked what a
+/// handful of ids a segment mentioned are called; this one is asked what the account has *not*
+/// got, and there is no list of that anywhere — it is what is left when the census is taken
+/// away from the game's own table. So every row comes over, all 13,732 of them.
+///
+/// The rows this install cannot read are left out rather than sent as blanks. An achievement the
+/// game encrypts is content it has not shipped, and counting it would put a nameless line in
+/// somebody's list of what they are missing and add its nought points to what a category is
+/// worth.
+pub fn catalogue(files: &dyn GameFiles) -> Result<Catalogue, String> {
+    let table = Db2::parse(files.read(ACHIEVEMENT)?)?;
+    let declared = table.declared_rows();
+    let mut found: Vec<Achievement> = table
+        .rows()
+        .filter_map(|row| {
+            let title = row.text(column::TITLE);
+            (!title.is_empty()).then(|| Achievement {
+                id: row.id(),
+                title,
+                description: row.text(column::DESCRIPTION),
+                reward: row.text(column::REWARD),
+                category: Vec::new(),
+                category_id: row.number(column::CATEGORY),
+                points: points_of(row.number(column::POINTS)),
+                icon_file_data_id: row.number(column::ICON_FILE_ID),
+                faction: row.number(column::FACTION) as i32,
+            })
+        })
+        .collect();
+
+    // One read of the tree for the whole table rather than one per row, which is the same
+    // saving [`read`] makes and the reason both of them assemble the rows before filing them.
+    let tree = if found.is_empty() {
+        Tree::default()
+    } else {
+        Tree::read(files)?
+    };
+    for achievement in &mut found {
+        achievement.category = tree.path(achievement.category_id);
+    }
+    Ok(Catalogue {
+        withheld: declared.saturating_sub(found.len()),
+        found,
+    })
+}
+
+/// Every achievement, and how many the install would not say.
+///
+/// The count travels with the rows because a total that quietly left some out is the one number
+/// on this screen nobody could check. A window drawing "you have 4,100 of 13,732" has to be able
+/// to say that 44 of the table came through encrypted, or the subtraction is a lie by omission.
+#[derive(Debug)]
+pub struct Catalogue {
+    pub found: Vec<Achievement>,
+    /// Rows the table declared that this install cannot read — content the game has not
+    /// shipped, and rows a patch retired.
+    pub withheld: usize,
+}
+
 /// The category tree, as the names and the parent of each category.
 #[derive(Default)]
 struct Tree {
@@ -458,6 +519,73 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let error = read(&DirFiles::new(temp.path()), &[LIGHTHOUSE]).unwrap_err();
         assert!(error.contains("1260179.db2"), "{error}");
+    }
+
+    /* ---------- the catalogue ---------- */
+
+    // What the census cannot walk. Every achievement the install can read, filed and worth
+    // what it is worth, because "what am I missing" has no other source than this.
+    #[test]
+    fn hands_over_every_achievement_the_install_can_read() {
+        let catalogue = catalogue(&achievement_fixture_files()).unwrap().found;
+        let named: Vec<(u32, &str, u32)> = catalogue
+            .iter()
+            .map(|found| (found.id, found.title.as_str(), found.points))
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                (LIGHTHOUSE, "Into the Light", 10),
+                (UNSEEN, "Deeper into the Light", 25),
+                (EMBERFORGE, "Emberforge Initiate", 10),
+                (ALLIANCE_SKIRMISH, "For the Coalition", 10),
+                (HORDE_SKIRMISH, "For the Covenant", 10),
+                (ODDMENTS, "Keeper of Oddments", 5),
+                (LONG_ROAD, "The Long Road", 0),
+                (NOWHERE, "Ledger of Nothing", 0),
+                // The six the reputation tests put in the same fixture, which the catalogue
+                // has no business filtering: it is asked for the table, not for a selection.
+                (111, "Emberforge Covenant", 10),
+                (112, "Twenty Exalted Reputations", 10),
+                (113, "Tidewrought Wardens", 10),
+                (114, "Tidewrought Wardens Tier 2 [DNT]", 10),
+                (115, "Venture Company", 10),
+                (116, "Ashfall Legion", 10),
+            ]
+        );
+        // Filed the same way a looked-up one is: the catalogue and the book have to agree
+        // about a category, because a window draws both at once.
+        let lighthouse = catalogue
+            .iter()
+            .find(|found| found.id == LIGHTHOUSE)
+            .unwrap();
+        assert_eq!(lighthouse.category, vec!["Chronicles", "Tideglass Deeps"]);
+        assert_eq!(lighthouse.icon_file_data_id, 250001);
+    }
+
+    // An achievement the game keeps encrypted arrives with nothing in it. A nameless line in a
+    // list of what somebody has still to earn is worse than no line, and its nought points
+    // would be added to what its category is worth.
+    #[test]
+    fn leaves_out_an_achievement_this_install_cannot_read() {
+        let catalogue = catalogue(&achievement_fixture_files()).unwrap();
+        let ids: Vec<u32> = catalogue.found.iter().map(|found| found.id).collect();
+        assert!(!ids.contains(&WITHHELD), "{ids:?}");
+        // And it is counted rather than merely dropped, because a total with a silent hole in
+        // it is the one number on the screen a reader has no way of checking.
+        assert_eq!(catalogue.withheld, 1);
+    }
+
+    // Both tables, once each, for the whole of it — the same claim the batched lookup makes,
+    // and the one that matters more here because there is no smaller version of this request.
+    #[test]
+    fn opens_each_table_once_for_the_whole_catalogue() {
+        let files = Noted::new();
+        assert_eq!(catalogue(&files).unwrap().found.len(), 14);
+        assert_eq!(
+            files.asked.into_inner(),
+            vec![ACHIEVEMENT, ACHIEVEMENT_CATEGORY]
+        );
     }
 
     /* ---------- the book ---------- */

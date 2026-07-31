@@ -14,6 +14,7 @@ pub mod customization;
 pub mod customsets;
 pub mod db2;
 mod dto;
+pub mod escapes;
 pub mod failure;
 pub mod fingerprints;
 pub mod gallery;
@@ -30,6 +31,7 @@ pub mod m2;
 pub mod maps;
 pub mod marks;
 pub mod models;
+pub mod mounts;
 pub mod openings;
 pub mod placement;
 pub mod qualities;
@@ -744,6 +746,79 @@ fn send_set_to_game(
 #[specta::specta]
 fn set_requests(state: State<'_, AppState>) -> Result<Vec<ingamesets::Request>, CommandError> {
     Ok(collector::set_requests(&state.database_path())?)
+}
+
+/* ---------- what the account holds ---------- */
+
+/// Everything the census walked, and the claim over each part of it.
+///
+/// Chronie's own database and nothing else, so it answers in a millisecond and works on a
+/// machine with no game installed — which is half the point: the addon writes a localised name
+/// beside every id it walks precisely so that this list can be drawn without one.
+///
+/// Its own command rather than a corner of [`dashboard`], because the two change on completely
+/// different beats. The segments are re-read every thirty seconds while somebody is playing; a
+/// census is written at a logout and read when a reader opens the screen for it.
+#[tauri::command]
+#[specta::specta]
+fn account_census(state: State<'_, AppState>) -> Result<dto::AccountCensusPayload, CommandError> {
+    Ok(collector::account_census(&state.database_path())?)
+}
+
+/// Every achievement and every mount the installed game has, which is the other half of that.
+///
+/// The half no addon can produce. A census can only ever list what an account *has*; the names
+/// of the things it has not are in the client's own tables and nowhere else, so what the
+/// Collection view actually draws is this minus the census — see [`achievements::catalogue`]
+/// and [`mounts::catalogue`].
+///
+/// Both tables in one command, because the cost here is not the rows. It is opening the game's
+/// storage at all, which the first read of a session pays in full; asking for the two of them
+/// separately would pay it twice for a screen that draws them side by side. Thirteen thousand
+/// achievements and sixteen hundred mounts is a payload well under what a page of the wardrobe
+/// already sends.
+///
+/// A reader with no install gets a failure with a condition they can act on, the way the
+/// transmog sets do — and the census beside it still draws, which is the whole reason the two
+/// are separate commands.
+#[tauri::command]
+#[specta::specta]
+async fn collection_catalogue(
+    state: State<'_, AppState>,
+) -> Result<dto::CollectionCataloguePayload, CommandError> {
+    let read = read_game_files(&state, move |files| {
+        let achievements = achievements::catalogue(files)?;
+        let mounts = mounts::catalogue(files)?;
+        Ok((achievements, mounts))
+    })
+    .await?;
+    let (achievements, mounts) = read;
+    Ok(dto::CollectionCataloguePayload {
+        achievements: achievements
+            .found
+            .into_iter()
+            .map(|found| dto::CatalogueAchievement {
+                id: i64::from(found.id),
+                title: found.title,
+                description: found.description,
+                category: found.category,
+                points: i64::from(found.points),
+                icon_file_data_id: i64::from(found.icon_file_data_id),
+                faction: found.faction,
+            })
+            .collect(),
+        mounts: mounts
+            .found
+            .into_iter()
+            .map(|found| dto::CatalogueMount {
+                id: i64::from(found.id),
+                name: found.name,
+                source: found.source,
+            })
+            .collect(),
+        withheld_achievements: achievements.withheld,
+        withheld_mounts: mounts.withheld,
+    })
 }
 
 /// What the game says about the achievements a window is showing.
@@ -2192,6 +2267,7 @@ fn report_startup_failure(message: &str) {
 
 fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+        account_census,
         achievement_details,
         add_activity,
         capture_image,
@@ -2201,6 +2277,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         character_worn_set,
         check_for_app_update,
         choose_wow_path,
+        collection_catalogue,
         combat_logging,
         currency_icons,
         custom_sets,

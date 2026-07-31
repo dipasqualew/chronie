@@ -178,3 +178,40 @@ how the achievement tree is walked.
 Then a table and a reader in `collector::census`. Nothing in `Census.lua` changes, and nothing
 downstream of the claim does either — `census_domains` is the same shape for every kind of
 thing, which is the whole point of keeping it apart from the per-domain tables.
+
+## What the app draws with it
+
+The mechanism is only worth what it shows, and what it shows is on the **Collection** screen:
+`apps/desktop/src/collectionView.tsx` draws it and `collection.ts` holds the rules.
+
+**The interesting half is not the list.** A list of what an account holds is a thing the game
+already has a pane for, and the addon could have written it into a tooltip. What no in-game
+addon can do is the *subtraction* — because the names of the things somebody has not got are in
+the client's own DB2 tables and an addon cannot read those. `achievements::catalogue` hands over
+all 13,732 rows of `Achievement` with their categories, points and icons, `mounts::catalogue`
+hands over `Mount`, and the screen is what is left when the census is taken away from them: what
+is missing in a category ranked by points, which character has been carrying the account, and a
+genuine timeline out of `earned_year`/`earned_month`/`earned_day` that reaches back years before
+Chronie was installed.
+
+**And the rule travels with it.** Every number on that screen is a subtraction made against one
+of these readings, and a reading that did not finish licenses none — so the claim is drawn
+*before* the numbers rather than as a footnote under them, and `collection.ts::caveat` is what
+decides which of three things the screen is allowed to say:
+
+| What the reading is | What may be said |
+|---|---|
+| no completed pass, ever | not a count of what the account holds — a count of what Chronie watched it collect |
+| a pass that was cut short | at least this much, and what is left is an upper bound |
+| a pass that finished | the subtraction, qualified only by the rows the install could not read |
+
+That last qualification is the catalogue's rather than the census's, and it is kept for the same
+reason: a total with a silent hole in it is the one number on the screen a reader has no way of
+checking. Both catalogues count the rows their table declared and could not decrypt, and the
+screen says so.
+
+Two commands rather than one, because the halves fail apart. `account_census` is Chronie's own
+database and answers in a millisecond on a machine with no game installed — which is what the
+localised name the addon writes beside every id is for. `collection_catalogue` is the game's
+storage, costs what the transmog sets cost, and is simply absent without an install; when it
+fails the lists still draw and the totals say `—`.

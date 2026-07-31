@@ -1,9 +1,11 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { commandFailure } from "./failure";
 import { wearable as canBeWorn, wornSetKey } from "./modelPreview";
 import { appearanceRows } from "./transmogModal";
 
 import type {
+  AccountCensusPayload,
   AchievementDetail,
   AchievementDetailsPayload,
   Activity,
@@ -18,6 +20,7 @@ import type {
   CharacterModelPayload,
   CharacterPick,
   CharacterWornSetPayload,
+  CollectionCataloguePayload,
   CombatLogStatus,
   CustomSetPiece,
   CustomSetsPayload,
@@ -98,6 +101,25 @@ export const e2eDesktop = {
   reloadWindow: (_after: number): void => undefined,
   dashboard: (): Promise<DashboardPayload> =>
     mock ? Promise.resolve(structuredClone(mock.dashboard)) : missingMock(),
+  // What the census walked, out of Chronie's own database. Instant, and the half of the
+  // Collection view that draws on a machine with no game installed.
+  accountCensus: (): Promise<AccountCensusPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.accountCensus)) : missingMock(),
+  // And the half that does not: every achievement and every mount the installed game has, which
+  // costs the same storage open the transmog sets do. A `null` in the fixture is a machine with
+  // no install, and the real backend fails the same way — with a condition somebody can act on.
+  collectionCatalogue: (): Promise<CollectionCataloguePayload> => {
+    if (!mock) return missingMock();
+    if (!mock.collectionCatalogue) {
+      return Promise.reject(
+        commandFailure({
+          code: "installNotFound",
+          message: "Chronie could not find World of Warcraft.",
+        }),
+      );
+    }
+    return Promise.resolve(structuredClone(mock.collectionCatalogue));
+  },
   // Reading the game's own tables takes about a second and a couple of hundred megabytes
   // of transient memory, so the window asks only when the view is first opened.
   transmogSets: (): Promise<TransmogPayload> =>
