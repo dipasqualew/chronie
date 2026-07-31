@@ -105,17 +105,37 @@ pub struct ItemFacts {
 /// The order is by name, because the list is browsed and searched by name and nothing else the
 /// game says about an appearance orders a wardrobe usefully. The rows the game will not name
 /// go last, where an unreadable id is not in anybody's way.
-#[tracing::instrument(name = "wardrobe.appearances", skip_all, fields(kinds = display_types.len()))]
 pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value, String> {
+    let read = looks(files, display_types)?;
+    Ok(payload(display_types, read.found, read.withheld))
+}
+
+/// Every look filling one of `display_types`, and how many the install could say nothing about.
+///
+/// What [`appearances`] answers with before it becomes a payload. Kept as the rows themselves
+/// for the readers that are not the window: [`crate::shapes`] sweeps every display type at once
+/// and wants three numbers off each row, and serialising fifty-five thousand looks to JSON so
+/// that it can parse them back is fourteen megabytes of nothing.
+pub struct Looks {
+    pub found: Vec<WardrobeAppearance>,
+    /// How many looks of those kinds this install can read no item of at all.
+    pub withheld: usize,
+}
+
+#[tracing::instrument(name = "wardrobe.looks", skip_all, fields(kinds = display_types.len()))]
+pub fn looks(files: &dyn GameFiles, display_types: &[u32]) -> Result<Looks, String> {
     let wanted: HashSet<u32> = display_types.iter().copied().collect();
     if wanted.is_empty() {
-        return Ok(payload(display_types, Vec::new(), 0));
+        return Ok(Looks {
+            found: Vec::new(),
+            withheld: 0,
+        });
     }
 
     // Which looks fill those places. The whole table is parsed — it is eight milliseconds —
     // and only the appearances of the kinds asked for are kept.
     let table = Db2::parse(files.read(ITEM_APPEARANCE)?)?;
-    let looks: HashMap<u32, (u32, u32, u32)> = table
+    let filling: HashMap<u32, (u32, u32, u32)> = table
         .rows()
         .filter(|row| wanted.contains(&row.number(appearance_column::DISPLAY_TYPE)))
         .map(|row| {
@@ -129,13 +149,16 @@ pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value
             )
         })
         .collect();
-    if looks.is_empty() {
-        return Ok(payload(display_types, Vec::new(), 0));
+    if filling.is_empty() {
+        return Ok(Looks {
+            found: Vec::new(),
+            withheld: 0,
+        });
     }
 
     // And which items reach each of them, which is the hop that makes a row a look rather
     // than an item: half the appearances in the game are sold by more than one item.
-    let items_of = reaching(files, &|appearance_id| looks.contains_key(&appearance_id))?;
+    let items_of = reaching(files, &|appearance_id| filling.contains_key(&appearance_id))?;
 
     let facts = describe(files, &items_of)?;
 
@@ -156,7 +179,7 @@ pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value
 
     let mut found: Vec<WardrobeAppearance> = Vec::new();
     let mut withheld = 0usize;
-    for (appearance_id, (display_type, display_info_id, icon_file_data_id)) in looks {
+    for (appearance_id, (display_type, display_info_id, icon_file_data_id)) in filling {
         // An appearance no item of this install reaches is one the game says nothing about at
         // all — no name, no kind, no place. A set keeps such a row because its own count
         // promised it; a catalogue promised nothing, so this is counted and left out.
@@ -193,7 +216,7 @@ pub fn appearances(files: &dyn GameFiles, display_types: &[u32]) -> Result<Value
             .then(left.item_id.cmp(&right.item_id))
             .then(left.appearance_id.cmp(&right.appearance_id))
     });
-    Ok(payload(display_types, found, withheld))
+    Ok(Looks { found, withheld })
 }
 
 /// Which of the items that give a look the row is named after.
