@@ -64,6 +64,7 @@ export const dashboard: E2EMock["dashboard"] = {
     ],
     factions: [
       {
+        id: 1201,
         faction: "Cavern Cartographers",
         best: {
           character: "Brin-Hearth",
@@ -98,6 +99,7 @@ export const dashboard: E2EMock["dashboard"] = {
       // The one the account leader is standing on: nobody is ahead of this character
       // because this character is the one out in front, and there is nothing to say.
       {
+        id: 1202,
         faction: "Deepwater Wardens",
         best: {
           character: "Brin-Hearth",
@@ -170,8 +172,11 @@ export const dashboard: E2EMock["dashboard"] = {
       ],
       currencies: [{ id: 8, name: "Rustward Scrip", amount: 2 }],
       reputation: [
+        // No id at all: a gain the client would not place, which is what the addon files for a
+        // faction it has only ever seen named in a chat line. It draws its medal and finds no
+        // rollup, which is exactly what it did before there were ids.
         { faction: "Lamplighters", amount: 10 },
-        { faction: "Deepwater Wardens", amount: 40, standing: "Exalted" },
+        { faction: "Deepwater Wardens", factionId: 1202, amount: 40, standing: "Exalted" },
       ],
       achievements: [],
       levelUps: [{ level: 9, at: EVENING + 3000 }],
@@ -284,6 +289,7 @@ export const dashboard: E2EMock["dashboard"] = {
       // had. That is the split a real history has, and the modern half is the larger one.
       reputation: [
         {
+          factionId: 1201,
           faction: "Cavern Cartographers",
           amount: 25,
           standing: "Honored",

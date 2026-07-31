@@ -314,6 +314,31 @@ describe("ns.newSegmentLog", function()
             assert.same({ { faction = "Argent Dawn", amount = 40 } }, record.reputation)
         end)
 
+        -- The filed record is rebuilt key by key from `ns.segmentEventSpecs`, so a field the
+        -- schema does not name is a field a reopened segment has lost. The id is the one the
+        -- account's standings are keyed on: without it, a segment opened weeks later from the
+        -- table can no longer be told who else on the account has been to this faction.
+        it("carries the faction's own id and the warband flag into the record", function()
+            local log = newLog()
+            local pending = visit()
+            local gain = {
+                faction = "Council of Dornogal",
+                id = 2590,
+                accountWide = true,
+                amount = 40,
+                standing = "Renown 8",
+                current = 500,
+                max = 2500,
+                rank = 8,
+                system = "renown",
+            }
+            pending.summary.reputation = { gain }
+
+            local record = log.record(pending)
+
+            assert.same({ gain }, record.reputation)
+        end)
+
         it("copies the currency list out of the caller's summary", function()
             local log = newLog()
             local pending = visit()

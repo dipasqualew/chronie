@@ -3243,8 +3243,13 @@ describe("addon integration", function()
                 -- A clock far enough from the epoch that a reading two days old is a real
                 -- time rather than one before the world began.
                 now = 1700000000,
+                -- The chat line names the faction and the client answers with its id, which
+                -- is what the account's standings are filed under — Argent Dawn is 529. The
+                -- name travels beside it for the tooltip's title and nothing else.
                 factions = {
                     ["Argent Dawn"] = {
+                        id = 529,
+                        name = "Argent Dawn",
                         standing = "Honored",
                         current = 3000,
                         max = 12000,
@@ -3256,7 +3261,8 @@ describe("addon integration", function()
                     holdings = {
                         ["Jaina-Ragnaros"] = {
                             factions = {
-                                ["Argent Dawn"] = {
+                                [529] = {
+                                    name = "Argent Dawn",
                                     standing = "Exalted",
                                     current = 1,
                                     max = 1,
@@ -3875,6 +3881,8 @@ describe("addon integration", function()
             },
             reputation = {
                 {
+                    -- The id is what the standing is filed under; the name is drawn from.
+                    id = 933,
                     faction = "The Consortium",
                     standing = "Honored",
                     current = 3000,
@@ -3905,13 +3913,14 @@ describe("addon integration", function()
             assert.same({ name = "Flightstones", total = 5000, at = 1700000000 },
                 entry.currencies[2245])
             assert.same({
+                name = "The Consortium",
                 standing = "Honored",
                 current = 3000,
                 max = 12000,
                 rank = 6,
                 system = "reaction",
                 at = 1700000000,
-            }, entry.factions["The Consortium"])
+            }, entry.factions[933])
         end)
 
         -- Zero is the reading that watching could never produce: nothing announces a
@@ -3968,7 +3977,7 @@ describe("addon integration", function()
 
             local entry = recorded.db.holdings["Thrall-Ragnaros"]
             assert.equal(5000, entry.currencies[2245].total)
-            assert.is_table(entry.factions["The Consortium"])
+            assert.is_table(entry.factions[933])
         end)
 
         -- Gold is on neither pane. It answers outright and is already read whole at every
@@ -4039,6 +4048,41 @@ describe("addon integration", function()
             assert.equal("Herald of the Titans", achievements.entries[4842].name)
             assert.is_nil(achievements.entries[2144])
             assert.is_true(achievements.complete)
+        end)
+
+        -- The hole the pane sweep could never close, which is issue #254. `ns.readHoldings`
+        -- walks the reputation pane, and the pane hides every legacy reputation unless the
+        -- player has gone and asked for them — Argent Dawn, 529, is one of hundreds. The
+        -- census asks the client about ids instead, and only the booted addon says whether
+        -- Main.lua actually handed that domain the namespaces to ask with: a unit test of the
+        -- domain is handed them by the test rather than by the wiring.
+        it("writes down a standing the reputation pane would never have listed", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                censusFactions = {
+                    [529] = {
+                        factionID = 529,
+                        name = "Argent Dawn",
+                        reaction = 6,
+                        currentStanding = 12000,
+                        currentReactionThreshold = 9000,
+                        nextReactionThreshold = 21000,
+                    },
+                },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            -- Filed against the character rather than the account, because a standing is one
+            -- character's: two alts at different renown are two readings, not one being
+            -- overwritten by whichever of them logged out last.
+            local reputations = recorded.db.census.characters["Thrall-Ragnaros"].reputations
+            assert.equal("Argent Dawn", reputations.entries[529].name)
+            assert.equal("Honored", reputations.entries[529].standing)
+            assert.is_true(reputations.complete)
         end)
 
         -- The walk is spread a slice per frame and costs the player nothing, but *starting* it
@@ -4513,6 +4557,7 @@ describe("addon integration", function()
                         reputation = {
                             {
                                 faction = "Dream Wardens",
+                                id = 2574,
                                 amount = 250,
                                 standing = "Renown 8",
                                 current = 500,
@@ -4526,8 +4571,11 @@ describe("addon integration", function()
                 holdings = {
                     ["Alt-Ravencrest"] = {
                         currencies = {},
+                        -- Keyed on the faction's own id, which is what the filed segment's
+                        -- gain carries and what the panel looks the rollup up by.
                         factions = {
-                            ["Dream Wardens"] = {
+                            [2574] = {
+                                name = "Dream Wardens",
                                 standing = "Renown 22",
                                 current = 300,
                                 max = 2500,

@@ -233,10 +233,11 @@ fn factions(files: &dyn casc::GameFiles) {
     }
 
     // And the reader itself, over every faction the criteria mention: how many come back, and
-    // whether what comes back decodes and is icon-shaped.
-    let asked: Vec<String> = mentioned
+    // whether what comes back decodes and is icon-shaped. Asked by id, which is what the addon
+    // sends — the names above are only so the output can be read.
+    let asked: Vec<i64> = mentioned
         .iter()
-        .filter_map(|faction| named.get(faction).cloned())
+        .map(|faction| i64::from(*faction))
         .collect();
     let answered = match reputations::icons_of(files, &asked) {
         Ok(answered) => answered,
@@ -281,7 +282,7 @@ fn factions(files: &dyn casc::GameFiles) {
     println!("\nthe four spot checks:");
     for (faction, expected) in SPOT_CHECKS {
         let name = named.get(&faction).cloned().unwrap_or_default();
-        let icon = answered.get(&name).copied().unwrap_or(0);
+        let icon = answered.get(&i64::from(faction)).copied().unwrap_or(0);
         println!(
             "  {faction:<5} {name:<26} icon {icon:<9} {}",
             if icon == expected {

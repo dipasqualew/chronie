@@ -227,6 +227,11 @@ pub const MOUNT: u32 = 921760;
 /// `Faction` — every faction the game has a standing for, and what it is called. Its id sits
 /// in a list beside the rows.
 ///
+/// **The app no longer opens it.** It was opened for one thing: turning the localised name a
+/// segment carried into a faction id, so that `reputations.rs` could walk on to the Exalted
+/// achievement whose icon it borrows. The addon sends the id now, so that walk starts a table
+/// later — leaving this the catalogue the dumper reads to put names to the numbers it prints.
+///
 /// Column 0 is 256 bits wide — the four race masks the real table opens with, stored as one
 /// column — which is what puts the name at column 1 rather than at column 0 the way every
 /// other table in this app has it.
@@ -850,8 +855,8 @@ pub mod mount {
 pub mod faction {
     /// `Name_lang`
     ///
-    /// The only column read, and the join: a segment carries this string and nothing else
-    /// about the faction.
+    /// What the faction is called. Read by the dumper, not by the app: the addon already sends
+    /// the name the client showed the player, beside the id everything is keyed on.
     pub const NAME: usize = 1;
 }
 

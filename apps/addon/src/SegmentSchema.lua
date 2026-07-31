@@ -23,7 +23,8 @@ ns.SEGMENT_SCHEMA_VERSION = 1
 ns.segmentEventSpecs = {
     transmogs       = { "id", "at", "sourceID", "appearanceID", "newAppearance" },
     currencies      = { "id", "name", "amount", "total" },
-    reputation      = { "faction", "amount", "standing", "current", "max", "rank", "system" },
+    reputation      = { "faction", "id", "accountWide", "amount", "standing", "current", "max",
+        "rank", "system" },
     achievements    = { "id", "name", "at", "accountFirst" },
     levelUps        = { "level", "at" },
     mounts          = { "id", "name", "at", "guid" },

@@ -552,6 +552,32 @@ describe("ns.newSegmentTally", function()
             }, tally.summary().reputation)
         end)
 
+        -- A chat line names the faction and nothing else, which is all a gain can be grouped
+        -- by while the segment is open. The id arrives with the standing, off the same lookup,
+        -- and it is what everything downstream files the standing under — a name is localised
+        -- and an id is not. The warband flag rides along for the same reason a shared
+        -- currency's does: the standing is one the whole account reports.
+        it("carries the faction's own id and the warband flag out with the standing", function()
+            local tally = newTally({
+                factions = {
+                    ["Council of Dornogal"] = {
+                        id = 2590,
+                        accountWide = true,
+                        standing = "Renown 8",
+                        current = 500,
+                        max = 2500,
+                    },
+                },
+            })
+            tally.begin(0)
+
+            tally.reputation("Your Council of Dornogal reputation has increased by 250.")
+
+            local gain = tally.summary().reputation[1]
+            assert.equal(2590, gain.id)
+            assert.is_true(gain.accountWide)
+        end)
+
         -- The standing is a running state, not a property of one gain: a segment that
         -- carries a faction into the next level should report the level it ended on.
         it("keeps the standing read at the last gain, not the first", function()

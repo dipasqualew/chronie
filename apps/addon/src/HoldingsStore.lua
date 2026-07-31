@@ -16,6 +16,15 @@ local _, ns = ...
 ---@field character string "Name-Realm".
 ---@field at integer When it was read, in epoch seconds.
 
+---Where the account as a whole stands with one faction.
+---@class StandingRollup
+---@field id integer The faction's own id, which is what the snapshot is keyed on.
+---@field faction string What the client last called it, for something to draw.
+---@field accountWide boolean True when the standing is the warband's rather than each
+---character's own, so the several rows are one standing reported several times.
+---@field best StandingHolding The furthest along any character has been seen.
+---@field characters StandingHolding[] Sorted by character.
+
 ---Every character's holding of one currency, and what they come to across the account.
 ---@class CurrencyRollup
 ---@field id integer
@@ -26,12 +35,6 @@ local _, ns = ...
 ---a holding per character.
 ---@field characters CurrencyHolding[] Sorted by character, so the list never reshuffles.
 ---@field oldest integer The least recently read of the holdings the total is built from.
-
----Where the account as a whole stands with one faction.
----@class StandingRollup
----@field faction string
----@field best StandingHolding The furthest along any character has been seen.
----@field characters StandingHolding[] Sorted by character.
 
 ---What one character was last seen carrying in its own wallet.
 ---@class GoldHolding
@@ -52,7 +55,7 @@ local _, ns = ...
 ---@field record fun(character: string, summary: table)
 ---@field recordWarband fun(amount: integer?)
 ---@field currency fun(currencyID: integer): CurrencyRollup?
----@field standing fun(faction: string): StandingRollup?
+---@field standing fun(factionID: integer): StandingRollup?
 ---@field gold fun(): GoldRollup?
 
 ---@class HoldingsStoreDeps
@@ -80,7 +83,10 @@ local _, ns = ...
 ---  the client's own currency and reputation panes at every zoning-in and again at logout
 ---  and hands the lot to `record`, which is why the same call takes both. What it still
 ---  cannot reach is what those panes are not showing — a collapsed group, and every legacy
----  reputation, which the pane hides by default.
+---  reputation, which the pane hides by default. `ns.currencyCensus` and
+---  `ns.reputationCensus` are what reach those, by id and with no pane involved; they are
+---  kept in `db.census` rather than folded in here, because a census is a complete
+---  occasional reading and this is a shallow live one.
 ---
 ---Gold sits outside both of those. `GetMoney` answers outright rather than only as part of a
 ---change, so a wallet is read whole at every segment close — but only at a close that files,
@@ -195,8 +201,24 @@ function ns.newHoldingsStore(deps)
             end
 
             for _, gain in ipairs(summary.reputation or {}) do
-                if gain.faction and (gain.standing or gain.rank) then
-                    entry.factions[gain.faction] = {
+                -- Keyed on the faction's own id, never on what it is called. A name is
+                -- localised: keyed on one, a player who switches the client to German comes
+                -- back as a second character standing with a second faction, and the account's
+                -- best is decided between two halves of the same grind. A gain the client
+                -- would not put an id on has nowhere to go — and it has no standing either,
+                -- because the id and the standing come off the same lookup.
+                if gain.id and (gain.standing or gain.rank) then
+                    local previous = entry.factions[gain.id] or {}
+                    -- The same rule the currency flag keeps: a reading that says nothing must
+                    -- leave the last answer standing, or a warband reputation would unshare
+                    -- itself between two zonings-in. A walk does say — false included.
+                    local accountWide = gain.accountWide
+                    if accountWide == nil then
+                        accountWide = previous.accountWide
+                    end
+                    entry.factions[gain.id] = {
+                        name = gain.faction or previous.name,
+                        accountWide = accountWide or nil,
                         standing = gain.standing,
                         current = gain.current,
                         max = gain.max,
@@ -320,18 +342,28 @@ function ns.newHoldingsStore(deps)
 
         ---Where the account stands with one faction: every character that has been seen with
         ---it, and the furthest along any of them has been. Nil when none of them has.
-        ---@param faction string
+        ---
+        ---Asked by id rather than by name, because that is what the snapshots are keyed on —
+        ---see `record`. The name comes back on the rollup for something to draw with.
+        ---@param factionID integer
         ---@return StandingRollup?
-        standing = function(faction)
-            if type(faction) ~= "string" or faction == "" then
+        standing = function(factionID)
+            if type(factionID) ~= "number" then
                 return nil
             end
 
             local seen = {}
+            local name, accountWide = nil, false
 
             for character, entry in pairs(db.holdings) do
-                local held = (entry.factions or {})[faction]
+                local held = (entry.factions or {})[factionID]
                 if held then
+                    name = name or held.name
+                    -- One character that has been asked settles it for the roster, the same
+                    -- way a shared currency's flag does: being the warband's is a fact about
+                    -- the faction rather than about whoever looked, so a snapshot written
+                    -- before the flag was ever collected is an unasked question, not a "no".
+                    accountWide = accountWide or held.accountWide == true
                     seen[#seen + 1] = {
                         character = character,
                         standing = held.standing,
@@ -362,7 +394,13 @@ function ns.newHoldingsStore(deps)
                 return nil
             end
 
-            return { faction = faction, best = best, characters = seen }
+            return {
+                id = factionID,
+                faction = name or "",
+                accountWide = accountWide,
+                best = best,
+                characters = seen,
+            }
         end,
 
         ---What the account is worth in gold: every wallet that has reported, and the warband

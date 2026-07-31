@@ -51,7 +51,13 @@ local _, ns = ...
 ---@field summary fun(): SegmentSummary
 
 ---@class ReputationGain
----@field faction string
+---@field faction string The localised name the chat line called it, which is all a chat line
+---carries and so all this can be grouped by while a segment is open.
+---@field id integer? The faction's own id, once the client has been asked where the character
+---stands and has answered. **What a standing is filed under downstream** — a name is localised
+---and an id is not — so a gain the client would not place carries none, and is not filed.
+---@field accountWide boolean? True when the standing is the warband's rather than this
+---character's own.
 ---@field amount integer
 ---@field standing string? The level the character stood at when it last gained with this
 ---faction — "Honored", "Renown 12" — when the client had one to report.
@@ -1071,6 +1077,13 @@ function ns.newSegmentTally(deps)
                 local state = entry.state
                 reputation[#reputation + 1] = {
                     faction = faction,
+                    -- The one thing about the faction that is not the localised string the
+                    -- chat line named it with, which is what everything downstream files the
+                    -- standing under. Absent when the client would not place the faction —
+                    -- the id and the standing arrive from the same lookup, so a gain with no
+                    -- standing has no id either.
+                    id = state and state.id,
+                    accountWide = state and state.accountWide,
                     amount = entry.amount,
                     standing = state and state.standing,
                     current = state and state.current,

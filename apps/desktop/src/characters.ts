@@ -58,7 +58,16 @@ export interface CharacterGold {
 
 /** Where one character stands with one faction, and whether anybody is ahead of them. */
 export interface CharacterFaction extends CharacterStanding {
+  /** The faction's own id, which is what the row is keyed by and what its picture is asked for by. */
+  id: number;
+  /** What the client called it, or the id where nobody has reported a name. */
   faction: string;
+  /**
+   * True when the standing is the warband's rather than this character's own. Every character on
+   * the account then reports the same numbers, so there is nobody to be ahead of and nobody to be
+   * behind — see [`leads`], which is meaningless for one of these.
+   */
+  accountWide: boolean;
   /** True when no other character on the account has got further up this faction's ladder. */
   leads: boolean;
   /**
@@ -226,7 +235,9 @@ function factionsOf(name: string, holdings?: AccountHoldings): CharacterFaction[
       return [
         {
           ...standing,
-          faction: faction.faction,
+          id: faction.id,
+          faction: faction.faction || `Faction ${faction.id}`,
+          accountWide: faction.accountWide === true,
           leads: faction.best?.character === name,
           best: faction.best ?? null,
         },

@@ -102,9 +102,7 @@ Blizzard's own list is drawn from and what this deliberately is not.
 The same escape exists for the two domains `HoldingsSweep` gets wrong, which is why they were
 the obvious next adapters: on 12.0.5.67823 the client has
 `C_CurrencyInfo.GetCurrencyInfo(id)` and `C_Reputation.GetFactionDataByID(id)`, both of which
-answer completely, by id, with no pane involved. **Currencies have been taken** — see below.
-Faction ids are still to come, and would also take `character_standings` off localised names,
-which is what `reputations.rs` currently has to join on.
+answer completely, by id, with no pane involved. **Both have been taken** — see below.
 
 ## Currencies, and why the sweep survived them
 
@@ -138,6 +136,47 @@ live and shallow in `character_currencies`; the census is complete and occasiona
 `census_currencies`, qualified by its claim like every other reading here. One table with two
 writers of different freshness, and no column saying which of them a row came from, would be
 worse than two tables that each say what they are.
+
+## Reputations, and the hole nothing else could reach
+
+`reputations` is the second `scope = "character"` domain, and the one that closes the largest
+hole in the whole record. `HoldingsSweep` walks the reputation pane, and **the pane hides every
+legacy reputation unless the player has asked for them** — which is most of the game's factions.
+The call that would show them, `C_Reputation.SetLegacyReputationsShown`, rearranges a pane
+somebody arranged. `GetFactionDataByID(id)` does not: it answers for a faction whether the pane
+is drawing it, hiding it, or has it folded under a collapsed expansion header.
+
+The positions are a range, for the same reason currencies' are. `C_Reputation` enumerates the
+pane and nothing else — `GetNumFactions` counts the rows it is drawing, which is the very number
+this domain exists not to trust, so it is also not a counter this domain can be distrusted by.
+`Faction` on 12.0.5.67823 is 860 rows running from 1 to 2793, so the walk asks about 1 to 4,000:
+that top id and half again, twenty slices, the same bounded hole with the same free fix.
+
+**The reduction is `ns.readFactionStanding`'s, reused rather than reimplemented.** Four systems
+answer "where does this character stand" and none of them share a shape — renown, paragon,
+friendship, and the classic reaction ladder — and that function is what turns any of them into
+one bar with a `rank` and the `system` the rank was read off. Without it two characters'
+standings with the same faction cannot be compared at all, because "Renown 12" and "Honored" do
+not sort.
+
+`isAccountWide` rides along, and belongs exactly where `account_wide` sits for a currency: a
+warband reputation is one standing every character on the account reports, and treating it as a
+standing each is the mistake the warband gold pot exists to avoid.
+
+### The id is the point, and it is also the defect it fixes
+
+`character_standings.faction` used to be a **localised name**, and so was the key the addon
+filed a standing under. A player who switched the client's language came back as a second
+character standing with a second faction, and the account's best was decided between two halves
+of one grind. Worse, the desktop had to *enter* the game's tables through `Faction`'s name
+column to find out anything else about a faction — matching case-insensitively on a trimmed
+string and following every one of the fourteen names that sit on more than one `Faction` row —
+which is what `reputations.rs` opened with and no longer does.
+
+So the migration takes `character_standings` onto `faction_id`, and the rows do not come with
+it: a name is not an id and nothing in the collector could turn one into the other. They are
+re-derived wholesale from the addon's snapshot at the next sync, which is what that table has
+always been.
 
 ## What is written down, and what is not
 

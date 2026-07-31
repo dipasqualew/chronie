@@ -16,9 +16,9 @@
 //! inferring completeness from how much arrived.
 //!
 //! The bookkeeping is generic and the storage is not. `census_domains` holds the claim, which is
-//! the same shape for every kind of thing; `account_mounts`, `account_achievements` and
-//! `census_currencies` hold what a mount, an achievement and a wallet actually are, which is not.
-//! Adding a domain is a table and a reader.
+//! the same shape for every kind of thing; `account_mounts`, `account_achievements`,
+//! `census_currencies` and `census_standings` hold what a mount, an achievement, a wallet and a
+//! reputation actually are, which is not. Adding a domain is a table and a reader.
 
 use rusqlite::{params, Transaction};
 use serde_json::Value;
@@ -28,7 +28,8 @@ use std::path::Path;
 use crate::dto;
 use crate::failure::Failure;
 use crate::saved_variables::{
-    RawCensus, RawCensusAchievement, RawCensusCurrency, RawCensusMount, RawCensusState,
+    RawCensus, RawCensusAchievement, RawCensusCurrency, RawCensusMount, RawCensusStanding,
+    RawCensusState,
 };
 
 use super::database::open_database;
@@ -42,6 +43,7 @@ use super::roster::upsert_character_key;
 const MOUNTS: &str = "mounts";
 const ACHIEVEMENTS: &str = "achievements";
 const CURRENCIES: &str = "currencies";
+const REPUTATIONS: &str = "reputations";
 
 pub(super) fn sync_census(
     transaction: &Transaction<'_>,
@@ -123,6 +125,12 @@ fn sync_domain(
         // arrived and was not stored.
         (CURRENCIES, Some(character_id)) => {
             sync_currencies(transaction, account_id, character_id, state, complete)
+        }
+        // A standing belongs to a character for the same reason a wallet does: two alts at
+        // different renown are two standings, not one that keeps being replaced. Filed against
+        // the account it has nowhere to go, and the claim above is what says so.
+        (REPUTATIONS, Some(character_id)) => {
+            sync_standings(transaction, account_id, character_id, state, complete)
         }
         // A domain a newer addon sends and this build has no table for. The claim above is kept so
         // that a later build can tell it has never imported these entries, and nothing else
@@ -358,6 +366,74 @@ fn sync_currencies(
             transaction,
             "census_currencies",
             "currency_id",
+            account_id,
+            Some(character_id),
+            &ids_of(state),
+        )?;
+    }
+    Ok(())
+}
+
+/// Where one character stands with every faction the game has.
+///
+/// The domain that reaches what nothing else could. `character_standings` next door is written
+/// from a walk of the reputation *pane*, and the pane hides every legacy faction unless the player
+/// has asked for them — which is most of the game's factions. This one is walked by id, so the
+/// pane's settings have no bearing on it at all.
+///
+/// Character-scoped, and pruned no further than the character that walked it, for the reason
+/// [`sync_currencies`] gives: a walk by an alt says where *that* alt stands and nothing whatever
+/// about the others.
+fn sync_standings(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    character_id: i64,
+    state: &RawCensusState,
+    complete: bool,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(faction_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let stands: RawCensusStanding = typed(value);
+        transaction.execute(
+            "INSERT INTO census_standings (
+                     account_id, character_id, faction_id, name, standing, standing_current,
+                     standing_max, ladder_rank, ladder, account_wide, seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(account_id, character_id, faction_id) DO UPDATE SET
+                     name = excluded.name,
+                     standing = excluded.standing,
+                     standing_current = excluded.standing_current,
+                     standing_max = excluded.standing_max,
+                     ladder_rank = excluded.ladder_rank,
+                     ladder = excluded.ladder,
+                     account_wide = excluded.account_wide,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                character_id,
+                faction_id,
+                stands.name.as_deref(),
+                stands.standing.as_deref(),
+                stands.current.unwrap_or(0),
+                stands.max.unwrap_or(0),
+                // Nullable rather than defaulted, unlike the two above: nought is a real place on
+                // a ladder — the bottom of it — and "the client would not place this faction" is
+                // a different answer nothing downstream may confuse with it. The ladder is absent
+                // for exactly the same rows, which is what makes a rank comparable at all.
+                stands.rank,
+                stands.system.as_deref(),
+                i64::from(stands.account_wide.unwrap_or(false)),
+                stands.seen,
+            ],
+        )?;
+    }
+    if complete {
+        prune(
+            transaction,
+            "census_standings",
+            "faction_id",
             account_id,
             Some(character_id),
             &ids_of(state),
@@ -1099,6 +1175,179 @@ mod tests {
         assert_eq!(claim.held, 1);
         assert_eq!(claim.character_id, None);
         assert_eq!(count_of(&install.database, "census_currencies"), 0);
+    }
+
+    /// A finished walk of one character's reputations, written as the addon writes one. 2574 is a
+    /// renown faction, 1090 an old reaction one the pane hides as legacy, and 2570 a warband
+    /// reputation — so between them they carry every column the table has, on all three ladders
+    /// the reduction can land on.
+    const ASTER_WALKED_REPUTATIONS: &str = r#"
+        ["characters"] = {
+            ["Aster-Vale"] = {
+                ["reputations"] = {
+                    ["complete"] = true,
+                    ["revision"] = 1,
+                    ["held"] = 3,
+                    ["build"] = "12.0.5.67823",
+                    ["startedAt"] = 1999990000,
+                    ["completedAt"] = 1999990020,
+                    ["entries"] = {
+                        [2574] = {
+                            ["name"] = "Dream Wardens", ["standing"] = "Renown 22",
+                            ["current"] = 100, ["max"] = 2500, ["rank"] = 22,
+                            ["system"] = "renown", ["seen"] = 1999990000,
+                        },
+                        -- The one the sweep next door can never see: a legacy faction, which the
+                        -- reputation pane hides unless the player has asked for it.
+                        [1090] = {
+                            ["name"] = "Kirin Tor", ["standing"] = "Exalted",
+                            ["current"] = 1, ["max"] = 1, ["rank"] = 8,
+                            ["system"] = "reaction", ["seen"] = 1999990000,
+                        },
+                        [2570] = {
+                            ["name"] = "Hallowfall Arathi", ["standing"] = "Renown 4",
+                            ["current"] = 50, ["max"] = 2500, ["rank"] = 4,
+                            ["system"] = "renown", ["accountWide"] = true,
+                            ["seen"] = 1999990000,
+                        },
+                    },
+                },
+            },
+        },
+    "#;
+
+    fn standing_ids(install: &Install, character: &str) -> Vec<i64> {
+        ids_of(
+            install,
+            &format!(
+                "SELECT faction_id FROM census_standings s
+                   JOIN characters c ON c.id = s.character_id
+                  WHERE c.source_key = '{character}' ORDER BY faction_id"
+            ),
+        )
+    }
+
+    /// One standing as it was stored, whole. The two counts are `NOT NULL` and the rank is not,
+    /// which is the distinction the table exists to keep: nought is the bottom of a ladder and a
+    /// null is no ladder at all.
+    #[derive(Debug, PartialEq)]
+    struct Standing {
+        name: Option<String>,
+        standing: Option<String>,
+        current: i64,
+        max: i64,
+        rank: Option<i64>,
+        ladder: Option<String>,
+        account_wide: i64,
+        seen_at: Option<i64>,
+    }
+
+    fn standing_of(install: &Install, character: &str, faction_id: i64) -> Standing {
+        install
+            .open()
+            .query_row(
+                "SELECT s.name, s.standing, s.standing_current, s.standing_max, s.ladder_rank,
+                        s.ladder, s.account_wide, s.seen_at
+                   FROM census_standings s
+                   JOIN characters c ON c.id = s.character_id
+                  WHERE c.source_key = ?1 AND s.faction_id = ?2",
+                params![character, faction_id],
+                |row| {
+                    Ok(Standing {
+                        name: row.get(0)?,
+                        standing: row.get(1)?,
+                        current: row.get(2)?,
+                        max: row.get(3)?,
+                        rank: row.get(4)?,
+                        ladder: row.get(5)?,
+                        account_wide: row.get(6)?,
+                        seen_at: row.get(7)?,
+                    })
+                },
+            )
+            .unwrap()
+    }
+
+    /// The round trip for the domain that reaches what nothing else could. The pane the sweep
+    /// walks hides every legacy faction by default, so the Kirin Tor row here is one no amount of
+    /// watching a player earn reputation would ever have produced.
+    #[test]
+    fn files_a_legacy_reputation_the_pane_would_never_have_shown() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_REPUTATIONS));
+
+        install.collect(2_000_000_100);
+
+        assert_eq!(standing_ids(&install, "Aster-Vale"), vec![1090, 2570, 2574]);
+        assert_eq!(
+            standing_of(&install, "Aster-Vale", 1090),
+            Standing {
+                name: Some("Kirin Tor".into()),
+                standing: Some("Exalted".into()),
+                current: 1,
+                max: 1,
+                rank: Some(8),
+                ladder: Some("reaction".into()),
+                account_wide: 0,
+                seen_at: Some(1_999_990_000),
+            }
+        );
+        // The warband's one standing rather than this character's own, which is the reputation
+        // side of a shared currency pot.
+        assert_eq!(standing_of(&install, "Aster-Vale", 2570).account_wide, 1);
+        // And the claim is the character's, not the account's: two alts at different renown are
+        // two standings rather than one that keeps being replaced.
+        let claim = claim_of(&install, "reputations");
+        assert_eq!(claim.held, 3);
+        assert!(claim.character_id.is_some());
+    }
+
+    /// The same property [`prune`]'s `character` exists for, on the second domain to need it.
+    /// Where an alt stands says nothing whatever about where anybody else stands.
+    #[test]
+    fn a_finished_reputation_walk_leaves_another_characters_standings_alone() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_REPUTATIONS));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["characters"] = { ["Brin-Vale"] = { ["reputations"] = {
+                ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                ["entries"] = {
+                    [2515] = {
+                        ["name"] = "The Assembly of the Deeps", ["standing"] = "Renown 9",
+                        ["rank"] = 9, ["system"] = "renown", ["seen"] = 2000000000,
+                    },
+                },
+            } } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        assert_eq!(standing_ids(&install, "Aster-Vale"), vec![1090, 2570, 2574]);
+        assert_eq!(standing_ids(&install, "Brin-Vale"), vec![2515]);
+    }
+
+    /// A faction the client would not place at all — no name for the level and no rank — never
+    /// reaches this table, because the addon refuses it. What does arrive with no rank is a
+    /// standing that was named and not placed, and its rank stays null rather than becoming the
+    /// bottom of a ladder it was never on.
+    #[test]
+    fn keeps_an_unplaced_standing_apart_from_one_at_the_bottom_of_its_ladder() {
+        let install = Install::of(&SavedVariables::new().census(
+            r#"["characters"] = { ["Aster-Vale"] = { ["reputations"] = {
+                ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                ["entries"] = {
+                    [1119] = { ["name"] = "The Sons of Hodir", ["standing"] = "Neutral" },
+                },
+            } } },"#,
+        ));
+
+        install.collect(2_000_000_100);
+
+        let stands = standing_of(&install, "Aster-Vale", 1119);
+        assert_eq!(stands.rank, None);
+        assert_eq!(stands.ladder, None);
+        // The two counts default to nought, which is what the addon means by leaving them out.
+        assert_eq!(stands.current, 0);
+        assert_eq!(stands.max, 0);
     }
 
     /* ---------- reading it back ---------- */

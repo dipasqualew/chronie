@@ -117,11 +117,16 @@ fn insert_outcomes(
     for event in &segment.reputation {
         transaction.execute(
             "INSERT INTO reputation_gains (
-                     segment_id, faction, amount, standing, standing_current, standing_max
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     segment_id, faction, faction_id, amount, standing, standing_current,
+                     standing_max
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 segment_id,
                 event.faction,
+                // Still keyed on the name, because that is what a chat line carries and what the
+                // tally groups a segment's gains by while it is open. The id rides along so the
+                // window can ask for a picture without anyone joining on a localised string.
+                event.id,
                 event.amount,
                 event.standing.as_deref(),
                 event.current,
@@ -640,7 +645,7 @@ mod tests {
           { ["id"] = 2914, ["name"] = "Weathered Relic", ["amount"] = 3 }
         },
         ["reputation"] = {
-          { ["faction"] = "Cavern Cartographers", ["amount"] = 250,
+          { ["faction"] = "Cavern Cartographers", ["id"] = 2594, ["amount"] = 250,
             ["standing"] = "Honored", ["current"] = 4200, ["max"] = 12000 },
           { ["faction"] = "Lamplighters", ["amount"] = 75 }
         } }
@@ -664,6 +669,9 @@ mod tests {
 
         let faction = &segment["reputation"][0];
         assert_eq!(faction["faction"], "Cavern Cartographers");
+        // The faction's own id beside the localised name the chat line gave it, which is what
+        // the window asks for a picture by — no join on a string anywhere.
+        assert_eq!(faction["factionId"], 2594);
         assert_eq!(faction["amount"], 250);
         assert_eq!(faction["standing"], "Honored");
         assert_eq!(faction["current"], 4_200);
@@ -698,8 +706,12 @@ mod tests {
         assert_eq!(faction["standing"], Value::Null);
         assert_eq!(faction["current"], Value::Null);
         assert_eq!(faction["max"], Value::Null);
+        // And no id, because the id and the standing arrive from the same lookup: a faction the
+        // client would not place is one it would not name either. Such a line draws its medal
+        // and asks for no picture at all.
+        assert_eq!(faction["factionId"], Value::Null);
         let keys = faction.as_object().expect("a reputation object");
-        for key in ["standing", "current", "max"] {
+        for key in ["standing", "current", "max", "factionId"] {
             assert!(
                 keys.contains_key(key),
                 "{key} has to be there and null: {faction}"

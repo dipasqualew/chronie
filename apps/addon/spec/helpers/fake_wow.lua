@@ -862,6 +862,11 @@ end
 ---  `censusMounts` maps a mount id to `{ name, spell, source, collected, ... }` and `censusTrees`
 ---  maps an achievement category to the rows inside it, both being what the account *holds*
 ---  rather than what it was watched collecting; `clientBuild` is the game this is a census of.
+---  `censusFactions` maps a faction id to a row in `C_Reputation.GetFactionDataByID`'s shape,
+---  plus an optional `renown` for a major faction, and is what a test hands over to say this
+---  build has reputations to walk at all — absent, the census is simply not taken of them.
+---  `reactionLabels` maps a reaction to what the client calls it, standing in for the
+---  `FACTION_STANDING_LABELn` globals.
 ---  `cvars` maps a client setting to its value; `protectedCVars` names the ones this client
 ---  refuses to let an addon write, mapping each to "raise" or to any truthy value for a write
 ---  that is silently dropped. `combatLogging` is whether the client starts out logging.
@@ -958,6 +963,20 @@ function fake.newEnv(options)
             },
             { id = 2144, name = "The Immortal", points = 25, completed = false },
         },
+    }
+    -- The factions the census walk can reach by id, keyed by id and each in the shape
+    -- `C_Reputation.GetFactionDataByID` answers in — which is deliberately *not* the shape
+    -- `factions` above uses: that one is keyed by localised name and already reduced, because
+    -- it stands in for a whole reader, and this one is the raw client row the real reader has
+    -- to reduce itself.
+    --
+    -- Absent unless a test says otherwise, and that absence is load-bearing: see censusClients.
+    local censusFactions = options.censusFactions
+    -- What the client would call each reaction, standing in for the `FACTION_STANDING_LABELn`
+    -- globals Main.lua reads them out of. Only the levels a test names, since a reaction with
+    -- no label is a perfectly ordinary thing for a build to answer with.
+    local reactionLabels = options.reactionLabels or {
+        [4] = "Neutral", [5] = "Friendly", [6] = "Honored", [7] = "Revered", [8] = "Exalted",
     }
     -- Which game this is, as GetBuildInfo's version and build joined. A census taken against
     -- another one is a census of a different game, so this is what a test changes to model a
@@ -1228,8 +1247,15 @@ function fake.newEnv(options)
         -- Handed over as a bag rather than called, which is the seam's whole point: a build
         -- missing one of these leaves that domain out instead of raising, so a test can model
         -- one by removing a key here.
+        --
+        -- The reputation bundle is the one key that is only here when a test asked for it, and
+        -- the reason is that a domain which always answered would change what `census.audit()`
+        -- reports for every test in the suite: a pass that had never walked the reputations
+        -- would be named as distrusted at every login, so a test about mounts would start
+        -- turning on a reputation walk it never mentioned. `censusFactions` is a test saying
+        -- "this build has reputations too", and everything else models the client as it was.
         censusClients = function()
-            return {
+            local clients = {
                 mount = {
                     GetMountIDs = function()
                         return sortedKeys(censusMounts)
@@ -1267,6 +1293,40 @@ function fake.newEnv(options)
                     completedCount = completedAchievements,
                 },
             }
+            if censusFactions then
+                -- The four namespaces a standing has to be assembled out of, in the bag the
+                -- pure readers take them in — the same bag Main.lua builds out of
+                -- `C_Reputation`, `C_MajorFactionData` and `C_GossipInfo`. A row here answers
+                -- by id and by id alone: this is the walk that reaches the legacy factions the
+                -- reputation pane will not draw, so there is deliberately no pane to walk.
+                clients.standing = {
+                    reputation = {
+                        GetFactionDataByID = function(factionID)
+                            return censusFactions[factionID]
+                        end,
+                        IsMajorFaction = function(factionID)
+                            return (censusFactions[factionID] or {}).renown ~= nil
+                        end,
+                        IsFactionParagon = function()
+                            return false
+                        end,
+                    },
+                    majorFaction = {
+                        GetMajorFactionData = function(factionID)
+                            return (censusFactions[factionID] or {}).renown
+                        end,
+                    },
+                    gossip = {
+                        GetFriendshipReputation = function()
+                            return nil
+                        end,
+                    },
+                    reactionLabel = function(reaction)
+                        return reactionLabels[reaction]
+                    end,
+                }
+            end
+            return clients
         end,
         clientBuild = function()
             return clientBuild

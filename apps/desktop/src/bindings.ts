@@ -488,17 +488,19 @@ async bossPortraits(encounters: number[]) : Promise<Result<IconsPayload, Command
 }
 },
 /**
- * The pictures a list of factions is drawn with, keyed by the name rather than the file.
+ * The pictures a list of factions is drawn with, keyed by the faction id rather than the file.
  *
- * Keyed by the name for the same reason [`place_icons`] is: a reputation arrives from the addon
- * under the name the client gave the faction, and that name is the only thing the window holds.
+ * Keyed by the id rather than by the name the way [`place_icons`] is, and that is the difference
+ * worth naming: a place arrives from the addon as a localised string and has nothing else, where
+ * a reputation now arrives with `Faction`'s own id beside it. So this join needs no massaging and
+ * no fan-in over the fourteen names that sit on several `Faction` rows.
  *
- * The hop behind it is four tables rather than two, and the picture is borrowed rather than the
- * faction's own — `Faction` has no icon column, so what this answers with is the icon of the
- * achievement for reaching Exalted with that faction. Most of what it is asked about comes back
- * with nothing: the modern renown factions have no such achievement. See [`reputations::icons_of`].
+ * The picture is still borrowed rather than the faction's own — `Faction` has no icon column, so
+ * what this answers with is the icon of the achievement for reaching Exalted with that faction.
+ * Most of what it is asked about comes back with nothing: the modern renown factions have no such
+ * achievement. See [`reputations::icons_of`].
  */
-async reputationIcons(factions: string[]) : Promise<Result<IconsPayload, CommandError>> {
+async reputationIcons(factions: number[]) : Promise<Result<IconsPayload, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("reputation_icons", { factions }) };
 } catch (e) {
@@ -1011,7 +1013,23 @@ async wornSet(pieces: WornPiece[]) : Promise<Result<WornSetPayload, CommandError
 
 export type AccountCensusPayload = { readings: CensusReading[]; achievements: EarnedAchievement[]; mounts: HeldMount[] }
 export type AccountCurrency = { id: number; name?: string | null; total: number; accountWide?: boolean | null; oldest?: number | null; characters: CurrencyHolder[] }
-export type AccountFaction = { faction: string; best?: CharacterStanding | null; characters: CharacterStanding[] }
+export type AccountFaction = {
+/**
+ * `Faction`'s own id, which is what the standings are grouped by and what a picture is
+ * looked up by. A name is localised; this is not.
+ */
+id: number;
+/**
+ * What the client called it, for something to draw. Absent for a faction no character has
+ * reported a name for, which is what an id filed by an addon the player has since changed
+ * the language of looks like.
+ */
+faction?: string | null;
+/**
+ * True when the standing is the warband's rather than each character's own, so the several
+ * rows below are one standing reported several times.
+ */
+accountWide?: boolean; best?: CharacterStanding | null; characters: CharacterStanding[] }
 export type AccountGold = { characters: GoldHolder[]; wallets: number; warband?: number | null; warbandAt?: number | null; total: number; oldest?: number | null }
 export type AccountHoldings = { currencies: AccountCurrency[]; factions: AccountFaction[]; gold?: AccountGold | null }
 export type AchievementDetail = { id: number; title: string; description: string; reward: string; category: string[]; categoryId: number; points: number; iconFileDataId: number; faction: number }
@@ -1537,7 +1555,14 @@ unfinished: Pile;
  * What sweeps have actually removed, newest first.
  */
 removed: Gone[] }
-export type ReputationGain = { faction: string; amount: number; at?: number | null; standing?: string | null; current?: number | null; max?: number | null }
+export type ReputationGain = { faction: string;
+/**
+ * The faction's own id, once the addon has asked the client to place the faction the chat
+ * line named. Absent on a gain filed before that was asked, and on one the client would not
+ * place — such a line draws without a picture, which is what every one of them drew before
+ * there were any.
+ */
+factionId?: number | null; amount: number; at?: number | null; standing?: string | null; current?: number | null; max?: number | null }
 /**
  * An outfit this app has asked the game to hold on to.
  *

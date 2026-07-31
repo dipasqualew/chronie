@@ -666,12 +666,36 @@ describe("ns.newResultsWindow", function()
         end)
 
         describe("what the rest of the account has already done with the faction", function()
+            -- The store keys its standings on the faction's own id rather than on the
+            -- localised name a chat line used, so this stand-in answers for 2574 and for
+            -- nothing else. A panel that asked it by the name would be handed nil and would
+            -- draw no "best" line at all, which is what every case below would then fail on.
+            local WARDENS = 2574
+
             ---@param best table?
+            ---@param asked table? Collects, once each, what the panel asked the store about.
+            ---A row is asked more than once — the "best" line and the hover put the same
+            ---question twice — and how often is the panel's own business rather than a fact
+            ---worth pinning down; *what* it asks with is the whole point.
             ---@return function
-            local function standingSource(best)
-                return function(faction)
-                    assert.equal("Dream Wardens", faction)
-                    return best and { faction = faction, best = best, characters = { best } } or nil
+            local function standingSource(best, asked)
+                local seen = {}
+                return function(factionID)
+                    local key = tostring(factionID)
+                    if asked and not seen[key] then
+                        seen[key] = true
+                        asked[#asked + 1] = factionID
+                    end
+                    if factionID ~= WARDENS or not best then
+                        return nil
+                    end
+                    return {
+                        id = factionID,
+                        faction = "Dream Wardens",
+                        accountWide = false,
+                        best = best,
+                        characters = { best },
+                    }
                 end
             end
 
@@ -680,6 +704,7 @@ describe("ns.newResultsWindow", function()
             local function gained(overrides)
                 local gain = {
                     faction = "Dream Wardens",
+                    id = WARDENS,
                     amount = 250,
                     standing = "Renown 8",
                     current = 500,
@@ -692,6 +717,21 @@ describe("ns.newResultsWindow", function()
                 end
                 return { reputationTotal = 250, reputation = { gain } }
             end
+
+            -- Said outright because it is the whole of #254 as the panel sees it. The gain
+            -- carries both — the name the chat line announced and the id the client answered
+            -- with — and only one of them is what the account's standings are filed under.
+            it("asks the store by the faction's id, not by the name the chat line used", function()
+                local asked = {}
+                local window, frames = newWindow({
+                    accountStanding = standingSource(nil, asked),
+                })
+                window.update(summary(gained()))
+
+                expand(frames[1], "Reputation")
+
+                assert.same({ WARDENS }, asked)
+            end)
 
             it("says which character has got furthest, and how stale that is", function()
                 local window, frames = newWindow({

@@ -5,6 +5,16 @@ local _, ns = ...
 ---long the level is. Everything the client's four different reputation systems disagree
 ---about is resolved here.
 ---@class FactionStanding
+---@field id integer? The faction's own id, when the standing was read off a faction the client
+---named rather than worked out from a bare set of numbers. **This is what a standing is filed
+---under**, everywhere one is filed: a name is localised, so a client language change would fork
+---the store into a second row for the same faction under a German spelling, and the desktop
+---would have to join the game's own tables on a string to find out anything else about it.
+---@field name string? What the client called that faction, kept beside the id for something to
+---draw. Never keyed on.
+---@field accountWide boolean? True when the standing belongs to the warband rather than to the
+---character it was read on — the reputation equivalent of a shared currency pot, and absent
+---rather than false for the ordinary faction, so a key per faction saying "no" costs nothing.
 ---@field standing string? The level's name — "Honored", "Renown 12", "Best Friend".
 ---@field current integer Progress into the current level, never past its end.
 ---@field max integer Reputation the level takes to finish; 0 when the client offered none.
@@ -214,13 +224,64 @@ function ns.readFactionStanding(clients, data)
         reactionLabel = clients.reactionLabel(data.reaction)
     end
 
-    return ns.factionStanding({
+    local state = ns.factionStanding({
         faction = data,
         renown = renown,
         friendship = friendship,
         paragon = paragon,
         reactionLabel = reactionLabel,
     })
+    if not state then
+        return nil
+    end
+
+    -- Who this standing is with, carried out with it rather than left for the caller to
+    -- remember. Every caller files the standing somewhere and every one of them files it under
+    -- the id, so working the pair out once here is what stops three of them working it out
+    -- three ways — and the name is worth carrying beside it only because something eventually
+    -- has to be drawn.
+    state.id = factionID
+    state.name = type(data.name) == "string" and data.name ~= "" and data.name or nil
+
+    -- The warband's one standing rather than this character's own, which is the reputation
+    -- side of a shared currency pot: the client answers every character on the account with
+    -- the same numbers, so counting it once per alt would be the mistake `accountWide` already
+    -- exists to stop for currencies. Off the row where the row carries it, and off the call
+    -- where it does not — the two are the same fact, and build 12.0.5.67823 has both.
+    local accountWide = data.isAccountWide
+    if accountWide == nil and factionID then
+        local isAccountWide = callable(reputation, "IsAccountWideReputation")
+        accountWide = isAccountWide and isAccountWide(factionID)
+    end
+    state.accountWide = accountWide == true or nil
+
+    return state
+end
+
+---Everything the client knows about one faction, asked for by its id.
+---
+---**The call `findFaction` wanted and could not have.** A faction's id is the only thing about
+---it that is not localised, and `GetFactionDataByID` answers for every faction the game has —
+---not merely the ones the reputation pane is currently drawing. That reaches the legacy
+---factions the pane hides by default and the ones under a collapsed header alike, without
+---touching a single one of the player's own pane settings.
+---
+---Nilable in the client's own documentation, which is what an id that is not a faction comes
+---back as; a client build without the call answers the same way, and the caller is left with
+---no standing rather than with a Lua error.
+---@param clients table? As `ns.readFactionStanding` takes them.
+---@param factionID integer?
+---@return FactionStanding?
+function ns.readFactionStandingByID(clients, factionID)
+    if type(factionID) ~= "number" then
+        return nil
+    end
+    clients = clients or {}
+    local byID = callable(clients.reputation, "GetFactionDataByID")
+    if not byID then
+        return nil
+    end
+    return ns.readFactionStanding(clients, byID(factionID))
 end
 
 ---Where the character stands with the faction a chat message just named.

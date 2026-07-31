@@ -13,10 +13,12 @@ local _, ns = ...
 ---the currency and reputation *panes* and documents the holes that leaves — a collapsed group,
 ---and every legacy reputation, which the pane hides by default — because the calls that would
 ---open them up rearrange a pane the player arranged. The domains here reach the same facts
----without a pane: `C_MountJournal.GetMountIDs`, `GetAchievementInfo` and
----`C_CurrencyInfo.GetCurrencyInfo` all answer about ids, and an id has no idea what the player
----has the interface set to. `ns.currencyCensus` is that difference at its plainest — the same
----currencies the sweep next door can only see when the player has the group open.
+---without a pane: `C_MountJournal.GetMountIDs`, `GetAchievementInfo`,
+---`C_CurrencyInfo.GetCurrencyInfo` and `C_Reputation.GetFactionDataByID` all answer about ids,
+---and an id has no idea what the player has the interface set to. `ns.currencyCensus` and
+---`ns.reputationCensus` are that difference at its plainest — the same currencies the sweep next
+---door can only see when the player has the group open, and the legacy factions it cannot see at
+---all.
 ---
 ---And nothing here writes down what the account does *not* hold. The catalogue of everything
 ---that exists lives in the game's own tables, which the desktop already reads — `Achievement` is
@@ -301,12 +303,105 @@ function ns.currencyCensus(currency)
     }
 end
 
+---The highest faction id the walk asks about.
+---
+---`C_Reputation` enumerates the reputation *pane* and nothing else. `GetNumFactions` counts the
+---rows it is drawing, which is the very number this domain exists not to trust — every legacy
+---reputation is missing from it, because the pane hides them unless the player has asked
+---otherwise, and `SetLegacyReputationsShown` would fix that by rearranging a pane the player
+---arranged. So the positions are a range, and a range needs an end.
+---
+---`Faction` on build 12.0.5.67823 is 860 rows running from 1 to 2793, which is the table
+---`docs/game-tables.json` already registers and `reputations.rs` already reads. Four thousand is
+---that top id and half again — the same headroom `LAST_CURRENCY_ID` leaves, for the same reason:
+---an id above this is invisible to the walk and the walk would still call itself complete. It is
+---bounded, and raising it is free, 4,000 reads being twenty slices.
+local LAST_FACTION_ID = 4000
+
+---Reputations: where this character stands with every faction the game has.
+---
+---**This is the domain that reaches the legacy reputations**, which is most of the game's
+---factions and none of what `ns.readHoldings` can see. That walk reads the reputation pane, and
+---the pane hides legacy factions by default; `GetFactionDataByID` takes an arbitrary id and
+---answers for it whether the pane is drawing it, hiding it, or has it folded under a collapsed
+---expansion header. Nothing of the player's is touched, which is the rule the whole file keeps.
+---
+---**Character-scoped**, like the wallet next door and for the same reason: a standing is one
+---character's, and two alts at different renown must not read as one alt whose standing keeps
+---being replaced. `accountWide` is the exception the client itself draws — a warband reputation
+---is one standing every character reports, and counting it once per alt is the mistake the
+---warband gold pot exists to avoid.
+---
+---**Filed under the id, and the id is the whole point.** A faction's name is localised, so a
+---store keyed on one forks the moment somebody plays in another language, and the desktop had
+---to enter the game's tables through `Faction`'s name column to find out anything else about a
+---faction it had only been given a string for.
+---
+---The four-ladder reduction is `ns.readFactionStanding`'s, reused rather than reimplemented:
+---renown, paragon, friendship and the classic reaction ladder disagree about everything, and
+---that function is what makes two characters' standings comparable at all.
+---
+---**No counter.** `GetNumFactions` counts pane rows, so it is not a count of this at all — it is
+---the number this domain refuses to believe. So reputations are never distrusted into a pass of
+---their own and are walked when something else provokes one, exactly as currencies are.
+---
+---A position costs more here than anywhere else — up to four client calls, because a faction that
+---answers at all is then asked whether it is a major one, a friendship and a paragon — and the
+---budget in `Census.lua` is sized for exactly that: it is a frame budget rather than a batch size,
+---small enough that a domain whose reads are several times an ordinary one's still cannot drop a
+---frame. Two thirds of the range are not factions and cost one call and no more.
+---@param clients table? As `ns.readFactionStanding` takes them: `{ reputation = C_Reputation,
+---majorFaction = C_MajorFactionData, gossip = C_GossipInfo, reactionLabel = ... }`.
+---@return CensusDomain?
+function ns.reputationCensus(clients)
+    clients = clients or {}
+    if not ns.callable(clients.reputation, "GetFactionDataByID") then
+        return nil
+    end
+
+    return {
+        name = "reputations",
+        scope = "character",
+        ---@return integer[]
+        list = function()
+            local ids = {}
+            for id = 1, LAST_FACTION_ID do
+                ids[id] = id
+            end
+            return ids
+        end,
+        ---@param id integer
+        ---@return integer?, table?
+        read = function(id)
+            local state = ns.readFactionStandingByID(clients, id)
+            -- A standing the client answers for with neither a name for the level nor a rank is
+            -- a standing in nothing but shape: there is no ladder to place it on, so nothing
+            -- downstream could ever crown it or compare it, and it would draw as a nameless full
+            -- bar. `ns.readHoldings` refuses it on the same terms, and most of the range is not a
+            -- faction at all.
+            if not state or not (state.standing or state.rank) then
+                return nil, nil
+            end
+            return id, {
+                name = state.name,
+                standing = state.standing,
+                current = state.current,
+                max = state.max,
+                rank = state.rank,
+                system = state.system,
+                accountWide = state.accountWide,
+            }
+        end,
+    }
+end
+
 ---Every domain this client build can answer for, in the order they are walked.
 ---
 ---A domain whose calls this build does not have reports nil and is simply left out, which is the
 ---same answer `ns.readHoldings` gives for a pane the client will not open: a census that cannot
 ---be taken is not a census of nothing.
----@param clients table `{ mount = C_MountJournal, currency = C_CurrencyInfo, achievement = { ... } }`
+---@param clients table `{ mount = C_MountJournal, currency = C_CurrencyInfo,
+---standing = { reputation = C_Reputation, ... }, achievement = { ... } }`
 ---@return CensusDomain[]
 function ns.censusDomains(clients)
     clients = clients or {}
@@ -322,6 +417,9 @@ function ns.censusDomains(clients)
         end,
         function()
             return ns.currencyCensus(clients.currency)
+        end,
+        function()
+            return ns.reputationCensus(clients.standing)
         end,
         function()
             return ns.achievementCensus(clients.achievement)

@@ -2,10 +2,14 @@
  * The picture a faction borrows from its own Exalted achievement, kept for as long as the window is
  * open.
  *
- * A reputation arrives from the addon as a name, an amount and a standing — the client reports a
- * faction by its localised name — so a name is the whole of what there is to key on, the same as a
- * place. What is different is that there is nothing to look up: `Faction` has no icon column. What
- * the backend answers with instead is the icon of the achievement for reaching Exalted with that
+ * Keyed by the faction's own id, the way a currency is keyed by its. A chat line reports a faction
+ * by its localised name and for a long time that name was the whole of what there was to key on —
+ * which meant the backend had to enter the game's tables through `Faction`'s name column, matching
+ * case-insensitively and following every one of the fourteen names that sit on more than one row.
+ * The addon sends the id beside the name now, and none of that is a question any more.
+ *
+ * What has not changed is that there is nothing to look up: `Faction` has no icon column. What the
+ * backend answers with instead is the icon of the achievement for reaching Exalted with that
  * faction, which is per-faction artwork the game already draws beside it. See `reputations.rs`.
  *
  * **Most of what this is asked about comes back with nothing, and the modern half comes back with
@@ -21,9 +25,9 @@
 import { createIconBook } from "./iconBook";
 import type { IconBook, IconBookOptions } from "./iconBook";
 
-export type FactionIconsOptions = IconBookOptions<string>;
-export type FactionIcons = IconBook<string>;
+export type FactionIconsOptions = IconBookOptions<number>;
+export type FactionIcons = IconBook<number>;
 
 export function createFactionIcons(options: FactionIconsOptions): FactionIcons {
-  return createIconBook<string>(options);
+  return createIconBook<number>(options);
 }
