@@ -1,5 +1,6 @@
 pub mod achievements;
 mod activity;
+pub mod alternatives;
 pub mod appearances;
 pub mod body;
 pub mod budget;
@@ -14,6 +15,7 @@ pub mod customsets;
 pub mod db2;
 mod dto;
 pub mod failure;
+pub mod fingerprints;
 pub mod gallery;
 pub mod gap;
 pub mod glb;
@@ -191,6 +193,10 @@ struct AppState {
     /// they are separate tables, and the same bargain: a history names the same item once
     /// per segment it turned up in, and the read behind it opens `ItemSparse`.
     items: Arc<ItemBook>,
+    /// The two stores behind "what else looks like this", once either has been read off the
+    /// game — see `alternatives::Held`, which is also what keeps six clicks on locked slots
+    /// from starting six half-minute sweeps of the same sixty-eight thousand textures.
+    alternatives: Arc<alternatives::Held>,
     /// The newest combat log as the last poll saw it. Kept because one look at a file cannot
     /// tell "being written to" from "left there in March"; two looks thirty seconds apart can.
     combat_log_seen: Mutex<Option<combatlog::LogFile>>,
@@ -401,6 +407,129 @@ async fn transmog_openings(
     Ok(dto::convert(
         read_game_files(&state, move |files| openings::of_set(files, set_id)).await?,
     )?)
+}
+
+/// What else in the game gives a look a reader is locked out of, exactly and then approximately.
+///
+/// The last tier of the answer the openings panel begins. That panel says *this look is on an
+/// unrestricted item* or *nothing sells around it*, and where it says the second there is nothing
+/// exact left to say — so this offers the same armour in another colour, from the geometry, and
+/// then the nearest pictures in the slot, from the fingerprints. See `alternatives.rs`.
+///
+/// The two halves arrive apart on purpose. The geometry is half a second of walking tables and is
+/// measured on the spot; the fingerprints are half a minute of decoding the game's textures, so
+/// the first call that wants them and finds none starts a background sweep and the payload says
+/// `lookalikesReady: false` until it lands. The display type comes from the window because the
+/// window already has it, and it is what the slot's wardrobe rows are fetched by.
+#[tauri::command]
+#[specta::specta]
+async fn transmog_alternatives(
+    appearance_id: u32,
+    display_type: u32,
+    state: State<'_, AppState>,
+) -> Result<dto::AlternativesPayload, CommandError> {
+    let retail = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        configured_wow_path(&settings)?
+    };
+    let storage = Arc::clone(&state.storage);
+    let held = Arc::clone(&state.alternatives);
+    let dir = state.data_dir.clone();
+
+    let (payload, sweep) = tauri::async_runtime::spawn_blocking({
+        let (held, dir) = (Arc::clone(&held), dir.clone());
+        move || -> Result<(serde_json::Value, Option<(String, PathBuf)>), Failure> {
+            let install = install_beside(&retail)?;
+            let build = casc::live_version(install).map_err(Failure::from)?;
+            let files = storage.files(install)?;
+            let files = files.as_ref();
+
+            // The body both stores are measured on, which is not the body the reader is looking
+            // at: which mesh a helm resolves to and which pictures it paints are answered per
+            // race and sex, so a store taken on her and one taken on him are two different
+            // claims about one helm. See `shapes` and `fingerprints`, which both say so.
+            let body = body::of(files, body::DEFAULT).map_err(Failure::from)?;
+            let slot = wardrobe::looks(files, &[display_type]).map_err(Failure::from)?;
+            let shapes = held
+                .shapes(files, &body, &build, &dir)
+                .map_err(Failure::from)?;
+            let prints = held.prints(&build, &dir);
+            let payload = alternatives::of(&shapes, prints.as_deref(), &slot.found, appearance_id);
+            // Nothing on this machine has the pictures yet, so somebody has to go and decode
+            // them — but not this reader, and not six times over if they click six locked slots.
+            let sweep =
+                (prints.is_none() && held.claim_sweep()).then(|| (build, install.to_path_buf()));
+            Ok((payload, sweep))
+        }
+    })
+    .await
+    .context("waiting for a read of the game's files")??;
+
+    if let Some((build, install)) = sweep {
+        sweep_fingerprints(Arc::clone(&state.storage), held, build, install, dir);
+    }
+    Ok(dto::convert(payload)?)
+}
+
+/// Decodes the game's textures into the fingerprint store, off every thread a reader is on.
+///
+/// Half a minute on a shipping install, and the whole reason the payload above has a "not ready"
+/// state. Nothing waits for this and nothing is told when it finishes: the reader clicks again,
+/// or opens the next locked slot, and by then the store is there. A run that failed gives the
+/// claim back, because the commonest failure is a game folder that has not been pointed at yet.
+fn sweep_fingerprints(
+    storage: Arc<casc::OpenStorage>,
+    held: Arc<alternatives::Held>,
+    build: String,
+    install: PathBuf,
+    dir: PathBuf,
+) {
+    tauri::async_runtime::spawn_blocking(move || {
+        let swept = storage
+            .files(&install)
+            .map_err(|failure| failure.to_string())
+            .and_then(|files| {
+                let files = files.as_ref();
+                let body = body::of(files, body::DEFAULT)?;
+                fingerprints::cached(files, &body, &build, &dir)
+            });
+        match swept {
+            Ok(read) => held.keep_prints(&build, read),
+            Err(error) => record(&format!("could not read the game's fingerprints: {error}")),
+        }
+        held.finished_sweeping();
+    });
+}
+
+/// Everything anybody has decided about a suggestion this app made them.
+///
+/// Read whole rather than per look, for the reason the marks are: these are the rows one person
+/// wrote by hand, and there are a handful of them against a wardrobe of fifty thousand looks.
+#[tauri::command]
+#[specta::specta]
+fn transmog_lookalikes(state: State<'_, AppState>) -> Result<dto::LookalikesPayload, CommandError> {
+    Ok(dto::convert(serde_json::json!({
+        "said": collector::transmog_lookalikes(&state.database_path())?,
+    }))?)
+}
+
+/// Writes down that somebody agreed with a suggestion, or that they did not, or neither.
+#[tauri::command]
+#[specta::specta]
+fn set_transmog_lookalike(
+    appearance_id: i64,
+    alternative_id: i64,
+    verdict: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<dto::LookalikesPayload, CommandError> {
+    let said = collector::set_transmog_lookalike(
+        &state.database_path(),
+        appearance_id,
+        alternative_id,
+        verdict.as_deref(),
+        Utc::now().timestamp(),
+    )?;
+    Ok(dto::convert(serde_json::json!({ "said": said }))?)
 }
 
 /// Every appearance the game holds for one kind of place, whether or not a set names it.
@@ -1152,19 +1281,27 @@ where
     };
     let storage = Arc::clone(&state.storage);
     tauri::async_runtime::spawn_blocking(move || {
-        let install = retail.parent().ok_or_else(|| {
-            Failure::new(
-                FailureCode::InstallNotFound,
-                "Chronie could not find World of Warcraft's Data folder beside the game folder \
-                 in Setup.",
-            )
-            .context(format!("looking beside {}", retail.display()))
-        })?;
-        let files = storage.files(install)?;
+        let files = storage.files(install_beside(&retail)?)?;
         read(files.as_ref()).map_err(Failure::from)
     })
     .await
     .context("waiting for a read of the game's files")?
+}
+
+/// The install root beside the flavour folder the settings point at.
+///
+/// `resolve_wow_path` lands on `_retail_`, which is where `WTF` and the addon live; the game's
+/// storage is its sibling `Data`, so everything that reads the game's own files wants the folder
+/// above. A path with nothing above it is a setting nobody could have meant.
+fn install_beside(retail: &Path) -> Result<&Path, Failure> {
+    retail.parent().ok_or_else(|| {
+        Failure::new(
+            FailureCode::InstallNotFound,
+            "Chronie could not find World of Warcraft's Data folder beside the game folder \
+             in Setup.",
+        )
+        .context(format!("looking beside {}", retail.display()))
+    })
 }
 
 #[tauri::command]
@@ -2101,10 +2238,13 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         set_log_retention,
         set_requests,
         set_transmog_favourite,
+        set_transmog_lookalike,
         set_transmog_tag,
         settings,
         sync_now,
+        transmog_alternatives,
         transmog_appearances,
+        transmog_lookalikes,
         transmog_marks,
         transmog_openings,
         transmog_set_items,
@@ -2219,6 +2359,7 @@ pub fn run() {
                 icons: Arc::default(),
                 achievements: Arc::default(),
                 items: Arc::default(),
+                alternatives: Arc::default(),
                 combat_log_seen: Mutex::default(),
                 updater_configured,
             };

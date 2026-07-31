@@ -188,6 +188,36 @@ export class SetGrid {
   }
 
   /**
+   * The button on a row nothing sells around, which opens the last and least certain tier.
+   *
+   * Named after the set's own piece rather than the slot, because that is what a reader is
+   * standing in front of and what the panel it opens is titled after.
+   */
+  showAlternatives(set: string, own: string): Locator {
+    return this.card(set).getByRole("button", { name: `Show possible alternatives to ${own}` });
+  }
+
+  /** And what it opened: everything the two measures could still say about that look. */
+  alternatives(set: string, own: string): Locator {
+    return this.card(set).getByRole("list", { name: `Possible alternatives to ${own}` });
+  }
+
+  /** One of its rows, found by the item it offers. */
+  alternative(set: string, own: string, offered: string): Locator {
+    return this.alternatives(set, own).getByRole("listitem").filter({ hasText: offered });
+  }
+
+  /**
+   * Saying what one thinks of a suggestion — the one thing on this panel that outlives a patch.
+   *
+   * Both stores behind the rows are thrown away and measured off the game again whenever it
+   * moves; a person's answer is not, so it is a button rather than a reading.
+   */
+  ruleOn(set: string, own: string, says: string, offered: string): Locator {
+    return this.alternatives(set, own).getByRole("button", { name: `${says}: ${offered}` });
+  }
+
+  /**
    * The way through to the item an appearance came from, which is the corner of its row.
    *
    * Named in full rather than by the item alone: the link is a drawn glyph with no text of

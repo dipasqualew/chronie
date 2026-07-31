@@ -68,6 +68,10 @@ export type {
   QuerySchema,
   QueryTable,
   OpeningsPayload,
+  Alternative,
+  AlternativesPayload,
+  LookalikeVerdict,
+  LookalikesPayload,
   QuestEvent,
   Release,
   ReputationGain,
@@ -126,6 +130,8 @@ import type {
   ItemAppearance,
   ItemDetail,
   OpeningsPayload,
+  AlternativesPayload,
+  LookalikeVerdict,
   Peer,
   QueryAnswer,
   QuerySchema,
@@ -186,6 +192,11 @@ export interface E2EMock {
   transmogItems: Record<number, TransmogSetItemsPayload>;
   /** And which of each set's looks something outside it sells to anybody — see `openings.rs`. */
   transmogOpenings: Record<number, OpeningsPayload>;
+  /** And what else might do for one of the looks nothing sells around — see `alternatives.rs`. */
+  transmogAlternatives: Record<number, AlternativesPayload>;
+  /** What anybody has decided about one of those suggestions. State rather than a fixture: a
+   * scenario rules on a row and the next read has to say what was ruled. */
+  lookalikeVerdicts: LookalikeVerdict[];
   wardrobe: Record<string, WardrobePayload>;
   transmogMarks: TransmogMarksPayload;
   customSets: CustomSetsPayload;

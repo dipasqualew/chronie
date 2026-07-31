@@ -587,6 +587,70 @@ export const transmogOpenings: E2EMock["transmogOpenings"] = {
   },
 };
 
+/**
+ * And what else in the game might do for the one look nothing sells around — see
+ * `alternatives.rs` and `alternatives.ts`.
+ *
+ * Keyed by the look rather than by the set, because that is the grain the button is pressed at:
+ * `Tideglass Hide`'s sandals are the Druid's own and the red row of the panel above, and this is
+ * everything the two measures could still say about them.
+ *
+ * Both claims are in it, because they are not the same claim and the panel must not draw them
+ * alike:
+ *
+ * - `Boots of the Tidewalker` is the *same boot* — an equality between two signatures out of
+ *   `shapes.rs`, with no distance on it at all, and leather like the pair it stands in for.
+ * - `Sandals of the Quiet Deep` is a *suggestion* — two thumbnails 3.9% apart under the cut this
+ *   install measured for feet — and, being cloth, is exactly the row a reader has to look at
+ *   twice: the world drop that lifts a class lock nearly always lifts the class and not the
+ *   armour type, so a cloth answer is no use to the Druid who asked.
+ *
+ * `geometryAnswers` is true because a boot hangs no mesh in the real game and this fixture is
+ * saying what a slot that *can* be answered exactly looks like; a chestpiece would be false, and
+ * the sentence over the list is what tells the two apart.
+ */
+export const transmogAlternatives: E2EMock["transmogAlternatives"] = {
+  80004: {
+    appearanceId: 80004,
+    geometryAnswers: true,
+    lookalikesReady: true,
+    sameMesh: [
+      {
+        appearanceId: 80104,
+        itemId: 30104,
+        name: "Boots of the Tidewalker",
+        requiredLevel: 40,
+        quality: 3,
+        iconFileDataId: 130004,
+        classId: 4,
+        subclassId: 2,
+      },
+    ],
+    lookalikes: [
+      {
+        appearanceId: 80105,
+        itemId: 30105,
+        name: "Sandals of the Quiet Deep",
+        requiredLevel: 0,
+        quality: 2,
+        iconFileDataId: 130002,
+        classId: 4,
+        subclassId: 1,
+        distance: 0.039,
+      },
+    ],
+  },
+};
+
+/**
+ * What anybody has decided about one of those suggestions.
+ *
+ * Empty, and state rather than a fixture: what a scenario is checking is that pressing the
+ * button writes something the next read comes back with, so starting from nothing is what makes
+ * the assertion about the write.
+ */
+export const lookalikeVerdicts: E2EMock["lookalikeVerdicts"] = [];
+
 // The other half of the browser: every look the game holds for one kind of place, keyed by
 // the display types the window asks for. Two answers, because that is all the window ever
 // asks for — one armour slot, and everything held in a hand at once.

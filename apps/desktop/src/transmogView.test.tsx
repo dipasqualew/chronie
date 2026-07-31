@@ -17,6 +17,9 @@ import type {
   CustomSetsPayload,
   GalleryKind,
   MarkSubjectKind,
+  AlternativesPayload,
+  LookalikesPayload,
+  LookalikeVerdict,
   OpeningsPayload,
   QualitiesFile,
   SetGalleryPayload,
@@ -750,6 +753,21 @@ function view(
      * written against.
      */
     openings?: (setId: number) => Promise<OpeningsPayload>;
+    /**
+     * And what else in the game might do for a look nothing sells around — see
+     * `alternatives.ts`. Left out by default for the reason both reads above are: it is behind
+     * a button on the one row of the panel that has no answer, and nothing asks it until then.
+     */
+    alternatives?: (appearanceId: number, displayType: number) => Promise<AlternativesPayload>;
+    /** What anybody has decided about one of those suggestions, and deciding one. */
+    lookalikes?: {
+      load: () => Promise<LookalikesPayload>;
+      rule: (
+        appearanceId: number,
+        alternativeId: number,
+        verdict: string | null,
+      ) => Promise<LookalikesPayload>;
+    };
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
@@ -828,6 +846,9 @@ function view(
       loadSetQualities={loadSetQualities}
       loadWearers={options.wearers}
       loadOpenings={options.openings}
+      loadAlternatives={options.alternatives}
+      loadLookalikes={options.lookalikes?.load}
+      setLookalike={options.lookalikes?.rule}
     />,
   );
   return {
@@ -1861,9 +1882,7 @@ describe("how anybody gets the looks a set locks", () => {
     });
     const table = await panelOf(card, "Lightsworn Plate");
     expect(
-      within(slotRow(table, "Legs")).getByRole("cell", {
-        name: "Nothing gives this look to another class",
-      }),
+      within(slotRow(table, "Legs")).getByText("Nothing gives this look to another class"),
     ).toBeTruthy();
     // And the look the set already sells to everybody is no row at all: nobody was stopped at
     // it, and a table where half the rows say "you were never kept from this" buries the one
@@ -1899,6 +1918,167 @@ describe("how anybody gets the looks a set locks", () => {
         name: "How anyone gets the looks Lightsworn Plate locks",
       }),
     ).toBeNull();
+  });
+
+  /* ---------- and what else might do, where nothing sells it around ---------- */
+
+  /**
+   * What the two measures had to say about the greaves nothing in the game sells around.
+   *
+   * Both kinds of claim, because the panel's whole job is not to draw them alike: the first row
+   * is an equality between two mesh signatures and the second is two thumbnails 3.9% apart under
+   * a threshold this install cut for the legs. See `alternatives.rs`.
+   */
+  const MIGHT_DO: AlternativesPayload = {
+    appearanceId: 11,
+    geometryAnswers: true,
+    lookalikesReady: true,
+    sameMesh: [
+      {
+        appearanceId: 12,
+        itemId: 12,
+        name: "Greaves of the Wanderer",
+        requiredLevel: 30,
+        quality: 3,
+        iconFileDataId: 0,
+        classId: 4,
+        subclassId: 4,
+      },
+    ],
+    lookalikes: [
+      {
+        appearanceId: 13,
+        itemId: 13,
+        name: "Legwraps of the Quiet Deep",
+        requiredLevel: 0,
+        quality: 2,
+        iconFileDataId: 0,
+        classId: 4,
+        subclassId: 1,
+        distance: 0.039,
+      },
+    ],
+  };
+
+  /** A set opened on its blocked row, with the suggestions already drawn. */
+  async function suggestions(
+    over: Partial<AlternativesPayload> = {},
+    lookalikes?: NonNullable<Parameters<typeof view>[0]>["lookalikes"],
+  ) {
+    const held = heldOpenings();
+    const alternatives = vi.fn((appearanceId: number, _displayType: number) =>
+      Promise.resolve({ ...MIGHT_DO, appearanceId, ...over }),
+    );
+    view({ payload: LOCKED, openings: held.loadOpenings, alternatives, lookalikes });
+    const card = await open("Lightsworn Plate");
+    await waitFor(() => expect(held.loadOpenings).toHaveBeenCalledWith(701));
+    await act(async () => {
+      held.answer(SOLD_AROUND);
+    });
+    const table = await panelOf(card, "Lightsworn Plate");
+    await act(async () => {
+      fireEvent.click(
+        within(table).getByRole("button", {
+          name: "Show possible alternatives to Lightsworn Greaves",
+        }),
+      );
+    });
+    return { card, table, alternatives };
+  }
+
+  // The whole of the last tier, from the reader's side: the red row carries a way on, and behind
+  // it are the two things still worth saying — the same armour in another colour, and something
+  // the pictures say is near, with the number it was ranked by on it.
+  it("offers what else might do behind a button on the row that has no answer", async () => {
+    const { table, alternatives } = await suggestions();
+    // Asked for the look and its slot, both measures behind the answer being per slot.
+    expect(alternatives).toHaveBeenCalledWith(11, 5);
+
+    const list = await within(table).findByRole("list", {
+      name: "Possible alternatives to Lightsworn Greaves",
+    });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Greaves of the Wanderer"),
+      expect.stringContaining("Legwraps of the Quiet Deep"),
+    ]);
+    // An equality reads as an equality and a distance reads as a distance. A panel that drew
+    // them alike would lend the second the first's certainty, which is the one thing this
+    // half of the feature must not do.
+    expect(rows[0]?.textContent).toContain("The same armour, another colour");
+    expect(rows[1]?.textContent).toContain("96.1% alike");
+    // And the kind of armour on both, because the world drop that lifts a class lock nearly
+    // always lifts the class and not the kind: a cloth answer is no use to a plate wearer.
+    expect(rows[0]?.textContent).toContain("Plate");
+    expect(rows[1]?.textContent).toContain("Cloth");
+  });
+
+  // Nothing is asked until the button is pressed. Both measures cost a walk of the game's own
+  // files and one of them starts half a minute of decoding textures, so a reader who came for
+  // the certain half pays for none of it.
+  it("asks nothing about what else might do until somebody presses the button", async () => {
+    const held = heldOpenings();
+    const alternatives = vi.fn(() => Promise.resolve(MIGHT_DO));
+    view({ payload: LOCKED, openings: held.loadOpenings, alternatives });
+    const card = await open("Lightsworn Plate");
+    await waitFor(() => expect(held.loadOpenings).toHaveBeenCalledWith(701));
+    await act(async () => {
+      held.answer(SOLD_AROUND);
+    });
+    await panelOf(card, "Lightsworn Plate");
+
+    expect(alternatives).not.toHaveBeenCalled();
+  });
+
+  // The state that is not an answer. Half a minute of decoding the game's textures stands
+  // between a fresh install and the ranked half, and a panel that said "nothing looks like this"
+  // meanwhile would be the app reporting its own unfinished work as a fact about the game.
+  it("says the pictures are still being read rather than that nothing matched", async () => {
+    const { table } = await suggestions({
+      sameMesh: [],
+      lookalikes: [],
+      lookalikesReady: false,
+    });
+    expect(
+      await within(table).findByText(
+        "Chronie is reading the game's own textures to answer this — about a minute, once per patch",
+      ),
+    ).toBeTruthy();
+  });
+
+  // And what a person says about a suggestion, which is the one thing here that outlives a
+  // patch: both stores are thrown away and measured again, and this is not.
+  it("keeps what somebody decided about a suggestion", async () => {
+    let said: LookalikeVerdict[] = [];
+    const rule = vi.fn((appearanceId: number, alternativeId: number, verdict: string | null) => {
+      said = verdict ? [{ appearanceId, alternativeId, verdict }] : [];
+      return Promise.resolve({ said });
+    });
+    const { table } = await suggestions({}, { load: () => Promise.resolve({ said }), rule });
+
+    const list = await within(table).findByRole("list", {
+      name: "Possible alternatives to Lightsworn Greaves",
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(list).getByRole("button", {
+          name: "That is the one: Legwraps of the Quiet Deep",
+        }),
+      );
+    });
+    expect(rule).toHaveBeenCalledWith(11, 13, "yes");
+
+    // What was stored is what is drawn: the row is now pressed, and it has been lifted above
+    // the exact one, a person's answer outranking a measurement.
+    const after = within(list).getByRole("button", {
+      name: "That is the one: Legwraps of the Quiet Deep",
+    });
+    expect(after.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent?.includes("Legwraps of the Quiet Deep")),
+    ).toEqual([true, false]);
   });
 });
 

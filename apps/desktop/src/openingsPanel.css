@@ -37,3 +37,7 @@
   box-shadow: inset 2px 0 var(--bad); color: var(--bad);
 }
 .mog-openings td:last-child { display: flex; gap: 6px; align-items: baseline; }
+/* The row a list of suggestions unfolds into. Its cell is the whole width and carries none of
+   the padding above, the panel inside it having its own — see `alternativesPanel.css`. */
+.mog-openings tbody tr.mog-openings-under td { padding: 0; display: table-cell; box-shadow: none; }
+.mog-openings tbody tr.mog-openings-under td:last-child { color: inherit; }
