@@ -60,6 +60,7 @@ const HOLDINGS: AccountHoldings = {
     {
       // Somebody else is out in front here, which is the row a reader actually wants a column
       // for: "Honored, and the alt you never play is Revered".
+      id: 1201,
       faction: "Cavern Cartographers",
       best: {
         character: "Brin-Hearth",
@@ -83,6 +84,7 @@ const HOLDINGS: AccountHoldings = {
       ],
     },
     {
+      id: 1202,
       faction: "Deepwater Wardens",
       best: {
         character: "Aster-Vale",
@@ -97,6 +99,33 @@ const HOLDINGS: AccountHoldings = {
           standing: "Exalted",
           rank: 8,
           system: "reaction",
+          at: BASE,
+        },
+      ],
+    },
+    // A warband reputation: one standing the whole account shares, which the client reports the
+    // same numbers for on every character. The alt sorted first here is not ahead of anybody.
+    {
+      id: 1203,
+      faction: "Hallowfall Arathi",
+      accountWide: true,
+      best: {
+        character: "Brin-Hearth",
+        standing: "Renown 4",
+        current: 50,
+        max: 2_500,
+        rank: 4,
+        system: "renown",
+        at: BASE,
+      },
+      characters: [
+        {
+          character: "Aster-Vale",
+          standing: "Renown 4",
+          current: 50,
+          max: 2_500,
+          rank: 4,
+          system: "renown",
           at: BASE,
         },
       ],
@@ -227,6 +256,20 @@ describe("CharacterSummary", () => {
       const row = rowFor("Reputation", "Deepwater Wardens");
       expect(row.textContent).toContain("This character · Exalted");
       expect(row.textContent).not.toContain("Aster-Vale");
+    });
+
+    /**
+     * The reputation half of the mistake `accountWide` exists to stop. Every character on the
+     * account reports a warband reputation's numbers identically, so crowning whichever of them
+     * sorted first would tell a reader an alt was further along when the standing is literally
+     * their own.
+     */
+    it("says a warband reputation is the warband's rather than naming an alt as ahead", () => {
+      show();
+
+      const row = rowFor("Reputation", "Hallowfall Arathi");
+      expect(row.textContent).toContain("The warband · Renown 4");
+      expect(row.textContent).not.toContain("Brin-Hearth");
     });
 
     it("draws where they stand inside their own level", () => {

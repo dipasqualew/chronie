@@ -256,10 +256,10 @@ export interface E2EMock {
    * fight absent from here is one this install's journal has never heard of, which is what a boss
    * from a newer build looks like. */
   bossPortraits: Record<number, string>;
-  /** The picture each faction borrows from its own Exalted achievement, keyed by the name the
-   * reputation was recorded under. A faction absent from here has no such achievement, which every
-   * modern renown faction is — so most of a current history draws nothing. */
-  factionIcons: Record<string, string>;
+  /** The picture each faction borrows from its own Exalted achievement, keyed by the faction id
+   * the reputation was recorded under. A faction absent from here has no such achievement, which
+   * every modern renown faction is — so most of a current history draws nothing. */
+  factionIcons: Record<number, string>;
   /** What the game says about each achievement, keyed by id. An id absent from here is one
    * the install can say nothing about, which the real backend also answers nothing for. */
   achievementDetails: Record<number, AchievementDetail>;

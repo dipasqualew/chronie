@@ -311,6 +311,249 @@ describe("the census domains", function()
         end)
     end)
 
+    describe("ns.reputationCensus", function()
+        ---A stand-in for the four namespaces a standing is assembled out of.
+        ---
+        ---The important half of this fake is the gap it keeps open between the two ways in.
+        ---`GetFactionDataByID` answers for every row the test lists; `GetNumFactions` and
+        ---`GetFactionDataByIndex` answer only for `options.pane`, which is the subset the
+        ---player's reputation pane happens to be drawing. That gap is issue #254 — every
+        ---legacy faction sits in it, because the pane hides them unless the player has said
+        ---otherwise — and a fake whose two halves agreed would agree with a domain that had
+        ---quietly gone on walking the pane.
+        ---@param options table `{ rows, pane, renown, friendship, paragon, labels, without }`
+        ---rows is keyed by faction id, each in `GetFactionDataByID`'s shape; pane is the list
+        ---of ids the pane is drawing, in pane order.
+        ---@return table clients
+        local function newFactions(options)
+            local rows = options.rows or {}
+            local pane = options.pane or {}
+            local missing = {}
+            for _, name in ipairs(options.without or {}) do
+                missing[name] = true
+            end
+
+            local reputation = {
+                GetFactionDataByID = function(factionID)
+                    return rows[factionID]
+                end,
+                GetNumFactions = function()
+                    return #pane
+                end,
+                GetFactionDataByIndex = function(index)
+                    return rows[pane[index]]
+                end,
+                IsMajorFaction = function(factionID)
+                    return (options.renown or {})[factionID] ~= nil
+                end,
+                IsFactionParagon = function(factionID)
+                    return (options.paragon or {})[factionID] ~= nil
+                end,
+                GetFactionParagonInfo = function(factionID)
+                    local paragon = (options.paragon or {})[factionID] or {}
+                    return paragon.value, paragon.threshold
+                end,
+            }
+            for name in pairs(missing) do
+                reputation[name] = nil
+            end
+
+            return {
+                reputation = reputation,
+                majorFaction = {
+                    GetMajorFactionData = function(factionID)
+                        return (options.renown or {})[factionID]
+                    end,
+                },
+                gossip = {
+                    GetFriendshipReputation = function(factionID)
+                        return (options.friendship or {})[factionID]
+                    end,
+                },
+                reactionLabel = function(reaction)
+                    return (options.labels or {})[reaction]
+                end,
+            }
+        end
+
+        -- Argent Dawn, 529, is a legacy reputation: the pane will not draw it unless the
+        -- player has gone and asked for legacy reputations, and `SetLegacyReputationsShown`
+        -- would fix that by rearranging a pane the player arranged. So it is exactly the
+        -- faction the pane walk next door cannot see.
+        local ARGENT_DAWN = {
+            factionID = 529,
+            name = "Argent Dawn",
+            reaction = 6,
+            currentStanding = 12000,
+            currentReactionThreshold = 9000,
+            nextReactionThreshold = 21000,
+        }
+        local DREAM_WARDENS = { factionID = 2574, name = "Dream Wardens", reaction = 8 }
+
+        -- The same answer every other domain here gives for a client that cannot be asked: a
+        -- census that cannot be taken is not a census of nothing, so the domain declines to
+        -- exist rather than existing and reporting a character who stands with nobody.
+        for _, case in ipairs({
+            { what = "a client with no reputation API at all", clients = nil },
+            { what = "a client with no namespaces whatsoever", clients = {} },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                assert.is_nil(ns.reputationCensus(case.clients))
+            end)
+        end
+
+        it("is not a domain on a build that cannot be asked about an id", function()
+            local clients = newFactions({ rows = {}, without = { "GetFactionDataByID" } })
+
+            assert.is_nil(ns.reputationCensus(clients))
+        end)
+
+        -- `GetNumFactions` counts pane rows, which is the very number this domain exists not
+        -- to trust, and there is no other enumerator. So the positions are a range — the same
+        -- shape `ns.currencyCensus` walks, and for the same reason.
+        it("walks a range of ids rather than the rows the pane happens to be drawing", function()
+            local domain = ns.reputationCensus(newFactions({ rows = {} }))
+
+            local ids = domain.list()
+
+            assert.equal("reputations", domain.name)
+            -- A standing is one character's. Two alts at different renown must not read as
+            -- one alt whose standing keeps being replaced.
+            assert.equal("character", domain.scope)
+            assert.equal(4000, #ids)
+            assert.equal(1, ids[1])
+            assert.equal(4000, ids[#ids])
+        end)
+
+        -- Issue #254 in one test. The pane is drawing one faction and knows nothing of the
+        -- other; asked by id, the client answers for both.
+        it("reaches a standing the reputation pane never lists", function()
+            local domain = ns.reputationCensus(newFactions({
+                rows = { [529] = ARGENT_DAWN, [2574] = DREAM_WARDENS },
+                pane = { 2574 },
+                renown = {
+                    [2574] = { renownLevel = 12, renownReputationEarned = 500,
+                        renownLevelThreshold = 2500 },
+                },
+                labels = { [6] = "Honored" },
+            }))
+
+            local id, held = domain.read(529)
+
+            assert.equal(529, id)
+            assert.same({
+                name = "Argent Dawn",
+                standing = "Honored",
+                current = 3000,
+                max = 12000,
+                rank = 6,
+                system = "reaction",
+            }, held)
+        end)
+
+        -- Most of a four-thousand-id range is not a faction at all, and the client's own
+        -- documentation marks the call nilable. Nothing is the answer rather than a Lua error
+        -- out of a walk that has three thousand more ids to get through.
+        it("says nothing about an id that is not a faction", function()
+            local domain = ns.reputationCensus(newFactions({ rows = { [529] = ARGENT_DAWN } }))
+
+            local id, held = domain.read(3999)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- A standing with neither a name for the level nor a rank is a standing in nothing but
+        -- shape: nothing downstream could crown it or compare it, and it would draw as a
+        -- nameless full bar. `ns.readHoldings` refuses one on exactly the same terms.
+        it("says nothing about a faction the client will not place", function()
+            local domain = ns.reputationCensus(newFactions({
+                rows = {
+                    [1177] = {
+                        factionID = 1177,
+                        name = "Nameless Rank",
+                        currentStanding = 500,
+                        currentReactionThreshold = 0,
+                        nextReactionThreshold = 3000,
+                    },
+                },
+            }))
+
+            local id, held = domain.read(1177)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- The reduction is `ns.readFactionStanding`'s, reused rather than reimplemented: the
+        -- four systems disagree about everything, and that function is what makes two
+        -- characters' standings comparable at all. A renown faction reached by id must not
+        -- come back as the Friendly its reaction ladder also reports.
+        it("reduces the four ladders the way every other reader of a standing does", function()
+            local domain = ns.reputationCensus(newFactions({
+                rows = { [2574] = DREAM_WARDENS },
+                renown = {
+                    [2574] = { renownLevel = 12, renownReputationEarned = 500,
+                        renownLevelThreshold = 2500 },
+                },
+                labels = { [8] = "Friendly" },
+            }))
+
+            local id, held = domain.read(2574)
+
+            assert.equal(2574, id)
+            assert.equal("Renown 12", held.standing)
+            assert.equal("renown", held.system)
+            assert.equal(12, held.rank)
+        end)
+
+        -- A warband reputation is one standing every character on the account reports, so a
+        -- census that wrote it per character without saying so would have every alt looking
+        -- like it had done the grind. The flag is what the desktop counts it once by.
+        it("carries the warband's own standings through as the warband's", function()
+            local domain = ns.reputationCensus(newFactions({
+                rows = {
+                    [2590] = {
+                        factionID = 2590,
+                        name = "Council of Dornogal",
+                        reaction = 6,
+                        isAccountWide = true,
+                        currentStanding = 12000,
+                        currentReactionThreshold = 9000,
+                        nextReactionThreshold = 21000,
+                    },
+                },
+                labels = { [6] = "Honored" },
+            }))
+
+            local _, held = domain.read(2590)
+
+            assert.is_true(held.accountWide)
+        end)
+
+        -- Absent rather than false, the same economy every other domain here keeps: most
+        -- factions are the character's own, and a key per faction per character saying "no"
+        -- is a saved file spent saying what its absence already said.
+        it("leaves the warband out of a standing that is only this character's", function()
+            local domain = ns.reputationCensus(newFactions({
+                rows = { [529] = ARGENT_DAWN },
+                labels = { [6] = "Honored" },
+            }))
+
+            local _, held = domain.read(529)
+
+            assert.is_nil(held.accountWide)
+        end)
+
+        -- `GetNumFactions` counts the rows the pane is drawing, so it is not a count of this
+        -- at all — it is the number the domain refuses to believe. So there is nothing to
+        -- distrust this walk into a pass of its own, and it is walked whenever something else
+        -- provokes one, exactly as the currencies are.
+        it("offers no counter, because the only one the client has counts the pane", function()
+            assert.is_nil(ns.reputationCensus(newFactions({ rows = {} })).count)
+        end)
+    end)
+
     describe("ns.achievementCensus", function()
         ---A stand-in for the four bare globals the achievement tree is reached through.
         ---
@@ -515,6 +758,9 @@ describe("the census domains", function()
                 currency = {
                     GetCurrencyInfo = print,
                 },
+                standing = {
+                    reputation = { GetFactionDataByID = print },
+                },
                 achievement = {
                     categories = print,
                     categoryCount = print,
@@ -538,7 +784,7 @@ describe("the census domains", function()
         -- queued behind the thirteen-thousand-call one that takes a minute.
         it("names every domain a build can answer for, cheapest walk first", function()
             assert.same(
-                { "mounts", "currencies", "achievements" },
+                { "mounts", "currencies", "reputations", "achievements" },
                 namesOf(ns.censusDomains(everything()))
             )
         end)
@@ -555,24 +801,38 @@ describe("the census domains", function()
             local clients = everything()
             clients.mount = nil
 
-            assert.same({ "currencies", "achievements" }, namesOf(ns.censusDomains(clients)))
+            assert.same({ "currencies", "reputations", "achievements" },
+                namesOf(ns.censusDomains(clients)))
         end)
 
         it("keeps the domains ahead of one this build cannot answer for", function()
             local clients = everything()
             clients.achievement = nil
 
-            assert.same({ "mounts", "currencies" }, namesOf(ns.censusDomains(clients)))
+            assert.same({ "mounts", "currencies", "reputations" }, namesOf(ns.censusDomains(clients)))
         end)
 
         -- And the case that would actually catch it, now there is a domain with one on each
-        -- side: a build with no `C_CurrencyInfo` leaves the achievements behind the gap and the
-        -- mounts in front of it, rather than a list that stops where the currencies would be.
+        -- side: a build with no `C_CurrencyInfo` leaves the reputations and achievements behind
+        -- the gap and the mounts in front of it, rather than a list that stops where the
+        -- currencies would be.
         it("keeps the domains on both sides of one this build cannot answer for", function()
             local clients = everything()
             clients.currency = nil
 
-            assert.same({ "mounts", "achievements" }, namesOf(ns.censusDomains(clients)))
+            assert.same({ "mounts", "reputations", "achievements" },
+                namesOf(ns.censusDomains(clients)))
+        end)
+
+        -- The newest domain is reached through a bundle of namespaces rather than one, so a
+        -- build without it is spelled by withholding the bundle — and the walk in front of it
+        -- and the walk behind it both have to survive that.
+        it("keeps the domains on both sides of a build with no reputation calls", function()
+            local clients = everything()
+            clients.standing = nil
+
+            assert.same({ "mounts", "currencies", "achievements" },
+                namesOf(ns.censusDomains(clients)))
         end)
     end)
 end)

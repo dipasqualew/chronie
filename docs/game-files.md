@@ -1421,10 +1421,11 @@ tables, and the join starts from a name because a name is what a segment carries
 ```
 Faction                           (id in a list beside the rows)
   col0 = ReputationRaceMask[4]     256 bits wide, which is what puts the name at col1
-  col1 = Name_lang               ◀── the string a segment and a standing carry
+  col1 = Name_lang                 read by the dumper only; the app no longer opens this table
   col2 = Description_lang
   col3 = ReputationIndex
   col4 = ParentFactionID
+       └─ the id itself             ◀── the number a segment and a standing now carry
 
 Criteria                          (id in col0)
   col0 = ID
@@ -1465,8 +1466,11 @@ Two more rules, each of which is a wrong picture rather than a missing one if sk
   later hidden per-character copy, an unshipped "[DNT]" tier, a seasonal reissue. The lowest id is
   the original, and where two are both real they share an icon anyway.
 - **14 faction names are on more than one `Faction` row.** "Venture Company" is on three; there are
-  rows literally called "reuse" and "unused". So every row bearing an asked-for name is followed and
-  whichever reaches an achievement answers.
+  rows literally called "reuse" and "unused". This used to mean following every row bearing an
+  asked-for name and taking whichever reached an achievement, because a segment carried only the
+  localised string. Since #254 the addon sends `Faction`'s own id, so the walk starts at the
+  criterion and this table is not opened by the app at all — the rows are still there, and each now
+  answers only for itself.
 
 **What this route does not reach is the modern half.** No Dragonflight-or-later renown faction has an
 Exalted achievement, because renown has no Exalted tier — the Council of Dornogal, the Assembly of

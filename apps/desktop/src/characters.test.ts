@@ -218,6 +218,7 @@ describe("buildCharacters against what the account holds", () => {
     },
     factions: [
       {
+        id: 1201,
         faction: "Cavern Cartographers",
         best: { character: "Brin-Hearth", standing: "Revered", rank: 7, system: "reaction" },
         characters: [
@@ -240,12 +241,14 @@ describe("buildCharacters against what the account holds", () => {
         ],
       },
       {
+        id: 1202,
         faction: "Deepwater Wardens",
         best: { character: "Aster-Vale", standing: "Exalted", rank: 8, system: "reaction" },
         characters: [{ character: "Aster-Vale", standing: "Exalted", rank: 8, system: "reaction" }],
       },
       // Met, but the client never placed it on a ladder — which is no rank, not a rank of nought.
       {
+        id: 1203,
         faction: "Lamplighters",
         best: null,
         characters: [{ character: "Aster-Vale", standing: null }],

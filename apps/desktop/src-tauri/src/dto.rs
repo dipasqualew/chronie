@@ -156,6 +156,12 @@ dto!(CurrencyGain {
 
 dto!(ReputationGain {
     pub faction: String,
+    /// The faction's own id, once the addon has asked the client to place the faction the chat
+    /// line named. Absent on a gain filed before that was asked, and on one the client would not
+    /// place — such a line draws without a picture, which is what every one of them drew before
+    /// there were any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faction_id: Option<i64>,
     pub amount: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<i64>,
@@ -368,7 +374,18 @@ dto!(CharacterStanding {
 });
 
 dto!(AccountFaction {
-    pub faction: String,
+    /// `Faction`'s own id, which is what the standings are grouped by and what a picture is
+    /// looked up by. A name is localised; this is not.
+    pub id: i64,
+    /// What the client called it, for something to draw. Absent for a faction no character has
+    /// reported a name for, which is what an id filed by an addon the player has since changed
+    /// the language of looks like.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faction: Option<String>,
+    /// True when the standing is the warband's rather than each character's own, so the several
+    /// rows below are one standing reported several times.
+    #[serde(default)]
+    pub account_wide: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub best: Option<CharacterStanding>,
     pub characters: Vec<CharacterStanding>,

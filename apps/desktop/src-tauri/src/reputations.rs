@@ -1,24 +1,28 @@
 //! The picture a faction borrows from its own reputation achievement.
 //!
-//! A segment records what it earned with a faction as a name and an amount, and a character's
-//! standings the same way — because that is what the client reports. `Faction` has no icon column
-//! at all, so unlike a dungeon or a boss there is nothing to look up: the reputation lines drew as
-//! plain text.
+//! A segment records what it earned with a faction, and a character's standings the same way.
+//! `Faction` has no icon column at all, so unlike a dungeon or a boss there is nothing to look up:
+//! the reputation lines drew as plain text.
 //!
 //! There is a picture, though, and it is one the game already draws beside that faction: **the icon
 //! of the achievement for reaching Exalted with it.** "Hero of the Frostwolf Clan" is drawn with a
 //! Frostwolf banner, "Knight of Arathor" with the League of Arathor's crest. Those are per-faction
-//! artwork sitting in a table this app already reads, and the way from one to the other is four
+//! artwork sitting in a table this app already reads, and the way from one to the other is three
 //! tables:
 //!
 //! ```text
-//! Faction col1 (the name a segment carries)
-//!   └▶ Faction's own id
-//!        ◀── Criteria col2, where Criteria col1 is 46 ("reach reputation with faction")
-//!               └▶ CriteriaTree col4, walked *up* by col1 to its root
-//!                    ◀── Achievement col14
-//!                         └▶ Achievement col12, the icon
+//! the faction id a segment carries
+//!   ◀── Criteria col2, where Criteria col1 is 46 ("reach reputation with faction")
+//!         └▶ CriteriaTree col4, walked *up* by col1 to its root
+//!              ◀── Achievement col14
+//!                   └▶ Achievement col12, the icon
 //! ```
+//!
+//! **It used to be four, and the one that went was `Faction` itself.** The walk began by matching
+//! a localised name against `Faction`'s name column — case-insensitively, on a trimmed string,
+//! following every one of the fourteen names that sit on more than one row — because a name was
+//! all the addon sent. It now sends the id, which is the only thing about a faction that is not
+//! localised, and the criterion walk starts from it.
 //!
 //! **The catch is which achievement a faction lands on.** 216 factions are named by a type-46
 //! criterion somewhere, but most of them only through the *aggregate* achievements — "25 Exalted
@@ -44,8 +48,7 @@ use crate::db2::Db2;
 use crate::tables::achievement as achievement_column;
 use crate::tables::criteria as criteria_column;
 use crate::tables::criteria_tree as tree_column;
-use crate::tables::faction as faction_column;
-use crate::tables::{ACHIEVEMENT, CRITERIA, CRITERIA_TREE, FACTION};
+use crate::tables::{ACHIEVEMENT, CRITERIA, CRITERIA_TREE};
 
 /// The `Criteria` type meaning "reach a given reputation with a faction", whose asset is the
 /// faction's own id.
@@ -63,8 +66,8 @@ pub const REPUTATION_CRITERIA: u32 = 46;
 /// the same reason, as `achievements.rs` puts on the category tree.
 const DEEPEST_TREE: usize = 12;
 
-/// The icon each of the factions asked about is drawn with, as a FileDataID, keyed by the name it
-/// was asked for under.
+/// The icon each of the factions asked about is drawn with, as a FileDataID, keyed by the faction
+/// id it was asked for under.
 ///
 /// The same bargain as [`crate::journal::icons_of`]: only the factions a window is showing, all of
 /// them in one call because what costs is opening the game's storage, and a faction with no
@@ -83,34 +86,20 @@ const DEEPEST_TREE: usize = 12;
 ///   seasonal reissue. The lowest id is the original, and where two are both real they share an
 ///   icon anyway.
 ///
-/// Matching is case-insensitive on a trimmed name, for the reason the places are: the name is a
-/// string the client handed over. **Fourteen names are on more than one `Faction` row** — "Venture
-/// Company" is on three, and there are rows literally called "reuse" and "unused" — so every row
-/// bearing an asked-for name is followed, and whichever of them reaches an achievement answers.
-pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<String, u32>, String> {
-    let keys: Vec<(String, &String)> = wanted
+/// `Faction` itself is no longer opened at all. What it was read for was turning a localised name
+/// into an id, and the addon now sends the id — so the fourteen names sitting on more than one
+/// `Faction` row, the rows literally called "reuse" and "unused", and the case-insensitive trim
+/// that had to cope with all of them are simply not questions any more.
+pub fn icons_of(files: &dyn GameFiles, wanted: &[i64]) -> Result<HashMap<i64, u32>, String> {
+    // The ids worth asking about, as the tables spell them. Nought and below are not faction ids —
+    // a null column and a gain the client would not place both arrive as one — and asking about
+    // them would open the game's storage to answer nothing.
+    let asked_for: HashSet<u32> = wanted
         .iter()
-        .map(|name| (key_of(name), name))
-        .filter(|(key, _)| !key.is_empty())
+        .filter(|id| **id > 0)
+        .filter_map(|id| u32::try_from(*id).ok())
         .collect();
     let mut found = HashMap::new();
-    if keys.is_empty() {
-        return Ok(found);
-    }
-
-    // Which faction ids were asked about, and under which spelling. Several ids can carry one name,
-    // so this is a fan-in rather than a rename.
-    let mut asked_for: HashMap<u32, &String> = HashMap::new();
-    let table = Db2::parse(files.read(FACTION)?)?;
-    for row in table.rows() {
-        let name = key_of(&row.text(faction_column::NAME));
-        if name.is_empty() {
-            continue;
-        }
-        if let Some((_, asked)) = keys.iter().find(|(key, _)| *key == name) {
-            asked_for.insert(row.id(), asked);
-        }
-    }
     if asked_for.is_empty() {
         return Ok(found);
     }
@@ -165,7 +154,7 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
         let Some(faction) = named_by.get(&root).and_then(one_of) else {
             continue;
         };
-        if !asked_for.contains_key(&faction) {
+        if !asked_for.contains(&faction) {
             continue;
         }
         let icon = row.number(achievement_column::ICON_FILE_ID);
@@ -178,26 +167,10 @@ pub fn icons_of(files: &dyn GameFiles, wanted: &[String]) -> Result<HashMap<Stri
         }
     }
 
-    // Back to the name the caller asked under. Where two faction rows share a name and both reach
-    // an achievement, the lower achievement id answers — the same tie-break, one level up.
-    let mut answered: HashMap<&String, (u32, u32)> = HashMap::new();
-    for (faction, asked) in &asked_for {
-        let Some((id, icon)) = best.get(faction) else {
-            continue;
-        };
-        if answered.get(asked).is_none_or(|(had, _)| id < had) {
-            answered.insert(asked, (*id, *icon));
-        }
-    }
-    for (asked, (_, icon)) in answered {
-        found.insert(asked.clone(), icon);
+    for (faction, (_, icon)) in best {
+        found.insert(i64::from(faction), icon);
     }
     Ok(found)
-}
-
-/// One faction name reduced to what two spellings of it have in common.
-fn key_of(name: &str) -> String {
-    name.trim().to_lowercase()
 }
 
 /// The only member of a set, or nothing when there is more than one.
@@ -238,31 +211,30 @@ mod tests {
     use crate::casc::achievement_fixture_files;
 
     /// The fixture's factions and the icons they should reach. See
-    /// `scripts/make-achievement-fixtures.ts`.
-    const OWN: &str = "Emberforge Covenant";
+    /// `scripts/make-achievement-fixtures.ts`, where the ids below are the `Faction` id list.
+    const OWN: i64 = 3001;
     const OWN_ICON: u32 = 250002;
     /// A faction with two achievements of its own; the lower id carries this icon.
-    const TWO_OF_ITS_OWN: &str = "Tidewrought Wardens";
+    const TWO_OF_ITS_OWN: i64 = 3002;
     const TWO_OF_ITS_OWN_ICON: u32 = 250004;
     const LATER_COPYS_ICON: u32 = 250001;
     /// A faction only the aggregate achievement names, so its picture would be everyone's.
-    const AGGREGATE_ONLY: &str = "Glasswing Flight";
+    const AGGREGATE_ONLY: i64 = 3003;
     /// A faction the criteria table says nothing about at all.
-    const UNMENTIONED: &str = "Harborwatch";
-    /// A name two faction rows carry, only the second of which reaches an achievement.
-    const REPEATED: &str = "Venture Company";
+    const UNMENTIONED: i64 = 3004;
+    /// Two rows carry the name "Venture Company" and only the second reaches an achievement.
+    /// Which of them a segment meant was unanswerable from the name and is not a question at all
+    /// from the id.
+    const REPEATED_WITHOUT_ONE: i64 = 3005;
+    const REPEATED_WITH_ONE: i64 = 3006;
     const REPEATED_ICON: u32 = 250003;
     /// A faction reached only through a criterion of the wrong type.
-    const WRONG_TYPE: &str = "Ashfall Legion";
-
-    fn names(of: &[&str]) -> Vec<String> {
-        of.iter().map(|name| (*name).to_string()).collect()
-    }
+    const WRONG_TYPE: i64 = 3007;
 
     #[test]
     fn answers_with_the_icon_of_a_factions_own_exalted_achievement() {
-        let found = icons_of(&achievement_fixture_files(), &names(&[OWN])).unwrap();
-        assert_eq!(found.get(OWN), Some(&OWN_ICON));
+        let found = icons_of(&achievement_fixture_files(), &[OWN]).unwrap();
+        assert_eq!(found.get(&OWN), Some(&OWN_ICON));
     }
 
     /// The aggregate achievements — "25 Exalted Reputations" and its neighbours — reach most of the
@@ -271,7 +243,7 @@ mod tests {
     /// putting none on any.
     #[test]
     fn leaves_out_a_faction_only_an_aggregate_achievement_names() {
-        let found = icons_of(&achievement_fixture_files(), &names(&[AGGREGATE_ONLY])).unwrap();
+        let found = icons_of(&achievement_fixture_files(), &[AGGREGATE_ONLY]).unwrap();
         assert!(found.is_empty(), "{found:?}");
     }
 
@@ -279,18 +251,25 @@ mod tests {
     /// unshipped "[DNT]" tiers. The original is the low id.
     #[test]
     fn takes_the_first_of_several_achievements_a_faction_has_of_its_own() {
-        let found = icons_of(&achievement_fixture_files(), &names(&[TWO_OF_ITS_OWN])).unwrap();
-        assert_eq!(found.get(TWO_OF_ITS_OWN), Some(&TWO_OF_ITS_OWN_ICON));
-        assert_ne!(found.get(TWO_OF_ITS_OWN), Some(&LATER_COPYS_ICON));
+        let found = icons_of(&achievement_fixture_files(), &[TWO_OF_ITS_OWN]).unwrap();
+        assert_eq!(found.get(&TWO_OF_ITS_OWN), Some(&TWO_OF_ITS_OWN_ICON));
+        assert_ne!(found.get(&TWO_OF_ITS_OWN), Some(&LATER_COPYS_ICON));
     }
 
-    /// Fourteen names are on more than one `Faction` row, and there is no telling from the name
-    /// which row the client meant. Following only the first would draw nothing for a faction whose
-    /// picture is hanging off the second.
+    /// The join the id removes, kept as a test because the two rows are still there. Fourteen of
+    /// the real table's names sit on more than one row, and asking by name meant following every
+    /// one of them and hoping. Asked by id, each row answers only for itself — the one with an
+    /// achievement gives its icon and the one without gives nothing, rather than the pair of them
+    /// being folded together on a string.
     #[test]
-    fn follows_every_faction_row_a_name_is_on() {
-        let found = icons_of(&achievement_fixture_files(), &names(&[REPEATED])).unwrap();
-        assert_eq!(found.get(REPEATED), Some(&REPEATED_ICON));
+    fn answers_for_the_faction_row_asked_about_where_two_share_a_name() {
+        let found = icons_of(
+            &achievement_fixture_files(),
+            &[REPEATED_WITH_ONE, REPEATED_WITHOUT_ONE],
+        )
+        .unwrap();
+        assert_eq!(found.get(&REPEATED_WITH_ONE), Some(&REPEATED_ICON));
+        assert_eq!(found.get(&REPEATED_WITHOUT_ONE), None);
     }
 
     /// `Criteria`'s asset column means whatever the type column beside it says it means, so a
@@ -298,7 +277,7 @@ mod tests {
     /// an achievement about something else entirely.
     #[test]
     fn reads_only_the_criteria_that_are_about_a_reputation() {
-        let found = icons_of(&achievement_fixture_files(), &names(&[WRONG_TYPE])).unwrap();
+        let found = icons_of(&achievement_fixture_files(), &[WRONG_TYPE]).unwrap();
         assert!(found.is_empty(), "{found:?}");
     }
 
@@ -306,32 +285,24 @@ mod tests {
     /// Dornogal and its neighbours reach nothing here at all.
     #[test]
     fn leaves_out_a_faction_no_achievement_is_about() {
-        let found = icons_of(&achievement_fixture_files(), &names(&[OWN, UNMENTIONED])).unwrap();
+        let found = icons_of(&achievement_fixture_files(), &[OWN, UNMENTIONED]).unwrap();
         assert_eq!(found.len(), 1);
-        assert!(!found.contains_key(UNMENTIONED));
+        assert!(!found.contains_key(&UNMENTIONED));
     }
 
-    /// The name comes back the way it was asked for, whatever case the table spells it in: the
-    /// window keys its reputation lines by the string the segment carries and has nothing else.
-    #[test]
-    fn answers_under_the_name_it_was_asked_under() {
-        let asked = "  emberforge covenant ";
-        let found = icons_of(&achievement_fixture_files(), &names(&[asked])).unwrap();
-        assert_eq!(found.get(asked), Some(&OWN_ICON));
-    }
-
+    /// A gain the client would not place carries no id, and the window has nothing to ask about.
+    /// Nought and below are what those arrive as, and opening the game's storage to answer nothing
+    /// is the one cost this whole errand exists to avoid.
     #[test]
     fn answers_nothing_when_nothing_was_asked_about() {
         assert!(icons_of(&achievement_fixture_files(), &[])
             .unwrap()
             .is_empty());
-        assert!(icons_of(&achievement_fixture_files(), &names(&["", "  "]))
+        assert!(icons_of(&achievement_fixture_files(), &[0, -1])
             .unwrap()
             .is_empty());
     }
 
-    /// A tree whose parents loop is a shape only a table read wrongly has, and the reason to guard
-    /// it is that the alternative is a hung window rather than a wrong picture.
     #[test]
     fn does_not_climb_forever_up_a_tree_that_loops() {
         let parents = HashMap::from([(1u32, 2u32), (2, 3), (3, 1)]);

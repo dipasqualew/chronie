@@ -163,13 +163,16 @@ pub fn dashboard(database_path: &Path) -> Result<Value, Failure> {
         ))
     );
     load_rows!(
-        "SELECT segment_id, faction, amount, standing, standing_current, standing_max
+        "SELECT segment_id, faction, amount, standing, standing_current, standing_max, faction_id
          FROM reputation_gains ORDER BY segment_id, faction",
         "reputation",
         |row| Ok((
             row.get::<_, i64>(0)?,
             serde_json::json!({
                 "faction": row.get::<_, String>(1)?,
+                // Null on every gain filed before the addon carried one, and on any the client
+                // would not place. The window draws such a line without a picture.
+                "factionId": row.get::<_, Option<i64>>(6)?,
                 "amount": row.get::<_, i64>(2)?,
                 "standing": row.get::<_, Option<String>>(3)?,
                 "current": row.get::<_, Option<i64>>(4)?,

@@ -116,6 +116,19 @@ describe("ns.readHoldings", function()
         currentReactionThreshold = 9000,
         nextReactionThreshold = 21000,
     }
+    -- A warband reputation: every character on the account reads the same standing through
+    -- the same row, and `isAccountWide` on the row is the only thing that says so.
+    local DORNOGAL = {
+        isHeader = false,
+        isHeaderWithRep = false,
+        factionID = 2590,
+        name = "Council of Dornogal",
+        reaction = 6,
+        isAccountWide = true,
+        currentStanding = 12000,
+        currentReactionThreshold = 9000,
+        nextReactionThreshold = 21000,
+    }
     local FACTION_HEADER = {
         isHeader = true,
         isHeaderWithRep = false,
@@ -197,6 +210,9 @@ describe("ns.readHoldings", function()
         assert.same({ { id = 2245, name = "Flightstones", total = 5000, accountWide = false } }, held.currencies)
     end)
 
+    -- Filed under the id and drawn from the name. The id is what the store keys on, because
+    -- the name is localised and a client switched to German would otherwise come back as a
+    -- second character standing with a second faction.
     it("reads every faction the pane lists, reduced to the same bar a gain is", function()
         local held = ns.readHoldings(client({
             factions = { FACTION_HEADER, CONSORTIUM },
@@ -205,6 +221,7 @@ describe("ns.readHoldings", function()
 
         assert.same({
             {
+                id = 933,
                 faction = "The Consortium",
                 standing = "Honored",
                 current = 3000,
@@ -213,6 +230,45 @@ describe("ns.readHoldings", function()
                 system = "reaction",
             },
         }, held.reputation)
+    end)
+
+    -- The reputation half of what the currency rows next door already say: a warband
+    -- reputation is one standing every character on the account reports, and nothing
+    -- downstream could tell it from an alt's own grind by looking at the numbers.
+    it("says which standings are the warband's rather than this character's", function()
+        local held = ns.readHoldings(client({
+            factions = { DORNOGAL, CONSORTIUM },
+            labels = { [6] = "Honored" },
+        }))
+
+        assert.equal(2, #held.reputation)
+        assert.is_true(held.reputation[1].accountWide)
+        -- Absent rather than false, so a snapshot does not spend a key per faction per
+        -- character saying what its absence already said.
+        assert.is_nil(held.reputation[2].accountWide)
+    end)
+
+    -- A row with no id has nowhere to be filed: the store keys on the id, and putting the
+    -- localised name in its place is the very fork the id exists to prevent. Dropping it
+    -- costs one row of one pane; filing it by name costs a duplicate faction per language.
+    it("drops a pane row the client will not put an id on", function()
+        local held = ns.readHoldings(client({
+            factions = {
+                {
+                    isHeader = false,
+                    name = "The Consortium",
+                    reaction = 6,
+                    currentStanding = 12000,
+                    currentReactionThreshold = 9000,
+                    nextReactionThreshold = 21000,
+                },
+                CONSORTIUM,
+            },
+            labels = { [6] = "Honored" },
+        }))
+
+        assert.equal(1, #held.reputation)
+        assert.equal(933, held.reputation[1].id)
     end)
 
     -- A pure header carries a faction id of its own — the "Midnight" title reads 2698 on
@@ -260,6 +316,7 @@ describe("ns.readHoldings", function()
 
         assert.same({
             {
+                id = 2574,
                 faction = "Dream Wardens",
                 standing = "Renown 12",
                 current = 500,
@@ -325,13 +382,14 @@ describe("ns.readHoldings", function()
         assert.same({ name = "Flightstones", total = 5000, at = 1700 }, entry.currencies[2245])
         assert.same({ name = "Valorstones", total = 0, at = 1700 }, entry.currencies[3008])
         assert.same({
+            name = "The Consortium",
             standing = "Honored",
             current = 3000,
             max = 12000,
             rank = 6,
             system = "reaction",
             at = 1700,
-        }, entry.factions["The Consortium"])
+        }, entry.factions[933])
         -- The walk reads holdings, never the wallet: gold answers outright and is already
         -- read whole at every segment close.
         assert.is_nil(entry.gold)

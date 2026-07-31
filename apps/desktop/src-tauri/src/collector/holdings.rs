@@ -79,20 +79,34 @@ pub(super) fn sync_holdings(
             }
         }
 
-        for (faction, held) in &snapshot.factions {
+        for (key, held) in &snapshot.factions {
+            // Keyed by the faction's own id, the same parse the currencies above get and for a
+            // sharper reason: a key that is not a number is a standing an older addon filed under
+            // the faction's localised *name*, and there is nothing here that could turn one into
+            // the other — the mapping lives in the game's `Faction` table, which the collector
+            // does not open. Such a row is skipped, and the next sweep the player's client runs
+            // files it again under its id.
+            let Ok(faction_id) = key.parse::<i64>() else {
+                continue;
+            };
             transaction.execute(
                 "INSERT INTO character_standings (
-                         character_id, faction, standing, standing_current, standing_max,
-                         ladder_rank, ladder, observed_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                         character_id, faction_id, name, standing, standing_current, standing_max,
+                         ladder_rank, ladder, account_wide, observed_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     character_id,
-                    faction,
+                    faction_id,
+                    held.name.as_deref(),
                     held.standing.as_deref(),
                     held.current,
                     held.max,
                     held.rank,
                     held.system.as_deref(),
+                    // The addon writes the flag only when it is set, so an absent one is a
+                    // faction this character's own — which is what the column's default already
+                    // says for every row written before it existed.
+                    i64::from(held.account_wide.unwrap_or(false)),
                     held.at
                 ],
             )?;
@@ -200,41 +214,57 @@ pub(super) fn account_holdings(connection: &Connection) -> Result<Value, Failure
     }
 
     let mut statement = connection.prepare(
-        "SELECT s.faction, s.standing, s.standing_current, s.standing_max,
-                    s.ladder_rank, s.ladder, s.observed_at, c.source_key
+        "SELECT s.faction_id, s.name, s.standing, s.standing_current, s.standing_max,
+                    s.ladder_rank, s.ladder, s.observed_at, c.source_key, s.account_wide
              FROM character_standings s
              JOIN characters c ON c.id = s.character_id
-             ORDER BY s.faction, c.source_key",
+             ORDER BY s.faction_id, c.source_key",
     )?;
     let rows = statement.query_map([], |row| {
         Ok((
-            row.get::<_, String>(0)?,
+            row.get::<_, i64>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, i64>(9)? != 0,
             serde_json::json!({
-                "character": row.get::<_, String>(7)?,
-                "standing": row.get::<_, Option<String>>(1)?,
-                "current": row.get::<_, Option<i64>>(2)?,
-                "max": row.get::<_, Option<i64>>(3)?,
-                "rank": row.get::<_, Option<i64>>(4)?,
-                "system": row.get::<_, Option<String>>(5)?,
-                "at": row.get::<_, Option<i64>>(6)?,
+                "character": row.get::<_, String>(8)?,
+                "standing": row.get::<_, Option<String>>(2)?,
+                "current": row.get::<_, Option<i64>>(3)?,
+                "max": row.get::<_, Option<i64>>(4)?,
+                "rank": row.get::<_, Option<i64>>(5)?,
+                "system": row.get::<_, Option<String>>(6)?,
+                "at": row.get::<_, Option<i64>>(7)?,
             }),
         ))
     })?;
 
     let mut factions: Vec<Value> = Vec::new();
     for row in rows {
-        let (faction, held) = row?;
+        let (faction_id, name, account_wide, held) = row?;
         match factions
             .last_mut()
-            .filter(|entry| entry["faction"] == faction)
+            .filter(|entry| entry["id"] == faction_id)
         {
             Some(entry) => {
+                // The name is whatever the first character to report it called it, and a later
+                // row only fills the gap. Grouping is the id's job; this is only ever something
+                // to draw.
+                if entry["faction"].is_null() {
+                    entry["faction"] = serde_json::json!(name);
+                }
+                // Being the warband's is a fact about the faction rather than about the character
+                // that looked, so one row that says so settles it for all of them — the same rule
+                // a shared currency's flag keeps a few lines up.
+                if account_wide {
+                    entry["accountWide"] = serde_json::json!(true);
+                }
                 if let Some(seen) = entry["characters"].as_array_mut() {
                     seen.push(held);
                 }
             }
             None => factions.push(serde_json::json!({
-                "faction": faction,
+                "id": faction_id,
+                "faction": name,
+                "accountWide": account_wide,
                 "characters": [held],
             })),
         }
@@ -426,7 +456,8 @@ mod tests {
                 [3008] = { ["name"] = "Valorstones", ["total"] = 800, ["at"] = 1999913600 },
             },
             ["factions"] = {
-                ["Dream Wardens"] = {
+                [2574] = {
+                    ["name"] = "Dream Wardens",
                     ["standing"] = "Renown 22", ["current"] = 100, ["max"] = 2500,
                     ["rank"] = 22, ["system"] = "renown", ["at"] = 1999913600,
                 },
@@ -439,7 +470,8 @@ mod tests {
                 [2245] = { ["name"] = "Flightstones", ["total"] = 400, ["at"] = 2000000000 },
             },
             ["factions"] = {
-                ["Dream Wardens"] = {
+                [2574] = {
+                    ["name"] = "Dream Wardens",
                     ["standing"] = "Renown 8", ["current"] = 500, ["max"] = 2500,
                     ["rank"] = 8, ["system"] = "renown", ["at"] = 2000000000,
                 },
@@ -592,6 +624,7 @@ mod tests {
 
         let holdings = &install.dashboard()["holdings"];
         let wardens = &holdings["factions"][0];
+        assert_eq!(wardens["id"], 2574);
         assert_eq!(wardens["faction"], "Dream Wardens");
         assert_eq!(wardens["best"]["character"], "Alt-Ravencrest");
         assert_eq!(wardens["best"]["standing"], "Renown 22");
@@ -606,13 +639,16 @@ mod tests {
     fn judges_a_faction_on_the_ladder_most_of_its_characters_were_read_off() {
         let install = Install::of(&SavedVariables::new().holdings(
             r#"
-            ["Main-Ravencrest"] = { ["factions"] = { ["Brann Bronzebeard"] = {
+            ["Main-Ravencrest"] = { ["factions"] = { [2640] = {
+                ["name"] = "Brann Bronzebeard",
                 ["standing"] = "Best Friend", ["rank"] = 8400, ["system"] = "friendship",
             } } },
-            ["Second-Ravencrest"] = { ["factions"] = { ["Brann Bronzebeard"] = {
+            ["Second-Ravencrest"] = { ["factions"] = { [2640] = {
+                ["name"] = "Brann Bronzebeard",
                 ["standing"] = "Pal", ["rank"] = 1200, ["system"] = "friendship",
             } } },
-            ["Odd-Ravencrest"] = { ["factions"] = { ["Brann Bronzebeard"] = {
+            ["Odd-Ravencrest"] = { ["factions"] = { [2640] = {
+                ["name"] = "Brann Bronzebeard",
                 ["standing"] = "Honored", ["rank"] = 6, ["system"] = "reaction",
             } } },
         "#,
@@ -628,8 +664,8 @@ mod tests {
     #[test]
     fn leaves_a_faction_uncrowned_when_no_standing_can_be_placed_on_a_ladder() {
         let install = Install::of(&SavedVariables::new().holdings(
-            r#"["Main-Ravencrest"] = { ["factions"] = { ["Hallowfall Arathi"] = {
-                ["standing"] = "Honored",
+            r#"["Main-Ravencrest"] = { ["factions"] = { [2570] = {
+                ["name"] = "Hallowfall Arathi", ["standing"] = "Honored",
             } } },"#,
         ));
 
@@ -640,6 +676,91 @@ mod tests {
         // the same as this character being the one out in front.
         assert!(arathi["best"].is_null());
         assert_eq!(arathi["characters"].as_array().unwrap().len(), 1);
+    }
+
+    /// The defect the faction id was introduced for. Keyed on the localised name, the same
+    /// faction read on a client set to German arrived as a second row, and the account's best
+    /// standing was then decided between two halves of one grind. Keyed on the id, the two
+    /// readings are one faction whatever either client called it — and the name drawn beside it
+    /// is simply the first one reported.
+    #[test]
+    fn folds_two_spellings_of_one_faction_into_the_standing_they_both_are() {
+        let install = Install::of(&SavedVariables::new().holdings(
+            r#"
+            ["Main-Ravencrest"] = { ["factions"] = { [2574] = {
+                ["name"] = "Dream Wardens", ["standing"] = "Renown 8",
+                ["rank"] = 8, ["system"] = "renown", ["at"] = 2000000000,
+            } } },
+            ["Zweit-Ravencrest"] = { ["factions"] = { [2574] = {
+                ["name"] = "Traumwächter", ["standing"] = "Renown 22",
+                ["rank"] = 22, ["system"] = "renown", ["at"] = 2000000000,
+            } } },
+        "#,
+        ));
+
+        install.collect(2_000_000_100);
+
+        let factions = install.dashboard()["holdings"]["factions"]
+            .as_array()
+            .cloned()
+            .unwrap();
+        assert_eq!(factions.len(), 1);
+        assert_eq!(factions[0]["id"], 2574);
+        assert_eq!(factions[0]["characters"].as_array().unwrap().len(), 2);
+        assert_eq!(factions[0]["best"]["character"], "Zweit-Ravencrest");
+    }
+
+    /// A snapshot an older addon wrote is keyed on the faction's name, and nothing here can turn
+    /// one into an id — the mapping is in the game's own `Faction` table, which the collector
+    /// does not open. So it is skipped rather than guessed at, and the character's next sweep
+    /// files the same standing again under its id.
+    #[test]
+    fn skips_a_standing_an_older_addon_filed_under_a_name() {
+        let install = Install::of(&SavedVariables::new().holdings(
+            r#"["Main-Ravencrest"] = { ["factions"] = {
+                ["Dream Wardens"] = {
+                    ["standing"] = "Renown 8", ["rank"] = 8, ["system"] = "renown",
+                },
+                [2574] = {
+                    ["name"] = "Dream Wardens", ["standing"] = "Renown 8",
+                    ["rank"] = 8, ["system"] = "renown",
+                },
+            } },"#,
+        ));
+
+        install.collect(2_000_000_100);
+
+        let factions = install.dashboard()["holdings"]["factions"]
+            .as_array()
+            .cloned()
+            .unwrap();
+        assert_eq!(factions.len(), 1);
+        assert_eq!(factions[0]["id"], 2574);
+    }
+
+    /// A warband reputation is one standing every character on the account reports, so the flag
+    /// is a fact about the faction rather than about whoever looked. One character that has been
+    /// asked settles it for the roster — a snapshot written before the flag was ever collected is
+    /// an unasked question, not a "no".
+    #[test]
+    fn counts_a_faction_as_the_warbands_once_any_character_has_said_so() {
+        let install = Install::of(&SavedVariables::new().holdings(
+            r#"
+            ["Main-Ravencrest"] = { ["factions"] = { [2570] = {
+                ["name"] = "Hallowfall Arathi", ["standing"] = "Renown 4",
+                ["rank"] = 4, ["system"] = "renown",
+            } } },
+            ["Alt-Ravencrest"] = { ["factions"] = { [2570] = {
+                ["name"] = "Hallowfall Arathi", ["standing"] = "Renown 4",
+                ["rank"] = 4, ["system"] = "renown", ["accountWide"] = true,
+            } } },
+        "#,
+        ));
+
+        install.collect(2_000_000_100);
+
+        let arathi = &install.dashboard()["holdings"]["factions"][0];
+        assert_eq!(arathi["accountWide"], true);
     }
 
     /// A snapshot is where one character stands, not a log of where it has stood. Half of an

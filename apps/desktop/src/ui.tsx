@@ -787,10 +787,18 @@ export function PlaceIcon({
  */
 export function FactionIcon({
   faction,
+  factionId,
   factions,
   fallback = null,
 }: {
+  /** What the faction is called, which is what the label says and never what is looked up. */
   faction: string;
+  /**
+   * The faction's own id, which is what the picture is asked for by. Null on a gain filed before
+   * the addon carried one and on any the client would not place; such a row draws its fallback,
+   * which is what every row drew before there were pictures at all.
+   */
+  factionId?: number | null;
   /**
    * The pictures the window has been handed, shared between the modal and the roster. Absent where
    * nothing can draw one — a window with no game install behind it — which leaves the row as it was.
@@ -800,10 +808,11 @@ export function FactionIcon({
   fallback?: ReactNode;
 }): ReactNode {
   // The same argument as `PlaceIcon`: the book is a cache outside React, and `useBook` is what
-  // turns a picture landing into a redraw of the row that asked for it — see `book.ts`.
-  useBook(factions, [faction]);
+  // turns a picture landing into a redraw of the row that asked for it — see `book.ts`. An
+  // unplaced faction asks for nothing rather than for zero, which the book would spend a slot on.
+  useBook(factions, factionId ? [factionId] : []);
 
-  const picture = factions?.icon(faction);
+  const picture = factionId ? factions?.icon(factionId) : undefined;
   if (!picture) return fallback;
   return (
     <span className="faction-icon" role="img" aria-label={`Icon for ${faction}`}>

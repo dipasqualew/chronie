@@ -24,7 +24,7 @@ local _, ns = ...
 ---@field openTransmogCollection fun(sourceID: integer)?
 ---@field itemName fun(itemID: integer): string?
 ---@field now fun(): integer? Current time, for saying how old an account-wide figure is.
----@field accountStanding fun(faction: string): StandingRollup? Where the account as a whole
+---@field accountStanding fun(factionID: integer): StandingRollup? Where the account as a whole
 ---stands with a faction, so a gain can say who holds the highest standing anybody has reached
 ---with it — and whether a grind is already finished elsewhere.
 ---@field accountCurrency fun(id: integer): CurrencyRollup? What the whole account holds of a
@@ -638,7 +638,7 @@ function ns.newResultsWindow(deps)
             local best = ns.bestStanding({
                 faction = gain.faction,
                 gain = gain,
-                rollup = deps.accountStanding and deps.accountStanding(gain.faction),
+                rollup = deps.accountStanding and deps.accountStanding(gain.id),
                 character = deps.character and deps.character(),
                 now = deps.now and deps.now(),
             })
@@ -797,7 +797,7 @@ function ns.newResultsWindow(deps)
                     hover(ns.standingTooltip({
                         faction = gain.faction,
                         gain = gain,
-                        rollup = deps.accountStanding and deps.accountStanding(gain.faction),
+                        rollup = deps.accountStanding and deps.accountStanding(gain.id),
                         character = deps.character and deps.character(),
                         now = deps.now and deps.now(),
                     }))

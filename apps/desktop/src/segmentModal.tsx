@@ -324,6 +324,10 @@ function AccountStanding({
 }): ReactNode {
   const best = faction?.best;
   if (!best || best.character === character || !best.standing) return null;
+  // And nobody is further along on a warband reputation: it is one standing every character on
+  // the account reports, so naming an alt as ahead would be reporting the reader's own progress
+  // back at them under somebody else's name.
+  if (faction?.accountWide) return null;
   const when = best.at ? ` · read ${ago(best.at)}` : "";
   return (
     <p className="rep-account muted">
@@ -351,16 +355,27 @@ function Reputation({
 }): ReactNode {
   const gains = eventsOf(segment, "reputation");
   if (!gains.length) return null;
-  const byFaction = new Map((holdings?.factions || []).map((entry) => [entry.faction, entry]));
+  // Keyed by the faction's own id, which is what the rollup is grouped by. A gain the client
+  // would not place carries none and simply finds nothing here, the same as a faction no other
+  // character has ever reported.
+  const byFaction = new Map((holdings?.factions || []).map((entry) => [entry.id, entry]));
   return (
     <Section title="Reputation">
       <ul>
         {gains.map((gain) => (
           <li key={gain.faction}>
-            <FactionIcon faction={gain.faction} factions={factions} fallback="🎖️" /> {gain.faction}{" "}
-            <span className="muted">{signed(gain.amount)}</span> <At event={gain} />
+            <FactionIcon
+              faction={gain.faction}
+              factionId={gain.factionId}
+              factions={factions}
+              fallback="🎖️"
+            />{" "}
+            {gain.faction} <span className="muted">{signed(gain.amount)}</span> <At event={gain} />
             <StandingBar standing={gain} faction={gain.faction} />
-            <AccountStanding faction={byFaction.get(gain.faction)} character={segment.character} />
+            <AccountStanding
+              faction={gain.factionId ? byFaction.get(gain.factionId) : undefined}
+              character={segment.character}
+            />
           </li>
         ))}
       </ul>

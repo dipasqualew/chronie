@@ -4,7 +4,8 @@ local _, ns = ...
 ---already takes off a finished segment.
 ---@class HeldSweep
 ---@field currencies table[] `{ id, name, total, accountWide }` per currency the pane lists.
----@field reputation table[] `{ faction, standing, current, max, rank, system }` per faction.
+---@field reputation table[] `{ id, faction, accountWide, standing, current, max, rank, system }`
+---per faction, keyed downstream on `id` — see `ns.readFactionStanding`.
 
 ---Reads a currency the pane is showing, or nothing when the row is not one.
 ---
@@ -98,9 +99,15 @@ local function readStandings(clients)
             -- as well is what keeps this the list of factions the character has a standing
             -- with rather than the list of rows the pane drew.
             local state = ns.readFactionStanding(clients, data)
-            if state and (state.standing or state.rank) then
+            if state and state.id and (state.standing or state.rank) then
                 standings[#standings + 1] = {
-                    faction = data.name,
+                    -- Filed under the id and drawn from the name, never the other way round.
+                    -- A row the client will not put an id on cannot be filed at all: the store
+                    -- keys on the id, and a localised name in its place is a second row for
+                    -- the same faction the first time somebody plays in another language.
+                    id = state.id,
+                    faction = state.name,
+                    accountWide = state.accountWide,
                     standing = state.standing,
                     current = state.current,
                     max = state.max,
@@ -134,14 +141,15 @@ end
 ---handler where nothing can be put back is a worse trade than a hole. So the walk reads
 ---what is on show, and what is hidden stays as incomplete as it was before.
 ---
----**The currency hole is covered elsewhere now, and this walk is still worth its keep.**
+---**Both holes are covered elsewhere now, and this walk is still worth its keep.**
 ---`ns.currencyCensus` asks `C_CurrencyInfo.GetCurrencyInfo` about ids rather than about pane
 ---rows, so it reaches every currency including the ones under a collapsed group, and carries
----the caps besides. What it cannot be is *here*: a census is spread a slice per frame and so
----cannot finish inside a logout handler, and this is the freshest reading there will ever be
----of a character about to stop answering. So the two are complementary rather than one
----replacing the other — this one is live and shallow, that one is complete and occasional,
----and they are kept in tables of their own for exactly that reason.
+---the caps besides; `ns.reputationCensus` asks `C_Reputation.GetFactionDataByID` the same way,
+---which is what finally reaches the legacy reputations. What neither can be is *here*: a census
+---is spread a slice per frame and so cannot finish inside a logout handler, and this is the
+---freshest reading there will ever be of a character about to stop answering. So they are
+---complementary rather than one replacing the other — this one is live and shallow, those are
+---complete and occasional, and they are kept in tables of their own for exactly that reason.
 ---@param clients table? `{ currency = C_CurrencyInfo, reputation = C_Reputation,
 ---majorFaction = C_MajorFactionData, gossip = C_GossipInfo,
 ---reactionLabel = fun(reaction: integer): string? }`

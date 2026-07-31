@@ -1800,6 +1800,13 @@ if CreateFrame then
                     -- one of them can see a currency under a collapsed group and the other
                     -- cannot.
                     currency = C_CurrencyInfo,
+                    -- The same bundle `factionState` and `heldSweep` are handed, asked the
+                    -- third question: those two look a faction up by the name a chat line
+                    -- gave it and walk the rows the pane is drawing, and this one asks about
+                    -- ids — which is the only one of the three that can see a legacy
+                    -- reputation, because the pane hides those unless the player says
+                    -- otherwise.
+                    standing = reputationClients(),
                     achievement = {
                         categories = GetCategoryList,
                         categoryCount = GetCategoryNumAchievements,

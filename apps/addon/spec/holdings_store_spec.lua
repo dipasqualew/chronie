@@ -104,6 +104,29 @@ describe("ns.newHoldingsStore", function()
             assert.is_nil(db.holdings["Alt-Ravencrest"].currencies[2032].accountWide)
         end)
 
+        -- Filed under the faction's own id, with the name beside it for something to draw
+        -- rather than to key on. A name is localised, so a snapshot keyed on one forks into a
+        -- second faction the moment the player switches the client's language.
+        it("writes each character's standings under the faction's own id", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({
+                reputation = { { id = 2574, faction = "Dream Wardens", amount = 250,
+                    standing = "Renown 8", current = 500, max = 2500, rank = 8,
+                    system = "renown" } },
+            }))
+
+            assert.same({
+                name = "Dream Wardens",
+                standing = "Renown 8",
+                current = 500,
+                max = 2500,
+                rank = 8,
+                system = "renown",
+                at = NOW,
+            }, db.holdings["Alt-Ravencrest"].factions[2574])
+        end)
+
         it("keeps a faction the client would not place out of the snapshot", function()
             local store, db = newStore()
 
@@ -113,6 +136,21 @@ describe("ns.newHoldingsStore", function()
 
             assert.same({}, db.holdings["Alt-Ravencrest"].factions)
             assert.is_nil(db.holdings["Alt-Ravencrest"].updatedAt)
+        end)
+
+        -- The id and the standing arrive from the same lookup, so a gain with no id is a
+        -- faction the client would not place — but a gain the chat line named and the client
+        -- did place has both, and filing it under the name instead is the fork the id exists
+        -- to prevent. There is nowhere else for it to go, so it goes nowhere.
+        it("keeps a standing the client would not put an id on out of the snapshot", function()
+            local store, db = newStore()
+
+            store.record("Alt-Ravencrest", summary({
+                reputation = { { faction = "Hallowfall Arathi", amount = 250,
+                    standing = "Renown 4", rank = 4, system = "renown" } },
+            }))
+
+            assert.same({}, db.holdings["Alt-Ravencrest"].factions)
         end)
 
         it("ignores a summary with no character to file it against", function()
@@ -395,15 +433,25 @@ describe("ns.newHoldingsStore", function()
     end)
 
     describe("where the account stands with a faction", function()
-        ---@param faction string
+        -- Real ids, because the whole of what this rollup is now keyed on is the id: Dream
+        -- Wardens is 2574, Brann Bronzebeard's friendship is 2640, and the Council of
+        -- Dornogal — a warband reputation — is 2590.
+        local WARDENS = 2574
+        local BRANN = 2640
+        local DORNOGAL = 2590
+
+        ---@param id integer The faction's own id, which is what the snapshot is keyed on.
+        ---@param faction string What the client called it, which is only ever drawn.
         ---@param standing string
         ---@param rank integer
-        ---@param options table? `{ system = string?, current = integer? }`
+        ---@param options table? `{ system = string?, current = integer?, accountWide = boolean? }`
         ---@return table
-        local function gain(faction, standing, rank, options)
+        local function gain(id, faction, standing, rank, options)
             options = options or {}
             return {
+                id = id,
                 faction = faction,
+                accountWide = options.accountWide,
                 amount = 250,
                 standing = standing,
                 current = options.current or 0,
@@ -417,30 +465,80 @@ describe("ns.newHoldingsStore", function()
             local store = newStore()
 
             store.record("Main-Ravencrest", summary({
-                reputation = { gain("Dream Wardens", "Renown 8", 8) },
+                reputation = { gain(WARDENS, "Dream Wardens", "Renown 8", 8) },
             }))
             store.record("Alt-Ravencrest", summary({
-                reputation = { gain("Dream Wardens", "Renown 22", 22) },
+                reputation = { gain(WARDENS, "Dream Wardens", "Renown 22", 22) },
             }))
 
-            local rollup = store.standing("Dream Wardens")
+            local rollup = store.standing(WARDENS)
 
+            assert.equal(WARDENS, rollup.id)
+            assert.equal("Dream Wardens", rollup.faction)
             assert.equal("Alt-Ravencrest", rollup.best.character)
             assert.equal("Renown 22", rollup.best.standing)
             assert.equal(2, #rollup.characters)
+        end)
+
+        -- The fork the id keying exists to prevent, played out. Two characters on one account
+        -- can be read by clients set to two languages — an alt levelled while the player had
+        -- the game in German reports "Traumwächter" for the very faction the main reports as
+        -- "Dream Wardens" — and keyed on that string the account's best would be decided
+        -- between two halves of one grind. Keyed on 2574 they are one faction, as they are.
+        it("rolls two characters up as one faction however their clients spell it", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                reputation = { gain(WARDENS, "Dream Wardens", "Renown 8", 8) },
+            }))
+            store.record("Alt-Ravencrest", summary({
+                reputation = { gain(WARDENS, "Traumwächter", "Renown 22", 22) },
+            }))
+
+            local rollup = store.standing(WARDENS)
+
+            assert.equal(2, #rollup.characters)
+            assert.equal("Alt-Ravencrest", rollup.best.character)
+        end)
+
+        -- What the store looked like before #254: standings filed under the localised name.
+        -- Those rows are not migrated and are not reached — the next sweep of either pane
+        -- writes the same character's standing under the id and the legacy row is simply
+        -- left behind, which is cheaper and safer than guessing an id from a string.
+        it("does not find a standing an older addon filed under the faction's name", function()
+            local store, db = newStore({
+                db = {
+                    holdings = {
+                        ["Alt-Ravencrest"] = {
+                            currencies = {},
+                            factions = {
+                                ["Dream Wardens"] = {
+                                    standing = "Renown 22", current = 300, max = 2500,
+                                    rank = 22, system = "renown", at = NOW - DAY,
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+
+            assert.is_nil(store.standing(WARDENS))
+            -- Still on disk rather than deleted: it costs nothing to leave, and a reader that
+            -- went round destroying rows it did not understand would be a worse citizen.
+            assert.is_table(db.holdings["Alt-Ravencrest"].factions["Dream Wardens"])
         end)
 
         it("breaks a tie on progress into the level", function()
             local store = newStore()
 
             store.record("Main-Ravencrest", summary({
-                reputation = { gain("Dream Wardens", "Renown 8", 8, { current = 2000 }) },
+                reputation = { gain(WARDENS, "Dream Wardens", "Renown 8", 8, { current = 2000 }) },
             }))
             store.record("Alt-Ravencrest", summary({
-                reputation = { gain("Dream Wardens", "Renown 8", 8, { current = 100 }) },
+                reputation = { gain(WARDENS, "Dream Wardens", "Renown 8", 8, { current = 100 }) },
             }))
 
-            assert.equal("Main-Ravencrest", store.standing("Dream Wardens").best.character)
+            assert.equal("Main-Ravencrest", store.standing(WARDENS).best.character)
         end)
 
         -- A build that cannot reach the friendship API falls back to the reaction ladder,
@@ -451,41 +549,84 @@ describe("ns.newHoldingsStore", function()
             local store = newStore()
 
             store.record("Main-Ravencrest", summary({
-                reputation = { gain("Brann Bronzebeard", "Best Friend", 8400,
+                reputation = { gain(BRANN, "Brann Bronzebeard", "Best Friend", 8400,
                     { system = "friendship" }) },
             }))
             store.record("Second-Ravencrest", summary({
-                reputation = { gain("Brann Bronzebeard", "Pal", 1200, { system = "friendship" }) },
+                reputation = { gain(BRANN, "Brann Bronzebeard", "Pal", 1200,
+                    { system = "friendship" }) },
             }))
             store.record("Odd-Ravencrest", summary({
-                reputation = { gain("Brann Bronzebeard", "Honored", 6, { system = "reaction" }) },
+                reputation = { gain(BRANN, "Brann Bronzebeard", "Honored", 6,
+                    { system = "reaction" }) },
             }))
 
-            local rollup = store.standing("Brann Bronzebeard")
+            local rollup = store.standing(BRANN)
 
             assert.equal("Main-Ravencrest", rollup.best.character)
             -- Set aside for ranking, still listed: it is a real reading of a real character.
             assert.equal(3, #rollup.characters)
         end)
 
+        -- Whether a standing is the warband's is a fact about the faction rather than about
+        -- whoever looked, so one character that has been asked settles it for the roster — the
+        -- same rule a shared currency's flag keeps, and for the same reason: a snapshot
+        -- written before the flag was ever collected is an unasked question, not a "no".
+        it("treats a standing as the warband's once any character has read the flag", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                reputation = { gain(DORNOGAL, "Council of Dornogal", "Renown 8", 8) },
+            }))
+            store.record("Alt-Ravencrest", summary({
+                reputation = { gain(DORNOGAL, "Council of Dornogal", "Renown 8", 8,
+                    { accountWide = true }) },
+            }))
+
+            assert.is_true(store.standing(DORNOGAL).accountWide)
+        end)
+
+        -- Only a walk of the pane reads the flag; a gain arrives off a chat line that never
+        -- carries one. Clearing it on every gain would unshare a warband reputation between
+        -- two zonings-in and start counting it once per alt again.
+        it("keeps the warband flag through a later reading that says nothing about it", function()
+            local store = newStore()
+
+            store.record("Main-Ravencrest", summary({
+                reputation = { gain(DORNOGAL, "Council of Dornogal", "Renown 8", 8,
+                    { accountWide = true }) },
+            }))
+            store.record("Main-Ravencrest", summary({
+                reputation = { gain(DORNOGAL, "Council of Dornogal", "Renown 9", 9) },
+            }))
+
+            local rollup = store.standing(DORNOGAL)
+
+            assert.is_true(rollup.accountWide)
+            assert.equal("Renown 9", rollup.best.standing)
+        end)
+
         it("never crowns a standing that cannot be placed on a ladder at all", function()
             local store = newStore()
 
             store.record("Main-Ravencrest", summary({
-                reputation = { { faction = "Dream Wardens", amount = 250, standing = "Honored" } },
+                reputation = { { id = WARDENS, faction = "Dream Wardens", amount = 250,
+                    standing = "Honored" } },
             }))
 
             -- Recorded, because the name is worth keeping; never the best, because there is
             -- nothing to measure it with.
-            local rollup = store.standing("Dream Wardens")
+            local rollup = store.standing(WARDENS)
             assert.is_nil(rollup)
         end)
 
         it("says nothing about a faction no character has been seen with", function()
             local store = newStore()
 
+            assert.is_nil(store.standing(WARDENS))
+            -- A name is not an id, and asking with one is a caller that has not been updated
+            -- rather than a faction to go looking for.
             assert.is_nil(store.standing("Dream Wardens"))
-            assert.is_nil(store.standing(""))
             assert.is_nil(store.standing(nil))
         end)
     end)

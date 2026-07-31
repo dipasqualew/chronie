@@ -1193,19 +1193,21 @@ async fn place_heroes(
     Ok(dto::convert(serde_json::json!({ "icons": icons }))?)
 }
 
-/// The pictures a list of factions is drawn with, keyed by the name rather than the file.
+/// The pictures a list of factions is drawn with, keyed by the faction id rather than the file.
 ///
-/// Keyed by the name for the same reason [`place_icons`] is: a reputation arrives from the addon
-/// under the name the client gave the faction, and that name is the only thing the window holds.
+/// Keyed by the id rather than by the name the way [`place_icons`] is, and that is the difference
+/// worth naming: a place arrives from the addon as a localised string and has nothing else, where
+/// a reputation now arrives with `Faction`'s own id beside it. So this join needs no massaging and
+/// no fan-in over the fourteen names that sit on several `Faction` rows.
 ///
-/// The hop behind it is four tables rather than two, and the picture is borrowed rather than the
-/// faction's own — `Faction` has no icon column, so what this answers with is the icon of the
-/// achievement for reaching Exalted with that faction. Most of what it is asked about comes back
-/// with nothing: the modern renown factions have no such achievement. See [`reputations::icons_of`].
+/// The picture is still borrowed rather than the faction's own — `Faction` has no icon column, so
+/// what this answers with is the icon of the achievement for reaching Exalted with that faction.
+/// Most of what it is asked about comes back with nothing: the modern renown factions have no such
+/// achievement. See [`reputations::icons_of`].
 #[tauri::command]
 #[specta::specta]
 async fn reputation_icons(
-    factions: Vec<String>,
+    factions: Vec<i64>,
     state: State<'_, AppState>,
 ) -> Result<dto::IconsPayload, CommandError> {
     let cache = Arc::clone(&state.icons);
@@ -1224,7 +1226,7 @@ async fn reputation_icons(
     let mut icons = serde_json::Map::new();
     for (faction, file) in named {
         if let Some(url) = by_file["icons"].get(file.to_string()) {
-            icons.insert(faction, url.clone());
+            icons.insert(faction.to_string(), url.clone());
         }
     }
     Ok(dto::convert(serde_json::json!({ "icons": icons }))?)

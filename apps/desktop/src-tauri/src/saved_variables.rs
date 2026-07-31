@@ -463,6 +463,7 @@ pub struct CurrencyGain {
 
 optional_fields!(RawReputationGain {
     faction: String,
+    id: i64,
     amount: i64,
     standing: String,
     current: i64,
@@ -475,6 +476,7 @@ impl RawReputationGain {
     fn normalize(self) -> Option<ReputationGain> {
         Some(ReputationGain {
             faction: self.faction?,
+            id: self.id,
             amount: self.amount.unwrap_or_default(),
             standing: self.standing,
             current: self.current,
@@ -488,6 +490,10 @@ impl RawReputationGain {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReputationGain {
     pub faction: String,
+    /// The faction's own id, which the addon carries beside the localised name a chat line
+    /// gave it. Absent on a gain the client would not place, and on every gain filed before
+    /// the addon started asking.
+    pub id: Option<i64>,
     pub amount: i64,
     pub standing: Option<String>,
     pub current: Option<i64>,
@@ -948,12 +954,17 @@ optional_fields!(RawObservedTotal {
     at: i64
 });
 
+// One faction's standing as the sweep filed it, under the faction's own id. `name` is what the
+// client called it and is never the key: a localised name forks the store the first time somebody
+// plays in another language, and it is the join `reputations.rs` no longer has to make.
 optional_fields!(RawStanding {
+    name: String,
     standing: String,
     current: i64,
     max: i64,
     rank: i64,
     system: String,
+    account_wide: bool,
     at: i64,
 });
 
@@ -1036,6 +1047,21 @@ optional_fields!(RawCensusCurrency {
     week_cap: i64,
     account_wide: bool,
     transferable: bool,
+    seen: i64,
+});
+
+// One faction as the census walked it. The same bar the sweep files, reached by id rather than
+// off the pane — which is what makes the legacy reputations, invisible to the pane, reachable at
+// all. `standing` and `rank` are the two halves of "where is this character": a name to draw and
+// a number to compare, and the domain refuses a faction that offers neither.
+optional_fields!(RawCensusStanding {
+    name: String,
+    standing: String,
+    current: i64,
+    max: i64,
+    rank: i64,
+    system: String,
+    account_wide: bool,
     seen: i64,
 });
 

@@ -610,24 +610,35 @@ describe("SegmentButton", () => {
  * before there were any pictures where there is not.
  */
 describe("the picture on a reputation line", () => {
-  /** A faction the game has an Exalted achievement for, and one it never will. */
-  const EXALTED = "Argent Dawn";
-  const RENOWN = "Council of Dornogal";
+  /**
+   * A faction the game has an Exalted achievement for, and one it never will — each as the pair
+   * a line actually carries. The id is what the picture is asked for by and the name is only ever
+   * the label, which is the whole point of the split: two clients in two languages spell the
+   * Argent Dawn differently and ask for 529 either way.
+   */
+  const EXALTED = { id: 529, name: "Argent Dawn" };
+  const RENOWN = { id: 2590, name: "Council of Dornogal" };
 
-  const book = (held: Record<string, string>) =>
+  const book = (held: Record<number, string>) =>
     createFactionIcons({
       load: (asked) =>
         Promise.resolve({
           icons: Object.fromEntries(
-            asked.filter((name) => held[name]).map((name) => [name, held[name] as string]),
+            asked.filter((id) => held[id]).map((id) => [String(id), held[id] as string]),
           ),
         }),
     });
 
   it("draws the icon of the achievement the faction is earned through", async () => {
-    render(<FactionIcon faction={EXALTED} factions={book({ [EXALTED]: FACTION_PICTURE })} />);
+    render(
+      <FactionIcon
+        faction={EXALTED.name}
+        factionId={EXALTED.id}
+        factions={book({ [EXALTED.id]: FACTION_PICTURE })}
+      />,
+    );
 
-    const icon = await screen.findByRole("img", { name: `Icon for ${EXALTED}` });
+    const icon = await screen.findByRole("img", { name: `Icon for ${EXALTED.name}` });
     expect(icon.querySelector("img")?.getAttribute("src")).toBe(FACTION_PICTURE);
     expect(icon.querySelector("img")?.getAttribute("alt")).toBe("");
   });
@@ -640,8 +651,9 @@ describe("the picture on a reputation line", () => {
   it("falls back to what the line carried before, for a faction the game cannot draw", async () => {
     const view = render(
       <FactionIcon
-        faction={RENOWN}
-        factions={book({ [EXALTED]: FACTION_PICTURE })}
+        faction={RENOWN.name}
+        factionId={RENOWN.id}
+        factions={book({ [EXALTED.id]: FACTION_PICTURE })}
         fallback="🎖️"
       />,
     );
@@ -656,14 +668,42 @@ describe("the picture on a reputation line", () => {
    * decoration rather than a reading of the game.
    */
   it("draws nothing where the line never had a mark", async () => {
-    const view = render(<FactionIcon faction={RENOWN} factions={book({})} />);
+    const view = render(
+      <FactionIcon faction={RENOWN.name} factionId={RENOWN.id} factions={book({})} />,
+    );
 
     await waitFor(() => expect(view.container.textContent).toBe(""));
   });
 
+  /**
+   * A gain the addon filed before it carried ids, and one the client would not place, both arrive
+   * with no id at all. Such a line has nothing to ask about, so it never asks — and never spends a
+   * slot in the book on a key that can only ever come back empty.
+   */
+  it("asks for nothing at all for a gain the client would not place", async () => {
+    let asked: number[] = [];
+    const view = render(
+      <FactionIcon
+        faction={EXALTED.name}
+        factions={createFactionIcons({
+          load: (keys) => {
+            asked = [...asked, ...keys];
+            return Promise.resolve({ icons: {} });
+          },
+        })}
+        fallback="🎖️"
+      />,
+    );
+
+    await waitFor(() => expect(view.container.textContent).toBe("🎖️"));
+    expect(asked).toEqual([]);
+  });
+
   /** A window with no game install behind it draws the line exactly as it always did. */
   it("keeps the line as it was when nothing can look a picture up", () => {
-    const view = render(<FactionIcon faction={EXALTED} fallback="🎖️" />);
+    const view = render(
+      <FactionIcon faction={EXALTED.name} factionId={EXALTED.id} fallback="🎖️" />,
+    );
 
     expect(view.container.textContent).toBe("🎖️");
     expect(view.container.querySelector(".faction-icon")).toBeNull();

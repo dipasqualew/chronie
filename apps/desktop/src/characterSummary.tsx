@@ -229,12 +229,13 @@ function Factions({
         </thead>
         <tbody>
           {entry.factions.map((standing) => (
-            <tr key={standing.faction}>
+            <tr key={standing.id}>
               {/* No glyph to fall back to here: this column was plain names before there were
                   any pictures, and adding a medal to the rows the game cannot draw would be
                   inventing decoration rather than reading the game. */}
               <th scope="row">
-                <FactionIcon faction={standing.faction} factions={icons} /> {standing.faction}
+                <FactionIcon faction={standing.faction} factionId={standing.id} factions={icons} />{" "}
+                {standing.faction}
               </th>
               <td>
                 <StandingBar standing={standing} faction={standing.faction} />
@@ -256,6 +257,13 @@ function Factions({
  * account" would read as though somebody else happened to share it.
  */
 function leaderOf(standing: CharacterFaction): string {
+  // A warband reputation is one standing the whole account shares, so there is no furthest
+  // character to name: every alt reports the same numbers and whichever of them happened to sort
+  // first would be crowned for standing exactly where everybody else does. Saying whose it is
+  // answers the question the column was asked.
+  if (standing.accountWide) {
+    return `The warband${standing.standing ? ` · ${standing.standing}` : ""}`;
+  }
   if (standing.leads) return `This character${standing.standing ? ` · ${standing.standing}` : ""}`;
   const best = standing.best;
   if (!best) return "";
