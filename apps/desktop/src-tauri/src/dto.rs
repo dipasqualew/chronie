@@ -461,6 +461,30 @@ dto!(WearersPayload {
     pub read_count: usize,
 });
 
+dto!(SetOpening {
+    /// The look this is a way in to, which is what joins it to the row already on screen.
+    pub appearance_id: u32,
+    pub item_id: u32,
+    pub name: String,
+    pub required_level: u32,
+    pub quality: u32,
+});
+
+dto!(OpeningsPayload {
+    pub set_id: u32,
+    /// One per look of the set that an item nobody is locked out of also gives — the cheapest
+    /// such item, by `wardrobe::named`. A look the set's own items already open to everybody
+    /// is in here too, naming one of them; which of the set's rows are worth drawing against
+    /// this is the window's question rather than this read's.
+    pub openings: Vec<SetOpening>,
+    /// And the looks nothing in the game sells around: read, and locked all the way down.
+    pub blocked: Vec<u32>,
+    pub read_count: usize,
+    /// The set's looks this install can read no item of, which are in neither list above. The
+    /// game encrypts the content it has not shipped, and "nothing is known" is not "shut".
+    pub withheld_count: usize,
+});
+
 dto!(TransmogAppearance {
     pub modified_appearance_id: u32,
     pub item_id: u32,

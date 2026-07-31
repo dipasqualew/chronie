@@ -17,6 +17,7 @@ import type {
   CustomSetsPayload,
   GalleryKind,
   MarkSubjectKind,
+  OpeningsPayload,
   QualitiesFile,
   SetGalleryPayload,
   SetQualitiesFile,
@@ -244,9 +245,50 @@ const WARDROBE: Record<string, WardrobePayload> = {
   },
 };
 
+/**
+ * A set the game locks to one class, which is what the openings panel is drawn for.
+ *
+ * Three looks and two of them the Paladin's own: a helm something outside the set sells to
+ * everybody, and a pair of greaves nothing does. The third is unrestricted and is the control —
+ * it stops nobody, so it is not a row of the panel however open the set's other two are.
+ */
+const LIGHTSWORN_HELM = appearance({
+  appearanceId: 10,
+  itemId: 10,
+  modifiedAppearanceId: 10,
+  name: "Lightsworn Helm",
+  displayType: 0,
+  displayInfoId: 900_101,
+  allowableClass: 0x0002,
+});
+const LIGHTSWORN_GREAVES = appearance({
+  appearanceId: 11,
+  itemId: 11,
+  modifiedAppearanceId: 11,
+  name: "Lightsworn Greaves",
+  displayType: 5,
+  displayInfoId: 900_102,
+  allowableClass: 0x0002,
+});
+const LIGHTSWORN_BREASTPLATE = appearance({
+  appearanceId: 12,
+  itemId: 12,
+  modifiedAppearanceId: 12,
+  name: "Lightsworn Breastplate",
+  displayType: 3,
+  displayInfoId: 900_103,
+});
+
 const CONTENTS: Record<number, TransmogSetItemsPayload> = {
   201: { setId: 201, appearances: [HELM, ROBE, ARROWS], readCount: 3, withheldCount: 0 },
   203: { setId: 203, appearances: [OTHER_HELM, WITHHELD], readCount: 1, withheldCount: 1 },
+  // The class-locked set the openings panel is about — see the describe of that name below.
+  701: {
+    setId: 701,
+    appearances: [LIGHTSWORN_HELM, LIGHTSWORN_GREAVES, LIGHTSWORN_BREASTPLATE],
+    readCount: 3,
+    withheldCount: 0,
+  },
   // The two members of the family below, which hold different clothes: the whole reason a rail
   // is worth clicking is that the harder difficulty is a different set of armour.
   401: { setId: 401, appearances: [HELM], readCount: 1, withheldCount: 0 },
@@ -699,6 +741,15 @@ function view(
      * looking at the grid it was written against.
      */
     wearers?: () => Promise<WearersPayload>;
+    /**
+     * And which of one set's locked looks something outside it sells to anybody — see
+     * `openings.ts`.
+     *
+     * Left out by default, the same way the wearers read is: a set that shuts nobody out has no
+     * question to ask, and every test that predates the panel is looking at the card it was
+     * written against.
+     */
+    openings?: (setId: number) => Promise<OpeningsPayload>;
   } = {},
 ) {
   const { stage, shown, resets } = fakeStage();
@@ -776,6 +827,7 @@ function view(
       loadQualities={loadQualities}
       loadSetQualities={loadSetQualities}
       loadWearers={options.wearers}
+      loadOpenings={options.openings}
     />,
   );
   return {
@@ -1691,6 +1743,162 @@ describe("who a card says can wear the set", () => {
       expect(screen.getByText("Reading the game's transmog tables…")).toBeTruthy(),
     );
     expect(held.loadWearers).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The panel inside an opened class-locked set: how anybody gets the looks it keeps from them.
+ *
+ * The chip above says whether the lock stands for the whole set; this says which slot did it, and
+ * where to go instead. That is the difference between "Paladin only" and the eight rows a reader
+ * standing in front of a raid tier actually needs — seven of them on a world drop and the eighth
+ * on nothing at all. See `openings.ts` for the rows and `openings.rs` for the read behind them.
+ */
+describe("how anybody gets the looks a set locks", () => {
+  afterEach(cleanup);
+
+  const LOCKED: TransmogPayload = {
+    sets: [
+      set({ id: 701, name: "Lightsworn Plate", group: "Icecrown Citadel", classMask: 0x0002 }),
+    ],
+    readCount: 1,
+    declaredCount: 1,
+    withheldCount: 0,
+  };
+
+  /**
+   * What the backend read out of every item in the game for that set.
+   *
+   * The helm is opened by an item belonging to no set at all — which is where 87% of these live,
+   * and the whole reason the read walks the game rather than the set — and the greaves are in
+   * `blocked`, which is the one row the panel exists to draw.
+   */
+  const SOLD_AROUND: OpeningsPayload = {
+    setId: 701,
+    openings: [
+      {
+        appearanceId: 10,
+        itemId: 30_025,
+        name: "Crown of the Wanderer",
+        requiredLevel: 30,
+        quality: 3,
+      },
+    ],
+    blocked: [11],
+    readCount: 1,
+    withheldCount: 0,
+  };
+
+  /** The read, held open until a test lets it answer — the panel says so meanwhile. */
+  function heldOpenings() {
+    let hand: ((payload: OpeningsPayload) => void) | null = null;
+    return {
+      loadOpenings: vi.fn(
+        (_setId: number) =>
+          new Promise<OpeningsPayload>((resolve) => {
+            hand = resolve;
+          }),
+      ),
+      answer: (payload: OpeningsPayload): void => {
+        if (!hand) throw new Error("nothing has asked how anybody gets anything");
+        hand(payload);
+      },
+    };
+  }
+
+  /** The panel's table, which is named after the set whose locks it is about. */
+  async function panelOf(card: HTMLElement, name: string): Promise<HTMLElement> {
+    return within(card).findByRole("table", { name: `How anyone gets the looks ${name} locks` });
+  }
+
+  /**
+   * One row of it, found by the slot it is named after.
+   *
+   * The slot is the row's header rather than a cell, which is what lets a reader scanning the
+   * body find the row and a screen reader announce which look each answer belongs to.
+   */
+  function slotRow(table: HTMLElement, slot: string): HTMLElement {
+    const row = within(table).getByRole("rowheader", { name: slot }).closest("tr");
+    if (!row) throw new Error(`${slot} is on no row of the panel`);
+    return row as HTMLElement;
+  }
+
+  // The whole feature, seen from the reader's side: the slot that locked them out, the item they
+  // cannot have, and the item anybody can — which is in no set and unreachable from this grid.
+  it("names the item anybody can wear for a look the set keeps to one class", async () => {
+    const held = heldOpenings();
+    view({ payload: LOCKED, openings: held.loadOpenings });
+    const card = await open("Lightsworn Plate");
+    await waitFor(() => expect(held.loadOpenings).toHaveBeenCalledWith(701));
+
+    await act(async () => {
+      held.answer(SOLD_AROUND);
+    });
+    const table = await panelOf(card, "Lightsworn Plate");
+    const head = slotRow(table, "Head");
+    expect(within(head).getByRole("cell", { name: "Lightsworn Helm" })).toBeTruthy();
+    // The level and the colour beside the name, which are what a reader recognises a drop by.
+    expect(
+      within(head).getByRole("cell", { name: /Crown of the Wanderer · Rare · Level 30/ }),
+    ).toBeTruthy();
+    // And the count over the table, which is the answer for a reader who reads nothing else.
+    expect(
+      within(card).getByText("1 of the 2 looks this set locks is on an item anybody can wear"),
+    ).toBeTruthy();
+  });
+
+  // The row the panel is read for, and the reason it is a sentence rather than an empty cell: a
+  // blank is a thing that failed to load, and this is the fact that decides whether the set is
+  // worth chasing at all.
+  it("says in words when nothing in the game sells a locked look around", async () => {
+    const held = heldOpenings();
+    view({ payload: LOCKED, openings: held.loadOpenings });
+    const card = await open("Lightsworn Plate");
+    await waitFor(() => expect(held.loadOpenings).toHaveBeenCalledWith(701));
+
+    await act(async () => {
+      held.answer(SOLD_AROUND);
+    });
+    const table = await panelOf(card, "Lightsworn Plate");
+    expect(
+      within(slotRow(table, "Legs")).getByRole("cell", {
+        name: "Nothing gives this look to another class",
+      }),
+    ).toBeTruthy();
+    // And the look the set already sells to everybody is no row at all: nobody was stopped at
+    // it, and a table where half the rows say "you were never kept from this" buries the one
+    // that says they were.
+    expect(within(table).queryByRole("rowheader", { name: "Chest" })).toBeNull();
+  });
+
+  // The cost guard. The read is the walk of `Item` and `ItemSparse` the item browser pays for one
+  // slot at a time, and it is paid again per set opened — so a set that shuts nobody out must not
+  // ask it. Only what the set holds can say that, which is why it is asked after the contents
+  // land rather than when the card is clicked.
+  it("asks nothing at all for a set that locks nobody out", async () => {
+    const held = heldOpenings();
+    view({ openings: held.loadOpenings });
+    const card = await open("Tideglass Regalia");
+
+    expect(held.loadOpenings).not.toHaveBeenCalled();
+    expect(within(card).queryByRole("table")).toBeNull();
+  });
+
+  // A read in flight is a second of the game's own storage, and the panel's whole content is
+  // what could not be found — so it says it is still looking rather than drawing an empty table
+  // a reader would read as an answer.
+  it("says it is still reading until the answer lands", async () => {
+    const held = heldOpenings();
+    view({ payload: LOCKED, openings: held.loadOpenings });
+    const card = await open("Lightsworn Plate");
+    await waitFor(() => expect(held.loadOpenings).toHaveBeenCalledWith(701));
+
+    expect(within(card).getByText("Reading who else sells these looks…")).toBeTruthy();
+    expect(
+      within(card).queryByRole("table", {
+        name: "How anyone gets the looks Lightsworn Plate locks",
+      }),
+    ).toBeNull();
   });
 });
 

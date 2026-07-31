@@ -63,6 +63,8 @@ import { NO_MARK_FILTER, indexMarks, tagChoices } from "./marks";
 import { MarkControls, MarkFilters } from "./marksEditor";
 import type { MarkActions } from "./marksEditor";
 import { REASONS, wearable as canBeWorn } from "./modelPreview";
+import { locksAnything } from "./openings";
+import { OpeningsPanel } from "./openingsPanel";
 import {
   NOTHING_ON,
   isWorn,
@@ -122,6 +124,7 @@ import type {
   InGameSetSlot,
   InGameSetsPayload,
   MarkSubjectKind,
+  OpeningsPayload,
   Quality,
   QualitiesFile,
   SetGalleryPayload,
@@ -257,6 +260,15 @@ export interface TransmogViewProps {
    * mask says, which is what they said before any of this existed.
    */
   loadWearers?: () => Promise<WearersPayload>;
+  /**
+   * And which of one set's looks something outside it sells to anybody — see `openings.rs`.
+   *
+   * Per set and only for a set whose own rows lock somebody out, which is the difference from
+   * `loadWearers` above: that is one read for the whole grid and this costs the same walk of
+   * `Item` and `ItemSparse` again for each set opened. A set that shuts nobody out has nothing
+   * to answer, so nothing is asked for it.
+   */
+  loadOpenings?: (setId: number) => Promise<OpeningsPayload>;
 }
 
 /**
@@ -267,6 +279,15 @@ export interface TransmogViewProps {
  * can describe.
  */
 const NOBODY_ASKED = (): Promise<WearersPayload> => Promise.resolve({ wearers: [], readCount: 0 });
+
+/**
+ * And what an unwired window says about how anybody gets a locked look: that it read nothing.
+ *
+ * An empty answer rather than a rejected promise, so the panel says what it says of a set whose
+ * every locked look is encrypted rather than the sentence a failed command gets.
+ */
+const NOTHING_OPEN = (setId: number): Promise<OpeningsPayload> =>
+  Promise.resolve({ setId, openings: [], blocked: [], readCount: 0, withheldCount: 0 });
 
 /**
  * Which of the four browsers the reader is in.
@@ -298,6 +319,7 @@ export function TransmogView({
   loadQualities,
   loadSetQualities = loadSetStore,
   loadWearers = NOBODY_ASKED,
+  loadOpenings = NOTHING_OPEN,
 }: TransmogViewProps): ReactNode {
   const [browsing, setBrowsing] = useState<Browsing>("sets");
   /**
@@ -357,6 +379,10 @@ export function TransmogView({
   // throughout, so a set opened after its neighbour draws complete straight away.
   const icons = useRef(new Map<number, string>()).current;
   const asked = useRef(new Set<number>()).current;
+  // And how anybody gets the looks each opened set locks, kept the same way and for the same
+  // reason: it is read out of the installed game, so a set opened twice is read once.
+  const openings = useRef(new Map<number, OpeningsPayload>()).current;
+  const askedOpenings = useRef(new Set<number>()).current;
   // Which pictures have already been sent for. Both halves of the browser ask through the same
   // door — a wardrobe list of a hundred rows and a set of twelve want the same textures often
   // enough — and this is what stops the second asker asking again while the first is in flight.
@@ -390,6 +416,28 @@ export function TransmogView({
   );
 
   /**
+   * Reads which of a set's locked looks something else in the game sells to anybody.
+   *
+   * A third step behind the two below rather than part of either, because it is the dearest of
+   * the three and the one fewest sets need — and because the list of looks is worth reading
+   * while it happens. A read that will not come leaves the panel saying it is still reading,
+   * which is the honest thing for a panel whose whole content is what could not be found.
+   */
+  const wantOpenings = useCallback(
+    (setId: number): void => {
+      if (askedOpenings.has(setId)) return;
+      askedOpenings.add(setId);
+      void loadOpenings(setId)
+        .then((answer) => {
+          openings.set(setId, answer);
+          redraw();
+        })
+        .catch(() => undefined);
+    },
+    [loadOpenings, openings, askedOpenings],
+  );
+
+  /**
    * Reads what a set is made of, and then the pictures its rows are waiting on.
    *
    * The rows are worth drawing before the icons arrive — decoding a set's worth of textures
@@ -405,6 +453,10 @@ export function TransmogView({
           known.set(setId, answer);
           redraw();
           wantIcons(iconIds(answer));
+          // Only now can it be known whether there is anything to ask: the question is about
+          // the set's *locked* looks, and what the set locks is what has just arrived. A set
+          // open to everybody costs the walk of `Item` and `ItemSparse` for nothing.
+          if (locksAnything(appearanceRows(answer))) wantOpenings(setId);
         })
         // A set that will not come is worth saying, because the reader clicked to see what was
         // in it.
@@ -413,7 +465,7 @@ export function TransmogView({
           redraw();
         });
     },
-    [loadSet, wantIcons, known, asked],
+    [loadSet, wantIcons, wantOpenings, known, asked],
   );
 
   const openSet = useCallback(
@@ -785,6 +837,7 @@ export function TransmogView({
                             read(member.id);
                           }}
                           contents={known.get(set.id)}
+                          openings={openings.get(set.id)}
                           icons={icons}
                           outfit={outfit}
                           hideUnwearable={hideUnwearable}
@@ -927,6 +980,7 @@ function Card({
   onToggle,
   onShow,
   contents,
+  openings,
   icons,
   outfit,
   hideUnwearable,
@@ -950,6 +1004,14 @@ function Card({
   onShow: (member: TransmogSet) => void;
   /** What the set holds, the sentence saying why it could not be read, or nothing yet. */
   contents: TransmogSetItemsPayload | string | undefined;
+  /**
+   * And how anybody gets the looks it locks, or nothing — see `openings.ts`.
+   *
+   * Nothing where the read has not landed, and nothing where it was never asked for, which is
+   * every set that locks nobody out. The panel is drawn only for a set that locks something,
+   * so the two never have to be told apart.
+   */
+  openings: OpeningsPayload | undefined;
   icons: Map<number, string>;
   outfit: Outfit;
   /** Whether the rows with nowhere to go are left out, which the browser decides for all. */
@@ -1102,6 +1164,13 @@ function Card({
                   </button>
                 ) : null}
               </div>
+              {/* Which of the looks this set locks anybody can get anyway, and where. Above the
+                  list because it is about the whole set and the list is one row at a time, and
+                  only for a set that locks something — for the other two thirds of the game's
+                  sets there is no question to answer. See `openings.ts`. */}
+              {locksAnything(rows) ? (
+                <OpeningsPanel name={name} rows={rows} openings={openings} />
+              ) : null}
               <ul className="mog-items" aria-label={`Appearances in ${name}`}>
                 {shown.map((row, index) => (
                   <Line

@@ -1,0 +1,39 @@
+/*
+ * How anyone gets the looks a set locks — see `openingsPanel.tsx`.
+ *
+ * The window's shared `table` rules are for its sortable data grids: a sticky, clickable head
+ * and a row that highlights because clicking it opens something. None of that is true here, so
+ * the three of them are undone rather than worked around.
+ */
+
+.mog-openings { margin: 0 0 10px; }
+.mog-openings .detail-facts { margin: 0 0 6px; }
+.mog-openings table {
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  font-size: 13px;
+}
+.mog-openings th, .mog-openings td {
+  padding: 5px 10px; white-space: normal; vertical-align: baseline;
+}
+.mog-openings thead th {
+  position: static; cursor: default; background: var(--surface-2);
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+}
+.mog-openings thead th:hover { color: var(--text-secondary); }
+.mog-openings tbody tr { cursor: default; }
+.mog-openings tbody tr:hover { background: none; }
+/* The slot, which is the column the table is read down. Narrow, so the two item columns get
+   the width — a set name and a world drop's name are both long. */
+.mog-openings tbody th {
+  position: static; cursor: default; background: none;
+  color: var(--text-secondary); font-weight: 600; width: 1%; white-space: nowrap;
+}
+/* The set's own piece: the one the reader cannot have, and so the quieter of the two. */
+.mog-openings td:nth-child(2) { color: var(--text-secondary); }
+/* And the answer. A green edge where there is one and a red edge where there is not, which is
+   the only thing on this table worth seeing from across a room. */
+.mog-openings tbody tr[data-open="true"] td:last-child { box-shadow: inset 2px 0 var(--ok); }
+.mog-openings tbody tr[data-open="false"] td:last-child {
+  box-shadow: inset 2px 0 var(--bad); color: var(--bad);
+}
+.mog-openings td:last-child { display: flex; gap: 6px; align-items: baseline; }

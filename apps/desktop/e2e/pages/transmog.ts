@@ -158,6 +158,36 @@ export class SetGrid {
   }
 
   /**
+   * The panel over an opened set's list: how anybody gets the looks that set locks.
+   *
+   * A table, and named after the set it is about — the one thing on the card that says which
+   * slot a class lock actually cost the reader, where the chip above says only that one stands.
+   */
+  openings(set: string): Locator {
+    return this.card(set).getByRole("table", { name: `How anyone gets the looks ${set} locks` });
+  }
+
+  /**
+   * The rows of it, which are one per locked look and never the head of the table.
+   *
+   * What tells them apart is the slot: a row carries it as its stub, and the head carries three
+   * column titles and no stub at all. A look the set already sells to everybody is not a row
+   * here, which is what this count is worth asserting.
+   */
+  openingRows(set: string): Locator {
+    return this.openings(set)
+      .getByRole("row")
+      .filter({ has: this.page.getByRole("rowheader") });
+  }
+
+  /** One of those rows, found by the slot it is named after. */
+  openingRow(set: string, slot: string): Locator {
+    return this.openings(set)
+      .getByRole("row")
+      .filter({ has: this.page.getByRole("rowheader", { name: slot, exact: true }) });
+  }
+
+  /**
    * The way through to the item an appearance came from, which is the corner of its row.
    *
    * Named in full rather than by the item alone: the link is a drawn glyph with no text of
