@@ -13,14 +13,30 @@ local _, ns = ...
 ---the currency and reputation *panes* and documents the holes that leaves — a collapsed group,
 ---and every legacy reputation, which the pane hides by default — because the calls that would
 ---open them up rearrange a pane the player arranged. The domains here reach the same facts
----without a pane: `C_MountJournal.GetMountIDs` and `GetAchievementInfo` answer about ids, and
----an id has no idea what the player has the interface set to.
+---without a pane: `C_MountJournal.GetMountIDs`, `GetAchievementInfo` and
+---`C_CurrencyInfo.GetCurrencyInfo` all answer about ids, and an id has no idea what the player
+---has the interface set to. `ns.currencyCensus` is that difference at its plainest — the same
+---currencies the sweep next door can only see when the player has the group open.
 ---
 ---And nothing here writes down what the account does *not* hold. The catalogue of everything
 ---that exists lives in the game's own tables, which the desktop already reads — `Achievement` is
 ---13,732 rows in `achievements.rs`, `ItemAppearance` is 55,198 in `wardrobe.rs`. A census that
 ---also recorded every absence would be several times the size and would say nothing the desktop
 ---could not work out by subtraction.
+
+---A count worth writing down, or nothing.
+---
+---Nought is the client's answer for "no cap", "nothing earned yet" and "no weekly" alike, and a
+---census writes a key per id per character — so a nought written down is a saved file spent
+---saying what its absence already said. Every reader of these defaults them back to nought.
+---@param value any
+---@return integer?
+local function nonzero(value)
+    if type(value) ~= "number" or value == 0 then
+        return nil
+    end
+    return value
+end
 
 ---Mounts: everything the account can summon.
 ---
@@ -186,12 +202,111 @@ function ns.achievementCensus(clients)
     }
 end
 
+---The highest currency id the walk asks about.
+---
+---`C_CurrencyInfo` has no enumerator. There is no `GetCurrencyIDs` and no counter, and the one
+---call that hands over a list of ids — `GetPlayerCurrencyCategoryInfo` — is keyed by a category
+---id that is itself only in the game's own tables. So the positions are a range, and a range needs
+---an end.
+---
+---`CurrencyTypes` on build 12.0.5.67823 is 1,490 rows running from 42 to 3513, read out of the
+---install with `Db2::parse` the way `currencies.rs` reads it for icons. Five thousand is that top
+---id and half again, which is the headroom a patch's worth of new currencies has to fit into: an
+---id above this is invisible to the walk, and a walk that cannot see it will still say it is
+---complete. That is the one hole left here, it is bounded, and raising the number is free —
+---5,000 reads is twenty-five slices, a fraction of a second, against the achievement walk's minute.
+local LAST_CURRENCY_ID = 5000
+
+---Currencies: what this character is holding of each, and how much more it may hold.
+---
+---**Character-scoped, and the first domain that is.** Every other domain here answers the same on
+---any character, which is why they are kept once; a wallet is the opposite, and two alts with a
+---wallet each must not read as one alt whose wallet keeps being replaced.
+---
+---This is the domain that removes a trade rather than making one. `ns.readHoldings` walks the
+---currency *pane*, and a currency under a collapsed group is invisible to it — the call that would
+---open the group up, `C_CurrencyInfo.ExpandCurrencyList`, rearranges something the player
+---arranged, and doing that from a logout handler where nothing can be put back was the worse of
+---two bad options. `GetCurrencyInfo(id)` takes an arbitrary id and answers about it completely, so
+---there is no pane, no expansion, no filter, and nothing of the player's touched.
+---
+---It also carries what the pane row does not. `maxQuantity` and `maxWeeklyQuantity` beside
+---`totalEarned` and `quantityEarnedThisWeek` are what make "am I capped" and "have I done my
+---weekly" answerable at all, which no amount of watching a balance change ever could.
+---
+---**No counter.** Nothing in `C_CurrencyInfo` counts what is held — `GetCurrencyListSize` counts
+---the rows the pane is drawing, which is the very number this domain exists not to trust. So this
+---one is never distrusted into a pass of its own and is walked when something else provokes one,
+---which is what `ns.newCensus` already does for mounts.
+---@param currency table? The client's `C_CurrencyInfo`.
+---@return CensusDomain?
+function ns.currencyCensus(currency)
+    local info = ns.callable(currency, "GetCurrencyInfo")
+    if not info then
+        return nil
+    end
+
+    return {
+        name = "currencies",
+        scope = "character",
+        ---@return integer[]
+        list = function()
+            local ids = {}
+            for id = 1, LAST_CURRENCY_ID do
+                ids[id] = id
+            end
+            return ids
+        end,
+        ---@param id integer
+        ---@return integer?, table?
+        read = function(id)
+            local row = info(id)
+            -- `MayReturnNothing` in the client's own documentation, which is what an id that is
+            -- not a currency comes back as — the great majority of the range. The header check is
+            -- the one `ns.readHoldings` makes for the same reason: the pane's group titles come
+            -- back through this same structure.
+            if type(row) ~= "table" or row.isHeader or type(row.quantity) ~= "number" then
+                return nil, nil
+            end
+            -- What the client means by "this character has had something to do with this
+            -- currency". Every other id in the range is a currency that exists in a game this
+            -- character has never played the content of, and writing five thousand of those down
+            -- per character is a saved file spent saying nothing. The balance is checked beside
+            -- it rather than instead of it, so a build whose `discovered` means something narrower
+            -- than expected still cannot lose a currency somebody is holding.
+            if not row.discovered and row.quantity <= 0 then
+                return nil, nil
+            end
+            return id, {
+                name = row.name,
+                -- The balance as it stands, zero included, for the reason `ns.readHoldings` keeps
+                -- one: a character that has spent everything it had must be able to say so.
+                total = row.quantity,
+                -- Every other count is written only when it is not nought. Nought is what the
+                -- client says for "no cap" and for "nothing yet this week" alike, and a key per
+                -- currency per character saying it is a file spent saying nothing — the reader
+                -- defaults each of these to nought, which is the same answer.
+                earned = nonzero(row.totalEarned),
+                cap = nonzero(row.maxQuantity),
+                week = nonzero(row.quantityEarnedThisWeek),
+                weekCap = nonzero(row.maxWeeklyQuantity),
+                -- The warband's one pot rather than this character's share of it, and the
+                -- separate pair for a currency that stays each character's own but can be moved
+                -- between them at a cost. Both are the client's own distinction — see
+                -- `ns.readHoldings`, which reads the same two off the pane row.
+                accountWide = row.isAccountWide or nil,
+                transferable = row.isAccountTransferable or nil,
+            }
+        end,
+    }
+end
+
 ---Every domain this client build can answer for, in the order they are walked.
 ---
 ---A domain whose calls this build does not have reports nil and is simply left out, which is the
 ---same answer `ns.readHoldings` gives for a pane the client will not open: a census that cannot
 ---be taken is not a census of nothing.
----@param clients table `{ mount = C_MountJournal, achievement = { ... } }`
+---@param clients table `{ mount = C_MountJournal, currency = C_CurrencyInfo, achievement = { ... } }`
 ---@return CensusDomain[]
 function ns.censusDomains(clients)
     clients = clients or {}
@@ -204,6 +319,9 @@ function ns.censusDomains(clients)
     local makers = {
         function()
             return ns.mountCensus(clients.mount)
+        end,
+        function()
+            return ns.currencyCensus(clients.currency)
         end,
         function()
             return ns.achievementCensus(clients.achievement)

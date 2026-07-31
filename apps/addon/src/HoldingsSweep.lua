@@ -133,6 +133,15 @@ end
 ---every one of them rearranges a pane the player arranged, and doing that from a logout
 ---handler where nothing can be put back is a worse trade than a hole. So the walk reads
 ---what is on show, and what is hidden stays as incomplete as it was before.
+---
+---**The currency hole is covered elsewhere now, and this walk is still worth its keep.**
+---`ns.currencyCensus` asks `C_CurrencyInfo.GetCurrencyInfo` about ids rather than about pane
+---rows, so it reaches every currency including the ones under a collapsed group, and carries
+---the caps besides. What it cannot be is *here*: a census is spread a slice per frame and so
+---cannot finish inside a logout handler, and this is the freshest reading there will ever be
+---of a character about to stop answering. So the two are complementary rather than one
+---replacing the other — this one is live and shallow, that one is complete and occasional,
+---and they are kept in tables of their own for exactly that reason.
 ---@param clients table? `{ currency = C_CurrencyInfo, reputation = C_Reputation,
 ---majorFaction = C_MajorFactionData, gossip = C_GossipInfo,
 ---reactionLabel = fun(reaction: integer): string? }`

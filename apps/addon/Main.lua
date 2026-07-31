@@ -1795,6 +1795,11 @@ if CreateFrame then
             censusClients = function()
                 return {
                     mount = C_MountJournal,
+                    -- The same namespace `heldSweep` reaches for above, asked the other
+                    -- question: that one walks the pane and this one walks ids, which is why
+                    -- one of them can see a currency under a collapsed group and the other
+                    -- cannot.
+                    currency = C_CurrencyInfo,
                     achievement = {
                         categories = GetCategoryList,
                         categoryCount = GetCategoryNumAchievements,
