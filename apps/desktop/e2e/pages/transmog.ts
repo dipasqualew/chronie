@@ -1,9 +1,10 @@
 /**
- * The transmog view: four browsers on the left, and the character on the right.
+ * The transmog view: five browsers on the left, and the character on the right.
  *
  * This holds the two halves that never go away — the switch above the browsers, and the
- * character wearing whatever has been clicked out of any of them — and the browser of the
- * game's own sets. The other three are `wardrobe.ts` and `ownSets.ts`.
+ * character wearing whatever has been clicked out of any of them — the browser of the game's own
+ * sets, and the shelf of the ones a reader is a slot short of. The others are `wardrobe.ts` and
+ * `ownSets.ts`.
  *
  * A collection is a level-3 heading and a set a level-4 one, so the whole grid is reachable by
  * heading the way a screen reader walks it. A set opens in place — there is no dialog — so
@@ -34,17 +35,19 @@ export class TransmogView {
   }
 
   /**
-   * The switch above the browsers: the game's sets, its whole wardrobe, the reader's own, or
-   * the ones the player saved in the game itself.
+   * The switch above the browsers: the game's sets, its whole wardrobe, the reader's own, the
+   * ones the player saved in the game itself, or the shelf of sets one slot short of anybody.
    */
-  async browseBy(what: "Sets" | "Items" | "Yours" | "Personal in-game sets"): Promise<void> {
+  async browseBy(
+    what: "Sets" | "Items" | "Yours" | "Personal in-game sets" | "One slot short",
+  ): Promise<void> {
     await this.view
       .getByRole("group", { name: "Browse the game by" })
       .getByRole("button", { name: what, exact: true })
       .click();
   }
 
-  /** Whatever the view says about the whole of what it read, above all four browsers. */
+  /** Whatever the view says about the whole of what it read, above all five browsers. */
   saying(text: string | RegExp): Locator {
     return this.view.getByText(text);
   }
@@ -436,6 +439,80 @@ export class SetGrid {
 
   scrollToEnd(): Promise<void> {
     return this.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  }
+}
+
+/**
+ * The fifth browser: the sets a reader can almost have — see `shelf.ts`.
+ *
+ * Drawn as the same cards the grid is, so a set is a level-4 heading here too and everything
+ * about one is found inside its own card. What is only here is the obstacle: which slot stops
+ * the set, and whether that slot is one the game's own geometry can answer exactly.
+ */
+export class Shelf {
+  readonly page: Page;
+  readonly browser: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.browser = new TransmogView(page).view.getByRole("region", {
+      name: "Sets one slot short of anybody",
+    });
+  }
+
+  /** The sets on the shelf, in the order it puts them. */
+  sets(): Locator {
+    return this.browser.getByRole("heading", { level: 4 });
+  }
+
+  /** The card one is drawn on, found by its own heading. */
+  card(name: string): Locator {
+    return this.browser
+      .getByRole("article")
+      .filter({ has: this.page.getByRole("heading", { name, exact: true }) });
+  }
+
+  /** Whatever the shelf says about itself, above the list. */
+  saying(text: string | RegExp): Locator {
+    return this.browser.getByText(text);
+  }
+
+  /** And whatever one of its cards says, found by the words on it. */
+  cardSaying(set: string, text: string | RegExp): Locator {
+    return this.card(set).getByText(text);
+  }
+
+  /** The one box above the list, which narrows it by name, class or slot. */
+  search(): Locator {
+    return this.browser.getByRole("searchbox", { name: "Filter the sets one slot short" });
+  }
+
+  /**
+   * The chip naming a slot in the way, which is the one thing on a card only this browser draws.
+   *
+   * By its title rather than by the word on it, because the word is on the card twice — the chip
+   * and the sentence under it both say "Feet" — and the chip is the half that carries whether the
+   * geometry can answer for the slot.
+   */
+  blocked(set: string, slot: string): Locator {
+    return this.card(set).getByTitle(
+      `${slot} is one of the slots nothing in the game sells around`,
+    );
+  }
+
+  /** Opens one in place, which reads the set and draws its own openings panel under it. */
+  async openSet(name: string): Promise<Locator> {
+    await this.browser.getByRole("button", { name, exact: true }).click();
+    const card = this.card(name);
+    await expect(
+      card.getByRole("table", { name: `How anyone gets the looks ${name} locks` }),
+    ).toBeVisible();
+    return card;
+  }
+
+  /** The button on the row nothing sells around, which is what this shelf is a road to. */
+  showAlternatives(set: string, own: string): Locator {
+    return this.card(set).getByRole("button", { name: `Show possible alternatives to ${own}` });
   }
 }
 

@@ -452,6 +452,14 @@ dto!(SetWearers {
     /// set holds. Never zero, and never the game's "zero means everybody": this is the answer
     /// itself rather than a mask to be interpreted.
     pub class_mask: u32,
+    /// How many of the set's slots something in the game gives to anybody, whether or not that
+    /// something is in the set. The other half of the count is `blocked_slots` below, and the
+    /// two together are what `open:` narrows the grid by.
+    pub open_slots: usize,
+    /// And the slots nothing sells around, as `ItemAppearance.DisplayType` numbers the places
+    /// on a body. A set with one of these is one slot short of anybody being able to wear it,
+    /// which is the whole of what the near-miss shelf lists — see `shelf.ts`.
+    pub blocked_slots: Vec<u32>,
 });
 
 dto!(WearersPayload {

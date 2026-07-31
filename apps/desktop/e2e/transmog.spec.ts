@@ -11,7 +11,7 @@
 
 import { expect, test } from "./harness";
 import { Shell } from "./pages/shell";
-import { Outfit, PATIENCE_MS, SetGrid, TransmogView } from "./pages/transmog";
+import { Outfit, PATIENCE_MS, SetGrid, Shelf, TransmogView } from "./pages/transmog";
 import { pixelsOf } from "./pages/wardrobe";
 
 test("browses the game's transmog sets and dresses the character in them", async ({ page }) => {
@@ -19,6 +19,7 @@ test("browses the game's transmog sets and dresses the character in them", async
   const shell = new Shell(page);
   const transmog = new TransmogView(page);
   const sets = new SetGrid(page);
+  const shelf = new Shelf(page);
   const outfit = new Outfit(page);
   await transmog.open();
 
@@ -342,6 +343,28 @@ test("browses the game's transmog sets and dresses the character in them", async
     await sets.search().fill("");
   });
 
+  // And the one thing about a set the card cannot say and the game never wrote down: how much
+  // of it anybody can have. "Any plate wearer" is a verdict on a body's worth of clothes and
+  // reads the same over a set nothing shuts and a set one slot short of it — the counts behind
+  // it are what separate those, and `open:` is how a reader asks for them. See `wearers.rs`.
+  await test.step("the search asks how much of a set anybody can have", async () => {
+    // Tideglass Hide is out: its sandals are the Druid's own and nothing in the game sells the
+    // look around them, so one of its two slots is shut.
+    await sets.search().fill("open:all");
+    await expect(sets.sets()).toHaveText(["Emberforge Plate", "Tideglass Regalia"]);
+    await sets.search().fill("open:some");
+    await expect(sets.sets()).toHaveText([
+      "Emberforge Plate",
+      "Tideglass Regalia",
+      "Tideglass Hide",
+    ]);
+    // The sentence the term was asked for: a class-locked tier a reader of another class can
+    // put on anything that wears the armour.
+    await sets.search().fill("open:all class:warrior");
+    await expect(sets.sets()).toHaveText(["Emberforge Plate"]);
+    await sets.search().fill("");
+  });
+
   await test.step("expansion and class narrow it together", async () => {
     await sets.expansion().selectOption({ label: "Cataclysm" });
     await expect(sets.sets()).toHaveCount(2);
@@ -626,6 +649,31 @@ test("browses the game's transmog sets and dresses the character in them", async
     ).toContainText("Sandals of the Quiet Deep");
 
     await sets.closeSet("Tideglass Hide");
+  });
+
+  // And the entry point to all of that, which is the half of #248 no filter could be. A set one
+  // slot short is the most interesting thing in the wardrobe — a look you can almost have, with
+  // a single named obstacle — and nobody finds one by guessing which search would show it. The
+  // shelf is the list, and it says which slot did it and which kind of answer that slot has.
+  await test.step("the sets one slot short of anybody are a browser of their own", async () => {
+    await transmog.browseBy("One slot short");
+    // One of the four, and the other three are not near misses at all: everything they lock is
+    // sold around by something in the game, or they lock nothing to begin with.
+    await expect(shelf.sets()).toHaveText(["Tideglass Hide"]);
+    await expect(shelf.saying("1 set one slot short")).toBeVisible();
+    await expect(shelf.cardSaying("Tideglass Hide", "1 of 2 slots open to anybody")).toBeVisible();
+    await expect(shelf.blocked("Tideglass Hide", "Feet")).toBeVisible();
+    // The half of the answer this browser exists to draw: a boot is paint on a body every look
+    // in the slot shares, so nothing exact can be said about it and the row says so rather than
+    // promising the certainty a helm would have — see `alternatives.ts`.
+    await expect(shelf.cardSaying("Tideglass Hide", /ranking to confirm by eye/)).toBeVisible();
+
+    // And opening one is opening the set: the same panel, and so the same button on the same
+    // red row. The shelf is the road to the answer rather than a second copy of it.
+    await shelf.openSet("Tideglass Hide");
+    await expect(shelf.showAlternatives("Tideglass Hide", "Tideglass Sandals")).toBeVisible();
+
+    await transmog.browseBy("Sets");
   });
 
   // The camera belongs to the reader and not to whatever is on the stage. A new body is drawn

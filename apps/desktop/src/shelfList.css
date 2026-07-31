@@ -1,0 +1,40 @@
+/*
+ * The shelf of sets one slot short — see `shelfList.tsx`.
+ *
+ * Almost nothing, because a near miss is drawn as the card the grid beside it already draws: the
+ * `.mog-card`, `.mog-facts` and `.mog-grid` rules in `transmogView.css` do the work. What is here
+ * is the one thing this browser says that no other does — which slot stops the set, and what kind
+ * of answer that slot has.
+ */
+
+/* The obstacle, which is the only chip on the card that is not a plain fact. Red-edged because
+   it is the thing in the way, and outlined rather than filled so that a card with two of them
+   is not two blocks of colour. */
+.mog-shelf .mog-shelf-slot {
+  border: 1px solid var(--bad);
+  color: var(--bad);
+  background: none;
+}
+
+/* And the split the whole browser exists to draw: a slot the game's own geometry can speak for
+   is an exact question, and a reader scanning six hundred cards is scanning for these. */
+.mog-shelf .mog-shelf-slot[data-exact="true"] {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* The two sentences under the chips: what stops it, and what kind of answer that has. Tight
+   against each other, being one thought in two lines. */
+.mog-shelf .detail-facts {
+  margin: 4px 0 0;
+}
+
+/* A wider card than the grid's, because these rows are sentences rather than chips and a
+   collection heading is not what separates them. */
+#shelf .mog-grid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+#shelf-summary {
+  margin: 6px 0 0;
+}

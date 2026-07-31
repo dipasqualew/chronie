@@ -9,14 +9,17 @@
  * from one and a robe from another — and a dialog that had to be closed to reach the second
  * set made that the hard way round.
  *
- * The left half browses **three ways**, and the switch between them is the one control above
- * all of them. Sets are what somebody at Blizzard put together; items are the game's whole
- * wardrobe cut by the kind of thing — every head, every staff — which is the only way to reach
- * the several thousand looks no set names; and yours are the outfits assembled here and saved
- * under a name, which is the only one of the three the game knows nothing about. What survives
- * every switch is the outfit, because it lives here rather than in any browser: a helm out of a
- * set is still on her while a two-hander is picked out of the list, and what she is wearing when
- * all of that is done is what a set of the reader's own is made of.
+ * The left half browses **five ways**, and the switch between them is the one control above all
+ * of them. Sets are what somebody at Blizzard put together; items are the game's whole wardrobe
+ * cut by the kind of thing — every head, every staff — which is the only way to reach the several
+ * thousand looks no set names; yours are the outfits assembled here and saved under a name; and
+ * the personal in-game sets are the ones the player saved at a transmogrifier long before Chronie
+ * existed. The fifth is not a list of what the game holds at all: it is the sets a reader is one
+ * slot short of being able to wear, which is arithmetic over every item in the game rather than
+ * anything the game states — see `shelf.ts`. What survives every switch is the outfit, because it
+ * lives here rather than in any browser: a helm out of a set is still on her while a two-hander is
+ * picked out of the list, and what she is wearing when all of that is done is what a set of the
+ * reader's own is made of.
  *
  * `transmog.ts` decides how sets group and filter, `wardrobe.ts` what a kind is and what a
  * filter over one leaves, `customSets.ts` how a saved set becomes rows and back again,
@@ -83,6 +86,7 @@ import type { Outfit } from "./outfit";
 import { OutfitPanel } from "./outfitPanel";
 import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "./qualities";
 import { Qualities, Swatch } from "./qualitiesChips";
+import { ShelfList } from "./shelfList";
 import { withTerm } from "./terms";
 import {
   CLASSES,
@@ -133,6 +137,7 @@ import type {
   QualitiesFile,
   SetGalleryPayload,
   SetQualitiesFile,
+  SetWearers,
   TransmogMark,
   TransmogMarksPayload,
   TransmogPayload,
@@ -332,14 +337,16 @@ const NOTHING_LIKE = (appearanceId: number): Promise<AlternativesPayload> =>
 const NOBODY_RULED = (): Promise<LookalikesPayload> => Promise.resolve({ said: [] });
 
 /**
- * Which of the four browsers the reader is in.
+ * Which of the five browsers the reader is in.
  *
  * The game's sets, the game's whole wardrobe by the kind of thing, the sets they made
- * themselves, and the ones they saved in the game long before Chronie existed. Four lists of one
- * kind of answer — something to put on her — and the outfit survives every switch between them,
- * which is what makes assembling one out of all four the ordinary thing rather than a trick.
+ * themselves, the ones they saved in the game long before Chronie existed — and the shelf of
+ * sets a slot or two short of anybody being able to wear them, which is the only one of the five
+ * that is not a list of what exists but a list of what nearly does. Five lists of one kind of
+ * answer — something to put on her — and the outfit survives every switch between them, which is
+ * what makes assembling one out of all five the ordinary thing rather than a trick.
  */
-type Browsing = "sets" | "items" | "yours" | "ingame";
+type Browsing = "sets" | "items" | "yours" | "ingame" | "shelf";
 
 export function TransmogView({
   payload,
@@ -609,13 +616,13 @@ export function TransmogView({
   // arrived — there is no install to read it out of when the sets could not be read — and
   // held as a lookup for the reason the marks below are: the search box re-filters several
   // thousand cards on every keystroke and each of them asks this once.
-  const [wearers, setWearers] = useState<Map<number, number> | null>(null);
+  const [wearers, setWearers] = useState<Map<number, SetWearers> | null>(null);
   useEffect(() => {
     if (!payload) return;
     let stale = false;
     void loadWearers()
       .then((answer) => {
-        if (!stale) setWearers(new Map(answer.wearers.map((row) => [row.setId, row.classMask])));
+        if (!stale) setWearers(new Map(answer.wearers.map((row) => [row.setId, row])));
       })
       // The cards drew the game's own mask before any of this existed, and they draw it now.
       .catch(() => undefined);
@@ -813,6 +820,16 @@ export function TransmogView({
             >
               Personal in-game sets
             </button>
+            {/* And the one that is not a list of what the game holds. Its own button rather than
+              a filter over the grid, because "the sets I am one slot short of" is arithmetic
+              over every item in the game and nobody finds it by guessing — see `shelf.ts`. */}
+            <button
+              type="button"
+              aria-pressed={browsing === "shelf"}
+              onClick={() => setBrowsing("shelf")}
+            >
+              One slot short
+            </button>
           </div>
           {/* Named, because all four browsers are the same panel with the same controls in it — a
           class filter, a search box, a box about what she can wear — and "the class filter" is
@@ -825,13 +842,16 @@ export function TransmogView({
           >
             <div className="table-head">
               <div className="controls">
-                {/* A term in the placeholder beside the words, because `class:mage` is not a thing
+                {/* Terms in the placeholder beside the words, because `class:mage` is not a thing
                 anybody guesses a search box takes — see `terms.ts`, and the chips on every card
-                below, which write one into here when they are clicked. */}
+                below, which write one into here when they are clicked. `open:` is the one term
+                no chip writes, there being no chip for it: how much of a set anybody can have is
+                a fact about the whole grid rather than about the card, and the shelf next door is
+                where a reader meets it drawn. So the placeholder is the only place it is named. */}
                 <input
                   id="transmog-search"
                   type="search"
-                  placeholder="Filter by name, class, or colour:brown…"
+                  placeholder="Filter by name, class, colour:brown or open:all…"
                   aria-label="Filter transmog sets"
                   value={search}
                   onChange={(event) => narrow(() => setSearch(event.target.value))}
@@ -1033,6 +1053,21 @@ export function TransmogView({
               setOutfit((was) => wearAllAt(was, pieces, inGameSetLabel(set)))
             }
           />
+          {/* And the fifth, kept in the tree beside the other four for their reason. It shares
+            the grid's own caches — what a set is made of, how anybody gets the looks it locks,
+            and what else might do for the ones nothing sells around — so a set opened here and
+            opened again over there is read once. */}
+          <ShelfList
+            hidden={browsing !== "shelf"}
+            payload={payload}
+            wearersOf={wearersOf}
+            ready={wearers !== null}
+            onOpen={read}
+            contentsOf={(setId) => known.get(setId)}
+            openingsOf={(setId) => openings.get(setId)}
+            alternatives={alternativeActions}
+            icons={icons}
+          />
         </div>
         <OutfitPanel
           outfit={outfit}
@@ -1135,13 +1170,14 @@ function Card({
    */
   qualityOf: (setId: number) => Quality | undefined;
   /**
-   * Who the items behind this set say can really wear it, or nothing — see [`whoWears`].
+   * What the items behind this set say about it, or nothing — see `wearers.rs`.
    *
-   * Nothing means two different things and the card treats them alike, because the honest
-   * answer to both is the game's own mask: the read has not landed yet, or it landed and this
-   * install can describe no item of the set.
+   * The card draws one thing out of it, which is who can really wear the set. Nothing means two
+   * different things and the card treats them alike, because the honest answer to both is the
+   * game's own mask: the read has not landed yet, or it landed and this install can describe no
+   * item of the set.
    */
-  wearersOf: (setId: number) => number | undefined;
+  wearersOf: (setId: number) => SetWearers | undefined;
   /**
    * What a chip on the card asks of the grid when it is clicked — see `terms.ts`.
    *
@@ -1164,7 +1200,7 @@ function Card({
   // Who the items say, where that has been read, and the game's own mask until then — one
   // decision for the chip below and the list of classes the card is titled with, so the two
   // can never be about different things.
-  const wearers = wearersOf(set.id);
+  const wearers = wearersOf(set.id)?.classMask;
   const classes = classNames(wearers ?? set.classMask);
   const rows = typeof contents === "object" ? appearanceRows(contents, set.name) : [];
   // Whatever is hidden is still worn by "wear all of", because that puts the set on rather
