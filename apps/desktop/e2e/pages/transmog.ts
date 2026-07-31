@@ -241,6 +241,19 @@ export class SetGrid {
     return this.wear(set, slot, label).getByText(label, { exact: true });
   }
 
+  /**
+   * Whether the account has been seen to own that look — the chip on the row, or nothing.
+   *
+   * The same claim the wardrobe beside this draws on the same look, because both browsers key
+   * on the appearance rather than on the item or the set — see `collected.ts`.
+   */
+  collected(set: string, slot: string, label: string): Locator {
+    return this.card(set)
+      .getByRole("listitem")
+      .filter({ has: this.page.getByRole("button", { name: `Wear ${slot}: ${label}` }) })
+      .getByText("Collected", { exact: true });
+  }
+
   /** The one box above the grid: whether the rows with nowhere to go are left out. */
   hideUnwearable(): Locator {
     return this.browser.getByRole("checkbox", { name: "Hide what she cannot wear" });

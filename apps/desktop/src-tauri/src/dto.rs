@@ -848,6 +848,22 @@ dto!(AccountCensusPayload {
     pub mounts: Vec<HeldMount>,
 });
 
+// Which of the game's looks the account has, and how much of a claim that is.
+//
+// Ids and nothing else, because the transmog view already has everything else about a look out of
+// the game's own tables and wants one question answered: has this one been collected. What the
+// answer is *worth* is the reading beside them — and it never says `complete`, because the client
+// only ever shows the wardrobe through the logged-in character's class filter, so this is the
+// union of what the roster has been able to see. "At least this much", never "this and no more".
+dto!(CollectedAppearancesPayload {
+    /// Absent where no pass has ever run — a fresh install, or an addon older than this app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<CensusReading>,
+    /// The client's own `visualID`s, which are `ItemAppearance` ids: the same number
+    /// `WardrobeAppearance.appearance_id` carries, so the window joins on it for nothing.
+    pub appearances: Vec<i64>,
+});
+
 dto!(CatalogueAchievement {
     pub id: i64,
     pub title: String,

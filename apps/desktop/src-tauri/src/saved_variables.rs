@@ -1065,6 +1065,16 @@ optional_fields!(RawCensusStanding {
     seen: i64,
 });
 
+// One look the account has collected, as the census walked it — and the shortest row here by
+// some distance. There is no name: the client's appearance list is ids and flags, and what a look
+// is *called* is the name of one of however many items give it, which is a decision `wardrobe.rs`
+// makes out of the game's own tables and not one an addon is in a position to make.
+optional_fields!(RawCensusAppearance {
+    category: i64,
+    favourite: bool,
+    seen: i64,
+});
+
 optional_fields!(RawCensusAchievement {
     name: String,
     points: i64,

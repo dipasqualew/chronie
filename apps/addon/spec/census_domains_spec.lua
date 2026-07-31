@@ -744,6 +744,205 @@ describe("the census domains", function()
         end)
     end)
 
+    describe("ns.appearanceCensus", function()
+        ---A stand-in for `C_TransmogCollection`, answering about a category at a time.
+        ---
+        ---Two lengths on purpose. `GetCategoryTotal` is the client's *unfiltered* total, which
+        ---is what the plan is drawn against; `GetCategoryAppearances` answers with what the
+        ---class filter shows, which can only be shorter — so a category may hold rows the walk
+        ---is planned for and never sees, which is the whole shape of this domain.
+        ---@param categories table Keyed by category, each `{ total = n?, rows = { ... } }`.
+        ---@return table collection
+        local function newCollection(categories)
+            local asked = {}
+            return {
+                asked = asked,
+                GetCategoryInfo = function(category)
+                    if not categories[category] then
+                        return nil
+                    end
+                    return "Category " .. category, category > 11
+                end,
+                GetCategoryTotal = function(category)
+                    local held = categories[category]
+                    if not held then
+                        return 0
+                    end
+                    return held.total or #held.rows
+                end,
+                GetCategoryAppearances = function(category)
+                    asked[#asked + 1] = category
+                    return (categories[category] or {}).rows
+                end,
+                GetCategoryCollectedCount = function(category)
+                    return (categories[category] or {}).collected
+                end,
+            }
+        end
+
+        for _, case in ipairs({
+            { what = "a client with no transmog collection at all", collection = nil },
+            {
+                what = "a build that will not answer about a category's appearances",
+                collection = { GetCategoryInfo = print, GetCategoryTotal = print },
+            },
+            {
+                what = "a build that cannot say which categories it has",
+                collection = { GetCategoryAppearances = print, GetCategoryTotal = print },
+            },
+            {
+                what = "a build that cannot say how deep a category is",
+                collection = { GetCategoryAppearances = print, GetCategoryInfo = print },
+            },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                assert.is_nil(ns.appearanceCensus(case.collection))
+            end)
+        end
+
+        -- The claim this whole domain turns on. A walk of it is the logged-in character's share
+        -- of the account's wardrobe and never the whole of it, so it must never be read as one:
+        -- `partial` is what stops the collector pruning away another class's looks.
+        it("says out loud that a walk of it is only ever part of an answer", function()
+            local domain = ns.appearanceCensus(newCollection({}))
+
+            assert.equal("appearances", domain.name)
+            assert.equal("account", domain.scope)
+            assert.is_true(domain.partial)
+        end)
+
+        it("plans a position for every appearance in every category the build has", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { {}, {}, {} } },
+                [11] = { rows = { {}, {} } },
+            }))
+
+            assert.equal(5, #domain.list())
+        end)
+
+        it("plans nothing for a category this build does not have", function()
+            local collection = newCollection({ [1] = { rows = { {} } } })
+
+            assert.equal(1, #ns.appearanceCensus(collection).list())
+        end)
+
+        it("reads a position back out as the category and offset it stands for", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { { visualID = 1101, isCollected = true } } },
+                [11] = { rows = { { visualID = 1201, isCollected = true } } },
+            }))
+            domain.list()
+
+            local first, head = domain.read(1)
+            local second, feet = domain.read(2)
+
+            assert.equal(1101, first)
+            assert.equal(1, head.category)
+            assert.equal(1201, second)
+            assert.equal(11, feet.category)
+        end)
+
+        -- What keeps `list` a handful of calls. The thirty category fetches are the expensive
+        -- half of this walk, and they belong on the slices that consume them rather than in the
+        -- one frame that draws the plan — so a category is asked about once, when the walk
+        -- first reaches it, however many positions it then holds.
+        it("asks the client about a category once, however many looks are in it", function()
+            local collection = newCollection({
+                [1] = { rows = { { visualID = 1 }, { visualID = 2 }, { visualID = 3 } } },
+                [11] = { rows = { { visualID = 4 } } },
+            })
+            local domain = ns.appearanceCensus(collection)
+
+            for _, position in ipairs(domain.list()) do
+                domain.read(position)
+            end
+
+            assert.same({ 1, 11 }, collection.asked)
+        end)
+
+        it("says nothing about a look the account has not collected", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { { visualID = 1101, isCollected = false } } },
+            }))
+            domain.list()
+
+            assert.is_nil(domain.read(1))
+        end)
+
+        -- The "hide helm" pseudo-looks. The client calls them collected and they answer to no
+        -- appearance anybody owns, which is why Blizzard's own list drops them before drawing.
+        it("says nothing about a hidden visual", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { { visualID = 1101, isCollected = true, isHideVisual = true } } },
+            }))
+            domain.list()
+
+            assert.is_nil(domain.read(1))
+        end)
+
+        it("carries the player's own arrangement of a look through", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { { visualID = 1101, isCollected = true, isFavorite = true } } },
+            }))
+            domain.list()
+
+            local id, look = domain.read(1)
+
+            assert.equal(1101, id)
+            assert.is_true(look.favourite)
+        end)
+
+        it("leaves the arrangement out where the player has not made one", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { { visualID = 1101, isCollected = true } } },
+            }))
+            domain.list()
+
+            local _, look = domain.read(1)
+
+            assert.is_nil(look.favourite)
+        end)
+
+        -- The class filter, in the one shape a test can see it: the plan is drawn against the
+        -- unfiltered total and the answer is shorter than the plan, so the positions past the
+        -- end of what this character was shown read nothing and take nothing away.
+        it("reads nothing where the character was shown less than the category holds", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { total = 3, rows = { { visualID = 1101, isCollected = true } } },
+            }))
+            local positions = domain.list()
+
+            assert.equal(3, #positions)
+            assert.equal(1101, (domain.read(1)))
+            assert.is_nil(domain.read(2))
+            assert.is_nil(domain.read(3))
+        end)
+
+        it("says nothing about a position no plan was ever drawn for", function()
+            local domain = ns.appearanceCensus(newCollection({ [1] = { rows = { {} } } }))
+
+            assert.is_nil(domain.read(7))
+        end)
+
+        -- The unfiltered counter, which is the client's own opinion of how much of this the
+        -- account has — against which `held` is how much of it the roster has managed to show.
+        it("counts what the client says is collected across every category", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = {}, collected = 40 },
+                [11] = { rows = {}, collected = 2 },
+            }))
+
+            assert.equal(42, domain.count())
+        end)
+
+        it("offers no count at all on a build without the call", function()
+            local collection = newCollection({ [1] = { rows = {} } })
+            collection.GetCategoryCollectedCount = nil
+
+            assert.is_nil(ns.appearanceCensus(collection).count())
+        end)
+    end)
+
     describe("ns.censusDomains", function()
         ---Everything a build would need to answer for every domain.
         ---@return table
@@ -760,6 +959,11 @@ describe("the census domains", function()
                 },
                 standing = {
                     reputation = { GetFactionDataByID = print },
+                },
+                collection = {
+                    GetCategoryAppearances = print,
+                    GetCategoryInfo = print,
+                    GetCategoryTotal = print,
                 },
                 achievement = {
                     categories = print,
@@ -784,7 +988,7 @@ describe("the census domains", function()
         -- queued behind the thirteen-thousand-call one that takes a minute.
         it("names every domain a build can answer for, cheapest walk first", function()
             assert.same(
-                { "mounts", "currencies", "reputations", "achievements" },
+                { "mounts", "currencies", "reputations", "appearances", "achievements" },
                 namesOf(ns.censusDomains(everything()))
             )
         end)
@@ -801,7 +1005,7 @@ describe("the census domains", function()
             local clients = everything()
             clients.mount = nil
 
-            assert.same({ "currencies", "reputations", "achievements" },
+            assert.same({ "currencies", "reputations", "appearances", "achievements" },
                 namesOf(ns.censusDomains(clients)))
         end)
 
@@ -809,7 +1013,8 @@ describe("the census domains", function()
             local clients = everything()
             clients.achievement = nil
 
-            assert.same({ "mounts", "currencies", "reputations" }, namesOf(ns.censusDomains(clients)))
+            assert.same({ "mounts", "currencies", "reputations", "appearances" },
+                namesOf(ns.censusDomains(clients)))
         end)
 
         -- And the case that would actually catch it, now there is a domain with one on each
@@ -820,7 +1025,7 @@ describe("the census domains", function()
             local clients = everything()
             clients.currency = nil
 
-            assert.same({ "mounts", "reputations", "achievements" },
+            assert.same({ "mounts", "reputations", "appearances", "achievements" },
                 namesOf(ns.censusDomains(clients)))
         end)
 
@@ -831,7 +1036,7 @@ describe("the census domains", function()
             local clients = everything()
             clients.standing = nil
 
-            assert.same({ "mounts", "currencies", "achievements" },
+            assert.same({ "mounts", "currencies", "appearances", "achievements" },
                 namesOf(ns.censusDomains(clients)))
         end)
     end)

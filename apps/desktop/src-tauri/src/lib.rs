@@ -554,6 +554,26 @@ async fn transmog_appearances(
     )?)
 }
 
+/// Which of the game's looks the account has actually collected.
+///
+/// The other half of the wardrobe, and the one no install can answer: [`transmog_appearances`]
+/// reads what the game *holds* out of `ItemAppearance` and this reads what the account was seen
+/// to hold out of Chronie's own database, so the two together are what lets a look be drawn as
+/// owned or not. Its own command for the reason the marks next door are: it costs a millisecond
+/// against the second the game's storage costs, it works on a machine with no game installed, and
+/// a failure here leaves the browsers drawing everything they already drew.
+///
+/// The claim rides along and the window is expected to say what it licenses. The addon can only
+/// read the wardrobe through the logged-in character's class filter, so this is the union of what
+/// the roster has been shown — see `ns.appearanceCensus`.
+#[tauri::command]
+#[specta::specta]
+fn collected_appearances(
+    state: State<'_, AppState>,
+) -> Result<dto::CollectedAppearancesPayload, CommandError> {
+    Ok(collector::collected_appearances(&state.database_path())?)
+}
+
 /// Everything anybody has said about the game's wardrobe with their own hands.
 ///
 /// The one thing on the transmog screen that is not read out of the installed game: a star and
@@ -2279,6 +2299,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         character_worn_set,
         check_for_app_update,
         choose_wow_path,
+        collected_appearances,
         collection_catalogue,
         combat_logging,
         currency_icons,

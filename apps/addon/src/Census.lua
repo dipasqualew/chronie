@@ -52,6 +52,22 @@ local _, ns = ...
 ---nothing more.
 ---@field count fun(): integer? The client's own count of what is held, in one call. Nil for a
 ---domain whose client offers none. See `audit`.
+---@field partial boolean? Whether the most a pass over this domain can ever be is *part* of the
+---answer.
+---
+---Every other domain here asks the client a question every character answers the same, so a walk
+---that visited every position it was given has seen the whole of what the account holds. One does
+---not: `ns.appearanceCensus` reads a wardrobe the client will only show through the logged-in
+---character's class filter, so a mage's walk is the account's cloth and none of its plate no
+---matter how faithfully it runs to the end.
+---
+---A domain that says so here is treated as what it is — a set of positive observations. **It
+---never claims completeness and is never pruned**, which is the same standing an interrupted pass
+---already has and which `docs/account-census.md` lists as the "character that can only see part of
+---what the account owns" case. And it is **never settled by an audit**: the next character is a
+---different part of the answer, so there is always a reason to walk again. That is what makes the
+---union across the roster happen at all, and it is affordable for the same reason it is necessary
+---— the domain that needs it is the one no client event feeds between passes.
 
 ---@class Census
 ---@field audit fun(): string[] Which domains look wrong without walking them.
@@ -206,6 +222,26 @@ function ns.newCensus(deps)
     ---A domain that is none of those three needs no pass, because between passes the record keeps
     ---itself: every domain in here is also fed by a client event — `NEW_MOUNT_ADDED`,
     ---`ACHIEVEMENT_EARNED` and the rest — for as long as the addon is loaded.
+    ---Whether the reading in hand is one this audit has no reason to go behind.
+    ---
+    ---For an ordinary domain that is the completeness claim itself: a pass that finished asked
+    ---about every id the client named, and a flag still down is a pass a logout cut short.
+    ---
+    ---A partial domain never carries that claim and so can never be settled by it — and is not
+    ---settled by anything else either, deliberately. A walk of it speaks for the character that
+    ---took it, the next character is a different part of the answer, and nothing else in the
+    ---session tells this domain that the account collected something. So it is walked once a
+    ---session, which is what unions the roster's wardrobes together over time.
+    ---@param domain CensusDomain
+    ---@param state CensusState
+    ---@return boolean
+    local function settled(domain, state)
+        if domain.partial then
+            return false
+        end
+        return state.complete == true
+    end
+
     ---@return string[] The domains whose stored census cannot be trusted as it stands.
     local function audit()
         local build = deps.build and deps.build() or nil
@@ -215,7 +251,7 @@ function ns.newCensus(deps)
             local counter = domain.count
             local counted = counter and counter() or nil
             local wrongCount = type(counted) == "number" and counted > state.held
-            if not state.complete or (build and state.build ~= build) or wrongCount then
+            if not settled(domain, state) or (build and state.build ~= build) or wrongCount then
                 stale[#stale + 1] = name
             end
         end
@@ -235,6 +271,25 @@ function ns.newCensus(deps)
         local held = 0
         for id, entry in pairs(state.entries) do
             if type(entry) ~= "table" or (entry.seen or 0) < startedAt then
+                state.entries[id] = nil
+            else
+                held = held + 1
+            end
+        end
+        state.held = held
+    end
+
+    ---How many entries there are, taking none of them away.
+    ---
+    ---What a partial domain gets where an ordinary one is pruned. Its walk visited every position
+    ---it was given and still cannot speak for the ids it was never shown, so an entry the pass did
+    ---not touch is not gone — it is a plate helm being counted by a mage. The count still has to
+    ---be right, because `audit` compares it against the client's own.
+    ---@param state CensusState
+    local function tally(state)
+        local held = 0
+        for id, entry in pairs(state.entries) do
+            if type(entry) ~= "table" then
                 state.entries[id] = nil
             else
                 held = held + 1
@@ -340,13 +395,23 @@ function ns.newCensus(deps)
     ---An account that holds nothing and has always held nothing is untouched by this, because
     ---there is no reading to protect: `held` is zero, the pass completes, and a brand new
     ---account gets its empty census like anything else.
+    ---A partial domain reaches the same end and makes a smaller claim. It is not pruned, because
+    ---what it did not touch it was never shown, and `complete` stays down for the same reason —
+    ---so the file goes on saying out loud that this is part of an answer. Everything else a
+    ---finished pass records is still recorded: when it ended, the revision, and what the client's
+    ---own counter made of it, which is the one number that says how much of the account the union
+    ---has reached so far.
     local function finish()
         local state, domain = pass.state, pass.domain
         if observed(state, pass.startedAt) == 0 and state.held > 0 then
             return
         end
-        prune(state, pass.startedAt)
-        state.complete = true
+        if domain.partial then
+            tally(state)
+        else
+            prune(state, pass.startedAt)
+            state.complete = true
+        end
         state.completedAt = now()
         state.revision = state.revision + 1
         local counter = domain.count

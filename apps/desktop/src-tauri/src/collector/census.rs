@@ -28,8 +28,8 @@ use std::path::Path;
 use crate::dto;
 use crate::failure::Failure;
 use crate::saved_variables::{
-    RawCensus, RawCensusAchievement, RawCensusCurrency, RawCensusMount, RawCensusStanding,
-    RawCensusState,
+    RawCensus, RawCensusAchievement, RawCensusAppearance, RawCensusCurrency, RawCensusMount,
+    RawCensusStanding, RawCensusState,
 };
 
 use super::database::open_database;
@@ -44,6 +44,7 @@ const MOUNTS: &str = "mounts";
 const ACHIEVEMENTS: &str = "achievements";
 const CURRENCIES: &str = "currencies";
 const REPUTATIONS: &str = "reputations";
+const APPEARANCES: &str = "appearances";
 
 pub(super) fn sync_census(
     transaction: &Transaction<'_>,
@@ -118,6 +119,7 @@ fn sync_domain(
 
     match (domain, character_id) {
         (MOUNTS, _) => sync_mounts(transaction, account_id, state, complete),
+        (APPEARANCES, _) => sync_appearances(transaction, account_id, state),
         (ACHIEVEMENTS, _) => sync_achievements(transaction, account_id, state, complete),
         // A wallet belongs to a character, so a currencies reading filed against the account has
         // nowhere to go: there is no column for "whoever's" and summing it into one of the alts
@@ -245,6 +247,51 @@ fn sync_mounts(
             account_id,
             None,
             &ids_of(state),
+        )?;
+    }
+    Ok(())
+}
+
+/// Every look the account has collected, which is the only domain here that is never pruned.
+///
+/// **It takes no `complete` and has nowhere to put one.** The addon walks this through the
+/// logged-in character's class filter — a mage is shown no plate — so a reading of it is one
+/// character's share of the account's wardrobe and the account's wardrobe is the union of them,
+/// built up as the roster is played. `ns.appearanceCensus` marks the domain `partial` and the
+/// claim it writes has `complete` down forever, which is what stops [`sync_domain`] ever handing
+/// this function a flag it would be wrong to act on. An id missing from a reading is a look the
+/// walker was not shown, not a look the account lost, and there is no reading in which the
+/// difference can be told from in here.
+///
+/// So the rows only ever accumulate — which is also why this is the one domain whose stored count
+/// can exceed what any single walk reports, and why `census_domains.counted` beside it is worth
+/// reading: that is the client's own unfiltered total, and the two together say how much of the
+/// account's wardrobe the roster has managed to show us so far.
+fn sync_appearances(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    state: &RawCensusState,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(appearance_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let look: RawCensusAppearance = typed(value);
+        transaction.execute(
+            "INSERT INTO account_appearances (
+                     account_id, appearance_id, category, favourite, seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(account_id, appearance_id) DO UPDATE SET
+                     category = excluded.category,
+                     favourite = excluded.favourite,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                appearance_id,
+                look.category,
+                i64::from(look.favourite.unwrap_or(false)),
+                look.seen,
+            ],
         )?;
     }
     Ok(())
@@ -535,6 +582,67 @@ pub fn account_census(database_path: &Path) -> Result<dto::AccountCensusPayload,
     })
 }
 
+/// Which of the game's looks the account has, as ids and the claim over them.
+///
+/// Its own command rather than a corner of [`account_census`], and the reason is the shape of the
+/// two screens. The Collection view draws mounts and achievements with their names and dates; the
+/// transmog view draws fifty-five thousand looks out of the game's own tables and wants one
+/// question answered about each — *has this one been collected* — which is a set membership and
+/// nothing more. Thirty thousand ids is a couple of hundred kilobytes and answers in a
+/// millisecond; the same ids folded into the Collection payload would be paid for by a screen that
+/// has no use for them.
+///
+/// **The claim travels with them and is not decoration.** This reading is the union of what the
+/// roster's characters have each been shown, and `complete` on it is down permanently — so what
+/// the window may say is "at least this much", never "this and no more". A look absent from here
+/// is one nobody has proved the account owns, which is not the same as one it does not own, and a
+/// window that drew the second from the first would be lying to a reader about their own wardrobe.
+/// `None` is a reading that has never happened at all, which is every install where the addon has
+/// not yet run a pass.
+pub fn collected_appearances(
+    database_path: &Path,
+) -> Result<dto::CollectedAppearancesPayload, Failure> {
+    let connection = open_database(database_path)?;
+
+    let mut statement = connection.prepare(
+        "SELECT d.domain, c.source_key, d.complete, d.revision, d.held, d.counted,
+                d.build, d.walked_by, d.started_at, d.completed_at, d.observed_at
+           FROM census_domains d
+           LEFT JOIN characters c ON c.id = d.character_id
+          WHERE d.domain = ?1",
+    )?;
+    let reading = statement
+        .query_map([APPEARANCES], |row| {
+            Ok(dto::CensusReading {
+                domain: row.get(0)?,
+                character: row.get(1)?,
+                complete: row.get::<_, i64>(2)? != 0,
+                revision: row.get(3)?,
+                held: row.get(4)?,
+                counted: row.get(5)?,
+                build: row.get(6)?,
+                walked_by: row.get(7)?,
+                started_at: row.get(8)?,
+                completed_at: row.get(9)?,
+                observed_at: row.get(10)?,
+            })
+        })?
+        .next()
+        .transpose()?;
+    drop(statement);
+
+    let mut statement = connection
+        .prepare("SELECT appearance_id FROM account_appearances ORDER BY appearance_id")?;
+    let appearances: Vec<i64> = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+
+    Ok(dto::CollectedAppearancesPayload {
+        reading,
+        appearances,
+    })
+}
+
 /// The day the client stated, as one `YYYY-MM-DD` string.
 ///
 /// `GetAchievementInfo` hands over three numbers and no clock, and its year is the years since
@@ -663,6 +771,44 @@ mod tests {
                             ["seen"] = 2000000000,
                         },
                     },
+                },
+            },
+        },
+    "#;
+
+    /// A walk of the wardrobe by a character who can see cloth, which is what every reading of
+    /// this domain is: part of an answer. `complete` is down and stays down — see
+    /// `ns.appearanceCensus` — so the claim beside these two looks is the only reason a reader
+    /// knows not to conclude that the account owns nothing else.
+    const CLOTH_WALKED_APPEARANCES: &str = r#"
+        ["account"] = {
+            ["appearances"] = {
+                ["complete"] = false,
+                ["revision"] = 1,
+                ["held"] = 2,
+                ["counted"] = 9,
+                ["build"] = "12.0.5.67823",
+                ["by"] = "Aster-Vale",
+                ["startedAt"] = 1999990000,
+                ["completedAt"] = 1999990030,
+                ["entries"] = {
+                    [1101] = { ["category"] = 1, ["favourite"] = true, ["seen"] = 1999990000 },
+                    [1102] = { ["category"] = 11, ["seen"] = 1999990000 },
+                },
+            },
+        },
+    "#;
+
+    /// The same wardrobe walked by a plate-wearing alt, which shows one look the first walk
+    /// could see and one it could not. The pair is the union this domain exists to build.
+    const PLATE_WALKED_APPEARANCES: &str = r#"
+        ["account"] = {
+            ["appearances"] = {
+                ["complete"] = false, ["revision"] = 1, ["held"] = 2, ["counted"] = 9,
+                ["by"] = "Brin-Vale",
+                ["entries"] = {
+                    [1101] = { ["category"] = 1, ["seen"] = 2000000000 },
+                    [2201] = { ["category"] = 4, ["seen"] = 2000000000 },
                 },
             },
         },
@@ -1542,5 +1688,105 @@ mod tests {
         assert!(census.readings.is_empty());
         assert!(census.achievements.is_empty());
         assert!(census.mounts.is_empty());
+    }
+
+    /* ---------- the wardrobe ---------- */
+
+    #[test]
+    fn files_every_look_a_walk_of_the_wardrobe_found() {
+        let install = Install::of(&SavedVariables::new().census(CLOTH_WALKED_APPEARANCES));
+
+        install.collect(2_000_000_100);
+
+        let stored: Vec<(i64, Option<i64>, i64, Option<i64>)> = {
+            let connection = install.open();
+            let mut statement = connection
+                .prepare(
+                    "SELECT appearance_id, category, favourite, seen_at
+                       FROM account_appearances ORDER BY appearance_id",
+                )
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            rows
+        };
+        assert_eq!(
+            stored,
+            vec![
+                (1101, Some(1), 1, Some(1_999_990_000)),
+                (1102, Some(11), 0, Some(1_999_990_000)),
+            ]
+        );
+        // The claim goes in as it always does, and it says the thing this whole domain turns
+        // on: the walk finished and the reading is still not whole.
+        assert_eq!(
+            claim_of(&install, "appearances"),
+            Claim {
+                complete: 0,
+                revision: 1,
+                held: 2,
+                // What the client's own unfiltered counter made of it, against which `held` is
+                // how much of the account's wardrobe the roster has managed to show us.
+                counted: Some(9),
+                build: Some("12.0.5.67823".into()),
+                walked_by: Some("Aster-Vale".into()),
+                character_id: None,
+            }
+        );
+    }
+
+    /// The rule this domain exists inside, and the one that would break it. A walk by a
+    /// plate-wearing alt is not shown the account's cloth, so a reading that pruned would empty
+    /// the wardrobe at every login by a character of a different armour type — and then fill it
+    /// again at the next, forever.
+    #[test]
+    fn a_walk_the_next_character_could_not_repeat_adds_rather_than_replaces() {
+        let install = Install::of(&SavedVariables::new().census(CLOTH_WALKED_APPEARANCES));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(PLATE_WALKED_APPEARANCES));
+        install.collect(2_000_000_200);
+
+        assert_eq!(
+            ids_of(
+                &install,
+                "SELECT appearance_id FROM account_appearances ORDER BY appearance_id"
+            ),
+            vec![1101, 1102, 2201]
+        );
+    }
+
+    /// And what the window is handed: the ids, and the claim that says what may be said over
+    /// them. "At least this much" — never "this and no more".
+    #[test]
+    fn hands_the_window_the_looks_and_the_claim_that_qualifies_them() {
+        let install = Install::of(&SavedVariables::new().census(CLOTH_WALKED_APPEARANCES));
+        install.collect(2_000_000_100);
+
+        let payload = collected_appearances(&install.database).unwrap();
+
+        assert_eq!(payload.appearances, vec![1101, 1102]);
+        let reading = payload.reading.expect("a walk that ran is a reading");
+        assert!(!reading.complete);
+        assert_eq!(reading.held, 2);
+        assert_eq!(reading.counted, Some(9));
+        assert_eq!(reading.walked_by.as_deref(), Some("Aster-Vale"));
+    }
+
+    /// A wardrobe nobody has walked draws as one nothing is known about, rather than as one
+    /// nothing is in — which is the same distinction the claim exists to keep everywhere else.
+    #[test]
+    fn answers_with_no_reading_at_all_where_no_walk_has_happened() {
+        let install = Install::initialized();
+
+        let payload = collected_appearances(&install.database).unwrap();
+
+        assert!(payload.reading.is_none());
+        assert!(payload.appearances.is_empty());
     }
 }

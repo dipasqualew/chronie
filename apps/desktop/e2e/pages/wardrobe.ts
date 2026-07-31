@@ -60,6 +60,11 @@ export class Wardrobe {
     return this.row(label).getByRole("button", { name: `Favourite ${label}`, exact: true });
   }
 
+  /** Whether the account has been seen to own that look — the chip, or nothing. */
+  collected(label: string): Locator {
+    return this.row(label).getByText("Collected", { exact: true });
+  }
+
   /** What the reader has said about the look, as the chips read. */
   tags(label: string): Locator {
     return this.row(label).getByRole("button", { name: /^Filter by the tag / });

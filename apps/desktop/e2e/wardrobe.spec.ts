@@ -41,6 +41,22 @@ test("browses every look the game holds, as names and as characters", async ({ p
     await expect(wardrobe.count()).toHaveText("3 appearances · 1 look the game keeps encrypted");
   });
 
+  // The other half of a wardrobe, and the half no install can answer: which of these the
+  // account has actually got. Two of the three, so the list says something by *not* marking
+  // the third — see `collected.ts`.
+  await test.step("the looks the account has collected are marked, and only those", async () => {
+    await expect(wardrobe.collected("Coif of the Drowned Star")).toBeVisible();
+    await expect(wardrobe.collected("Emberforge Helm")).toBeVisible();
+    await expect(wardrobe.collected("Tideglass Crown")).toHaveCount(0);
+  });
+
+  // And the sentence that keeps those marks honest. An unmarked row reads as "not collected",
+  // and the client only ever shows a character the appearances its own class can wear — so
+  // what the roster has not yet been able to see is said out loud over the list.
+  await test.step("what the roster has not been able to see is said, not implied", async () => {
+    await expect(wardrobe.saying(/The game counts 2 more collected looks than this/)).toBeVisible();
+  });
+
   // And what the switch does not do: she keeps what she has on. The helm went on out of a
   // set and the rail says so too — one look, however it was reached.
   await test.step("what she has on survives the switch, and the rail knows it", async () => {

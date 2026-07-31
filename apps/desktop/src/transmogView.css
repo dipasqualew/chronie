@@ -151,6 +151,12 @@
    a list they have to open first. */
 .chip.mog-lifted { border-color: var(--series-1); color: var(--series-1); }
 
+/* Already in the wardrobe. The only claim on a row that is about the *reader* rather than
+   about the game, which is why it takes the palette's one affirmative colour — and why there
+   is no chip for its opposite: nothing here knows that a look is uncollected, only that
+   nobody has yet been in a position to say it is collected. See `collected.ts`. */
+.chip.mog-collected { border-color: var(--ok); color: var(--ok); }
+
 /* How many other items give this look. Deliberately quiet — it is a count, and the reader
    came for the picture beside it. */
 .mog-sources-toggle {

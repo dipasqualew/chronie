@@ -576,6 +576,17 @@ test("browses the game's transmog sets and dresses the character in them", async
     await expect.poll(() => outfit.drew("vertices")).toBe("976");
   });
 
+  // The same claim the wardrobe browser draws, on the same look, out of the same reading —
+  // which is the whole benefit of both halves keying on the appearance rather than on the item
+  // or the set. One of these two the account has and the other it has not, so the row that says
+  // nothing is saying something.
+  await test.step("an opened set says which of its looks the account already has", async () => {
+    await expect(sets.collected("Emberforge Plate", "Head", "Emberforge Helm")).toBeVisible();
+    await expect(
+      sets.collected("Emberforge Plate", "Shoulder", "Emberforge Pauldrons"),
+    ).toHaveCount(0);
+  });
+
   // The second half of the answer the chip on the card gives, and the half no chip could: "Any
   // plate wearer" says the lock lifts and never says which slot lifted it. The greaves of this
   // set are the Paladin's own, and the item that opens them belongs to no set at all — which is

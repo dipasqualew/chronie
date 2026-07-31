@@ -861,7 +861,9 @@ end
 ---  would enumerate — nil, as the real client answers everywhere else. See setCustomizations.
 ---  `censusMounts` maps a mount id to `{ name, spell, source, collected, ... }` and `censusTrees`
 ---  maps an achievement category to the rows inside it, both being what the account *holds*
----  rather than what it was watched collecting; `clientBuild` is the game this is a census of.
+---  rather than what it was watched collecting; `censusAppearances` maps a transmog category to
+---  the rows `GetCategoryAppearances` answers with, which is only ever what the logged-in
+---  character's class filter shows; `clientBuild` is the game this is a census of.
 ---  `censusFactions` maps a faction id to a row in `C_Reputation.GetFactionDataByID`'s shape,
 ---  plus an optional `renown` for a major faction, and is what a test hands over to say this
 ---  build has reputations to walk at all — absent, the census is simply not taken of them.
@@ -962,6 +964,22 @@ function fake.newEnv(options)
                 month = 8, day = 4, year = 9, completed = true, mine = true,
             },
             { id = 2144, name = "The Immortal", points = 25, completed = false },
+        },
+    }
+    -- The appearances the census walk can reach, keyed by the client's own transmog category
+    -- and holding the rows `GetCategoryAppearances` answers with. Only what a category *shows*
+    -- this character: the client answers that call through the class filter, which is why the
+    -- domain over it says it is only ever part of an answer.
+    local censusAppearances = options.censusAppearances or {
+        [1] = {
+            { visualID = 1101, isCollected = true, isFavorite = true },
+            { visualID = 1102, isCollected = false },
+        },
+        [11] = {
+            { visualID = 1201, isCollected = true },
+            -- A "hide helm" pseudo-look: collected as far as the client is concerned and not a
+            -- look anybody owns, so the domain leaves it out.
+            { visualID = 1202, isCollected = true, isHideVisual = true },
         },
     }
     -- The factions the census walk can reach by id, keyed by id and each in the shape
@@ -1291,6 +1309,39 @@ function fake.newEnv(options)
                             row.guild, row.mine, row.by
                     end,
                     completedCount = completedAchievements,
+                },
+                -- The wardrobe, as the client answers about it: a category at a time, by id,
+                -- with no transmog location — the second argument is optional, which is what
+                -- lets the census ask without naming a slot of the player's.
+                collection = {
+                    GetCategoryInfo = function(category)
+                        local rows = censusAppearances[category]
+                        if not rows then
+                            return nil
+                        end
+                        return "Category " .. category
+                    end,
+                    -- The *unfiltered* total, which is what the plan is drawn against: the list
+                    -- below is the class filter's and can only be shorter.
+                    GetCategoryTotal = function(category)
+                        return #(censusAppearances[category] or {})
+                    end,
+                    GetCategoryAppearances = function(category)
+                        return censusAppearances[category]
+                    end,
+                    -- The unfiltered collected count, the twin of the client's own
+                    -- `GetFilteredCategoryCollectedCount`. Counted off the same rows the walk
+                    -- reads and skipping the hidden visuals it skips, so that a fake cannot
+                    -- have every login provoke a pass the real client would not.
+                    GetCategoryCollectedCount = function(category)
+                        local collected = 0
+                        for _, row in ipairs(censusAppearances[category] or {}) do
+                            if row.isCollected and not row.isHideVisual then
+                                collected = collected + 1
+                            end
+                        end
+                        return collected
+                    end,
                 },
             }
             if censusFactions then

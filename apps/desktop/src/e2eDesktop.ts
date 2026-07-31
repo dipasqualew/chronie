@@ -20,6 +20,7 @@ import type {
   CharacterModelPayload,
   CharacterPick,
   CharacterWornSetPayload,
+  CollectedAppearancesPayload,
   CollectionCataloguePayload,
   CombatLogStatus,
   CustomSetPiece,
@@ -191,6 +192,10 @@ export const e2eDesktop = {
   // browser draws is what the database holds.
   transmogMarks: (): Promise<TransmogMarksPayload> =>
     mock ? Promise.resolve(structuredClone(mock.transmogMarks)) : missingMock(),
+  // Which of those looks the account owns. Chronie's own database again, and instant — the
+  // other half of a wardrobe, and the half no install can answer.
+  collectedAppearances: (): Promise<CollectedAppearancesPayload> =>
+    mock ? Promise.resolve(structuredClone(mock.collectedAppearances)) : missingMock(),
   setTransmogFavourite: (
     kind: MarkSubjectKind,
     id: number,
