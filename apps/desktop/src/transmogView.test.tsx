@@ -1645,7 +1645,10 @@ describe("who a card says can wear the set", () => {
     withheldCount: 0,
   };
 
-  const SAID: WearersPayload = { wearers: [{ setId: 601, classMask: 0x0023 }], readCount: 1 };
+  const SAID: WearersPayload = {
+    wearers: [{ setId: 601, classMask: 0x0023, openSlots: 4, blockedSlots: [] }],
+    readCount: 1,
+  };
 
   /**
    * The read, held open until the test lets it answer — or refuses it.

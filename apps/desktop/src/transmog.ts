@@ -17,7 +17,14 @@ import type { MarkFilter } from "./marks";
 import { qualityFacets, qualityWords } from "./qualities";
 import { asksAnything, matchesTerms, matchesWords, parseQuery } from "./terms";
 import type { Facet } from "./terms";
-import type { Alternate, Quality, SameLookReason, TransmogMark, TransmogSet } from "./types";
+import type {
+  Alternate,
+  Quality,
+  SameLookReason,
+  SetWearers,
+  TransmogMark,
+  TransmogSet,
+} from "./types";
 
 /**
  * The classes, in the order the game's class mask numbers them.
@@ -113,6 +120,42 @@ export function whoWears(mask: number): string {
   if (names.length <= 2) return `${names.join(" & ")} only`;
   return `${names.length} classes only`;
 }
+
+/**
+ * How much of a set anybody can have, as the words `open:` narrows the grid by.
+ *
+ * [`whoWears`] is a verdict on a whole body's worth of clothes, so it says the same thing about a
+ * set seven of whose eight slots some world drop sells to everybody and a set nothing of which
+ * does. The counts behind it say which — see `wearers.rs` — and this is the vocabulary a reader
+ * asks them in:
+ *
+ * - **`open:all`** — every slot has a way in. `open:all class:paladin` is the whole of "tier
+ *   looks I can put on anything that wears plate", which was one question and no way to ask it.
+ * - **`open:most`** — three quarters of them or more, `all` included: a set with one obstacle in
+ *   eight is a set worth chasing, and a reader looking for those does not want to have to
+ *   remember to ask twice.
+ * - **`open:some`** — at least one, which is the band between the two and would otherwise be
+ *   unreachable.
+ * - **`open:none`** — nothing. The genuinely class-locked, which is 47% of the game's
+ *   single-class sets.
+ *
+ * A set whose slots this install can read nothing of carries no `open:` facet at all, and so
+ * answers none of these — the same silence the chip on its card falls back from. "Nothing is
+ * known" is not "nothing is open", and `open:none` claiming it would be this app reporting its
+ * own blindness as a wall.
+ */
+export function opennessWords(about: SetWearers): string[] {
+  const slots = about.openSlots + about.blockedSlots.length;
+  if (!slots) return [];
+  if (!about.openSlots) return ["none"];
+  const words = about.blockedSlots.length ? [] : ["all"];
+  if (about.openSlots / slots >= MOSTLY) words.push("most");
+  words.push("some");
+  return words;
+}
+
+/** Where "most of it" starts, which is the three quarters the issue that asked for it named. */
+const MOSTLY = 0.75;
 
 /** A short label for who a set is for. */
 export function classLabel(mask: number): string {
@@ -241,8 +284,14 @@ function everyNamed(family: Family): Named[] {
 interface Said {
   mark: (setId: number) => TransmogMark | undefined;
   quality: (setId: number) => Quality | undefined;
-  /** And who the items say can wear one, where the backend has answered — see [`whoWears`]. */
-  wearers: (setId: number) => number | undefined;
+  /**
+   * And what the items say about one, where the backend has answered — see `wearers.rs`.
+   *
+   * The whole row rather than the mask, because it carries two different answers a filter
+   * wants: who can wear the set, and how much of it anybody can — see [`whoWears`] and
+   * [`opennessWords`].
+   */
+  wearers: (setId: number) => SetWearers | undefined;
 }
 
 /**
@@ -303,6 +352,9 @@ function facetsOf(family: Family, said: Said): Facet[] {
       { key: "class", value: classLabel(one.classMask) },
       ...classNames(one.classMask).map((name) => ({ key: "class", value: name })),
       ...wearerWords(one, said).map((word) => ({ key: "class", value: word })),
+      // And how much of it anybody can have, which is the one thing about a set neither the
+      // game's mask nor the chip drawn from it can be asked — see [`opennessWords`].
+      ...openWords(one, said).map((word) => ({ key: "open", value: word })),
       { key: "expansion", value: expansionName(one.expansionId) },
       { key: "patch", value: patchName(one.patchIntroduced) },
     ])
@@ -316,9 +368,15 @@ function facetsOf(family: Family, said: Said): Facet[] {
 
 /** The phrase the card draws for who can wear a set, and the classes in it, where it is known. */
 function wearerWords(one: Named, said: Said): string[] {
-  const wearers = said.wearers(one.id);
-  if (wearers === undefined) return [];
-  return [whoWears(wearers), ...classNames(wearers)];
+  const about = said.wearers(one.id);
+  if (about === undefined) return [];
+  return [whoWears(about.classMask), ...classNames(about.classMask)];
+}
+
+/** And how much of it they can have, in the words the box asks for that — [`opennessWords`]. */
+function openWords(one: Named, said: Said): string[] {
+  const about = said.wearers(one.id);
+  return about === undefined ? [] : opennessWords(about);
 }
 
 /**
@@ -331,8 +389,8 @@ function wearerWords(one: Named, said: Said): string[] {
  * it has always been, mask of zero and all.
  */
 function wearableBy(one: Named, klass: number, said: Said): boolean {
-  const wearers = said.wearers(one.id);
-  if (wearers !== undefined) return (wearers & (1 << klass)) !== 0;
+  const about = said.wearers(one.id);
+  if (about !== undefined) return (about.classMask & (1 << klass)) !== 0;
   return one.classMask === 0 || (one.classMask & (1 << klass)) !== 0;
 }
 
@@ -413,9 +471,10 @@ export function filterFamilies(
     /** What the committed store measured a whole set to be — see `qualities.ts`. Absent where
      * the file has not arrived, which is what the first draw of the view passes. */
     qualities?: (setId: number) => Quality | undefined;
-    /** Who the items behind a set say can wear it — see [`whoWears`]. Absent for a set the
-     * install can describe no item of, and for every set until that read lands. */
-    wearers?: (setId: number) => number | undefined;
+    /** What the items behind a set say — who can wear it, and how much of it anybody can, see
+     * [`whoWears`] and [`opennessWords`]. Absent for a set the install can describe no item of,
+     * and for every set until that read lands. */
+    wearers?: (setId: number) => SetWearers | undefined;
   },
 ): Family[] {
   const query = parseQuery(filters.search);

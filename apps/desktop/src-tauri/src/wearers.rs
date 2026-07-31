@@ -27,6 +27,21 @@
 //! What comes out is a mask per set: the classes that can wear **every** look in it. Nothing
 //! here decides wording — that a mask of three plate classes reads as "any plate wearer" is
 //! `transmog.ts`'s business, the same way `items.rs` leaves "Leather" to the window.
+//!
+//! ## And *how much* of it, which the mask cannot say
+//!
+//! A mask is a verdict on a whole body's worth of clothes, so it says the same thing about a set
+//! seven of whose eight slots something sells to everybody and a set nothing of which does. The
+//! difference between those two is the interesting one: the first is a look a reader can almost
+//! have, with a single named obstacle. So each set also comes back with **how many of its slots
+//! have a way in, and which ones do not** — the counts behind `open:` in the search box, and the
+//! whole of what the shelf of nearly-wearable sets is built from. See `shelf.ts`.
+//!
+//! **Slots rather than looks, which is the same grain [`wearers_of_set`] already reckons in.** A
+//! set is not one outfit: `Brutal Gladiator's Satin Armor` files a Priest's legs, a Mage's legs
+//! and a pair open to every cloth class all under legs, and a reader wanting the set's legs is
+//! not stopped by the two they cannot have. A slot is blocked when *nothing* filed under it has a
+//! way in, and that is the slot worth naming.
 
 use std::collections::{HashMap, HashSet};
 
@@ -112,6 +127,31 @@ fn wearers_of_look(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> Option<u
     wearers
 }
 
+/// Whether some item in the game gives this look to anybody at all.
+///
+/// The class lock lifting, and nothing else: an unrestricted plate helm still leaves a Priest
+/// unable to wear the look, and that is the armour rather than a lock — see [`armour_wearers`].
+/// This is the same test `openings.rs` sorts one set's looks by and the same one
+/// `wardrobe::lifts_restriction` reports per row; here it is asked of every set at once, which
+/// is what lets the window say a set is one slot short without opening it.
+fn opens_a_look(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> bool {
+    reached.iter().any(|item_id| {
+        facts
+            .get(item_id)
+            .is_some_and(|about| about.allowable_class == ANY_CLASS)
+    })
+}
+
+/// One look of a set, as everything the two answers below are worked out of.
+struct Look {
+    /// Where on the body it goes, as `ItemAppearance.DisplayType` numbers the places.
+    slot: u32,
+    /// Who can wear it, out of every item the game reaches it by — see [`wearers_of_look`].
+    wearers: u32,
+    /// And whether one of those items lets anybody have it — see [`opens_a_look`].
+    open: bool,
+}
+
 /// Who can wear one whole set: a union down each slot, and an intersection across them.
 ///
 /// **Both halves are what a shipping install forces.** Across slots it has to be an
@@ -122,15 +162,42 @@ fn wearers_of_look(reached: &[u32], facts: &HashMap<u32, ItemFacts>) -> Option<u
 /// wear all three. Intersecting those said the set was nobody's — it is the Priest's.
 ///
 /// `None` where this install can describe no look of the set at all.
-fn wearers_of_set(looks: &[u32], per_look: &HashMap<u32, (u32, u32)>) -> Option<u32> {
+fn wearers_of_set(looks: &[u32], per_look: &HashMap<u32, Look>) -> Option<u32> {
     let mut per_slot: HashMap<u32, u32> = HashMap::new();
     for look in looks {
-        let Some((slot, who)) = per_look.get(look) else {
+        let Some(about) = per_look.get(look) else {
             continue;
         };
-        *per_slot.entry(*slot).or_default() |= who;
+        *per_slot.entry(about.slot).or_default() |= about.wearers;
     }
     per_slot.values().copied().reduce(|had, slot| had & slot)
+}
+
+/// How much of a set anybody can have: the slots with a way in, and the slots without one.
+///
+/// A slot is open when *something* filed under it is on an unrestricted item, for the reason the
+/// union above is a union — a set is a wardrobe rather than an outfit, and a reader is not kept
+/// from its legs by a pair of legs beside the pair they can have.
+///
+/// A slot this install can read nothing of is in neither answer. The game encrypts the items of
+/// content it has not shipped, and a slot counted as blocked on that account would put a set on
+/// the near-miss shelf because Chronie is blind rather than because the game locked anything.
+fn openness_of_set(looks: &[u32], per_look: &HashMap<u32, Look>) -> (usize, Vec<u32>) {
+    let mut per_slot: HashMap<u32, bool> = HashMap::new();
+    for look in looks {
+        let Some(about) = per_look.get(look) else {
+            continue;
+        };
+        let open = per_slot.entry(about.slot).or_default();
+        *open |= about.open;
+    }
+    let mut blocked: Vec<u32> = per_slot
+        .iter()
+        .filter(|(_, open)| !**open)
+        .map(|(slot, _)| *slot)
+        .collect();
+    blocked.sort_unstable();
+    (per_slot.len() - blocked.len(), blocked)
 }
 
 /// Who can wear every set the game holds, keyed by the set.
@@ -170,7 +237,7 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
         crate::wardrobe::reaching(files, &|appearance_id| wanted.contains(&appearance_id))?;
     let facts = crate::wardrobe::describe(files, &reached)?;
 
-    let mut per_look: HashMap<u32, (u32, u32)> = HashMap::new();
+    let mut per_look: HashMap<u32, Look> = HashMap::new();
     for (appearance_id, items) in &reached {
         // A look whose slot this install cannot read is one nothing can be said about: it
         // would be an alternative to everything or to nothing, and neither is an answer.
@@ -179,13 +246,26 @@ pub fn sets(files: &dyn GameFiles) -> Result<Value, String> {
         else {
             continue;
         };
-        per_look.insert(*appearance_id, (*slot, wearers));
+        per_look.insert(
+            *appearance_id,
+            Look {
+                slot: *slot,
+                wearers,
+                open: opens_a_look(items, &facts),
+            },
+        );
     }
 
     let mut found: Vec<Value> = Vec::new();
     for (set_id, looks) in &held {
         if let Some(wearers) = wearers_of_set(looks, &per_look) {
-            found.push(json!({ "setId": set_id, "classMask": wearers }));
+            let (open_slots, blocked_slots) = openness_of_set(looks, &per_look);
+            found.push(json!({
+                "setId": set_id,
+                "classMask": wearers,
+                "openSlots": open_slots,
+                "blockedSlots": blocked_slots,
+            }));
         }
     }
     Ok(payload(found))
@@ -211,6 +291,30 @@ mod tests {
                 (
                     row["setId"].as_u64().unwrap() as u32,
                     row["classMask"].as_u64().unwrap() as u32,
+                )
+            })
+            .collect()
+    }
+
+    /// And how much of each of them anybody can have: the open slots, and the shut ones.
+    fn openness() -> HashMap<u32, (u64, Vec<u64>)> {
+        let payload = sets(&fixture_files()).unwrap();
+        payload["wearers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["setId"].as_u64().unwrap() as u32,
+                    (
+                        row["openSlots"].as_u64().unwrap(),
+                        row["blockedSlots"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|slot| slot.as_u64().unwrap())
+                            .collect(),
+                    ),
                 )
             })
             .collect()
@@ -266,6 +370,31 @@ mod tests {
     #[test]
     fn leaves_out_a_set_this_install_can_describe_no_item_of() {
         assert_eq!(read().get(&205), None);
+    }
+
+    // The shelf's whole question, on the fixture's one near-miss set: 202's gloves are open to
+    // anybody and its sandals are the Druid's own, so it is a set one slot short — and the slot
+    // is named, because which slot did it is the difference between an answer and a shrug.
+    // Feet are display type 6.
+    #[test]
+    fn names_the_one_slot_that_keeps_a_set_from_everybody() {
+        assert_eq!(openness().get(&202), Some(&(1, vec![6])));
+    }
+
+    // And the set that is a slot short of nothing. 203's legs are the Paladin's own, but an item
+    // outside the set sells the look to anybody — so every one of its four slots has a way in and
+    // there is nothing for a shelf of near misses to draw.
+    #[test]
+    fn counts_a_slot_an_item_outside_the_set_opens_as_open() {
+        assert_eq!(openness().get(&203), Some(&(4, vec![])));
+    }
+
+    // A slot this install can read nothing of is neither open nor shut. Set 205's every item is
+    // encrypted, so it is absent altogether — and a set half of which was encrypted would be
+    // counted on what could be read rather than put on the shelf for Chronie's own blindness.
+    #[test]
+    fn leaves_a_slot_it_can_read_no_item_of_out_of_both_counts() {
+        assert_eq!(openness().get(&205), None);
     }
 
     #[test]

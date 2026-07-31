@@ -10,12 +10,13 @@ import {
   filterFamilies,
   foldFamilies,
   groupFamilies,
+  opennessWords,
   patchName,
   variantLabel,
   whoWears,
 } from "./transmog";
 import type { Family } from "./transmog";
-import type { Alternate, TransmogSet } from "./types";
+import type { Alternate, SetWearers, TransmogSet } from "./types";
 
 /** A set with only the fields a test cares about spelled out. */
 const set = (fields: Partial<TransmogSet> & Pick<TransmogSet, "id" | "name">): TransmogSet => ({
@@ -29,6 +30,20 @@ const set = (fields: Partial<TransmogSet> & Pick<TransmogSet, "id" | "name">): T
   patchIntroduced: 0,
   itemCount: 0,
   ...fields,
+});
+
+/**
+ * What the items behind a set say about it — see `wearers.rs`.
+ *
+ * The mask is what most of these tests are about, and the two counts beside it are what says how
+ * much of the set anybody can have. Open by default, because a set nothing shuts is the ordinary
+ * one and a test about who can wear a set should not have to say anything about slots.
+ */
+const said = (classMask: number, openSlots = 4, blockedSlots: number[] = []): SetWearers => ({
+  setId: 0,
+  classMask,
+  openSlots,
+  blockedSlots,
 });
 
 /** A set folded into another one, with only the fields a test cares about spelled out. */
@@ -1062,9 +1077,9 @@ describe("narrowing the grid to who can really wear a set", () => {
     // And one the game files under nobody in particular, which it means as everybody.
     set({ id: 604, name: "Sunwarmed Tabard", classMask: 0 }),
   ];
-  const SAID = new Map<number, number>([
-    [601, 0x0023],
-    [602, 0x0400],
+  const SAID = new Map<number, SetWearers>([
+    [601, said(0x0023)],
+    [602, said(0x0400)],
   ]);
   /** The grid as the view now asks for it: the items where they have been read. */
   const asked = (klass: string): number[] =>
@@ -1120,12 +1135,12 @@ describe("narrowing the grid to who can really wear a set", () => {
     set({ id: 612, name: "Sunbound Regalia", classMask: 0x0023, sameLookAs: 611 }),
     set({ id: 631, name: "Duskwoven Shroud", classMask: 0x0023 }),
   ];
-  const FOLDED_SAID = new Map<number, number>([
-    [621, 0x0023],
-    [622, 0x1fff],
-    [611, 0x0023],
-    [612, 0x1fff],
-    [631, 0x0023],
+  const FOLDED_SAID = new Map<number, SetWearers>([
+    [621, said(0x0023)],
+    [622, said(0x1fff)],
+    [611, said(0x0023)],
+    [612, said(0x1fff)],
+    [631, said(0x0023)],
   ]);
 
   it("reads what the items say about a variant and about a set folded away", () => {
@@ -1153,9 +1168,9 @@ describe("searching for who can really wear a set", () => {
     set({ id: 601, name: "Emberforge Bulwark", group: "Emberforge Armory", classMask: 1 << 1 }),
     set({ id: 602, name: "Tideglass Hide", group: "Tideglass Wardrobe", classMask: 0x0e08 }),
   ];
-  const SAID = new Map<number, number>([
-    [601, 0x0023],
-    [602, 0x0400],
+  const SAID = new Map<number, SetWearers>([
+    [601, said(0x0023)],
+    [602, said(0x0400)],
   ]);
   const found = (search: string): number[] =>
     ids(filtered(SETS, { ...none, search, wearers: (setId) => SAID.get(setId) }));
@@ -1190,5 +1205,82 @@ describe("searching for who can really wear a set", () => {
   it("does not answer for an armour neither the mask nor the items name", () => {
     expect(found("class:mail")).toEqual([]);
     expect(found("plate druid")).toEqual([]);
+  });
+});
+
+/**
+ * How much of a set anybody can have, which is the one thing the chip on the card cannot say.
+ *
+ * "Any plate wearer" and "Paladin only" are verdicts on a whole body's worth of clothes, so they
+ * read the same over a set seven of whose eight slots some world drop sells around and over a
+ * set nothing of which is open. The counts behind them say which — see `wearers.rs` — and this
+ * is the vocabulary a reader asks them in.
+ */
+describe("opennessWords", () => {
+  it.each<[string, number, number[], string[]]>([
+    ["a set nothing shuts", 8, [], ["all", "most", "some"]],
+    ["a set one slot short of eight", 7, [5], ["most", "some"]],
+    ["a set three quarters open exactly", 6, [3, 5], ["most", "some"]],
+    ["a set half open", 4, [1, 3, 5, 6], ["some"]],
+    ["a set nothing sells around", 0, [0, 3, 5], ["none"]],
+  ])("answers for %s", (_what, openSlots, blockedSlots, expected) => {
+    expect(opennessWords(said(0x0023, openSlots, blockedSlots))).toEqual(expected);
+  });
+
+  // Not "none". A set whose every slot sits in a section this install holds no key to is a set
+  // nothing is known about, and answering `open:none` for it would be this app reporting its own
+  // blindness as a wall — the same silence the chip on its card falls back from.
+  it("says nothing at all about a set no slot of which could be read", () => {
+    expect(opennessWords(said(0x0023, 0, []))).toEqual([]);
+  });
+});
+
+/**
+ * And asking the grid for them, which is the whole of what the issue wanted: one term.
+ *
+ * `open:all class:paladin` is "tier looks I can put on anything that wears plate" — a question a
+ * reader has always had and there has never been a way to ask.
+ */
+describe("narrowing the grid by how much of a set anybody can have", () => {
+  const none = { search: "", expansion: "", klass: "" };
+  const SETS = [
+    // Every look on an unrestricted item somewhere in the game, the game's own lock
+    // notwithstanding: the whole set is a Warrior's after all.
+    set({ id: 601, name: "Emberforge Bulwark", classMask: 1 << 1 }),
+    // One slot short, which is the interesting one and what the shelf is a list of.
+    set({ id: 602, name: "Stormforged Vestments", classMask: 1 << 1 }),
+    // And a wall: nothing in the game gives any of these looks to another class.
+    set({ id: 603, name: "Lightsworn Plate", classMask: 1 << 1 }),
+    // A set the install can describe no item of, which answers none of it.
+    set({ id: 604, name: "Duskwoven Shroud", classMask: 0x0190 }),
+  ];
+  const SAID = new Map<number, SetWearers>([
+    [601, said(0x0023, 8, [])],
+    [602, said(1 << 1, 7, [3])],
+    [603, said(1 << 1, 0, [0, 3, 5])],
+  ]);
+  const found = (search: string): number[] =>
+    ids(filtered(SETS, { ...none, search, wearers: (setId) => SAID.get(setId) }));
+
+  it.each<[string, string, number[]]>([
+    ["every look already on an unrestricted item", "open:all", [601]],
+    ["three quarters or more of them", "open:most", [601, 602]],
+    ["at least one of them", "open:some", [601, 602]],
+    ["none of them", "open:none", [603]],
+  ])("answers open: for %s", (_what, search, expected) => {
+    expect(found(search)).toEqual(expected);
+  });
+
+  // The sentence the issue asked for, and the reason the term is worth having at all.
+  it("narrows to what one class can have out of another class's tier", () => {
+    expect(found("open:all class:warrior")).toEqual([601]);
+    expect(found("open:none class:warrior")).toEqual([]);
+  });
+
+  // A set nothing was read of answers no `open:` term rather than the wrong one — a term nothing
+  // carries matches nothing, which is `terms.ts`'s own rule and the honest answer here.
+  it("leaves a set nothing was read of out of every answer", () => {
+    expect(found("open:none")).not.toContain(604);
+    expect(found("open:all")).not.toContain(604);
   });
 });

@@ -234,15 +234,22 @@ export const transmog: E2EMock["transmog"] = {
  * files it under the leather mask and its sandals are the Druid's own, so no Rogue can wear the
  * set however much leather it is. And `Duskwoven Shroud` is absent, because its every item sits
  * in a section this install holds no key to: the card falls back to the game's own mask.
+ *
+ * The counts beside each mask are how much of the set anybody can have — see `wearers.rs` — and
+ * they are what `open:` narrows the grid by and what the shelf of near misses is built from.
+ * `Tideglass Hide` is the shelf's whole story: its gloves are open to everybody and its sandals
+ * are the Druid's own, so it is one slot short, and the slot is the feet. Every other set here
+ * has a way in to all of its slots, `Emberforge Plate` included — its legs are the Paladin's own
+ * and a world drop sells the look around them.
  */
 export const transmogWearers: E2EMock["transmogWearers"] = {
   readCount: 5,
   wearers: [
-    { setId: 201, classMask: 0x0190 },
-    { setId: 211, classMask: 0x0190 },
-    { setId: 202, classMask: 0x0400 },
-    { setId: 210, classMask: 0x0400 },
-    { setId: 203, classMask: 0x0023 },
+    { setId: 201, classMask: 0x0190, openSlots: 3, blockedSlots: [] },
+    { setId: 211, classMask: 0x0190, openSlots: 1, blockedSlots: [] },
+    { setId: 202, classMask: 0x0400, openSlots: 1, blockedSlots: [6] },
+    { setId: 210, classMask: 0x0400, openSlots: 1, blockedSlots: [6] },
+    { setId: 203, classMask: 0x0023, openSlots: 4, blockedSlots: [] },
   ],
 };
 

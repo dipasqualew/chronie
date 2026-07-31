@@ -1468,7 +1468,19 @@ export type SetWearers = { setId: number;
  * set holds. Never zero, and never the game's "zero means everybody": this is the answer
  * itself rather than a mask to be interpreted.
  */
-classMask: number }
+classMask: number;
+/**
+ * How many of the set's slots something in the game gives to anybody, whether or not that
+ * something is in the set. The other half of the count is `blocked_slots` below, and the
+ * two together are what `open:` narrows the grid by.
+ */
+openSlots: number;
+/**
+ * And the slots nothing sells around, as `ItemAppearance.DisplayType` numbers the places
+ * on a body. A set with one of these is one slot short of anybody being able to wear it,
+ * which is the whole of what the near-miss shelf lists — see `shelf.ts`.
+ */
+blockedSlots: number[] }
 export type SettingsPayload = { wowPath?: string | null; lastSync?: string | null; combatLogging?: boolean; retainLogDays?: number | null; keepOriginalScreenshots?: boolean; captureQuality?: Quality; captureTriggers?: string[]; characterLook?: CharacterPick[]; characterBody?: number }
 /**
  * One appearance in a set, and where on the character it sits.
