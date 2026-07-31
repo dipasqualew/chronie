@@ -420,16 +420,20 @@ export class SetGrid {
     return this.browser.getByLabel("Tag", { exact: true });
   }
 
+  /** The whole of what the grid is narrowed by. There were two selects beside it; there are not. */
   search(): Locator {
     return this.browser.getByLabel("Filter transmog sets");
   }
 
-  expansion(): Locator {
-    return this.browser.getByLabel("Expansion");
-  }
-
-  klass(): Locator {
-    return this.browser.getByLabel("Class");
+  /**
+   * A fact printed on a card, which narrows the grid to what it says when clicked.
+   *
+   * This is what the expansion and class dropdowns became — see `Fact` in `transmogView.tsx`.
+   * Named by what clicking it would ask for rather than by what it prints, which is also how
+   * the measured colour beside it is named.
+   */
+  fact(set: string, asks: string): Locator {
+    return this.card(set).getByRole("button", { name: `Filter by ${asks}` });
   }
 
   /** How far down the grid the reader has got, which the character has to survive. */

@@ -87,9 +87,8 @@ import { OutfitPanel } from "./outfitPanel";
 import { NO_QUALITIES, indexQualities, loadSetQualities as loadSetStore } from "./qualities";
 import { Qualities, Swatch } from "./qualitiesChips";
 import { ShelfList } from "./shelfList";
-import { withTerm } from "./terms";
+import { termText, withTerm } from "./terms";
 import {
-  CLASSES,
   alternateLabel,
   classLabel,
   classNames,
@@ -382,9 +381,14 @@ export function TransmogView({
    * *different* from what it was when somebody changes one. See `herself.ts`.
    */
   const [look, setLook] = useState("");
+  /**
+   * The whole of what the grid is narrowed to by, dropdowns and all — see `terms.ts`.
+   *
+   * There were two selects beside it, an expansion and a class, and both asked for something
+   * `facetsOf` already answers under a name. Every chip on every card writes into here instead,
+   * which is the mechanism the measured colours and the reader's own tags were already using.
+   */
   const [search, setSearch] = useState("");
-  const [expansion, setExpansion] = useState("");
-  const [klass, setKlass] = useState("");
   const [outfit, setOutfit] = useState<Outfit>(NOTHING_ON);
   /** What the sets are narrowed to beyond what the game says. The wardrobe keeps its own. */
   const [marked, setMarked] = useState(NO_MARK_FILTER);
@@ -658,8 +662,6 @@ export function TransmogView({
   const shownFamilies = payload
     ? filterFamilies(families, {
         search,
-        expansion,
-        klass,
         marks: { filter: marked, of: (id) => index.of("set", id) },
         // So that "brown" and `colour:brown` mean here what they already meant in the wardrobe
         // beside this: the card draws the same measured chip, and a chip the box cannot be asked
@@ -737,10 +739,6 @@ export function TransmogView({
     setShown(SET_PAGE);
   };
 
-  // Only offer the expansions this install actually has sets for.
-  const expansions = payload
-    ? [...new Set(payload.sets.map((set) => set.expansionId))].sort((a, b) => b - a)
-    : [];
   const withheld =
     payload && payload.withheldCount > 0
       ? ` · ${plural(payload.withheldCount, "set")} the game keeps encrypted`
@@ -856,32 +854,6 @@ export function TransmogView({
                   value={search}
                   onChange={(event) => narrow(() => setSearch(event.target.value))}
                 />
-                <select
-                  id="transmog-expansion"
-                  aria-label="Expansion"
-                  value={expansion}
-                  onChange={(event) => narrow(() => setExpansion(event.target.value))}
-                >
-                  <option value="">All expansions</option>
-                  {expansions.map((id) => (
-                    <option key={id} value={id}>
-                      {expansionName(id)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  id="transmog-class"
-                  aria-label="Class"
-                  value={klass}
-                  onChange={(event) => narrow(() => setKlass(event.target.value))}
-                >
-                  <option value="">All classes</option>
-                  {CLASSES.map((name, index) => (
-                    <option key={name} value={index}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
                 {/* Applies to every set at once rather than to the one being read, because it is a
                 statement about what a reader is here for and not about a particular set. */}
                 <label className="mog-hide">
@@ -997,7 +969,7 @@ export function TransmogView({
               hidden={!payload || shownFamilies.length > 0}
             >
               <p className="empty-title">Nothing matches</p>
-              <p>Try a different search, class or expansion.</p>
+              <p>Try a different search, or one term fewer.</p>
             </div>
           </section>
           {/* Kept in the tree rather than swapped in, so that what a reader has read, searched
@@ -1230,12 +1202,19 @@ function Card({
         {/* Who can wear it, which is a harder question than the game's own mask and a more
             useful answer: "Any plate wearer" is a Paladin set a Warrior can have after all,
             and "Paladin only" is a wall. The mask until that read lands — see `wearers.rs`,
-            and [`whoWears`] for the three sentences it comes to. */}
-        <span className="chip">
-          {wearers === undefined ? classLabel(set.classMask) : whoWears(wearers)}
-        </span>
-        <span className="chip">{expansionName(set.expansionId)}</span>
-        {patch ? <span className="chip">Patch {patch}</span> : null}
+            and [`whoWears`] for the three sentences it comes to.
+
+            All three of these narrow the grid to what they say, which is what the two dropdowns
+            over it used to be: a reader looking at "Plate · Cataclysm · Patch 4.0.1" and wanting
+            more like it clicks the word they are looking at rather than hunting for the select
+            that happens to hold it. `patch:` never had a dropdown at all. */}
+        <Fact
+          facet="class"
+          said={wearers === undefined ? classLabel(set.classMask) : whoWears(wearers)}
+          onFilter={onFilter}
+        />
+        <Fact facet="expansion" said={expansionName(set.expansionId)} onFilter={onFilter} />
+        {patch ? <Fact facet="patch" said={patch} prefix="Patch " onFilter={onFilter} /> : null}
         {/* Last of the facts and dashed, because it is the one of them nobody wrote down: the
             game states the class, the expansion and the patch, and this was measured off the
             artwork of the looks the set holds. There is no size — a set is a body's worth of
@@ -1339,6 +1318,50 @@ function Card({
         </div>
       ) : null}
     </article>
+  );
+}
+
+/**
+ * One thing the game states about a set, and the way to ask the grid for more like it.
+ *
+ * This is where the expansion and class dropdowns went. They asked what the card was already
+ * printing, so a reader had two ways to say one thing and neither of them was the obvious one —
+ * the obvious one being the word itself, which is what they were looking at. Clicking it writes
+ * the term into the box above; see `terms.ts` for the syntax and `qualitiesChips.tsx` for the
+ * chip that has worked this way since the measured colours arrived.
+ *
+ * It stays looking like the chip it was rather than becoming a button, for the reason the
+ * measured one does: it is still the card stating a fact, and the underline on hover is the
+ * whole of what says it can be clicked. Named by what it would do rather than by what it says,
+ * because "Cataclysm" read out of a grid of several thousand cards is not something anybody can
+ * act on.
+ *
+ * @param prefix What the chip prints before the value but does not ask for — "Patch 4.0.1" is
+ *   what a reader reads and `patch:4.0.1` is the term, the word "Patch" being the key said aloud.
+ */
+function Fact({
+  facet,
+  said,
+  prefix = "",
+  onFilter,
+}: {
+  /** The key the term is asked under — and never React's own `key`. */
+  facet: string;
+  said: string;
+  prefix?: string;
+  onFilter: (term: string) => void;
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      className="chip mog-ask"
+      aria-label={`Filter by ${facet}: ${said}`}
+      title={`Filter by ${facet}: ${said}`}
+      onClick={() => onFilter(termText(facet, said))}
+    >
+      {prefix}
+      {said}
+    </button>
   );
 }
 

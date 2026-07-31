@@ -236,7 +236,7 @@ describe("filtering the grid", () => {
       expansionId: 4,
     }),
   ];
-  const none = { search: "", expansion: "", klass: "" };
+  const none = { search: "" };
 
   it("keeps every set when nothing is filled in", () => {
     expect(ids(filtered(SETS, none))).toEqual([205, 203, 201, 202]);
@@ -249,20 +249,25 @@ describe("filtering the grid", () => {
     expect(filtered(SETS, { ...none, search: "nothing like it" })).toEqual([]);
   });
 
+  // What the two dropdowns over the grid used to be. They are terms now — see `filterFamilies`
+  // — and the whole point of cutting them is that these are the same answers.
   it("narrows to one expansion", () => {
-    expect(ids(filtered(SETS, { ...none, expansion: "3" }))).toEqual([201, 202]);
+    expect(ids(filtered(SETS, { search: "expansion:cataclysm" }))).toEqual([201, 202]);
   });
 
   // Priest is a cloth class, and a set with no class of its own is for everyone — which is
-  // the case a plain mask test gets wrong.
+  // the case a plain mask test gets wrong, and the one thing `class:` had to learn from the
+  // dropdown it replaced: `classNames` reads no class at all out of a mask of nothing.
   it("keeps a class-agnostic set alongside the class asked for", () => {
-    expect(ids(filtered(SETS, { ...none, klass: "4" }))).toEqual([205, 201]);
-    expect(ids(filtered(SETS, { ...none, klass: "0" }))).toEqual([205, 203]);
+    expect(ids(filtered(SETS, { search: "class:priest" }))).toEqual([205, 201]);
+    expect(ids(filtered(SETS, { search: "class:warrior" }))).toEqual([205, 203]);
   });
 
-  it("applies search, expansion and class together", () => {
-    expect(ids(filtered(SETS, { search: "tideglass", expansion: "3", klass: "9" }))).toEqual([202]);
-    expect(filtered(SETS, { search: "tideglass", expansion: "4", klass: "" })).toEqual([]);
+  it("applies words, expansion and class together", () => {
+    expect(ids(filtered(SETS, { search: "tideglass expansion:cataclysm class:monk" }))).toEqual([
+      202,
+    ]);
+    expect(filtered(SETS, { search: "tideglass expansion:mists" })).toEqual([]);
   });
 
   // Everything the card itself already shows is searchable, because a reader looking at
@@ -388,12 +393,12 @@ describe("filtering the grid", () => {
 
   // A folded set matching a filter on its own account is the case worth pinning down: the grid
   // must answer with the card standing in for it, and never with two rows of the same clothes.
-  it.each<[string, { search: string; expansion: string; klass: string }, number[]]>([
-    ["by its name", { search: "warmongering", expansion: "", klass: "" }, [301]],
-    ["by its expansion", { search: "", expansion: "5", klass: "" }, [301, 321]],
-    ["by its class", { search: "", expansion: "", klass: "9" }, [311, 321]],
-  ])("never shows a folded set even when it matches %s", (_what, filters, expected) => {
-    expect(ids(filtered(CLUSTERS, filters))).toEqual(expected);
+  it.each<[string, string, number[]]>([
+    ["by its name", "warmongering", [301]],
+    ["by its expansion", "expansion:draenor", [301, 321]],
+    ["by its class", "class:monk", [311, 321]],
+  ])("never shows a folded set even when it matches %s", (_what, search, expected) => {
+    expect(ids(filtered(CLUSTERS, { search }))).toEqual(expected);
   });
 
   // The whole risk of folding sets away is a reader typing the name of one and getting nothing.
@@ -422,20 +427,20 @@ describe("filtering the grid", () => {
    * class at all, which the game means as everyone rather than as nobody.
    */
   it("keeps a cluster whose only wearer of the class asked for was folded away", () => {
-    expect(ids(filtered(CLUSTERS, { ...none, klass: "9" }))).toEqual([311, 321]);
+    expect(ids(filtered(CLUSTERS, { search: "class:monk" }))).toEqual([311, 321]);
   });
 
-  it.each<[string, string, number[]]>([
-    ["Warrior", "0", [301, 321]],
-    ["Priest", "4", [311, 321, 331]],
-  ])("still reads the shown set's own classes when narrowed to %s", (_what, klass, expected) => {
-    expect(ids(filtered(CLUSTERS, { ...none, klass }))).toEqual(expected);
+  it.each<[string, number[]]>([
+    ["class:warrior", [301, 321]],
+    ["class:priest", [311, 321, 331]],
+  ])("still reads the shown set's own classes when narrowed by %s", (search, expected) => {
+    expect(ids(filtered(CLUSTERS, { search }))).toEqual(expected);
   });
 
   // A set reissued a few expansions later is the same clothes from a different era, and the
   // reader narrowing to the later one is looking for exactly the card that swallowed it.
   it("keeps a cluster whose only set from an expansion was folded away", () => {
-    expect(ids(filtered(CLUSTERS, { ...none, expansion: "9" }))).toEqual([321]);
+    expect(ids(filtered(CLUSTERS, { search: "expansion:dragonflight" }))).toEqual([321]);
   });
 
   // Four thousand of the game's sets are in no cluster at all, and the fields the backend
@@ -453,12 +458,12 @@ describe("filtering the grid", () => {
       }),
     ];
     expect(ids(filtered(plain, none))).toEqual([331]);
-    expect(ids(filtered(plain, { search: "duskwoven", expansion: "3", klass: "4" }))).toEqual([
+    expect(ids(filtered(plain, { search: "duskwoven expansion:cataclysm class:priest" }))).toEqual([
       331,
     ]);
-    expect(filtered(plain, { ...none, search: "warmongering" })).toEqual([]);
-    expect(filtered(plain, { ...none, expansion: "9" })).toEqual([]);
-    expect(filtered(plain, { ...none, klass: "9" })).toEqual([]);
+    expect(filtered(plain, { search: "warmongering" })).toEqual([]);
+    expect(filtered(plain, { search: "expansion:dragonflight" })).toEqual([]);
+    expect(filtered(plain, { search: "class:monk" })).toEqual([]);
   });
 });
 
@@ -652,7 +657,7 @@ describe("variantLabel", () => {
  * in, has to land on the card that swallowed it.
  */
 describe("filtering a family by what only a variant says", () => {
-  const none = { search: "", expansion: "", klass: "" };
+  const none = { search: "" };
   const REACHED: TransmogSet[] = [
     set({
       id: 401,
@@ -687,24 +692,29 @@ describe("filtering a family by what only a variant says", () => {
     set({ id: 421, name: "Duskwoven Shroud", group: "Duskwoven Attire", expansionId: 3 }),
   ];
 
-  it.each<[string, { search: string; expansion: string; klass: string }, number[]]>([
-    ["its name", { ...none, search: "sanctified" }, [401]],
-    ["its collection", { ...none, search: "trophies" }, [401]],
-    ["its id", { ...none, search: "402" }, [401]],
-    ["its patch", { ...none, search: "10.2.0" }, [401]],
-    ["the expansion it came out in", { ...none, expansion: "9" }, [401]],
-    ["the class of a set folded into it", { ...none, klass: "5" }, [401, 421]],
-  ])("answers %s with the card standing in for it", (_what, filters, expected) => {
-    expect(ids(filtered(REACHED, filters))).toEqual(expected);
+  it.each<[string, string, number[]]>([
+    ["its name", "sanctified", [401]],
+    ["its collection", "trophies", [401]],
+    ["its id", "402", [401]],
+    ["its patch", "10.2.0", [401]],
+    ["the expansion it came out in", "expansion:dragonflight", [401]],
+  ])("answers %s with the card standing in for it", (_what, search, expected) => {
+    expect(ids(filtered(REACHED, { search }))).toEqual(expected);
   });
 
   it.each<[string, string, number[]]>([
     ["its name", "name:sanctified", [401]],
     ["its collection", "collection:trophies", [401]],
-    ["the class of a set folded into it", "class:death knight", [401]],
     ["its expansion", "expansion:dragonflight", [401]],
   ])("answers a term asking for %s the same way", (_what, search, expected) => {
-    expect(ids(filtered(REACHED, { ...none, search }))).toEqual(expected);
+    expect(ids(filtered(REACHED, { search }))).toEqual(expected);
+  });
+
+  // 421 belongs to no class at all, which the game means as everyone — so it answers here
+  // beside the family that swallowed a Death Knight's version of its armour. That is the whole
+  // of what `class:` had to learn when it took the dropdown's job: see `classFacets`.
+  it("answers the class of a set folded into a family, and the sets no class owns", () => {
+    expect(ids(filtered(REACHED, { search: 'class:"death knight"' }))).toEqual([401, 421]);
   });
 
   // Every word somewhere in the family rather than all of them in one member, so a reader who
@@ -848,10 +858,51 @@ describe("groupFamilies", () => {
     expect(grouped[1]?.families.map((found) => found.shown.id)).toEqual([201, 202]);
   });
 
-  // A collection the tables do not name still has to land somewhere on screen.
-  it("files a set with no collection under one of its own", () => {
-    const grouped = groupFamilies(foldFamilies([set({ id: 900, name: "Orphan" })]));
-    expect(grouped.map((group) => group.group)).toEqual(["Ungrouped"]);
+  /**
+   * A collection the tables do not name still has to land somewhere on screen — and somewhere
+   * that is not one heading over a third of the grid.
+   *
+   * `TransmogSetGroup` says nothing about 1,482 of a 12.x install's 4,475 sets, and folding by
+   * parent barely touches them because they are one-offs rather than variant chains. So the
+   * expansion and the patch stand in, both of which the game states about every set it has.
+   */
+  it("files a set with no collection under the patch it arrived in", () => {
+    const grouped = groupFamilies(
+      foldFamilies([
+        set({ id: 900, name: "Emberforge Bulwark", expansionId: 9, patchIntroduced: 100200 }),
+        set({ id: 901, name: "Sunwarmed Tabard", expansionId: 9, patchIntroduced: 100200 }),
+        set({ id: 902, name: "Duskwoven Shroud", expansionId: 9, patchIntroduced: 100007 }),
+        set({ id: 903, name: "Tideglass Hide", expansionId: 3, patchIntroduced: 100200 }),
+      ]),
+    );
+    expect(grouped.map((group) => group.group)).toEqual([
+      "Dragonflight · Patch 10.2.0",
+      "Dragonflight · Patch 10.0.7",
+      "Cataclysm · Patch 10.2.0",
+    ]);
+    expect(grouped[0]?.families.map((one) => one.shown.id)).toEqual([900, 901]);
+  });
+
+  // The tables leave the patch at zero for sets old enough to predate the column, and a heading
+  // reading "Classic · Patch " would be the app printing a hole rather than a fact.
+  it("falls back to the expansion alone where the tables give no patch", () => {
+    const grouped = groupFamilies(foldFamilies([set({ id: 904, name: "Orphan", expansionId: 0 })]));
+    expect(grouped.map((group) => group.group)).toEqual(["Classic"]);
+  });
+
+  // The heading a set with no collection lands under is a sentence about when it arrived, and a
+  // collection the game happens to have named the same thing is a different pile entirely.
+  it("keeps a collection apart from the sets that fell back to its name", () => {
+    const grouped = groupFamilies(
+      foldFamilies([
+        set({ id: 905, name: "Emberforge Bulwark", group: "Classic", expansionId: 5 }),
+        set({ id: 906, name: "Sunwarmed Tabard", expansionId: 0 }),
+      ]),
+    );
+    expect(grouped.map((group) => group.families.map((one) => one.shown.id))).toEqual([
+      [905],
+      [906],
+    ]);
   });
 
   it("has nothing to group when nothing is left", () => {
@@ -877,8 +928,6 @@ describe("narrowing the grid to what the reader said about it", () => {
   const shown = (filter: MarkFilter): number[] =>
     filtered(sets, {
       search: "",
-      expansion: "",
-      klass: "",
       marks: marked(filter),
     }).map((one) => one.shown.id);
 
@@ -906,8 +955,6 @@ describe("narrowing the grid to what the reader said about it", () => {
   it("finds a set by a word the reader filed it under", () => {
     const found = filtered(sets, {
       search: "horde",
-      expansion: "",
-      klass: "",
       marks: marked(NO_MARK_FILTER),
     });
     expect(found.map((one) => one.shown.id)).toEqual([201]);
@@ -916,8 +963,6 @@ describe("narrowing the grid to what the reader said about it", () => {
   it("finds the starred sets by the word for them", () => {
     const found = filtered(sets, {
       search: "favourite",
-      expansion: "",
-      klass: "",
       marks: marked(NO_MARK_FILTER),
     });
     expect(found.map((one) => one.shown.id)).toEqual([201]);
@@ -925,8 +970,8 @@ describe("narrowing the grid to what the reader said about it", () => {
 
   // Every caller that predates marks passes none, and must keep getting the whole grid.
   it("says nothing about marks when it was given none", () => {
-    expect(filtered(sets, { search: "", expansion: "", klass: "" })).toHaveLength(3);
-    expect(filtered(sets, { search: "horde", expansion: "", klass: "" })).toHaveLength(0);
+    expect(filtered(sets, { search: "" })).toHaveLength(3);
+    expect(filtered(sets, { search: "horde" })).toHaveLength(0);
   });
 });
 
@@ -982,8 +1027,6 @@ describe("asking the grid for one thing a set says", () => {
   const found = (search: string): number[] =>
     filtered(sets, {
       search,
-      expansion: "",
-      klass: "",
       marks: { filter: NO_MARK_FILTER, of: (id) => marks.of("set", id) },
       qualities: (id) => measured.of(id),
     }).map((one) => one.shown.id);
@@ -1062,7 +1105,6 @@ describe("asking the grid for one thing a set says", () => {
  * disagreement are here, because both are a reader being shown the wrong grid.
  */
 describe("narrowing the grid to who can really wear a set", () => {
-  const none = { search: "", expansion: "", klass: "" };
   const SETS = [
     // The set that motivated the issue. The game locks it to Paladins, and every one of its
     // looks is sold by something else to every class that can wear plate — so a Warrior can
@@ -1083,36 +1125,45 @@ describe("narrowing the grid to who can really wear a set", () => {
   ]);
   /** The grid as the view now asks for it: the items where they have been read. */
   const asked = (klass: string): number[] =>
-    ids(filtered(SETS, { ...none, klass, wearers: (setId) => SAID.get(setId) }));
+    ids(filtered(SETS, { search: `class:${klass}`, wearers: (setId) => SAID.get(setId) }));
   /** And as it asked before any of this existed, which is what a card falls back to. */
-  const byMask = (klass: string): number[] => ids(filtered(SETS, { ...none, klass }));
+  const byMask = (klass: string): number[] => ids(filtered(SETS, { search: `class:${klass}` }));
 
   // The whole of the issue in one line: the Paladin set is on a Warrior's grid now.
   it("keeps a set the game locks to one class when its items are sold to another", () => {
-    expect(asked("0")).toEqual([601, 604]);
-    expect(byMask("0")).toEqual([604]);
+    expect(asked("warrior")).toEqual([601, 604]);
+    expect(byMask("warrior")).toEqual([604]);
   });
 
   it("drops a set the game files under an armour its items do not really give", () => {
-    expect(asked("3")).toEqual([604]);
-    expect(byMask("3")).toEqual([602, 604]);
+    expect(asked("rogue")).toEqual([604]);
+    expect(byMask("rogue")).toEqual([602, 604]);
   });
 
   // And says yes to the class the items really do give it to, which is the half a narrowing
   // filter could pass by saying no to everything.
   it("keeps a set for the one class its items are for", () => {
-    expect(asked("10")).toEqual([602, 604]);
+    expect(asked("druid")).toEqual([602, 604]);
   });
 
   // A set the backend said nothing about is filtered by exactly the test it always was, mask of
   // zero and all — which is what lets a read that lands late, or not at all, still leave a grid.
   it.each<[string, string, number[]]>([
-    ["Priest, whose armour it is", "4", [603, 604]],
-    ["Mage, whose armour it is", "7", [603, 604]],
-    ["Hunter, whose armour it is not", "2", [604]],
+    ["Priest, whose armour it is", "priest", [603, 604]],
+    ["Mage, whose armour it is", "mage", [603, 604]],
+    ["Shaman, whose armour it is not", "shaman", [604]],
   ])("filters a set nothing was read of by its own mask, for %s", (_what, klass, expected) => {
     expect(asked(klass)).toEqual(expected);
     expect(byMask(klass)).toEqual(expected);
+  });
+
+  // 604 is in every answer above, and this is why: the game writes "anybody can wear this" as a
+  // mask of nothing, and a term left to `classNames` alone would read that as nobody — hiding
+  // every tabard and weapon rack from the reader narrowing to their own class. See `classFacets`.
+  it("keeps a set the game files under no class at all for every class", () => {
+    for (const klass of ["warrior", "rogue", "druid", "priest", "shaman"]) {
+      expect(byMask(klass)).toContain(604);
+    }
   });
 
   /**
@@ -1145,11 +1196,11 @@ describe("narrowing the grid to who can really wear a set", () => {
 
   it("reads what the items say about a variant and about a set folded away", () => {
     const found = ids(
-      filtered(FOLDED, { ...none, klass: "7", wearers: (setId) => FOLDED_SAID.get(setId) }),
+      filtered(FOLDED, { search: "class:mage", wearers: (setId) => FOLDED_SAID.get(setId) }),
     );
     expect(found).toEqual([621, 611]);
     // And nothing about the masks would have kept any of them: all three cards are plate.
-    expect(ids(filtered(FOLDED, { ...none, klass: "7" }))).toEqual([]);
+    expect(ids(filtered(FOLDED, { search: "class:mage" }))).toEqual([]);
   });
 });
 
@@ -1161,7 +1212,7 @@ describe("narrowing the grid to who can really wear a set", () => {
  * mask. Neither word is anywhere in what the game wrote down about the set.
  */
 describe("searching for who can really wear a set", () => {
-  const none = { search: "", expansion: "", klass: "" };
+  const none = { search: "" };
   // Named so that nothing but the computed phrase can answer for the armour: "Emberforge
   // Bulwark" holds no armour word, and the mask's own label is "Paladin".
   const SETS = [
@@ -1193,11 +1244,15 @@ describe("searching for who can really wear a set", () => {
     expect(found(search)).toEqual(expected);
   });
 
-  // What the game itself said is still there beside it: the two labels are two facts about the
-  // set, and dropping the mask's own would lose the reader who typed what the game calls it.
-  it("still answers for the mask the game filed the set under", () => {
+  // And the mask stops answering where the items have contradicted it, which is the half the
+  // dropdown above the grid used to carry on its own. The card says "Druid only" over 602, so a
+  // Rogue asking `class:leather` is asking for a set the app has already told them they cannot
+  // wear. Where the items only widened the mask its own class is still in the answer, 601 being
+  // a Paladin set every plate wearer can now have.
+  it("stops answering for a mask the items contradict", () => {
+    expect(found("class:leather")).toEqual([]);
+    expect(found("class:rogue")).toEqual([]);
     expect(found("class:paladin")).toEqual([601]);
-    expect(found("class:leather")).toEqual([602]);
   });
 
   // And the word only the mask carries stays absent from the sets the items widened, so this is
@@ -1242,7 +1297,7 @@ describe("opennessWords", () => {
  * reader has always had and there has never been a way to ask.
  */
 describe("narrowing the grid by how much of a set anybody can have", () => {
-  const none = { search: "", expansion: "", klass: "" };
+  const none = { search: "" };
   const SETS = [
     // Every look on an unrestricted item somewhere in the game, the game's own lock
     // notwithstanding: the whole set is a Warrior's after all.

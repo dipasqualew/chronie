@@ -3171,6 +3171,99 @@ describe("narrowing a list by clicking what is written on it", () => {
     expect(screen.getByText("Coif of the Drowned Star")).toBeTruthy();
   });
 
+  /**
+   * The other half of it, and the half that used to be two dropdowns.
+   *
+   * An expansion select and a class select sat over the grid asking what `facetsOf` already
+   * answers under a name, so a reader had two ways to say one thing and neither of them was the
+   * word they were looking at. These are what the pair became: the fact printed on the card,
+   * clickable, writing its own term into the one box left.
+   */
+  const setsBox = (): HTMLInputElement =>
+    screen.getByLabelText("Filter transmog sets") as HTMLInputElement;
+
+  const cardOf = async (name: string): Promise<HTMLElement> =>
+    (await screen.findByRole("button", { name })).closest("article") as HTMLElement;
+
+  it.each<[string, string, string]>([
+    ["expansion", "Filter by expansion: Mists of Pandaria", 'expansion:"Mists of Pandaria"'],
+    ["class", "Filter by class: Plate", "class:Plate"],
+  ])(
+    "narrows the grid by the %s the card states, when it is clicked",
+    async (_what, asks, term) => {
+      view();
+      const card = await cardOf("Emberforge Plate");
+
+      fireEvent.click(within(card).getByRole("button", { name: asks }));
+
+      expect(setsBox().value).toBe(term);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull(),
+      );
+      expect(screen.getByRole("button", { name: "Emberforge Plate" })).toBeTruthy();
+    },
+  );
+
+  // Two clicks narrow rather than replace, the same way the wardrobe's do — and between them
+  // they are exactly what the two dropdowns said when both were set.
+  it("says what both dropdowns said when two of them are clicked", async () => {
+    view();
+    const card = await cardOf("Emberforge Plate");
+
+    fireEvent.click(within(card).getByRole("button", { name: "Filter by class: Plate" }));
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Filter by expansion: Mists of Pandaria" }),
+    );
+
+    expect(setsBox().value).toBe('class:Plate expansion:"Mists of Pandaria"');
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Tideglass Regalia" })).toBeNull(),
+    );
+  });
+
+  /**
+   * And the pile the grid used to file a third of itself into.
+   *
+   * `TransmogSetGroup` names nothing about 1,482 of a 12.x install's sets, and they all landed
+   * under one "Ungrouped" heading — which is not a section anybody reads. The expansion and the
+   * patch stand in, both of which the game states about every set it has; see `groupFamilies`.
+   */
+  it("heads the sets out of no collection with when they arrived", async () => {
+    view({
+      payload: {
+        sets: [
+          set({ id: 701, name: "Sunwarmed Tabard", group: "", patchIntroduced: 100200 }),
+          set({ id: 702, name: "Emberforge Bulwark", group: "", patchIntroduced: 100200 }),
+          set({ id: 703, name: "Duskwoven Shroud", group: "", patchIntroduced: 100007 }),
+        ],
+        readCount: 3,
+        declaredCount: 3,
+        withheldCount: 0,
+      },
+    });
+    await cardOf("Sunwarmed Tabard");
+    const panel = within(screen.getByRole("region", { name: "The game's sets" }));
+
+    expect(panel.queryByRole("heading", { name: /Ungrouped/ })).toBeNull();
+    expect(panel.getAllByRole("heading", { level: 3 }).map((head) => head.textContent)).toEqual([
+      "Cataclysm · Patch 10.2.0 · 2 sets",
+      "Cataclysm · Patch 10.0.7 · 1 set",
+    ]);
+  });
+
+  // The dropdowns themselves are gone. Asked of the sets panel by name rather than of the
+  // window, because the wardrobe beside it keeps a class filter of its own — that browser has
+  // no chips writing terms and so has not had this done to it.
+  it("leaves one box and no selects over the grid", async () => {
+    view();
+    await cardOf("Emberforge Plate");
+    const panel = within(screen.getByRole("region", { name: "The game's sets" }));
+
+    expect(panel.queryByLabelText("Expansion")).toBeNull();
+    expect(panel.queryByLabelText("Class")).toBeNull();
+    expect(setsBox()).toBeTruthy();
+  });
+
   // The rows inside an opened set are looks and the box above that grid filters *sets*, so a
   // chip there that narrowed the grid by its own tag would be answering another question.
   it("leaves the chips inside an opened set as the words they were", async () => {
