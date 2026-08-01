@@ -1429,12 +1429,22 @@ describe("the census domains", function()
     end)
 
     describe("ns.appearanceCensus", function()
+        ---The top of `Enum.TransmogCollectionType` on build 12.0.5.67823: 0 is `None`, 1 to 11
+        ---the armour slots, 12 to 29 what is held in a hand. Nothing above it is a category.
+        local LAST_TRANSMOG_ENUM_CATEGORY = 29
+
         ---A stand-in for `C_TransmogCollection`, answering about a category at a time.
         ---
         ---Two lengths on purpose. `GetCategoryTotal` is the client's *unfiltered* total, which
         ---is what the plan is drawn against; `GetCategoryAppearances` answers with what the
         ---class filter shows, which can only be shorter — so a category may hold rows the walk
         ---is planned for and never sees, which is the whole shape of this domain.
+        ---
+        ---`GetCategoryInfo` makes the distinction the live client makes and this fake used not
+        ---to: an id *inside* the enum that this build has no rows for answers nothing and is
+        ---skipped, but an id *outside* the enum is not a category at all and the client raises
+        ---on it, with the `Usage:` string every `bad argument #1` carries. A fake that answered
+        ---nil for both is why issue #271 reached a player's login untested.
         ---@param categories table Keyed by category, each `{ total = n?, rows = { ... } }`.
         ---@return table collection
         local function newCollection(categories)
@@ -1442,6 +1452,11 @@ describe("the census domains", function()
             return {
                 asked = asked,
                 GetCategoryInfo = function(category)
+                    if type(category) ~= "number" or category > LAST_TRANSMOG_ENUM_CATEGORY then
+                        error("bad argument #1 to 'GetCategoryInfo' (Usage: local name, isWeapon,"
+                            .. " canHaveIllusions, canMainHand, canOffHand, canRanged ="
+                            .. " C_TransmogCollection.GetCategoryInfo(category))", 2)
+                    end
                     if not categories[category] then
                         return nil
                     end
@@ -1508,6 +1523,26 @@ describe("the census domains", function()
             local collection = newCollection({ [1] = { rows = { {} } } })
 
             assert.equal(1, #ns.appearanceCensus(collection).list())
+        end)
+
+        -- Issue #271, at the first of the two seams that probe. The walk asks about every id up
+        -- to its own headroom, which reaches well past the top of `Enum.TransmogCollectionType`,
+        -- on the premise that an id nothing sits at costs one call that answers nothing. That
+        -- premise holds only *inside* the enum. Past the end of it the client raises rather than
+        -- answering, so the headroom is not eleven wasted calls, it is a login that ends in a
+        -- Lua error — and the plan the walk was drawing never gets returned at all.
+        it("plans a walk without dying on an id past the top of the enum", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = { {}, {} } },
+                [LAST_TRANSMOG_ENUM_CATEGORY] = { rows = { {} } },
+            }))
+
+            local positions
+            assert.has_no.errors(function()
+                positions = domain.list()
+            end)
+
+            assert.equal(3, #positions)
         end)
 
         it("reads a position back out as the category and offset it stands for", function()
@@ -1617,6 +1652,24 @@ describe("the census domains", function()
             }))
 
             assert.equal(42, domain.count())
+        end)
+
+        -- The same probe at the other seam, which is the one the traceback in issue #271 came
+        -- out of: `count` walks the identical range and asks the identical question before it
+        -- adds anything up, so it goes down in the identical way and takes the audit that called
+        -- it — and with it the rest of the login's census — down with it.
+        it("counts what is collected without dying on an id past the top of the enum", function()
+            local domain = ns.appearanceCensus(newCollection({
+                [1] = { rows = {}, collected = 40 },
+                [LAST_TRANSMOG_ENUM_CATEGORY] = { rows = {}, collected = 2 },
+            }))
+
+            local total
+            assert.has_no.errors(function()
+                total = domain.count()
+            end)
+
+            assert.equal(42, total)
         end)
 
         it("offers no count at all on a build without the call", function()

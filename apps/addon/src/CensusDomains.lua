@@ -717,11 +717,36 @@ end
 ---the armour slots down the body, and 12 to 29 everything held in a hand, wands through paired
 ---weapons. Read out of the client's own `TransmogSharedDocumentation` rather than off the wiki.
 ---
----Forty is that top value with a patch's worth of headroom, and the headroom is nearly free here
----in a way it is not for currencies: a category that does not exist costs one `GetCategoryInfo`
----call that answers nothing and is then skipped, so the eleven spare are eleven calls once per
----pass rather than eleven positions to walk.
+---Forty is that top value with a patch's worth of headroom, and the headroom costs eleven calls
+---once per pass rather than eleven positions to walk — but only through `categoryExists` below,
+---which is what makes those eleven calls survivable at all.
 local LAST_TRANSMOG_CATEGORY = 40
+
+---Whether the build has this category, asked in the one way that does not end the login.
+---
+---**The headroom above was written on a premise the client does not honour.** Every other bounded
+---walk in this file — currencies, achievements — is over ids the client answers *nothing* about
+---when nothing sits at them, so reaching past the end is free. `GetCategoryInfo` is not one of
+---those. Its argument is a declared enum rather than an arbitrary id, and an id above the top of
+---`Enum.TransmogCollectionType` is not a category it declines to describe, it is an argument it
+---refuses: the C function raises `bad argument #1` with its own usage string. That error came out
+---of the probe, out of the walk, out of `audit`, and out of the login handler that provoked the
+---first census of the session — issue #271, thrown at 30 on the first id past the end of a
+---thirty-value enum.
+---
+---So a raise and a nil are read as the same answer, which is the answer the range was always
+---written expecting: there is no such category, skip it. Catching rather than shortening the
+---range is deliberate. The point of the headroom is a category this build has and the number in
+---this file has never heard of, and only the client can say where its own enum stops — a boundary
+---moving either way is then a call that answers or a call that does not, rather than a walk that
+---silently misses a slot or takes the addon down again.
+---@param categoryInfo fun(category: integer): string?
+---@param category integer
+---@return boolean
+local function categoryExists(categoryInfo, category)
+    local ok, name = pcall(categoryInfo, category)
+    return ok and name ~= nil
+end
 
 ---Appearances: every look the account has collected, keyed by the client's own `visualID`.
 ---
@@ -794,9 +819,9 @@ function ns.appearanceCensus(collection)
             heldCategory, heldList = nil, nil
             local positions = {}
             for category = 1, LAST_TRANSMOG_CATEGORY do
-                -- A category the build does not have has no name, which is the same nothing an
-                -- id above the top of the enum answers with.
-                if categoryInfo(category) then
+                -- A category the build does not have has no name; an id above the top of the
+                -- enum has no answer at all. `categoryExists` is where those become one thing.
+                if categoryExists(categoryInfo, category) then
                     -- The unfiltered total, which is what makes it a bound rather than a length:
                     -- the list a position actually reads is the class filter's, and the class
                     -- filter can only take rows away. A category answering with more than this
@@ -854,7 +879,7 @@ function ns.appearanceCensus(collection)
             end
             local total = 0
             for category = 1, LAST_TRANSMOG_CATEGORY do
-                if categoryInfo(category) then
+                if categoryExists(categoryInfo, category) then
                     total = total + (counter(category) or 0)
                 end
             end

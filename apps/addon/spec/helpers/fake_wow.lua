@@ -839,6 +839,24 @@ function fake.newFormatDate()
     return formatDate, calls
 end
 
+---The top of `Enum.TransmogCollectionType` on build 12.0.5.67823, and the line the real client
+---draws between two answers a fake used to blur into one.
+---
+---An id *inside* the enum that this build happens to have no rows for answers nothing:
+---`GetCategoryInfo` returns nil and a caller skips the category. An id *outside* it is not a
+---category at all, and the client does not answer nothing for it — it raises, out of the C
+---function, with the usage string the whole family of `bad argument #1` errors carries. That is
+---issue #271: a probe past the end of the enum is not a call that costs nothing, it is a call
+---that takes the addon down, and a fake that returned nil for both could never have said so.
+local LAST_TRANSMOG_ENUM_CATEGORY = 29
+
+---What the client raises when asked about a category id that is not in the enum, in its own
+---shape — the `Usage:` text is the client's own, read off the error the live game threw.
+local function raiseUnknownTransmogCategory()
+    error("bad argument #1 to 'GetCategoryInfo' (Usage: local name, isWeapon, canHaveIllusions,"
+        .. " canMainHand, canOffHand, canRanged = C_TransmogCollection.GetCategoryInfo(category))", 2)
+end
+
 ---A complete fake WowEnv plus the recordings the test asserts on.
 ---
 ---`options.db` may be shared between two `newEnv` calls to model two characters on
@@ -1314,7 +1332,12 @@ function fake.newEnv(options)
                 -- with no transmog location — the second argument is optional, which is what
                 -- lets the census ask without naming a slot of the player's.
                 collection = {
+                    -- Nothing for a category inside the enum this build has no rows for, and a
+                    -- raise for an id past the end of it — see raiseUnknownTransmogCategory.
                     GetCategoryInfo = function(category)
+                        if type(category) ~= "number" or category > LAST_TRANSMOG_ENUM_CATEGORY then
+                            raiseUnknownTransmogCategory()
+                        end
                         local rows = censusAppearances[category]
                         if not rows then
                             return nil
