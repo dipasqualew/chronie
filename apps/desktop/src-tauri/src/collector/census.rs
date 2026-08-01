@@ -28,8 +28,8 @@ use std::path::Path;
 use crate::dto;
 use crate::failure::Failure;
 use crate::saved_variables::{
-    RawCensus, RawCensusAchievement, RawCensusAppearance, RawCensusCurrency, RawCensusMount,
-    RawCensusStanding, RawCensusState,
+    RawCensus, RawCensusAchievement, RawCensusAppearance, RawCensusCurrency, RawCensusHeirloom,
+    RawCensusMount, RawCensusPet, RawCensusStanding, RawCensusState, RawCensusTitle, RawCensusToy,
 };
 
 use super::database::open_database;
@@ -45,6 +45,10 @@ const ACHIEVEMENTS: &str = "achievements";
 const CURRENCIES: &str = "currencies";
 const REPUTATIONS: &str = "reputations";
 const APPEARANCES: &str = "appearances";
+const PETS: &str = "pets";
+const TOYS: &str = "toys";
+const HEIRLOOMS: &str = "heirlooms";
+const TITLES: &str = "titles";
 
 pub(super) fn sync_census(
     transaction: &Transaction<'_>,
@@ -121,6 +125,20 @@ fn sync_domain(
         (MOUNTS, _) => sync_mounts(transaction, account_id, state, complete),
         (APPEARANCES, _) => sync_appearances(transaction, account_id, state),
         (ACHIEVEMENTS, _) => sync_achievements(transaction, account_id, state, complete),
+        (PETS, _) => sync_pets(transaction, account_id, state, complete),
+        // No `complete` and nowhere to put one, exactly as appearances have none: `ns.toyCensus`
+        // and `ns.heirloomCensus` both mark their domain `partial` because the client's own list
+        // is very probably the player's filtered one, so an id missing from a reading is a thing
+        // the walk was not shown rather than a thing the account lost. Both collections are
+        // grow-only, which is what makes never pruning them cost nothing.
+        (TOYS, _) => sync_toys(transaction, account_id, state),
+        (HEIRLOOMS, _) => sync_heirlooms(transaction, account_id, state),
+        // A title is one character's, so a reading filed against the account has nowhere to go —
+        // the same nowhere a wallet has, and the claim above is what says a reading arrived and
+        // was not stored.
+        (TITLES, Some(character_id)) => {
+            sync_titles(transaction, account_id, character_id, state, complete)
+        }
         // A wallet belongs to a character, so a currencies reading filed against the account has
         // nowhere to go: there is no column for "whoever's" and summing it into one of the alts
         // would be inventing an owner. The claim above still stands, which is what says a reading
@@ -292,6 +310,208 @@ fn sync_appearances(
                 i64::from(look.favourite.unwrap_or(false)),
                 look.seen,
             ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Every battle pet the account owns, counted by species.
+///
+/// The one domain whose row carries a *count*, because pets are the one collectible the game lets
+/// an account own several of: three Mechanical Squirrels are three GUIDs in the client's answer and
+/// one line of the pet journal, and the journal's line is what this stores. The count is the
+/// client's own `GetNumCollectedInfo` rather than a tally of the walk, so a pass a logout cut short
+/// still says how many of a species the account has rather than how many of them it reached.
+///
+/// Pruned like a mount is. A pet can be released or caged away, so an id a complete walk did not
+/// mention is genuinely one the account no longer owns — which is what separates this from the two
+/// grow-only collections below.
+fn sync_pets(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    state: &RawCensusState,
+    complete: bool,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(species_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let pet: RawCensusPet = typed(value);
+        transaction.execute(
+            "INSERT INTO account_pets (
+                     account_id, species_id, name, count, level, custom_name, favourite, seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(account_id, species_id) DO UPDATE SET
+                     name = excluded.name,
+                     count = excluded.count,
+                     level = excluded.level,
+                     custom_name = excluded.custom_name,
+                     favourite = excluded.favourite,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                species_id,
+                pet.name.as_deref(),
+                pet.count.unwrap_or(0),
+                // Nullable, unlike the count: a pet the client would not state a level for is not
+                // a pet at level nought, and nothing downstream may draw the two the same.
+                pet.level,
+                pet.custom.as_deref(),
+                i64::from(pet.favourite.unwrap_or(false)),
+                pet.seen,
+            ],
+        )?;
+    }
+    if complete {
+        prune(
+            transaction,
+            "account_pets",
+            "species_id",
+            account_id,
+            None,
+            &ids_of(state),
+        )?;
+    }
+    Ok(())
+}
+
+/// Every toy the account can pull out of the box, and one of the two domains here that is never
+/// pruned.
+///
+/// **It takes no `complete` and has nowhere to put one**, for the reason [`sync_appearances`] does
+/// not. `C_ToyBox` has a single indexer and Blizzard's own toy box pairs it with the *filtered*
+/// count, so the list `ns.toyCensus` walks is very probably the one the player's filters left
+/// standing; the domain says so by declaring itself `partial`, and the claim it writes has
+/// `complete` down forever. An id missing from a reading is a toy the walk was not shown rather
+/// than one the account lost — and since toys cannot be lost, there is nothing a prune could ever
+/// have been right about.
+fn sync_toys(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    state: &RawCensusState,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(item_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let toy: RawCensusToy = typed(value);
+        transaction.execute(
+            "INSERT INTO account_toys (
+                     account_id, item_id, name, favourite, seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(account_id, item_id) DO UPDATE SET
+                     name = excluded.name,
+                     favourite = excluded.favourite,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                item_id,
+                toy.name.as_deref(),
+                i64::from(toy.favourite.unwrap_or(false)),
+                toy.seen,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Every heirloom the account has bought, and how far each has been taken.
+///
+/// Never pruned, like the toys above and for a related reason: nothing in Blizzard's own interface
+/// calls `C_Heirloom.GetHeirloomItemIDs`, so nothing in the install settles whether it answers past
+/// the heirloom pane's filters, and `ns.heirloomCensus` declines to claim what it cannot check.
+/// Heirlooms are bought once and kept, so the refusal costs nothing.
+///
+/// `upgrade_level` beside `max_upgrade` is the pair that makes "is this one finished with"
+/// answerable — the heirloom's version of a currency's cap, and the half of the answer no amount of
+/// watching somebody buy an upgrade would produce for the ones bought years before Chronie existed.
+fn sync_heirlooms(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    state: &RawCensusState,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(item_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let heirloom: RawCensusHeirloom = typed(value);
+        transaction.execute(
+            "INSERT INTO account_heirlooms (
+                     account_id, item_id, name, slot, upgrade_level, max_upgrade, source, seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(account_id, item_id) DO UPDATE SET
+                     name = excluded.name,
+                     slot = excluded.slot,
+                     upgrade_level = excluded.upgrade_level,
+                     max_upgrade = excluded.max_upgrade,
+                     source = excluded.source,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                item_id,
+                heirloom.name.as_deref(),
+                heirloom.slot.as_deref(),
+                // Nullable rather than defaulted to nought, which is the distinction
+                // `census_standings.ladder_rank` keeps: the addon writes no upgrade level for an
+                // heirloom sitting at nought, and a ceiling this build would not state is not a
+                // ceiling of nought. A reader that defaulted both would say an un-upgraded
+                // heirloom and an unknowable one were the same thing.
+                heirloom.upgrade,
+                heirloom.max_upgrade,
+                heirloom.source,
+                heirloom.seen,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Every title one character may put before or after their name.
+///
+/// The third `scope = "character"` domain, and the plainest of them: two alts share almost no
+/// titles, so a walk by one says nothing whatever about the others and a prune reaches no further
+/// than the character that walked it — the property [`sync_currencies`] exists to keep.
+fn sync_titles(
+    transaction: &Transaction<'_>,
+    account_id: i64,
+    character_id: i64,
+    state: &RawCensusState,
+    complete: bool,
+) -> Result<(), Failure> {
+    for (key, value) in &state.entries {
+        let Ok(title_id) = key.parse::<i64>() else {
+            continue;
+        };
+        let title: RawCensusTitle = typed(value);
+        transaction.execute(
+            "INSERT INTO census_titles (
+                     account_id, character_id, title_id, name, suffix, seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, character_id, title_id) DO UPDATE SET
+                     name = excluded.name,
+                     suffix = excluded.suffix,
+                     seen_at = excluded.seen_at",
+            params![
+                account_id,
+                character_id,
+                title_id,
+                title.name.as_deref(),
+                // Which side of the name it goes on, which is the one thing the space the addon
+                // trimmed away was saying. Absent means it precedes the name, which is what the
+                // majority of them do.
+                i64::from(title.suffix.unwrap_or(false)),
+                title.seen,
+            ],
+        )?;
+    }
+    if complete {
+        prune(
+            transaction,
+            "census_titles",
+            "title_id",
+            account_id,
+            Some(character_id),
+            &ids_of(state),
         )?;
     }
     Ok(())
@@ -1494,6 +1714,422 @@ mod tests {
         // The two counts default to nought, which is what the addon means by leaving them out.
         assert_eq!(stands.current, 0);
         assert_eq!(stands.max, 0);
+    }
+
+    /* ---------- the grow-only collections ---------- */
+
+    /// The titles stored against one character, and nobody else's — the same helper shape the
+    /// wallets and the standings have, and for the same reason: every claim this module makes
+    /// about a character-scoped domain is a claim about one character's rows.
+    fn title_ids(install: &Install, character: &str) -> Vec<i64> {
+        ids_of(
+            install,
+            &format!(
+                "SELECT title_id FROM census_titles t
+                   JOIN characters c ON c.id = t.character_id
+                  WHERE c.source_key = '{character}' ORDER BY title_id"
+            ),
+        )
+    }
+
+    /// A finished walk of a small account's pets. Two species, one of them owned three times over
+    /// with a levelled favourite among them and one of them a single unnamed pet, so between them
+    /// every column `account_pets` has is carried by one and left out by the other.
+    const WALKED_PETS: &str = r#"
+        ["account"] = {
+            ["pets"] = {
+                ["complete"] = true,
+                ["revision"] = 1,
+                ["held"] = 2,
+                ["build"] = "12.0.5.67823",
+                ["by"] = "Aster-Vale",
+                ["startedAt"] = 1999990000,
+                ["completedAt"] = 1999990005,
+                ["entries"] = {
+                    [39] = {
+                        ["name"] = "Mechanical Squirrel", ["count"] = 3, ["level"] = 25,
+                        ["custom"] = "Nuts", ["favourite"] = true, ["seen"] = 1999990000,
+                    },
+                    [40] = {
+                        ["name"] = "Bombay Cat", ["count"] = 1, ["seen"] = 1999990000,
+                    },
+                },
+            },
+        },
+    "#;
+
+    /// A walk of the toy box, which is only ever part of an answer: the client's own indexer walks
+    /// the list the player's filters left standing, so `ns.toyCensus` marks the domain `partial`
+    /// and `complete` here is down and stays down.
+    const WALKED_TOYS: &str = r#"
+        ["account"] = {
+            ["toys"] = {
+                ["complete"] = false, ["revision"] = 1, ["held"] = 2,
+                ["build"] = "12.0.5.67823", ["by"] = "Aster-Vale",
+                ["entries"] = {
+                    [54212] = {
+                        ["name"] = "Foot Ball", ["favourite"] = true, ["seen"] = 1999990000,
+                    },
+                    [88801] = { ["name"] = "Wormhole Generator", ["seen"] = 1999990000 },
+                },
+            },
+        },
+    "#;
+
+    /// A walk of the heirlooms. One taken to its ceiling and one bought and never upgraded, which
+    /// is the pair that separates "no upgrades yet" from "this build would not say".
+    const WALKED_HEIRLOOMS: &str = r#"
+        ["account"] = {
+            ["heirlooms"] = {
+                ["complete"] = false, ["revision"] = 1, ["held"] = 2, ["counted"] = 2,
+                ["build"] = "12.0.5.67823", ["by"] = "Aster-Vale",
+                ["entries"] = {
+                    [122668] = {
+                        ["name"] = "Eternal Woven Ivy Necklace", ["slot"] = "INVTYPE_NECK",
+                        ["upgrade"] = 5, ["maxUpgrade"] = 5, ["source"] = 1,
+                        ["seen"] = 1999990000,
+                    },
+                    -- Bought and never upgraded, so the addon writes no level at all: nought is
+                    -- what it means by leaving one out.
+                    [122340] = {
+                        ["name"] = "Burnished Breastplate", ["slot"] = "INVTYPE_CHEST",
+                        ["maxUpgrade"] = 5, ["source"] = 1, ["seen"] = 1999990000,
+                    },
+                },
+            },
+        },
+    "#;
+
+    /// A finished walk of one character's titles: one that follows the name and one that precedes
+    /// it, which is the whole of what the trimmed-away space was saying.
+    const ASTER_WALKED_TITLES: &str = r#"
+        ["characters"] = {
+            ["Aster-Vale"] = {
+                ["titles"] = {
+                    ["complete"] = true, ["revision"] = 1, ["held"] = 2,
+                    ["build"] = "12.0.5.67823",
+                    ["entries"] = {
+                        [42] = {
+                            ["name"] = "the Explorer", ["suffix"] = true,
+                            ["seen"] = 1999990000,
+                        },
+                        [8] = { ["name"] = "Sergeant", ["seen"] = 1999990000 },
+                    },
+                },
+            },
+        },
+    "#;
+
+    /// The round trip for the one domain whose row carries a count, because pets are the one
+    /// collectible the game lets an account own several of. A species is the line of the journal
+    /// and the id of the row; the count beside it is how many of that line the account holds.
+    #[test]
+    fn files_a_pet_under_its_species_with_how_many_of_it_the_account_owns() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_PETS));
+
+        install.collect(2_000_000_100);
+
+        assert_eq!(
+            ids_of(
+                &install,
+                "SELECT species_id FROM account_pets ORDER BY species_id"
+            ),
+            vec![39, 40]
+        );
+        let squirrel: (String, i64, Option<i64>, Option<String>, i64) = install
+            .open()
+            .query_row(
+                "SELECT name, count, level, custom_name, favourite
+                   FROM account_pets WHERE species_id = 39",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        // Three of them, the best of them at 25 and called something, and starred in the journal.
+        assert_eq!(
+            squirrel,
+            (
+                "Mechanical Squirrel".into(),
+                3,
+                Some(25),
+                Some("Nuts".into()),
+                1
+            )
+        );
+        let cat: (i64, Option<i64>, Option<String>, i64) = install
+            .open()
+            .query_row(
+                "SELECT count, level, custom_name, favourite
+                   FROM account_pets WHERE species_id = 40",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        // A level the client would not state is not a level of nought, and a pet nobody renamed
+        // has no name of its own — neither of which is a zero.
+        assert_eq!(cat, (1, None, None, 0));
+    }
+
+    /// Pets are the one grow-only-looking collection that can actually shrink: a pet can be caged
+    /// away or released, so an id a finished walk did not mention is a species the account has
+    /// genuinely stopped owning.
+    #[test]
+    fn a_finished_pet_walk_takes_out_a_species_the_account_let_go() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_PETS));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["account"] = { ["pets"] = {
+                ["complete"] = true, ["revision"] = 2, ["held"] = 1,
+                ["entries"] = {
+                    [39] = {
+                        ["name"] = "Mechanical Squirrel", ["count"] = 1, ["level"] = 25,
+                        ["seen"] = 2000000000,
+                    },
+                },
+            } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        assert_eq!(
+            ids_of(
+                &install,
+                "SELECT species_id FROM account_pets ORDER BY species_id"
+            ),
+            vec![39]
+        );
+        // And the duplicates that were let go are off the count of the one that stayed.
+        let count: i64 = install
+            .open()
+            .query_row(
+                "SELECT count FROM account_pets WHERE species_id = 39",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn files_every_toy_a_walk_of_the_box_found() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_TOYS));
+
+        install.collect(2_000_000_100);
+
+        let stored: Vec<(i64, Option<String>, i64)> = {
+            let connection = install.open();
+            let mut statement = connection
+                .prepare("SELECT item_id, name, favourite FROM account_toys ORDER BY item_id")
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            rows
+        };
+        assert_eq!(
+            stored,
+            vec![
+                (54212, Some("Foot Ball".into()), 1),
+                (88801, Some("Wormhole Generator".into()), 0),
+            ]
+        );
+        // And the claim says what the domain says about itself: the walk ran and the reading is
+        // still not whole, because the list the client indexed was the player's filtered one.
+        assert_eq!(claim_of(&install, "toys").complete, 0);
+    }
+
+    /// The rule the two grow-only domains live inside. A reading of either is a set of positive
+    /// observations and nothing more, so **no** reading may take a row out — not even one that
+    /// arrives claiming to be complete, which the addon never writes and a hand-edited file
+    /// might.
+    #[test]
+    fn no_reading_of_a_grow_only_collection_ever_deletes_a_row() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_TOYS));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["account"] = { ["toys"] = {
+                ["complete"] = true, ["revision"] = 2, ["held"] = 1,
+                ["entries"] = {
+                    [61031] = { ["name"] = "Blazing Wings", ["seen"] = 2000000000 },
+                },
+            } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        // The two the second walk was not shown are still there, and the one it found is beside
+        // them.
+        assert_eq!(
+            ids_of(
+                &install,
+                "SELECT item_id FROM account_toys ORDER BY item_id"
+            ),
+            vec![54212, 61031, 88801]
+        );
+    }
+
+    /// The heirloom's version of a currency's cap: how far this one has been taken against how far
+    /// it goes, which is what makes "is this one finished with" answerable for an heirloom bought
+    /// years before Chronie was installed.
+    #[test]
+    fn files_how_far_an_heirloom_has_been_taken_and_how_far_it_goes() {
+        let install = Install::of(&SavedVariables::new().census(WALKED_HEIRLOOMS));
+
+        install.collect(2_000_000_100);
+
+        let necklace: (String, String, Option<i64>, Option<i64>, Option<i64>) = install
+            .open()
+            .query_row(
+                "SELECT name, slot, upgrade_level, max_upgrade, source
+                   FROM account_heirlooms WHERE item_id = 122668",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            necklace,
+            (
+                "Eternal Woven Ivy Necklace".into(),
+                "INVTYPE_NECK".into(),
+                Some(5),
+                Some(5),
+                Some(1),
+            )
+        );
+        // Bought and never upgraded. Null rather than nought, because "no upgrades yet" and "this
+        // build would not say" are different answers and a screen may not draw them the same.
+        let untouched: (Option<i64>, Option<i64>) = install
+            .open()
+            .query_row(
+                "SELECT upgrade_level, max_upgrade FROM account_heirlooms WHERE item_id = 122340",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(untouched, (None, Some(5)));
+        // The client's own count of what is known, beside how much of it this walk reached.
+        let claim = claim_of(&install, "heirlooms");
+        assert_eq!((claim.held, claim.counted, claim.complete), (2, Some(2), 0));
+    }
+
+    /// A title is one character's, which is the plainest case of the character scope in the whole
+    /// census: two alts of one account share almost none of them.
+    #[test]
+    fn files_a_characters_titles_and_which_side_of_the_name_each_goes_on() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_TITLES));
+
+        install.collect(2_000_000_100);
+
+        assert_eq!(title_ids(&install, "Aster-Vale"), vec![8, 42]);
+        let stored: Vec<(i64, Option<String>, i64)> = {
+            let connection = install.open();
+            let mut statement = connection
+                .prepare(
+                    "SELECT t.title_id, t.name, t.suffix FROM census_titles t
+                       JOIN characters c ON c.id = t.character_id
+                      WHERE c.source_key = 'Aster-Vale' ORDER BY t.title_id",
+                )
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            rows
+        };
+        // Trimmed, with the side the space was saying kept beside it: "Sergeant" goes before the
+        // name and "the Explorer" after it.
+        assert_eq!(
+            stored,
+            vec![
+                (8, Some("Sergeant".into()), 0),
+                (42, Some("the Explorer".into()), 1)
+            ]
+        );
+        let claim = claim_of(&install, "titles");
+        assert_eq!(claim.held, 2);
+        assert!(claim.character_id.is_some());
+    }
+
+    /// The property [`prune`]'s `character` exists for, on the third domain to need it. What one
+    /// alt has earned says nothing whatever about what another has.
+    #[test]
+    fn a_finished_title_walk_leaves_another_characters_titles_alone() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_TITLES));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["characters"] = { ["Brin-Vale"] = { ["titles"] = {
+                ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                ["entries"] = {
+                    [175] = { ["name"] = "the Insane", ["suffix"] = true, ["seen"] = 2000000000 },
+                },
+            } } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        assert_eq!(title_ids(&install, "Aster-Vale"), vec![8, 42]);
+        assert_eq!(title_ids(&install, "Brin-Vale"), vec![175]);
+    }
+
+    /// And the rule the module turns on, inside the one character it may be applied to: a title
+    /// this character no longer has is one a finished walk of theirs did not mention.
+    #[test]
+    fn a_second_finished_title_walk_takes_out_what_that_character_no_longer_has() {
+        let install = Install::of(&SavedVariables::new().census(ASTER_WALKED_TITLES));
+        install.collect(2_000_000_100);
+
+        install.rewrite(&SavedVariables::new().census(
+            r#"["characters"] = { ["Aster-Vale"] = { ["titles"] = {
+                ["complete"] = true, ["revision"] = 2, ["held"] = 1,
+                ["entries"] = {
+                    [42] = {
+                        ["name"] = "the Explorer", ["suffix"] = true, ["seen"] = 2000000000,
+                    },
+                },
+            } } },"#,
+        ));
+        install.collect(2_000_100_100);
+
+        assert_eq!(title_ids(&install, "Aster-Vale"), vec![42]);
+    }
+
+    /// A title belongs to a character, so a titles reading filed against the account has nowhere
+    /// to go — the same nowhere a wallet has. The claim is still recorded, which is what says a
+    /// reading arrived and was not stored.
+    #[test]
+    fn records_the_claim_of_a_titles_reading_no_character_owns() {
+        let install = Install::of(&SavedVariables::new().census(
+            r#"["account"] = { ["titles"] = {
+                ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                ["entries"] = { [42] = { ["name"] = "the Explorer" } },
+            } },"#,
+        ));
+
+        install.collect(2_000_000_100);
+
+        let claim = claim_of(&install, "titles");
+        assert_eq!(claim.held, 1);
+        assert_eq!(claim.character_id, None);
+        assert_eq!(count_of(&install.database, "census_titles"), 0);
     }
 
     /* ---------- reading it back ---------- */
