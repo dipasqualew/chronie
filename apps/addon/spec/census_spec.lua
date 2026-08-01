@@ -551,6 +551,119 @@ describe("ns.newCensus", function()
         end)
     end)
 
+    -- What makes a pass something another module can wait on. `ns.newCensusResync` records a
+    -- walk somebody asked for as carried out on this callback and on nothing else, so every
+    -- claim below is one that module is leaning on.
+    describe("saying when a pass has run to the end", function()
+        ---A census whose slices after the first wait for the test to ask for them.
+        ---
+        ---`fake.newScheduler` drains a whole chain of slices in one go, which is what the tests
+        ---above want and is precisely wrong for the case that matters here: a logout lands
+        ---*between* two slices, and standing in that gap means holding the queue by hand.
+        ---@param options table `{ positions, budget }`
+        ---@return table census, table frames `{ next = fun(), waiting = fun(): integer }`
+        local function newHeldCensus(options)
+            local waiting = {}
+            local census = ns.newCensus({
+                db = {},
+                now = function()
+                    return NOW
+                end,
+                after = function(_, callback)
+                    waiting[#waiting + 1] = callback
+                end,
+                character = function()
+                    return WALKER
+                end,
+                domains = { newDomain({ positions = options.positions }) },
+                budget = options.budget,
+            })
+            return census, {
+                ---The client handing the addon the next frame it asked for.
+                next = function()
+                    local slice = assert(table.remove(waiting, 1),
+                        "the census was not waiting on the client for anything")
+                    slice()
+                end,
+                waiting = function()
+                    return #waiting
+                end,
+            }
+        end
+
+        it("calls back once, and only once the queue has run out", function()
+            local census, frames = newHeldCensus({ positions = { 1, 2, 3, 4, 5 }, budget = 2 })
+            local done = 0
+
+            assert.is_true(census.run({ "things" }, function()
+                done = done + 1
+            end))
+            -- The first slice runs where `run` was called, and there are three to go.
+            assert.equal(0, done)
+
+            frames.next()
+            assert.equal(0, done)
+
+            frames.next()
+
+            assert.equal(1, done)
+            assert.is_false(census.running())
+            -- Nothing left waiting to call it a second time.
+            assert.equal(0, frames.waiting())
+        end)
+
+        -- A pass a logout cuts short never calls back, because there is no frame left to call it
+        -- from — and that silence is the whole of how an interrupted resync is handled. A
+        -- callback fired on the way out would mark half an answer as the fresh census somebody
+        -- asked for.
+        it("never calls back for a pass that was abandoned part-way", function()
+            local census, frames = newHeldCensus({ positions = { 1, 2, 3, 4, 5 }, budget = 2 })
+            local done = 0
+
+            census.run({ "things" }, function()
+                done = done + 1
+            end)
+            frames.next()
+
+            assert.equal(0, done)
+            assert.is_true(census.running())
+            assert.equal(1, frames.waiting())
+        end)
+
+        -- The refusal a second pass meets, reported rather than raised: the caller has to be
+        -- able to tell "I started that" from "somebody else is already walking", because only
+        -- the first of them will ever call back.
+        it("answers false and never calls back where a pass is already in flight", function()
+            local domain = newDomain({ positions = { 1, 2, 3, 4, 5 } })
+            local census, _, _, scheduler = newCensus({ domains = { domain }, budget = 2 })
+            local second = 0
+
+            assert.is_true(census.run({ "things" }))
+            assert.is_false(census.run({ "things" }, function()
+                second = second + 1
+            end))
+            scheduler.settle()
+
+            assert.equal(0, second)
+        end)
+
+        it("answers false and never calls back where there was nothing to begin", function()
+            local domain = newDomain({ positions = { 1 }, holds = { [1] = { name = "one" } } })
+            local census = newCensus({ domains = { domain } })
+            sweep(census)
+            local done = 0
+            local function onDone()
+                done = done + 1
+            end
+
+            -- Nothing the audit distrusts, and then a name this build has never heard of.
+            assert.is_false(census.run(nil, onDone))
+            assert.is_false(census.run({ "housing" }, onDone))
+
+            assert.equal(0, done)
+        end)
+    end)
+
     describe("a client build that will not answer", function()
         -- Nil is not an empty list. A build that has moved a call, or a server that has not sent
         -- the tree yet, has said nothing — and replacing a census with an empty one on the

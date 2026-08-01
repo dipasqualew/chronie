@@ -6,6 +6,7 @@ pub mod body;
 pub mod budget;
 pub mod captures;
 pub mod casc;
+pub mod censusrequests;
 pub mod character;
 mod collector;
 pub mod combatlog;
@@ -756,7 +757,11 @@ fn send_set_to_game(
         configured_wow_path(&settings)
     } {
         let waiting = collector::waiting_set_requests(&state.database_path())?;
-        let _ = write_requests(&wow_path, &waiting, now);
+        let _ = write_addon_module(
+            &wow_path,
+            REQUESTS_MODULE,
+            ingamesets::requests_module(now, &waiting),
+        );
     }
     Ok(requests)
 }
@@ -766,6 +771,53 @@ fn send_set_to_game(
 #[specta::specta]
 fn set_requests(state: State<'_, AppState>) -> Result<Vec<ingamesets::Request>, CommandError> {
     Ok(collector::set_requests(&state.database_path())?)
+}
+
+/// Asks the game to walk the account's collections again and write down what it finds.
+///
+/// The second thing this app says back to a WoW account, and shaped exactly like the first: the
+/// ask is recorded here, written into a source file of the addon's own, and carried out by the
+/// *addon* the next time the player logs in. Nothing in this app can reach a running game.
+///
+/// **It exists because the addon's audit is deliberately conservative** — a build change, a domain
+/// that was never whole, or the client's own counter saying there is more, and none of those is a
+/// timer. See `docs/account-census.md`. What none of them covers is a reader who knows better, and
+/// this is how they say so.
+///
+/// `domains` empty asks for every domain the addon can walk, which is what the button sends.
+///
+/// A game folder that cannot be written to is not a failure of the *ask*. The row is stored, every
+/// later install writes the file again, and telling somebody their resync failed when it is queued
+/// would be the wrong sentence.
+#[tauri::command]
+#[specta::specta]
+fn request_census(
+    domains: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<censusrequests::CensusRequest>, CommandError> {
+    let now = Utc::now().timestamp();
+    let requests = collector::request_census(&state.database_path(), &domains, now)?;
+    if let Ok(wow_path) = {
+        let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        configured_wow_path(&settings)
+    } {
+        let waiting = collector::waiting_census_requests(&state.database_path())?;
+        let _ = write_addon_module(
+            &wow_path,
+            CENSUS_REQUESTS_MODULE,
+            censusrequests::requests_module(now, &waiting),
+        );
+    }
+    Ok(requests)
+}
+
+/// Every walk this app has asked the game for, and what became of each.
+#[tauri::command]
+#[specta::specta]
+fn census_requests(
+    state: State<'_, AppState>,
+) -> Result<Vec<censusrequests::CensusRequest>, CommandError> {
+    Ok(collector::census_requests(&state.database_path())?)
 }
 
 /* ---------- what the account holds ---------- */
@@ -1799,6 +1851,37 @@ const SETTINGS_MODULE: &str = "src/Settings.lua";
 /// loads it and never touches it.
 const REQUESTS_MODULE: &str = "src/CustomSetRequests.lua";
 
+/// And the third: which collections the app has been asked to have walked again.
+///
+/// The same road as the one above — a source file the client loads and never writes — carrying a
+/// much simpler payload. See `censusrequests.rs`, and `docs/account-census.md` for why a walk has
+/// to be asked for at all when the addon audits itself at every loading screen.
+const CENSUS_REQUESTS_MODULE: &str = "src/CensusRequests.lua";
+
+/// Everything the app is still waiting for the game to do.
+///
+/// Both asks travel together because both are written by the same two callers — a send and an
+/// install — and an install that laid one down and not the other would replace the other's file
+/// with the shipped empty copy, losing whatever had not been carried out yet.
+#[derive(Debug, Default)]
+struct Waiting {
+    sets: Vec<ingamesets::Request>,
+    census: Vec<censusrequests::CensusRequest>,
+}
+
+impl Waiting {
+    /// What has not been answered, or nothing at all when the database will not say.
+    ///
+    /// Read before an install tears the addon folder down and lays it again, so a request made a
+    /// moment ago survives rather than being replaced by the shipped empty file.
+    fn read(database_path: &Path) -> Self {
+        Waiting {
+            sets: collector::waiting_set_requests(database_path).unwrap_or_default(),
+            census: collector::waiting_census_requests(database_path).unwrap_or_default(),
+        }
+    }
+}
+
 /// A trigger name as a Lua string literal, or nothing at all.
 ///
 /// The names come out of a settings file somebody can edit by hand, and they end up inside a
@@ -1850,7 +1933,7 @@ fn settings_module(combat_logging: bool, capture_triggers: &[String]) -> String 
 fn stage_addon(
     destination: &Path,
     settings: &Settings,
-    requests: &[ingamesets::Request],
+    waiting: &Waiting,
     now: i64,
 ) -> Result<(), Failure> {
     for (relative, contents) in BUNDLED_ADDON {
@@ -1864,7 +1947,12 @@ fn stage_addon(
                 settings_module(settings.combat_logging, &settings.capture_triggers),
             )
         } else if *relative == REQUESTS_MODULE {
-            fs::write(&output, ingamesets::requests_module(now, requests))
+            fs::write(&output, ingamesets::requests_module(now, &waiting.sets))
+        } else if *relative == CENSUS_REQUESTS_MODULE {
+            fs::write(
+                &output,
+                censusrequests::requests_module(now, &waiting.census),
+            )
         } else {
             fs::write(&output, contents)
         }
@@ -1882,20 +1970,16 @@ fn stage_addon(
 /// A game folder with no Chronie in it is not an error. Somebody can send an outfit before they
 /// have ever installed the addon, and the install itself lays the same file down with the same
 /// requests in it, so nothing is lost by saying nothing here.
-fn write_requests(
-    wow_path: &Path,
-    requests: &[ingamesets::Request],
-    now: i64,
-) -> Result<(), String> {
+fn write_addon_module(wow_path: &Path, relative: &str, contents: String) -> Result<(), String> {
     let target = wow_path
         .join("Interface")
         .join("AddOns")
         .join("chronie")
-        .join(REQUESTS_MODULE);
+        .join(relative);
     if !target.parent().is_some_and(Path::is_dir) {
         return Ok(());
     }
-    fs::write(&target, ingamesets::requests_module(now, requests))
+    fs::write(&target, contents)
         .map_err(|error| format!("Could not write {}: {error}", target.display()))
 }
 
@@ -1922,7 +2006,7 @@ fn bundled_addon_version() -> String {
 fn replace_addon(
     wow_path: &Path,
     settings: &Settings,
-    requests: &[ingamesets::Request],
+    waiting: &Waiting,
     now: i64,
 ) -> Result<InstallResult, Failure> {
     let addons = wow_path.join("Interface").join("AddOns");
@@ -1937,7 +2021,7 @@ fn replace_addon(
         .prefix(".chronie-install-")
         .tempdir_in(&addons)
         .context("making a staging folder beside the game's AddOns")?;
-    stage_addon(staging.path(), settings, requests, now)?;
+    stage_addon(staging.path(), settings, waiting, now)?;
     let target = addons.join("chronie");
     let backup = addons.join(".chronie-backup");
     if backup.exists() {
@@ -1967,9 +2051,7 @@ fn install_bundled_addon(state: &AppState) -> Result<InstallResult, Failure> {
         let settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
         (configured_wow_path(&settings)?, settings.clone())
     };
-    // Read before the folder is torn down and laid again, so a request made a moment ago
-    // survives an install rather than being replaced by the shipped empty file.
-    let waiting = collector::waiting_set_requests(&state.database_path()).unwrap_or_default();
+    let waiting = Waiting::read(&state.database_path());
     replace_addon(&wow_path, &settings, &waiting, Utc::now().timestamp())
         .context("laying the addon into the game folder")
 }
@@ -2294,6 +2376,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         add_activity,
         capture_image,
         capture_thumbnails,
+        census_requests,
         character_look,
         character_model,
         character_worn_set,
@@ -2323,6 +2406,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         boss_portraits,
         reputation_icons,
         query_schema,
+        request_census,
         release,
         reset_activities,
         run_query,
@@ -2616,7 +2700,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
-        let result = replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        let result = replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         assert_eq!(result.version, version_in_the_toc());
         let installed = addon_folder(&retail);
@@ -2666,7 +2750,16 @@ mod tests {
             }],
         };
 
-        replace_addon(&retail, &Settings::default(), &[waiting], 20).unwrap();
+        replace_addon(
+            &retail,
+            &Settings::default(),
+            &Waiting {
+                sets: vec![waiting],
+                ..Waiting::default()
+            },
+            20,
+        )
+        .unwrap();
 
         let written =
             fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
@@ -2689,12 +2782,64 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
-        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         let written =
             fs::read_to_string(addon_folder(&retail).join("src/CustomSetRequests.lua")).unwrap();
         assert!(written.contains("ns.customSetRequests = {"), "{written}");
         assert!(!written.contains(r#"["id"]"#), "{written}");
+    }
+
+    /// And the other ask travelling the same road. A walk somebody pressed the button for has
+    /// to survive the trip into the game folder for exactly the reason an outfit does: an
+    /// install lays the whole folder down again, and the shipped empty module going over the top
+    /// would drop every request the addon had not carried out yet — silently, and at the one
+    /// moment somebody is most likely to be reinstalling.
+    #[test]
+    fn carries_a_waiting_census_request_into_the_game_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let waiting = censusrequests::CensusRequest {
+            id: 7,
+            domains: vec!["mounts".into(), "appearances".into()],
+            created_at: 10,
+            outcome: None,
+            applied_at: None,
+            walked: Vec::new(),
+        };
+
+        replace_addon(
+            &retail,
+            &Settings::default(),
+            &Waiting {
+                census: vec![waiting],
+                ..Waiting::default()
+            },
+            20,
+        )
+        .unwrap();
+
+        let written =
+            fs::read_to_string(addon_folder(&retail).join(CENSUS_REQUESTS_MODULE)).unwrap();
+        assert!(
+            written.contains(r#"["id"] = 7, ["domains"] = { "mounts", "appearances" }"#),
+            "{written}"
+        );
+        assert_ne!(written.as_bytes(), bundled(CENSUS_REQUESTS_MODULE));
+    }
+
+    /// The bundled module is what a hand-installed copy loads, so it has to declare the same
+    /// table the generated one does — a shape that had drifted would be an addon that failed to
+    /// load for everybody who installed it by hand rather than through this app.
+    #[test]
+    fn ships_a_census_requests_module_matching_the_one_it_generates() {
+        let shipped = std::str::from_utf8(bundled(CENSUS_REQUESTS_MODULE)).unwrap();
+        let generated = censusrequests::requests_module(0, &[]);
+
+        for declaration in ["ns.censusRequests = {", "issuedAt", "requests"] {
+            assert!(shipped.contains(declaration), "{shipped}");
+            assert!(generated.contains(declaration), "{generated}");
+        }
     }
 
     /// The setting has to survive the trip into the game folder, because the addon reads it
@@ -2708,7 +2853,7 @@ mod tests {
             ..Settings::default()
         };
 
-        replace_addon(&retail, &settings, &[], 0).unwrap();
+        replace_addon(&retail, &settings, &Waiting::default(), 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
         assert!(
@@ -2724,7 +2869,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
-        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
         assert!(installed.contains("combatLogging = false"), "{installed}");
@@ -2761,7 +2906,7 @@ mod tests {
             ..Settings::default()
         };
 
-        replace_addon(&retail, &settings, &[], 0).unwrap();
+        replace_addon(&retail, &settings, &Waiting::default(), 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
         assert!(
@@ -2894,7 +3039,7 @@ mod tests {
         fs::write(&stale, b"-- a module this build no longer ships\n").unwrap();
         fs::write(installed.join("chronie.toc"), b"## Version: 0.0.1-stale\n").unwrap();
 
-        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         assert!(
             !stale.exists(),
@@ -2932,7 +3077,7 @@ mod tests {
         )
         .unwrap();
 
-        replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         assert!(
             !stale.exists(),
@@ -2952,9 +3097,9 @@ mod tests {
         let retail = game_folder(root.path());
         let addons = retail.join("Interface").join("AddOns");
 
-        let first = replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        let first = replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
         let after_first = tree(&addons);
-        let second = replace_addon(&retail, &Settings::default(), &[], 0).unwrap();
+        let second = replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         assert_eq!(second.version, first.version);
         assert_eq!(tree(&addons), after_first);
@@ -2966,7 +3111,8 @@ mod tests {
         let bystander = root.path().join("WTF");
         fs::create_dir_all(&bystander).unwrap();
 
-        let error = replace_addon(root.path(), &Settings::default(), &[], 0).unwrap_err();
+        let error =
+            replace_addon(root.path(), &Settings::default(), &Waiting::default(), 0).unwrap_err();
 
         assert!(
             error.report().contains("AddOns"),

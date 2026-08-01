@@ -48,7 +48,10 @@ import {
   remaining,
 } from "./collection";
 import type { CategoryRow, Progress } from "./collection";
+import { message as failureMessage } from "./failure";
 import { plural } from "./format";
+import { ASK, PROMISE, resyncOf } from "./resync";
+import type { CensusRequest } from "./bindings";
 import type { AccountCensusPayload, CollectionCataloguePayload } from "./types";
 
 /** How many of a category's missing achievements are drawn before the list is cut off. */
@@ -71,6 +74,15 @@ export interface CollectionViewProps {
   catalogueStatus: string;
   /** The one thing a reader can do about that, when there is one. */
   catalogueRecourse: CollectionRecourse | null;
+  /**
+   * Every walk this app has asked the game to take, newest first. `null` while the read is out.
+   *
+   * The only thing on this screen that is not a reading: the census is provoked and never
+   * scheduled, so this is how somebody who knows a reading is stale says so. See `resync.ts`.
+   */
+  censusRequests: CensusRequest[] | null;
+  /** Records the ask, and answers with every request there is — which is the new list. */
+  onResync: () => Promise<CensusRequest[]>;
 }
 
 type Half = "achievements" | "mounts";
@@ -80,6 +92,8 @@ export function CollectionView({
   catalogue,
   catalogueStatus,
   catalogueRecourse,
+  censusRequests,
+  onResync,
 }: CollectionViewProps): ReactNode {
   const [half, setHalf] = useState<Half>("achievements");
 
@@ -109,6 +123,7 @@ export function CollectionView({
             ) : null}
           </div>
         ) : null}
+        <Resync requests={censusRequests} ask={onResync} />
       </header>
 
       {/* Two buttons rather than a select, the same way the transmog browsers are switched:
@@ -248,6 +263,60 @@ export function CollectionView({
         </section>
       </section>
     </>
+  );
+}
+
+/**
+ * The one thing on this screen that asks the game for something rather than reporting it.
+ *
+ * Everything else here is a subtraction made against a reading. This is what a reader does when
+ * they believe the reading is stale and the addon's own audit has not noticed — which it will not,
+ * because a pass is provoked by a build change, a domain that was never whole, or the client's own
+ * counter saying there is more, and none of those is a timer. `docs/account-census.md` argues that
+ * at length and it is still the right design; this is the escape hatch it always implied.
+ *
+ * **The promise is drawn whatever state the ask is in**, because it is the answer to the question
+ * the button raises rather than a report on any particular request: nothing happens now, it
+ * happens at the next login, and it is written down at the logout after that.
+ */
+function Resync({
+  requests,
+  ask,
+}: {
+  requests: CensusRequest[] | null;
+  ask: () => Promise<CensusRequest[]>;
+}): ReactNode {
+  const [asking, setAsking] = useState(false);
+  const [failure, setFailure] = useState("");
+  const resync = useMemo(() => resyncOf(requests), [requests]);
+
+  return (
+    <div className="col-resync" role="group" aria-label="Ask for a fresh census">
+      <button
+        type="button"
+        disabled={asking || !resync.canAsk}
+        onClick={() => {
+          setAsking(true);
+          setFailure("");
+          ask()
+            .catch((error: unknown) => setFailure(failureMessage(error)))
+            .finally(() => setAsking(false));
+        }}
+      >
+        {ASK}
+      </button>
+      <p className="sub">{PROMISE}</p>
+      {resync.sentence ? (
+        <p className="sub" role="status" aria-label="What the last ask came to">
+          {resync.sentence}
+        </p>
+      ) : null}
+      {failure ? (
+        <p className="sub" role="alert">
+          {failure}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -111,4 +111,19 @@ test("says what the account is missing, and what that claim is worth", async ({ 
       "The game says nothing about where this one comes from.",
     );
   });
+
+  // And the one thing on the screen that is not a reading. A census is provoked and never
+  // scheduled, so somebody who knows better has to be able to say so — and the affordance has to
+  // be honest that nothing happens until they next log in, or it is a button people press twice.
+  await test.step("a reader who knows a reading is stale can ask for a fresh one", async () => {
+    await expect(collection.askForACensus()).toBeEnabled();
+    await expect(collection.lastAsk()).toHaveCount(0);
+
+    await collection.askForACensus().click();
+
+    await expect(collection.lastAsk()).toContainText("the next time you log in");
+    // And goes quiet, because a second ask would be the same walk written into the game's folder
+    // twice. The button coming back is what says the first one was collected.
+    await expect(collection.askForACensus()).toBeDisabled();
+  });
 });

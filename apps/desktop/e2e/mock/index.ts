@@ -13,7 +13,7 @@
 import type { E2EMock } from "../../src/types";
 
 import { captureImages } from "./captures";
-import { accountCensus, collectionCatalogue } from "./collection";
+import { accountCensus, censusRequests, collectionCatalogue } from "./collection";
 import { dashboard } from "./dashboard";
 import {
   achievementDetails,
@@ -84,6 +84,7 @@ export {
 export const mockDesktop: E2EMock = {
   dashboard,
   accountCensus,
+  censusRequests,
   collectionCatalogue,
   transmog,
   transmogWearers,

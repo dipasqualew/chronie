@@ -168,3 +168,14 @@ export const collectionCatalogue: E2EMock["collectionCatalogue"] = {
   withheldAchievements: 2,
   withheldMounts: 1,
 };
+
+/**
+ * The walks somebody has asked the game to take, and there have been none.
+ *
+ * Empty on purpose, because the state the affordance exists for is the one nobody has used yet:
+ * the button is offered, its promise is drawn, and there is no history above it. A scenario that
+ * presses it moves the fixture to the state after — see `e2eDesktop.ts`, which records the ask
+ * exactly as the backend would, unanswered, because that is what a real one is until the player
+ * has actually logged in.
+ */
+export const censusRequests: E2EMock["censusRequests"] = [];

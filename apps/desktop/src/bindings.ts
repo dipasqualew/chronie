@@ -83,6 +83,17 @@ async captureThumbnails(captureIds: number[]) : Promise<Result<CaptureThumbnails
 }
 },
 /**
+ * Every walk this app has asked the game for, and what became of each.
+ */
+async censusRequests() : Promise<Result<CensusRequest[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("census_requests") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * What the reader may be asked about her, what they have answered so far, and who they play.
  *
  * The first two halves at once because neither is any use alone: a list of swatches with nothing
@@ -536,6 +547,32 @@ async reputationIcons(factions: number[]) : Promise<Result<IconsPayload, Command
 async querySchema() : Promise<Result<QuerySchema, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("query_schema") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Asks the game to walk the account's collections again and write down what it finds.
+ *
+ * The second thing this app says back to a WoW account, and shaped exactly like the first: the
+ * ask is recorded here, written into a source file of the addon's own, and carried out by the
+ * *addon* the next time the player logs in. Nothing in this app can reach a running game.
+ *
+ * **It exists because the addon's audit is deliberately conservative** — a build change, a domain
+ * that was never whole, or the client's own counter saying there is more, and none of those is a
+ * timer. See `docs/account-census.md`. What none of them covers is a reader who knows better, and
+ * this is how they say so.
+ *
+ * `domains` empty asks for every domain the addon can walk, which is what the button sends.
+ *
+ * A game folder that cannot be written to is not a failure of the *ask*. The row is stored, every
+ * later install writes the file again, and telling somebody their resync failed when it is queued
+ * would be the wrong sentence.
+ */
+async requestCensus(domains: string[]) : Promise<Result<CensusRequest[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("request_census", { domains }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1133,6 +1170,41 @@ character?: string | null; complete: boolean; revision: number; held: number;
  * mounts, deliberately: see `ns.mountCensus`.
  */
 counted?: number | null; build?: string | null; walkedBy?: string | null; startedAt?: number | null; completedAt?: number | null; observedAt: number }
+/**
+ * A walk this app has asked for.
+ *
+ * Named for its domain rather than shortened to `Request`, because the generated TypeScript is
+ * one flat namespace: `ingamesets::Request` is already `Request` over there, and two structs of
+ * that name would arrive as two declarations of one type.
+ *
+ * The shape of a row of `census_requests` and of the entry written into the addon's folder — one
+ * idea of what a request is, rather than one per hop.
+ */
+export type CensusRequest = { id: number;
+/**
+ * Which domains to walk, by the addon's own word for each. **Empty asks for every one the
+ * addon can walk**, which is what the Resync button sends.
+ *
+ * Named rather than implied because this is the seam a targeted probe arrives on: the app
+ * knows the whole catalogue out of DB2 and the addon does not, so "walk the appearances
+ * again" is a thing only this end can decide to ask for.
+ */
+domains: string[]; createdAt: number;
+/**
+ * What the addon did about it: `walked`, or `unknown` for a request naming nothing that
+ * build can walk. Absent while it is still waiting to be seen, which is the state the app
+ * draws differently and the state that keeps it being written into the game.
+ */
+outcome?: string | null;
+/**
+ * When the walk it asked for *ended*, which is the addon's own moment and not this app's.
+ */
+appliedAt?: number | null;
+/**
+ * What was actually walked, which is not always what was asked for: a build missing a
+ * domain's client calls cannot walk it however plainly the request named it.
+ */
+walked: string[] }
 export type CharacterBody = { id: number; name: string }
 export type CharacterChosen = { body: number; picked: CharacterPick[] }
 export type CharacterLookPayload = { bodies: CharacterBody[]; body: number; questions: CharacterQuestion[]; picked: CharacterPick[]; characters: PlayedCharacter[] }

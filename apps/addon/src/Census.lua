@@ -74,7 +74,8 @@ local _, ns = ...
 ---@field start fun(names: string[]?): string[] Begin a pass over these domains, or over every
 ---domain that `audit` distrusts. Returns what it will walk.
 ---@field step fun(): boolean One slice of work. True while there is more to do.
----@field run fun(names: string[]?) Start a pass and drive it to the end, a slice per frame.
+---@field run fun(names: string[]?, onDone: fun()?): boolean Start a pass and drive it to the end,
+---a slice per frame. False when there was nothing to begin.
 ---@field state fun(name: string, character: string?): CensusState? What a domain last said.
 ---@field running fun(): boolean
 
@@ -454,20 +455,31 @@ function ns.newCensus(deps)
         return advance()
     end
 
+    ---Begins a pass and drives it to the end, a slice per frame.
+    ---
+    ---`onDone` fires when the queue runs out, and **only then**: a pass a logout cuts short never
+    ---calls it, because there is no frame left to call it from. That is what makes it usable as
+    ---the answer to "did the walk somebody asked for actually happen" — see `ns.newCensusResync`,
+    ---which records a request as carried out on this and nothing else.
     ---@param names string[]?
-    local function run(names)
+    ---@param onDone fun()?
+    ---@return boolean Whether a pass was begun.
+    local function run(names, onDone)
         -- One pass at a time. A second chain of slices over the same domains would walk the
         -- same ids twice and, far worse, could finish the first chain's domain on the second
         -- chain's `startedAt` — pruning away everything the first chain had already written.
         if pass or #start(names) == 0 then
-            return
+            return false
         end
         local function slice()
             if step() then
                 deps.after(SLICE_DELAY, slice)
+            elseif onDone then
+                onDone()
             end
         end
         slice()
+        return true
     end
 
     return {

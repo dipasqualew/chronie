@@ -927,6 +927,9 @@ function fake.newEnv(options)
     -- it. `customSetWrites` is the record a test reads back: the writer's whole job is calls
     -- into the client, and only the calls can say whether it did it.
     local customSetRequests = options.customSetRequests or {}
+    -- The walks the app has asked for, by the same road: a table of `{ id, domains }` the addon
+    -- reads out of a source file of its own rather than out of SavedVariables.
+    local censusRequests = options.censusRequests or {}
     local customSetWrites = { created = {}, modified = {} }
     local maxCustomSets = options.maxCustomSets
     local validCustomSetName = options.validCustomSetName
@@ -1222,6 +1225,9 @@ function fake.newEnv(options)
         end,
         customSetRequests = function()
             return customSetRequests
+        end,
+        censusRequests = function()
+            return censusRequests
         end,
         customSetClient = {
             create = function(name, icon, list)

@@ -44,6 +44,8 @@ local addonName, ns = ...
 ---@field playerCustomizations fun(): table? Every option the character was made of, as the
 ---barber's screen enumerates them — and nothing at all anywhere else. See ns.newCharacterLook.
 ---@field customSetRequests fun(): CustomSetRequest[] What the app left in the addon's own folder.
+---@field censusRequests fun(): CensusRequest[] The walks the app has asked for, from the same
+---folder and by the same road — see `src/CensusRequests.lua`.
 ---@field customSetClient CustomSetClient The four calls that change the player's own wardrobe.
 ---@field activeQuestIDs fun(): integer[]
 ---@field questCompletionInfo fun(questID: integer): table
@@ -231,6 +233,12 @@ function ns.main(env)
         holdings.record(currentCharacter(), env.heldSweep())
     end
 
+    -- Held rather than passed straight through, because three things want the same list: the
+    -- census walks it, the report needs each domain's name and scope to draw a line for it, and a
+    -- resync needs every name to ask for a walk of the lot. Building it twice would risk two lists
+    -- that disagree about what this client build can answer for.
+    local censusDomains = ns.censusDomains(env.censusClients and env.censusClients() or {})
+
     ---What the account holds, as opposed to what it was watched collecting.
     ---
     ---The same argument `HoldingsStore` makes about currencies, taken to its conclusion. A
@@ -250,7 +258,48 @@ function ns.main(env)
         after = env.after,
         character = currentCharacter,
         build = env.clientBuild,
-        domains = ns.censusDomains(env.censusClients and env.censusClients() or {}),
+        domains = censusDomains,
+    })
+
+    ---@return string[] Every domain this build can walk, in walk order.
+    local function censusDomainNames()
+        local names = {}
+        for _, domain in ipairs(censusDomains) do
+            names[#names + 1] = domain.name
+        end
+        return names
+    end
+
+    local censusReport = ns.newCensusReport({
+        domains = censusDomains,
+        state = census.state,
+        running = census.running,
+        now = env.now,
+        character = currentCharacter,
+    })
+
+    ---Where the record of which walks the app has already had is kept.
+    ---
+    ---Account-wide, beside the custom set requests and for the same reason: a census is a reading
+    ---of what the account holds, so a resync carried out on one character has been carried out.
+    local function censusRequestStore()
+        env.db.censusRequests = env.db.censusRequests or {}
+        return env.db.censusRequests
+    end
+
+    local censusResync = ns.newCensusResync({
+        readRequests = env.censusRequests,
+        store = setmetatable({}, {
+            __index = function(_, key)
+                return censusRequestStore()[key]
+            end,
+            __newindex = function(_, key, value)
+                censusRequestStore()[key] = value
+            end,
+        }),
+        now = env.now,
+        domains = censusDomainNames,
+        walk = census.run,
     })
 
     ---How long after the world arrives before a census may start.
@@ -271,6 +320,14 @@ function ns.main(env)
     ---about during a long walk cannot restart or double it.
     local function sweepCensus()
         env.after(CENSUS_SETTLE_SECONDS, function()
+            -- What somebody explicitly asked for goes first, and the audit's own pass second.
+            -- The other order would have the audit's pass in flight when the request arrived,
+            -- and `census.run` refuses a second one — so a resync would be silently deferred to
+            -- the next loading screen every time the audit had anything at all to say.
+            local walking = censusResync.run()
+            if #walking > 0 then
+                logger.info(ns.censusResyncText(walking))
+            end
             census.run()
         end)
     end
@@ -865,8 +922,8 @@ function ns.main(env)
 
     local router = ns.newSlashRouter({
         onUnknown = function()
-            logger.info("usage: /chronie locks | results | segments | currency | report | log "
-                .. "| events | note [text]")
+            logger.info("usage: /chronie locks | results | segments | currency | census | report "
+                .. "| log | events | note [text]")
         end,
     })
     ---Names every event this client build refused, so a wrong or since-renamed event name
@@ -927,6 +984,27 @@ function ns.main(env)
     end)
     router.add("report", function()
         reportWindow.toggle(reportCommand.lines())
+    end)
+    -- Chat rather than a window, because this is a handful of lines somebody reads once and
+    -- because the two numbers on each of them — what is written down and what the client itself
+    -- counts — are what a person pastes into an issue.
+    --
+    -- `refresh` is the impatient form, and it exists for the case the audit deliberately does not
+    -- cover: a reader who *knows* a reading is stale, where the client's own counter has not
+    -- noticed and the build has not changed. It walks every domain rather than taking a name,
+    -- because naming one would be a vocabulary to learn for a command run twice a year.
+    router.add("census", function(argument)
+        if (argument or ""):lower() ~= "refresh" then
+            for _, line in ipairs(censusReport.lines()) do
+                logger.info(line)
+            end
+            return
+        end
+        if not census.run(censusDomainNames()) then
+            logger.info("a census is already walking — /chronie census says how far it has got.")
+            return
+        end
+        logger.info("walking every collection again. It is written down when you log out.")
     end)
     -- The one way into a memory, and a slash command rather than a key on purpose. Chronie
     -- binds none (see the note at the foot of chronie.toc), and the chat box is somewhere a
@@ -1703,6 +1781,14 @@ if CreateFrame then
             ---addon has the shipped copy, which asks for nothing.
             customSetRequests = function()
                 local asked = ns.customSetRequests
+                return type(asked) == "table" and asked.requests or {}
+            end,
+            ---The walks the desktop app has asked for, by the same road and for the same reason.
+            ---
+            ---Read out of `src/CensusRequests.lua`. A hand-installed addon has the shipped copy,
+            ---which asks for nothing.
+            censusRequests = function()
+                local asked = ns.censusRequests
                 return type(asked) == "table" and asked.requests or {}
             end,
             ---The four calls that change the player's own transmog sets.
