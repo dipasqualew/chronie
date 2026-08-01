@@ -149,6 +149,13 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
     when: view === "collection",
     load: desktop.collectionCatalogue,
   });
+  // And the one ask that goes the other way. Chronie's own database again, and read beside the
+  // census rather than folded into it: what the account holds and what somebody asked to have
+  // counted again are two different questions, and only one of them is written by the addon.
+  const censusRequests = useAsyncResource({
+    when: view === "collection",
+    load: desktop.censusRequests,
+  });
 
   // Kinds the backend can guess at, plus any the user has already invented, so the editor's
   // picker offers what this history actually contains rather than only what the app ships with.
@@ -624,6 +631,17 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
           catalogue={catalogue.value}
           catalogueStatus={catalogueStatus}
           catalogueRecourse={catalogueRecourse}
+          censusRequests={censusRequests.value}
+          // Empty asks for every domain the addon can walk, which is the whole of what the
+          // button offers. A list is what a targeted probe would send once the app starts
+          // handing over a suspicion rather than a whole pass.
+          onResync={async () => {
+            const asked = await desktop.requestCensus([]);
+            // Write-through, the way every other write in this app answers: the ask comes back
+            // with the whole list, and that list is the resource's new value.
+            censusRequests.put(asked);
+            return asked;
+          }}
         />
       </section>
 

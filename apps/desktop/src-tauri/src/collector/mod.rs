@@ -18,6 +18,7 @@
 mod activities;
 mod captures;
 mod census;
+mod census_requests;
 mod custom_sets;
 mod database;
 mod holdings;
@@ -37,6 +38,7 @@ mod testing;
 pub use activities::{add_activity, delete_activity, reset_activities, update_activity};
 pub use captures::{capture_image, capture_thumbnails, delete_capture, set_capture_note};
 pub use census::{account_census, collected_appearances};
+pub use census_requests::{census_requests, request_census, waiting_census_requests};
 pub use custom_sets::{custom_sets, delete_custom_set, save_custom_set};
 pub use database::{initialize, install_database, snapshot, summarize, Summary};
 pub use ingame_sets::{in_game_sets, request_set_in_game, set_requests, waiting_set_requests};
@@ -48,6 +50,7 @@ pub use marks::{delete_transmog_tag, set_transmog_favourite, set_transmog_tag, t
 pub use read_model::{dashboard, newest_segment_end};
 
 use crate::captures::Marker;
+use crate::censusrequests;
 use crate::failure::Failure;
 use crate::ingamesets;
 use crate::look;
@@ -56,6 +59,7 @@ use crate::saved_variables::{self, RawCensus, RawHoldingSnapshot, RawWarband, Se
 use captures::{deleted_captures, ingest_images, link_capture_achievements, link_captures};
 use captures::{place_captures, record_images, store_root, upsert_capture};
 use census::sync_census;
+use census_requests::sync_census_request_outcomes;
 use database::open_database;
 use holdings::{sync_holdings, sync_warband};
 use ingame_sets::{sync_in_game_sets, sync_set_request_outcomes};
@@ -113,6 +117,9 @@ struct Incoming {
     /// What the addon did about the outfits this app asked it to save: request id, outcome,
     /// when, and the set that resulted. Account-wide, because a custom set is.
     set_request_outcomes: Vec<(i64, String, Option<i64>, Option<i64>)>,
+    /// What the addon did about the walks this app asked for: request id, outcome, when the walk
+    /// ended, and which domains it actually covered. Account-wide, because a request names none.
+    census_request_outcomes: Vec<(i64, String, Option<i64>, Vec<String>)>,
     markers: Vec<Marker>,
 }
 
@@ -158,6 +165,7 @@ pub fn collect(
         let census = std::mem::take(&mut saved.census);
         let in_game_sets = ingamesets::read(&saved.custom_sets);
         let set_request_outcomes = ingamesets::outcomes(&saved.custom_set_requests);
+        let census_request_outcomes = censusrequests::outcomes(&saved.census_requests);
         let looks = look::read(&saved.character_look);
         let markers = crate::captures::markers_from_entries(&saved.entries);
         incoming.push(Incoming {
@@ -183,6 +191,9 @@ pub fn collect(
             // The other half of the two-way sync, coming back. The addon writes what it did
             // under the request's own id, which is how the app knows to stop asking.
             set_request_outcomes,
+            // And the other ask coming back: whether the walk somebody pressed a button for
+            // actually happened, which is the one thing the app cannot see from a census alone.
+            census_request_outcomes,
             // Who the reader's own characters are, which is what lets the transmog view draw
             // one of them rather than a body assembled from selects. See `look.rs`.
             looks,
@@ -238,6 +249,7 @@ pub fn collect(
         sync_in_game_sets(&transaction, account_id, &account.in_game_sets, now)?;
         sync_character_looks(&transaction, account_id, &account.looks, now)?;
         sync_set_request_outcomes(&transaction, &account.set_request_outcomes, now)?;
+        sync_census_request_outcomes(&transaction, &account.census_request_outcomes, now)?;
         for marker in &account.markers {
             if deleted.contains(&marker.source_id) {
                 continue;

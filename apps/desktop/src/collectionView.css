@@ -23,6 +23,20 @@
   margin: 0 0 8px;
 }
 
+/*
+ * The one control on the screen, kept in the header and kept quiet.
+ *
+ * It asks for a walk that will not happen until the next login, so it has no business competing
+ * with the numbers: the button sits above its own explanation and everything under it is `.sub`.
+ */
+.col-resync {
+  margin-top: 10px;
+}
+.col-resync p {
+  margin: 4px 0 0;
+  max-width: 68ch;
+}
+
 /* The provenance of every number under it, so it reads as a preamble rather than a footnote. */
 .col-reading {
   border-left: 2px solid var(--border);

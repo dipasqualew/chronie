@@ -81,6 +81,66 @@ or suppress one that was needed.
 
 Mounts do without, because they can afford to: the whole mount walk is about 1,900 calls.
 
+## Seeing what it knows, and asking for a fresh one
+
+The mechanism above runs in silence, which was fine while nobody could act on it and is not fine
+now that somebody can. Two things break that silence, and the second is also the escape hatch the
+argument above always implied.
+
+### `/chronie census`
+
+One line per domain: whether the reading is whole, how many entries it holds, what the client's own
+counter said beside it, which build and which character it was walked on, and how long ago.
+`apps/addon/src/CensusReport.lua` is the whole of it and `ns.formatAge` is the last field.
+
+**`held` and `counted` on the same line is the point of the line.** They are the two numbers the
+audit compares, and putting them side by side turns the guild-achievement question above — does
+`GetNumCompletedAchievements` include them? — from something needing `/dump` into something a
+person answers by looking.
+
+The line opens with one of four standings, because `complete` alone cannot tell the three ways of
+not being complete apart and they mean different things: **never walked** is waiting for a walk,
+**cut short** is waiting for the rest of one, and **part of an answer** is a `partial` domain that
+will never be whole however long it is left.
+
+### Asking for a walk
+
+`audit` is deliberately conservative and should stay so. What it cannot cover is a reader who
+simply knows a reading is stale — the counter has not noticed, the build has not changed, and
+nothing else will provoke a thing. There are two ways to say so.
+
+`/chronie census refresh` walks every domain, immediately, from the chat box.
+
+**The Resync button on the Collection screen** is the one somebody will actually find, and it
+travels the road `docs/transmog-sets.md` proved: the app writes `src/CensusRequests.lua` into the
+installed addon folder, the addon reads it at load, and the answer comes back through
+SavedVariables at logout. `censusrequests.rs` is the shape and the file, `collector::census_requests`
+is the storage, `ns.newCensusResync` carries it out and `resync.ts` is what the screen says about
+it.
+
+Three things about that channel are load-bearing.
+
+**Nothing about it is immediate**, and the affordance says so rather than implying otherwise. A
+request is picked up at the next *load* and answered at the next *logout*, because `ChronieDB` is
+written once, at teardown. A button that read as "resync now" would be a button people press twice.
+
+**The request is recorded when the walk ends, not when it starts.** A player who logs out thirty
+seconds into a minute-long walk has had part of an answer, which the census files as the positive
+observations it is; the request stays unanswered, the app goes on writing it, and the next login
+walks again. A record written at the start would have marked that half-pass as the resync somebody
+explicitly asked for. The cost is a walk nobody can ever finish going round again at every login,
+which is the same walk the audit would provoke anyway and which stops the moment one pass
+completes.
+
+**A request carries the domains it wants**, and an empty list means all of them. The button sends
+an empty list; naming them is what a targeted probe would use, which is the reason this end is
+worth building properly at all — the app knows the whole catalogue out of DB2 and the addon does
+not, so "check these ids" is a thing only the desktop can decide to ask for.
+
+The resync runs *before* the audit's own pass at each loading screen. The other order would have
+the audit's pass in flight when the request arrived, and `census.run` refuses a second one — so an
+explicit ask would be silently deferred every time the audit had anything at all to say.
+
 ## What a walk may not do
 
 **Nothing here touches what the player arranged.** No filter is set, no header expanded, no

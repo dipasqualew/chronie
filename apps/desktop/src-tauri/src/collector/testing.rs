@@ -197,6 +197,12 @@ impl SavedVariables {
         )
     }
 
+    /// What the addon did about the walks this app asked for, keyed by the id of the request
+    /// that asked. See [`super::census_requests`].
+    pub(super) fn answered_census_requests(self, lua: &str) -> Self {
+        self.table("censusRequests", &format!("{{ [\"done\"] = {{ {lua} }} }}"))
+    }
+
     /// Who each character is and what they are made of.
     pub(super) fn character_look(self, lua: &str) -> Self {
         self.braced("characterLook", lua)

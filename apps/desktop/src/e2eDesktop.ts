@@ -15,6 +15,7 @@ import type {
   CaptureImagePayload,
   CaptureQuality,
   CaptureThumbnailsPayload,
+  CensusRequest,
   CharacterLookPayload,
   CharacterChosen,
   CharacterModelPayload,
@@ -121,6 +122,22 @@ export const e2eDesktop = {
     }
     return Promise.resolve(structuredClone(mock.collectionCatalogue));
   },
+  // And the one ask that travels the other way. Recorded and *not* carried out, which is what
+  // the real backend does too: the addon reads it at the next login and answers at the logout
+  // after that, so what a scenario can see is a request sitting there unanswered.
+  requestCensus: (domains: string[]): Promise<CensusRequest[]> => {
+    if (!mock) return missingMock();
+    const id = mock.censusRequests.reduce((highest, one) => Math.max(highest, one.id), 0) + 1;
+    mock.censusRequests.unshift({
+      id,
+      domains,
+      createdAt: Math.floor(Date.now() / 1000),
+      walked: [],
+    });
+    return Promise.resolve(structuredClone(mock.censusRequests));
+  },
+  censusRequests: (): Promise<CensusRequest[]> =>
+    mock ? Promise.resolve(structuredClone(mock.censusRequests)) : missingMock(),
   // Reading the game's own tables takes about a second and a couple of hundred megabytes
   // of transient memory, so the window asks only when the view is first opened.
   transmogSets: (): Promise<TransmogPayload> =>

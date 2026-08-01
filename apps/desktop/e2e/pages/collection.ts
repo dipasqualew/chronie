@@ -93,6 +93,22 @@ export class Collection {
     return above.y < below.y;
   }
 
+  /* ---------- asking for a fresh one ---------- */
+
+  private get resync(): Locator {
+    return this.view.getByRole("group", { name: "Ask for a fresh census" });
+  }
+
+  /** The one control on the screen: asks the addon to walk the lot again at the next login. */
+  askForACensus(): Locator {
+    return this.resync.getByRole("button", { name: "Walk them all again" });
+  }
+
+  /** What the last ask came to, which is nothing at all until one has been made. */
+  lastAsk(): Locator {
+    return this.resync.getByRole("status", { name: "What the last ask came to" });
+  }
+
   /* ---------- the achievement tree ---------- */
 
   private get tree(): Locator {

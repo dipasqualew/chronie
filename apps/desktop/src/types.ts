@@ -25,6 +25,7 @@ export type {
   CaptureThumbnailsPayload,
   CatalogueAchievement,
   CatalogueMount,
+  CensusRequest,
   CensusReading,
   CharacterBody,
   CharacterChosen,
@@ -129,6 +130,7 @@ import type {
   AccountCensusPayload,
   AchievementDetail,
   AppUpdateResult,
+  CensusRequest,
   CharacterLookPayload,
   CharacterQuestion,
   CollectedAppearancesPayload,
@@ -204,6 +206,9 @@ export interface E2EMock {
    * `null` stands for a machine with no install, which is a real state that screen has to draw
    * rather than an error — a spec sets it to make the census draw alone. */
   collectionCatalogue: CollectionCataloguePayload | null;
+  /** Every walk somebody has asked the game to take. State rather than a fixture: a scenario
+   * presses the button and the next read has to say it was pressed — see `resync.ts`. */
+  censusRequests: CensusRequest[];
   transmog: TransmogPayload;
   /** Who the items behind each set say can really wear it — see `wearers.rs`. */
   transmogWearers: WearersPayload;

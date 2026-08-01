@@ -46,6 +46,7 @@ pub struct RawSavedVariables {
     pub census: RawCensus,
     pub custom_sets: Value,
     pub custom_set_requests: Value,
+    pub census_requests: Value,
     pub character_look: Value,
     pub entries: Value,
 }

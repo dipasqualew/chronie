@@ -4111,6 +4111,153 @@ describe("addon integration", function()
         end)
     end)
 
+    -- Chat rather than a window, because the two numbers on each line — what is written down and
+    -- what the client itself counts — are what somebody pastes into an issue. The exact wording
+    -- of a line belongs to census_report_spec.lua; what only a booted addon can say is that the
+    -- report was handed the same domains the walk was, and that every line reaches chat.
+    describe("the /chronie census slash command", function()
+        ---@return boolean whether anything the addon has said carries `needle`
+        local function mentions(recorded, needle)
+            for _, line in ipairs(recorded.lines) do
+                if line:find(needle, 1, true) then
+                    return true
+                end
+            end
+            return false
+        end
+
+        it("draws a head line, a line per domain, and the way out", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("census")
+
+            assert.is_truthy(recorded.lines[1]:find("census — 0 of 3 domains whole", 1, true))
+            -- Every domain this build can be asked about, and nothing has walked any of them.
+            assert.is_true(mentions(recorded, "mounts — never walked"))
+            assert.is_true(mentions(recorded, "appearances — never walked"))
+            assert.is_true(mentions(recorded, "achievements — never walked"))
+            assert.is_truthy(recorded.lines[#recorded.lines]:find("/chronie census refresh", 1, true))
+        end)
+
+        -- The pairing the command exists for, and the half of it only the wiring can prove: the
+        -- client's own counter has to be the one the domain that was walked offers, or the two
+        -- numbers on the line are of different things.
+        it("puts what the walk found beside what the client counts", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            recorded.slashRegistrations[1].handler("census")
+
+            -- The mount journal offers no counter whose meaning is settled, so its line has one
+            -- number; the achievement tree does, and its line has both.
+            assert.is_true(mentions(recorded, "mounts — whole, 1 held, build 12.0.5.67823"))
+            assert.is_true(mentions(recorded, "achievements — whole, 1 held, 1 counted"))
+        end)
+
+        -- The impatient form, for the case the audit deliberately does not cover: a reader who
+        -- knows a reading is stale where the client's counter has not noticed and the build has
+        -- not changed.
+        it("walks every collection again when asked to refresh", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            recorded.slashRegistrations[1].handler("census refresh")
+            recorded.settle()
+
+            assert.equal(2, recorded.db.census.account.mounts.revision)
+            assert.equal(2, recorded.db.census.account.achievements.revision)
+            assert.is_true(mentions(recorded, "walking every collection again"))
+        end)
+
+        -- `census.run` refuses a second pass in silence, so a refresh asked for mid-walk would
+        -- otherwise look exactly like one that had started.
+        it("says so rather than nothing when a census is already walking", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.slashRegistrations[1].handler("census refresh")
+            recorded.slashRegistrations[1].handler("census refresh")
+
+            assert.is_true(mentions(recorded, "a census is already walking"))
+        end)
+    end)
+
+    describe("a census the app asked for", function()
+        -- The road into the game a SavedVariables file cannot carry: the app writes a request
+        -- into a source file of the addon's own, which the client reads at load. Nothing about
+        -- it is immediate, and the walk is started ten seconds after the world arrives rather
+        -- than in the instant it does — the server has not finished saying what this account
+        -- has, and a walk that ran then would find nothing and write that down.
+        it("walks on the far side of the loading screen, and says so", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                censusRequests = { { id = 4 } },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            assert.same({}, recorded.lines)
+            assert.is_nil(recorded.db.censusRequests)
+
+            recorded.settle()
+
+            assert.is_truthy(recorded.lines[1]:find("walking 3 collection(s) again", 1, true))
+            local done = recorded.db.censusRequests.done[4]
+            assert.equal("walked", done.outcome)
+            assert.equal(1700000000, done.at)
+            assert.same({ "mounts", "appearances", "achievements" }, done.domains)
+        end)
+
+        -- The ordering `sweepCensus` documents. The audit has something to say on this loading
+        -- screen — nothing has ever been walked — so if its pass went first it would be in
+        -- flight when the request was picked up, `census.run` would refuse the second one, and
+        -- the resync would be deferred to the next loading screen every time. What says which
+        -- way round it happened is what got walked: the request named one domain, and the
+        -- audit's own pass would have named all of them.
+        it("goes before the audit's own pass rather than being deferred by it", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                censusRequests = { { id = 4, domains = { "mounts" } } },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            local done = recorded.db.censusRequests.done[4]
+            assert.equal("walked", done.outcome)
+            assert.same({ "mounts" }, done.domains)
+            assert.is_truthy(recorded.lines[1]:find("walking 1 collection(s) again", 1, true))
+        end)
+
+        -- The app keeps writing the same request into the folder until it has read what became
+        -- of it, so every login for the rest of the session — and every alt — reads one that is
+        -- already carried out. Walking again would cost a minute of somebody's evening to
+        -- produce the census that is already in the file.
+        it("does nothing for a request already written down as done", function()
+            local db = {
+                censusRequests = {
+                    done = { [4] = { id = 4, at = 1, outcome = "walked", domains = { "mounts" } } },
+                },
+            }
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                db = db,
+                censusRequests = { { id = 4 } },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            assert.same({}, recorded.lines)
+            -- Left exactly as it was, rather than re-stamped with this session's clock.
+            assert.equal(1, db.censusRequests.done[4].at)
+        end)
+    end)
+
     describe("the player's own transmog sets", function()
         ---One set in the shape Main.lua reduces the client's three transmog calls to, so a
         ---test says only the part it is about.
@@ -4655,7 +4802,7 @@ describe("addon integration", function()
 
             assert.equal(
                 "|cff33ff99chronie|r: usage: /chronie locks | results | segments | currency "
-                    .. "| report | log | events | note [text]",
+                    .. "| census | report | log | events | note [text]",
                 recorded.lines[1]
             )
         end)

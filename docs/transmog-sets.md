@@ -87,3 +87,9 @@ The address that works is **a file of the addon's own**, listed in `chronie.toc`
 like any other source file. The client never writes those, so the app owns it outright, and
 the addon reads whatever is in it at load. The app already installs the addon, so it already
 has the folder and the right to write there.
+
+That road is now carrying a second thing. `src/CensusRequests.lua` is the same shape with a much
+simpler payload — a reader asking for the account's collections to be walked again — and
+`docs/account-census.md` is where it is argued. Everything above about the address holds for it:
+picked up at the next load, answered at the next logout, and written into the addon's folder on
+every install so an ask survives one.

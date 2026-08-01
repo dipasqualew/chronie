@@ -21,6 +21,9 @@ src/CaptureBurst.lua
 src/CaptureTriggers.lua
 src/Census.lua
 src/CensusDomains.lua
+src/CensusReport.lua
+src/CensusRequests.lua
+src/CensusResync.lua
 src/CharacterLook.lua
 src/ClassDisplay.lua
 src/CombatLogging.lua
