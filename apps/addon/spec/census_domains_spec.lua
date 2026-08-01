@@ -126,6 +126,690 @@ describe("the census domains", function()
         end)
     end)
 
+    describe("ns.petCensus", function()
+        ---A stand-in for `C_PetJournal`, answering about the account's own pets.
+        ---
+        ---`GetNumCollectedInfo` writes down every species it is asked about, because the reason
+        ---the count comes from the client rather than from a tally of the walk only shows in how
+        ---often it is asked: a domain that asked once per pet would come back with the same
+        ---number and would have made a call per pet to do it.
+        ---
+        ---`GetPetInfoTableByPetID` hands over a table of named fields rather than the
+        ---seventeen-return positional twin, which is the pair the client's own `PetJournalInfo`
+        ---documentation describes and the one a fake cannot silently agree with by one position.
+        ---@param options table `{ guids, pets, counts }` — guids in the order the client hands
+        ---them over, pets keyed by GUID, counts keyed by species id.
+        ---@return table journal, table asked
+        local function newPetJournal(options)
+            local asked = {}
+            return {
+                GetOwnedPetIDs = function()
+                    return options.guids or {}
+                end,
+                GetPetInfoTableByPetID = function(guid)
+                    return (options.pets or {})[guid]
+                end,
+                GetNumCollectedInfo = function(speciesID)
+                    asked[#asked + 1] = speciesID
+                    return (options.counts or {})[speciesID]
+                end,
+            }, asked
+        end
+
+        -- The same answer every other domain here gives for a client that cannot be asked: a
+        -- census that cannot be taken is not a census of nothing, so the domain declines to
+        -- exist rather than existing and reporting an account that owns no pets.
+        for _, case in ipairs({
+            { what = "a client with no pet journal at all", missing = nil },
+            { what = "a journal that will not enumerate", missing = "GetOwnedPetIDs" },
+            { what = "a journal that will not describe", missing = "GetPetInfoTableByPetID" },
+            { what = "a journal that will not count a species", missing = "GetNumCollectedInfo" },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                local journal = nil
+                if case.missing then
+                    journal = newPetJournal({})
+                    journal[case.missing] = nil
+                end
+
+                assert.is_nil(ns.petCensus(journal))
+            end)
+        end
+
+        -- `GetOwnedPetIDs` takes no filter and answers about what is owned. The filtered pair is
+        -- `GetNumPets`/`GetPetInfoByIndex`, which is what Blizzard's own pet journal draws its
+        -- list from with a search box in front of it — the same distinction the mounts make.
+        it("walks the account's own pets rather than the list the journal is drawing", function()
+            local journal = newPetJournal({ guids = { "BattlePet-0-1", "BattlePet-0-2" } })
+            local domain = ns.petCensus(journal)
+
+            assert.equal("pets", domain.name)
+            assert.equal("account", domain.scope)
+            assert.same({ "BattlePet-0-1", "BattlePet-0-2" }, domain.list())
+        end)
+
+        -- A GUID is one pet and a collection is counted in species: three Mechanical Squirrels
+        -- are one line of the pet journal, so the id an entry is filed under has to be the
+        -- species or the record would carry three rows the journal draws as one.
+        it("files a pet under its species rather than under its own guid", function()
+            local journal = newPetJournal({
+                guids = { "BattlePet-0-1" },
+                pets = { ["BattlePet-0-1"] = { speciesID = 39, name = "Mechanical Squirrel" } },
+                counts = { [39] = 1 },
+            })
+            local domain = ns.petCensus(journal)
+            domain.list()
+
+            local id, held = domain.read("BattlePet-0-1")
+
+            assert.equal(39, id)
+            assert.equal("Mechanical Squirrel", held.name)
+            assert.equal(1, held.count)
+        end)
+
+        -- The count is the client's answer rather than a tally of the walk, and the difference
+        -- shows in exactly the case the whole design is built around: a pass a logout cuts short
+        -- still says how many of a species the account has, instead of how many it reached.
+        it("folds a species' pets into one entry the client itself counts", function()
+            local journal, asked = newPetJournal({
+                guids = { "BattlePet-0-1", "BattlePet-0-2", "BattlePet-0-3" },
+                pets = {
+                    ["BattlePet-0-1"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 1 },
+                    ["BattlePet-0-2"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 1 },
+                    ["BattlePet-0-3"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 1 },
+                },
+                counts = { [39] = 3 },
+            })
+            local domain = ns.petCensus(journal)
+
+            local entries = {}
+            for _, guid in ipairs(domain.list()) do
+                local id, held = domain.read(guid)
+                entries[id] = held
+            end
+
+            assert.equal(3, entries[39].count)
+            -- Once per species, not once per pet.
+            assert.same({ 39 }, asked)
+        end)
+
+        -- A species is the unit here, so a level has to be *some* pet's — and the highest is the
+        -- only choice that does not depend on what order the client handed the GUIDs over in.
+        for _, case in ipairs({
+            { what = "worst first", guids = { "BattlePet-0-1", "BattlePet-0-2" } },
+            { what = "best first", guids = { "BattlePet-0-2", "BattlePet-0-1" } },
+        }) do
+            it("keeps the best pet of a species, " .. case.what, function()
+                local journal = newPetJournal({
+                    guids = case.guids,
+                    pets = {
+                        ["BattlePet-0-1"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 3 },
+                        ["BattlePet-0-2"] = {
+                            speciesID = 39, name = "Mechanical Squirrel",
+                            petLevel = 25, customName = "Nutkin",
+                        },
+                    },
+                    counts = { [39] = 2 },
+                })
+                local domain = ns.petCensus(journal)
+
+                local held
+                for _, guid in ipairs(domain.list()) do
+                    _, held = domain.read(guid)
+                end
+
+                assert.equal(25, held.level)
+                assert.equal("Nutkin", held.custom)
+            end)
+        end
+
+        -- The player's own arrangement rather than a fact about the species, and true if any one
+        -- of them is starred, because that is what the journal draws a star on.
+        it("stars a species any one of whose pets the player has starred", function()
+            local journal = newPetJournal({
+                guids = { "BattlePet-0-1", "BattlePet-0-2" },
+                pets = {
+                    ["BattlePet-0-1"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 25 },
+                    ["BattlePet-0-2"] = {
+                        speciesID = 39, name = "Mechanical Squirrel",
+                        petLevel = 3, isFavorite = true,
+                    },
+                },
+                counts = { [39] = 2 },
+            })
+            local domain = ns.petCensus(journal)
+
+            local held
+            for _, guid in ipairs(domain.list()) do
+                _, held = domain.read(guid)
+            end
+
+            assert.is_true(held.favourite)
+        end)
+
+        -- Absent rather than false, the same economy the mounts keep: a key per species saying
+        -- "not starred", "not renamed" is a saved file spent saying what its absence already said.
+        it("leaves the star and the nickname out where the player has made neither", function()
+            local journal = newPetJournal({
+                guids = { "BattlePet-0-1" },
+                pets = {
+                    ["BattlePet-0-1"] = {
+                        speciesID = 39, name = "Mechanical Squirrel",
+                        petLevel = 25, isFavorite = false,
+                    },
+                },
+                counts = { [39] = 1 },
+            })
+            local domain = ns.petCensus(journal)
+            domain.list()
+
+            local _, held = domain.read("BattlePet-0-1")
+
+            assert.equal(25, held.level)
+            assert.is_nil(held.favourite)
+            assert.is_nil(held.custom)
+        end)
+
+        it("says nothing about a guid the client will not describe", function()
+            local domain = ns.petCensus(newPetJournal({ guids = { "BattlePet-0-1" } }))
+            domain.list()
+
+            local id, held = domain.read("BattlePet-0-1")
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- The entries are kept only for as long as a pass lasts. A species whose best pet was
+        -- traded away between two passes must come back as what the account holds now, rather
+        -- than going on reporting the level of a pet nobody owns any more.
+        it("starts a species afresh on every pass", function()
+            -- The account as the fake will report it, and the account after the level-25 pet
+            -- has been traded away — the fake reads this table on every call, so a second pass
+            -- meets what a second pass would really meet.
+            local account = {
+                guids = { "BattlePet-0-1", "BattlePet-0-2" },
+                pets = {
+                    ["BattlePet-0-1"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 3 },
+                    ["BattlePet-0-2"] = { speciesID = 39, name = "Mechanical Squirrel", petLevel = 25 },
+                },
+                counts = { [39] = 2 },
+            }
+            local domain = ns.petCensus(newPetJournal(account))
+            for _, guid in ipairs(domain.list()) do
+                domain.read(guid)
+            end
+
+            account.guids = { "BattlePet-0-1" }
+            account.pets["BattlePet-0-2"] = nil
+            account.counts[39] = 1
+            domain.list()
+            local _, held = domain.read("BattlePet-0-1")
+
+            assert.equal(3, held.level)
+            assert.equal(1, held.count)
+        end)
+    end)
+
+    describe("ns.toyCensus", function()
+        ---A stand-in for the toy box and the bare `PlayerHasToy` global beside it.
+        ---
+        ---`GetToyInfo` returns five values and this domain reads two of them, so the icon between
+        ---the name and the star is written out rather than skipped: a fake that dropped it would
+        ---agree with a domain that read the wrong positions.
+        ---
+        ---`PlayerHasToy` is a bare function rather than a member of `C_ToyBox`, which is
+        ---genuinely what the client offers — it was never moved into the namespace.
+        ---@param options table `{ total, indexed, toys, has }` — indexed keyed by position,
+        ---toys keyed by item id, has the set of item ids the account owns.
+        ---@return table clients
+        local function newToyBox(options)
+            return {
+                box = {
+                    GetNumToys = function()
+                        return options.total or 0
+                    end,
+                    GetToyFromIndex = function(index)
+                        return (options.indexed or {})[index]
+                    end,
+                    GetToyInfo = function(itemID)
+                        local toy = (options.toys or {})[itemID]
+                        if not toy then
+                            return nil
+                        end
+                        return itemID, toy.name, "interface/icon", toy.favourite, toy.fanfare
+                    end,
+                },
+                hasToy = function(itemID)
+                    return (options.has or {})[itemID] or false
+                end,
+            }
+        end
+
+        -- The same answer every other domain here gives for a client that cannot be asked, and
+        -- the bundle has two halves that can each be missing on their own.
+        for _, case in ipairs({
+            { what = "a client with no toy calls at all", bare = true },
+            { what = "a bundle with no toy box in it", bundle = { hasToy = print } },
+            { what = "a box that will not say how many there are", missing = "GetNumToys" },
+            { what = "a box that will not answer for a position", missing = "GetToyFromIndex" },
+            { what = "a box that will not describe a toy", missing = "GetToyInfo" },
+            { what = "a build with no PlayerHasToy beside the box", withoutHas = true },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                local clients = case.bundle
+                if not case.bare and not clients then
+                    clients = newToyBox({})
+                    if case.missing then
+                        clients.box[case.missing] = nil
+                    else
+                        clients.hasToy = nil
+                    end
+                end
+
+                assert.is_nil(ns.toyCensus(clients))
+            end)
+        end
+
+        -- The claim this domain refuses to make. There is only one indexer and Blizzard's own
+        -- toy box pairs it with the *filtered* count, so the list this walks is very probably
+        -- the one the player's filters left standing — and a reading that never claims to be
+        -- whole can never prune away a toy somebody had narrowed out of view.
+        it("says out loud that a walk of it is only ever part of an answer", function()
+            local domain = ns.toyCensus(newToyBox({}))
+
+            assert.equal("toys", domain.name)
+            assert.equal("account", domain.scope)
+            assert.is_true(domain.partial)
+        end)
+
+        -- The bound is the *unfiltered* total, which is the larger of the client's two: nothing
+        -- the player has left visible can fall outside it.
+        it("walks a position for every toy the unfiltered total claims", function()
+            local domain = ns.toyCensus(newToyBox({ total = 3 }))
+
+            assert.same({ 1, 2, 3 }, domain.list())
+        end)
+
+        -- `-1` is the client's own answer for a position past the end of the list, which is what
+        -- Blizzard's toy button checks for before drawing itself.
+        for _, case in ipairs({
+            { what = "past the end of the list", answer = -1 },
+            { what = "the client answers nothing for", answer = nil },
+        }) do
+            it("says nothing about a position " .. case.what, function()
+                local domain = ns.toyCensus(newToyBox({ total = 1, indexed = { [1] = case.answer } }))
+
+                local id, held = domain.read(1)
+
+                assert.is_nil(id)
+                assert.is_nil(held)
+            end)
+        end
+
+        -- `PlayerHasToy` answers about an id whatever the toy box is showing, so the index
+        -- naming a toy is not the same as the account owning it.
+        it("says nothing about a toy the index named but the account does not have", function()
+            local domain = ns.toyCensus(newToyBox({
+                total = 1,
+                indexed = { [1] = 163722 },
+                toys = { [163722] = { name = "Anima Drainer" } },
+                has = {},
+            }))
+
+            local id, held = domain.read(1)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        it("describes a toy the account can pull out of the box", function()
+            local domain = ns.toyCensus(newToyBox({
+                total = 1,
+                indexed = { [1] = 54452 },
+                toys = { [54452] = { name = "Ethereal Portal", favourite = true } },
+                has = { [54452] = true },
+            }))
+
+            local id, held = domain.read(1)
+
+            assert.equal(54452, id)
+            assert.same({ name = "Ethereal Portal", favourite = true }, held)
+        end)
+
+        it("leaves the star out of a toy the player has not starred", function()
+            local domain = ns.toyCensus(newToyBox({
+                total = 1,
+                indexed = { [1] = 54452 },
+                toys = { [54452] = { name = "Ethereal Portal", favourite = false } },
+                has = { [54452] = true },
+            }))
+
+            local _, held = domain.read(1)
+
+            assert.equal("Ethereal Portal", held.name)
+            assert.is_nil(held.favourite)
+        end)
+    end)
+
+    describe("ns.heirloomCensus", function()
+        ---A stand-in for `C_Heirloom`.
+        ---
+        ---`GetHeirloomInfo` returns ten values and this domain reads four of them, so the four
+        ---between the slot and the source and the three trailing levels are all written out
+        ---rather than skipped: a fake that stopped at the source would agree with a domain that
+        ---read the wrong positions.
+        ---@param options table `{ ids, rows, has, known }` — rows keyed by item id.
+        ---@return table heirloom
+        local function newHeirlooms(options)
+            local heirloom = {
+                GetHeirloomItemIDs = function()
+                    return options.ids
+                end,
+                GetHeirloomInfo = function(itemID)
+                    local row = (options.rows or {})[itemID]
+                    if not row then
+                        return nil
+                    end
+                    return row.name, row.slot, false, "interface/icon", row.upgrade,
+                        row.source, false, 60, 1, 60
+                end,
+                PlayerHasHeirloom = function(itemID)
+                    return (options.has or {})[itemID] or false
+                end,
+                GetHeirloomMaxUpgradeLevel = function(itemID)
+                    return ((options.rows or {})[itemID] or {}).maxUpgrade
+                end,
+            }
+            if options.known then
+                heirloom.GetNumKnownHeirlooms = function()
+                    return options.known
+                end
+            end
+            return heirloom
+        end
+
+        for _, case in ipairs({
+            { what = "a client with no heirloom API at all", missing = nil },
+            { what = "a build that will not enumerate", missing = "GetHeirloomItemIDs" },
+            { what = "a build that will not describe one", missing = "GetHeirloomInfo" },
+            { what = "a build that will not say what the account has", missing = "PlayerHasHeirloom" },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                local heirloom = nil
+                if case.missing then
+                    heirloom = newHeirlooms({ ids = {} })
+                    heirloom[case.missing] = nil
+                end
+
+                assert.is_nil(ns.heirloomCensus(heirloom))
+            end)
+        end
+
+        -- Nothing in Blizzard's own interface calls `GetHeirloomItemIDs`, so nothing in the
+        -- install says whether it answers past the pane's class and spec filters — and the toy
+        -- box next door is a live counter-example to reading a name as evidence. Refusing to
+        -- prune costs nothing on a grow-only collection; pruning a filtered list would not.
+        it("says out loud that a walk of it is only ever part of an answer", function()
+            local domain = ns.heirloomCensus(newHeirlooms({ ids = {} }))
+
+            assert.equal("heirlooms", domain.name)
+            assert.equal("account", domain.scope)
+            assert.is_true(domain.partial)
+        end)
+
+        -- The one enumerator in `C_Heirloom` that does not say "Displayed" in its name. The
+        -- pane's pair is `GetNumDisplayedHeirlooms`/`GetHeirloomItemIDFromDisplayedIndex`, with
+        -- a class filter, a spec filter and a search box in front of it.
+        it("walks the client's own id list rather than the pane's", function()
+            local domain = ns.heirloomCensus(newHeirlooms({ ids = { 122668, 122667 } }))
+
+            assert.same({ 122668, 122667 }, domain.list())
+        end)
+
+        it("walks nothing at all on a build that will not enumerate", function()
+            assert.is_nil(ns.heirloomCensus(newHeirlooms({})).list())
+        end)
+
+        it("says nothing about an heirloom the account has never bought", function()
+            local domain = ns.heirloomCensus(newHeirlooms({
+                ids = { 122668 },
+                rows = { [122668] = { name = "Bloodied Arcanite Reaper", slot = "INVTYPE_2HWEAPON" } },
+                has = {},
+            }))
+
+            local id, held = domain.read(122668)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- "Is this one finished with" is a question no amount of watching somebody buy an
+        -- upgrade would answer for the heirlooms bought years ago, which is why how far it has
+        -- been taken and how far it goes are both written down.
+        it("describes one the account has bought, and how far it has been taken", function()
+            local domain = ns.heirloomCensus(newHeirlooms({
+                ids = { 122668 },
+                rows = {
+                    [122668] = {
+                        name = "Bloodied Arcanite Reaper", slot = "INVTYPE_2HWEAPON",
+                        upgrade = 4, maxUpgrade = 6, source = 3,
+                    },
+                },
+                has = { [122668] = true },
+            }))
+
+            local id, held = domain.read(122668)
+
+            assert.equal(122668, id)
+            assert.same({
+                name = "Bloodied Arcanite Reaper",
+                slot = "INVTYPE_2HWEAPON",
+                upgrade = 4,
+                maxUpgrade = 6,
+                source = 3,
+            }, held)
+        end)
+
+        -- The same economy every count in this file keeps. Nought is what the client says for
+        -- "never upgraded" and for "no ceiling known" alike, and every reader defaults these
+        -- back to nought — so a key saying it is a saved file spent saying nothing.
+        it("leaves out an upgrade level the client only reported as nought", function()
+            local domain = ns.heirloomCensus(newHeirlooms({
+                ids = { 122668 },
+                rows = {
+                    [122668] = {
+                        name = "Bloodied Arcanite Reaper", slot = "INVTYPE_2HWEAPON",
+                        upgrade = 0, maxUpgrade = 0, source = 3,
+                    },
+                },
+                has = { [122668] = true },
+            }))
+
+            local _, held = domain.read(122668)
+
+            assert.equal("Bloodied Arcanite Reaper", held.name)
+            assert.is_nil(held.upgrade)
+            assert.is_nil(held.maxUpgrade)
+        end)
+
+        -- An heirloom with no known ceiling is still an heirloom the account owns, and this is
+        -- the only field of the row that costs a second call — so it is not required for the
+        -- domain to exist.
+        it("still describes heirlooms on a build with no ceiling call", function()
+            local heirloom = newHeirlooms({
+                ids = { 122668 },
+                rows = {
+                    [122668] = {
+                        name = "Bloodied Arcanite Reaper", slot = "INVTYPE_2HWEAPON",
+                        upgrade = 4, maxUpgrade = 6, source = 3,
+                    },
+                },
+                has = { [122668] = true },
+            })
+            heirloom.GetHeirloomMaxUpgradeLevel = nil
+            local domain = ns.heirloomCensus(heirloom)
+
+            local id, held = domain.read(122668)
+
+            assert.equal(122668, id)
+            assert.equal(4, held.upgrade)
+            assert.is_nil(held.maxUpgrade)
+        end)
+
+        -- It settles nothing — a partial domain is never audited into a pass of its own — but
+        -- beside `held` it is what says how much of the answer a walk managed to reach, which
+        -- is exactly the pair `ns.appearanceCensus` keeps.
+        it("counts what the client says the account knows", function()
+            local domain = ns.heirloomCensus(newHeirlooms({ ids = {}, known = 118 }))
+
+            assert.equal(118, domain.count())
+        end)
+
+        it("offers no count at all on a build without the call", function()
+            assert.is_nil(ns.heirloomCensus(newHeirlooms({ ids = {} })).count())
+        end)
+    end)
+
+    describe("ns.titleCensus", function()
+        ---A stand-in for the three bare globals a title is reached through.
+        ---
+        ---`known` and `titles` are kept apart on purpose. A mask the client knows but will not
+        ---call a `playerTitle` is the case Blizzard's own paper doll pane refuses to draw, and a
+        ---fake whose two halves always agreed could never express it.
+        ---@param options table `{ count, known, titles }` — known the set of mask ids this
+        ---character has earned, titles keyed by mask id as `{ text, player }`.
+        ---@return table clients
+        local function newTitles(options)
+            return {
+                count = function()
+                    return options.count or 0
+                end,
+                known = function(id)
+                    return (options.known or {})[id] or false
+                end,
+                name = function(id)
+                    local title = (options.titles or {})[id]
+                    if not title then
+                        return nil
+                    end
+                    return title.text, title.player
+                end,
+            }
+        end
+
+        for _, case in ipairs({
+            { what = "a client with no title calls at all", clients = nil },
+            { what = "a client with no calls in the bundle", clients = {} },
+            { what = "a build that will not say how big the range is", missing = "count" },
+            { what = "a build that will not say what is known", missing = "known" },
+            { what = "a build that will not name a mask", missing = "name" },
+        }) do
+            it("is not a domain on " .. case.what, function()
+                local clients = case.clients
+                if case.missing then
+                    clients = newTitles({})
+                    clients[case.missing] = nil
+                end
+
+                assert.is_nil(ns.titleCensus(clients))
+            end)
+        end
+
+        -- A title is earned by whoever earned it — two alts of one account share almost none of
+        -- them — so the wallet's rule applies exactly, and `GetNumTitles` is the top of the mask
+        -- range rather than a count of anything held.
+        it("walks the mask range as this character's own", function()
+            local domain = ns.titleCensus(newTitles({ count = 3 }))
+
+            assert.equal("titles", domain.name)
+            assert.equal("character", domain.scope)
+            assert.same({ 1, 2, 3 }, domain.list())
+        end)
+
+        it("says nothing about a mask this character has not earned", function()
+            local domain = ns.titleCensus(newTitles({
+                count = 1,
+                known = {},
+                titles = { [1] = { text = "the Explorer", player = true } },
+            }))
+
+            local id, held = domain.read(1)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- The `playerTitle` return is what Blizzard's own `PaperDollTitlesPane_Update` requires
+        -- before it will draw a row: a mask the client knows but does not call a player title is
+        -- not a title anybody can wear, and a list carrying one would disagree with the pane.
+        it("says nothing about a mask the client will not call a player title", function()
+            local domain = ns.titleCensus(newTitles({
+                count = 1,
+                known = { [1] = true },
+                titles = { [1] = { text = "the Explorer", player = false } },
+            }))
+
+            local id, held = domain.read(1)
+
+            assert.is_nil(id)
+            assert.is_nil(held)
+        end)
+
+        -- The client hands these over already spaced for the player's name, and trimming alone
+        -- would throw away the one thing the spacing said — so the side is kept as a flag rather
+        -- than as a space nothing downstream would think to preserve.
+        for _, case in ipairs({
+            {
+                what = "after the name", text = " the Explorer",
+                name = "the Explorer", suffix = true,
+            },
+            { what = "before it", text = "Sergeant ", name = "Sergeant", suffix = nil },
+        }) do
+            it("stores a title trimmed, and says the client spaced it to go " .. case.what,
+                function()
+                    local domain = ns.titleCensus(newTitles({
+                        count = 1,
+                        known = { [1] = true },
+                        titles = { [1] = { text = case.text, player = true } },
+                    }))
+
+                    local id, held = domain.read(1)
+
+                    assert.equal(1, id)
+                    assert.equal(case.name, held.name)
+                    assert.equal(case.suffix, held.suffix)
+                end)
+        end
+
+        -- What is left of a title that was nothing but the spacing is nothing at all, and a row
+        -- with no name is a row nothing downstream could ever draw.
+        for _, case in ipairs({
+            { what = "empty", text = "" },
+            { what = "nothing but space", text = "   " },
+        }) do
+            it("says nothing about a title string that is " .. case.what, function()
+                local domain = ns.titleCensus(newTitles({
+                    count = 1,
+                    known = { [1] = true },
+                    titles = { [1] = { text = case.text, player = true } },
+                }))
+
+                local id, held = domain.read(1)
+
+                assert.is_nil(id)
+                assert.is_nil(held)
+            end)
+        end
+
+        -- Nothing in the client counts known titles. `GetNumTitles` is the size of the range and
+        -- would sit permanently above `held` by an order of magnitude, which would provoke a
+        -- pass at every login and change nothing each time.
+        it("offers no counter, because nothing in the client counts what is known", function()
+            assert.is_nil(ns.titleCensus(newTitles({})).count)
+        end)
+    end)
+
     describe("ns.currencyCensus", function()
         ---A stand-in for `C_CurrencyInfo`, answering the way the real one does.
         ---
@@ -954,6 +1638,29 @@ describe("the census domains", function()
                     end,
                     GetMountInfoByID = print,
                 },
+                pet = {
+                    GetOwnedPetIDs = print,
+                    GetPetInfoTableByPetID = print,
+                    GetNumCollectedInfo = print,
+                },
+                toy = {
+                    box = {
+                        GetNumToys = print,
+                        GetToyFromIndex = print,
+                        GetToyInfo = print,
+                    },
+                    hasToy = print,
+                },
+                heirloom = {
+                    GetHeirloomItemIDs = print,
+                    GetHeirloomInfo = print,
+                    PlayerHasHeirloom = print,
+                },
+                title = {
+                    count = print,
+                    known = print,
+                    name = print,
+                },
                 currency = {
                     GetCurrencyInfo = print,
                 },
@@ -987,10 +1694,12 @@ describe("the census domains", function()
         -- the session, so the two domains that finish in a fraction of a second must not be
         -- queued behind the thirteen-thousand-call one that takes a minute.
         it("names every domain a build can answer for, cheapest walk first", function()
-            assert.same(
-                { "mounts", "currencies", "reputations", "appearances", "achievements" },
-                namesOf(ns.censusDomains(everything()))
-            )
+            assert.same({
+                -- The four short walks first, none of them two thousand positions, then the
+                -- five-thousand-id ranges, and the thirteen-thousand-call tree last.
+                "mounts", "pets", "toys", "heirlooms", "titles",
+                "currencies", "reputations", "appearances", "achievements",
+            }, namesOf(ns.censusDomains(everything())))
         end)
 
         it("is no domains at all on a build that can answer for none", function()
@@ -1005,16 +1714,20 @@ describe("the census domains", function()
             local clients = everything()
             clients.mount = nil
 
-            assert.same({ "currencies", "reputations", "appearances", "achievements" },
-                namesOf(ns.censusDomains(clients)))
+            assert.same({
+                "pets", "toys", "heirlooms", "titles",
+                "currencies", "reputations", "appearances", "achievements",
+            }, namesOf(ns.censusDomains(clients)))
         end)
 
         it("keeps the domains ahead of one this build cannot answer for", function()
             local clients = everything()
             clients.achievement = nil
 
-            assert.same({ "mounts", "currencies", "reputations", "appearances" },
-                namesOf(ns.censusDomains(clients)))
+            assert.same({
+                "mounts", "pets", "toys", "heirlooms", "titles",
+                "currencies", "reputations", "appearances",
+            }, namesOf(ns.censusDomains(clients)))
         end)
 
         -- And the case that would actually catch it, now there is a domain with one on each
@@ -1025,8 +1738,23 @@ describe("the census domains", function()
             local clients = everything()
             clients.currency = nil
 
-            assert.same({ "mounts", "reputations", "appearances", "achievements" },
-                namesOf(ns.censusDomains(clients)))
+            assert.same({
+                "mounts", "pets", "toys", "heirlooms", "titles",
+                "reputations", "appearances", "achievements",
+            }, namesOf(ns.censusDomains(clients)))
+        end)
+
+        -- And the same for one of the four short walks, which sit between the mounts and the
+        -- ranges: a build with no toy box must leave the pets in front of the gap and the
+        -- heirlooms behind it, rather than a list that stops where the toys would be.
+        it("keeps the domains on both sides of a build with no toy box", function()
+            local clients = everything()
+            clients.toy = nil
+
+            assert.same({
+                "mounts", "pets", "heirlooms", "titles",
+                "currencies", "reputations", "appearances", "achievements",
+            }, namesOf(ns.censusDomains(clients)))
         end)
 
         -- The newest domain is reached through a bundle of namespaces rather than one, so a
@@ -1036,8 +1764,10 @@ describe("the census domains", function()
             local clients = everything()
             clients.standing = nil
 
-            assert.same({ "mounts", "currencies", "appearances", "achievements" },
-                namesOf(ns.censusDomains(clients)))
+            assert.same({
+                "mounts", "pets", "toys", "heirlooms", "titles",
+                "currencies", "appearances", "achievements",
+            }, namesOf(ns.censusDomains(clients)))
         end)
     end)
 end)

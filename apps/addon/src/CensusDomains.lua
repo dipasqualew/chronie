@@ -97,6 +97,320 @@ function ns.mountCensus(journal)
     }
 end
 
+---Pets: every battle pet the account owns, counted by species.
+---
+---**The one collectible the game lets somebody own several of**, which is why this is the only
+---domain whose entry carries a count. `GetOwnedPetIDs` hands over one GUID per *pet* and a
+---collection is counted in *species* — three Mechanical Squirrels are one line of the pet journal
+---and three positions of this walk — so the id an entry is filed under is the species and the
+---pets of it are folded together as the walk meets them.
+---
+---`C_PetJournal.GetNumCollectedInfo(speciesID)` is where the count comes from rather than a tally
+---of what the walk has seen, and the difference shows in exactly the case this whole design is
+---built around: a pass a logout cuts short still says how many of a species the account has,
+---instead of how many of them it got as far as. It is also the number `Main.lua` already asks for
+---in the `NEW_PET_ADDED` handler, so the two halves of the record agree by construction.
+---
+---**The GUIDs are the account's own pets rather than the journal's list**, which is the same
+---distinction `ns.mountCensus` makes: the filtered pair here is
+---`GetNumPets`/`GetPetInfoByIndex` — what Blizzard's own `PetJournal_UpdatePetList` draws from,
+---with `SetSearchFilter` beside it — and `GetOwnedPetIDs` takes no filter and answers about what
+---is owned.
+---
+---`GetPetInfoTableByPetID` rather than the seventeen-return `GetPetInfoByPetID`, because it is the
+---one of the pair the client's own `PetJournalInfo` documentation describes: named fields cannot
+---be read off by one position the way a positional list silently can.
+---
+---**No counter, and the free one is a trap.** `#GetOwnedPetIDs()` costs nothing and counts *pets*,
+---while `held` counts *species* — so on any account that owns two of anything the counter would
+---sit permanently above what is written down and provoke a full pass at every login, forever. A
+---counter that is counting a different set from the one stored is worse than none, which is the
+---reason `ns.mountCensus` does without one too.
+---@param journal table? The client's `C_PetJournal`.
+---@return CensusDomain?
+function ns.petCensus(journal)
+    local owned = ns.callable(journal, "GetOwnedPetIDs")
+    local info = ns.callable(journal, "GetPetInfoTableByPetID")
+    local countOf = ns.callable(journal, "GetNumCollectedInfo")
+    if not owned or not info or not countOf then
+        return nil
+    end
+
+    -- One entry per species, kept for as long as the pass lasts and handed back again by every
+    -- later pet of the same species. The census writes `entries[id] = held` on each read, so a
+    -- species met three times is written three times — the same table each time, which is what
+    -- lets the third pet's level land in the row the first pet created.
+    local held = {}
+
+    return {
+        name = "pets",
+        scope = "account",
+        ---@return string[]?
+        list = function()
+            local guids = owned()
+            if type(guids) ~= "table" then
+                return nil
+            end
+            held = {}
+            return guids
+        end,
+        ---@param guid string
+        ---@return integer?, table?
+        read = function(guid)
+            local pet = info(guid)
+            if type(pet) ~= "table" or type(pet.speciesID) ~= "number" then
+                return nil, nil
+            end
+            local species = pet.speciesID
+            local entry = held[species]
+            if not entry then
+                local counted = countOf(species)
+                entry = {
+                    name = pet.name,
+                    -- The client's own count of the species, asked once per species rather than
+                    -- once per pet.
+                    count = type(counted) == "number" and counted or nil,
+                }
+                held[species] = entry
+            end
+            -- The best of them, which is the one somebody would actually summon. A species is the
+            -- unit here, so a level and a nickname have to be *some* pet's — and the highest is
+            -- the only choice that does not depend on what order the client happened to hand the
+            -- GUIDs over in.
+            local level = type(pet.petLevel) == "number" and pet.petLevel or nil
+            if level and level > (entry.level or 0) then
+                entry.level = level
+                -- Nil for a pet nobody renamed, which is most of them: a key per species saying
+                -- "no name" is a saved file spent saying nothing.
+                entry.custom = pet.customName
+            end
+            -- The player's own arrangement rather than a fact about the species, kept for the
+            -- reason a mount's favourite is — and true if any one of them is, because that is
+            -- what the journal draws a star on.
+            entry.favourite = entry.favourite or pet.isFavorite or nil
+            return species, entry
+        end,
+    }
+end
+
+---Toys: what the account can pull out of the toy box.
+---
+---**Partial, and for a reason that could not be settled from the install.** `GetNumToys` is the
+---unfiltered total and `GetNumFilteredToys` its filtered twin, but there is only one indexer —
+---`GetToyFromIndex(itemIndex)` — and Blizzard's own `blizzard_toybox.lua` on 12.0.5.67823 pairs it
+---with the *filtered* count in both places it uses it, `ToySpellButton_UpdateButton` and
+---`ToyBox_FindPageForToyID`. So the list this walks is very probably the one the player's own
+---filters left standing, and a walk of it can never claim to have seen every toy.
+---
+---That claim is the only thing at stake, because everything else here is filter-proof: the walk
+---never sets a filter, `PlayerHasToy(itemID)` answers about an id whatever the toy box is showing,
+---and a reading that never claims completeness can never delete anything. Being wrong the other
+---way — calling it complete and pruning — would empty the record of every toy the player had
+---filtered out of view. Toys are a grow-only collection, so what `partial` costs is nothing at
+---all, and lifting it later is one line: **what would settle it** is a running client with a
+---restrictive filter set in the toy box, comparing `C_ToyBox.GetNumToys()` and
+---`C_ToyBox.GetNumFilteredToys()` against what `GetToyFromIndex` walks out.
+---
+---The bound is still the unfiltered total. It is the larger of the two, so nothing the player has
+---left visible falls outside it, and a position past the end of the list costs one call that
+---answers `-1` — which is what Blizzard's own button code checks for.
+---
+---**No counter.** `GetNumLearnedDisplayedToys` is the obvious one and is filter-dependent by its
+---own name, which makes it exactly the kind of counter `docs/account-census.md` argues is worse
+---than none: it would fall below `held` the moment somebody narrowed the pane. A partial domain is
+---never settled by an audit in any case — it is walked once a session, which is what unions the
+---player's various filterings together over time.
+---@param clients table? `{ box = C_ToyBox, hasToy = PlayerHasToy }`
+---@return CensusDomain?
+function ns.toyCensus(clients)
+    clients = clients or {}
+    local box = clients.box
+    local total = ns.callable(box, "GetNumToys")
+    local fromIndex = ns.callable(box, "GetToyFromIndex")
+    local info = ns.callable(box, "GetToyInfo")
+    -- A bare global rather than a member of the namespace, which is genuinely what the client
+    -- offers: `PlayerHasToy` was never moved into `C_ToyBox`.
+    local hasToy = type(clients.hasToy) == "function" and clients.hasToy or nil
+    if not total or not fromIndex or not info or not hasToy then
+        return nil
+    end
+
+    return {
+        name = "toys",
+        scope = "account",
+        partial = true,
+        ---@return integer[]
+        list = function()
+            local positions = {}
+            for index = 1, total() or 0 do
+                positions[index] = index
+            end
+            return positions
+        end,
+        ---@param index integer
+        ---@return integer?, table?
+        read = function(index)
+            local itemID = fromIndex(index)
+            -- `-1` is the client's answer for a position past the end of the list, which is what
+            -- Blizzard's own toy button checks for before drawing itself.
+            if type(itemID) ~= "number" or itemID <= 0 or not hasToy(itemID) then
+                return nil, nil
+            end
+            local _, name, _, isFavorite = info(itemID)
+            return itemID, {
+                name = name,
+                favourite = isFavorite or nil,
+            }
+        end,
+    }
+end
+
+---Heirlooms: what the account has bought once and every character after can wear.
+---
+---`GetHeirloomItemIDs` is the only enumerator in `C_Heirloom` that does not say "Displayed" in its
+---name — the pane's pair is `GetNumDisplayedHeirlooms`/`GetHeirloomItemIDFromDisplayedIndex`,
+---which is what Blizzard's own `HeirloomsMixin:SortHeirloomsIntoEquipmentBuckets` draws its list
+---from, with a class filter, a spec filter and a search box in front of it.
+---
+---**Partial all the same, for the reason `ns.toyCensus` is.** Nothing in Blizzard's own interface
+---calls `GetHeirloomItemIDs`, so nothing in the install says whether it answers past the pane's
+---filters; the naming is the whole of the evidence, and the toy box next door is a live
+---counter-example to naming as evidence — `GetToyFromIndex` says neither "filtered" nor
+---"displayed" and is used against the filtered count. Heirlooms are a grow-only collection, so
+---refusing to prune costs nothing, while pruning on a filtered list would take out every heirloom
+---the player had narrowed out of view. **What would settle it** is a running client with a class
+---filter set in the heirloom pane: `#C_Heirloom.GetHeirloomItemIDs()` against
+---`C_Heirloom.GetNumHeirlooms()` and `C_Heirloom.GetNumDisplayedHeirlooms()`.
+---
+---`GetNumKnownHeirlooms` rides along as the counter even so. It settles nothing — a partial domain
+---is never audited — but it is the client's own opinion of how many the account has, and beside
+---`held` it is what says how much of the answer a walk managed to reach, which is exactly the pair
+---`ns.appearanceCensus` keeps.
+---@param heirloom table? The client's `C_Heirloom`.
+---@return CensusDomain?
+function ns.heirloomCensus(heirloom)
+    local ids = ns.callable(heirloom, "GetHeirloomItemIDs")
+    local info = ns.callable(heirloom, "GetHeirloomInfo")
+    local has = ns.callable(heirloom, "PlayerHasHeirloom")
+    if not ids or not info or not has then
+        return nil
+    end
+    -- Not required for the domain to exist: an heirloom with no known ceiling is still an
+    -- heirloom the account owns, and this is the only field of the row that costs a second call.
+    local ceiling = ns.callable(heirloom, "GetHeirloomMaxUpgradeLevel")
+
+    return {
+        name = "heirlooms",
+        scope = "account",
+        partial = true,
+        ---@return integer[]?
+        list = function()
+            local items = ids()
+            return type(items) == "table" and items or nil
+        end,
+        ---@param itemID integer
+        ---@return integer?, table?
+        read = function(itemID)
+            if type(itemID) ~= "number" or not has(itemID) then
+                return nil, nil
+            end
+            local name, slot, _, _, upgradeLevel, source = info(itemID)
+            if not name then
+                return nil, nil
+            end
+            return itemID, {
+                name = name,
+                -- `INVTYPE_HEAD` and the rest, which is the one thing about an heirloom a machine
+                -- with no install can group the list by.
+                slot = slot,
+                -- How far it has been taken and how far it goes, which is the heirloom's version
+                -- of a currency's cap: "is this one finished with" is a question no amount of
+                -- watching somebody buy an upgrade would answer for the ones bought years ago.
+                upgrade = nonzero(upgradeLevel),
+                maxUpgrade = ceiling and nonzero(ceiling(itemID)) or nil,
+                source = source,
+            }
+        end,
+        ---@return integer?
+        count = function()
+            local counter = ns.callable(heirloom, "GetNumKnownHeirlooms")
+            local known = counter and counter() or nil
+            return type(known) == "number" and known or nil
+        end,
+    }
+end
+
+---Titles: what this character may put before or after their name.
+---
+---**Character-scoped, and the plainest case of it in the file.** A title is earned by whoever
+---earned it — two alts of one account share almost none of them — so the wallet's rule applies
+---exactly: kept per `Name-Realm`, and a complete walk prunes that character's rows and nobody
+---else's.
+---
+---There is no pane and no filter anywhere near this one. `GetNumTitles()` is the top of the title
+---mask range rather than a count of anything held, `IsTitleKnown(i)` answers for a mask id, and
+---most of the range is not a title this character has. It is the whole of what Blizzard's own
+---`PaperDollTitlesPane_Update` walks, and this walks it the same way — including the
+---`playerTitle` return, which is what that pane requires before it will draw a row: a mask the
+---client knows but does not call a player title is not a title anybody can wear, and a list
+---carrying one would disagree with the pane the player is looking at.
+---
+---**The name is stored trimmed, and which side it goes on is stored beside it.** The client hands
+---these over already spaced for the player's name — `"Sergeant "` before it, `" the Explorer"`
+---after — and `TitleUtil.GetNameFromTitleMaskID` trims for display, which is what a reader wants.
+---Trimming alone would throw away the one thing the spacing said, so the side is kept as a flag
+---rather than as a space nothing downstream would think to preserve.
+---
+---**No counter.** Nothing in the client counts known titles: `GetNumTitles` is the size of the
+---range and would sit permanently above `held` by an order of magnitude, which would provoke a
+---pass at every login and change nothing each time.
+---@param clients table? `{ count = GetNumTitles, known = IsTitleKnown, name = GetTitleName }`
+---@return CensusDomain?
+function ns.titleCensus(clients)
+    clients = clients or {}
+    local count = clients.count
+    local known = clients.known
+    local nameOf = clients.name
+    if type(count) ~= "function" or type(known) ~= "function" or type(nameOf) ~= "function" then
+        return nil
+    end
+
+    return {
+        name = "titles",
+        scope = "character",
+        ---@return integer[]
+        list = function()
+            local ids = {}
+            for id = 1, count() or 0 do
+                ids[id] = id
+            end
+            return ids
+        end,
+        ---@param id integer
+        ---@return integer?, table?
+        read = function(id)
+            if not known(id) then
+                return nil, nil
+            end
+            local titleString, playerTitle = nameOf(id)
+            if type(titleString) ~= "string" or not playerTitle then
+                return nil, nil
+            end
+            local name = titleString:gsub("^%s*(.-)%s*$", "%1")
+            if name == "" then
+                return nil, nil
+            end
+            return id, {
+                name = name,
+                -- Where the client put the space: after the name for "the Explorer", before it
+                -- for "Sergeant". Written only for the ones that follow, which keeps the common
+                -- case free of a key.
+                suffix = titleString:match("^%s") ~= nil or nil,
+            }
+        end,
+    }
+end
+
 ---Achievements: what the account has earned, and which character earned it.
 ---
 ---This is the domain that pays for the whole mechanism, because the client answers a question
@@ -554,7 +868,9 @@ end
 ---A domain whose calls this build does not have reports nil and is simply left out, which is the
 ---same answer `ns.readHoldings` gives for a pane the client will not open: a census that cannot
 ---be taken is not a census of nothing.
----@param clients table `{ mount = C_MountJournal, currency = C_CurrencyInfo,
+---@param clients table `{ mount = C_MountJournal, pet = C_PetJournal,
+---toy = { box = C_ToyBox, hasToy = PlayerHasToy }, heirloom = C_Heirloom,
+---title = { count = GetNumTitles, ... }, currency = C_CurrencyInfo,
 ---standing = { reputation = C_Reputation, ... }, collection = C_TransmogCollection,
 ---achievement = { ... } }`
 ---@return CensusDomain[]
@@ -569,6 +885,21 @@ function ns.censusDomains(clients)
     local makers = {
         function()
             return ns.mountCensus(clients.mount)
+        end,
+        -- The four short walks, all of them under two thousand positions and each of them done
+        -- inside a few seconds of ordinary play — so they go in front of the five-thousand-id
+        -- ranges and a long way in front of the achievement tree.
+        function()
+            return ns.petCensus(clients.pet)
+        end,
+        function()
+            return ns.toyCensus(clients.toy)
+        end,
+        function()
+            return ns.heirloomCensus(clients.heirloom)
+        end,
+        function()
+            return ns.titleCensus(clients.title)
         end,
         function()
             return ns.currencyCensus(clients.currency)

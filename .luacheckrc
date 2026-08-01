@@ -60,6 +60,15 @@ read_globals = {
     "C_MountJournal",
     "C_PetJournal",
     "C_ToyBox",
+    -- The census's four grow-only collections. `PlayerHasToy` and the three title calls are
+    -- bare globals rather than members of a namespace, which is genuinely what 12.0.5.67823
+    -- offers: both predate `C_` namespaces and neither was ever moved into one. Signatures out
+    -- of the client's own `titledocumentation.lua` and `blizzard_toybox.lua`.
+    "PlayerHasToy",
+    "C_Heirloom",
+    "GetNumTitles",
+    "IsTitleKnown",
+    "GetTitleName",
     "C_HousingCatalog",
     "C_Map",
     "Screenshot",

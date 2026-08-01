@@ -1795,6 +1795,25 @@ if CreateFrame then
             censusClients = function()
                 return {
                     mount = C_MountJournal,
+                    -- The same namespace `petInfo` above reaches for when a pet is announced,
+                    -- asked about the whole collection rather than the one that just landed —
+                    -- and asked for `GetNumCollectedInfo` again, so that the census counts a
+                    -- species exactly the way the `NEW_PET_ADDED` handler does.
+                    pet = C_PetJournal,
+                    -- Two halves, because that is what the client offers: the box is a
+                    -- namespace and `PlayerHasToy` is a bare global that was never moved into
+                    -- it. `toyInfo` above reaches for the same namespace to name one toy.
+                    toy = { box = C_ToyBox, hasToy = PlayerHasToy },
+                    heirloom = C_Heirloom,
+                    -- Bare globals, as the achievement bag below is and for the same reason:
+                    -- titles predate `C_` namespaces. Read out of Blizzard's own
+                    -- `PaperDollTitlesPane_Update` on 12.0.5.67823, which walks
+                    -- `1, GetNumTitles()` and requires both returns of `GetTitleName`.
+                    title = {
+                        count = GetNumTitles,
+                        known = IsTitleKnown,
+                        name = GetTitleName,
+                    },
                     -- The same namespace `heldSweep` reaches for above, asked the other
                     -- question: that one walks the pane and this one walks ids, which is why
                     -- one of them can see a currency under a collapsed group and the other

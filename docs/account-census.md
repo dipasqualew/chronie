@@ -287,6 +287,104 @@ items give it — `wardrobe.rs`'s decision, out of the game's own tables, and no
 a position to make. What rides along instead is the category, which is enough for a machine with no
 install to count a reader's heads.
 
+## Pets, toys, heirlooms and titles: the long tail
+
+Four domains of the same shape, and none of them a day's work on its own — but between them they
+are most of what is left of a collection, and each one turns out to say something the three big
+domains did not have to answer.
+
+### Pets are counted in species, and that is what makes them odd
+
+`C_PetJournal.GetOwnedPetIDs()` hands over one GUID per **pet**, and a collection is counted in
+**species**: three Mechanical Squirrels are three GUIDs and one line of the pet journal. So the id
+an entry is filed under is the species, which is also the only thing it could be — a pet's GUID is
+a string like `BattlePet-0-000008B1F3A1`, and every census id is a number.
+
+`count` is the client's own `GetNumCollectedInfo(speciesID)` rather than a tally of the walk, and
+the difference shows in exactly the case this design is built around: a pass a logout cut short
+still says how many of a species the account has instead of how many of them it got as far as. It
+is also the number the `NEW_PET_ADDED` handler in `Main.lua` already asks for, so the two halves of
+the record agree by construction.
+
+The level and the nickname are the **best of them** — the highest-levelled pet of the species, the
+one somebody would actually summon. A species is the unit, so a level has to be some pet's, and the
+highest is the only choice that does not depend on the order the client handed the GUIDs over in.
+
+**And no counter, because the free one counts the wrong thing.** `#GetOwnedPetIDs()` costs nothing
+and counts pets, while `held` counts species — so on any account that kept a duplicate of anything
+it would sit permanently above what is written down and provoke a full pass at every login, for
+ever. A counter counting a different set from the one stored is the guessed counter this document
+already argues is worse than none.
+
+Pets are also the one collection here that can **shrink**: a pet can be caged away or released, so
+a complete walk prunes like a mount walk does.
+
+### Toys and heirlooms are partial, because the client's list may be the player's
+
+The other two are grow-only, and both are marked `partial` for the same unsettled reason.
+
+`C_ToyBox` has exactly one indexer, `GetToyFromIndex(itemIndex)`, and Blizzard's own
+`blizzard_toybox.lua` on 12.0.5.67823 pairs it with `GetNumFilteredToys` in both places it uses it —
+`ToySpellButton_UpdateButton` and `ToyBox_FindPageForToyID`. So the list the walk indexes into is
+very probably the one the player's filters left standing. `C_Heirloom.GetHeirloomItemIDs` is the
+mirror image: nothing in Blizzard's whole interface calls it, so nothing in the install says
+whether it answers past the heirloom pane's class, spec and source filters. Naming is the only
+evidence there, and the toy box next door is a live counter-example to naming as evidence.
+
+The walk is unaffected either way — no filter is read and none is written, `PlayerHasToy(itemID)`
+and `C_Heirloom.PlayerHasHeirloom(itemID)` answer about an id whatever a pane is showing — so the
+only thing at stake is the **claim**. Being wrong towards completeness would prune away every toy
+the player had filtered out of view; being wrong towards `partial` costs a walk a session and one
+prune that could never have been right anyway, because **neither collection can shrink**. That
+asymmetry is the whole argument, and it is why `partial` is the right reach here where the general
+advice in *Adding a domain* is to be sparing with it.
+
+**What would settle either** is a running client and one comparison. For toys: with a restrictive
+filter set in the toy box, `C_ToyBox.GetNumToys()` against `C_ToyBox.GetNumFilteredToys()` and what
+`GetToyFromIndex` walks out. For heirlooms: with a class filter set in the heirloom pane,
+`#C_Heirloom.GetHeirloomItemIDs()` against `GetNumHeirlooms()` and `GetNumDisplayedHeirlooms()`.
+Lifting `partial` afterwards is one line in each domain.
+
+`GetNumKnownHeirlooms()` rides along as the heirloom counter even so. It settles nothing — a
+partial domain is never audited — but it is the client's own opinion of how many the account has,
+and beside `held` it is what says how much of the answer a walk reached: the same pair appearances
+keep. Toys get none, because `GetNumLearnedDisplayedToys` is filter-dependent by its own name and
+would fall *below* `held` the moment somebody narrowed the pane.
+
+An heirloom carries how far it has been taken and how far it goes, which is its version of a
+currency's cap: "is this one finished with" is a question no amount of watching somebody buy an
+upgrade would answer for the ones bought years before Chronie existed.
+
+### Titles are one character's, and the space in them means something
+
+`titles` is the third `scope = "character"` domain and the plainest of them — two alts of one
+account share almost no titles — so a walk by one prunes that character's rows and nobody else's.
+
+There is no pane and no filter anywhere near it. `GetNumTitles()` is the top of the title mask
+range rather than a count of anything held, `IsTitleKnown(i)` answers for a mask id, and most of
+the range is not a title this character has. That is exactly what Blizzard's own
+`PaperDollTitlesPane_Update` walks, and the census walks it the same way — **including the
+`playerTitle` return**, which that pane requires before it will draw a row. A mask the client knows
+but does not call a player title is not a title anybody can wear, and a list carrying one would
+disagree with the pane the player is looking at.
+
+The name is stored **trimmed**, as `TitleUtil.GetNameFromTitleMaskID` trims it for display — the
+client hands these over already spaced for the player's name, `"Sergeant "` before it and
+`" the Explorer"` after. Trimming alone would throw away the one thing the spacing said, so which
+side it goes on is kept as a flag rather than as a space nothing downstream would think to
+preserve.
+
+**No counter**: nothing in the client counts known titles, and `GetNumTitles` is the size of the
+range, which would sit an order of magnitude above `held` and provoke a pass at every login.
+
+### What is not here
+
+Nothing draws these yet. The Collection screen is the *subtraction* — what the account has not got
+— and that half needs the game's own tables, which means `BattlePetSpecies`, `Toy`, `Heirloom` and
+`CharTitles` registered in `docs/game-tables.json` and a catalogue reader each, the way
+`achievements::catalogue` and `mounts::catalogue` are. This is the census half: the four readings,
+their claims, and the tables to keep them in.
+
 ## Adding a domain
 
 A domain is a name, a scope, and three seams:

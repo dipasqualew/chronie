@@ -1075,6 +1075,50 @@ optional_fields!(RawCensusAppearance {
     seen: i64,
 });
 
+// One species of battle pet as the census walked it, and the only row here that carries a count:
+// pets are the one collectible the game lets an account own several of, so the unit is a species
+// and `count` is how many of it the client says are owned. `level` and `custom` belong to the best
+// of them — a species is the unit, so a level has to be some pet's, and the highest is the only
+// choice that does not depend on the order the client handed the GUIDs over in.
+optional_fields!(RawCensusPet {
+    name: String,
+    count: i64,
+    level: i64,
+    custom: String,
+    favourite: bool,
+    seen: i64,
+});
+
+// One toy the account can pull out of the box. The shortest row here after an appearance: the
+// client names it and says whether the player starred it, and everything else about a toy is in
+// the game's own tables.
+optional_fields!(RawCensusToy {
+    name: String,
+    favourite: bool,
+    seen: i64,
+});
+
+// One heirloom the account has bought. `upgrade` beside `max_upgrade` is the heirloom's version of
+// a currency's cap — how far this one has been taken against how far it goes — and is the half of
+// the answer no amount of watching somebody buy an upgrade would produce for the ones bought years
+// before Chronie was installed.
+optional_fields!(RawCensusHeirloom {
+    name: String,
+    slot: String,
+    upgrade: i64,
+    max_upgrade: i64,
+    source: i64,
+    seen: i64,
+});
+
+// One title this character may wear. The name arrives trimmed and `suffix` is what the trimmed-away
+// space said: " the Explorer" follows the player's name and "Sergeant " precedes it.
+optional_fields!(RawCensusTitle {
+    name: String,
+    suffix: bool,
+    seen: i64,
+});
+
 optional_fields!(RawCensusAchievement {
     name: String,
     points: i64,
