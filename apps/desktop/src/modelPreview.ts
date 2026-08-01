@@ -129,7 +129,20 @@ export function glbBytes(dataUrl: string): Uint8Array {
 }
 
 /** Where a model can be looked at from. */
-export type View = "default" | "front" | "back" | "left" | "right";
+export type View = "default" | "front" | "back" | "left" | "right" | "tile";
+
+type Triple = [number, number, number];
+
+const cross = (a: Triple | readonly [number, number, number], b: Triple): Triple => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+const unit = (a: Triple): Triple => {
+  const length = Math.hypot(...a);
+  return length < 1e-9 ? [0, 0, 1] : [a[0] / length, a[1] / length, a[2] / length];
+};
 
 /**
  * Which way the camera sits, per named view, as a direction from the model's middle.
@@ -145,6 +158,12 @@ export type View = "default" | "front" | "back" | "left" | "right";
  * is a woman in the clothes somebody is choosing for her, and the reader wanting to see the
  * front of a tabard was being shown three quarters of her left side. Every view of her is one
  * drag away and this is the one to start from; the axis it happens to be is the game's.
+ *
+ * `tile` is the odd one and the only one off an axis. A thumbnail is a hundred pixels and cannot
+ * be zoomed, panned or turned off its own axis, so a look shown square on reads as a silhouette
+ * with no way for the reader to fix it — which is an argument about small pictures rather than
+ * about models, and is why it does not apply to the pane. Slightly round and slightly above,
+ * so a shoulder has depth and a helm has a top.
  */
 const DIRECTIONS: Record<View, [number, number, number]> = {
   default: [1, 0, 0],
@@ -152,6 +171,7 @@ const DIRECTIONS: Record<View, [number, number, number]> = {
   back: [0, 0, -1],
   left: [-1, 0, 0],
   right: [1, 0, 0],
+  tile: unit([0.45, 0.12, 1]),
 };
 
 /** Where to put a camera that is `distance` from a model, looking at it from `view`. */
@@ -176,19 +196,6 @@ export interface OnScreen {
 
 /** Which way is up in the world the models are put into, and the only one they are given. */
 const UP: readonly [number, number, number] = [0, 1, 0];
-
-type Triple = [number, number, number];
-
-const cross = (a: Triple | readonly [number, number, number], b: Triple): Triple => [
-  a[1] * b[2] - a[2] * b[1],
-  a[2] * b[0] - a[0] * b[2],
-  a[0] * b[1] - a[1] * b[0],
-];
-
-const unit = (a: Triple): Triple => {
-  const length = Math.hypot(...a);
-  return length < 1e-9 ? [0, 0, 1] : [a[0] / length, a[1] / length, a[2] / length];
-};
 
 /**
  * A box of `size` seen from `view`, as the three half-sizes framing it needs.

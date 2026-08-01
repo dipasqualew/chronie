@@ -15,7 +15,6 @@ import "./modelViewer.css";
 import {
   ACESFilmicToneMapping,
   AmbientLight,
-  Box3,
   DirectionalLight,
   Group,
   type Material,
@@ -32,8 +31,9 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+import { placeOn } from "./framing";
 import { WHOLE, type Focus } from "./gallery";
-import { cameraFor, frameOn, type View } from "./modelPreview";
+import { cameraFor, type View } from "./modelPreview";
 
 /** How wide a view the camera takes, in degrees. Narrow enough that a helm keeps its shape
  * rather than bulging the way a wide angle makes close things bulge. */
@@ -269,16 +269,15 @@ export function createModelStage(container: HTMLElement, options: StageOptions =
    * the difference between a reset that frames the body and a reset that hands back a drag.
    */
   function frameModel(loaded: Group, focus: Focus): void {
-    const box = new Box3().setFromObject(loaded);
-    const { offset, distance, leash } = frameOn(
-      [box.min.x, box.min.y, box.min.z],
-      [box.max.x, box.max.y, box.max.z],
+    // `framing.ts`, because a framing that lived here would be the second one in the app and the
+    // gallery's was the first. It is also what makes framing the same model twice harmless,
+    // which nothing in this file does and nothing in this file should have to remember.
+    const { distance, leash } = placeOn(loaded, {
       focus,
       view,
-      FIELD_OF_VIEW,
-      camera.aspect,
-    );
-    loaded.position.set(...offset);
+      fov: FIELD_OF_VIEW,
+      aspect: camera.aspect,
+    });
 
     const place = cameraFor(view, distance);
     controls.maxTargetRadius = leash;

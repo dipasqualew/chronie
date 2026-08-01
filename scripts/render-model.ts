@@ -57,8 +57,14 @@ const PORT = 1421;
 /** How long to wait for the dev server to come up, and for a model to draw. */
 const PATIENCE_MS = 60_000;
 
-/** The views `modelPreview.ts` knows how to place a camera for. */
-const VIEWS = ["default", "front", "back", "left", "right"] as const;
+/**
+ * The views `modelPreview.ts` knows how to place a camera for.
+ *
+ * `tile` is the one a gallery thumbnail is drawn from, and it is offered here because it is the
+ * only way to see what the grid does to a real model without the whole app running — the grid
+ * itself is twenty pictures of the game's own bodies and no fixture stands in for one.
+ */
+const VIEWS = ["default", "front", "back", "left", "right", "tile"] as const;
 type View = (typeof VIEWS)[number];
 
 /** What the page says about what it drew, which is `renderStage.ts`'s `RenderReport`. */
@@ -257,7 +263,7 @@ function parse(argv: string[]): Options {
 function usage(): never {
   console.error(
     "usage: bun run render <model> <out.png> [--install <wow install>]\n" +
-      "                     [--unlit] [--view default|front|back|left|right] [--size 640]\n" +
+      `                     [--unlit] [--view ${VIEWS.join("|")}] [--size 640]\n` +
       "                     [--body <ChrModel>] [--as <question>:<swatch>]...\n" +
       "\n" +
       "  <model>  a path to a .glb, or what dump_model understands: a display id,\n" +
