@@ -58,6 +58,15 @@ describe("addon integration", function()
 
             assert.is_false(ns.settings.combatLogging)
         end)
+
+        -- Asserted on the file rather than on the behaviour, because the file is what the app
+        -- writes and what a hand-installed copy gets. What the flag then gates has tests of its
+        -- own further down.
+        it("carries settings with nothing that walks the account by itself switched on", function()
+            local ns = loader.load()
+
+            assert.is_false(ns.settings.sync.census)
+        end)
     end)
 
     describe("PLAYER_LOGIN", function()
@@ -4141,6 +4150,27 @@ describe("addon integration", function()
     end)
 
     describe("the account's own census", function()
+        ---What `src/Settings.lua` says when somebody has ticked the box on the Collection screen.
+        ---
+        ---Off in the bundle, so every test below that wants a loading screen to provoke a walk
+        ---has to say so — which is the point: the ones that do not say so are the ones proving
+        ---it does not.
+        local CENSUS_ON = { sync = { census = true } }
+
+        -- Why the box exists, and why it starts unticked. The walk behind a census is thousands
+        -- of client calls, a loading screen is what provokes it, and a player who wanted their
+        -- lockouts and their evening never asked for it. Nothing has been removed — the pass is
+        -- in Census.lua and `/chronie census refresh` still runs it — but nothing starts it by
+        -- itself until somebody says so.
+        it("walks nothing on a loading screen until it has been switched on", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            assert.is_nil(recorded.db.census)
+        end)
+
         -- The hole neither the segments nor the pane sweep can close. Both of those record
         -- something happening, so the record of what an account has collected begins empty and
         -- fills in one at a time — and never at all for a mount bought on a laptop or an
@@ -4152,6 +4182,7 @@ describe("addon integration", function()
                 playerName = "Thrall",
                 realmName = "Ragnaros",
                 now = 1700000000,
+                settings = CENSUS_ON,
             })
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
@@ -4183,6 +4214,7 @@ describe("addon integration", function()
                 playerName = "Thrall",
                 realmName = "Ragnaros",
                 now = 1700000000,
+                settings = CENSUS_ON,
                 censusFactions = {
                     [529] = {
                         factionID = 529,
@@ -4211,7 +4243,11 @@ describe("addon integration", function()
         -- in the instant the world arrives is asking the client questions the server has not
         -- told it the answers to yet — the achievement tree in particular lands after login.
         it("asks the client nothing until the world has had a moment", function()
-            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = CENSUS_ON,
+            })
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
@@ -4221,7 +4257,11 @@ describe("addon integration", function()
         -- Cheap on every loading screen but the first, which is what makes it safe to provoke
         -- from one at all: in the steady state the audit names nothing and no pass is started.
         it("does not walk it again on a loading screen with nothing to find", function()
-            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = CENSUS_ON,
+            })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
             recorded.settle()
 
@@ -4266,7 +4306,11 @@ describe("addon integration", function()
         -- numbers on the line are of different things.
         it("puts what the walk found beside what the client counts", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
-            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            -- Seeded by asking for the walk rather than by zoning into one, because zoning does
+            -- not start one unless somebody has ticked the box. Which is the better seed anyway:
+            -- what the report has to pair with is a walk, and this is the walk every install can
+            -- provoke whatever its settings say.
+            recorded.slashRegistrations[1].handler("census refresh")
             recorded.settle()
 
             recorded.slashRegistrations[1].handler("census")
@@ -4282,7 +4326,7 @@ describe("addon integration", function()
         -- not changed.
         it("walks every collection again when asked to refresh", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
-            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.slashRegistrations[1].handler("census refresh")
             recorded.settle()
 
             recorded.slashRegistrations[1].handler("census refresh")
@@ -4332,6 +4376,28 @@ describe("addon integration", function()
             assert.same({ "mounts", "appearances", "achievements" }, done.domains)
         end)
 
+        -- The asymmetry the switch is drawn along, and the reason it gates one call and not the
+        -- other: a resync is a walk somebody pressed a button to ask for, so it is carried out
+        -- whatever `sync.census` says, while the audit deciding by itself that a reading looks
+        -- stale is exactly what an unticked box means. What tells the two apart here is what got
+        -- walked — the request named mounts, and the audit's own pass would have named the rest.
+        it("is carried out even with the automatic walk switched off", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                censusRequests = { { id = 4, domains = { "mounts" } } },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            local done = recorded.db.censusRequests.done[4]
+            assert.equal("walked", done.outcome)
+            assert.same({ "mounts" }, done.domains)
+            assert.is_truthy(recorded.db.census.account.mounts)
+            assert.is_nil(recorded.db.census.account.achievements)
+        end)
+
         -- The ordering `sweepCensus` documents. The audit has something to say on this loading
         -- screen — nothing has ever been walked — so if its pass went first it would be in
         -- flight when the request was picked up, `census.run` would refuse the second one, and
@@ -4342,6 +4408,7 @@ describe("addon integration", function()
             local _, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
+                settings = { sync = { census = true } },
                 censusRequests = { { id = 4, domains = { "mounts" } } },
             })
 

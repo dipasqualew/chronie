@@ -921,6 +921,8 @@ dto!(SettingsPayload {
     #[specta(optional)]
     pub capture_triggers: Vec<String>,
     #[specta(optional)]
+    pub automatic_census: bool,
+    #[specta(optional)]
     pub character_look: Vec<CharacterPick>,
     #[specta(optional)]
     pub character_body: u32,

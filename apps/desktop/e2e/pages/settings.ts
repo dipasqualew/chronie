@@ -70,6 +70,20 @@ export class GameAndSync {
   state(): Locator {
     return this.panel.getByRole("status");
   }
+
+  /** The one box on this panel: whether the addon walks the account off its own bat. */
+  census(): Locator {
+    return this.panel.getByRole("checkbox", {
+      name: "Walk the whole account after a loading screen",
+    });
+  }
+
+  /** And what the backend was actually told, as against what the box on screen drew. */
+  storedCensus(): Eventually<boolean | undefined> {
+    return eventually(() =>
+      this.page.evaluate(() => window.__Chronie_E2E__?.settings.automaticCensus),
+    );
+  }
 }
 
 /**

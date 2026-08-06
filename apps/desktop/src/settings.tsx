@@ -39,6 +39,13 @@ export interface SettingsActions {
   syncNow: () => Promise<SyncResult>;
   installAddon: () => Promise<InstallResult>;
   checkForAppUpdate: () => Promise<AppUpdateResult>;
+  /**
+   * Records whether the addon may walk the account by itself, and reinstalls so the game gets it.
+   *
+   * Answers with the whole of the settings, the same rule every other write in this app follows:
+   * what ends up on screen is what was stored rather than what the click hoped.
+   */
+  setAutomaticCensus: (enabled: boolean) => Promise<Stored>;
   /** Called after a sync that changed something, because every view is now out of date. */
   onSynced: () => void;
   /** Anything that went wrong, in the words the backend used. */
@@ -78,6 +85,9 @@ export function Settings({
   const [path, setPath] = useState(settings.wowPath || "");
   const [saying, setSaying] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // Held here rather than read off the prop, because the write answers with the whole of the
+  // settings and this is where that answer lands. The prop is the opening position only.
+  const [census, setCensus] = useState(settings.automaticCensus === true);
 
   async function run<T>(
     name: string,
@@ -233,6 +243,48 @@ export function Settings({
                 ? `Last background sync: ${new Date(settings.lastSync).toLocaleString()}`
                 : "No successful sync yet."}
             </p>
+
+            <h3 className="setup-subhead">What the addon does by itself</h3>
+            <p className="sub">
+              This one reaches the addon, so a change takes effect at the next login or{" "}
+              <code>/reload</code>.
+            </p>
+            {/* Off unless somebody means it, and the sentence under the box is why: the audit in
+                front of the walk is cheap and usually finds nothing, but the pass it provokes asks
+                the client about every id it will answer for, and a patch makes every loading screen
+                the first one again. Nothing is lost by leaving it off — Resync on the Collection
+                screen still asks for a walk, and that road is not gated by this at all. */}
+            <label className="setup-choice">
+              <input
+                type="checkbox"
+                checked={census}
+                disabled={busy === "census"}
+                onChange={(event) => {
+                  const wanted = event.target.checked;
+                  setCensus(wanted);
+                  void run(
+                    "census",
+                    () => actions.setAutomaticCensus(wanted),
+                    () =>
+                      wanted
+                        ? "Chronie will walk the account after a loading screen."
+                        : "Chronie will only walk the account when asked.",
+                  ).then((stored) => {
+                    if (stored) setCensus(stored.automaticCensus === true);
+                  });
+                }}
+              />
+              <span>
+                Walk the whole account after a loading screen
+                <span className="sub">
+                  Chronie asks the game for every mount, appearance and achievement the account
+                  holds, so the Collection screen knows what it has without waiting for it to happen
+                  again. The first walk is thousands of questions and a game patch makes every
+                  loading screen the first one again. Leave this off and use <strong>Resync</strong>{" "}
+                  on the Collection screen instead, which asks for the same walk when you want one.
+                </span>
+              </span>
+            </label>
           </section>
 
           <div hidden={category !== "screenshots"}>

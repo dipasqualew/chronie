@@ -103,11 +103,31 @@ not being complete apart and they mean different things: **never walked** is wai
 **cut short** is waiting for the rest of one, and **part of an answer** is a `partial` domain that
 will never be whole however long it is left.
 
+### And the audit itself is off unless somebody asks for it
+
+Everything above is about *when* a pass should be provoked, and it is still the right answer to
+that question. What it does not settle is whether the addon should be the one asking, and the
+default is that it is not: `settings.sync.census` ships `false`, `sweepCensus` reads it, and a
+loading screen provokes nothing on an install nobody has configured.
+
+The reason is the one thing the argument above cannot make cheap. "A handful of calls at every
+load screen, naming nothing in the steady state" is true, and the steady state is not the whole
+of anybody's life with the game: the first pass walks every id the client will answer for, a
+patch puts every install back to a first pass, and a `partial` domain is walked once a session
+by design. That is a bill a player who wanted their lockouts never agreed to.
+
+**Nothing is removed by the switch.** `Census.lua` walks exactly as it always did, `audit` still
+decides what a pass would cover, and both routes below still reach it — a walk somebody asked
+for by name is not the addon running by itself, so neither is gated. The box is on Settings under
+**Game and sync**; the desktop app writes the flag into `src/Settings.lua` with the rest of them,
+so it takes effect at the next login or `/reload`.
+
 ### Asking for a walk
 
-`audit` is deliberately conservative and should stay so. What it cannot cover is a reader who
-simply knows a reading is stale — the counter has not noticed, the build has not changed, and
-nothing else will provoke a thing. There are two ways to say so.
+`audit` is deliberately conservative and should stay so, and with the switch off it is not
+consulted on a loading screen at all. Either way what neither covers is a reader who simply knows
+a reading is stale — the counter has not noticed, the build has not changed, and nothing else
+will provoke a thing. There are two ways to say so.
 
 `/chronie census refresh` walks every domain, immediately, from the chat box.
 
@@ -137,9 +157,10 @@ an empty list; naming them is what a targeted probe would use, which is the reas
 worth building properly at all — the app knows the whole catalogue out of DB2 and the addon does
 not, so "check these ids" is a thing only the desktop can decide to ask for.
 
-The resync runs *before* the audit's own pass at each loading screen. The other order would have
-the audit's pass in flight when the request arrived, and `census.run` refuses a second one — so an
-explicit ask would be silently deferred every time the audit had anything at all to say.
+The resync runs *before* the audit's own pass at each loading screen, on an install where the
+audit runs at all. The other order would have the audit's pass in flight when the request arrived,
+and `census.run` refuses a second one — so an explicit ask would be silently deferred every time
+the audit had anything at all to say.
 
 ## What a walk may not do
 

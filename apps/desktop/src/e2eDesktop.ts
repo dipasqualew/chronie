@@ -582,6 +582,18 @@ export const e2eDesktop = {
     }
     return missingMock();
   },
+  // Whether the addon walks the account without being asked. Reaches the game inside the addon
+  // the same way the capture rules do, and answers with the whole of the settings for the same
+  // reason: the panel repaints from what was stored.
+  setAutomaticCensus: (enabled: boolean): Promise<Settings> => {
+    if (mock) {
+      return written(() => {
+        mock.settings.automaticCensus = enabled;
+        return structuredClone(mock.settings);
+      });
+    }
+    return missingMock();
+  },
   // What is kept of a picture, and whether the game keeps its own copy. The two travel together
   // because they are one decision about disk, and neither reaches the addon at all.
   setCaptureStorage: (quality: CaptureQuality, keepOriginals: boolean): Promise<Settings> => {

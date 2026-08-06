@@ -679,6 +679,25 @@ async sessionGap() : Promise<Result<Verdict, CommandError>> {
 }
 },
 /**
+ * Whether the addon walks the account for what it holds without being asked.
+ *
+ * Reaches the game inside the addon folder like the capture rules and the combat log switch do,
+ * so it reinstalls straight away rather than waiting for the next launch — and like both of
+ * those it only takes effect at the next login or `/reload`, which the panel is what says.
+ *
+ * Nothing about the Resync button changes with this. That road is the request channel, it is
+ * somebody pressing a button, and it is ungated on purpose: what this decides is only whether
+ * the addon may start a walk that nobody asked for.
+ */
+async setAutomaticCensus(enabled: boolean) : Promise<Result<SettingsPayload, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_automatic_census", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The two ways somebody changes a capture, answering with the whole dashboard for the same
  * reason the activity edits do: what ends up on screen is what was stored, never what the
  * window hoped the write did. Which matters more here than anywhere — a note that looked
@@ -1712,7 +1731,7 @@ openSlots: number;
  * which is the whole of what the near-miss shelf lists — see `shelf.ts`.
  */
 blockedSlots: number[] }
-export type SettingsPayload = { wowPath?: string | null; lastSync?: string | null; combatLogging?: boolean; retainLogDays?: number | null; keepOriginalScreenshots?: boolean; captureQuality?: Quality; captureTriggers?: string[]; characterLook?: CharacterPick[]; characterBody?: number }
+export type SettingsPayload = { wowPath?: string | null; lastSync?: string | null; combatLogging?: boolean; retainLogDays?: number | null; keepOriginalScreenshots?: boolean; captureQuality?: Quality; captureTriggers?: string[]; automaticCensus?: boolean; characterLook?: CharacterPick[]; characterBody?: number }
 /**
  * One appearance in a set, and where on the character it sits.
  *

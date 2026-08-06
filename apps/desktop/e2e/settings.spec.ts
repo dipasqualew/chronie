@@ -43,3 +43,38 @@ test("drives the game folder, sync, addon installation and app update checks", a
     await expect(setup.state()).toHaveText("Chronie is up to date.");
   });
 });
+
+/**
+ * The one setting on this panel, and the only one anywhere that decides what the addon starts
+ * without being asked.
+ *
+ * Its own scenario rather than a step of the one above, because it is a different question: the
+ * buttons up there all reach out of the window and are held to their status line, and this is a
+ * switch whose whole claim is that what was ticked is what was stored. Both halves are checked
+ * for that reason — a box that draws itself ticked and saved nothing looks identical on screen.
+ */
+test("walks the account by itself only once somebody has asked it to", async ({ page }) => {
+  const setup = new GameAndSync(page);
+  await setup.open();
+
+  await test.step("a fresh install draws it unticked", async () => {
+    await expect(setup.census()).not.toBeChecked();
+    await setup.storedCensus().toBe(false);
+  });
+
+  await test.step("the sentence beside it says what to use instead", async () => {
+    await expect(setup.panel).toContainText("Resync");
+  });
+
+  await test.step("ticking it says so, and is what the backend was told", async () => {
+    await setup.census().check();
+    await expect(setup.state()).toHaveText("Chronie will walk the account after a loading screen.");
+    await setup.storedCensus().toBe(true);
+  });
+
+  await test.step("and unticking it puts the account back where it was", async () => {
+    await setup.census().uncheck();
+    await expect(setup.state()).toHaveText("Chronie will only walk the account when asked.");
+    await setup.storedCensus().toBe(false);
+  });
+});

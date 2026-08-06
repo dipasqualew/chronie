@@ -329,12 +329,37 @@ function ns.main(env)
     ---play still finishes a pass.
     local CENSUS_SETTLE_SECONDS = 10
 
+    ---Whether the addon has been told it may start something on its own account.
+    ---
+    ---Read through one accessor rather than reached for at each site, so that "is this switched
+    ---on" is a single question with a single answer everywhere it is asked, and so that a
+    ---settings file an older install left behind — one written before `sync` existed — reads as
+    ---off rather than raising on a nil index.
+    ---@param name string
+    ---@return boolean
+    local function syncEnabled(name)
+        local sync = ns.settings and ns.settings.sync
+        return type(sync) == "table" and sync[name] == true
+    end
+
     ---Takes a census of anything that needs one, a little after the world has settled.
     ---
-    ---Called on the far side of every loading screen, and cheap on every one of them but the
-    ---first: `audit` is a handful of calls, and in the steady state it names nothing and no pass
-    ---is started at all. `run` refuses to begin a second pass while one is in flight, so zoning
-    ---about during a long walk cannot restart or double it.
+    ---Called on the far side of every loading screen. Two different things happen here and only
+    ---one of them is switched: a resync is a walk the desktop app was told to ask for, by
+    ---somebody pressing Resync, and it is carried out whatever the settings say; the audit's own
+    ---pass is the addon deciding by itself that a reading looks stale, and that is what
+    ---`settings.sync.census` gates.
+    ---
+    ---It is off by default because "cheap on every loading screen but the first" is true and is
+    ---not the whole story: the first one costs a walk of every mount, appearance and achievement
+    ---id the client will answer for, a patch makes every loading screen the first one again, and
+    ---a partial domain is walked once a session by design. Nothing about the walk is removed —
+    ---`/chronie census refresh` and the Resync button both still reach it.
+    ---
+    ---The timer is armed either way, because a request the app left in the addon folder is
+    ---waiting on exactly this callback and has to be found however the switch is set. `run`
+    ---refuses to begin a second pass while one is in flight, so zoning about during a long walk
+    ---cannot restart or double it.
     local function sweepCensus()
         env.after(CENSUS_SETTLE_SECONDS, function()
             -- What somebody explicitly asked for goes first, and the audit's own pass second.
@@ -345,7 +370,9 @@ function ns.main(env)
             if #walking > 0 then
                 logger.info(ns.censusResyncText(walking))
             end
-            census.run()
+            if syncEnabled("census") then
+                census.run()
+            end
         end)
     end
 
