@@ -3354,6 +3354,74 @@ describe("addon integration", function()
             }, recorded.dressingRoom())
         end)
 
+        -- The shifted half of the same click, and it is wired through more parts than the
+        -- unshifted one: the panel has to have been handed a set lookup built on the client's
+        -- three set calls, a preview that takes source ids rather than links, the journal's
+        -- own set page, and a way to read the shift key — five seams, any one of which can be
+        -- left unwired without a single unit test noticing. Both buttons in one test because
+        -- what the pair proves is that they went to different places: a shifted right click
+        -- that opened the dressing room, or a shifted left click that opened Collections,
+        -- would each pass a test that only watched one of them.
+        it("dresses the model in a whole set and opens that set when its row is shift-clicked", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                transmogSources = { [11] = { item = 19019, newAppearance = true } },
+                transmogSetsOfSource = { [11] = { 1783 } },
+                transmogSets = {
+                    [1783] = {
+                        name = "Bloodfang Armor",
+                        label = "Heroic",
+                        -- The piece that dropped is one of the three, and it goes on with the
+                        -- rest rather than separately: the whole set is what is being shown.
+                        pieces = {
+                            { sourceID = 101, collected = true },
+                            { sourceID = 11, collected = true },
+                            { sourceID = 103, collected = false },
+                        },
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            local frame = panelFrame(recorded)
+            ---Clicks the first row on screen saying `needle`. Looked up afresh each time,
+            ---because a click repaints the panel and the rows are pooled.
+            ---@param needle string
+            ---@param button string
+            local function click(needle, button)
+                -- Through `regionsOf`, because the body is drawn inside the viewport that
+                -- scrolls it rather than on the panel frame itself.
+                for _, fontString in ipairs((fake.regionsOf(frame))) do
+                    if fontString.shown and (fontString.text or ""):find(needle, 1, true) then
+                        fontString:run("OnMouseUp", button)
+                        return
+                    end
+                end
+                error("no row saying " .. needle .. " to click")
+            end
+
+            -- The heading first: the item's own row is not drawn until the block it sits in
+            -- has been opened.
+            click("Transmog", "LeftButton")
+            recorded.setShiftDown(true)
+            click("Item 19019", "LeftButton")
+            click("Item 19019", "RightButton")
+
+            -- Stripped once, and then every piece of the set in the order the client listed
+            -- them — as source ids, which is what a set's pieces are.
+            assert.same({
+                { call = "dressUp", link = "item:19019" },
+                { call = "undress" },
+                { call = "tryOn", link = 101 },
+                { call = "tryOn", link = 11 },
+                { call = "tryOn", link = 103 },
+            }, recorded.dressingRoom())
+            assert.same({ 1783 }, recorded.openedTransmogSets())
+        end)
+
         it("registers the events that feed the segment panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 

@@ -18,14 +18,24 @@ describe("ns.newResultsWindow", function()
     ---The picker needs both a list and a way to choose from it, so either half can be
     ---withheld on its own — `views = false`, or `select = false` — because the detail window
     ---is handed neither and must come out of it a panel with a plain title.
+    ---`options.set` is the membership every transmog row's appearance is said to belong to —
+    ---a table, or a function of the source id for a case where one row is in a set and the
+    ---next is not. `set = false` withholds the lookup entirely, which is the build that has
+    ---no set support wired at all and must draw the rows exactly as it always did.
     ---@param options table? `{ name = string?, point = { string, number, number }?,
     ---views = SegmentView[]|fun(): SegmentView[]|boolean?, select = boolean?,
+    ---set = TransmogSetMembership|fun(sourceID: integer?): TransmogSetMembership?|boolean?,
+    ---shift = boolean?,
     ---title = string|fun(summary: SegmentSummary): string? }`
     ---@return table window, table frames, table recorded `{ saved, loadCalls, selected, tooltip }`
     local function newWindow(options)
         options = options or {}
         local createFrame, frames = fake.newCreateFrame()
         local tooltip, tooltipRecorded = fake.newTooltip()
+        -- Held here rather than read off the options, because shift is the one thing about a
+        -- click that a test cannot express by clicking: the same panel has to answer both
+        -- ways, one click after the other, the way a player's hand does.
+        local shift = options.shift and true or false
         local recorded = {
             saved = {},
             sizes = {},
@@ -34,9 +44,17 @@ describe("ns.newResultsWindow", function()
             achievements = {},
             previews = {},
             collections = {},
+            setPreviews = {},
+            setCollections = {},
+            setLookups = {},
             selected = {},
             viewReads = 0,
             tooltip = tooltipRecorded,
+            ---Hold shift down, or let it up again, between two clicks on the same row.
+            ---@param down boolean?
+            holdShift = function(down)
+                shift = down and true or false
+            end,
         }
         local strip = options.views
         -- Wired independently of the strip, so "a list nobody can choose from" and "a chooser
@@ -102,6 +120,29 @@ describe("ns.newResultsWindow", function()
             end,
             openTransmogCollection = function(id)
                 recorded.collections[#recorded.collections + 1] = id
+            end,
+            -- The set the appearance belongs to, asked per row per repaint. Every source it
+            -- was asked about is kept, because "the panel looked this up at all" is half of
+            -- what separates a row drawn with a set from one drawn without.
+            transmogSet = options.set ~= false and function(sourceID)
+                recorded.setLookups[#recorded.setLookups + 1] = sourceID
+                if type(options.set) == "function" then
+                    return options.set(sourceID)
+                end
+                return options.set or nil
+            end or nil,
+            -- Withheld together by `options.setActions = false`, which is the panel on a build
+            -- that can say what set a piece belongs to but was given no way to act on one.
+            -- Main wires the pair with the lookup, so this is about the panel staying whole
+            -- rather than about a client that exists.
+            previewTransmogSet = options.setActions ~= false and function(itemID, sources)
+                recorded.setPreviews[#recorded.setPreviews + 1] = { id = itemID, sources = sources }
+            end or nil,
+            openTransmogSet = options.setActions ~= false and function(setID)
+                recorded.setCollections[#recorded.setCollections + 1] = setID
+            end or nil,
+            shiftDown = function()
+                return shift
             end,
             itemName = function(id)
                 return "Named item " .. id
@@ -1423,6 +1464,365 @@ describe("ns.newResultsWindow", function()
             assert.is_not_nil(reviewed)
             assert.equal("new", reviewed.value)
             assert.truthy(reviewed.label:find("|TInterface", 1, true))
+        end)
+
+        describe("a transmog row that belongs to one of Blizzard's sets", function()
+            local ITEM = 19019
+            local SOURCE = 11
+            local SET = 1783
+            local SOURCES = { 101, 102 }
+            ---The row as it is labelled once `itemName` has named the item, which is what a
+            ---test points at and clicks. The reviewed tick lands in front of it after the
+            ---first click, so it is matched as a substring rather than compared whole.
+            local ROW = "Named item 19019"
+            ---The set icon, exactly as the panel draws it: a texture escape, and a trailing
+            ---space of its own separating it from the fraction.
+            local SET_ICON = "|TInterface\\Icons\\INV_Chest_Cloth_17:12:12:0:-1|t "
+
+            ---@param overrides table?
+            ---@return TransmogSetMembership
+            local function membership(overrides)
+                local base = {
+                    setID = SET,
+                    name = "Bloodfang Armor",
+                    collected = 3,
+                    total = 8,
+                    sources = SOURCES,
+                }
+                for key, value in pairs(overrides or {}) do
+                    base[key] = value
+                end
+                return base
+            end
+
+            ---A segment with one collected appearance in it. `sourceID = false` files the drop
+            ---without one, which is what a client that would not resolve the source leaves
+            ---behind — and a nil written into an overrides table cannot say that, being
+            ---indistinguishable from a key nobody wrote.
+            ---@param overrides table? Fields of the transmog event the row is drawn from.
+            ---@return SegmentSummary
+            local function dropped(overrides)
+                local event = { id = ITEM, sourceID = SOURCE, newAppearance = true }
+                for key, value in pairs(overrides or {}) do
+                    event[key] = value
+                end
+                if event.sourceID == false then
+                    event.sourceID = nil
+                end
+                return summary({ transmogs = { event } })
+            end
+
+            ---The two font strings making up the row saying `name` — the label and the value
+            ---beside it. Paired by position among the rows on screen, the same way `rowsOf`
+            ---does it, because the panel creates them label-then-value per line.
+            ---@param frame table
+            ---@param name string
+            ---@return table label, table value
+            local function regionsFor(frame, name)
+                local labels, values = {}, {}
+                -- Through `regionsOf` rather than off the panel's own font strings: the body
+                -- is drawn inside the viewport that scrolls it, so the panel frame itself
+                -- carries none of these rows.
+                for _, fontString in ipairs((regionsOf(frame))) do
+                    local row = fontString.shown and fontString.template == ROW_FONT
+                    if row and fontString.justify == "LEFT" then
+                        labels[#labels + 1] = fontString
+                    elseif row and fontString.justify == "RIGHT" then
+                        values[#values + 1] = fontString
+                    end
+                end
+                for index, label in ipairs(labels) do
+                    if (label.text or ""):find(name, 1, true) then
+                        return label, values[index]
+                    end
+                end
+                error("no row saying " .. name .. " on screen")
+            end
+
+            ---Clicks the row saying `name` with one particular button. Looked up afresh every
+            ---time, because a click repaints the panel and the row is pooled.
+            ---@param frame table
+            ---@param name string
+            ---@param button string
+            local function clickRow(frame, name, button)
+                local label = regionsFor(frame, name)
+                label:run("OnMouseUp", button)
+            end
+
+            ---Opens the block and hands back the panel's frame, which is every one of these
+            ---tests' first two lines: a transmog row is not drawn until the heading over it
+            ---has been clicked.
+            ---@param options table?
+            ---@param overrides table? Fields of the transmog event the row is drawn from.
+            ---@return table frame, table recorded
+            local function showing(options, overrides)
+                local window, frames, recorded = newWindow(options)
+                window.update(dropped(overrides))
+                expand(frames[1], "Transmog")
+                return frames[1], recorded
+            end
+
+            -- The fraction is the whole point of the feature: a dropped shoulder is one thing
+            -- and the fifth of eight is another. It is drawn after the word the row already
+            -- carried rather than instead of it, because "new" and "variant" answer a
+            -- different question — whether the account had ever seen this look — and the set
+            -- says nothing about that.
+            for _, case in ipairs({
+                {
+                    what = "a new appearance part way into its set",
+                    set = {},
+                    newAppearance = true,
+                    expected = "new |cffadadb3" .. SET_ICON .. "3/8|r",
+                },
+                {
+                    what = "a variant of something the account already had",
+                    set = {},
+                    newAppearance = false,
+                    expected = "variant |cffadadb3" .. SET_ICON .. "3/8|r",
+                },
+                -- The gold the client uses for a completed collection everywhere else. The
+                -- grey above is a set still being worked on, and the two hexes are the only
+                -- thing on the row saying which of the two a player is looking at.
+                {
+                    what = "the piece that finished the set",
+                    set = { collected = 8 },
+                    newAppearance = true,
+                    expected = "new |cffffd100" .. SET_ICON .. "8/8|r",
+                },
+            }) do
+                it("draws the set's fraction beside " .. case.what, function()
+                    local frame = showing(
+                        { set = membership(case.set) },
+                        { newAppearance = case.newAppearance }
+                    )
+
+                    assert.equal(case.expected, valueFor(rowsOf(frame), "  " .. ROW))
+                end)
+            end
+
+            -- The regression that matters most. Most appearances in the game belong to no set
+            -- at all, so this is what nearly every transmog row in nearly every segment looks
+            -- like, and the set feature must be invisible on all of them: same word, same
+            -- width, same everything it was drawn with before sets existed.
+            for _, case in ipairs({
+                { what = "the appearance belongs to no set the client knows of", options = {} },
+                { what = "the build never wired a set lookup at all", options = { set = false } },
+                -- Reached through the same nil the module itself refuses on: a row the client
+                -- would not resolve a source for has nothing to look a set up by.
+                { what = "the drop was filed with no source id", options = {}, sourceID = false },
+            }) do
+                it("draws the row exactly as it always was when " .. case.what, function()
+                    local frame = showing(case.options, { sourceID = case.sourceID })
+
+                    assert.equal("new", valueFor(rowsOf(frame), "  " .. ROW))
+                end)
+            end
+
+            -- Ninety-two pixels hold "variant" and nothing else. A row carrying a word, an
+            -- icon and a fraction needs the wider column the summary headings use, or the
+            -- numbers — the only part that is news — are the part clipped off the end.
+            for _, case in ipairs({
+                { what = "widens the value column for a row carrying a fraction", set = true, width = 140 },
+                { what = "leaves an ordinary row on the narrow column", set = false, width = 92 },
+            }) do
+                it(case.what, function()
+                    local frame = showing({ set = case.set and membership() or nil })
+
+                    local _, value = regionsFor(frame, ROW)
+                    assert.equal(case.width, value.width)
+                end)
+            end
+
+            it("looks the set up by the source id the drop was filed with", function()
+                local _, recorded = showing({ set = membership() })
+
+                assert.same({ SOURCE }, recorded.setLookups)
+            end)
+
+            -- The fraction moves every time another piece is collected, including on another
+            -- character an hour later, so the row asks again on every repaint rather than
+            -- keeping the answer it was first drawn with.
+            it("asks again every time the row is repainted", function()
+                local window, frames, recorded = newWindow({ set = membership() })
+                window.update(dropped())
+                expand(frames[1], "Transmog")
+
+                window.update(dropped())
+
+                assert.same({ SOURCE, SOURCE }, recorded.setLookups)
+            end)
+
+            describe("on hover", function()
+                it("opens the set the appearance belongs to", function()
+                    local frame, recorded = showing({ set = membership({ label = "Heroic" }) })
+
+                    pointAt(frame, ROW)
+
+                    assert.same({
+                        "Bloodfang Armor",
+                        "Heroic",
+                        "Collected → 3 / 8",
+                        "",
+                        "Shift-click to try on the whole set",
+                        "Shift-right-click to open it in Collections",
+                    }, tooltipLines(recorded))
+                end)
+
+                it("closes it again when the pointer moves off", function()
+                    local frame, recorded = showing({ set = membership() })
+
+                    pointAt(frame, ROW, { leave = true })
+
+                    assert.equal(1, recorded.tooltip.hidden)
+                end)
+
+                -- A row with nothing to say must not become a dead spot on a frame the player
+                -- drags the panel by: mouse-enabling it swallows the drag for no answer.
+                it("leaves a row that belongs to no set alone", function()
+                    local frame = showing()
+
+                    assert.is_false(pointable(frame, ROW))
+                end)
+            end)
+
+            -- Four actions on one row, told apart by the button and by shift. Each case
+            -- asserts on all four recordings rather than only its own, because the failure
+            -- worth catching is a click doing the plausible wrong one of two things — opening
+            -- the set where the piece was asked for — and only the empty lists say so.
+            for _, case in ipairs({
+                {
+                    what = "a plain left click tries the piece that dropped on",
+                    button = "LeftButton", shift = false,
+                    previews = { ITEM },
+                },
+                {
+                    what = "a plain right click opens the piece in the wardrobe",
+                    button = "RightButton", shift = false,
+                    collections = { SOURCE },
+                },
+                {
+                    what = "a shifted left click tries the whole set on",
+                    button = "LeftButton", shift = true,
+                    setPreviews = { { id = ITEM, sources = SOURCES } },
+                },
+                {
+                    what = "a shifted right click opens the set in Collections",
+                    button = "RightButton", shift = true,
+                    setCollections = { SET },
+                },
+            }) do
+                it(case.what, function()
+                    local frame, recorded = showing({ set = membership(), shift = case.shift })
+
+                    clickRow(frame, ROW, case.button)
+
+                    assert.same(case.previews or {}, recorded.previews)
+                    assert.same(case.collections or {}, recorded.collections)
+                    assert.same(case.setPreviews or {}, recorded.setPreviews)
+                    assert.same(case.setCollections or {}, recorded.setCollections)
+                end)
+            end
+
+            -- Shift over a row that has no set has asked for something that does not exist,
+            -- and the piece clicked is the nearest true answer. A click that silently did
+            -- nothing reads to a player as the panel being broken.
+            for _, case in ipairs({
+                {
+                    what = "tries the piece on for a shifted left click",
+                    button = "LeftButton",
+                    previews = { ITEM },
+                },
+                {
+                    what = "opens the piece for a shifted right click",
+                    button = "RightButton",
+                    collections = { SOURCE },
+                },
+            }) do
+                it("falls back to the piece and " .. case.what, function()
+                    local frame, recorded = showing({ shift = true })
+
+                    clickRow(frame, ROW, case.button)
+
+                    assert.same(case.previews or {}, recorded.previews)
+                    assert.same(case.collections or {}, recorded.collections)
+                    assert.same({}, recorded.setPreviews)
+                    assert.same({}, recorded.setCollections)
+                end)
+            end
+
+            -- The same fallback, reached from the other side: there is a set on the row, and
+            -- no way to act on it. The panel resolves which of the two set actions a button
+            -- would take *before* it classifies the click, precisely so that a shifted click
+            -- cannot enter a set branch and find nothing to do there — the row would draw its
+            -- fraction and then answer no click at all, which is the worst of both.
+            for _, case in ipairs({
+                -- A build wired for the fraction but not for the actions.
+                {
+                    what = "the panel was given no way to act on a set",
+                    options = { setActions = false, set = true },
+                    button = "LeftButton",
+                    previews = { ITEM },
+                },
+                {
+                    what = "the panel was given no way to open a set",
+                    options = { setActions = false, set = true },
+                    button = "RightButton",
+                    collections = { SOURCE },
+                },
+                -- A set the client counted pieces for but named no sources of. It can still be
+                -- opened in the journal, so only the left click falls back: there is nothing
+                -- to put on a body, and a dressing room opened over an empty set is the naked
+                -- character `ns.newTransmogPreview` exists to avoid.
+                {
+                    what = "the set the client named has no sources to wear",
+                    options = { set = "sourceless" },
+                    button = "LeftButton",
+                    previews = { ITEM },
+                },
+            }) do
+                it("falls back to the piece when " .. case.what, function()
+                    local set = membership(case.options.set == "sourceless" and { sources = {} } or nil)
+                    local frame, recorded = showing({
+                        shift = true,
+                        set = set,
+                        setActions = case.options.setActions,
+                    })
+
+                    clickRow(frame, ROW, case.button)
+
+                    assert.same(case.previews or {}, recorded.previews)
+                    assert.same(case.collections or {}, recorded.collections)
+                    assert.same({}, recorded.setPreviews)
+                    assert.same({}, recorded.setCollections)
+                end)
+            end
+
+            -- The half of the sourceless set that does still work. Withholding the whole set
+            -- row on a client that would not enumerate it would take away the fraction too,
+            -- which is the part the player can actually use.
+            it("still opens a set the client named no sources for", function()
+                local frame, recorded = showing({ shift = true, set = membership({ sources = {} }) })
+
+                clickRow(frame, ROW, "RightButton")
+
+                assert.same({ SET }, recorded.setCollections)
+                assert.same({}, recorded.collections)
+            end)
+
+            -- Shift is read when the row is clicked, not when it was drawn. A panel that
+            -- sampled the key at repaint would answer with whatever was held the last time
+            -- something else happened, which is almost never what the hand on the keyboard
+            -- is doing now.
+            it("answers the same row both ways as shift goes down between two clicks", function()
+                local frame, recorded = showing({ set = membership() })
+
+                clickRow(frame, ROW, "LeftButton")
+                recorded.holdShift(true)
+                clickRow(frame, ROW, "LeftButton")
+
+                assert.same({ ITEM }, recorded.previews)
+                assert.same({ { id = ITEM, sources = SOURCES } }, recorded.setPreviews)
+            end)
         end)
 
         ---Clicks the first row whose text contains `needle`, which is how a heading is

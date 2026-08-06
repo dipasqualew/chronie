@@ -49,6 +49,10 @@ read_globals = {
     "GetCursorInfo",
     "ClearCursor",
     "C_TransmogCollection",
+    -- Blizzard's own tier and vendor sets, which is what says a dropped shoulder is the fifth
+    -- of eight. Signatures out of the 12.0.5.67823 client's own usage strings.
+    "C_TransmogSets",
+    "IsShiftKeyDown",
     "C_EquipmentSet",
     "GetInventoryItemID",
     "ItemLocation",

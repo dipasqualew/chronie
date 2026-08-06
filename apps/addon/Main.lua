@@ -75,6 +75,14 @@ local addonName, ns = ...
 ---@field dressUpActor fun(): table? The player's actor in whichever dressing room dressUpItem
 ---just opened. Nil until one has been, and nil on a client that built no actor for it.
 ---@field openTransmogCollection fun(sourceID: integer)
+---@field openTransmogSet fun(setID: integer) The same journal, opened on one of Blizzard's own
+---sets rather than on a single appearance.
+---@field transmogSetsContaining fun(sourceID: integer): integer[]? Which of Blizzard's sets an
+---appearance sits in, in the client's own order.
+---@field transmogSetInfo fun(setID: integer): table? What the client will say about a set.
+---@field transmogSetPieces fun(setID: integer): { sourceID: integer, collected: boolean }[] Every
+---piece of a set and whether the account holds it.
+---@field shiftDown fun(): boolean Whether shift is held right now.
 ---@field itemName fun(itemID: integer): string?
 ---@field playerGUID fun(): string? UnitGUID("player"), the client's own unique character id.
 ---@field mapState fun(): MapPosition? Where the player is standing, when the client says.
@@ -339,6 +347,15 @@ function ns.main(env)
         playerActor = env.dressUpActor,
     })
 
+    -- Which of Blizzard's sets a collected appearance belongs to, and how far into it the
+    -- account is. Handed to both panels beside the preview above, so a row means the same
+    -- thing whichever of them it is read on.
+    local transmogSets = ns.newTransmogSets({
+        setsContaining = env.transmogSetsContaining,
+        setInfo = env.transmogSetInfo,
+        setPieces = env.transmogSetPieces,
+    })
+
     -- Declared before the panel and filled in after the log and the tracker they read from,
     -- because the panel is built first and its picker has to reach them.
     ---@type SegmentViews
@@ -393,6 +410,10 @@ function ns.main(env)
         openAchievement = env.openAchievement,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
+        previewTransmogSet = transmogPreview.showSet,
+        openTransmogSet = env.openTransmogSet,
+        transmogSet = transmogSets.forSource,
+        shiftDown = env.shiftDown,
         itemName = env.itemName,
         now = env.now,
         character = currentCharacter,
@@ -866,6 +887,10 @@ function ns.main(env)
         openAchievement = env.openAchievement,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
+        previewTransmogSet = transmogPreview.showSet,
+        openTransmogSet = env.openTransmogSet,
+        transmogSet = transmogSets.forSource,
+        shiftDown = env.shiftDown,
         itemName = env.itemName,
         now = env.now,
         -- Where the account stands now, beside what that evening earned. The HUD gets the
@@ -2050,6 +2075,57 @@ if CreateFrame then
                 CollectionsJournal_LoadUI()
                 ToggleCollectionsJournal(5)
                 WardrobeCollectionFrame:OpenTransmogLink("transmogappearance:" .. sourceID)
+            end,
+            -- The same road as the appearance above, down the other of its two branches.
+            -- `OpenTransmogLink` is what the client's own chat links land in, and the
+            -- 12.0.5.67823 binary formats three of them — `transmogappearance:`,
+            -- `transmogillusion:` and `|Htransmogset:%d|h` — so the journal's handler takes a
+            -- set id by the same door it already takes a source id through, and lands on the
+            -- sets tab rather than the appearances one.
+            openTransmogSet = function(setID)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(5)
+                WardrobeCollectionFrame:OpenTransmogLink("transmogset:" .. setID)
+            end,
+            transmogSetsContaining = function(sourceID)
+                return C_TransmogSets.GetSetsContainingSourceID(sourceID)
+            end,
+            transmogSetInfo = function(setID)
+                return C_TransmogSets.GetSetInfo(setID)
+            end,
+            ---Every piece of a set, and whether the account holds it.
+            ---
+            ---Off the *primary* appearances rather than `GetAllSourceIDs`, because that is the
+            ---list the wardrobe's own set browser counts and the fraction this panel prints has
+            ---to be the fraction the collections journal prints. `GetAllSourceIDs` answers a
+            ---different question — every source the set lists, variants included — and a panel
+            ---saying 5/11 beside a journal saying 5/8 reads as one of the two being wrong.
+            ---
+            ---`collected` comes off the entry where the client sets it, and is asked again per
+            ---source where it does not. The second call is free when the field is there and
+            ---false — `PlayerHasTransmogItemModifiedAppearance` answers the same thing — and is
+            ---the whole count when it is not, so the fraction cannot silently become 0/8 on a
+            ---build that names that field something else.
+            transmogSetPieces = function(setID)
+                local pieces = {}
+                for _, appearance in ipairs(C_TransmogSets.GetSetPrimaryAppearances(setID) or {}) do
+                    -- The client's own name for the field, and it is a source id rather than a
+                    -- visual id: `GetSetPrimaryAppearances` hands back item-modified-appearance
+                    -- rows, which is what both the count and the dressing room want.
+                    local sourceID = appearance.appearanceID
+                    if sourceID then
+                        pieces[#pieces + 1] = {
+                            sourceID = sourceID,
+                            collected = appearance.collected
+                                or C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(sourceID)
+                                or false,
+                        }
+                    end
+                end
+                return pieces
+            end,
+            shiftDown = function()
+                return IsShiftKeyDown() and true or false
             end,
             itemName = function(itemID)
                 return (GetItemInfo(itemID))

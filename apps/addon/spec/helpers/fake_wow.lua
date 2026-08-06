@@ -1030,6 +1030,20 @@ function fake.newEnv(options)
     }
     local itemPrices = options.itemPrices or {}
     local transmogSources = options.transmogSources or {}
+    -- Blizzard's own tier and vendor sets, already reduced to the shape Main.lua reduces the
+    -- client's three calls to: `{ [setID] = { name = , label = , pieces = { { sourceID = ,
+    -- collected = } } } }`, and `transmogSetsOfSource` says which sets a source sits in. Empty
+    -- by default, which is the ordinary case — most appearances belong to no set at all, and a
+    -- test that never mentions sets gets the panel exactly as it was before they existed.
+    local transmogSets = options.transmogSets or {}
+    local transmogSetsOfSource = options.transmogSetsOfSource or {}
+    -- Whether shift is held. Mutable through the returned handle rather than fixed at build,
+    -- because the four actions on a transmog row differ only by this and a test wants both
+    -- readings out of one panel.
+    local shiftDown = options.shiftDown and true or false
+    -- Every set the addon asked the collections journal to open, which is the only trace a
+    -- shifted right click leaves: the real journal is a frame this fake has no stand-in for.
+    local openedTransmogSets = {}
     -- The character's equipment sets and what it is wearing, both mutable so a test can
     -- change them between two syncs and watch the ledger notice.
     local equipmentSets = options.equipmentSets or {}
@@ -1574,6 +1588,26 @@ function fake.newEnv(options)
             return dressUpActor
         end,
         openTransmogCollection = function() end,
+        openTransmogSet = function(setID)
+            openedTransmogSets[#openedTransmogSets + 1] = setID
+        end,
+        transmogSetsContaining = function(sourceID)
+            return transmogSetsOfSource[sourceID]
+        end,
+        transmogSetInfo = function(setID)
+            local set = transmogSets[setID]
+            if not set then
+                return nil
+            end
+            return { name = set.name, label = set.label }
+        end,
+        transmogSetPieces = function(setID)
+            local set = transmogSets[setID]
+            return set and set.pieces or {}
+        end,
+        shiftDown = function()
+            return shiftDown
+        end,
         playerGUID = function()
             return playerGUID or nil
         end,
@@ -1770,6 +1804,17 @@ function fake.newEnv(options)
         ---@return table[]
         dressingRoom = function()
             return dressingRoom
+        end,
+        ---Every set the addon asked the collections journal to open, in the order it asked.
+        ---@return integer[]
+        openedTransmogSets = function()
+            return openedTransmogSets
+        end,
+        ---Hold shift down, or let it up. What tells the four actions on a transmog row apart,
+        ---and the one thing about a click a test cannot express by clicking.
+        ---@param down boolean?
+        setShiftDown = function(down)
+            shiftDown = down and true or false
         end,
         ---@return boolean whether the client is writing a combat log
         isLogging = function()

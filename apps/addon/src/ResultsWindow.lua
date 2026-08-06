@@ -27,6 +27,16 @@ local _, ns = ...
 ---@field openAchievement fun(id: integer)?
 ---@field previewTransmog fun(itemID: integer)?
 ---@field openTransmogCollection fun(sourceID: integer)?
+---@field previewTransmogSet fun(itemID: integer, sources: integer[])? The whole set on the body
+---at once, for the shifted click.
+---@field openTransmogSet fun(setID: integer)? The set's own page in the collections journal, for
+---the shifted right click.
+---@field transmogSet fun(sourceID: integer?): TransmogSetMembership? Which set a collected
+---appearance belongs to and how far into it the account is. Nil for the appearances that belong
+---to none, which is most of them, and the row is drawn exactly as it always was.
+---@field shiftDown fun(): boolean? Whether shift is held at the moment of a click. Injected
+---rather than read off the client here, because it is the only thing that tells the panel's
+---four transmog actions apart and a test cannot hold a key down.
 ---@field itemName fun(itemID: integer): string?
 ---@field now fun(): integer? Current time, for saying how old an account-wide figure is.
 ---@field accountStanding fun(factionID: integer): StandingRollup? Where the account as a whole
@@ -124,6 +134,18 @@ local COLOR_END = "|r"
 local EXPAND_ICON = "|TInterface\\Buttons\\UI-PlusButton-Up:12:12:0:-1|t "
 local COLLAPSE_ICON = "|TInterface\\Buttons\\UI-MinusButton-Up:12:12:0:-1|t "
 local REVIEWED_ICON = "|TInterface\\RaidFrame\\ReadyCheck-Ready:12:12:0:-1|t "
+-- What says the piece that dropped is part of a set, drawn in front of the fraction of that
+-- set the account holds. `interface/icons/inv_chest_cloth_17.blp` is the wardrobe's own icon
+-- and is in the 12.0.5 listfile; unlike the three above it is a full-bleed 64×64 icon rather
+-- than an alpha'd UI glyph, which at this size is what makes it read as a mark beside the
+-- numbers rather than as another piece of chrome.
+local SET_ICON = "|TInterface\\Icons\\INV_Chest_Cloth_17:12:12:0:-1|t "
+-- The fraction carries its own colour inside a value string the row has already coloured by
+-- whether the appearance was new or a variant, so it has to be written in rather than set.
+-- Gold once the set is finished, the panel's label grey while it is not: the completed one is
+-- the only state worth catching an eye that is not looking for it.
+local SET_HEX = "|cffadadb3"
+local SET_COMPLETE_HEX = "|cffffd100"
 
 -- The client's own padlock, the pair the default UI locks its bars with, and its own corner
 -- grabber, the one every resizable chat window has had in its bottom right since the game
@@ -1123,15 +1145,60 @@ function ns.newResultsWindow(deps)
                     local kindColor = current.newAppearance and ACCOUNT_COLOR or CHARACTER_COLOR
                     local reviewKey = tostring(current.sourceID or current.id) .. ":" .. tostring(index)
                     local prefix = reviewedTransmogs[reviewKey] and REVIEWED_ICON or ""
-                    line("  " .. prefix .. (itemName or ("Item " .. current.id)), kind, kindColor, function(button)
-                        reviewedTransmogs[reviewKey] = true
-                        if button == "RightButton" and current.sourceID and deps.openTransmogCollection then
-                            deps.openTransmogCollection(current.sourceID)
-                        elseif deps.previewTransmog then
-                            deps.previewTransmog(current.id)
-                        end
-                        render(latest)
-                    end)
+                    -- Asked per row per repaint rather than held, because the fraction moves
+                    -- as the account collects and a row drawn an hour ago would still be
+                    -- claiming the count it was drawn with. See ns.newTransmogSets.
+                    local set = deps.transmogSet and deps.transmogSet(current.sourceID)
+                    local valueText = kind
+                    local valueWidth
+                    if set then
+                        local hex = set.collected >= set.total and SET_COMPLETE_HEX or SET_HEX
+                        valueText = kind .. " " .. hex .. SET_ICON
+                            .. set.collected .. "/" .. set.total .. COLOR_END
+                        -- The ordinary rows' 92 pixels hold "variant" and nothing else, so a
+                        -- row carrying a set fraction is given the wider column the summary
+                        -- headings use rather than clipping the numbers off its own end.
+                        valueWidth = SUMMARY_VALUE_WIDTH
+                    end
+                    line("  " .. prefix .. (itemName or ("Item " .. current.id)), valueText, kindColor,
+                        function(button)
+                            reviewedTransmogs[reviewKey] = true
+                            -- Which of the two set actions this button would take, resolved
+                            -- before the click is classified rather than inside the branch it
+                            -- picks. `transmogClickAction` is told there is a set only when
+                            -- there is also a way to act on one, so a shifted click can never
+                            -- enter a set branch and find nothing to do there: it falls back
+                            -- to the piece that dropped, which is the whole point of the
+                            -- fallback rule. Both deps arrive together from Main, so this is
+                            -- about the panel still being whole without them.
+                            local setHandler
+                            if set then
+                                if button == "RightButton" then
+                                    setHandler = deps.openTransmogSet
+                                elseif #set.sources > 0 then
+                                    -- A set the client named no sources for can still be
+                                    -- opened in the journal, but there is nothing to put on a
+                                    -- body — and a dressing room opened over an empty set is
+                                    -- the naked character ns.newTransmogPreview exists to
+                                    -- avoid. The fraction on the row is still worth drawing,
+                                    -- so only this half of the shifted pair falls back.
+                                    setHandler = deps.previewTransmogSet
+                                end
+                            end
+                            local action = ns.transmogClickAction(button, deps.shiftDown and deps.shiftDown(),
+                                setHandler ~= nil)
+                            if action == "openSet" then
+                                setHandler(set.setID)
+                            elseif action == "previewSet" then
+                                setHandler(current.id, set.sources)
+                            elseif action == "openItem" and current.sourceID and deps.openTransmogCollection then
+                                deps.openTransmogCollection(current.sourceID)
+                            elseif deps.previewTransmog then
+                                deps.previewTransmog(current.id)
+                            end
+                            render(latest)
+                        end, valueWidth)
+                    hover(ns.transmogSetTooltip(set))
                 end
             end
         end
