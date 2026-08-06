@@ -1288,7 +1288,11 @@ describe("ns.newResultsWindow", function()
             assert.truthy(value:find("1 extra"))
         end)
 
-        it("expands housing items with their warband scope", function()
+        -- The colour is the whole of the scope, the way it is on a transmog or an achievement
+        -- row: purple for the warband's first and green for another of one it already had.
+        -- And here it is every row — `warbandFirst` is folded to a boolean where the event is
+        -- filed, so there is no third state to leave a word behind for.
+        it("expands housing items with their warband scope in colour alone", function()
             local window, frames = newWindow()
             window.update(summary({
                 housingItems = {
@@ -1298,9 +1302,12 @@ describe("ns.newResultsWindow", function()
             }))
             expand(frames[1], "Housing items")
 
+            assert.same({ 0.7, 0.45, 1 }, labelFor(frames[1], "Sturdy Oak Chair").color)
+            assert.same({ 0.35, 0.85, 0.45 }, labelFor(frames[1], "Iron Sconce").color)
+
             local lines = rowsOf(frames[1])
-            assert.equal("warband first", valueFor(lines, "  Sturdy Oak Chair"))
-            assert.equal("additional", valueFor(lines, "  Iron Sconce"))
+            assert.equal("", valueFor(lines, "  Sturdy Oak Chair"))
+            assert.equal("", valueFor(lines, "  Iron Sconce"))
         end)
 
         it("hides housing experience until some was gained", function()
@@ -1685,13 +1692,16 @@ describe("ns.newResultsWindow", function()
             assert.equal("earned", valueFor(rowsOf(frames[1]), "  The Loremaster"))
         end)
 
+        -- The rows that still carry a word are the ones no colour speaks for, and a quest that
+        -- is neither kind of first is one of them. Its name is clipped inside its own column
+        -- rather than wrapping over the row below or running out under the word beside it.
         it("keeps a long quest name out of the status column beside it", function()
             local window, frames = newWindow()
             local longQuest = "  An Extremely Long Quest Name That Cannot Fit Beside Its Status"
 
             window.update(summary({
                 quests = {
-                    { id = 2, name = longQuest:sub(3), characterFirst = true },
+                    { id = 2, name = longQuest:sub(3) },
                 },
             }))
             expand(frames[1], "Quests")
@@ -1701,19 +1711,30 @@ describe("ns.newResultsWindow", function()
             for _, fontString in ipairs((regionsOf(frames[1]))) do
                 if fontString.text == longQuest then
                     labels[#labels + 1] = fontString
-                elseif fontString.text == "character first" then
+                elseif fontString.text == "completed" then
                     values[#values + 1] = fontString
                 end
             end
 
             assert.equal(1, #labels)
             assert.equal(1, #values)
-            for index = 1, 1 do
-                assert.is_false(labels[index].wordWrap)
-                assert.is_false(values[index].wordWrap)
-                assert.equal(144, labels[index].width)
-                assert.equal(92, values[index].width)
-            end
+            assert.is_false(labels[1].wordWrap)
+            assert.is_false(values[1].wordWrap)
+            assert.equal(144, labels[1].width)
+            assert.equal(92, values[1].width)
+        end)
+
+        -- And a quest the colour does speak for has no such column, so its name gets the
+        -- panel's whole width — which is the point of taking the word off.
+        it("gives a quest row the panel's width once the colour says the scope", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                quests = { { id = 2, name = "Warband discovery", accountFirst = true } },
+            }))
+            expand(frames[1], "Quests")
+
+            assert.equal(244, labelFor(frames[1], "Warband discovery").width)
         end)
 
         it("summarises account-first and character-first achievements while collapsed", function()
@@ -1783,9 +1804,30 @@ describe("ns.newResultsWindow", function()
                 valueForHeading(rowsOf(frames[1]), "Quests")
             )
             expand(frames[1], "Quests")
+
+            -- The heading counts them in words; the rows say it in colour and say nothing
+            -- twice. Purple for the warband's own first, green for a character catching up
+            -- on one the warband had already done.
+            assert.same({ 0.7, 0.45, 1 }, labelFor(frames[1], "Warband discovery").color)
+            assert.same({ 0.35, 0.85, 0.45 }, labelFor(frames[1], "Alt discovery").color)
+
             local lines = rowsOf(frames[1])
-            assert.equal("warband first", valueFor(lines, "  Warband discovery"))
-            assert.equal("character first", valueFor(lines, "  Alt discovery"))
+            assert.equal("", valueFor(lines, "  Warband discovery"))
+            assert.equal("", valueFor(lines, "  Alt discovery"))
+        end)
+
+        -- A daily run again, or a quest the flags were never filed for: neither kind of first,
+        -- so there is no colour and the word is the whole of what the row has to say.
+        it("leaves a quest that is neither kind of first uncoloured, and says completed", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                quests = { { id = 1, name = "Daily rounds", accountFirst = false, characterFirst = false } },
+            }))
+
+            expand(frames[1], "Quests")
+
+            assert.same({ 0.68, 0.68, 0.7 }, labelFor(frames[1], "Daily rounds").color)
+            assert.equal("completed", valueFor(rowsOf(frames[1]), "  Daily rounds"))
         end)
 
         it("previews a transmog on left click and opens its source on right click", function()

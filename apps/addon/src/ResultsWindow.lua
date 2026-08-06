@@ -1148,16 +1148,22 @@ function ns.newResultsWindow(deps)
             heading("Quests", "quests", questValue, SUMMARY_VALUE_WIDTH)
             if expanded.quests then
                 for _, event in ipairs(quests) do
-                    local scope = "completed"
-                    local color = REP_COLOR
+                    -- The colour alone, the way the transmog and achievement blocks say it.
+                    -- The word that used to sit beside it is what the heading counts, and it
+                    -- was costing a quest name the column it is clipped in.
+                    --
+                    -- "completed" survives on a quest that is neither a warband first nor this
+                    -- character's — the run of a daily, or one the flags were never filed for.
+                    -- There is no colour for that, so the word is the whole of what the row
+                    -- has to say rather than a second telling of it.
+                    local scope, color = "completed", nil
                     if event.accountFirst == true then
-                        scope = "warband first"
-                        color = ACCOUNT_COLOR
+                        scope, color = "", ACCOUNT_COLOR
                     elseif event.characterFirst == true then
-                        scope = "character first"
-                        color = CHARACTER_COLOR
+                        scope, color = "", CHARACTER_COLOR
                     end
-                    line("  " .. (event.name or ("Quest " .. event.id)), scope, color)
+                    line("  " .. (event.name or ("Quest " .. event.id)), scope,
+                        color or REP_COLOR, nil, nil, color)
                 end
             end
         end
@@ -1210,9 +1216,12 @@ function ns.newResultsWindow(deps)
             heading("Housing items", "housingItems", housingValue, SUMMARY_VALUE_WIDTH)
             if expanded.housingItems then
                 for _, event in ipairs(housingItems) do
-                    local scope = event.warbandFirst and "warband first" or "additional"
+                    -- The colour alone, and here it is every row: `warbandFirst` is folded to
+                    -- a boolean where the event is filed, so there is no third state to leave
+                    -- a word behind for. The heading over the block is where "warband" and
+                    -- "extra" are still spelled out.
                     local color = event.warbandFirst and ACCOUNT_COLOR or CHARACTER_COLOR
-                    line("  " .. event.name, scope, color)
+                    line("  " .. event.name, "", color, nil, nil, color)
                 end
             end
         end
