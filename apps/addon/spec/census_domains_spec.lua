@@ -428,7 +428,7 @@ describe("the census domains", function()
         it("walks a position for every toy the unfiltered total claims", function()
             local domain = ns.toyCensus(newToyBox({ total = 3 }))
 
-            assert.same({ 1, 2, 3 }, domain.list())
+            assert.equal(3, domain.list())
         end)
 
         -- `-1` is the client's own answer for a position past the end of the list, which is what
@@ -724,7 +724,7 @@ describe("the census domains", function()
 
             assert.equal("titles", domain.name)
             assert.equal("character", domain.scope)
-            assert.same({ 1, 2, 3 }, domain.list())
+            assert.equal(3, domain.list())
         end)
 
         it("says nothing about a mask this character has not earned", function()
@@ -847,15 +847,17 @@ describe("the census domains", function()
         it("walks a range of ids rather than the rows the pane happens to be drawing", function()
             local domain = ns.currencyCensus(newCurrencies({}))
 
-            local ids = domain.list()
-
+            -- A count rather than an array of five thousand integers saying the same thing. See
+            -- `CensusDomain.list`: an unbroken run of positions is said in one number, and
+            -- building the array was work done inside the one frame `list` gets.
+            assert.equal(5000, domain.list())
             assert.equal("currencies", domain.name)
             -- The first domain that is not the account's. Two alts with a wallet each must not
             -- read as one alt whose wallet keeps being replaced.
             assert.equal("character", domain.scope)
-            assert.equal(5000, #ids)
-            assert.equal(1, ids[1])
-            assert.equal(5000, ids[#ids])
+            -- And one of the two the app draws its character screens from, which is what makes it
+            -- something the collections switch may not turn off.
+            assert.equal(ns.censusHoldings, domain.group)
         end)
 
         it("says nothing about an id the client answers nothing for", function()
@@ -1098,15 +1100,12 @@ describe("the census domains", function()
         it("walks a range of ids rather than the rows the pane happens to be drawing", function()
             local domain = ns.reputationCensus(newFactions({ rows = {} }))
 
-            local ids = domain.list()
-
+            assert.equal(4000, domain.list())
             assert.equal("reputations", domain.name)
             -- A standing is one character's. Two alts at different renown must not read as
             -- one alt whose standing keeps being replaced.
             assert.equal("character", domain.scope)
-            assert.equal(4000, #ids)
-            assert.equal(1, ids[1])
-            assert.equal(4000, ids[#ids])
+            assert.equal(ns.censusHoldings, domain.group)
         end)
 
         -- Issue #254 in one test. The pane is drawing one faction and knows nothing of the
@@ -1302,7 +1301,7 @@ describe("the census domains", function()
 
             assert.equal("achievements", domain.name)
             assert.equal("account", domain.scope)
-            assert.same({ 1, 2, 3, 4, 5 }, positions)
+            assert.equal(5, positions)
         end)
 
         it("reads each position back out as the tree and offset it stands for", function()
@@ -1516,13 +1515,15 @@ describe("the census domains", function()
                 [11] = { rows = { {}, {} } },
             }))
 
-            assert.equal(5, #domain.list())
+            -- A count rather than a five-entry array, which at real sizes was fifty-five
+            -- thousand entries drawn inside one frame. See `newPlan` in `CensusDomains.lua`.
+            assert.equal(5, domain.list())
         end)
 
         it("plans nothing for a category this build does not have", function()
             local collection = newCollection({ [1] = { rows = { {} } } })
 
-            assert.equal(1, #ns.appearanceCensus(collection).list())
+            assert.equal(1, ns.appearanceCensus(collection).list())
         end)
 
         -- Issue #271, at the first of the two seams that probe. The walk asks about every id up
@@ -1542,7 +1543,7 @@ describe("the census domains", function()
                 positions = domain.list()
             end)
 
-            assert.equal(3, #positions)
+            assert.equal(3, positions)
         end)
 
         it("reads a position back out as the category and offset it stands for", function()
@@ -1572,7 +1573,7 @@ describe("the census domains", function()
             })
             local domain = ns.appearanceCensus(collection)
 
-            for _, position in ipairs(domain.list()) do
+            for position = 1, domain.list() do
                 domain.read(position)
             end
 
@@ -1631,7 +1632,7 @@ describe("the census domains", function()
             }))
             local positions = domain.list()
 
-            assert.equal(3, #positions)
+            assert.equal(3, positions)
             assert.equal(1101, (domain.read(1)))
             assert.is_nil(domain.read(2))
             assert.is_nil(domain.read(3))
@@ -1743,16 +1744,39 @@ describe("the census domains", function()
             return names
         end
 
-        -- Cheapest first, and the order is the assertion. A pass is interrupted by whatever ends
-        -- the session, so the two domains that finish in a fraction of a second must not be
-        -- queued behind the thirteen-thousand-call one that takes a minute.
-        it("names every domain a build can answer for, cheapest walk first", function()
+        -- A pass is interrupted by whatever ends the session, so the order is the assertion.
+        -- The holdings go first — they are what the app's character screens are drawn from, they
+        -- run whatever the collections switch says, and they are character-scoped, so an alt
+        -- never logged in is an alt nothing can ever say a wallet for. Then the short collection
+        -- walks, and the thirteen-thousand-call tree and the wardrobe last.
+        it("names every domain a build can answer for, holdings first", function()
             assert.same({
-                -- The four short walks first, none of them two thousand positions, then the
-                -- five-thousand-id ranges, and the thirteen-thousand-call tree last.
+                "currencies", "reputations",
                 "mounts", "pets", "toys", "heirlooms", "titles",
-                "currencies", "reputations", "appearances", "achievements",
+                "appearances", "achievements",
             }, namesOf(ns.censusDomains(everything())))
+        end)
+
+        -- The split the whole family exists for. Turning the collections off must leave a
+        -- character's wallet and standings being walked, because they are what every other
+        -- screen in the app reads — which is the bug this was last edited for.
+        it("puts the wallet and the standings in a family of their own", function()
+            local byName = {}
+            for _, domain in ipairs(ns.censusDomains(everything())) do
+                byName[domain.name] = domain.group
+            end
+
+            assert.same({
+                currencies = ns.censusHoldings,
+                reputations = ns.censusHoldings,
+                mounts = ns.censusCollections,
+                pets = ns.censusCollections,
+                toys = ns.censusCollections,
+                heirlooms = ns.censusCollections,
+                titles = ns.censusCollections,
+                appearances = ns.censusCollections,
+                achievements = ns.censusCollections,
+            }, byName)
         end)
 
         it("is no domains at all on a build that can answer for none", function()
@@ -1768,8 +1792,9 @@ describe("the census domains", function()
             clients.mount = nil
 
             assert.same({
+                "currencies", "reputations",
                 "pets", "toys", "heirlooms", "titles",
-                "currencies", "reputations", "appearances", "achievements",
+                "appearances", "achievements",
             }, namesOf(ns.censusDomains(clients)))
         end)
 
@@ -1778,22 +1803,24 @@ describe("the census domains", function()
             clients.achievement = nil
 
             assert.same({
+                "currencies", "reputations",
                 "mounts", "pets", "toys", "heirlooms", "titles",
-                "currencies", "reputations", "appearances",
+                "appearances",
             }, namesOf(ns.censusDomains(clients)))
         end)
 
         -- And the case that would actually catch it, now there is a domain with one on each
-        -- side: a build with no `C_CurrencyInfo` leaves the reputations and achievements behind
-        -- the gap and the mounts in front of it, rather than a list that stops where the
-        -- currencies would be.
+        -- side: a build with no `C_CurrencyInfo` leaves everything behind the gap standing,
+        -- rather than a list that stops where the currencies would be — and the currencies are
+        -- first in the walk, so this is also the hole at the very front of it.
         it("keeps the domains on both sides of one this build cannot answer for", function()
             local clients = everything()
             clients.currency = nil
 
             assert.same({
+                "reputations",
                 "mounts", "pets", "toys", "heirlooms", "titles",
-                "reputations", "appearances", "achievements",
+                "appearances", "achievements",
             }, namesOf(ns.censusDomains(clients)))
         end)
 
@@ -1805,8 +1832,9 @@ describe("the census domains", function()
             clients.toy = nil
 
             assert.same({
+                "currencies", "reputations",
                 "mounts", "pets", "heirlooms", "titles",
-                "currencies", "reputations", "appearances", "achievements",
+                "appearances", "achievements",
             }, namesOf(ns.censusDomains(clients)))
         end)
 
@@ -1818,8 +1846,9 @@ describe("the census domains", function()
             clients.standing = nil
 
             assert.same({
+                "currencies",
                 "mounts", "pets", "toys", "heirlooms", "titles",
-                "currencies", "appearances", "achievements",
+                "appearances", "achievements",
             }, namesOf(ns.censusDomains(clients)))
         end)
     end)

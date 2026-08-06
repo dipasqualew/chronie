@@ -35,8 +35,8 @@ local _, ns = ...
 ---@field scope "account"|"character" Which of the two a reading belongs to. An account domain is
 ---one every character reports the same answer for — mounts, appearances, achievements — and is
 ---kept once. A character domain is kept per `Name-Realm`, the way `HoldingsStore` keeps holdings.
----@field list fun(): any[]? Every position the walk should visit, in whatever the domain finds
----cheapest to enumerate. Nil — not an empty list — when this client build will not answer at
+---@field list fun(): (any[]|integer)? Every position the walk should visit, in whatever the domain
+---finds cheapest to enumerate. Nil — not an empty list — when this client build will not answer at
 ---all, which leaves the last census standing rather than replacing it with an empty one.
 ---
 ---A position is not always an id, and that is the point. The mount journal hands over its ids
@@ -45,6 +45,13 @@ local _, ns = ...
 ---domain drew up. What the two have in common is that building the list is arithmetic and a
 ---handful of calls, never the walk itself — the walk is what the budget below exists to spread
 ---out, and a `list` that did it would freeze the client for exactly as long as this avoids.
+---
+---**A plain number means the positions are `1` to that number**, and a domain whose positions are
+---an unbroken run should say so rather than build the array. Four of them are: currencies and
+---reputations walk a range of ids because their client namespaces have no enumerator, and
+---achievements and appearances walk an offset into a plan they drew up. Handing back
+---`{ 1, 2, 3, ... 55000 }` for those was half a megabyte of array built inside a single frame
+---to say what one integer says — the frame the whole slicing mechanism exists to protect.
 ---@field read fun(position: any): (integer?, table?) The id at that position, and what the
 ---account holds of it — or nothing for a position that holds nothing. **Only what is held is
 ---written down**: the catalogue of what exists lives in the game's own tables, which the desktop
@@ -52,6 +59,11 @@ local _, ns = ...
 ---nothing more.
 ---@field count fun(): integer? The client's own count of what is held, in one call. Nil for a
 ---domain whose client offers none. See `audit`.
+---@field group string? Which family of readings this belongs to — `"holdings"` for what a
+---character is carrying and standing in, `"collections"` for what the account has gathered.
+---Default `"collections"`. Nothing in this file reads it; it is here because it is a fact about
+---the domain, and `Main.lua` is what decides that one family runs unasked and the other is a
+---switch. See `ns.censusDomains`.
 ---@field partial boolean? Whether the most a pass over this domain can ever be is *part* of the
 ---answer.
 ---
@@ -69,14 +81,23 @@ local _, ns = ...
 ---union across the roster happen at all, and it is affordable for the same reason it is necessary
 ---— the domain that needs it is the one no client event feeds between passes.
 
+---How far a pass in flight has got, which is the whole of what anything watching one is told.
+---@class CensusProgress
+---@field domain string Which domain is being walked right now.
+---@field done integer Positions of it visited.
+---@field total integer Positions it has.
+---@field at integer Which domain of the queue this is, counting from one.
+---@field of integer How many domains the pass covers.
+
 ---@class Census
 ---@field audit fun(): string[] Which domains look wrong without walking them.
 ---@field start fun(names: string[]?): string[] Begin a pass over these domains, or over every
 ---domain that `audit` distrusts. Returns what it will walk.
 ---@field step fun(): boolean One slice of work. True while there is more to do.
 ---@field run fun(names: string[]?, onDone: fun()?): boolean Start a pass and drive it to the end,
----a slice per frame. False when there was nothing to begin.
+---a slice at a time. False when there was nothing to begin.
 ---@field state fun(name: string, character: string?): CensusState? What a domain last said.
+---@field progress fun(): CensusProgress? How far the pass in flight has got, or nil when none is.
 ---@field running fun(): boolean
 
 ---@class CensusDeps
@@ -87,7 +108,18 @@ local _, ns = ...
 ---@field character fun(): string "Name-Realm" of whoever is logged in.
 ---@field build fun(): string? Which client build this is.
 ---@field domains CensusDomain[]
----@field budget integer? How many ids one slice asks about. Default `DEFAULT_BUDGET`.
+---@field budget integer? The most ids one slice will ask about. Default `DEFAULT_BUDGET`.
+---@field elapsed fun(): number? A millisecond clock that does not care what time it is —
+---`debugprofilestop` on a real client. **This is what makes the budget above a ceiling rather
+---than the whole rule**: see `SLICE_MILLISECONDS`. A build without one is walked on the count
+---alone, which is what every test that does not care about timing gets.
+---@field busy fun(): boolean? Whether this is a bad moment. A slice is skipped rather than
+---shortened while it answers true, because the moments this exists for — a pull, a boss — are
+---exactly the moments a player would blame the addon for a stutter, and they are over in
+---minutes. Absent means never busy.
+---@field onProgress fun(progress: CensusProgress?)? Called after every slice a `run` drives, and
+---once more when the queue runs out — with nil, because by then there is nothing in flight.
+---Whatever is watching decides how often it is worth acting on; this fires per slice.
 
 ---The account-level schema version, which is **not** `segmentSchemaVersion`.
 ---
@@ -97,20 +129,86 @@ local _, ns = ...
 ---that makes every reader re-import every segment.
 local VERSION = 1
 
----How many ids one slice asks the client about.
+---The most ids one slice will ask the client about.
 ---
----A slice runs inside one frame and nothing else runs while it does, so this is a frame-budget
----rather than a batch size. Two hundred `GetMountInfoByID` calls are well under a millisecond;
----the number is small enough that a domain whose reads are far more expensive than that still
----cannot drop a frame, and large enough that thirteen thousand achievements finish in about a
----minute of ordinary play.
+---A slice runs inside one frame and nothing else runs while it does, so this is a frame budget
+---rather than a batch size. Two hundred `GetMountInfoByID` calls are well under a millisecond.
+---
+---**It is a ceiling and not the rule**, which is the correction `SLICE_MILLISECONDS` makes. A
+---count can only ever be right for the domain it was chosen against, and the domains here differ
+---by more than an order of magnitude in what one position costs: an appearance is a table index
+---behind a call already made, and a reputation is up to four client calls, one of which reaches
+---the major-faction and friendship tables. Two hundred of the first is nothing; two hundred of
+---the second, every frame, is what a player feels.
 local DEFAULT_BUDGET = 200
 
----How long between slices. Zero means "next frame", which is what `C_Timer.After(0, ...)` does.
+---How long a slice may spend before it puts the rest back until next time.
 ---
----Next frame rather than a longer wait, because the whole pass is bounded by the budget above
----and a census that took ten minutes would be one that a logout reliably interrupts.
-local SLICE_DELAY = 0
+---The number that actually bounds the work, with the count above as the ceiling over it. A frame
+---at sixty is 16.7ms, so this is a tenth of one — small enough that a slice landing in a frame
+---that was already going to be tight cannot be what drops it, and large enough that the clock
+---reading itself is not most of what a slice does.
+---
+---Only enforced where `deps.elapsed` was given. Nothing here falls back to `now()`, which counts
+---in whole seconds and would either never fire or fire on every read.
+local SLICE_MILLISECONDS = 1.5
+
+---How many reads between two readings of that clock.
+---
+---A `debugprofilestop` is cheap and is not free, and a slice that asked the time after every
+---position would spend a real share of its budget finding out how much of it was left.
+---
+---It is also the floor under the slice, which is what sizes it: no slice can stop before this
+---many positions however long they took. Sixteen of the most expensive read here — a reputation,
+---which is up to four client calls — is sixty-four calls, comfortably inside a frame even if
+---every one of them were slow, so the floor cannot overshoot into anything a player sees.
+local CLOCK_EVERY = 16
+
+---How long between slices.
+---
+---This used to be zero — "next frame", which is what `C_Timer.After(0, ...)` does — and that is
+---the line that made the census something a player switched off. A slice per frame is the addon
+---asking for a share of *every* frame for as long as the pass lasts, and the share is not small
+---on the expensive domains. Nothing about it was visible either, which is how it went unnoticed:
+---the walk ran in silence and the game simply felt worse.
+---
+---A twentieth of a second instead. With the budget above that is a few thousand positions a
+---second — the whole of a currency or reputation walk inside two, an account's achievements in
+---under five, and the wardrobe in about fifteen — while the client keeps better than ninety-nine
+---frames in a hundred entirely to itself.
+local SLICE_DELAY = 0.05
+
+---How long to wait before looking again, when the moment was a bad one.
+---
+---Long enough that a pull is not being polled at twenty hertz, short enough that a pass does not
+---sit out the rest of a fight it could have finished during.
+local BUSY_DELAY = 2
+
+---How long a domain is left alone after a pass over it finished.
+---
+---**The bug this exists for.** `audit` is called on the far side of every loading screen, and two
+---of its answers never settle: a `partial` domain is never complete by construction, and a domain
+---whose client counter disagrees for a reason of the client's own goes on disagreeing however
+---often it is walked. Both were therefore named at *every* loading screen — so a player zoning in
+---and out of a dungeon re-walked the whole wardrobe each time, which is the "census slows the game
+---down" the switch was reached for to stop. The document says a partial domain is walked once a
+---session; nothing enforced it.
+---
+---A completed pass now buys quiet. It is time rather than a session flag because it is what the
+---file already records — `completedAt` is persisted, so logging in and out does not reset it
+---either, which was the same hole seen from the other side.
+local DEFAULT_QUIET = 15 * 60
+
+---And how long a `partial` domain is left alone, which is longer.
+---
+---An ordinary domain is only ever left un-settled by a real suspicion — a counter that says
+---something is missing — so a quarter of an hour before looking again is the right impatience. A
+---partial domain is *never* settled, so its quiet period is not an impatience but the whole
+---interval at which it is walked, and what would make it worth walking again is either the
+---account collecting something, which the client's own events already carry, or a different
+---character logging in, which is not a matter of time at all and is why `recentlyWalked` asks who
+---did the walking before it asks when.
+local PARTIAL_QUIET = 60 * 60
 
 ---@param deps CensusDeps
 ---@return Census
@@ -243,17 +341,58 @@ function ns.newCensus(deps)
         return state.complete == true
     end
 
+    ---Whether a pass over this domain finished recently enough that another would say nothing.
+    ---
+    ---The guard on the two suspicions that never go away — see `DEFAULT_QUIET`. It asks three
+    ---questions in the order that makes each of the later ones worth asking.
+    ---
+    ---**Has the game changed?** A build that differs from the one the reading was taken on is not
+    ---a stale reading, it is a reading of a different game, and there is no interval short enough
+    ---to be wrong about that. It goes through whatever the clock says.
+    ---
+    ---**Did somebody else take it?** `by` is who walked an account-scoped domain, and for a
+    ---`partial` one it is the whole point: the account's wardrobe is the union of what its
+    ---characters can each see, so a walk by the mage ten minutes ago is not a reason to refuse the
+    ---paladin. A character-scoped state is already only that character's, so there is nobody else
+    ---it could have been.
+    ---
+    ---**And how long ago?** Only then, and only against a pass that actually *finished* — an
+    ---interrupted one leaves `completedAt` nil and buys nothing, which is exactly right, because
+    ---the part it did not reach is still unread.
+    ---@param domain CensusDomain
+    ---@param state CensusState
+    ---@param build string?
+    ---@return boolean
+    local function recentlyWalked(domain, state, build)
+        if build and state.build ~= build then
+            return false
+        end
+        if domain.scope ~= "character" and state.by ~= deps.character() then
+            return false
+        end
+        local at = state.completedAt
+        if type(at) ~= "number" then
+            return false
+        end
+        return (now() - at) < (domain.partial and PARTIAL_QUIET or DEFAULT_QUIET)
+    end
+
     ---@return string[] The domains whose stored census cannot be trusted as it stands.
     local function audit()
         local build = deps.build and deps.build() or nil
         local stale = {}
         for name, domain in pairs(domains) do
             local state = stateOf(domain)
-            local counter = domain.count
-            local counted = counter and counter() or nil
-            local wrongCount = type(counted) == "number" and counted > state.held
-            if not settled(domain, state) or (build and state.build ~= build) or wrongCount then
-                stale[#stale + 1] = name
+            -- Asked before the counter below rather than after it, so a domain nothing is going
+            -- to walk is not also a handful of client calls at every loading screen. The
+            -- appearance counter alone is forty categories behind a `pcall` each.
+            if not recentlyWalked(domain, state, build) then
+                local counter = domain.count
+                local counted = counter and counter() or nil
+                local wrongCount = type(counted) == "number" and counted > state.held
+                if not settled(domain, state) or (build and state.build ~= build) or wrongCount then
+                    stale[#stale + 1] = name
+                end
             end
         end
         table.sort(stale)
@@ -314,7 +453,8 @@ function ns.newCensus(deps)
             return {}
         end
 
-        pass = { queue = queue, at = 0, ids = nil, index = 0, startedAt = now() }
+        pass = { queue = queue, at = 0, domain = nil, ids = nil, total = 0, index = 0,
+            startedAt = now() }
         local walking = {}
         for _, domain in ipairs(queue) do
             walking[#walking + 1] = domain.name
@@ -332,8 +472,15 @@ function ns.newCensus(deps)
             return false
         end
 
-        local ids = domain.list()
-        if type(ids) ~= "table" then
+        local listed = domain.list()
+        local ids, total
+        if type(listed) == "table" then
+            ids, total = listed, #listed
+        elseif type(listed) == "number" and listed >= 0 then
+            -- An unbroken run of positions, said in one integer rather than built as an array of
+            -- however many thousand. `positionAt` is the only place the difference is visible.
+            ids, total = nil, math.floor(listed)
+        else
             -- A client build that will not answer for this domain at all. The last census
             -- stands: replacing it with an empty one would tell a reader the account had lost
             -- everything, when what actually happened is that nobody could be asked.
@@ -355,8 +502,23 @@ function ns.newCensus(deps)
         pass.domain = domain
         pass.state = state
         pass.ids = ids
+        pass.total = total
         pass.index = 0
         return true
+    end
+
+    ---The position the walk should visit at this offset.
+    ---
+    ---One of the two shapes `list` may answer in: an array of the client's own ids, or a count
+    ---standing for the run `1` to `n`. Nil for a hole in an array, which nothing here writes and a
+    ---hand-edited domain could.
+    ---@param index integer
+    ---@return any
+    local function positionAt(index)
+        if not pass.ids then
+            return index
+        end
+        return pass.ids[index]
     end
 
     ---How much of what is written down this pass actually put there.
@@ -419,19 +581,29 @@ function ns.newCensus(deps)
         state.counted = counter and counter() or nil
     end
 
+    ---One slice: as much of the domain in hand as fits in a fraction of one frame.
+    ---
+    ---Two bounds rather than one, and the pair is the point. The count is a ceiling that holds on
+    ---any client; the clock is what makes the slice cost the same wherever it lands, across
+    ---domains whose positions differ by an order of magnitude in what they ask the client for.
+    ---Whichever runs out first ends the slice, and the rest waits for the next one.
     ---@return boolean
     local function step()
         if not pass then
             return false
         end
-        if not pass.ids and not advance() then
+        if not pass.domain and not advance() then
             return false
         end
 
         local seen = now()
-        local last = math.min(pass.index + budget, #pass.ids)
-        for index = pass.index + 1, last do
-            local position = pass.ids[index]
+        local elapsed = deps.elapsed
+        local until_ = elapsed and (elapsed() + SLICE_MILLISECONDS) or nil
+        local last = math.min(pass.index + budget, pass.total)
+        local index = pass.index
+        while index < last do
+            index = index + 1
+            local position = positionAt(index)
             if position ~= nil then
                 local id, held = pass.domain.read(position)
                 -- Both or neither. A domain that names an id but says nothing about it has
@@ -441,26 +613,52 @@ function ns.newCensus(deps)
                     pass.state.entries[id] = held
                 end
             end
+            -- Asked every so many reads rather than every read, so that finding out how much of
+            -- the budget is left is never a real share of it.
+            if until_ and index % CLOCK_EVERY == 0 and elapsed() >= until_ then
+                break
+            end
         end
-        pass.index = last
+        pass.index = index
 
-        if pass.index < #pass.ids then
+        if pass.index < pass.total then
             return true
         end
 
         finish()
+        pass.domain = nil
         pass.ids = nil
+        pass.total = 0
         -- False here is the queue running out, which `advance` reports by clearing the pass —
         -- so there is never a "finished" state to distinguish from "nothing in hand".
         return advance()
     end
 
-    ---Begins a pass and drives it to the end, a slice per frame.
+    ---@return CensusProgress?
+    local function progress()
+        if not pass or not pass.domain then
+            return nil
+        end
+        return {
+            domain = pass.domain.name,
+            done = pass.index,
+            total = pass.total,
+            at = pass.at,
+            of = #pass.queue,
+        }
+    end
+
+    ---Begins a pass and drives it to the end, a slice at a time.
     ---
     ---`onDone` fires when the queue runs out, and **only then**: a pass a logout cuts short never
     ---calls it, because there is no frame left to call it from. That is what makes it usable as
     ---the answer to "did the walk somebody asked for actually happen" — see `ns.newCensusResync`,
     ---which records a request as carried out on this and nothing else.
+    ---
+    ---**A bad moment is waited out rather than worked through.** `deps.busy` is what the client
+    ---says about combat, and a pass that shrugged and carried on would be spending its budget in
+    ---the only frames of the evening anybody is counting. Nothing is lost by waiting: the queue,
+    ---the plan and everything already observed are all still here when the fight ends.
     ---@param names string[]?
     ---@param onDone fun()?
     ---@return boolean Whether a pass was begun.
@@ -472,7 +670,15 @@ function ns.newCensus(deps)
             return false
         end
         local function slice()
-            if step() then
+            if deps.busy and deps.busy() then
+                deps.after(BUSY_DELAY, slice)
+                return
+            end
+            local more = step()
+            if deps.onProgress then
+                deps.onProgress(progress())
+            end
+            if more then
                 deps.after(SLICE_DELAY, slice)
             elseif onDone then
                 onDone()
@@ -487,6 +693,7 @@ function ns.newCensus(deps)
         start = start,
         step = step,
         run = run,
+        progress = progress,
         running = function()
             return pass ~= nil
         end,

@@ -14,12 +14,15 @@ local _, ns = ...
 ---`docs/account-census.md`, which asks for exactly that comparison against a running client.
 ---@class CensusReport
 ---@field lines fun(): string[]
+---@field section fun(): DetailSection The same reading as a block of the segments window, with a
+---row per domain and a bar under the one being walked. See `section`.
 
 ---@class CensusReportDeps
 ---@field domains CensusDomain[] The same list `ns.newCensus` was given, in the same order — which
----is walk order, cheapest first, and so the order these are worth reading in.
+---is walk order and so the order these are worth reading in.
 ---@field state fun(name: string, character: string?): CensusState?
 ---@field running fun(): boolean
+---@field progress fun(): CensusProgress? How far the walk in flight has got, or nil when none is.
 ---@field now fun(): integer
 ---@field character fun(): string "Name-Realm" of whoever is logged in.
 
@@ -61,6 +64,39 @@ local function age(state, now)
     return ns.formatAge(now - at)
 end
 
+---The columns of the block the segments window draws.
+---
+---Six of them against the segment table's nine, and they add up to the same width so that the two
+---blocks read as one window rather than as two tables that happen to be stacked.
+local COLUMNS = {
+    { title = "Collection", width = 148 },
+    { title = "Reading", width = 150 },
+    { title = "Walking", width = 132 },
+    { title = "Held", width = 92 },
+    { title = "Counted", width = 84 },
+    { title = "Last walked", width = 110 },
+}
+
+local ROW_COLOR = { 1, 1, 1 }
+-- The domain being walked right now, in the gold every other table here uses for the line the
+-- eye should land on.
+local WALKING_COLOR = { 1, 0.82, 0 }
+
+---How far into the domain being walked, as something with a shape rather than two numbers.
+---
+---A player watching this wants "is it moving and how much is left", which a bar answers at a
+---glance and "1,240 / 4,000" does not. The percentage rides beside it because the bar alone
+---cannot say whether a walk is nearly done or has barely begun once it is past halfway.
+---@param progress CensusProgress
+---@return string
+local function bar(progress)
+    local total = progress.total or 0
+    local share = total > 0 and math.min(math.max(progress.done / total, 0), 1) or 0
+    local filled = math.floor(share * 10 + 0.5)
+    return string.rep("|", filled) .. string.rep("·", 10 - filled)
+        .. string.format(" %d%%", math.floor(share * 100))
+end
+
 ---@param deps CensusReportDeps
 ---@return CensusReport
 function ns.newCensusReport(deps)
@@ -98,7 +134,69 @@ function ns.newCensusReport(deps)
         return name .. " — " .. table.concat(parts, ", ")
     end
 
+    ---What one domain says, as a row of the segments window.
+    ---@param domain CensusDomain
+    ---@param progress CensusProgress?
+    ---@return DetailRow
+    local function rowOf(domain, progress)
+        local character = domain.scope == "character" and deps.character() or nil
+        local state = deps.state(domain.name, character)
+        local walking = progress and progress.domain == domain.name or false
+        if not state then
+            return { cells = { domain.name, "nothing recorded", "", "", "", "" }, color = ROW_COLOR }
+        end
+        return {
+            cells = {
+                domain.name,
+                standing(domain, state),
+                -- Only on the one row it is true of. A column of empty cells under a bar is what
+                -- says which domain the client is actually busy with.
+                walking and bar(progress) or "",
+                tostring(state.held),
+                -- Blank rather than a nought where the client offers no counter: its absence is a
+                -- fact about the domain — see `ns.mountCensus`, which does without on purpose —
+                -- and a nought there would read as "the client says you have none".
+                type(state.counted) == "number" and tostring(state.counted) or "",
+                age(state, deps.now()),
+            },
+            color = walking and WALKING_COLOR or ROW_COLOR,
+        }
+    end
+
     return {
+        ---The whole reading as a block of the segments window.
+        ---
+        ---**The census used to run in complete silence, and that is half of why it was switched
+        ---off.** It is provoked at a loading screen, spread over slices and written out at logout;
+        ---there was no way at all to see that a walk was happening, let alone how far it had got,
+        ---so a client that felt worse for a minute after every zone had nothing at all to point
+        ---at. `/chronie census` broke the first half of that silence and is still the place the
+        ---two numbers an audit compares are read side by side. This is the other half: the walk
+        ---while it is running, somewhere a player is already looking.
+        ---@return DetailSection
+        section = function()
+            local progress = deps.progress and deps.progress() or nil
+            local rows = {}
+            for _, domain in ipairs(domains) do
+                rows[#rows + 1] = rowOf(domain, progress)
+            end
+
+            local heading = "Collections"
+            if progress then
+                -- Which domain of how many, because the bar on the row below only ever describes
+                -- the one in hand — and a player watching a pass wants to know there are five
+                -- more behind it.
+                heading = string.format("Collections — walking %s, %d of %d",
+                    progress.domain, progress.at, progress.of)
+            end
+            return {
+                heading = heading,
+                columns = COLUMNS,
+                rows = rows,
+                empty = "This client build answers for none of them.",
+            }
+        end,
+
         ---@return string[]
         lines = function()
             local whole = 0

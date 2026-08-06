@@ -52,29 +52,37 @@ test("drives the game folder, sync, addon installation and app update checks", a
  * buttons up there all reach out of the window and are held to their status line, and this is a
  * switch whose whole claim is that what was ticked is what was stored. Both halves are checked
  * for that reason — a box that draws itself ticked and saved nothing looks identical on screen.
+ *
+ * What it gates is the *collections*. A character's currencies and reputations are the census's
+ * other family and are walked whatever this says, which is what the sentence beside the box has
+ * to keep saying: one switch over both of them is what silently stopped every currency and
+ * reputation the app knew about.
  */
-test("walks the account by itself only once somebody has asked it to", async ({ page }) => {
+test("walks the account's collections unless somebody turns it off", async ({ page }) => {
   const setup = new GameAndSync(page);
   await setup.open();
 
-  await test.step("a fresh install draws it unticked", async () => {
-    await expect(setup.census()).not.toBeChecked();
-    await setup.storedCensus().toBe(false);
-  });
-
-  await test.step("the sentence beside it says what to use instead", async () => {
-    await expect(setup.panel).toContainText("Resync");
-  });
-
-  await test.step("ticking it says so, and is what the backend was told", async () => {
-    await setup.census().check();
-    await expect(setup.state()).toHaveText("Chronie will walk the account after a loading screen.");
+  await test.step("a fresh install draws it ticked", async () => {
+    await expect(setup.census()).toBeChecked();
     await setup.storedCensus().toBe(true);
   });
 
-  await test.step("and unticking it puts the account back where it was", async () => {
+  await test.step("the sentence beside it says what is walked either way", async () => {
+    await expect(setup.panel).toContainText("Resync");
+    await expect(setup.panel).toContainText("currencies and reputations are walked either way");
+  });
+
+  await test.step("unticking it says so, and is what the backend was told", async () => {
     await setup.census().uncheck();
-    await expect(setup.state()).toHaveText("Chronie will only walk the account when asked.");
+    await expect(setup.state()).toHaveText("Chronie will only walk the collections when asked.");
     await setup.storedCensus().toBe(false);
+  });
+
+  await test.step("and ticking it again puts the account back where it was", async () => {
+    await setup.census().check();
+    await expect(setup.state()).toHaveText(
+      "Chronie will walk the account's collections after a loading screen.",
+    );
+    await setup.storedCensus().toBe(true);
   });
 });

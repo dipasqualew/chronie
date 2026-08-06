@@ -40,6 +40,12 @@ read_globals = {
     "EJ_GetInstanceByIndex",
     "EJ_GetInstanceInfo",
     "GetMoney",
+    -- The client's own high-resolution stopwatch, in milliseconds since it started counting.
+    -- What bounds a census slice by how long it took rather than by a count guessed in advance.
+    "debugprofilestop",
+    -- Whether the player is in a fight. The census waits one out rather than spending its budget
+    -- in the only frames of the evening anybody is counting.
+    "InCombatLockdown",
     "C_Bank",
     "Enum",
     "GetInstanceInfo",

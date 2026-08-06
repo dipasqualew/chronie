@@ -26,6 +26,25 @@ local _, ns = ...
 ---also recorded every absence would be several times the size and would say nothing the desktop
 ---could not work out by subtraction.
 
+---What a character is carrying and where it stands: the wallet and the reputations.
+---
+---One of the two families in `CensusDomain.group`, and the distinction is not tidiness. These two
+---are what every other screen in the app is drawn from — a character's currencies, a faction's
+---best standing across the roster — and the pane sweep they complete
+---(`apps/addon/src/HoldingsSweep.lua`) already runs at every loading screen and every logout,
+---unasked and ungated. They are also the cheap end of the census by a wide margin: nine thousand
+---ids between them, character-scoped, and no plan to draw.
+---
+---So `Main.lua` walks them whatever the collections switch says. The alternative was tried and is
+---the bug this file was last edited for: one switch over the whole census meant that turning off a
+---wardrobe walk somebody could not afford also turned off every currency and reputation the app
+---knows about, silently, and the app went on drawing a character's holdings out of whatever the
+---pane happened to have been showing.
+ns.censusHoldings = "holdings"
+
+---What the account has gathered, which is the expensive end and the one behind a switch.
+ns.censusCollections = "collections"
+
 ---A count worth writing down, or nothing.
 ---
 ---Nought is the client's answer for "no cap", "nothing earned yet" and "no weekly" alike, and a
@@ -38,6 +57,64 @@ local function nonzero(value)
         return nil
     end
     return value
+end
+
+---A walk over several groups of different sizes, held as their boundaries rather than as one
+---entry per position.
+---
+---Two domains here have no id list and are walked by group and offset: achievements by category,
+---appearances by transmog category. Both used to draw the plan as two flat arrays with an entry
+---per position — 13,700 for one and 55,000 for the other, three arrays including the identity
+---list the walk itself wanted, all built inside the single frame `list` runs in. That frame is the
+---one the whole slicing mechanism exists to protect, and drawing the plan was by a distance the
+---largest thing the census ever did to it.
+---
+---The boundaries are the same information in eighty numbers. `add` records where each group ends,
+---`total` is what `list` hands back, and `at` binary-searches the position onto a group and an
+---offset within it — seven comparisons against eighty categories, once per read, which is
+---nothing beside the client call the read is there to make.
+---@return table `{ reset, add, total, at }`
+local function newPlan()
+    local groups, ends, total = {}, {}, 0
+
+    return {
+        reset = function()
+            groups, ends, total = {}, {}, 0
+        end,
+        ---@param group any What the positions in this stretch belong to.
+        ---@param count integer? How many of them there are. An empty group is not recorded at
+        ---all, which keeps `at` from ever having to land on one.
+        add = function(group, count)
+            if type(count) ~= "number" or count < 1 then
+                return
+            end
+            total = total + math.floor(count)
+            groups[#groups + 1] = group
+            ends[#ends + 1] = total
+        end,
+        ---@return integer
+        total = function()
+            return total
+        end,
+        ---@param position integer
+        ---@return any?, integer? The group, and which of its own positions this is.
+        at = function(position)
+            if type(position) ~= "number" or position < 1 or position > total then
+                return nil, nil
+            end
+            local low, high = 1, #ends
+            while low < high do
+                local middle = math.floor((low + high) / 2)
+                if ends[middle] < position then
+                    low = middle + 1
+                else
+                    high = middle
+                end
+            end
+            local before = low > 1 and ends[low - 1] or 0
+            return groups[low], position - before
+        end,
+    }
 end
 
 ---Mounts: everything the account can summon.
@@ -70,6 +147,7 @@ function ns.mountCensus(journal)
     return {
         name = "mounts",
         scope = "account",
+        group = ns.censusCollections,
         list = ids,
         ---@param id integer
         ---@return integer?, table?
@@ -145,6 +223,7 @@ function ns.petCensus(journal)
     return {
         name = "pets",
         scope = "account",
+        group = ns.censusCollections,
         ---@return string[]?
         list = function()
             local guids = owned()
@@ -238,14 +317,11 @@ function ns.toyCensus(clients)
     return {
         name = "toys",
         scope = "account",
+        group = ns.censusCollections,
         partial = true,
-        ---@return integer[]
+        ---@return integer
         list = function()
-            local positions = {}
-            for index = 1, total() or 0 do
-                positions[index] = index
-            end
-            return positions
+            return total() or 0
         end,
         ---@param index integer
         ---@return integer?, table?
@@ -302,6 +378,7 @@ function ns.heirloomCensus(heirloom)
     return {
         name = "heirlooms",
         scope = "account",
+        group = ns.censusCollections,
         partial = true,
         ---@return integer[]?
         list = function()
@@ -378,13 +455,10 @@ function ns.titleCensus(clients)
     return {
         name = "titles",
         scope = "character",
-        ---@return integer[]
+        group = ns.censusCollections,
+        ---@return integer
         list = function()
-            local ids = {}
-            for id = 1, count() or 0 do
-                ids[id] = id
-            end
-            return ids
+            return count() or 0
         end,
         ---@param id integer
         ---@return integer?, table?
@@ -442,39 +516,32 @@ function ns.achievementCensus(clients)
         return nil
     end
 
-    -- The plan the positions index into. Two flat arrays rather than a table per position: a
-    -- position is visited once and thirteen thousand two-key tables is a megabyte of garbage to
-    -- hand the collector for no benefit.
-    local planCategory, planIndex = {}, {}
+    -- Where each category ends, which is all a position needs to be resolved. See `newPlan`.
+    local plan = newPlan()
 
     return {
         name = "achievements",
         scope = "account",
-        ---@return integer[]?
+        group = ns.censusCollections,
+        ---@return integer?
         list = function()
             local trees = categories()
             if type(trees) ~= "table" then
                 return nil
             end
-            planCategory, planIndex = {}, {}
-            local positions = {}
+            plan.reset()
             for _, category in ipairs(trees) do
-                -- The count is asked for once per tree and the offsets are then arithmetic. This
-                -- is the whole of what `list` is allowed to cost: about eighty calls, and then
-                -- filling two arrays, which touches nothing outside this addon.
-                for index = 1, categoryCount(category) or 0 do
-                    local at = #positions + 1
-                    planCategory[at] = category
-                    planIndex[at] = index
-                    positions[at] = at
-                end
+                -- The count is asked for once per tree and everything after it is arithmetic.
+                -- This is the whole of what `list` is allowed to cost: about eighty calls, and
+                -- eighty numbers written down.
+                plan.add(category, categoryCount(category))
             end
-            return positions
+            return plan.total()
         end,
         ---@param position integer
         ---@return integer?, table?
         read = function(position)
-            local category, index = planCategory[position], planIndex[position]
+            local category, index = plan.at(position)
             if not category then
                 return nil, nil
             end
@@ -565,13 +632,10 @@ function ns.currencyCensus(currency)
     return {
         name = "currencies",
         scope = "character",
-        ---@return integer[]
+        group = ns.censusHoldings,
+        ---@return integer
         list = function()
-            local ids = {}
-            for id = 1, LAST_CURRENCY_ID do
-                ids[id] = id
-            end
-            return ids
+            return LAST_CURRENCY_ID
         end,
         ---@param id integer
         ---@return integer?, table?
@@ -676,13 +740,10 @@ function ns.reputationCensus(clients)
     return {
         name = "reputations",
         scope = "character",
-        ---@return integer[]
+        group = ns.censusHoldings,
+        ---@return integer
         list = function()
-            local ids = {}
-            for id = 1, LAST_FACTION_ID do
-                ids[id] = id
-            end
-            return ids
+            return LAST_FACTION_ID
         end,
         ---@param id integer
         ---@return integer?, table?
@@ -800,10 +861,10 @@ function ns.appearanceCensus(collection)
         return nil
     end
 
-    -- The plan the positions index into, in the two flat arrays `ns.achievementCensus` uses and
-    -- for the same reason: fifty-five thousand two-key tables is a megabyte of garbage to make
-    -- for a walk that visits each position once.
-    local planCategory, planIndex = {}, {}
+    -- Where each category ends, in the boundaries `ns.achievementCensus` uses and for a sharper
+    -- version of the same reason: this is the domain whose plan drawn position by position was
+    -- fifty-five thousand entries in one frame. See `newPlan`.
+    local plan = newPlan()
     -- One category's answer, fetched by the first position that needs it and dropped when the
     -- walk moves on. This is where `list` gets to stay a handful of calls: the thirty fetches are
     -- spread over the slices that consume them rather than made in the frame that draws the plan.
@@ -812,12 +873,12 @@ function ns.appearanceCensus(collection)
     return {
         name = "appearances",
         scope = "account",
+        group = ns.censusCollections,
         partial = true,
-        ---@return integer[]
+        ---@return integer
         list = function()
-            planCategory, planIndex = {}, {}
+            plan.reset()
             heldCategory, heldList = nil, nil
-            local positions = {}
             for category = 1, LAST_TRANSMOG_CATEGORY do
                 -- A category the build does not have has no name; an id above the top of the
                 -- enum has no answer at all. `categoryExists` is where those become one thing.
@@ -827,20 +888,15 @@ function ns.appearanceCensus(collection)
                     -- filter can only take rows away. A category answering with more than this
                     -- would be walked as far as this and no further, which is one more corner of
                     -- an answer this domain already says is a corner.
-                    for index = 1, categoryTotal(category) or 0 do
-                        local at = #positions + 1
-                        planCategory[at] = category
-                        planIndex[at] = index
-                        positions[at] = at
-                    end
+                    plan.add(category, categoryTotal(category))
                 end
             end
-            return positions
+            return plan.total()
         end,
         ---@param position integer
         ---@return integer?, table?
         read = function(position)
-            local category, index = planCategory[position], planIndex[position]
+            local category, index = plan.at(position)
             if not category then
                 return nil, nil
             end
@@ -908,12 +964,24 @@ function ns.censusDomains(clients)
     -- no hole for `ipairs` to stop at — which would silently drop every domain after it as well.
     -- The same trap `dressUpActor` is walked around in `Main.lua`, come at from the other side.
     local makers = {
+        -- What the character is carrying goes first, and the reason is no longer only that it is
+        -- cheap. These two are the `holdings` family: they run whatever the collections switch
+        -- says, they are what the app's own character screens are drawn from, and they are
+        -- character-scoped — so unlike everything under them, an alt that is never logged in is
+        -- an alt nothing can ever say a wallet or a standing for. Nine thousand ids between them,
+        -- a couple of seconds of slices, and then the collections have the rest of the session.
+        function()
+            return ns.currencyCensus(clients.currency)
+        end,
+        function()
+            return ns.reputationCensus(clients.standing)
+        end,
         function()
             return ns.mountCensus(clients.mount)
         end,
         -- The four short walks, all of them under two thousand positions and each of them done
-        -- inside a few seconds of ordinary play — so they go in front of the five-thousand-id
-        -- ranges and a long way in front of the achievement tree.
+        -- inside a few seconds of ordinary play — so they go a long way in front of the
+        -- achievement tree and the wardrobe.
         function()
             return ns.petCensus(clients.pet)
         end,
@@ -925,12 +993,6 @@ function ns.censusDomains(clients)
         end,
         function()
             return ns.titleCensus(clients.title)
-        end,
-        function()
-            return ns.currencyCensus(clients.currency)
-        end,
-        function()
-            return ns.reputationCensus(clients.standing)
         end,
         function()
             return ns.appearanceCensus(clients.collection)

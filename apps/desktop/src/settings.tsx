@@ -249,11 +249,17 @@ export function Settings({
               This one reaches the addon, so a change takes effect at the next login or{" "}
               <code>/reload</code>.
             </p>
-            {/* Off unless somebody means it, and the sentence under the box is why: the audit in
-                front of the walk is cheap and usually finds nothing, but the pass it provokes asks
-                the client about every id it will answer for, and a patch makes every loading screen
-                the first one again. Nothing is lost by leaving it off — Resync on the Collection
-                screen still asks for a walk, and that road is not gated by this at all. */}
+            {/* The collections and nothing else. A character's currencies and reputations are the
+                census's other family and are walked whatever this says — they are what the
+                Characters screen is drawn from, and one switch over both of them meant that
+                turning this off silently stopped every currency and reputation the app knew
+                about. See ns.censusHoldings in the addon.
+
+                On by default now. It shipped off for a while because the walk took a share of
+                every single frame until it finished and re-walked the wardrobe at every loading
+                screen; the walk is now bounded in milliseconds, waits out combat, and a finished
+                pass buys quiet. Nothing is lost by turning it off either — Resync on the
+                Collection screen still asks for a walk, and that road is not gated by this. */}
             <label className="setup-choice">
               <input
                 type="checkbox"
@@ -267,21 +273,23 @@ export function Settings({
                     () => actions.setAutomaticCensus(wanted),
                     () =>
                       wanted
-                        ? "Chronie will walk the account after a loading screen."
-                        : "Chronie will only walk the account when asked.",
+                        ? "Chronie will walk the account's collections after a loading screen."
+                        : "Chronie will only walk the collections when asked.",
                   ).then((stored) => {
                     if (stored) setCensus(stored.automaticCensus === true);
                   });
                 }}
               />
               <span>
-                Walk the whole account after a loading screen
+                Walk the collections after a loading screen
                 <span className="sub">
-                  Chronie asks the game for every mount, appearance and achievement the account
-                  holds, so the Collection screen knows what it has without waiting for it to happen
-                  again. The first walk is thousands of questions and a game patch makes every
-                  loading screen the first one again. Leave this off and use <strong>Resync</strong>{" "}
-                  on the Collection screen instead, which asks for the same walk when you want one.
+                  Chronie asks the game for every mount, pet, toy, appearance and achievement the
+                  account holds, so the Collection screen knows what it has without waiting for it
+                  to happen again. It runs a few per cent of a frame at a time, pauses while
+                  you&rsquo;re in combat, and the segments window shows how far it has got. Turn it
+                  off and use <strong>Resync</strong> on the Collection screen instead, which asks
+                  for the same walk when you want one. Your currencies and reputations are walked
+                  either way.
                 </span>
               </span>
             </label>

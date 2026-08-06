@@ -62,10 +62,14 @@ describe("addon integration", function()
         -- Asserted on the file rather than on the behaviour, because the file is what the app
         -- writes and what a hand-installed copy gets. What the flag then gates has tests of its
         -- own further down.
-        it("carries settings with nothing that walks the account by itself switched on", function()
+        --
+        -- It shipped off for a while, and what was wrong was the walk rather than the switch: a
+        -- slice every frame, nothing waiting out a pull, and the whole wardrobe re-walked at
+        -- every single loading screen. Census.lua answers each of those now.
+        it("carries settings with the account's collections walked by default", function()
             local ns = loader.load()
 
-            assert.is_false(ns.settings.sync.census)
+            assert.is_true(ns.settings.sync.census)
         end)
     end)
 
@@ -4157,18 +4161,74 @@ describe("addon integration", function()
         ---it does not.
         local CENSUS_ON = { sync = { census = true } }
 
-        -- Why the box exists, and why it starts unticked. The walk behind a census is thousands
-        -- of client calls, a loading screen is what provokes it, and a player who wanted their
-        -- lockouts and their evening never asked for it. Nothing has been removed — the pass is
-        -- in Census.lua and `/chronie census refresh` still runs it — but nothing starts it by
-        -- itself until somebody says so.
-        it("walks nothing on a loading screen until it has been switched on", function()
-            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+        ---And what it says when they have unticked it. The switch covers the *collections* and
+        ---nothing else, which is the whole of what these two tests are about.
+        local CENSUS_OFF = { sync = { census = false } }
+
+        -- The bug this split exists for. One switch over the whole census meant that turning off
+        -- a wardrobe walk somebody could not afford also stopped every currency and reputation
+        -- the app knew about — silently, and the app went on drawing a character's holdings out
+        -- of whatever the pane happened to have been showing at the time.
+        --
+        -- A wallet and a set of standings are not a collection. They are what every character
+        -- screen in the app is drawn from, they complete a pane sweep that already runs unasked
+        -- at every loading screen, and they are nine thousand ids against the wardrobe's
+        -- fifty-five. So they are walked whatever the box says.
+        it("walks the wallet and the standings even with the collections switched off", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = CENSUS_OFF,
+                censusCurrencies = {
+                    [1602] = {
+                        name = "Conquest", quantity = 1650, discovered = true,
+                        maxQuantity = 5500, quantityEarnedThisWeek = 750,
+                    },
+                },
+                censusFactions = {
+                    [529] = {
+                        factionID = 529,
+                        name = "Argent Dawn",
+                        reaction = 6,
+                        currentStanding = 12000,
+                        currentReactionThreshold = 9000,
+                        nextReactionThreshold = 21000,
+                    },
+                },
+            })
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
             recorded.settle()
 
-            assert.is_nil(recorded.db.census)
+            local mine = recorded.db.census.characters["Thrall-Ragnaros"]
+            assert.equal("Argent Dawn", mine.reputations.entries[529].name)
+            assert.is_true(mine.reputations.complete)
+            -- And the caps the pane row has no room for, which is the half of a wallet no
+            -- amount of watching somebody spend a currency would ever produce.
+            assert.equal(1650, mine.currencies.entries[1602].total)
+            assert.equal(5500, mine.currencies.entries[1602].cap)
+            assert.is_true(mine.currencies.complete)
+        end)
+
+        -- And the other half of the same claim: the expensive end really is behind the box.
+        it("walks none of the collections while the box is unticked", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = CENSUS_OFF,
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            -- The audit still looks at them, which is what leaves an empty state behind — but
+            -- nothing was ever walked, and a domain that was never walked has no revision and
+            -- no time it was started at.
+            for _, name in ipairs({ "mounts", "achievements", "appearances" }) do
+                local state = recorded.db.census.account[name]
+                assert.equal(0, state.revision)
+                assert.is_nil(state.startedAt)
+            end
         end)
 
         -- The hole neither the segments nor the pane sweep can close. Both of those record
@@ -4797,6 +4857,37 @@ describe("addon integration", function()
             recorded.slashRegistrations[1].handler("segments")
 
             assert.is_true(#recorded.frames > 1)
+        end)
+
+        -- The census used to run in complete silence, which is half of why it was switched off:
+        -- a client that felt worse for a minute after every zone had nothing at all to point at.
+        -- What the block says belongs to census_report_spec.lua; what only a booted addon can
+        -- say is that it reaches this window at all, and that the walk in flight moves it.
+        it("carries what the census is doing under the totals", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                now = 1700000000,
+                settings = { sync = { census = true } },
+            })
+            recorded.slashRegistrations[1].handler("segments")
+
+            -- Every frame rather than the window's own, because a section heading is drawn on
+            -- the scrolling child inside it.
+            local texts = {}
+            for _, frame in ipairs(recorded.frames) do
+                for _, fontString in ipairs(frame.fontStrings or {}) do
+                    texts[#texts + 1] = fontString.text
+                end
+            end
+
+            local found = false
+            for _, text in ipairs(texts) do
+                if text == "Collections" or (text or ""):find("^Collections — walking") then
+                    found = true
+                end
+            end
+            assert.is_true(found, table.concat(texts, " | "))
         end)
 
         it("filters the table and its totals as character, day, and location are edited", function()

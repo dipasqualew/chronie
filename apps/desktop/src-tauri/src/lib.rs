@@ -87,6 +87,16 @@ fn default_capture_triggers() -> Vec<String> {
     vec!["accountFirstAchievement".to_string()]
 }
 
+/// Whether a settings file that says nothing lets the addon walk the account's collections.
+///
+/// True, including for the files written while it shipped false. What was wrong then was the walk
+/// rather than the switch, and the walk has been rebuilt around a millisecond budget rather than a
+/// count of positions — so a reader whose file predates the fix gets the fixed behaviour rather
+/// than the setting they were driven to by a version of it that no longer exists.
+fn default_automatic_census() -> bool {
+    true
+}
+
 /// The body a settings file that says nothing is drawn on.
 fn body_default() -> u32 {
     body::DEFAULT
@@ -126,18 +136,25 @@ struct Settings {
     /// still photographs its account firsts; an explicit `[]` is respected and means off.
     #[serde(default = "default_capture_triggers")]
     capture_triggers: Vec<String>,
-    /// Whether the addon may walk the whole account for what it holds off its own bat, on the far
-    /// side of a loading screen. Off, and off for every settings file that predates it: the audit
-    /// in front of the walk is cheap and says nothing in the steady state, but the pass it
-    /// provokes asks the client about every mount, appearance and achievement id it will answer
-    /// for, a patch makes every loading screen the first one again, and a player who wanted their
-    /// lockouts never agreed to that.
+    /// Whether the addon may walk the account's **collections** off its own bat, on the far side
+    /// of a loading screen — the mounts, pets, toys, heirlooms, titles, appearances and
+    /// achievements. On, including for every settings file that predates the switch.
     ///
-    /// Switching it off takes nothing away. The Resync button on the Collection screen and
-    /// `/chronie census refresh` both still walk everything, because a walk somebody asked for by
+    /// It shipped off for a while, and what was wrong with it was the walk rather than the
+    /// switch: a slice ran every single frame until the pass was done, nothing waited out a pull,
+    /// and the wardrobe was re-walked at *every* loading screen rather than once. `Census.lua` is
+    /// where each of those is answered now.
+    ///
+    /// **A character's wallet and standings are not behind this and never should have been.**
+    /// They are the census's other family, they are what every character screen in this app is
+    /// drawn from, and one switch over both of them meant that turning this off silently stopped
+    /// every currency and reputation the app knew about. See `ns.censusHoldings`.
+    ///
+    /// Switching it off still takes nothing else away. The Resync button on the Collection screen
+    /// and `/chronie census refresh` both walk everything, because a walk somebody asked for by
     /// name is not the addon running by itself — and the request channel those travel is not
     /// gated by this at all.
-    #[serde(default)]
+    #[serde(default = "default_automatic_census")]
     automatic_census: bool,
     /// Who the character every appearance is shown on is: one answer to each of the questions
     /// the game's own character creation screen asks about her body. Empty on a fresh install
@@ -171,7 +188,7 @@ impl Default for Settings {
             keep_original_screenshots: false,
             capture_quality: captures::Quality::default(),
             capture_triggers: default_capture_triggers(),
-            automatic_census: false,
+            automatic_census: default_automatic_census(),
             character_look: Vec::new(),
             character_body: body::DEFAULT,
         }
@@ -2943,14 +2960,18 @@ mod tests {
             bundled.contains("captureTriggers = { \"accountFirstAchievement\" }"),
             "{bundled}"
         );
-        assert!(bundled.contains("census = false"), "{bundled}");
-        let generated = settings_module(false, &default_capture_triggers(), false);
+        assert!(bundled.contains("census = true"), "{bundled}");
+        let generated = settings_module(
+            false,
+            &default_capture_triggers(),
+            default_automatic_census(),
+        );
         assert!(generated.contains("ns.settings = {"));
         assert!(
             generated.contains("captureTriggers = { \"accountFirstAchievement\" }"),
             "{generated}"
         );
-        assert!(generated.contains("census = false"), "{generated}");
+        assert!(generated.contains("census = true"), "{generated}");
     }
 
     /// The switch has to survive the trip into the game folder the same way the other two do,
@@ -2970,25 +2991,36 @@ mod tests {
         assert!(installed.contains("census = true"), "{installed}");
     }
 
-    /// And a default install has to say no. The pass the addon would provoke asks the client
-    /// about every id it will answer for, and nobody gets that for having installed Chronie.
+    /// And a default install says yes. It said no for a while, and what was wrong then was the
+    /// walk rather than the switch — a share of every single frame until the pass finished, and
+    /// the whole wardrobe re-walked at every loading screen. `Census.lua` answers both, and a
+    /// reader who installs Chronie should get a Collection screen that knows what they own.
     #[test]
-    fn installs_with_the_automatic_census_off_by_default() {
+    fn installs_with_the_automatic_census_on_by_default() {
         let root = tempfile::tempdir().unwrap();
         let retail = game_folder(root.path());
 
         replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
 
         let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
-        assert!(installed.contains("census = false"), "{installed}");
+        assert!(installed.contains("census = true"), "{installed}");
     }
 
-    /// Every install that predates the switch is one somebody has been walking by default, so
-    /// what a settings file that says nothing means is the thing to be explicit about: off,
-    /// the same as a new install, rather than carrying the old behaviour forward silently.
+    /// A settings file written while the switch shipped off says nothing, and what it means is
+    /// worth being explicit about: the current default, not the value the reader was driven to by
+    /// a version of the walk that no longer exists.
     #[test]
-    fn reads_a_settings_file_that_predates_the_automatic_census_as_off() {
+    fn reads_a_settings_file_that_predates_the_automatic_census_as_on() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
+
+        assert!(settings.automatic_census);
+    }
+
+    /// And somebody who has explicitly turned it off stays turned off, which is the other half of
+    /// that: a default is what a silence means, never an override of an answer.
+    #[test]
+    fn leaves_a_settings_file_that_says_no_saying_no() {
+        let settings: Settings = serde_json::from_str(r#"{"automaticCensus": false}"#).unwrap();
 
         assert!(!settings.automatic_census);
     }
