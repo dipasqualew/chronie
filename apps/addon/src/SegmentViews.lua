@@ -6,11 +6,10 @@ local _, ns = ...
 ---@field kind string "session", "live" or "record".
 ---@field key string Identity of the view, stable while it is reachable.
 ---@field title string What the panel's header says while this view is on screen.
----@field label string What the picker calls it: the place, with an alt's name in front of
----it when the segment was theirs, or "Session".
----@field detail string The metadata beside that label — how long a segment ran and how long
----ago it closed, or how many segments the evening holds. Two runs of the same dungeon are
----the same word twice, and this is what tells them apart.
+---@field label string What the picker calls it: whose segment it was and where, or "Session".
+---@field detail string The metadata beside that label — when a segment happened, or how many
+---segments the evening holds. Two runs of the same dungeon on the same character are the same
+---label twice, and this is what tells them apart.
 ---@field summary SegmentSummary What to draw. A filed record is summary-shaped already,
 ---which is why one can be handed to the same panel a live tally is.
 ---@field current boolean Whether this is the view the panel is standing on, so the picker
@@ -206,23 +205,15 @@ local function ago(seconds)
     return age == "now" and "just now" or age
 end
 
----How long a segment ran, as it reads in the picker beside how long ago it closed.
+---Whoever played a segment, as their name reads in front of the place.
 ---
----Rounded down to one unit, the same as `formatAge` and for the same reason: this is a
----label on a menu row rather than a stopwatch, and "42m" is all anybody needs to tell one
----evening's Deadmines run from the other. Anything under a minute is "<1m" instead of "0m",
----because a zone walked straight through is a real thing to see on the list.
----@param seconds number?
----@return string
-local function lasted(seconds)
-    seconds = math.max(math.floor(seconds or 0), 0)
-    if seconds < 60 then
-        return "<1m"
-    end
-    if seconds < 3600 then
-        return string.format("%dm", math.floor(seconds / 60))
-    end
-    return string.format("%dh", math.floor(seconds / 3600))
+---Only the first name: every segment on the list belongs to the same evening, so the realm
+---is the same one over and over and is the half of "Name-Realm" that tells nothing apart.
+---@param character string?
+---@return string?
+local function named(character)
+    local short = tostring(character or ""):match("^([^-]+)")
+    return short ~= "" and short or nil
 end
 
 ---@param deps SegmentViewsDeps
@@ -278,7 +269,6 @@ function ns.newSegmentViews(deps)
         local finished = history()
         local segments = #finished + 1
         local now = deps.now()
-        local start = deps.liveStart()
         local counted = segments .. (segments == 1 and " segment" or " segments")
         local views = {
             {
@@ -289,15 +279,14 @@ function ns.newSegmentViews(deps)
                 detail = counted,
             },
         }
-        local playing = deps.character()
         for index = #finished, 1, -1 do
             local record = finished[index]
-            -- An evening survives hopping alts, so the list holds the alt's segments too —
-            -- and one of those has to say whose it was, or it reads as somewhere this
-            -- character has been. Only the name, because the realm is the same evening's.
-            local who = record.character ~= playing
-                and (tostring(record.character or ""):match("^([^-]+)") or record.character)
-                or nil
+            -- An evening survives hopping alts, so the list holds the alt's segments too, and
+            -- a row that named only the place would read as somewhere this character had been.
+            -- Every row says whose it was rather than only the alts' — a name in front of some
+            -- rows and not others reads as a list of two different kinds of thing, and the
+            -- question the menu is opened to answer is which run, on which character.
+            local who = named(record.character)
             local ended = record.endedAt or now
             local label = (who and who .. " — " or "") .. (record.instance or "Unknown")
             views[#views + 1] = {
@@ -305,16 +294,18 @@ function ns.newSegmentViews(deps)
                 key = "record:" .. tostring(record.id),
                 title = label .. " · " .. ago(now - ended),
                 label = label,
-                detail = lasted(ended - (record.startedAt or ended)) .. " · " .. ago(now - ended),
+                detail = ago(now - ended),
                 record = record,
             }
         end
+        local playing = named(deps.character())
+        local where = deps.liveLocation() or "Current Segment"
         views[#views + 1] = {
             kind = "live",
             key = "live",
-            title = deps.liveLocation() or "Current Segment",
-            label = deps.liveLocation() or "Current Segment",
-            detail = start and (lasted(now - start) .. " · playing") or "playing",
+            title = (playing and playing .. " — " or "") .. where,
+            label = (playing and playing .. " — " or "") .. where,
+            detail = "playing",
         }
         return views, finished
     end

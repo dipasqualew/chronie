@@ -395,7 +395,8 @@ describe("segment views", function()
             end
             assert.same({ "session", "record", "record", "live" }, kinds)
             assert.same({
-                "Session · 3 segments", "Stockade · 9m ago", "Deadmines · 3m ago", "Wailing Caverns",
+                "Session · 3 segments", "Main — Stockade · 9m ago", "Main — Deadmines · 3m ago",
+                "Main — Wailing Caverns",
             }, titlesOf(listed))
         end)
 
@@ -416,7 +417,7 @@ describe("segment views", function()
 
             assert.equal(4, #listed)
             assert.equal("Alt — Deadmines · 9m ago", listed[2].title)
-            assert.equal("Stockade · 3m ago", listed[3].title)
+            assert.equal("Main — Stockade · 3m ago", listed[3].title)
         end)
 
         -- An evening is what the desktop app says it is: segments chained across silences of
@@ -511,10 +512,10 @@ describe("segment views", function()
                 end)
             end
 
-            it("names the open segment after where it is being played", function()
+            it("names the open segment after whoever is playing it and where", function()
                 local views = newViews({ location = "Wailing Caverns" })
 
-                assert.equal("Wailing Caverns", views.selected().title)
+                assert.equal("Main — Wailing Caverns", views.selected().title)
             end)
 
             -- Between two zones, or before the first loading screen, there is no open segment
@@ -522,7 +523,7 @@ describe("segment views", function()
             it("says Current Segment while no segment is open", function()
                 local views = newViews({ location = nil })
 
-                assert.equal("Current Segment", views.selected().title)
+                assert.equal("Main — Current Segment", views.selected().title)
             end)
 
             -- formatAge answers "now" for anything inside the last minute, which is a fine
@@ -530,9 +531,9 @@ describe("segment views", function()
             -- the one being played, and "Deadmines · now" beside "Deadmines" is not a
             -- difference anybody can see.
             for _, case in ipairs({
-                { what = "twelve minutes ago", endedAt = NOW - 720, title = "Deadmines · 12m ago" },
-                { what = "half a minute ago", endedAt = NOW - 30, title = "Deadmines · just now" },
-                { what = "three hours ago", endedAt = NOW - 10800, title = "Deadmines · 3h ago" },
+                { what = "twelve minutes ago", endedAt = NOW - 720, title = "Main — Deadmines · 12m ago" },
+                { what = "half a minute ago", endedAt = NOW - 30, title = "Main — Deadmines · just now" },
+                { what = "three hours ago", endedAt = NOW - 10800, title = "Main — Deadmines · 3h ago" },
             }) do
                 it("dates a segment that closed " .. case.what, function()
                     local views = newViews({
@@ -561,8 +562,9 @@ describe("segment views", function()
 
                 local listed = views.list()
 
-                assert.same({ "Session", "Deadmines", "Wailing Caverns" }, labelsOf(listed))
-                assert.same({ "2 segments", "5m · 3m ago", "2m · playing" }, detailsOf(listed))
+                assert.same({ "Session", "Main — Deadmines", "Main — Wailing Caverns" },
+                    labelsOf(listed))
+                assert.same({ "2 segments", "3m ago", "playing" }, detailsOf(listed))
             end)
 
             -- The open segment counts as one of them, the same as it does in the header: a
@@ -584,42 +586,40 @@ describe("segment views", function()
                 end)
             end
 
-            -- Rounded down to one unit, the same as the age beside it and for the same reason:
-            -- this is a label on a menu row rather than a stopwatch, and "42m" is all it takes
-            -- to tell one evening's Deadmines run from the other. Anything under a minute is
-            -- "<1m" rather than "0m", because a zone walked straight through is a real thing to
-            -- find on the list and "0m" reads as the module not knowing.
+            -- How long a segment ran used to sit in front of how long ago it closed, and it is
+            -- the half of that pair nobody was reading: two runs of the same dungeon on the
+            -- same character are told apart by when they happened, and the duration was
+            -- spending the column that the names beside it needed.
             for _, case in ipairs({
-                { what = "a zone walked straight through", ran = 0, lasted = "<1m" },
-                { what = "a second short of a minute", ran = 59, lasted = "<1m" },
-                { what = "a minute exactly", ran = 60, lasted = "1m" },
-                { what = "a second short of an hour", ran = 3599, lasted = "59m" },
-                { what = "an hour exactly", ran = 3600, lasted = "1h" },
-                { what = "a whole evening in one zone", ran = 4 * 3600, lasted = "4h" },
+                { what = "a zone walked straight through", ran = 0 },
+                { what = "a minute exactly", ran = 60 },
+                { what = "a whole evening in one zone", ran = 4 * 3600 },
             }) do
-                it("says a segment that has run for " .. case.what .. " lasted " .. case.lasted, function()
+                it("says only that it is playing, however long " .. case.what .. " has run", function()
                     local views = newViews({ opened = NOW - case.ran })
 
-                    assert.equal(case.lasted .. " · playing", views.selected().detail)
+                    assert.equal("playing", views.selected().detail)
                 end)
             end
 
             -- Between two zones, or before the first loading screen, there is no open segment
-            -- to have been running for any length of time. The row still has to exist, because
-            -- it is what the panel comes back to; it simply has no duration to report.
-            it("says only that it is playing while no segment is open", function()
+            -- at all. The row still has to exist, because it is what the panel comes back to;
+            -- it simply has nowhere to name after whoever is standing in it.
+            it("still offers the open segment while there is no place to name it after", function()
                 local views = newViews({ opened = false })
 
                 local view = views.selected()
 
-                assert.equal("Current Segment", view.label)
+                assert.equal("Main — Current Segment", view.label)
                 assert.equal("playing", view.detail)
             end)
 
             -- An evening survives hopping alts, so the list holds the alt's segments too, and
-            -- one of those has to say whose it was or it reads as somewhere this character has
-            -- been. Only the first name: the realm is this evening's either way.
-            it("puts an alt's name in front of the place, and this character's nowhere", function()
+            -- a row that named only the place would read as somewhere this character had been.
+            -- Every row says whose it was rather than only the alts': a name in front of some
+            -- rows and not others reads as a list of two different kinds of thing. Only the
+            -- first name — the realm is this evening's either way.
+            it("puts whoever played a segment in front of the place, on every row", function()
                 local views = newViews({
                     segments = {
                         record({ id = "mine", instance = "Stockade", endedAt = OPENED - 60 }),
@@ -631,7 +631,7 @@ describe("segment views", function()
                 local listed = views.list()
 
                 assert.equal("Alt — Deadmines", listed[2].label)
-                assert.equal("Stockade", listed[3].label)
+                assert.equal("Main — Stockade", listed[3].label)
             end)
 
             -- The same reasoning the header's own dates were given: "now" is a fine staleness
@@ -643,7 +643,7 @@ describe("segment views", function()
                     opened = NOW - 30,
                 })
 
-                assert.equal("5m · just now", views.select("record:a").detail)
+                assert.equal("just now", views.select("record:a").detail)
             end)
         end)
 
@@ -725,7 +725,8 @@ describe("segment views", function()
             local listed = views.list()
 
             assert.same({ "session", "record:older", "record:newer", "live" }, keysOf(listed))
-            assert.same({ "Session", "Stockade", "Deadmines", "Wailing Caverns" }, labelsOf(listed))
+            assert.same({ "Session", "Main — Stockade", "Main — Deadmines", "Main — Wailing Caverns" },
+                labelsOf(listed))
         end)
 
         -- The menu's whole job is to say which of them is on screen: a list that named the

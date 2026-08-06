@@ -3118,12 +3118,12 @@ describe("addon integration", function()
             recorded.clock.advance(720)
 
             local frame = panelFrame(recorded)
-            assert.equal("Westfall", titleOf(frame))
+            assert.equal("Thrall — Westfall", titleOf(frame))
             assert.equal("0c", panelValueFor(frame, "Gold Δ"))
 
-            pick(recorded, frame, "Deadmines")
+            pick(recorded, frame, "Thrall — Deadmines")
 
-            assert.equal("Deadmines · 12m ago", titleOf(frame))
+            assert.equal("Thrall — Deadmines · 12m ago", titleOf(frame))
             -- The five silver picked up in there: the body follows the choice rather than
             -- staying on whatever was drawn before the list was opened over it.
             assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
@@ -3159,8 +3159,8 @@ describe("addon integration", function()
             local list = pickerFrame(recorded, frame)
             assert.same({
                 { label = "Session", detail = "2 segments" },
-                { label = "Deadmines", detail = "<1m · 12m ago" },
-                { label = "Westfall", detail = "12m · playing" },
+                { label = "Thrall — Deadmines", detail = "12m ago" },
+                { label = "Thrall — Westfall", detail = "playing" },
             }, pickerRows(list))
 
             pickRow(list, "Session")
@@ -3192,18 +3192,18 @@ describe("addon integration", function()
             recorded.clock.advance(120)
 
             local frame = panelFrame(recorded)
-            pick(recorded, frame, "Deadmines")
-            assert.equal("Deadmines · 2m ago", titleOf(frame))
+            pick(recorded, frame, "Thrall — Deadmines")
+            assert.equal("Thrall — Deadmines · 2m ago", titleOf(frame))
 
             recorded.setInstance({ name = "Elwynn Forest", kind = "none", difficultyId = 0,
                 difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.equal("Elwynn Forest", titleOf(frame))
+            assert.equal("Thrall — Elwynn Forest", titleOf(frame))
             -- And the dungeon is still on the list: the panel moved because something new
             -- opened, not because the view it was parked on fell out of the evening.
-            pick(recorded, frame, "Deadmines")
-            assert.equal("Deadmines · 2m ago", titleOf(frame))
+            pick(recorded, frame, "Thrall — Deadmines")
+            assert.equal("Thrall — Deadmines · 2m ago", titleOf(frame))
         end)
 
         -- The session total is the exception to that. Parking there is a deliberate "show me

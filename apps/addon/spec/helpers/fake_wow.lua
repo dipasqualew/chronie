@@ -151,6 +151,14 @@ function fake.newFontString(template)
         self.mouseEnabled = enabled
     end
 
+    ---The client keeps a region's click flag and its motion flag apart, and OnEnter and
+    ---OnLeave are the second of them: a font string with only the first is clickable and
+    ---cannot be pointed at. Recorded separately here for the same reason it is set
+    ---separately there.
+    function fontString:SetMouseMotionEnabled(enabled)
+        self.motionEnabled = enabled
+    end
+
     function fontString:SetScript(name, handler)
         self.scripts[name] = handler
     end

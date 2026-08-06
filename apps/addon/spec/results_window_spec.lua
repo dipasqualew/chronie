@@ -451,6 +451,21 @@ describe("ns.newResultsWindow", function()
         return nil
     end
 
+    ---The label font string of the first row saying `name`, for the assertions that are about
+    ---how a row is drawn rather than what it says.
+    ---@param frame table
+    ---@param name string
+    ---@return table
+    local function labelFor(frame, name)
+        for _, fontString in ipairs((regionsOf(frame))) do
+            if fontString.shown and fontString.template == ROW_FONT and fontString.justify == "LEFT"
+                and (fontString.text or ""):find(name, 1, true) then
+                return fontString
+            end
+        end
+        error("no row saying " .. name .. " on screen")
+    end
+
     ---Clicks the first row saying `name`, the way a player reaches what is under a heading.
     ---@param frame table
     ---@param name string
@@ -999,6 +1014,36 @@ describe("ns.newResultsWindow", function()
                     assert.equal(1, recorded.tooltip.hidden)
                 end)
 
+                -- The client keeps a region's click flag and its motion flag apart, and
+                -- OnEnter and OnLeave are the second of them: a row given only the first is
+                -- clickable and cannot be pointed at, which is a tooltip that is wired up
+                -- perfectly and never opens. Every row here is a font string rather than a
+                -- frame, so the flag has to be asked for by name.
+                it("takes mouse motion, not only clicks, on the row it hangs the tooltip on", function()
+                    local window, frames = newWindow({ accountStanding = standingSource(nil) })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+
+                    local row = labelFor(frames[1], "Dream Wardens")
+
+                    assert.is_true(row.mouseEnabled)
+                    assert.is_true(row.motionEnabled)
+                end)
+
+                -- Rows are pooled, so the flag comes off with the tooltip: a row that swallowed
+                -- motion for a handler it no longer has is a dead spot on the frame the panel
+                -- is dragged around by.
+                it("takes the motion back off a row reused for something else", function()
+                    local window, frames = newWindow({ accountStanding = standingSource(nil) })
+                    window.update(summary(gained()))
+                    expand(frames[1], "Reputation")
+                    local row = labelFor(frames[1], "Dream Wardens")
+
+                    window.update(summary({ reputation = {} }))
+
+                    assert.is_false(row.motionEnabled)
+                end)
+
                 it("anchors to the cursor, so the line pointed at is the one answered", function()
                     local window, frames, recorded = newWindow({ accountStanding = standingSource(nil) })
                     window.update(summary(gained()))
@@ -1355,6 +1400,38 @@ describe("ns.newResultsWindow", function()
             assert.equal("collected", valueFor(lines, "  Katy's Stampwhistle"))
         end)
 
+        -- A battle pet is the one collectible the game lets a player own several of, so a
+        -- catch is either the collection growing or the fourth of a critter already caged —
+        -- and that is the whole difference between a drop worth stopping for and one worth
+        -- releasing. Said in the panel's own two colours: purple for the account's first and
+        -- green for one it already had, the same pair a transmog row is read by.
+        for _, case in ipairs({
+            { what = "a species new to the collection", speciesFirst = true, color = { 0.7, 0.45, 1 } },
+            { what = "another of one already owned", speciesFirst = false, color = { 0.35, 0.85, 0.45 } },
+        }) do
+            it("colours the name of " .. case.what, function()
+                local window, frames = newWindow()
+                window.update(summary({
+                    pets = { { id = 2, name = "Darkmoon Rabbit", speciesFirst = case.speciesFirst } },
+                }))
+
+                expand(frames[1], "Pets")
+
+                assert.same(case.color, labelFor(frames[1], "Darkmoon Rabbit").color)
+            end)
+        end
+
+        -- `speciesFirst` is absent rather than false where nobody read the owned count at the
+        -- moment of the catch, and an unasked question is not a "no": the row says neither.
+        it("leaves a pet nobody counted at the moment of the catch uncoloured", function()
+            local window, frames = newWindow()
+            window.update(summary({ pets = { { id = 2, name = "Darkmoon Rabbit" } } }))
+
+            expand(frames[1], "Pets")
+
+            assert.same({ 0.68, 0.68, 0.7 }, labelFor(frames[1], "Darkmoon Rabbit").color)
+        end)
+
         describe("a click on something newly collected", function()
             local MOUNT = { id = 1, name = "Alabaster Hyena" }
             local PET = { id = 2, name = "Darkmoon Rabbit", guid = "BattlePet-0-000018A9C0D2" }
@@ -1472,6 +1549,43 @@ describe("ns.newResultsWindow", function()
             expand(frames[1], "Achievements")
 
             assert.is_not_nil(valueFor(rowsOf(frames[1]), "  The Loremaster"))
+        end)
+
+        -- The panel's two colours, on the half of the row the eye runs down. Purple is the
+        -- account's and green the character's everywhere else here — a transmog row is read
+        -- this way and so is the heading counting these in words — and a column of names is
+        -- recognised by colour long before any of them is read. The word beside it stays: it
+        -- is the legend the colours are learned from.
+        for _, case in ipairs({
+            { what = "nobody on the account had earned before", accountFirst = true,
+                color = { 0.7, 0.45, 1 } },
+            { what = "this character earned first", accountFirst = false,
+                color = { 0.35, 0.85, 0.45 } },
+        }) do
+            it("colours the name of an achievement " .. case.what, function()
+                local window, frames = newWindow()
+
+                window.update(summary({
+                    achievements = { { id = 1, name = "The Loremaster", accountFirst = case.accountFirst } },
+                }))
+                expand(frames[1], "Achievements")
+
+                assert.same(case.color, labelFor(frames[1], "The Loremaster").color)
+            end)
+        end
+
+        -- Green means "this character got there first" everywhere on this panel, and an
+        -- achievement filed without the flag has not said that. So it keeps the panel's
+        -- ordinary label grey rather than claiming one of the two answers.
+        it("leaves an achievement nobody said either way about uncoloured", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                achievements = { { id = 1, name = "The Loremaster" } },
+            }))
+            expand(frames[1], "Achievements")
+
+            assert.same({ 0.68, 0.68, 0.7 }, labelFor(frames[1], "The Loremaster").color)
         end)
 
         it("keeps long achievement and quest names out of the status column", function()
@@ -1821,13 +1935,14 @@ describe("ns.newResultsWindow", function()
                 end)
             end
 
-            -- A row carrying an icon and a fraction of two double-digit numbers needs the
-            -- wider column the summary headings use, or the numbers — the only part that is
-            -- news — are the part clipped off the end. A row carrying nothing gets no column:
-            -- zero rather than the ninety-two the word used to need, which is ninety-two more
-            -- pixels of the panel's width for the item's own name.
+            -- An icon and a fraction of two double-digit numbers is the whole of what this
+            -- column ever holds, so it is cut to that: narrower than the ninety-two an
+            -- ordinary value gets and far narrower than the summary headings' hundred and
+            -- forty, because every pixel it does not need is one the item's own name gets and
+            -- the name is what a player reading the row is reading. A row carrying nothing
+            -- gets no column at all.
             for _, case in ipairs({
-                { what = "widens the value column for a row carrying a fraction", set = true, width = 140 },
+                { what = "cuts the value column to the fraction the row carries", set = true, width = 58 },
                 { what = "gives a row with nothing to say no value column at all", set = false, width = 0 },
             }) do
                 it(case.what, function()

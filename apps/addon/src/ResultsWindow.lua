@@ -78,6 +78,11 @@ local LINE = 15
 local COLUMN_GAP = 8
 local VALUE_WIDTH = 92
 local SUMMARY_VALUE_WIDTH = 140
+-- The column a transmog row's set fraction sits in. An icon and "12/28" is the whole of what
+-- it ever holds, so it is cut to that rather than borrowing the summary headings' width: the
+-- word that used to sit there is gone, and every pixel the fraction does not need is one the
+-- item's own name gets — which is the thing on that row anybody is actually reading.
+local SET_VALUE_WIDTH = 58
 -- The title sits on a strip of its own, closed by a hairline: the panel's whole shape is
 -- flat colour and one-pixel edges, so the header is separated by a rule rather than a
 -- carved border.
@@ -89,10 +94,11 @@ local RULE_LINE = 11
 -- two read as one entry, and takes a whole line of its own so the standing fits on it.
 local BAR_HEIGHT = 11
 local BAR_INDENT = 10
--- The right-hand column of the picker, which carries how long a segment ran and how long
--- ago it closed. Wider than the body's values because "42m · 3h ago" is the widest thing
--- either column ever has to hold and clipping it would defeat the point of listing it.
-local PICKER_DETAIL_WIDTH = 96
+-- The right-hand column of the picker, which carries when a segment happened. "12 segments"
+-- is the widest thing it ever holds; a row's own is "just now" or "3h ago" or "playing", and
+-- the name beside it is what the eye is actually running down, so the column is cut to what
+-- it holds rather than left with room it does not use.
+local PICKER_DETAIL_WIDTH = 64
 -- Where the body starts: under the header strip, its closing hairline, and the frame's own
 -- one-pixel edge above both.
 local BODY_TOP = 1 + HEADER_HEIGHT + RULE_HEIGHT
@@ -227,6 +233,27 @@ local function newViewport(createFrame, parent, name, top)
     end)
 
     return viewport
+end
+
+---Turns a row's mouse input on or off — both halves of it, because a click and a hover are
+---two flags rather than one.
+---
+---Every row on this panel is a font string rather than a frame, and the client keeps a
+---region's click flag and its motion flag apart: `EnableMouse` is what a click needs, and
+---OnEnter and OnLeave are motion, which is the second flag. A row that had only the first was
+---clickable and could not be pointed at — which is what a faction whose account-wide standings
+---never opened on hover looks like from the keyboard.
+---
+---`SetMouseMotionEnabled` is asked for rather than assumed, the same rule `ns.callable` keeps
+---for every client call this addon makes: a build without it is left with exactly the behaviour
+---it already had rather than with a Lua error out of a repaint.
+---@param region table
+---@param enabled boolean
+local function takesMouse(region, enabled)
+    region:EnableMouse(enabled)
+    if region.SetMouseMotionEnabled then
+        region:SetMouseMotionEnabled(enabled)
+    end
 end
 
 ---Groups a count's digits in threes. Lives in `AccountTooltip.lua` because the bar caption
@@ -778,8 +805,8 @@ function ns.newResultsWindow(deps)
             value:SetText(valueText)
             value:SetTextColor(color[1], color[2], color[3])
             value:Show()
-            label:EnableMouse(action ~= nil)
-            value:EnableMouse(action ~= nil)
+            takesMouse(label, action ~= nil)
+            takesMouse(value, action ~= nil)
             label:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
             value:SetScript("OnMouseUp", action and function(_, button) action(button) end or nil)
             -- Cleared on every line rather than only where one was set. Rows are pooled, so a
@@ -805,7 +832,7 @@ function ns.newResultsWindow(deps)
             end
             local label, value = rowAt(used)
             for _, region in ipairs({ label, value }) do
-                region:EnableMouse(true)
+                takesMouse(region, true)
                 region:SetScript("OnEnter", function()
                     showTooltip(content)
                 end)
@@ -965,18 +992,30 @@ function ns.newResultsWindow(deps)
                     local current = event
                     local scope = "earned"
                     local color = REP_COLOR
+                    -- The name carries the colour as well as the word beside it, the way a
+                    -- transmog row's does: purple for the account's first and green for this
+                    -- character's own. The word stays — it is the legend the colours are
+                    -- learned from — but the colour is what a column of names is read by, and
+                    -- it belongs on the half of the row the eye is running down.
+                    --
+                    -- Nil rather than REP_COLOR where nobody said which it was: green means
+                    -- "this character got there first" everywhere on this panel, and an
+                    -- achievement filed without the flag has not said that.
+                    local nameColor
                     if current.accountFirst == true then
                         scope = "account first"
                         color = ACCOUNT_COLOR
+                        nameColor = ACCOUNT_COLOR
                     elseif current.accountFirst == false then
                         scope = "character first"
                         color = CHARACTER_COLOR
+                        nameColor = CHARACTER_COLOR
                     end
                     line("  " .. current.name, scope, color, function()
                         if deps.openAchievement then
                             deps.openAchievement(current.id)
                         end
-                    end)
+                    end, nil, nameColor)
                 end
             end
         end
@@ -1021,7 +1060,10 @@ function ns.newResultsWindow(deps)
         ---to open, and skipped for an event filed without the id the page is found by: a row
         ---that cannot answer a click must not be mouse-enabled, or it becomes a dead spot on
         ---the frame the player drags the panel around by.
-        local function collection(name, key, events, open)
+        ---@param tint fun(event: CollectionEvent): number[]? What colour this one is, for a
+        ---collection where one row can mean something a different row does not. Nil, and a nil
+        ---answer from it, leave the row in the panel's ordinary "collected" green.
+        local function collection(name, key, events, open, tint)
             if #events == 0 then
                 return
             end
@@ -1032,7 +1074,8 @@ function ns.newResultsWindow(deps)
                     local action = open and current.id and function()
                         open(current)
                     end or nil
-                    line("  " .. current.name, "collected", REP_COLOR, action)
+                    local color = tint and tint(current) or nil
+                    line("  " .. current.name, "collected", color or REP_COLOR, action, nil, color)
                 end
             end
         end
@@ -1045,6 +1088,20 @@ function ns.newResultsWindow(deps)
         -- rather than a caught one — falls back to the species, which is what the row names.
         collection("Pets", "pets", pets, deps.openPet and function(event)
             deps.openPet(event.id, event.guid)
+        end, function(event)
+            -- The same two colours the rest of the panel is read by. A species the collection
+            -- has never held is the account's first and purple; the fourth of a critter already
+            -- owned is green, which is the whole difference between a catch worth stopping for
+            -- and one worth caging. `speciesFirst` is absent rather than false where nobody
+            -- asked the client at the moment of the catch, and an unasked question is not a
+            -- "no" — so that row keeps the ordinary colour and says neither.
+            if event.speciesFirst == true then
+                return ACCOUNT_COLOR
+            end
+            if event.speciesFirst == false then
+                return CHARACTER_COLOR
+            end
+            return nil
         end)
 
         if #quests > 0 then
@@ -1187,11 +1244,10 @@ function ns.newResultsWindow(deps)
                         local hex = set.collected >= set.total and SET_COMPLETE_HEX or SET_HEX
                         valueText = hex .. SET_ICON
                             .. set.collected .. "/" .. set.total .. COLOR_END
-                        -- The ordinary rows' 92 pixels are cut fine for an icon and a fraction
-                        -- of two double-digit numbers, so a row carrying one is given the wider
-                        -- column the summary headings use rather than clipping the numbers off
-                        -- its own end.
-                        valueWidth = SUMMARY_VALUE_WIDTH
+                        -- Its own column rather than the ordinary rows': narrower than the 92
+                        -- pixels a value gets, because an icon and a fraction is all of it, and
+                        -- what it gives back goes to the item name beside it.
+                        valueWidth = SET_VALUE_WIDTH
                     end
                     line("  " .. prefix .. (itemName or ("Item " .. current.id)), valueText, kindColor,
                         function(button)
@@ -1244,7 +1300,7 @@ function ns.newResultsWindow(deps)
             -- it happens to be hidden is the exception that makes the rule unreadable.
             for _, region in ipairs({ rows[index].label, rows[index].value }) do
                 region:Hide()
-                region:EnableMouse(false)
+                takesMouse(region, false)
                 region:SetScript("OnMouseUp", nil)
                 region:SetScript("OnEnter", nil)
                 region:SetScript("OnLeave", nil)
