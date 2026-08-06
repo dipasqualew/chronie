@@ -32,7 +32,9 @@ local _, ns = ...
 ---@field setsContaining fun(sourceID: integer): integer[]? The client's
 ---`C_TransmogSets.GetSetsContainingSourceID`.
 ---@field setInfo fun(setID: integer): table? The client's `C_TransmogSets.GetSetInfo`, which
----may answer nothing at all for a set id it will not describe.
+---may answer nothing at all for a set id it will not describe. Asked of each candidate in turn
+---rather than only of the one that wins, because whether the client will name a set is what
+---decides which of them wins in the first place.
 ---@field setPieces fun(setID: integer): { sourceID: integer, collected: boolean }[]? One entry
 ---per piece of the set, already reduced to the two things asked of it. Assembled by the caller
 ---rather than here because which of the client's several source lists that is, and how each
@@ -52,13 +54,31 @@ function ns.newTransmogSets(deps)
             if not setIDs or #setIDs == 0 then
                 return nil
             end
-            -- The first the client names, where it names several. A source can sit in more
-            -- than one set — the same shoulder appears in a base set and in each of its
-            -- variants — and the panel has room for one line about one of them. Taking the
-            -- client's own first is deterministic and is the set the wardrobe treats as the
-            -- source's home; picking "whichever is furthest along" instead would move the
-            -- line under the player as they collected, which is worse than being arbitrary.
-            local setID = setIDs[1]
+            -- The first set the client will actually *name*, rather than simply the first it
+            -- returns. A source can sit in several — the same shoulder is in a base set and in
+            -- each of its variants — and the panel has room for one line about one of them, so
+            -- the client's own order decides between the real candidates: it is deterministic,
+            -- and picking "whichever is furthest along" instead would move the line under the
+            -- player as they collected, which is worse than being arbitrary.
+            --
+            -- The name is what separates a set from the table's own scaffolding. `TransmogSet`
+            -- on 12.0.5 carries 5143 rows, and 46 of them have no name in any locale: they are
+            -- grouping rows the wardrobe never draws, and they sort *before* the real sets on
+            -- every source that touches one. Taking the first id outright drew "Set 2 — 1/18"
+            -- over Magister's Regalia, and drew a meaningless marker on 635 further sources
+            -- whose only set is one of those rows. A set the player cannot be shown in the
+            -- collections journal is not a set worth telling them about.
+            local setID, info
+            for _, candidate in ipairs(setIDs) do
+                local described = deps.setInfo(candidate)
+                if described and described.name and described.name ~= "" then
+                    setID, info = candidate, described
+                    break
+                end
+            end
+            if not setID then
+                return nil
+            end
             local pieces = deps.setPieces(setID)
             if not pieces or #pieces == 0 then
                 return nil
@@ -73,11 +93,10 @@ function ns.newTransmogSets(deps)
                     sources[#sources + 1] = piece.sourceID
                 end
             end
-            local info = deps.setInfo(setID)
             return {
                 setID = setID,
-                name = info and info.name or nil,
-                label = info and info.label or nil,
+                name = info.name,
+                label = info.label,
                 collected = collected,
                 total = #pieces,
                 sources = sources,

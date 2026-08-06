@@ -33,7 +33,15 @@ describe("Blizzard's own transmog sets", function()
             end,
             setInfo = function(setID)
                 asked.info[#asked.info + 1] = setID
-                return (options.info or {})[setID]
+                -- Named by default, and only by default. Whether the client will name a set
+                -- is what decides which of several a source is reported under, so a fixture
+                -- that left the name out to say "this case is about counting" would silently
+                -- have been saying "this set is skipped" instead. A case that cares says so
+                -- by passing `info` and taking the naming into its own hands.
+                if options.info == nil then
+                    return { name = "Set " .. setID }
+                end
+                return options.info[setID]
             end,
             setPieces = function(setID)
                 asked.pieces[#asked.pieces + 1] = setID
@@ -214,22 +222,52 @@ describe("Blizzard's own transmog sets", function()
             end)
         end
 
-        -- A set the client will not describe is still a set, and the fraction is the half of
-        -- the row that is actually news. Refusing the membership over a missing name would
-        -- take "5 of 8" off a row for want of a string the tooltip can do without.
-        it("still answers with the set when the client will not name it", function()
-            local sets = newSets({
-                containing = { [SOURCE] = { SET } },
-                pieces = { [SET] = { { sourceID = 101, collected = true } } },
+        -- `TransmogSet` on 12.0.5 carries 5143 rows and 46 of them have no name in any locale.
+        -- They are the table's own grouping scaffolding, they hold real sources, and they sort
+        -- ahead of the real sets on every source that touches one — so taking the first id
+        -- outright drew "Set 2 — 1/18" over Magister's Regalia, and drew a marker naming
+        -- nothing on 635 further sources whose only set is one of those rows. A set the player
+        -- cannot be shown in the collections journal is not one to tell them about, and the
+        -- name is the only thing in the data that separates the two.
+        for _, case in ipairs({
+            { what = "named nothing at all", name = nil },
+            { what = "named with an empty string", name = "" },
+        }) do
+            it("skips a set the client " .. case.what .. " in favour of the one behind it", function()
+                local sets, asked = newSets({
+                    containing = { [SOURCE] = { OTHER_SET, SET } },
+                    info = {
+                        [OTHER_SET] = { name = case.name },
+                        [SET] = { name = "Magister's Regalia" },
+                    },
+                    pieces = {
+                        [OTHER_SET] = { { sourceID = 999, collected = true } },
+                        [SET] = eightPieces(),
+                    },
+                })
+
+                local membership = sets.forSource(SOURCE)
+
+                assert.equal(SET, membership.setID)
+                assert.equal("Magister's Regalia", membership.name)
+                assert.equal(8, membership.total)
+                -- And the skipped set was never enumerated. Walking the pieces of a set that
+                -- lost is a cost paid on every repaint for an answer thrown away.
+                assert.same({ SET }, asked.pieces)
+            end)
+        end
+
+        -- Nothing behind it to fall back to, which is the 635-source case: the marker is left
+        -- off the row entirely rather than drawn against a set that cannot be named or opened.
+        it("answers nothing when no set containing the source can be named", function()
+            local sets, asked = newSets({
+                containing = { [SOURCE] = { SET, OTHER_SET } },
+                info = { [SET] = {}, [OTHER_SET] = nil },
+                pieces = { [SET] = eightPieces() },
             })
 
-            local membership = sets.forSource(SOURCE)
-
-            assert.equal(SET, membership.setID)
-            assert.is_nil(membership.name)
-            assert.is_nil(membership.label)
-            assert.equal(1, membership.collected)
-            assert.equal(1, membership.total)
+            assert.is_nil(sets.forSource(SOURCE))
+            assert.same({}, asked.pieces)
         end)
 
         -- Read live rather than filed with the drop: the account collects another piece on
