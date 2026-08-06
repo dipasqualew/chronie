@@ -28,6 +28,8 @@ describe("ns.newResultsWindow", function()
         local tooltip, tooltipRecorded = fake.newTooltip()
         local recorded = {
             saved = {},
+            sizes = {},
+            sizeLoads = 0,
             loadCalls = 0,
             achievements = {},
             previews = {},
@@ -78,6 +80,20 @@ describe("ns.newResultsWindow", function()
             savePoint = function(point, x, y)
                 recorded.saved[#recorded.saved + 1] = { point = point, x = x, y = y }
             end,
+            -- Withheld outright on `options.sized = false`, which is the shape a caller that
+            -- does not want a box remembered is built in: the panel still resizes, it simply
+            -- has nowhere to write the answer down.
+            loadSize = options.sized ~= false and function()
+                recorded.sizeLoads = recorded.sizeLoads + 1
+                local box = options.size
+                if not box then
+                    return nil
+                end
+                return box.width, box.height, box.locked
+            end or nil,
+            saveSize = options.sized ~= false and function(width, height, locked)
+                recorded.sizes[#recorded.sizes + 1] = { width = width, height = height, locked = locked }
+            end or nil,
             openAchievement = function(id)
                 recorded.achievements[#recorded.achievements + 1] = id
             end,
@@ -144,6 +160,15 @@ describe("ns.newResultsWindow", function()
     ---what keeps it out of the rows below it now that it is justified like them.
     local ROW_FONT = "GameFontHighlightSmall"
 
+    ---Everything drawn on a panel, its own regions and every child frame's. The rows live
+    ---inside the viewport that scrolls them rather than on the panel itself, so reading the
+    ---panel's own two lists would find nothing but the header.
+    ---@param frame table
+    ---@return table fontStrings, table textures
+    local function regionsOf(frame)
+        return fake.regionsOf(frame)
+    end
+
     ---The rendered label/value pairs, in order. The window distinguishes labels from
     ---values by justification (left vs right), and creates them label-then-value, so
     ---pairing them by their shown order reconstructs each on-screen line.
@@ -151,7 +176,7 @@ describe("ns.newResultsWindow", function()
     ---@return table[] `{ { label = string, value = string }, ... }`
     local function rowsOf(frame)
         local labels, values = {}, {}
-        for _, fontString in ipairs(frame.fontStrings) do
+        for _, fontString in ipairs((regionsOf(frame))) do
             local row = fontString.shown and fontString.template == ROW_FONT
             if row and fontString.justify == "LEFT" then
                 labels[#labels + 1] = fontString.text
@@ -172,8 +197,9 @@ describe("ns.newResultsWindow", function()
     ---@param frame table
     ---@return table[] `{ { caption = string, filled = number, width = number }, ... }`
     local function barsOf(frame)
+        local fontStrings, textures = regionsOf(frame)
         local captions = {}
-        for _, fontString in ipairs(frame.fontStrings) do
+        for _, fontString in ipairs(fontStrings) do
             if fontString.shown and fontString.justify == "CENTER" then
                 captions[#captions + 1] = fontString.text
             end
@@ -183,7 +209,7 @@ describe("ns.newResultsWindow", function()
         -- chrome — the header strip and the hairlines between blocks — is drawn on BORDER,
         -- which is what keeps it out of this pairing.
         local pooled = {}
-        for _, texture in ipairs(frame.textures) do
+        for _, texture in ipairs(textures) do
             if texture.layer == "BACKGROUND" or texture.layer == "ARTWORK" then
                 pooled[#pooled + 1] = texture
             end
@@ -208,8 +234,9 @@ describe("ns.newResultsWindow", function()
     ---@param frame table
     ---@return table[] textures still on screen
     local function rulesOf(frame)
+        local _, textures = regionsOf(frame)
         local drawn = {}
-        for _, texture in ipairs(frame.textures) do
+        for _, texture in ipairs(textures) do
             if texture.layer == "BORDER" and texture.shown then
                 drawn[#drawn + 1] = texture
             end
@@ -224,7 +251,7 @@ describe("ns.newResultsWindow", function()
     ---@param frame table
     ---@return table?
     local function titleOf(frame)
-        for _, fontString in ipairs(frame.fontStrings) do
+        for _, fontString in ipairs((regionsOf(frame))) do
             if fontString.template ~= ROW_FONT then
                 return fontString
             end
@@ -246,6 +273,37 @@ describe("ns.newResultsWindow", function()
         return nil
     end
 
+    ---The viewport the body is drawn inside: the scroll frame the panel names after itself,
+    ---and the frame within it the rows are actually hung off.
+    ---@param frames table[]
+    ---@return table scroll, table content
+    local function viewportOf(frames)
+        for _, frame in ipairs(frames) do
+            if frame.frameName == NAME .. "Body" then
+                return frame, frame.children[1]
+            end
+        end
+        error("the panel built no viewport")
+    end
+
+    ---The two buttons that size the panel. They are told apart by what they answer to: the
+    ---lock is clicked, and the grip is pressed and let go of, because a drag is not a click.
+    ---@param frames table[]
+    ---@return table lock, table grip
+    local function handlesOf(frames)
+        local lock, grip
+        for _, frame in ipairs(frames) do
+            if frame.frameType == "Button" and frame.parent == frames[1] then
+                if frame.scripts.OnMouseDown then
+                    grip = frame
+                elseif frame.scripts.OnClick and frame.scripts.OnEnter then
+                    lock = frame
+                end
+            end
+        end
+        return assert(lock, "no lock button"), assert(grip, "no resize grip")
+    end
+
     ---The picker's two columns, in the order they were drawn — rows taken off screen included,
     ---so a test can prove a leftover one was hidden rather than only that it is not in the
     ---list any more. Both halves of a row are clickable, so both have to be reachable.
@@ -253,7 +311,7 @@ describe("ns.newResultsWindow", function()
     ---@return table[] labels, table[] details
     local function columnsOf(frames)
         local labels, details = {}, {}
-        for _, fontString in ipairs(pickerOf(frames).fontStrings) do
+        for _, fontString in ipairs((regionsOf(pickerOf(frames)))) do
             if fontString.justify == "LEFT" then
                 labels[#labels + 1] = fontString
             elseif fontString.justify == "RIGHT" then
@@ -340,7 +398,7 @@ describe("ns.newResultsWindow", function()
     ---@param frame table
     ---@param name string
     local function expand(frame, name)
-        for _, fontString in ipairs(frame.fontStrings) do
+        for _, fontString in ipairs((regionsOf(frame))) do
             if fontString.shown and fontString.template == ROW_FONT
                 and (fontString.text or ""):find(name, 1, true) then
                 fontString:run("OnMouseUp", "LeftButton")
@@ -356,7 +414,7 @@ describe("ns.newResultsWindow", function()
     ---@param options table? `{ leave = boolean }`
     ---@return table the font string the pointer was over
     local function pointAt(frame, name, options)
-        for _, fontString in ipairs(frame.fontStrings) do
+        for _, fontString in ipairs((regionsOf(frame))) do
             if fontString.shown and fontString.template == ROW_FONT and fontString.justify == "LEFT"
                 and (fontString.text or ""):find(name, 1, true) then
                 fontString:run("OnEnter")
@@ -373,7 +431,7 @@ describe("ns.newResultsWindow", function()
     ---@param name string
     ---@return boolean whether the row saying `name` has a tooltip on it at all
     local function pointable(frame, name)
-        for _, fontString in ipairs(frame.fontStrings) do
+        for _, fontString in ipairs((regionsOf(frame))) do
             if fontString.shown and fontString.template == ROW_FONT and fontString.justify == "LEFT"
                 and (fontString.text or ""):find(name, 1, true) then
                 return fontString.scripts.OnEnter ~= nil
@@ -436,12 +494,14 @@ describe("ns.newResultsWindow", function()
             assert.equal(0, #frames)
         end)
 
+        -- The panel is the first frame built and everything else — the buttons that size it,
+        -- the viewport its rows are drawn inside — hangs off it, so it is the panel being
+        -- there at all that says the build ran, rather than any count of what it brought.
         it("builds its frame on the first show", function()
             local window, frames = newWindow()
 
             window.show()
 
-            assert.equal(1, #frames)
             assert.equal(NAME, frames[1].frameName)
         end)
 
@@ -450,7 +510,7 @@ describe("ns.newResultsWindow", function()
 
             window.update(summary())
 
-            assert.equal(1, #frames)
+            assert.equal(NAME, frames[1].frameName)
         end)
 
         it("builds its frame on the first toggle", function()
@@ -458,7 +518,7 @@ describe("ns.newResultsWindow", function()
 
             window.toggle()
 
-            assert.equal(1, #frames)
+            assert.equal(NAME, frames[1].frameName)
         end)
     end)
 
@@ -484,10 +544,11 @@ describe("ns.newResultsWindow", function()
             local window, frames = newWindow()
 
             window.show()
+            local built = #frames
             window.hide()
             window.show()
 
-            assert.equal(1, #frames)
+            assert.equal(built, #frames)
         end)
 
         it("toggles from hidden to shown", function()
@@ -1244,7 +1305,7 @@ describe("ns.newResultsWindow", function()
 
             local labels = {}
             local values = {}
-            for _, fontString in ipairs(frames[1].fontStrings) do
+            for _, fontString in ipairs((regionsOf(frames[1]))) do
                 if fontString.text == longAchievement or fontString.text == longQuest then
                     labels[#labels + 1] = fontString
                 elseif fontString.text == "character first" then
@@ -1287,7 +1348,7 @@ describe("ns.newResultsWindow", function()
             }))
 
             expand(frames[1], "Achievements")
-            for _, fontString in ipairs(frames[1].fontStrings) do
+            for _, fontString in ipairs((regionsOf(frames[1]))) do
                 if fontString.text == "  Explore" then
                     fontString:run("OnMouseUp", "LeftButton")
                 end
@@ -1341,7 +1402,7 @@ describe("ns.newResultsWindow", function()
             }))
 
             expand(frames[1], "Transmog")
-            for _, fontString in ipairs(frames[1].fontStrings) do
+            for _, fontString in ipairs((regionsOf(frames[1]))) do
                 if fontString.text == "  Named item 19019" then
                     fontString:run("OnMouseUp", "LeftButton")
                     fontString:run("OnMouseUp", "RightButton")
@@ -1369,7 +1430,7 @@ describe("ns.newResultsWindow", function()
         ---@param frame table
         ---@param needle string
         local function clickContaining(frame, needle)
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((regionsOf(frame))) do
                 if fontString.shown and (fontString.text or ""):find(needle, 1, true) then
                     fontString:run("OnMouseUp", "LeftButton")
                     return
@@ -1420,7 +1481,7 @@ describe("ns.newResultsWindow", function()
             clickTitle(frames[1])
 
             for _, drawn in ipairs({ frames[1], pickerOf(frames) }) do
-                for _, fontString in ipairs(drawn.fontStrings) do
+                for _, fontString in ipairs((regionsOf(drawn))) do
                     if fontString.shown then
                         assert.is_nil(undrawable(fontString.text),
                             "undrawable character in " .. tostring(fontString.text))
@@ -1478,8 +1539,8 @@ describe("ns.newResultsWindow", function()
         -- There is nothing left in the header for a long name to run into, so it may have the
         -- whole strip, less the close button on a panel that has one.
         for _, case in ipairs({
-            { what = "the HUD, which has nothing beside the title", closable = false, width = 244 },
-            { what = "a window with a close button to keep clear of", closable = true, width = 220 },
+            { what = "the HUD, which has only the lock beside the title", closable = false, width = 220 },
+            { what = "a window with a close button as well", closable = true, width = 196 },
         }) do
             it("gives the title the width of " .. case.what, function()
                 local window, frames = newWindow({ closable = case.closable })
@@ -1559,7 +1620,7 @@ describe("ns.newResultsWindow", function()
                 local title = titleOf(frames[1])
                 assert.equal("Current Segment", title.text)
                 assert.is_nil(title.scripts.OnMouseUp)
-                assert.equal(1, #frames)
+                assert.is_nil(pickerOf(frames))
             end)
         end
 
@@ -1568,11 +1629,10 @@ describe("ns.newResultsWindow", function()
         it("builds the list on the first click of the title and not before", function()
             local window, frames = newWindow({ views = offered() })
             window.update(summary())
-            assert.equal(1, #frames)
+            assert.is_nil(pickerOf(frames))
 
             clickTitle(frames[1])
 
-            assert.equal(2, #frames)
             assert.equal(frames[1], pickerOf(frames).parent)
             assert.is_true(pickerOf(frames).shown)
         end)
@@ -1657,12 +1717,13 @@ describe("ns.newResultsWindow", function()
             local window, frames = newWindow({ views = offered() })
             window.update(summary())
             clickTitle(frames[1])
+            local built = #frames
 
             clickTitle(frames[1])
 
             assert.is_false(pickerOf(frames).shown)
-            -- And no second frame for it: the list is built once and redrawn afterwards.
-            assert.equal(2, #frames)
+            -- And nothing new built for it: the list is built once and redrawn afterwards.
+            assert.equal(built, #frames)
         end)
 
         -- The title is the picker's button, and a button has to say which way it goes. It
@@ -1807,6 +1868,260 @@ describe("ns.newResultsWindow", function()
             frames[1]:run("OnDragStop")
 
             assert.same({ { point = "BOTTOMLEFT", x = 10, y = 20 } }, recorded.saved)
+        end)
+    end)
+
+    describe("the box it sits in", function()
+        -- What the panel opens at, and where its body starts: under the header strip, the
+        -- hairline closing it, and the frame's own one-pixel edge above both.
+        local DEFAULT_WIDTH = 268
+        local DEFAULT_HEIGHT = 320
+        local BODY_TOP = 26
+        local LINE = 15
+        local LOCKED_ICON = "Interface\\Buttons\\LockButton-Locked-Up"
+        local UNLOCKED_ICON = "Interface\\Buttons\\LockButton-Unlocked-Up"
+
+        ---A summary carrying `count` level ups, which is the cheapest way to make the body
+        ---longer than the box it is drawn in: one expanded line each and no bars or hovers.
+        ---@param count integer
+        ---@return SegmentSummary
+        local function long(count)
+            local levelUps = {}
+            for index = 1, count do
+                levelUps[index] = { level = index }
+            end
+            return summary({ levelUps = levelUps })
+        end
+
+        -- The whole point. A panel as tall as whatever the evening had produced, anchored at
+        -- its centre the way a HUD dragged into place is, grew in both directions at once: a
+        -- drop landing pushed the rows already being read half a line up the screen.
+        it("keeps the frame the size it is however much there is to show", function()
+            local window, frames = newWindow()
+            window.update(summary())
+            local _, content = viewportOf(frames)
+            local wasContent = content.height
+
+            window.update(long(30))
+            expand(frames[1], "Level ups")
+
+            assert.equal(DEFAULT_WIDTH, frames[1].width)
+            assert.equal(DEFAULT_HEIGHT, frames[1].height)
+            -- And the growing happened somewhere: it is the thing inside the box that got
+            -- taller, which is what there now is to scroll.
+            assert.is_true(content.height > wasContent)
+        end)
+
+        it("opens at the box it was left in", function()
+            local window, frames, recorded = newWindow({ size = { width = 320, height = 420 } })
+
+            window.show()
+
+            assert.equal(1, recorded.sizeLoads)
+            assert.equal(320, frames[1].width)
+            assert.equal(420, frames[1].height)
+        end)
+
+        -- A saved box narrower than the panel can draw itself in is a file written by an
+        -- older build, or by hand. It is floored rather than obeyed.
+        it("refuses a saved box smaller than the panel's own minimum", function()
+            local window, frames = newWindow({ size = { width = 10, height = 10 } })
+
+            window.show()
+
+            assert.equal(200, frames[1].width)
+            assert.equal(120, frames[1].height)
+        end)
+
+        it("saves the box the corner was let go at", function()
+            local window, frames, recorded = newWindow()
+            window.show()
+            local _, grip = handlesOf(frames)
+
+            grip:run("OnMouseDown")
+            frames[1]:run("OnSizeChanged", 300, 400)
+            grip:run("OnMouseUp")
+
+            assert.equal("BOTTOMRIGHT", frames[1].sizingFrom)
+            assert.same({ { width = 300, height = 400, locked = false } }, recorded.sizes)
+        end)
+
+        it("relays out the body at the width it was dragged to", function()
+            local window, frames = newWindow()
+            window.update(summary())
+
+            frames[1]:run("OnSizeChanged", 400, 400)
+
+            -- The title is clipped rather than wrapped, so what it may have is a number, and
+            -- the rows below it are hung off the same width.
+            assert.equal(400 - 24 - 24, titleOf(frames[1]).width)
+            local _, content = viewportOf(frames)
+            assert.equal(400, content.width)
+        end)
+
+        describe("the lock in the header", function()
+            it("starts unlocked, with the panel resizable and the grip in its corner", function()
+                local window, frames = newWindow()
+
+                window.show()
+
+                local lock, grip = handlesOf(frames)
+                assert.is_true(frames[1].resizable)
+                assert.is_true(grip.shown)
+                assert.equal(UNLOCKED_ICON, lock.normalTexture)
+            end)
+
+            it("pins the size and takes the grip away when it is clicked", function()
+                local window, frames, recorded = newWindow()
+                window.show()
+                local lock, grip = handlesOf(frames)
+
+                lock:run("OnClick")
+
+                assert.is_false(frames[1].resizable)
+                assert.is_false(grip.shown)
+                assert.equal(LOCKED_ICON, lock.normalTexture)
+                assert.same({ { width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, locked = true } },
+                    recorded.sizes)
+            end)
+
+            it("gives the grip back when it is clicked again", function()
+                local window, frames = newWindow()
+                window.show()
+                local lock, grip = handlesOf(frames)
+                lock:run("OnClick")
+
+                lock:run("OnClick")
+
+                assert.is_true(frames[1].resizable)
+                assert.is_true(grip.shown)
+                assert.equal(UNLOCKED_ICON, lock.normalTexture)
+            end)
+
+            it("opens locked when that is how it was left", function()
+                local window, frames = newWindow({ size = { width = 300, height = 400, locked = true } })
+
+                window.show()
+
+                local lock, grip = handlesOf(frames)
+                assert.is_false(frames[1].resizable)
+                assert.is_false(grip.shown)
+                assert.equal(LOCKED_ICON, lock.normalTexture)
+            end)
+
+            -- A padlock in a corner is a thing people guess at, and the sentence beside it is
+            -- also the whole of what a client that failed to load the picture has to go on.
+            it("says which way round it is when the pointer rests on it", function()
+                local window, frames, recorded = newWindow()
+                window.show()
+                local lock = handlesOf(frames)
+
+                lock:run("OnEnter")
+
+                assert.equal("Size unlocked", recorded.tooltip.lines[1].text)
+                lock:run("OnLeave")
+                assert.equal(1, recorded.tooltip.hidden)
+            end)
+
+            it("locks without complaint when there is nowhere to write it down", function()
+                local window, frames = newWindow({ sized = false })
+                window.show()
+                local lock = handlesOf(frames)
+
+                assert.has_no.errors(function()
+                    lock:run("OnClick")
+                end)
+                assert.is_false(frames[1].resizable)
+            end)
+        end)
+
+        describe("scrolling what does not fit", function()
+            ---Opens a panel whose body is twice the height of the box holding it. The
+            ---viewport's own height is planted by hand: the fake does no anchor arithmetic,
+            ---so how tall the box came out is the test's to say rather than the frame's.
+            ---@return table window, table[] frames, table scroll, table content
+            local function overflowing()
+                local window, frames = newWindow()
+                window.update(summary())
+                local scroll, content = viewportOf(frames)
+                scroll:SetHeight(math.floor(content.height / 2))
+                return window, frames, scroll, content
+            end
+
+            it("moves the body up the box when the wheel is turned down", function()
+                local _, _, scroll, content = overflowing()
+
+                scroll:run("OnMouseWheel", -1)
+
+                assert.equal(content.height - scroll.height, scroll.verticalScroll)
+            end)
+
+            it("stops at the last line rather than scrolling past it", function()
+                local _, _, scroll, content = overflowing()
+
+                scroll:run("OnMouseWheel", -1)
+                scroll:run("OnMouseWheel", -1)
+
+                assert.equal(content.height - scroll.height, scroll.verticalScroll)
+            end)
+
+            it("stops at the first line rather than scrolling above it", function()
+                local _, _, scroll = overflowing()
+                scroll:run("OnMouseWheel", -1)
+
+                scroll:run("OnMouseWheel", 1)
+                scroll:run("OnMouseWheel", 1)
+
+                assert.equal(0, scroll.verticalScroll)
+            end)
+
+            -- A block closing under a viewport already scrolled to the bottom used to leave
+            -- the panel parked past its own last line, looking at nothing.
+            it("pulls back inside the body when a redraw makes it shorter", function()
+                local window, frames = newWindow()
+                window.update(long(30))
+                expand(frames[1], "Level ups")
+                local scroll, content = viewportOf(frames)
+                scroll:SetHeight(60)
+                scroll:run("OnMouseWheel", -20)
+                assert.is_true(scroll.verticalScroll > 0)
+
+                expand(frames[1], "Level ups")
+
+                assert.equal(math.max(content.height - 60, 0), scroll.verticalScroll)
+            end)
+
+            -- An evening's worth of segments is a longer list than the panel it hangs out of,
+            -- and a menu that ran off the bottom of the screen would put the oldest of them
+            -- where nobody can reach them.
+            it("stops the list at the panel's own bottom edge", function()
+                local many = { { kind = "session", key = "session", label = "Session", detail = "" } }
+                for index = 1, 40 do
+                    many[index + 1] = {
+                        kind = "record",
+                        key = "record:" .. index,
+                        label = "Segment " .. index,
+                        detail = "8m",
+                    }
+                end
+                local window, frames = newWindow({ views = many })
+                window.update(summary())
+
+                clickTitle(frames[1])
+
+                assert.equal(DEFAULT_HEIGHT - BODY_TOP, pickerOf(frames).height)
+            end)
+
+            it("leaves a list that fits at the height of the list", function()
+                local window, frames = newWindow({ views = offered() })
+                window.update(summary())
+
+                clickTitle(frames[1])
+
+                -- Padding, the hairline splitting the session off, three rows, padding — and
+                -- the picker's own edge above and below all of it.
+                assert.equal(12 + 11 + 3 * LINE + 12 + 2, pickerOf(frames).height)
+            end)
         end)
     end)
 end)

@@ -19,6 +19,11 @@ local _, ns = ...
 ---@field formatMoney fun(copper: integer): string
 ---@field loadPoint fun(): (string?, number?, number?) Saved point, x, y — or nil for the default spot.
 ---@field savePoint fun(point: string, x: number, y: number) Persist a dragged position.
+---@field loadSize fun(): (number?, number?, boolean?)? Saved width, height, and whether the size is
+---locked — or nil for the default box, unlocked. A panel built without this is still resizable; it
+---simply forgets the box between sessions.
+---@field saveSize fun(width: number, height: number, locked: boolean)? Persist a dragged size, or
+---the lock being turned on or off.
 ---@field openAchievement fun(id: integer)?
 ---@field previewTransmog fun(itemID: integer)?
 ---@field openTransmogCollection fun(sourceID: integer)?
@@ -46,6 +51,14 @@ local _, ns = ...
 ---@field toplevel boolean?
 
 local WIDTH = 268
+-- The box the panel starts in, and the smallest one it can be dragged down to. The panel
+-- used to be exactly as tall as whatever the evening had produced — which, anchored at its
+-- centre the way a HUD dragged into place is, grew in both directions at once: a drop
+-- landing pushed the rows already being read half a line up the screen. So the box is the
+-- player's, set once, and the content moves inside it instead.
+local DEFAULT_HEIGHT = 320
+local MIN_WIDTH = 200
+local MIN_HEIGHT = 120
 local PADDING = 12
 local LINE = 15
 local COLUMN_GAP = 8
@@ -66,6 +79,17 @@ local BAR_INDENT = 10
 -- ago it closed. Wider than the body's values because "42m · 3h ago" is the widest thing
 -- either column ever has to hold and clipping it would defeat the point of listing it.
 local PICKER_DETAIL_WIDTH = 96
+-- Where the body starts: under the header strip, its closing hairline, and the frame's own
+-- one-pixel edge above both.
+local BODY_TOP = 1 + HEADER_HEIGHT + RULE_HEIGHT
+-- Three lines a notch, which is what makes a wheel feel like it is turning a page rather
+-- than nudging one row at a time.
+local SCROLL_STEP = LINE * 3
+-- The bar down the right edge that says how much is off screen: as thin as the panel's own
+-- chrome, and never shorter than something the eye can find.
+local THUMB_WIDTH = 3
+local THUMB_MIN = 16
+local GRIP_SIZE = 16
 
 local TITLE_COLOR = { 1, 0.82, 0 }
 local HEADING_COLOR = { 0.93, 0.91, 0.85 }
@@ -86,6 +110,7 @@ local HEADER_COLOR = { 0.11, 0.11, 0.13, 1 }
 local RULE_COLOR = { 1, 0.82, 0, 0.22 }
 local BAR_BACK_COLOR = { 0.14, 0.14, 0.14, 0.9 }
 local BAR_FILL_COLOR = { 0.24, 0.55, 0.29, 0.95 }
+local THUMB_COLOR = { 1, 0.82, 0, 0.35 }
 
 local ACCOUNT_HEX = "|cffb373ff"
 local CHARACTER_HEX = "|cff59d973"
@@ -99,6 +124,84 @@ local COLOR_END = "|r"
 local EXPAND_ICON = "|TInterface\\Buttons\\UI-PlusButton-Up:12:12:0:-1|t "
 local COLLAPSE_ICON = "|TInterface\\Buttons\\UI-MinusButton-Up:12:12:0:-1|t "
 local REVIEWED_ICON = "|TInterface\\RaidFrame\\ReadyCheck-Ready:12:12:0:-1|t "
+
+-- The client's own padlock, the pair the default UI locks its bars with, and its own corner
+-- grabber, the one every resizable chat window has had in its bottom right since the game
+-- shipped. Both are what a player already reads as "this can be pinned down" and "this can
+-- be pulled" without being told, which is the whole reason for using the client's rather
+-- than drawing something of our own.
+local LOCKED_ICON = "Interface\\Buttons\\LockButton-Locked-Up"
+local UNLOCKED_ICON = "Interface\\Buttons\\LockButton-Unlocked-Up"
+local GRIP_ICON = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up"
+local GRIP_HIGHLIGHT_ICON = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight"
+local BUTTON_HIGHLIGHT = "Interface\\Buttons\\UI-Common-MouseHilight"
+
+---A viewport: a fixed box with something taller inside it, wheeled up and down.
+---
+---The bar down the right edge is drawn rather than taken from the client, because the panel
+---is flat colour and one-pixel edges and Blizzard's carved slider is three textures of chrome
+---for a control nobody here drags. The wheel is how this is scrolled; the bar only says how
+---much is off screen and whereabouts in it the eye has got to.
+---@param createFrame fun(frameType: string, name: string?, parent: table?, template: string?): table
+---@param parent table The frame the viewport fills, from `top` down to its bottom edge.
+---@param name string? Global name for the scroll frame; two must not share one.
+---@param top number How far below the parent's top edge the viewport starts.
+---@return table viewport `{ content = table, to = fun(offset: number), refresh = fun() }`
+local function newViewport(createFrame, parent, name, top)
+    local scroll = createFrame("ScrollFrame", name, parent)
+    scroll:SetPoint("TOPLEFT", 0, -top)
+    scroll:SetPoint("BOTTOMRIGHT", 0, 1)
+
+    local content = createFrame("Frame", nil, scroll)
+    content:SetSize(1, 1)
+    scroll:SetScrollChild(content)
+
+    -- On the parent rather than on the scroll frame: a child of a ScrollFrame is scrolled
+    -- with everything else in it, and a scroll bar that scrolled away is no use to anybody.
+    local thumb = parent:CreateTexture(nil, "OVERLAY")
+    thumb:SetColorTexture(THUMB_COLOR[1], THUMB_COLOR[2], THUMB_COLOR[3], THUMB_COLOR[4])
+    thumb:SetWidth(THUMB_WIDTH)
+    thumb:Hide()
+
+    local offset = 0
+    local viewport = { content = content }
+
+    ---Puts the content at `wanted`, as far as it will go, and redraws the bar saying where
+    ---that is. Deliberately clamped here rather than at the wheel, because the content
+    ---growing or the box shrinking under an already-scrolled viewport is the other way to
+    ---end up parked past the last line.
+    ---@param wanted number
+    function viewport.to(wanted)
+        local visible = scroll:GetHeight() or 0
+        local whole = content:GetHeight() or 0
+        local range = math.max(whole - visible, 0)
+        offset = math.max(0, math.min(wanted, range))
+        scroll:SetVerticalScroll(offset)
+
+        if range <= 0 or visible <= 0 then
+            thumb:Hide()
+            return
+        end
+        local size = math.max(math.floor(visible * visible / whole), THUMB_MIN)
+        local travel = math.max(visible - size, 0)
+        thumb:SetHeight(size)
+        thumb:ClearAllPoints()
+        thumb:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -1, -top - travel * (offset / range))
+        thumb:Show()
+    end
+
+    ---Re-clamps where it already is, for after a redraw changed how much there is to see.
+    function viewport.refresh()
+        viewport.to(offset)
+    end
+
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(_, delta)
+        viewport.to(offset - delta * SCROLL_STEP)
+    end)
+
+    return viewport
+end
 
 ---Groups a count's digits in threes. Lives in `AccountTooltip.lua` because the bar caption
 ---and the tooltip over it have to print the same number the same way.
@@ -131,11 +234,22 @@ function ns.newResultsWindow(deps)
     ---@type table[] Hairlines drawn between blocks of the body.
     local rules = {}
     local frame, title
+    ---The box the panel is in and whether the player has pinned it there. Held rather than
+    ---read back off the frame, because the frame does not exist until something opens the
+    ---panel and the saved box has to be known before it is built.
+    local width, height, locked = WIDTH, DEFAULT_HEIGHT, false
+    ---The body: the viewport the rows are drawn inside, the frame they are drawn on, and the
+    ---two controls that size the whole thing.
+    local viewport, body, lockButton, grip
     ---The picker: the frame it is drawn on, the rows pooled on it, and whether it is open.
     ---Built on the first click rather than with the panel, because a player who never opens
     ---it never pays for it.
     ---@type table?
     local picker
+    ---@type table?
+    local pickerViewport
+    ---@type table?
+    local pickerBody
     ---@type { label: table, value: table }[]
     local pickerRows = {}
     ---@type table?
@@ -170,11 +284,49 @@ function ns.newResultsWindow(deps)
     ---Declared here and filled in below the row pools they draw with, because the header
     ---is built before them and has to hang the click on something.
     local togglePicker
+    ---Both are laid out from the panel's own width, and both have to be redrawn while a
+    ---corner is being dragged — so the resize handler, which is installed with the frame,
+    ---needs them long before the pools they draw with exist.
+    local render, drawPicker
+
+    ---Re-hangs everything sized off the panel itself. The rows are not among them: they are
+    ---laid out from scratch on every render anyway, which is what a resize asks for.
+    local function applyWidth()
+        -- The strip, its hairline and the two header buttons are anchored to the frame's own
+        -- corners and follow it without being told. The title cannot be: it is clipped rather
+        -- than wrapped, so what it may have is a number, and the number is the strip less its
+        -- margins and less the controls at the far end of it.
+        title:SetWidth(width - PADDING * 2 - HEADER_HEIGHT - (deps.closable and HEADER_HEIGHT or 0))
+        body:SetWidth(width)
+    end
+
+    ---Turns resizing on or off. The grip goes away with it, so a pinned panel has nothing in
+    ---its corner to catch a click meant for the last row of the body.
+    local function applyLock()
+        frame:SetResizable(not locked)
+        lockButton:SetNormalTexture(locked and LOCKED_ICON or UNLOCKED_ICON)
+        if locked then
+            grip:Hide()
+        else
+            grip:Show()
+        end
+    end
+
+    local function saveSize()
+        if deps.saveSize then
+            deps.saveSize(math.floor(width), math.floor(height), locked)
+        end
+    end
 
     local function build()
         frame = createFrame("Frame", deps.name, deps.uiParent, "BackdropTemplate")
-        frame:SetWidth(WIDTH)
-        frame:SetHeight(90)
+        if deps.loadSize then
+            local savedWidth, savedHeight, savedLock = deps.loadSize()
+            width = math.max(savedWidth or WIDTH, MIN_WIDTH)
+            height = math.max(savedHeight or DEFAULT_HEIGHT, MIN_HEIGHT)
+            locked = savedLock and true or false
+        end
+        frame:SetSize(width, height)
         frame:SetFrameStrata(deps.frameStrata or "MEDIUM")
         if deps.toplevel then
             frame:SetToplevel(true)
@@ -211,14 +363,16 @@ function ns.newResultsWindow(deps)
         -- out of the pooled bar textures underneath it.
         local strip = frame:CreateTexture(nil, "BORDER")
         strip:SetColorTexture(HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], HEADER_COLOR[4])
+        -- Pinned to both top corners rather than given a width, so the strip follows a panel
+        -- being dragged wider without anything having to tell it to.
         strip:SetPoint("TOPLEFT", 1, -1)
-        strip:SetWidth(WIDTH - 2)
+        strip:SetPoint("TOPRIGHT", -1, -1)
         strip:SetHeight(HEADER_HEIGHT)
 
         local underline = frame:CreateTexture(nil, "BORDER")
         underline:SetColorTexture(RULE_COLOR[1], RULE_COLOR[2], RULE_COLOR[3], RULE_COLOR[4])
         underline:SetPoint("TOPLEFT", 1, -1 - HEADER_HEIGHT)
-        underline:SetWidth(WIDTH - 2)
+        underline:SetPoint("TOPRIGHT", -1, -1 - HEADER_HEIGHT)
         underline:SetHeight(RULE_HEIGHT)
 
         local middle = -1 - HEADER_HEIGHT / 2
@@ -231,9 +385,9 @@ function ns.newResultsWindow(deps)
         -- is what GameFontNormal is — the two would drift about the strip as the name under
         -- the pointer changed length, and the one control in the header would move with them.
         title:SetJustifyH("LEFT")
-        -- Clipped rather than wrapped, and clear of the close button when there is one: a
-        -- long "Character — Instance" title must not run out under it.
-        title:SetWidth(WIDTH - PADDING * 2 - (deps.closable and HEADER_HEIGHT or 0))
+        -- Clipped rather than wrapped, and clear of the buttons at the other end of the strip:
+        -- a long "Character — Instance" title must not run out under them. `applyWidth` below
+        -- is what says how much of the strip that leaves.
         title:SetText(type(deps.title) == "string" and deps.title or "Current Segment")
         title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
         -- The title is the picker's button. A button widget would be the only piece of
@@ -258,6 +412,81 @@ function ns.newResultsWindow(deps)
             end
         end
 
+        viewport = newViewport(createFrame, frame, deps.name .. "Body", BODY_TOP)
+        body = viewport.content
+
+        -- Built after the viewport, and deliberately: siblings of a frame stack in the order
+        -- they were created, so the two controls made below sit over the body rather than
+        -- under it. The grip in particular shares its corner with the body's last row.
+        --
+        -- Sizing a panel is something you do once and then want left alone, so there has to be
+        -- a way to take the grip out of that corner again. The switch is in the header because
+        -- the header is the one part of the panel nothing ever covers, and it sits inside the
+        -- close button so the button that shuts the window stays where the client always puts
+        -- it.
+        lockButton = createFrame("Button", nil, frame)
+        lockButton:SetSize(HEADER_HEIGHT, HEADER_HEIGHT)
+        lockButton:SetPoint("TOPRIGHT", -2 - (deps.closable and HEADER_HEIGHT or 0), -2)
+        lockButton:SetHighlightTexture(BUTTON_HIGHLIGHT, "ADD")
+        lockButton:SetScript("OnClick", function()
+            locked = not locked
+            applyLock()
+            saveSize()
+        end)
+        -- A padlock is a picture, and a picture in a corner is a thing people guess at. The
+        -- tooltip is what turns the guess into a sentence, and it is also the whole of what a
+        -- client that failed to load the texture would still have to go on.
+        lockButton:SetScript("OnEnter", function()
+            local tip = deps.tooltip
+            if not tip then
+                return
+            end
+            tip:SetOwner(lockButton, "ANCHOR_RIGHT")
+            tip:AddLine(locked and "Size locked" or "Size unlocked",
+                TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
+            tip:AddLine(locked and "Click to allow resizing." or "Click to pin this size.",
+                LABEL_COLOR[1], LABEL_COLOR[2], LABEL_COLOR[3])
+            tip:Show()
+        end)
+        lockButton:SetScript("OnLeave", function()
+            if deps.tooltip then
+                deps.tooltip:Hide()
+            end
+        end)
+
+        grip = createFrame("Button", nil, frame)
+        grip:SetSize(GRIP_SIZE, GRIP_SIZE)
+        grip:SetPoint("BOTTOMRIGHT", -2, 2)
+        grip:SetNormalTexture(GRIP_ICON)
+        grip:SetHighlightTexture(GRIP_HIGHLIGHT_ICON, "ADD")
+        grip:SetScript("OnMouseDown", function()
+            frame:StartSizing("BOTTOMRIGHT")
+        end)
+        grip:SetScript("OnMouseUp", function()
+            frame:StopMovingOrSizing()
+            saveSize()
+        end)
+
+        applyWidth()
+        frame:SetResizable(true)
+        frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT)
+        applyLock()
+
+        -- Installed last, and only last: the client fires this on the SetSize above as well as
+        -- on every frame of a drag, and a handler that ran before the body existed would take
+        -- the panel down on the way up.
+        frame:SetScript("OnSizeChanged", function(_, newWidth, newHeight)
+            width = newWidth or width
+            height = newHeight or height
+            applyWidth()
+            if latest then
+                render(latest)
+            end
+            if pickerOpen then
+                drawPicker()
+            end
+        end)
+
         frame:Hide()
     end
 
@@ -269,8 +498,8 @@ function ns.newResultsWindow(deps)
     local function rowAt(index)
         local row = rows[index]
         if not row then
-            local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            local value = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local label = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local value = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             label:SetJustifyH("LEFT")
             value:SetJustifyH("RIGHT")
             label:SetWordWrap(false)
@@ -289,9 +518,9 @@ function ns.newResultsWindow(deps)
     local function barAt(index)
         local bar = bars[index]
         if not bar then
-            local back = frame:CreateTexture(nil, "BACKGROUND")
-            local fill = frame:CreateTexture(nil, "ARTWORK")
-            local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local back = body:CreateTexture(nil, "BACKGROUND")
+            local fill = body:CreateTexture(nil, "ARTWORK")
+            local text = body:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             back:SetColorTexture(BAR_BACK_COLOR[1], BAR_BACK_COLOR[2], BAR_BACK_COLOR[3], BAR_BACK_COLOR[4])
             fill:SetColorTexture(BAR_FILL_COLOR[1], BAR_FILL_COLOR[2], BAR_FILL_COLOR[3], BAR_FILL_COLOR[4])
             text:SetJustifyH("CENTER")
@@ -341,7 +570,7 @@ function ns.newResultsWindow(deps)
     local function ruleAt(index)
         local rule = rules[index]
         if not rule then
-            rule = frame:CreateTexture(nil, "BORDER")
+            rule = body:CreateTexture(nil, "BORDER")
             rule:SetColorTexture(RULE_COLOR[1], RULE_COLOR[2], RULE_COLOR[3], RULE_COLOR[4])
             rules[index] = rule
         end
@@ -357,8 +586,8 @@ function ns.newResultsWindow(deps)
     local function pickerRowAt(index)
         local row = pickerRows[index]
         if not row then
-            local label = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            local value = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local label = pickerBody:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local value = pickerBody:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             label:SetJustifyH("LEFT")
             value:SetJustifyH("RIGHT")
             label:SetWordWrap(false)
@@ -376,11 +605,13 @@ function ns.newResultsWindow(deps)
     ---Read fresh on every open rather than kept, because the strip grows while the panel is
     ---on screen — a segment that closed since the last look is exactly the row somebody
     ---opening this is reaching for.
-    local function drawPicker()
+    function drawPicker()
         local views = deps.views()
         local y = -PADDING
         local used = 0
         local separated = false
+        picker:SetWidth(width)
+        pickerBody:SetWidth(width)
 
         for _, view in ipairs(views) do
             -- The whole point of the issue this was built for: the session total is one
@@ -389,7 +620,7 @@ function ns.newResultsWindow(deps)
             if view.kind ~= "session" and not separated then
                 separated = true
                 pickerRule:SetPoint("TOPLEFT", PADDING, y - (RULE_LINE - RULE_HEIGHT) / 2)
-                pickerRule:SetWidth(WIDTH - PADDING * 2)
+                pickerRule:SetWidth(width - PADDING * 2)
                 pickerRule:SetHeight(RULE_HEIGHT)
                 pickerRule:Show()
                 y = y - RULE_LINE
@@ -398,7 +629,7 @@ function ns.newResultsWindow(deps)
             used = used + 1
             local label, value = pickerRowAt(used)
             local color = view.current and TITLE_COLOR or HEADING_COLOR
-            label:SetWidth(WIDTH - PADDING * 2 - PICKER_DETAIL_WIDTH - COLUMN_GAP)
+            label:SetWidth(width - PADDING * 2 - PICKER_DETAIL_WIDTH - COLUMN_GAP)
             label:SetPoint("TOPLEFT", PADDING, y)
             label:SetText(view.label or view.title or "")
             label:SetTextColor(color[1], color[2], color[3])
@@ -428,7 +659,14 @@ function ns.newResultsWindow(deps)
                 region:SetScript("OnMouseUp", nil)
             end
         end
-        picker:SetHeight(-y + PADDING)
+        -- An evening's worth of segments is a longer list than the panel it hangs out of, and
+        -- a menu that ran off the bottom of the screen would put the oldest of them where
+        -- nobody can reach them. So it stops at the panel's own bottom edge and scrolls
+        -- inside that, the same way the body under it does.
+        local content = -y + PADDING
+        pickerBody:SetHeight(math.max(content, 1))
+        picker:SetHeight(math.min(content + 2, math.max(height - BODY_TOP, LINE)))
+        pickerViewport.refresh()
     end
 
     ---Builds the picker's own frame, once.
@@ -440,7 +678,7 @@ function ns.newResultsWindow(deps)
     ---own header opening downwards rather than a window in its own right.
     local function buildPicker()
         picker = createFrame("Frame", nil, frame, "BackdropTemplate")
-        picker:SetWidth(WIDTH)
+        picker:SetWidth(width)
         picker:SetHeight(LINE)
         picker:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -HEADER_HEIGHT - RULE_HEIGHT)
         picker:SetFrameStrata("DIALOG")
@@ -456,13 +694,15 @@ function ns.newResultsWindow(deps)
         -- Mouse-enabled with nothing to do: it is what stops a click meant for a menu row
         -- landing on the panel underneath and dragging the whole HUD across the screen.
         picker:EnableMouse(true)
-        pickerRule = picker:CreateTexture(nil, "BORDER")
+        pickerViewport = newViewport(createFrame, picker, nil, 1)
+        pickerBody = pickerViewport.content
+        pickerRule = pickerBody:CreateTexture(nil, "BORDER")
         pickerRule:SetColorTexture(RULE_COLOR[1], RULE_COLOR[2], RULE_COLOR[3], RULE_COLOR[4])
         picker:Hide()
     end
 
     ---@param summary SegmentSummary
-    local function render(summary)
+    function render(summary)
         -- A view names itself — "Session", the zone being played, a zone left an hour ago —
         -- and that name outranks anything the panel was built with, because it is the only
         -- thing on screen saying which of them is being looked at.
@@ -483,7 +723,9 @@ function ns.newResultsWindow(deps)
             named = (pickerOpen and COLLAPSE_ICON or EXPAND_ICON) .. named
         end
         title:SetText(named)
-        local y = -HEADER_HEIGHT - RULE_HEIGHT - PADDING
+        -- Down the body rather than down the frame: the rows are drawn on the thing inside the
+        -- viewport, which is as tall as they make it and is what the wheel moves.
+        local y = -PADDING
         local used = 0
         local usedBars = 0
         local usedRules = 0
@@ -499,7 +741,7 @@ function ns.newResultsWindow(deps)
             local label, value = rowAt(used)
             local valueWidth = valueText ~= "" and (requestedValueWidth or VALUE_WIDTH) or 0
             local gap = valueWidth > 0 and COLUMN_GAP or 0
-            label:SetWidth(WIDTH - PADDING * 2 - valueWidth - gap)
+            label:SetWidth(width - PADDING * 2 - valueWidth - gap)
             value:SetWidth(valueWidth)
             label:SetPoint("TOPLEFT", PADDING, y)
             label:SetText(text)
@@ -552,10 +794,10 @@ function ns.newResultsWindow(deps)
         local function bar(current, max, caption)
             usedBars = usedBars + 1
             local back, fill, text = barAt(usedBars)
-            local width = WIDTH - PADDING * 2 - BAR_INDENT
+            local track = width - PADDING * 2 - BAR_INDENT
             local fraction = max > 0 and math.min(current / max, 1) or 0
             back:SetPoint("TOPLEFT", PADDING + BAR_INDENT, y)
-            back:SetWidth(width)
+            back:SetWidth(track)
             back:SetHeight(BAR_HEIGHT)
             back:Show()
             fill:SetPoint("TOPLEFT", PADDING + BAR_INDENT, y)
@@ -563,13 +805,13 @@ function ns.newResultsWindow(deps)
             if fraction > 0 then
                 -- Kept off zero once any progress exists at all: a sliver still reads as
                 -- "started", where a bar of no width reads as an untouched level.
-                fill:SetWidth(math.max(math.floor(width * fraction), 1))
+                fill:SetWidth(math.max(math.floor(track * fraction), 1))
                 fill:Show()
             else
                 fill:Hide()
             end
             text:SetPoint("TOPLEFT", PADDING + BAR_INDENT, y - 1)
-            text:SetWidth(width)
+            text:SetWidth(track)
             text:SetText(caption)
             text:Show()
             y = y - LINE
@@ -580,7 +822,7 @@ function ns.newResultsWindow(deps)
             usedRules = usedRules + 1
             local drawn = ruleAt(usedRules)
             drawn:SetPoint("TOPLEFT", PADDING, y - (RULE_LINE - RULE_HEIGHT) / 2)
-            drawn:SetWidth(WIDTH - PADDING * 2)
+            drawn:SetWidth(width - PADDING * 2)
             drawn:SetHeight(RULE_HEIGHT)
             drawn:Show()
             y = y - RULE_LINE
@@ -919,7 +1161,11 @@ function ns.newResultsWindow(deps)
             rules[index]:Hide()
         end
 
-        frame:SetHeight(-y + PADDING)
+        -- The body is what grows, not the panel. Refreshing afterwards is what keeps a
+        -- viewport that was scrolled to the bottom from sitting past the last line once a
+        -- block is collapsed and the content under it becomes shorter than the box.
+        body:SetHeight(math.max(-y + PADDING, 1))
+        viewport.refresh()
     end
 
     ---Opens the list, or shuts it again. Built on the first open, drawn on every one.

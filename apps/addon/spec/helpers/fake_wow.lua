@@ -193,6 +193,10 @@ function fake.newTexture(layer)
         self.points[#self.points + 1] = { ... }
     end
 
+    function texture:ClearAllPoints()
+        self.points = {}
+    end
+
     function texture:SetWidth(width)
         self.width = width
     end
@@ -245,8 +249,14 @@ function fake.newFrame(options)
         registeredOrder = {},
         fontStrings = {},
         textures = {},
+        -- Frames created with this one as their parent, in creation order. A window whose
+        -- rows live inside a scroll frame draws them on a child rather than on itself, so
+        -- "what is on this panel" is a walk rather than one list; see fake.regionsOf.
+        children = {},
         points = {},
         shown = true,
+        width = 0,
+        height = 0,
     }
 
     function frame:SetScript(name, handler)
@@ -381,14 +391,67 @@ function fake.newFrame(options)
         return nil, nil
     end
 
+    -- Recorded rather than ignored, unlike the rest of the geometry: a panel that scrolls has
+    -- to compare how tall its content is against how tall the box holding it is, so a fake
+    -- that forgot both would have the addon dividing by nothing.
+    function frame:SetSize(width, height)
+        self.width = width
+        self.height = height or width
+    end
+
+    function frame:SetWidth(width)
+        self.width = width
+    end
+
+    function frame:SetHeight(height)
+        self.height = height
+    end
+
+    function frame:GetWidth()
+        return self.width
+    end
+
+    function frame:GetHeight()
+        return self.height
+    end
+
+    ---How far the content inside a ScrollFrame has been pushed up. Recorded because "the
+    ---panel is scrolled to here" is the whole of what the wheel does.
+    function frame:SetVerticalScroll(offset)
+        self.verticalScroll = offset
+    end
+
+    function frame:GetVerticalScroll()
+        return self.verticalScroll or 0
+    end
+
+    -- The picture a button wears, which is what says whether the size is pinned.
+    function frame:SetNormalTexture(picture)
+        self.normalTexture = picture
+    end
+
+    function frame:SetResizable(enabled)
+        self.resizable = enabled and true or false
+    end
+
+    function frame:SetResizeBounds(minWidth, minHeight)
+        self.resizeBounds = { minWidth, minHeight }
+    end
+
+    function frame:StartSizing(point)
+        self.sizingFrom = point
+    end
+
+    -- Recorded because a frame with a backdrop of its own is a panel in its own right rather
+    -- than part of the one it hangs off — which is what fake.regionsOf stops at.
+    function frame:SetBackdrop(backdrop)
+        self.backdrop = backdrop
+    end
+
     for _, name in ipairs({
-        "SetSize",
         "SetAllPoints",
-        "SetWidth",
-        "SetHeight",
         "SetFrameStrata",
         "SetToplevel",
-        "SetBackdrop",
         "SetBackdropColor",
         "SetBackdropBorderColor",
         "SetMovable",
@@ -396,7 +459,7 @@ function fake.newFrame(options)
         "RegisterForDrag",
         "SetClampedToScreen",
         "SetScrollChild",
-        "SetNormalTexture",
+        "EnableMouseWheel",
         "SetHighlightTexture",
         "RegisterForClicks",
         "SetJustifyH",
@@ -431,11 +494,48 @@ function fake.newCreateFrame(options)
         frame.frameName = name
         frame.parent = parent
         frame.template = template
+        if type(parent) == "table" and type(parent.children) == "table" then
+            parent.children[#parent.children + 1] = frame
+        end
         frames[#frames + 1] = frame
         return frame
     end
 
     return createFrame, frames, types
+end
+
+---Every font string and texture hung off `frame`, its own first and then each child's, in
+---creation order.
+---
+---A window that scrolls draws its rows on a frame inside a ScrollFrame rather than on the
+---panel itself, so reading the panel's own two lists would find only the chrome. Depth-first
+---from the frame keeps everything one pool handed out contiguous, which is what lets a test
+---pair a bar's track with its fill by position.
+---
+---The walk stops at any child carrying a backdrop of its own. A menu that opens over a panel
+---is parented to it but is not part of it, and reading the two as one list would have every
+---row of the menu turn up as a phantom row of the body underneath.
+---@param frame table
+---@return table fontStrings, table textures
+function fake.regionsOf(frame)
+    local fontStrings, textures = {}, {}
+
+    local function walk(current)
+        for _, fontString in ipairs(current.fontStrings or {}) do
+            fontStrings[#fontStrings + 1] = fontString
+        end
+        for _, texture in ipairs(current.textures or {}) do
+            textures[#textures + 1] = texture
+        end
+        for _, child in ipairs(current.children or {}) do
+            if not child.backdrop then
+                walk(child)
+            end
+        end
+    end
+
+    walk(frame)
+    return fontStrings, textures
 end
 
 ---A fake `GetSavedInstanceInfo` pair, driven by a list of readable tables rather

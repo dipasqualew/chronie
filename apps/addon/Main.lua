@@ -347,6 +347,15 @@ function ns.main(env)
     local renderResults
     local resultsWindow
 
+    ---The HUD's own corner of the saved variables. One table, written field by field rather
+    ---than replaced, because where it was dragged to and how big it was left are saved by two
+    ---different gestures and neither may drop the other.
+    ---@return table
+    local function resultsLayout()
+        env.db.resultsWindow = env.db.resultsWindow or {}
+        return env.db.resultsWindow
+    end
+
     resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
         uiParent = env.uiParent,
@@ -367,7 +376,19 @@ function ns.main(env)
             return saved.point, saved.x, saved.y
         end,
         savePoint = function(point, x, y)
-            env.db.resultsWindow = { point = point, x = x, y = y }
+            local saved = resultsLayout()
+            saved.point, saved.x, saved.y = point, x, y
+        end,
+        loadSize = function()
+            local saved = env.db.resultsWindow
+            if not saved then
+                return nil
+            end
+            return saved.width, saved.height, saved.locked
+        end,
+        saveSize = function(width, height, locked)
+            local saved = resultsLayout()
+            saved.width, saved.height, saved.locked = width, height, locked
         end,
         openAchievement = env.openAchievement,
         previewTransmog = transmogPreview.show,
@@ -829,6 +850,19 @@ function ns.main(env)
             return "CENTER", 260, 0
         end,
         savePoint = function() end,
+        -- Where it opens is fixed and its size is not: the position is a place the list it
+        -- came from is still readable beside, but how much of a filed evening fits on screen
+        -- is the player's business and worth remembering between them.
+        loadSize = function()
+            local saved = env.db.segmentDetailWindow
+            if not saved then
+                return nil
+            end
+            return saved.width, saved.height, saved.locked
+        end,
+        saveSize = function(width, height, locked)
+            env.db.segmentDetailWindow = { width = width, height = height, locked = locked }
+        end,
         openAchievement = env.openAchievement,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
