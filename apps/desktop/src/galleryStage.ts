@@ -34,7 +34,6 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
-  Box3,
   DirectionalLight,
   type Group,
   PerspectiveCamera,
@@ -45,21 +44,21 @@ import {
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+import { placeOn } from "./framing";
 import type { Focus } from "./gallery";
+import { cameraFor } from "./modelPreview";
 
 /** The same narrow view the pane uses, so a body has the same proportions in both. */
 const FIELD_OF_VIEW = 35;
 
-/** How much room to leave around what is framed, so nothing touches the edge of the picture. */
-const MARGIN = 1.15;
-
 /**
  * Where the camera stands, as a direction from what it is looking at.
  *
- * Square to the front would read as a silhouette; this is the same three-quarter view the pane
- * opens on, and the reason a gallery shows shape rather than outline.
+ * Square to the front would read as a silhouette, and a thumbnail has no zoom and no way back
+ * for a reader who has been handed one. `modelPreview.ts` holds the direction along with every
+ * other view this app has, because a picture is a picture whichever renderer draws it.
  */
-const FROM: [number, number, number] = [0.45, 0.12, 1];
+const FROM = "tile" as const;
 
 export interface GalleryStage {
   /**
@@ -113,9 +112,10 @@ export function createGalleryStage(options: GalleryStageOptions = {}): GallerySt
    * Points the camera at the part of the model `focus` names, holding as much of it as `focus`
    * asks for, from `turn` radians round.
    *
-   * Both of `focus`'s numbers are proportions of the model's own height, which is what lets one
-   * table in `gallery.ts` frame a body two metres tall and a body of two hundred fixture units
-   * alike.
+   * Where the model goes and how far back that puts the camera is `framing.ts`'s, which is the
+   * one place in the app either renderer puts a model down — and, since a drag calls this once
+   * per pointer move on a model that is already framed, the reason turning a tile no longer
+   * makes it flicker. What is left here is the turn.
    *
    * **The turn moves the camera and never the model**, which is not a matter of taste. Framing
    * is computed from an axis-aligned bounding box, and the box round a rotated model changes
@@ -124,25 +124,18 @@ export function createGalleryStage(options: GalleryStageOptions = {}): GallerySt
    * point already being looked at leaves every number above untouched.
    */
   function frame(model: Group, focus: Focus, turn: number): void {
-    const box = new Box3().setFromObject(model);
-    const middle = box.getCenter(new Vector3());
-    const span = box.getSize(new Vector3());
-    const height = Math.max(span.y, 0.001);
-
-    // Everything is framed about the origin, so the model is moved rather than the camera aimed:
-    // one subtraction here against a target, a projection and a leash everywhere else.
-    const at = box.min.y + focus.height * height;
-    model.position.set(-middle.x, -at, -middle.z);
-
-    // What has to fit: the slice of the body being held, and — for the whole-model case, which is
-    // every weapon — its width too, because a polearm is wider than she is tall.
-    const holds = Math.max(focus.holds * height, focus.holds >= 1 ? span.x : 0, 0.001);
-    const half = (FIELD_OF_VIEW / 2) * (Math.PI / 180);
-    const distance = (holds / 2 / Math.tan(half)) * MARGIN;
-    camera.position.set(...(FROM.map((axis) => axis * distance) as [number, number, number]));
+    // `turns`, because this is the picture a reader can only turn: no zoom, no pan, and nothing
+    // to get back out with if a model swings off the edge of its own tile.
+    const { distance } = placeOn(model, {
+      focus,
+      view: FROM,
+      fov: FIELD_OF_VIEW,
+      aspect: 1,
+      turns: true,
+    });
+    camera.position.set(...cameraFor(FROM, distance));
     camera.position.applyAxisAngle(UP, turn);
     camera.lookAt(0, 0, 0);
-    camera.updateProjectionMatrix();
   }
 
   /**
