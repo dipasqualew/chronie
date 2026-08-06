@@ -59,6 +59,11 @@ local addonName, ns = ...
 ---leaves that domain out instead of raising.
 ---@field clientBuild fun(): string? Which build of the game this is. What says a census was
 ---taken of a different game than the one now running.
+---@field elapsedMilliseconds fun(): number? A millisecond clock that does not care what time it
+---is — `debugprofilestop`. What lets a census slice be bounded by how long it took rather than by
+---a count guessed in advance; see `Census.lua`.
+---@field inCombat fun(): boolean? Whether the player is in combat. What lets the census wait out
+---a pull rather than spend its budget in the only frames of the evening anybody is counting.
 ---@field ownedItemCount fun(itemID: integer): integer Grand total owned across bags and every bank,
 ---the warband bank included, so internal transfers leave it unchanged.
 ---@field getCursorItem fun(): (integer?, string?) Item held on the cursor: id and name, or nil.
@@ -269,6 +274,11 @@ function ns.main(env)
     ---loaded, so between two passes the record keeps itself; a pass is provoked rather than
     ---timed, by `census.audit` finding a domain that was never whole, one taken against a
     ---different client build, or one whose count the client itself disagrees with.
+    ---Repaints whatever is drawing the walk. Assigned once the segments window exists, which is
+    ---a long way below this — the census is built early because three other things read it.
+    ---@type fun()?
+    local paintCensusProgress
+
     local census = ns.newCensus({
         db = env.db,
         now = env.now,
@@ -276,21 +286,48 @@ function ns.main(env)
         character = currentCharacter,
         build = env.clientBuild,
         domains = censusDomains,
+        elapsed = env.elapsedMilliseconds,
+        busy = env.inCombat,
+        onProgress = function()
+            if paintCensusProgress then
+                paintCensusProgress()
+            end
+        end,
     })
 
+    ---@param group string? Only the domains of this family, or every one of them.
     ---@return string[] Every domain this build can walk, in walk order.
-    local function censusDomainNames()
+    local function censusDomainNames(group)
         local names = {}
         for _, domain in ipairs(censusDomains) do
-            names[#names + 1] = domain.name
+            if not group or (domain.group or ns.censusCollections) == group then
+                names[#names + 1] = domain.name
+            end
         end
         return names
+    end
+
+    ---Whether this domain is one the addon walks whatever the collections switch says.
+    ---
+    ---The wallet and the standings. See `ns.censusHoldings` for the argument; the short version
+    ---is that they are what every character screen in the app is drawn from, and that the pane
+    ---sweep they complete already runs unasked at every loading screen and every logout.
+    ---@param name string
+    ---@return boolean
+    local function isHoldingsDomain(name)
+        for _, domain in ipairs(censusDomains) do
+            if domain.name == name then
+                return domain.group == ns.censusHoldings
+            end
+        end
+        return false
     end
 
     local censusReport = ns.newCensusReport({
         domains = censusDomains,
         state = census.state,
         running = census.running,
+        progress = census.progress,
         now = env.now,
         character = currentCharacter,
     })
@@ -344,22 +381,34 @@ function ns.main(env)
 
     ---Takes a census of anything that needs one, a little after the world has settled.
     ---
-    ---Called on the far side of every loading screen. Two different things happen here and only
-    ---one of them is switched: a resync is a walk the desktop app was told to ask for, by
-    ---somebody pressing Resync, and it is carried out whatever the settings say; the audit's own
-    ---pass is the addon deciding by itself that a reading looks stale, and that is what
-    ---`settings.sync.census` gates.
+    ---Called on the far side of every loading screen. Three different things can happen here and
+    ---they are gated differently, which is the correction this made to a single switch over all
+    ---of it.
     ---
-    ---It is off by default because "cheap on every loading screen but the first" is true and is
-    ---not the whole story: the first one costs a walk of every mount, appearance and achievement
-    ---id the client will answer for, a patch makes every loading screen the first one again, and
-    ---a partial domain is walked once a session by design. Nothing about the walk is removed —
-    ---`/chronie census refresh` and the Resync button both still reach it.
+    ---**A resync is carried out whatever the settings say.** It is a walk the desktop app was
+    ---told to ask for, by somebody pressing Resync, and a walk somebody asked for by name is not
+    ---the addon running by itself.
     ---
-    ---The timer is armed either way, because a request the app left in the addon folder is
-    ---waiting on exactly this callback and has to be found however the switch is set. `run`
-    ---refuses to begin a second pass while one is in flight, so zoning about during a long walk
-    ---cannot restart or double it.
+    ---**The holdings are walked whatever the settings say too**, and that is the part that
+    ---changed. A character's wallet and its standings are what every character screen in the app
+    ---is drawn from; the pane sweep that reads the same two things shallowly already runs unasked
+    ---at every loading screen and at logout, and this is the rest of that same reading — the
+    ---currencies a collapsed group hides and the legacy reputations the pane will not show at
+    ---all. One switch over the whole census meant that turning off a wardrobe walk somebody could
+    ---not afford also silently stopped every currency and reputation the app knew about, which is
+    ---the bug this was written for. Nine thousand ids, character-scoped, a couple of seconds of
+    ---slices.
+    ---
+    ---**The collections are what `settings.sync.census` gates**, and they are the expensive end:
+    ---every mount, appearance and achievement id the client will answer for. They are now on by
+    ---default, because the walk they provoke is no longer what it was — see `Census.lua`, where a
+    ---slice is bounded in milliseconds rather than in positions, waits out combat, takes a
+    ---twentieth of a second between slices rather than every frame, and cannot be restarted by
+    ---the next loading screen.
+    ---
+    ---The timer is armed whatever any of that says, because a request the app left in the addon
+    ---folder is waiting on exactly this callback. `run` refuses to begin a second pass while one
+    ---is in flight, so zoning about during a long walk cannot restart or double it.
     local function sweepCensus()
         env.after(CENSUS_SETTLE_SECONDS, function()
             -- What somebody explicitly asked for goes first, and the audit's own pass second.
@@ -369,10 +418,19 @@ function ns.main(env)
             local walking = censusResync.run()
             if #walking > 0 then
                 logger.info(ns.censusResyncText(walking))
+                return
             end
-            if syncEnabled("census") then
-                census.run()
+            -- Audited once and then filtered, rather than audited per family: the audit is the
+            -- expensive half of this — a counter call per domain — and asking it twice at every
+            -- loading screen would be paying for the switch twice.
+            local collections = syncEnabled("census")
+            local wanted = {}
+            for _, name in ipairs(census.audit()) do
+                if collections or isHoldingsDomain(name) then
+                    wanted[#wanted + 1] = name
+                end
             end
+            census.run(wanted)
         end)
     end
 
@@ -1056,6 +1114,12 @@ function ns.main(env)
         if #all > 0 and #filtered == 0 then
             spec.sections[1].empty = "No segments match those filters."
         end
+        -- Under the totals and over the days. The census is not a segment and does not belong in
+        -- the same table, but it is the one thing about Chronie that runs on its own account for
+        -- minutes at a time, and this window is where somebody already comes to see what the
+        -- addon has been doing — so the walk is drawn where it will actually be found rather than
+        -- behind a slash command nobody would think to run while wondering why the client stutters.
+        table.insert(spec.sections, 2, censusReport.section())
         spec.filters = {
             { key = "character", label = "Character", value = segmentFilters.character },
             { key = "day", label = "Day", value = segmentFilters.day },
@@ -1076,6 +1140,29 @@ function ns.main(env)
         end
     end
     router.add("segments", toggleSegments)
+
+    ---Redraws the segments window so a walk in flight is seen to be moving.
+    ---
+    ---**Throttled, and both halves of the throttle matter.** The census reports after every slice
+    ---— twenty a second — and a repaint rebuilds every row of a window that may be holding a
+    ---week of segments, so painting per slice would cost more than the walk it was drawing. A
+    ---window nobody has open costs nothing at all, which is the first check; once a second is
+    ---the second, and it is as often as a percentage is worth reading anyway.
+    ---
+    ---Assigned rather than declared here because the census is built long before this window is,
+    ---three other things reading it on the way.
+    local lastCensusPaint = 0
+    paintCensusProgress = function()
+        if not segmentWindow.isShown() then
+            return
+        end
+        local at = env.now()
+        if at == lastCensusPaint then
+            return
+        end
+        lastCensusPaint = at
+        segmentWindow.show(segmentSpec())
+    end
     router.add("currency", currencyWindow.toggle)
     router.add("events", function()
         if #dispatcher.unsupported() == 0 then
@@ -2048,6 +2135,20 @@ if CreateFrame then
                     return nil
                 end
                 return tostring(version) .. "." .. tostring(build or "?")
+            end,
+            ---Milliseconds since the client started counting, which is not a time of day.
+            ---
+            ---`debugprofilestop` is the client's own high-resolution stopwatch — the one
+            ---Blizzard's own `Blizzard_DebugTools` measures with — and it is the only clock here
+            ---fine enough to bound a census slice, `env.now` counting in whole seconds. What it
+            ---is *for* is that a count of positions can only ever be right for the domain it was
+            ---chosen against, and the domains differ by an order of magnitude in what one costs.
+            elapsedMilliseconds = debugprofilestop,
+            ---Whether the player is in a fight, which is when the addon should be doing nothing
+            ---it could do a moment later. `InCombatLockdown` rather than a `PLAYER_REGEN_*` pair
+            ---because this is asked at the top of a slice rather than watched.
+            inCombat = function()
+                return InCombatLockdown() == true
             end,
             -- includeBank, includeUses, includeReagentBank, includeAccountBankTabs: every
             -- store the character owns, so moving the item between them never shifts the total.

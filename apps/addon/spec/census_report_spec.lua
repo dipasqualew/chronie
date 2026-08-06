@@ -38,7 +38,7 @@ describe("ns.newCensusReport", function()
         return state
     end
 
-    ---@param options table? `{ domains, states, running, now, character }`
+    ---@param options table? `{ domains, states, running, progress, now, character }`
     ---@return table report, table asked every `(name, character)` the report looked up, in order
     local function newReport(options)
         options = options or {}
@@ -52,6 +52,9 @@ describe("ns.newCensusReport", function()
             end,
             running = function()
                 return options.running == true
+            end,
+            progress = function()
+                return options.progress
             end,
             now = function()
                 return options.now or NOW
@@ -354,6 +357,133 @@ describe("ns.newCensusReport", function()
 
             assert.equal(2, #lines)
             assert.is_nil(lines[2]:find("refresh", 1, true))
+        end)
+    end)
+    -- The other half of breaking the census's silence, and the half somebody will actually see.
+    -- `/chronie census` is where the two numbers an audit compares are read side by side; this
+    -- is the walk while it is happening, in a window a player already opens to find out what
+    -- Chronie has been doing.
+    describe("the block the segments window draws", function()
+        ---@param options table?
+        ---@return table
+        local function section(options)
+            return newReport(options).section()
+        end
+
+        it("draws a row for every domain, in the order they are walked", function()
+            local drawn = section({
+                domains = {
+                    newDomain({ name = "currencies", scope = "character" }),
+                    newDomain({ name = "reputations", scope = "character" }),
+                    newDomain({ name = "achievements" }),
+                },
+                states = {
+                    currencies = newState({ complete = true, revision = 1, held = 14 }),
+                    reputations = newState({ complete = true, revision = 1, held = 240 }),
+                    achievements = newState(),
+                },
+            })
+
+            local names = {}
+            for _, row in ipairs(drawn.rows) do
+                names[#names + 1] = row.cells[1]
+            end
+            assert.same({ "currencies", "reputations", "achievements" }, names)
+        end)
+
+        it("says what a reading claims, what it holds, and what the client counts", function()
+            local drawn = section({
+                domains = { newDomain({ name = "achievements" }) },
+                states = { achievements = newState({
+                    complete = true, revision = 2, held = 2841, counted = 2841,
+                    build = BUILD, by = WALKER, completedAt = NOW - 2 * DAY,
+                }) },
+            })
+
+            local cells = drawn.rows[1].cells
+            assert.equal("achievements", cells[1])
+            assert.equal("whole", cells[2])
+            -- Blank on every row but the one being walked, which is what says which domain the
+            -- client is actually busy with.
+            assert.equal("", cells[3])
+            assert.equal("2841", cells[4])
+            assert.equal("2841", cells[5])
+            assert.equal("2d ago", cells[6])
+        end)
+
+        -- Its absence is a fact about the domain rather than about this reading — see
+        -- `ns.mountCensus`, which does without a counter on purpose — and a nought in that cell
+        -- would read as the client saying the account has none.
+        it("leaves the counted cell empty where the client offers no counter", function()
+            local drawn = section({
+                domains = { newDomain({ name = "mounts" }) },
+                states = { mounts = newState({ complete = true, revision = 1, held = 412 }) },
+            })
+
+            assert.equal("", drawn.rows[1].cells[5])
+        end)
+
+        it("draws a bar on the domain being walked and on no other", function()
+            local drawn = section({
+                domains = { newDomain({ name = "currencies", scope = "character" }),
+                    newDomain({ name = "reputations", scope = "character" }) },
+                states = {
+                    currencies = newState({ held = 3 }),
+                    reputations = newState({ held = 0 }),
+                },
+                progress = { domain = "reputations", done = 1000, total = 4000, at = 2, of = 2 },
+            })
+
+            assert.equal("", drawn.rows[1].cells[3])
+            assert.equal("|||······· 25%", drawn.rows[2].cells[3])
+        end)
+
+        -- The bar on the row below only ever describes the domain in hand, and somebody
+        -- watching a pass wants to know how many are queued behind it.
+        it("says which domain of how many is being walked", function()
+            local drawn = section({
+                domains = { newDomain({ name = "appearances", partial = true }) },
+                states = { appearances = newState({ held = 900 }) },
+                progress = { domain = "appearances", done = 20000, total = 55000, at = 8, of = 9 },
+            })
+
+            assert.equal("Collections — walking appearances, 8 of 9", drawn.heading)
+        end)
+
+        it("is a plain heading while nothing is walking", function()
+            local drawn = section({
+                domains = { newDomain() },
+                states = { things = newState({ complete = true, revision = 1 }) },
+            })
+
+            assert.equal("Collections", drawn.heading)
+        end)
+
+        -- A character's wallet is that character's, so the row has to be read against whoever is
+        -- logged in rather than against the account — the same lookup the chat lines make.
+        it("asks a character-scoped domain about whoever is playing", function()
+            local report, asked = newReport({
+                domains = { newDomain({ name = "currencies", scope = "character" }),
+                    newDomain({ name = "mounts" }) },
+                states = { currencies = newState(), mounts = newState() },
+                character = "Brin-Vale",
+            })
+
+            report.section()
+
+            assert.same({
+                { name = "currencies", character = "Brin-Vale" },
+                { name = "mounts", character = nil },
+            }, asked)
+        end)
+
+        -- A build that answers for no domain at all draws an empty block rather than a heading
+        -- over nothing, which is what every other section in that window does.
+        it("says so when this build answers for none of them", function()
+            local drawn = section({})
+
+            assert.same({}, drawn.rows)
+            assert.equal("This client build answers for none of them.", drawn.empty)
         end)
     end)
 end)

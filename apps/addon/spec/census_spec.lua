@@ -55,7 +55,8 @@ describe("ns.newCensus", function()
         return domain, recorded
     end
 
-    ---@param options table? `{ db, clock, now, domains, budget, build, character }`
+    ---@param options table? `{ db, clock, now, domains, budget, build, character, elapsed, busy,
+    ---onProgress }`
     ---@return table census, table db, table clock, table scheduler
     local function newCensus(options)
         options = options or {}
@@ -72,6 +73,9 @@ describe("ns.newCensus", function()
             build = options.build,
             domains = options.domains or {},
             budget = options.budget,
+            elapsed = options.elapsed,
+            busy = options.busy,
+            onProgress = options.onProgress,
         })
         return census, db, clock, scheduler
     end
@@ -470,14 +474,15 @@ describe("ns.newCensus", function()
             assert.equal(1, state.held)
         end)
 
-        -- And so it is walked once a session. Nothing else in a session tells this domain that
-        -- the account collected a look, and the character in front of the client is a different
-        -- part of the answer every time — so unlike every other domain there is always a reason
-        -- to walk it again.
+        -- Nothing else in a session tells this domain that the account collected a look, and the
+        -- character in front of the client is a different part of the answer every time — so
+        -- unlike every other domain there is always a reason to walk it again eventually. What
+        -- decides *when* is the quiet period below, which is the difference between "again" and
+        -- "again at every loading screen".
         it("is never settled by an audit, because the next character sees something else",
             function()
                 local domain = newDomain({ partial = true, positions = { 1 }, holds = { [1] = {} } })
-                local census = newCensus({
+                local census, _, clock = newCensus({
                     domains = { domain },
                     build = function()
                         return BUILD
@@ -485,6 +490,7 @@ describe("ns.newCensus", function()
                 })
 
                 sweep(census)
+                clock.advance(61 * MINUTE)
 
                 assert.same({ "things" }, census.audit())
             end)
@@ -548,6 +554,166 @@ describe("ns.newCensus", function()
             -- Every position asked about exactly once, which is the whole claim: a doubled
             -- pass would have read five ids twice.
             assert.same({ 1, 2, 3, 4, 5 }, recorded.reads)
+        end)
+
+        -- A count can only ever be right for the domain it was chosen against, and the domains
+        -- here differ by more than an order of magnitude in what one position costs: an
+        -- appearance is a table index behind a call already made, a reputation is up to four
+        -- client calls. So the count is a ceiling and the clock is the rule.
+        it("gives back the rest of a slice that has spent its milliseconds", function()
+            local spent = { value = 0 }
+            local positions = {}
+            for index = 1, 400 do
+                positions[index] = index
+            end
+            local domain, recorded = newDomain({
+                positions = positions,
+                read = function()
+                    -- A position that costs the client half a millisecond, so a handful of them
+                    -- is already past a budget of one and a half.
+                    spent.value = spent.value + 0.5
+                    return nil, nil
+                end,
+            })
+            local census = newCensus({
+                domains = { domain },
+                -- Far above what the clock will allow, so what ends the slice can only be the
+                -- clock.
+                budget = 400,
+                elapsed = function()
+                    return spent.value
+                end,
+            })
+            census.start()
+
+            assert.is_true(census.step())
+            local first = #recorded.reads
+            -- Two hundred of these would be a hundred milliseconds — six whole frames — which is
+            -- exactly the slice this exists to refuse.
+            assert.is_true(first > 0 and first < 40)
+
+            -- And the rest is picked up where it was left rather than lost.
+            assert.is_true(census.step())
+            assert.is_true(#recorded.reads > first)
+            assert.equal(first + 1, recorded.reads[first + 1])
+        end)
+
+        -- A build with no such clock is walked on the count alone, which is what every test that
+        -- does not care about timing gets and what an ancient client would get.
+        it("walks on the count alone where there is no clock to read", function()
+            local domain, recorded = newDomain({ positions = { 1, 2, 3, 4, 5 } })
+            local census = newCensus({ domains = { domain }, budget = 3 })
+            census.start()
+
+            assert.is_true(census.step())
+
+            assert.same({ 1, 2, 3 }, recorded.reads)
+        end)
+
+        -- The moments this exists for — a pull, a boss — are exactly the moments a player would
+        -- blame the addon for a stutter, and they are over in minutes. Nothing is lost by
+        -- waiting: the queue, the plan and everything already observed are all still there.
+        it("waits out a bad moment rather than working through it", function()
+            local busy = { value = true }
+            local domain, recorded = newDomain({ positions = { 1, 2, 3, 4 } })
+            local census, _, _, scheduler = newCensus({
+                domains = { domain },
+                budget = 2,
+                busy = function()
+                    return busy.value
+                end,
+            })
+
+            assert.is_true(census.run())
+            -- Nothing read, and the pass still standing with a slice booked for later.
+            assert.same({}, recorded.reads)
+            assert.is_true(census.running())
+            assert.equal(1, scheduler.pending())
+
+            busy.value = false
+            scheduler.settle()
+
+            assert.same({ 1, 2, 3, 4 }, recorded.reads)
+        end)
+
+        -- Four domains here have no id list at all: currencies and reputations walk a range of
+        -- ids because their client namespaces have no enumerator, and achievements and
+        -- appearances walk an offset into a plan. Building `{ 1, 2, 3, ... 55000 }` to say what
+        -- one integer says was half a megabyte of array made inside the single frame `list` runs
+        -- in — the very frame the slicing exists to protect.
+        it("walks a run of positions a domain gave as a count rather than an array", function()
+            local domain, recorded = newDomain({
+                list = function()
+                    return 5
+                end,
+                holds = { [4] = { name = "four" } },
+            })
+            local census, db = newCensus({ domains = { domain }, budget = 2 })
+
+            census.start()
+            walk(census)
+
+            assert.same({ 1, 2, 3, 4, 5 }, recorded.reads)
+            assert.equal("four", db.census.account.things.entries[4].name)
+            assert.is_true(db.census.account.things.complete)
+        end)
+
+        -- The same answer a nil list gets, and for the same reason: a client that will not say
+        -- how many there are has not said there are none.
+        it("takes a count of nothing as a domain with nothing to walk", function()
+            local domain, recorded = newDomain({
+                list = function()
+                    return 0
+                end,
+            })
+            local census, db = newCensus({ domains = { domain } })
+
+            census.start()
+            walk(census)
+
+            assert.same({}, recorded.reads)
+            assert.is_true(db.census.account.things.complete)
+        end)
+    end)
+
+    -- The census used to run in complete silence, which is half of why it was switched off: the
+    -- game simply felt worse and nothing said why. This is what the segments window draws.
+    describe("saying how far a pass has got", function()
+        it("says nothing at all while nothing is walking", function()
+            local census = newCensus({ domains = { newDomain({ positions = { 1, 2 } }) } })
+
+            assert.is_nil(census.progress())
+        end)
+
+        it("names the domain in hand, how far into it, and where in the queue it is", function()
+            local first = newDomain({ name = "currencies", positions = { 1, 2, 3, 4 } })
+            local second = newDomain({ name = "reputations", positions = { 1, 2 } })
+            local census = newCensus({ domains = { first, second }, budget = 3 })
+
+            census.start({ "currencies", "reputations" })
+            census.step()
+
+            assert.same(
+                { domain = "currencies", done = 3, total = 4, at = 1, of = 2 },
+                census.progress()
+            )
+        end)
+
+        it("reports every slice a run drives, and nothing once the queue is empty", function()
+            local seen = {}
+            local domain = newDomain({ positions = { 1, 2, 3, 4 } })
+            local census, _, _, scheduler = newCensus({
+                domains = { domain },
+                budget = 2,
+                onProgress = function(progress)
+                    seen[#seen + 1] = progress and progress.done or "done"
+                end,
+            })
+
+            census.run()
+            scheduler.settle()
+
+            assert.same({ 2, "done" }, seen)
         end)
     end)
 
@@ -709,26 +875,37 @@ describe("ns.newCensus", function()
 
     describe("which domains an audit distrusts", function()
         ---A census over one domain whose build and counter the test drives by hand.
-        ---@param options table? `{ counted, positions, holds }`
-        ---@return table census, table build `{ value }`, table domain
+        ---@param options table? `{ counted, positions, holds, partial }`
+        ---@return table census, table build `{ value }`, table domain, table clock
         local function auditable(options)
             options = options or {}
             local build = { value = BUILD }
             local domain = newDomain({
                 positions = options.positions or { 1, 2 },
                 holds = options.holds or { [1] = { name = "one" }, [2] = { name = "two" } },
+                partial = options.partial,
                 count = options.counted and function()
                     return options.counted.value
                 end or nil,
             })
+            local clock = fake.newClock(NOW)
             local census = newCensus({
                 domains = { domain },
+                clock = clock,
                 build = function()
                     return build.value
                 end,
             })
-            return census, build, domain
+            return census, build, domain, clock
         end
+
+        ---Long enough after a finished pass that the audit will look at the domain again.
+        ---
+        ---A completed pass buys quiet — see `DEFAULT_QUIET` in `Census.lua`, which is what stops a
+        ---suspicion that never settles provoking a walk at every single loading screen. Every test
+        ---below is about what the audit *notices*, so each of them has to be standing on the far
+        ---side of that; the tests that are about the quiet itself are in their own block.
+        local PAST_QUIET = 16 * MINUTE
 
         -- Nothing has ever finished, so there is nothing to trust. This is what a fresh install
         -- looks like, and the reason the first login takes a census at all.
@@ -742,9 +919,10 @@ describe("ns.newCensus", function()
         -- so a census taken on the build before it is a census of a different game. The string
         -- is exact, which is what stops this ever firing when nothing has changed.
         it("names a domain last walked on another build of the game", function()
-            local census, build = auditable()
+            local census, build, _, clock = auditable()
             census.start()
             walk(census)
+            clock.advance(PAST_QUIET)
             assert.same({}, census.audit())
 
             build.value = "12.0.6.68000"
@@ -757,9 +935,10 @@ describe("ns.newCensus", function()
         -- is the one call that notices them.
         it("names a domain the client counts more of than was written down", function()
             local counted = { value = 2 }
-            local census = auditable({ counted = counted })
+            local census, _, _, clock = auditable({ counted = counted })
             census.start()
             walk(census)
+            clock.advance(PAST_QUIET)
             assert.same({}, census.audit())
 
             counted.value = 3
@@ -775,9 +954,10 @@ describe("ns.newCensus", function()
         -- thirteen thousand achievements at every single login and change nothing.
         it("leaves a domain alone when the client counts fewer than was written down", function()
             local counted = { value = 2 }
-            local census = auditable({ counted = counted })
+            local census, _, _, clock = auditable({ counted = counted })
             census.start()
             walk(census)
+            clock.advance(PAST_QUIET)
 
             counted.value = 1
 
@@ -786,10 +966,11 @@ describe("ns.newCensus", function()
 
         it("names nothing when the reading is whole, current, and agrees with the client",
             function()
-                local census = auditable({ counted = { value = 2 } })
+                local census, _, _, clock = auditable({ counted = { value = 2 } })
 
                 census.start()
                 walk(census)
+                clock.advance(PAST_QUIET)
 
                 assert.same({}, census.audit())
             end)
@@ -797,12 +978,129 @@ describe("ns.newCensus", function()
         -- A domain whose client offers no counter cannot be distrusted by one, so it is walked
         -- only when something else provokes a pass rather than on every login forever.
         it("never distrusts a domain on a count nobody offers", function()
-            local census = auditable()
+            local census, _, _, clock = auditable()
 
             census.start()
             walk(census)
+            clock.advance(PAST_QUIET)
 
             assert.same({}, census.audit())
+        end)
+    end)
+
+    -- The bug the quiet period exists for. `audit` runs on the far side of every loading screen,
+    -- and two of its answers never settle however often the walk runs: a partial domain is never
+    -- complete by construction, and a counter that disagrees for a reason of the client's own goes
+    -- on disagreeing. Both used to be named at every single loading screen, so a player zoning in
+    -- and out of a dungeon re-walked the whole wardrobe each time — which is what made the census
+    -- something worth switching off.
+    describe("the quiet a finished pass buys", function()
+        ---A census over one domain the audit can never settle, driven by a counter that will not
+        ---agree however much is written down.
+        ---@param options table? `{ partial }`
+        ---@return table census, table clock
+        local function unsettleable(options)
+            options = options or {}
+            local clock = fake.newClock(NOW)
+            local domain = newDomain({
+                partial = options.partial,
+                positions = { 1, 2 },
+                holds = { [1] = { name = "one" }, [2] = { name = "two" } },
+                count = (not options.partial) and function()
+                    return 99
+                end or nil,
+            })
+            local census = newCensus({ domains = { domain }, clock = clock })
+            census.start({ "things" })
+            walk(census)
+            return census, clock
+        end
+
+        it("says nothing about a domain a pass finished a moment ago", function()
+            local census = unsettleable()
+
+            assert.same({}, census.audit())
+        end)
+
+        it("names it again once the quiet has run out", function()
+            local census, clock = unsettleable()
+
+            clock.advance(16 * MINUTE)
+
+            assert.same({ "things" }, census.audit())
+        end)
+
+        -- A partial domain is never settled at all, so its quiet is not an impatience but the
+        -- whole interval at which it is walked — and it is the longer of the two, because what
+        -- would make walking it again worthwhile is the account collecting something, which the
+        -- client's own events already carry.
+        it("keeps a partial domain quiet for longer than an ordinary one", function()
+            local census, clock = unsettleable({ partial = true })
+
+            clock.advance(16 * MINUTE)
+            assert.same({}, census.audit())
+
+            clock.advance(61 * MINUTE)
+            assert.same({ "things" }, census.audit())
+        end)
+
+        -- The union across the roster is the whole reason a partial domain exists, and a clock
+        -- alone would break it: the mage's walk ten minutes ago says nothing about the plate the
+        -- paladin can see. So who did the walking is asked before how long ago it was.
+        it("buys no quiet at all against a character that did not do the walking", function()
+            local clock = fake.newClock(NOW)
+            local walker = { name = "Aster-Vale" }
+            local domain = newDomain({ partial = true, positions = { 1 }, holds = { [1] = {} } })
+            local census = newCensus({
+                domains = { domain },
+                clock = clock,
+                character = function()
+                    return walker.name
+                end,
+            })
+            census.start({ "things" })
+            walk(census)
+            assert.same({}, census.audit())
+
+            walker.name = "Brin-Vale"
+
+            assert.same({ "things" }, census.audit())
+        end)
+
+        -- A pass a logout cut short leaves `completedAt` nil and buys nothing, which is exactly
+        -- right: the part it never reached is still unread.
+        it("buys nothing for a pass that was cut short", function()
+            local clock = fake.newClock(NOW)
+            local domain = newDomain({ positions = { 1, 2, 3, 4 } })
+            local census = newCensus({ domains = { domain }, clock = clock, budget = 2 })
+
+            census.start({ "things" })
+            assert.is_true(census.step())
+
+            assert.same({ "things" }, census.audit())
+        end)
+
+        -- The one thing that goes through it. A build that differs is not a stale reading, it is
+        -- a reading of a different game, and there is no interval short enough to be wrong about
+        -- that.
+        it("is no defence against the game having changed underneath it", function()
+            local clock = fake.newClock(NOW)
+            local build = { value = BUILD }
+            local domain = newDomain({ positions = { 1 }, holds = { [1] = {} } })
+            local census = newCensus({
+                domains = { domain },
+                clock = clock,
+                build = function()
+                    return build.value
+                end,
+            })
+            census.start({ "things" })
+            walk(census)
+            assert.same({}, census.audit())
+
+            build.value = "12.0.6.68000"
+
+            assert.same({ "things" }, census.audit())
         end)
     end)
 

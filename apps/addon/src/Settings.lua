@@ -24,21 +24,29 @@ local _, ns = ...
 ---One field so far, and the shape is a table rather than another flat flag because that is
 ---the question it belongs to: not "what is recorded" but "what runs unprompted".
 ---@class ChronieSyncSettings
----@field census boolean Whether a loading screen may provoke an account census. Off. The audit
----in front of the walk is a handful of calls and names nothing in the steady state, which is
----true and is not the whole story: the first pass walks every mount, appearance and achievement
----id the client will answer for — thirteen thousand of the last alone — a patch makes every
----loading screen the first one again, and a partial domain is walked once a session by design.
----A player who wanted their lockouts and their evening never agreed to that bill.
+---@field census boolean Whether a loading screen may provoke a walk of the account's
+---**collections** — the mounts, pets, toys, heirlooms, titles, appearances and achievements. On.
 ---
----Nothing is removed by switching it off. Census.lua walks exactly as it always did; what
----changes is who asks. `/chronie census refresh` and the Collection screen's Resync button
----both still walk everything whatever this says, because a walk somebody asked for by name is
----not the addon running by itself.
+---It shipped off for a while, and what was wrong with it was the walk rather than the switch.
+---A slice ran every single frame until the pass was done, nothing waited out a pull, a plan of
+---fifty-five thousand positions was drawn inside one frame, and — the one that actually hurt —
+---the two suspicions an audit can never settle meant the whole wardrobe was re-walked at *every*
+---loading screen rather than once. `Census.lua` is where each of those is now answered, and a
+---pass costs a few per cent of a frame for half a minute.
+---
+---**A character's wallet and standings are not behind this**, and never should have been. They
+---are the other family — `ns.censusHoldings` — they are what every character screen in the app
+---is drawn from, and they complete a pane sweep that already runs unasked at every loading
+---screen. Switching the collections off used to switch those off with them, silently, which is
+---the bug this pair of families exists to make impossible.
+---
+---And nothing at all is removed by switching this off. `/chronie census refresh` and the
+---Collection screen's Resync button both still walk everything whatever it says, because a walk
+---somebody asked for by name is not the addon running by itself.
 ns.settings = {
     combatLogging = false,
     captureTriggers = { "accountFirstAchievement" },
     sync = {
-        census = false,
+        census = true,
     },
 }

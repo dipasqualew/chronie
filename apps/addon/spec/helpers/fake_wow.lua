@@ -1138,6 +1138,10 @@ function fake.newEnv(options)
     --
     -- Absent unless a test says otherwise, and that absence is load-bearing: see censusClients.
     local censusFactions = options.censusFactions
+    -- The same, for the wallet the census walks by id — which reaches the currencies a
+    -- collapsed group hides from the pane that `ns.readHoldings` walks. Keyed by currency id,
+    -- each value a row in the shape `C_CurrencyInfo.GetCurrencyInfo` answers in.
+    local censusCurrencies = options.censusCurrencies
     -- What the client would call each reaction, standing in for the `FACTION_STANDING_LABELn`
     -- globals Main.lua reads them out of. Only the levels a test names, since a reaction with
     -- no label is a perfectly ordinary thing for a build to answer with.
@@ -1524,6 +1528,17 @@ function fake.newEnv(options)
                     end,
                 },
             }
+            if censusCurrencies then
+                -- The wallet as the census reads it: by id, with the caps and the weeklies the
+                -- pane row has no room for. Absent unless a test plants one, the same way the
+                -- standings below are — a build with no `C_CurrencyInfo` leaves the domain out
+                -- rather than reporting an empty wallet.
+                clients.currency = {
+                    GetCurrencyInfo = function(currencyID)
+                        return censusCurrencies[currencyID]
+                    end,
+                }
+            end
             if censusFactions then
                 -- The four namespaces a standing has to be assembled out of, in the bag the
                 -- pure readers take them in — the same bag Main.lua builds out of
