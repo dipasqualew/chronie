@@ -67,6 +67,7 @@ src/SegmentViews.lua
 src/Settings.lua
 src/SlashRouter.lua
 src/TransmogPreview.lua
+src/TransmogSets.lua
 Main.lua
 
 # There is no Bindings.xml, and adding one back is a decision rather than a detail. Chronie

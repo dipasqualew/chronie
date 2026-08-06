@@ -69,12 +69,29 @@ local addonName, ns = ...
 ---@field toyInfo fun(id: integer): string? Localised name of a toy.
 ---@field housingItemInfo fun(id: integer): (string?, integer?) Localised name and warband-owned count.
 ---@field openAchievement fun(id: integer)
+---@field openMountJournal fun(mountID: integer) The collections journal, on the mount itself.
+---@field openPetJournal fun(speciesID: integer?, guid: string?) The same journal on its pets tab,
+---on the very pet the guid names where there is one and on the species otherwise.
+---@field className fun(classID: integer): string? Localised name of a class by its id, which is
+---how a transmog set's class mask becomes something a tooltip can print.
+---@field transmogArmorType fun(sourceID: integer): string? Localised armour type of the item
+---behind an appearance — cloth, leather, mail, plate — and nil for everything that has none.
 ---@field dressUpItem fun(link: string): boolean Client DressUpItemLink: opens the dressing room
 ---on the character as they are dressed and lays this item over the top. False when the client
 ---will not put the item on a body at all.
 ---@field dressUpActor fun(): table? The player's actor in whichever dressing room dressUpItem
 ---just opened. Nil until one has been, and nil on a client that built no actor for it.
 ---@field openTransmogCollection fun(sourceID: integer)
+---@field openTransmogSet fun(setID: integer) The same journal, opened on one of Blizzard's own
+---sets rather than on a single appearance.
+---@field transmogSetsContaining fun(sourceID: integer): integer[]? Which of Blizzard's sets an
+---appearance sits in, in the client's own order.
+---@field transmogSetInfo fun(setID: integer): table? What the client will say about a set.
+---@field transmogSetPieces fun(setID: integer): { sourceID: integer, collected: boolean }[] Every
+---piece of a set and whether the account holds it.
+---@field transmogSharedSources fun(sourceID: integer): integer[]? Every source wearing the same
+---look as this one, itself included, which is how a set is found over an item it does not list.
+---@field shiftDown fun(): boolean Whether shift is held right now.
 ---@field itemName fun(itemID: integer): string?
 ---@field playerGUID fun(): string? UnitGUID("player"), the client's own unique character id.
 ---@field mapState fun(): MapPosition? Where the player is standing, when the client says.
@@ -312,12 +329,37 @@ function ns.main(env)
     ---play still finishes a pass.
     local CENSUS_SETTLE_SECONDS = 10
 
+    ---Whether the addon has been told it may start something on its own account.
+    ---
+    ---Read through one accessor rather than reached for at each site, so that "is this switched
+    ---on" is a single question with a single answer everywhere it is asked, and so that a
+    ---settings file an older install left behind — one written before `sync` existed — reads as
+    ---off rather than raising on a nil index.
+    ---@param name string
+    ---@return boolean
+    local function syncEnabled(name)
+        local sync = ns.settings and ns.settings.sync
+        return type(sync) == "table" and sync[name] == true
+    end
+
     ---Takes a census of anything that needs one, a little after the world has settled.
     ---
-    ---Called on the far side of every loading screen, and cheap on every one of them but the
-    ---first: `audit` is a handful of calls, and in the steady state it names nothing and no pass
-    ---is started at all. `run` refuses to begin a second pass while one is in flight, so zoning
-    ---about during a long walk cannot restart or double it.
+    ---Called on the far side of every loading screen. Two different things happen here and only
+    ---one of them is switched: a resync is a walk the desktop app was told to ask for, by
+    ---somebody pressing Resync, and it is carried out whatever the settings say; the audit's own
+    ---pass is the addon deciding by itself that a reading looks stale, and that is what
+    ---`settings.sync.census` gates.
+    ---
+    ---It is off by default because "cheap on every loading screen but the first" is true and is
+    ---not the whole story: the first one costs a walk of every mount, appearance and achievement
+    ---id the client will answer for, a patch makes every loading screen the first one again, and
+    ---a partial domain is walked once a session by design. Nothing about the walk is removed —
+    ---`/chronie census refresh` and the Resync button both still reach it.
+    ---
+    ---The timer is armed either way, because a request the app left in the addon folder is
+    ---waiting on exactly this callback and has to be found however the switch is set. `run`
+    ---refuses to begin a second pass while one is in flight, so zoning about during a long walk
+    ---cannot restart or double it.
     local function sweepCensus()
         env.after(CENSUS_SETTLE_SECONDS, function()
             -- What somebody explicitly asked for goes first, and the audit's own pass second.
@@ -328,7 +370,9 @@ function ns.main(env)
             if #walking > 0 then
                 logger.info(ns.censusResyncText(walking))
             end
-            census.run()
+            if syncEnabled("census") then
+                census.run()
+            end
         end)
     end
 
@@ -339,6 +383,18 @@ function ns.main(env)
         playerActor = env.dressUpActor,
     })
 
+    -- Which of Blizzard's sets a collected appearance belongs to, and how far into it the
+    -- account is. Handed to both panels beside the preview above, so a row means the same
+    -- thing whichever of them it is read on.
+    local transmogSets = ns.newTransmogSets({
+        setsContaining = env.transmogSetsContaining,
+        setInfo = env.transmogSetInfo,
+        setPieces = env.transmogSetPieces,
+        sharedSources = env.transmogSharedSources,
+        className = env.className,
+        armorType = env.transmogArmorType,
+    })
+
     -- Declared before the panel and filled in after the log and the tracker they read from,
     -- because the panel is built first and its picker has to reach them.
     ---@type SegmentViews
@@ -346,6 +402,15 @@ function ns.main(env)
     ---Draws whichever view was picked off the panel's own list.
     local renderResults
     local resultsWindow
+
+    ---The HUD's own corner of the saved variables. One table, written field by field rather
+    ---than replaced, because where it was dragged to and how big it was left are saved by two
+    ---different gestures and neither may drop the other.
+    ---@return table
+    local function resultsLayout()
+        env.db.resultsWindow = env.db.resultsWindow or {}
+        return env.db.resultsWindow
+    end
 
     resultsWindow = ns.newResultsWindow({
         createFrame = env.createFrame,
@@ -367,11 +432,29 @@ function ns.main(env)
             return saved.point, saved.x, saved.y
         end,
         savePoint = function(point, x, y)
-            env.db.resultsWindow = { point = point, x = x, y = y }
+            local saved = resultsLayout()
+            saved.point, saved.x, saved.y = point, x, y
+        end,
+        loadSize = function()
+            local saved = env.db.resultsWindow
+            if not saved then
+                return nil
+            end
+            return saved.width, saved.height, saved.locked
+        end,
+        saveSize = function(width, height, locked)
+            local saved = resultsLayout()
+            saved.width, saved.height, saved.locked = width, height, locked
         end,
         openAchievement = env.openAchievement,
+        openMount = env.openMountJournal,
+        openPet = env.openPetJournal,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
+        previewTransmogSet = transmogPreview.showSet,
+        openTransmogSet = env.openTransmogSet,
+        transmogSet = transmogSets.forSource,
+        shiftDown = env.shiftDown,
         itemName = env.itemName,
         now = env.now,
         character = currentCharacter,
@@ -829,9 +912,28 @@ function ns.main(env)
             return "CENTER", 260, 0
         end,
         savePoint = function() end,
+        -- Where it opens is fixed and its size is not: the position is a place the list it
+        -- came from is still readable beside, but how much of a filed evening fits on screen
+        -- is the player's business and worth remembering between them.
+        loadSize = function()
+            local saved = env.db.segmentDetailWindow
+            if not saved then
+                return nil
+            end
+            return saved.width, saved.height, saved.locked
+        end,
+        saveSize = function(width, height, locked)
+            env.db.segmentDetailWindow = { width = width, height = height, locked = locked }
+        end,
         openAchievement = env.openAchievement,
+        openMount = env.openMountJournal,
+        openPet = env.openPetJournal,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
+        previewTransmogSet = transmogPreview.showSet,
+        openTransmogSet = env.openTransmogSet,
+        transmogSet = transmogSets.forSource,
+        shiftDown = env.shiftDown,
         itemName = env.itemName,
         now = env.now,
         -- Where the account stands now, beside what that evening earned. The HUD gets the
@@ -1479,6 +1581,15 @@ if CreateFrame then
         SlashCmdList["CHRONIE"] = handler
     end
 
+    -- What "you cannot wear this" is made of, as the item database numbers it:
+    -- `Enum.ItemClass.Armor` and the four `Enum.ItemArmorSubclass` values that are a material
+    -- rather than a shape. Written out rather than read off `Enum`, because these are indexed
+    -- at load and a build that renamed either table would take the whole addon down with it
+    -- over one line of a tooltip. Subclass 0 is Miscellaneous — rings, trinkets, necks — and
+    -- 6 is Shield, none of which restricts anybody by armour type.
+    local ARMOR_CLASS = 4
+    local ARMOR_SUBCLASSES = { [1] = true, [2] = true, [3] = true, [4] = true }
+
     -- SavedVariables only exist once the addon's variables have loaded.
     local bootstrap = CreateFrame("Frame")
     bootstrap:RegisterEvent("ADDON_LOADED")
@@ -1989,6 +2100,58 @@ if CreateFrame then
                 ShowUIPanel(AchievementFrame)
                 AchievementFrame_SelectAchievement(id)
             end,
+            -- The collections journal's tabs, by the same road the wardrobe below is opened
+            -- by: load the UI, toggle the journal onto the tab, then tell that tab's own frame
+            -- which entry to stand on. The tab numbers are `Enum.CollectionsJournalTab` on
+            -- 12.0.5 — mounts 1, pets 2, wardrobe 5 — and the two selection calls are globals
+            -- Blizzard_Collections defines rather than API namespaces, so each is nil-checked:
+            -- a build that renamed one leaves the journal open on the right tab, which is most
+            -- of what the click was for, rather than raising in a click handler.
+            openMountJournal = function(mountID)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(1)
+                if mountID and MountJournal_SelectByMountID then
+                    MountJournal_SelectByMountID(mountID)
+                end
+            end,
+            ---The pet the player caught, where the client said which one it was.
+            ---
+            ---A battle pet is the one collectible the game lets an account own several of, so
+            ---the journal separates "this pet" from "this species" and so does this: the guid
+            ---filed with the catch names the individual, and a pet learned rather than caught
+            ---has none, leaving the species as the whole of what is known.
+            openPetJournal = function(speciesID, guid)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(2)
+                if guid and PetJournal_SelectPet then
+                    PetJournal_SelectPet(nil, guid)
+                elseif speciesID and PetJournal_SelectSpecies then
+                    PetJournal_SelectSpecies(nil, speciesID)
+                end
+            end,
+            className = function(classID)
+                local info = C_CreatureInfo and C_CreatureInfo.GetClassInfo(classID)
+                return info and info.className or nil
+            end,
+            ---What an appearance's item is made of, where that is a restriction.
+            ---
+            ---The four armour subclasses and nothing else. A cloak, a ring, a shield and every
+            ---weapon in the game are all `Armor` or a class of their own with a subclass that
+            ---names a shape rather than a material — "Miscellaneous", "Warglaives" — and none
+            ---of those is the thing a player reading a tier set's tooltip is asking about. The
+            ---localised name comes off the client rather than being spelled here, because
+            ---"Plate" is "Plate" only in English.
+            transmogArmorType = function(sourceID)
+                local info = sourceID and C_TransmogCollection.GetSourceInfo(sourceID)
+                if not info or not info.itemID then
+                    return nil
+                end
+                local _, _, subType, _, _, classID, subclassID = GetItemInfoInstant(info.itemID)
+                if classID ~= ARMOR_CLASS or not ARMOR_SUBCLASSES[subclassID] then
+                    return nil
+                end
+                return subType
+            end,
             dressUpItem = function(link)
                 return DressUpItemLink(link) and true or false
             end,
@@ -2016,6 +2179,74 @@ if CreateFrame then
                 CollectionsJournal_LoadUI()
                 ToggleCollectionsJournal(5)
                 WardrobeCollectionFrame:OpenTransmogLink("transmogappearance:" .. sourceID)
+            end,
+            -- The same road as the appearance above, down the other of its two branches.
+            -- `OpenTransmogLink` is what the client's own chat links land in, and the
+            -- 12.0.5.67823 binary formats three of them — `transmogappearance:`,
+            -- `transmogillusion:` and `|Htransmogset:%d|h` — so the journal's handler takes a
+            -- set id by the same door it already takes a source id through, and lands on the
+            -- sets tab rather than the appearances one.
+            openTransmogSet = function(setID)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(5)
+                WardrobeCollectionFrame:OpenTransmogLink("transmogset:" .. setID)
+            end,
+            transmogSetsContaining = function(sourceID)
+                return C_TransmogSets.GetSetsContainingSourceID(sourceID)
+            end,
+            transmogSetInfo = function(setID)
+                return C_TransmogSets.GetSetInfo(setID)
+            end,
+            ---Every source in the game wearing the same look as this one.
+            ---
+            ---Two hops, because the client has no call from a source to its siblings: the
+            ---source names the visual it belongs to, and the visual names every source of it.
+            ---`GetAllAppearanceSources` rather than `GetAppearanceSources` — the second answers
+            ---the wardrobe's own question, cut to a category and to what is collected, and the
+            ---item that puts a look in a set is exactly the one the account may not hold.
+            ---
+            ---The list includes the source asked about, which `newTransmogSets` relies on
+            ---knowing: it skips it rather than asking the client about it twice.
+            transmogSharedSources = function(sourceID)
+                local info = C_TransmogCollection.GetSourceInfo(sourceID)
+                if not info or not info.visualID then
+                    return nil
+                end
+                return C_TransmogCollection.GetAllAppearanceSources(info.visualID)
+            end,
+            ---Every piece of a set, and whether the account holds it.
+            ---
+            ---Off the *primary* appearances rather than `GetAllSourceIDs`, because that is the
+            ---list the wardrobe's own set browser counts and the fraction this panel prints has
+            ---to be the fraction the collections journal prints. `GetAllSourceIDs` answers a
+            ---different question — every source the set lists, variants included — and a panel
+            ---saying 5/11 beside a journal saying 5/8 reads as one of the two being wrong.
+            ---
+            ---`collected` comes off the entry where the client sets it, and is asked again per
+            ---source where it does not. The second call is free when the field is there and
+            ---false — `PlayerHasTransmogItemModifiedAppearance` answers the same thing — and is
+            ---the whole count when it is not, so the fraction cannot silently become 0/8 on a
+            ---build that names that field something else.
+            transmogSetPieces = function(setID)
+                local pieces = {}
+                for _, appearance in ipairs(C_TransmogSets.GetSetPrimaryAppearances(setID) or {}) do
+                    -- The client's own name for the field, and it is a source id rather than a
+                    -- visual id: `GetSetPrimaryAppearances` hands back item-modified-appearance
+                    -- rows, which is what both the count and the dressing room want.
+                    local sourceID = appearance.appearanceID
+                    if sourceID then
+                        pieces[#pieces + 1] = {
+                            sourceID = sourceID,
+                            collected = appearance.collected
+                                or C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(sourceID)
+                                or false,
+                        }
+                    end
+                end
+                return pieces
+            end,
+            shiftDown = function()
+                return IsShiftKeyDown() and true or false
             end,
             itemName = function(itemID)
                 return (GetItemInfo(itemID))

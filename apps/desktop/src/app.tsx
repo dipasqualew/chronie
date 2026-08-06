@@ -655,6 +655,7 @@ export function App({ payload, settings, release }: AppProps): ReactNode {
             syncNow: desktop.syncNow,
             installAddon: desktop.installAddon,
             checkForAppUpdate: desktop.checkForAppUpdate,
+            setAutomaticCensus: desktop.setAutomaticCensus,
             onSynced: reloadWindow(800),
             onError: message,
           }}

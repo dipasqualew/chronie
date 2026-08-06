@@ -126,6 +126,19 @@ struct Settings {
     /// still photographs its account firsts; an explicit `[]` is respected and means off.
     #[serde(default = "default_capture_triggers")]
     capture_triggers: Vec<String>,
+    /// Whether the addon may walk the whole account for what it holds off its own bat, on the far
+    /// side of a loading screen. Off, and off for every settings file that predates it: the audit
+    /// in front of the walk is cheap and says nothing in the steady state, but the pass it
+    /// provokes asks the client about every mount, appearance and achievement id it will answer
+    /// for, a patch makes every loading screen the first one again, and a player who wanted their
+    /// lockouts never agreed to that.
+    ///
+    /// Switching it off takes nothing away. The Resync button on the Collection screen and
+    /// `/chronie census refresh` both still walk everything, because a walk somebody asked for by
+    /// name is not the addon running by itself — and the request channel those travel is not
+    /// gated by this at all.
+    #[serde(default)]
+    automatic_census: bool,
     /// Who the character every appearance is shown on is: one answer to each of the questions
     /// the game's own character creation screen asks about her body. Empty on a fresh install
     /// and on every settings file that predates this, which is the body the app drew before
@@ -158,6 +171,7 @@ impl Default for Settings {
             keep_original_screenshots: false,
             capture_quality: captures::Quality::default(),
             capture_triggers: default_capture_triggers(),
+            automatic_census: false,
             character_look: Vec::new(),
             character_body: body::DEFAULT,
         }
@@ -1690,6 +1704,36 @@ fn set_capture_triggers(
     Ok(dto::convert(saved)?)
 }
 
+/// Whether the addon walks the account for what it holds without being asked.
+///
+/// Reaches the game inside the addon folder like the capture rules and the combat log switch do,
+/// so it reinstalls straight away rather than waiting for the next launch — and like both of
+/// those it only takes effect at the next login or `/reload`, which the panel is what says.
+///
+/// Nothing about the Resync button changes with this. That road is the request channel, it is
+/// somebody pressing a button, and it is ungated on purpose: what this decides is only whether
+/// the addon may start a walk that nobody asked for.
+#[tauri::command]
+#[specta::specta]
+fn set_automatic_census(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<dto::SettingsPayload, CommandError> {
+    let (saved, configured) = {
+        let mut settings = state.settings.lock().map_err(|_| "Settings lock failed.")?;
+        settings.automatic_census = enabled;
+        state.save(&settings)?;
+        (settings.clone(), configured_wow_path(&settings).is_ok())
+    };
+    // Skipped rather than failed with no game folder yet, for the same reason the two switches
+    // above skip it: the setting is recorded either way, and the install that runs when a folder
+    // is finally chosen carries it.
+    if configured {
+        install_bundled_addon(&state)?;
+    }
+    Ok(dto::convert(saved)?)
+}
+
 /// What Chronie does with a screenshot once it has found the file: how much of it to keep,
 /// and whether the game keeps its own copy too.
 ///
@@ -1904,7 +1948,11 @@ fn trigger_literal(name: &str) -> Option<String> {
 /// Pure, so the thing that actually reaches somebody's game folder is testable without a
 /// game folder. The shape has to match the `ns.settings` the bundled `src/Settings.lua`
 /// declares, because a hand-installed copy gets that one and must still load.
-fn settings_module(combat_logging: bool, capture_triggers: &[String]) -> String {
+fn settings_module(
+    combat_logging: bool,
+    capture_triggers: &[String],
+    automatic_census: bool,
+) -> String {
     let triggers: Vec<String> = capture_triggers
         .iter()
         .filter_map(|name| trigger_literal(name))
@@ -1919,6 +1967,9 @@ fn settings_module(combat_logging: bool, capture_triggers: &[String]) -> String 
          ns.settings = {{\n\
          \x20   combatLogging = {combat_logging},\n\
          \x20   captureTriggers = {{ {triggers} }},\n\
+         \x20   sync = {{\n\
+         \x20       census = {automatic_census},\n\
+         \x20   }},\n\
          }}\n"
     )
 }
@@ -1944,7 +1995,11 @@ fn stage_addon(
         if *relative == SETTINGS_MODULE {
             fs::write(
                 &output,
-                settings_module(settings.combat_logging, &settings.capture_triggers),
+                settings_module(
+                    settings.combat_logging,
+                    &settings.capture_triggers,
+                    settings.automatic_census,
+                ),
             )
         } else if *relative == REQUESTS_MODULE {
             fs::write(&output, ingamesets::requests_module(now, &waiting.sets))
@@ -2415,6 +2470,7 @@ fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         save_wow_path,
         send_set_to_game,
         session_gap,
+        set_automatic_census,
         set_capture_note,
         set_capture_storage,
         set_capture_triggers,
@@ -2887,12 +2943,54 @@ mod tests {
             bundled.contains("captureTriggers = { \"accountFirstAchievement\" }"),
             "{bundled}"
         );
-        let generated = settings_module(false, &default_capture_triggers());
+        assert!(bundled.contains("census = false"), "{bundled}");
+        let generated = settings_module(false, &default_capture_triggers(), false);
         assert!(generated.contains("ns.settings = {"));
         assert!(
             generated.contains("captureTriggers = { \"accountFirstAchievement\" }"),
             "{generated}"
         );
+        assert!(generated.contains("census = false"), "{generated}");
+    }
+
+    /// The switch has to survive the trip into the game folder the same way the other two do,
+    /// because the addon reads it there and nowhere else.
+    #[test]
+    fn writes_the_automatic_census_switch_into_the_installed_addon() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+        let settings = Settings {
+            automatic_census: true,
+            ..Settings::default()
+        };
+
+        replace_addon(&retail, &settings, &Waiting::default(), 0).unwrap();
+
+        let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
+        assert!(installed.contains("census = true"), "{installed}");
+    }
+
+    /// And a default install has to say no. The pass the addon would provoke asks the client
+    /// about every id it will answer for, and nobody gets that for having installed Chronie.
+    #[test]
+    fn installs_with_the_automatic_census_off_by_default() {
+        let root = tempfile::tempdir().unwrap();
+        let retail = game_folder(root.path());
+
+        replace_addon(&retail, &Settings::default(), &Waiting::default(), 0).unwrap();
+
+        let installed = fs::read_to_string(addon_folder(&retail).join(SETTINGS_MODULE)).unwrap();
+        assert!(installed.contains("census = false"), "{installed}");
+    }
+
+    /// Every install that predates the switch is one somebody has been walking by default, so
+    /// what a settings file that says nothing means is the thing to be explicit about: off,
+    /// the same as a new install, rather than carrying the old behaviour forward silently.
+    #[test]
+    fn reads_a_settings_file_that_predates_the_automatic_census_as_off() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+
+        assert!(!settings.automatic_census);
     }
 
     /// The list has to survive the trip into the game folder the same way combat logging
@@ -2918,7 +3016,7 @@ mod tests {
     /// An empty list is a thing somebody can mean: photograph nothing unless I press the key.
     #[test]
     fn writes_an_empty_trigger_list_as_one() {
-        let generated = settings_module(false, &[]);
+        let generated = settings_module(false, &[], false);
 
         assert!(generated.contains("captureTriggers = {  }"), "{generated}");
     }
@@ -2935,7 +3033,7 @@ mod tests {
         assert_eq!(trigger_literal("a\\\"b"), None);
         assert_eq!(trigger_literal("mount\nlevelUp"), None);
 
-        let generated = settings_module(false, &["\" } print(1) --".into(), "mount".into()]);
+        let generated = settings_module(false, &["\" } print(1) --".into(), "mount".into()], false);
         assert!(
             generated.contains("captureTriggers = { \"mount\" }"),
             "{generated}"

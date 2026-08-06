@@ -103,6 +103,149 @@ describe("ns.newTransmogPreview", function()
         end)
     end)
 
+    describe("showing the whole set the appearance belongs to", function()
+        -- Source ids rather than links, and there is no way round it: a set's pieces are
+        -- item-modified-appearance ids, so there is no item id to look up and no link to
+        -- build. `TryOn` takes `itemLinkOrItemModifiedAppearanceID` on 12.0.5.67823, which
+        -- is what makes handing it the raw ids correct rather than a shortcut.
+        local SOURCES = { 4242, 4243, 4244 }
+
+        -- The room is opened with the piece that was clicked and not with the set, because
+        -- `DressUpItemLink` is the only entry point that picks which of the several dress-up
+        -- frames the player is standing in front of and builds an actor inside it — and it
+        -- takes a link. So the item opens the room and the set is fitted over the stripped
+        -- model afterwards. The whole ordered list is asserted for the same reason the single
+        -- appearance's is: strip after fitting and the player is looking at a naked character,
+        -- and a test that only checked both had happened would call that a pass.
+        it("opens the room with the item clicked and fits the set over a stripped model", function()
+            local preview, room = newPreview()
+
+            preview.showSet(ITEM, SOURCES)
+
+            assert.same({
+                { call = "dressUp", link = LINK },
+                { call = "undress" },
+                { call = "tryOn", link = 4242 },
+                { call = "tryOn", link = 4243 },
+                { call = "tryOn", link = 4244 },
+            }, room.calls)
+        end)
+
+        -- The order the client listed the pieces in is the order they go on. Two pieces of a
+        -- set can share a slot — a set with both a one-hander and its off-hand partner — and
+        -- fitting them in any other order puts the wrong one on the body.
+        it("fits the pieces in the order the client listed them", function()
+            local preview, room = newPreview()
+
+            preview.showSet(ITEM, { 9, 8, 7 })
+
+            local worn = {}
+            for _, call in ipairs(room.calls) do
+                if call.call == "tryOn" then
+                    worn[#worn + 1] = call.link
+                end
+            end
+            assert.same({ 9, 8, 7 }, worn)
+        end)
+
+        -- The piece that was clicked is a piece of the set, so the loop puts it back on along
+        -- with the rest: nothing is left on the model that the set does not contain, and the
+        -- link used to open the room is never worn as a link of its own.
+        it("leaves nothing on the model that the set does not contain", function()
+            local preview, room = newPreview()
+
+            preview.showSet(ITEM, SOURCES)
+
+            for _, call in ipairs(room.calls) do
+                if call.call == "tryOn" then
+                    assert.is_number(call.link)
+                end
+            end
+        end)
+
+        -- The dressing room stays open between clicks, so the second set lands on a body
+        -- already wearing the first. Undressing on every showing is what stops eight pieces
+        -- of Bloodfang hanging off a model meant to be showing eight of Nightslayer.
+        it("strips the previous set off before fitting the next one", function()
+            local preview, room = newPreview()
+
+            preview.showSet(ITEM, { 1 })
+            preview.showSet(OTHER, { 2 })
+
+            assert.same({
+                { call = "dressUp", link = LINK },
+                { call = "undress" },
+                { call = "tryOn", link = 1 },
+                { call = "dressUp", link = OTHER_LINK },
+                { call = "undress" },
+                { call = "tryOn", link = 2 },
+            }, room.calls)
+        end)
+
+        -- Same shape as the single appearance's refusals, and the same reason: undressing is
+        -- the half that always succeeds, so a module that stripped the model and only then
+        -- found it had nothing to fit would leave the player looking at a naked character.
+        -- The three that never reach the client at all matter most — a shifted click on a row
+        -- whose set the client would not enumerate must not open a dressing room over nothing.
+        for _, case in ipairs({
+            {
+                what = "there is no item id to open the room with",
+                options = {},
+                itemID = nil,
+                sources = SOURCES,
+                dressedUp = false,
+                actorRequests = 0,
+            },
+            {
+                what = "the set came back with no sources at all",
+                options = {},
+                itemID = ITEM,
+                sources = nil,
+                dressedUp = false,
+                actorRequests = 0,
+            },
+            {
+                what = "the set the client named turned out to be empty",
+                options = {},
+                itemID = ITEM,
+                sources = {},
+                dressedUp = false,
+                actorRequests = 0,
+            },
+            {
+                what = "the client will not put the clicked item on a body",
+                options = { dressable = false },
+                itemID = ITEM,
+                sources = SOURCES,
+                dressedUp = true,
+                actorRequests = 0,
+            },
+            {
+                what = "the dressing room came back with no player actor in it",
+                options = { actor = false },
+                itemID = ITEM,
+                sources = SOURCES,
+                dressedUp = true,
+                actorRequests = 1,
+            },
+        }) do
+            it("does nothing to the model when " .. case.what, function()
+                local preview, room = newPreview(case.options)
+
+                assert.has_no.errors(function()
+                    preview.showSet(case.itemID, case.sources)
+                end)
+
+                local expected = {}
+                if case.dressedUp then
+                    expected[1] = { call = "dressUp", link = LINK }
+                end
+                assert.same(expected, room.calls)
+                assert.equal(case.actorRequests, room.actorRequests)
+            end)
+        end
+    end)
+
     describe("a click there is nothing to show for", function()
         -- Every one of these ends with a model nothing was taken off and nothing was put on.
         -- That matters more than it sounds: undressing is the half that always succeeds, so a

@@ -45,10 +45,21 @@ read_globals = {
     "GetInstanceInfo",
     "GetRealZoneText",
     "GetItemInfo",
+    -- The cached half of the pair: class and subclass are in the item database rather than in
+    -- the item's own row, so this answers without a server round trip and without the "ask
+    -- again in a moment" GetItemInfo needs.
+    "GetItemInfoInstant",
     "C_Item",
+    -- Class ids to class names, which is what turns a transmog set's class mask into a line a
+    -- player can read.
+    "C_CreatureInfo",
     "GetCursorInfo",
     "ClearCursor",
     "C_TransmogCollection",
+    -- Blizzard's own tier and vendor sets, which is what says a dropped shoulder is the fifth
+    -- of eight. Signatures out of the 12.0.5.67823 client's own usage strings.
+    "C_TransmogSets",
+    "IsShiftKeyDown",
     "C_EquipmentSet",
     "GetInventoryItemID",
     "ItemLocation",
@@ -106,6 +117,11 @@ read_globals = {
     "CollectionsJournal_LoadUI",
     "ToggleCollectionsJournal",
     "WardrobeCollectionFrame",
+    -- The mount and pet tabs' own "stand on this entry" calls. Globals that Blizzard_Collections
+    -- defines rather than API namespaces, hence the nil checks at every call site.
+    "MountJournal_SelectByMountID",
+    "PetJournal_SelectPet",
+    "PetJournal_SelectSpecies",
     "FACTION_STANDING_INCREASED",
     "FACTION_STANDING_INCREASED_BONUS",
     "FACTION_STANDING_INCREASED_ACCOUNT_WIDE",

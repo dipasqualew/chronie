@@ -151,6 +151,14 @@ function fake.newFontString(template)
         self.mouseEnabled = enabled
     end
 
+    ---The client keeps a region's click flag and its motion flag apart, and OnEnter and
+    ---OnLeave are the second of them: a font string with only the first is clickable and
+    ---cannot be pointed at. Recorded separately here for the same reason it is set
+    ---separately there.
+    function fontString:SetMouseMotionEnabled(enabled)
+        self.motionEnabled = enabled
+    end
+
     function fontString:SetScript(name, handler)
         self.scripts[name] = handler
     end
@@ -191,6 +199,10 @@ function fake.newTexture(layer)
 
     function texture:SetPoint(...)
         self.points[#self.points + 1] = { ... }
+    end
+
+    function texture:ClearAllPoints()
+        self.points = {}
     end
 
     function texture:SetWidth(width)
@@ -245,8 +257,14 @@ function fake.newFrame(options)
         registeredOrder = {},
         fontStrings = {},
         textures = {},
+        -- Frames created with this one as their parent, in creation order. A window whose
+        -- rows live inside a scroll frame draws them on a child rather than on itself, so
+        -- "what is on this panel" is a walk rather than one list; see fake.regionsOf.
+        children = {},
         points = {},
         shown = true,
+        width = 0,
+        height = 0,
     }
 
     function frame:SetScript(name, handler)
@@ -381,14 +399,67 @@ function fake.newFrame(options)
         return nil, nil
     end
 
+    -- Recorded rather than ignored, unlike the rest of the geometry: a panel that scrolls has
+    -- to compare how tall its content is against how tall the box holding it is, so a fake
+    -- that forgot both would have the addon dividing by nothing.
+    function frame:SetSize(width, height)
+        self.width = width
+        self.height = height or width
+    end
+
+    function frame:SetWidth(width)
+        self.width = width
+    end
+
+    function frame:SetHeight(height)
+        self.height = height
+    end
+
+    function frame:GetWidth()
+        return self.width
+    end
+
+    function frame:GetHeight()
+        return self.height
+    end
+
+    ---How far the content inside a ScrollFrame has been pushed up. Recorded because "the
+    ---panel is scrolled to here" is the whole of what the wheel does.
+    function frame:SetVerticalScroll(offset)
+        self.verticalScroll = offset
+    end
+
+    function frame:GetVerticalScroll()
+        return self.verticalScroll or 0
+    end
+
+    -- The picture a button wears, which is what says whether the size is pinned.
+    function frame:SetNormalTexture(picture)
+        self.normalTexture = picture
+    end
+
+    function frame:SetResizable(enabled)
+        self.resizable = enabled and true or false
+    end
+
+    function frame:SetResizeBounds(minWidth, minHeight)
+        self.resizeBounds = { minWidth, minHeight }
+    end
+
+    function frame:StartSizing(point)
+        self.sizingFrom = point
+    end
+
+    -- Recorded because a frame with a backdrop of its own is a panel in its own right rather
+    -- than part of the one it hangs off — which is what fake.regionsOf stops at.
+    function frame:SetBackdrop(backdrop)
+        self.backdrop = backdrop
+    end
+
     for _, name in ipairs({
-        "SetSize",
         "SetAllPoints",
-        "SetWidth",
-        "SetHeight",
         "SetFrameStrata",
         "SetToplevel",
-        "SetBackdrop",
         "SetBackdropColor",
         "SetBackdropBorderColor",
         "SetMovable",
@@ -396,7 +467,7 @@ function fake.newFrame(options)
         "RegisterForDrag",
         "SetClampedToScreen",
         "SetScrollChild",
-        "SetNormalTexture",
+        "EnableMouseWheel",
         "SetHighlightTexture",
         "RegisterForClicks",
         "SetJustifyH",
@@ -431,11 +502,48 @@ function fake.newCreateFrame(options)
         frame.frameName = name
         frame.parent = parent
         frame.template = template
+        if type(parent) == "table" and type(parent.children) == "table" then
+            parent.children[#parent.children + 1] = frame
+        end
         frames[#frames + 1] = frame
         return frame
     end
 
     return createFrame, frames, types
+end
+
+---Every font string and texture hung off `frame`, its own first and then each child's, in
+---creation order.
+---
+---A window that scrolls draws its rows on a frame inside a ScrollFrame rather than on the
+---panel itself, so reading the panel's own two lists would find only the chrome. Depth-first
+---from the frame keeps everything one pool handed out contiguous, which is what lets a test
+---pair a bar's track with its fill by position.
+---
+---The walk stops at any child carrying a backdrop of its own. A menu that opens over a panel
+---is parented to it but is not part of it, and reading the two as one list would have every
+---row of the menu turn up as a phantom row of the body underneath.
+---@param frame table
+---@return table fontStrings, table textures
+function fake.regionsOf(frame)
+    local fontStrings, textures = {}, {}
+
+    local function walk(current)
+        for _, fontString in ipairs(current.fontStrings or {}) do
+            fontStrings[#fontStrings + 1] = fontString
+        end
+        for _, texture in ipairs(current.textures or {}) do
+            textures[#textures + 1] = texture
+        end
+        for _, child in ipairs(current.children or {}) do
+            if not child.backdrop then
+                walk(child)
+            end
+        end
+    end
+
+    walk(frame)
+    return fontStrings, textures
 end
 
 ---A fake `GetSavedInstanceInfo` pair, driven by a list of readable tables rather
@@ -930,6 +1038,25 @@ function fake.newEnv(options)
     }
     local itemPrices = options.itemPrices or {}
     local transmogSources = options.transmogSources or {}
+    -- Blizzard's own tier and vendor sets, already reduced to the shape Main.lua reduces the
+    -- client's three calls to: `{ [setID] = { name = , label = , pieces = { { sourceID = ,
+    -- collected = } } } }`, and `transmogSetsOfSource` says which sets a source sits in. Empty
+    -- by default, which is the ordinary case — most appearances belong to no set at all, and a
+    -- test that never mentions sets gets the panel exactly as it was before they existed.
+    --
+    -- `transmogSetsOfSource` is keyed by source and not by look, exactly as the client's own
+    -- call is: a set names the item-modified-appearance rows it lists and says nothing about
+    -- the other items wearing those looks. Two sources filed under one `visualID` in
+    -- `transmogSources` are how a test says one look reaches a set through another item.
+    local transmogSets = options.transmogSets or {}
+    local transmogSetsOfSource = options.transmogSetsOfSource or {}
+    -- Whether shift is held. Mutable through the returned handle rather than fixed at build,
+    -- because the four actions on a transmog row differ only by this and a test wants both
+    -- readings out of one panel.
+    local shiftDown = options.shiftDown and true or false
+    -- Every set the addon asked the collections journal to open, which is the only trace a
+    -- shifted right click leaves: the real journal is a frame this fake has no stand-in for.
+    local openedTransmogSets = {}
     -- The character's equipment sets and what it is wearing, both mutable so a test can
     -- change them between two syncs and watch the ledger notice.
     local equipmentSets = options.equipmentSets or {}
@@ -1220,6 +1347,30 @@ function fake.newEnv(options)
                 newAppearance = source.newAppearance,
             }
         end,
+        ---Every source wearing the same look as this one, which is every source filed under
+        ---one `visualID` — the same relation the real client's `GetAllAppearanceSources`
+        ---answers, read off the table a test already writes to say what a drop was.
+        ---
+        ---The source asked about is in its own answer, as the client's is. Nothing at all for
+        ---a source this client has no row for, and nothing for one whose look it will not name:
+        ---two sources of no visual are not two sources of one look, and a fake that folded
+        ---them together would find sets over every plain drop in every test that has two.
+        transmogSharedSources = function(sourceID)
+            local source = transmogSources[sourceID]
+            if not source or not source.visualID then
+                return nil
+            end
+            local shared = {}
+            for other, row in pairs(transmogSources) do
+                if row.visualID == source.visualID then
+                    shared[#shared + 1] = other
+                end
+            end
+            -- Sorted, because `pairs` has no order and a fake whose answer changed between
+            -- runs would make a test that reads the first one flake.
+            table.sort(shared)
+            return shared
+        end,
         equipmentSets = function()
             return equipmentSets
         end,
@@ -1474,6 +1625,26 @@ function fake.newEnv(options)
             return dressUpActor
         end,
         openTransmogCollection = function() end,
+        openTransmogSet = function(setID)
+            openedTransmogSets[#openedTransmogSets + 1] = setID
+        end,
+        transmogSetsContaining = function(sourceID)
+            return transmogSetsOfSource[sourceID]
+        end,
+        transmogSetInfo = function(setID)
+            local set = transmogSets[setID]
+            if not set then
+                return nil
+            end
+            return { name = set.name, label = set.label }
+        end,
+        transmogSetPieces = function(setID)
+            local set = transmogSets[setID]
+            return set and set.pieces or {}
+        end,
+        shiftDown = function()
+            return shiftDown
+        end,
         playerGUID = function()
             return playerGUID or nil
         end,
@@ -1670,6 +1841,17 @@ function fake.newEnv(options)
         ---@return table[]
         dressingRoom = function()
             return dressingRoom
+        end,
+        ---Every set the addon asked the collections journal to open, in the order it asked.
+        ---@return integer[]
+        openedTransmogSets = function()
+            return openedTransmogSets
+        end,
+        ---Hold shift down, or let it up. What tells the four actions on a transmog row apart,
+        ---and the one thing about a click a test cannot express by clicking.
+        ---@param down boolean?
+        setShiftDown = function(down)
+            shiftDown = down and true or false
         end,
         ---@return boolean whether the client is writing a combat log
         isLogging = function()

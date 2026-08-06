@@ -21,6 +21,9 @@ export const settings: E2EMock["settings"] = {
   captureTriggers: ["accountFirstAchievement", "somethingNewer"],
   captureQuality: "balanced",
   keepOriginalScreenshots: false,
+  // Off, which is what every install starts as and what the panel has to draw before anybody
+  // has touched it: the walk it provokes is thousands of questions the player never asked for.
+  automaticCensus: false,
 };
 
 // An install that has never been asked to log: the setting is off, and the game's own

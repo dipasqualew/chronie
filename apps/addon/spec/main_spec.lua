@@ -58,6 +58,15 @@ describe("addon integration", function()
 
             assert.is_false(ns.settings.combatLogging)
         end)
+
+        -- Asserted on the file rather than on the behaviour, because the file is what the app
+        -- writes and what a hand-installed copy gets. What the flag then gates has tests of its
+        -- own further down.
+        it("carries settings with nothing that walks the account by itself switched on", function()
+            local ns = loader.load()
+
+            assert.is_false(ns.settings.sync.census)
+        end)
     end)
 
     describe("PLAYER_LOGIN", function()
@@ -2408,9 +2417,12 @@ describe("addon integration", function()
         local function panelLootValue(recorded)
             for _, frame in ipairs(recorded.frames) do
                 if frame.frameName == "ChronieResultsWindow" then
-                    for index, fontString in ipairs(frame.fontStrings) do
+                    -- The rows are drawn inside the viewport that scrolls them rather than on
+                    -- the panel itself, so this is a walk rather than one list.
+                    local fontStrings = fake.regionsOf(frame)
+                    for index, fontString in ipairs(fontStrings) do
                         if fontString.text == "Loot value" then
-                            local value = frame.fontStrings[index + 1]
+                            local value = fontStrings[index + 1]
                             return value and value.text
                         end
                     end
@@ -3002,7 +3014,7 @@ describe("addon integration", function()
         ---@param frame table
         ---@return table?
         local function headerOf(frame)
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.template ~= "GameFontHighlightSmall" then
                     return fontString
                 end
@@ -3042,7 +3054,7 @@ describe("addon integration", function()
         ---@return table[] `{ { label = string, detail = string }, ... }`
         local function pickerRows(frame)
             local labels, details = {}, {}
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.shown and fontString.justify == "LEFT" then
                     labels[#labels + 1] = fontString.text
                 elseif fontString.shown and fontString.justify == "RIGHT" then
@@ -3060,7 +3072,7 @@ describe("addon integration", function()
         ---@param frame table the picker's frame
         ---@param label string
         local function pickRow(frame, label)
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.shown and fontString.justify == "LEFT" and fontString.text == label then
                     fontString:run("OnMouseUp", "LeftButton")
                     return
@@ -3085,9 +3097,10 @@ describe("addon integration", function()
         ---@param label string
         ---@return string?
         local function panelValueFor(frame, label)
-            for index, fontString in ipairs(frame.fontStrings) do
+            local fontStrings = fake.regionsOf(frame)
+            for index, fontString in ipairs(fontStrings) do
                 if fontString.text == label then
-                    local value = frame.fontStrings[index + 1]
+                    local value = fontStrings[index + 1]
                     return value and value.text
                 end
             end
@@ -3114,12 +3127,12 @@ describe("addon integration", function()
             recorded.clock.advance(720)
 
             local frame = panelFrame(recorded)
-            assert.equal("Westfall", titleOf(frame))
+            assert.equal("Thrall — Westfall", titleOf(frame))
             assert.equal("0c", panelValueFor(frame, "Gold Δ"))
 
-            pick(recorded, frame, "Deadmines")
+            pick(recorded, frame, "Thrall — Deadmines")
 
-            assert.equal("Deadmines · 12m ago", titleOf(frame))
+            assert.equal("Thrall — Deadmines · 12m ago", titleOf(frame))
             -- The five silver picked up in there: the body follows the choice rather than
             -- staying on whatever was drawn before the list was opened over it.
             assert.equal("5s 0c", panelValueFor(frame, "Gold Δ"))
@@ -3155,8 +3168,8 @@ describe("addon integration", function()
             local list = pickerFrame(recorded, frame)
             assert.same({
                 { label = "Session", detail = "2 segments" },
-                { label = "Deadmines", detail = "<1m · 12m ago" },
-                { label = "Westfall", detail = "12m · playing" },
+                { label = "Thrall — Deadmines", detail = "12m ago" },
+                { label = "Thrall — Westfall", detail = "playing" },
             }, pickerRows(list))
 
             pickRow(list, "Session")
@@ -3188,18 +3201,18 @@ describe("addon integration", function()
             recorded.clock.advance(120)
 
             local frame = panelFrame(recorded)
-            pick(recorded, frame, "Deadmines")
-            assert.equal("Deadmines · 2m ago", titleOf(frame))
+            pick(recorded, frame, "Thrall — Deadmines")
+            assert.equal("Thrall — Deadmines · 2m ago", titleOf(frame))
 
             recorded.setInstance({ name = "Elwynn Forest", kind = "none", difficultyId = 0,
                 difficulty = "" })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
-            assert.equal("Elwynn Forest", titleOf(frame))
+            assert.equal("Thrall — Elwynn Forest", titleOf(frame))
             -- And the dungeon is still on the list: the panel moved because something new
             -- opened, not because the view it was parked on fell out of the evening.
-            pick(recorded, frame, "Deadmines")
-            assert.equal("Deadmines · 2m ago", titleOf(frame))
+            pick(recorded, frame, "Thrall — Deadmines")
+            assert.equal("Thrall — Deadmines · 2m ago", titleOf(frame))
         end)
 
         -- The session total is the exception to that. Parking there is a deliberate "show me
@@ -3282,13 +3295,13 @@ describe("addon integration", function()
             )
 
             local frame = panelFrame(recorded)
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.shown and (fontString.text or ""):find("Reputation", 1, true) then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
             end
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.shown and fontString.justify == "LEFT"
                     and (fontString.text or ""):find("Argent Dawn", 1, true) then
                     fontString:run("OnEnter")
@@ -3330,13 +3343,13 @@ describe("addon integration", function()
             local frame = panelFrame(recorded)
             -- The heading first, because the item's own row is not drawn until the block it
             -- sits in has been opened, and then the row the appearance was filed under.
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.shown and (fontString.text or ""):find("Transmog", 1, true) then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
                 end
             end
-            for _, fontString in ipairs(frame.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
                 if fontString.shown and (fontString.text or ""):find("Item 19019", 1, true) then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
@@ -3348,6 +3361,124 @@ describe("addon integration", function()
                 { call = "undress" },
                 { call = "tryOn", link = "item:19019" },
             }, recorded.dressingRoom())
+        end)
+
+        -- The shifted half of the same click, and it is wired through more parts than the
+        -- unshifted one: the panel has to have been handed a set lookup built on the client's
+        -- three set calls, a preview that takes source ids rather than links, the journal's
+        -- own set page, and a way to read the shift key — five seams, any one of which can be
+        -- left unwired without a single unit test noticing. Both buttons in one test because
+        -- what the pair proves is that they went to different places: a shifted right click
+        -- that opened the dressing room, or a shifted left click that opened Collections,
+        -- would each pass a test that only watched one of them.
+        it("dresses the model in a whole set and opens that set when its row is shift-clicked", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                transmogSources = { [11] = { item = 19019, newAppearance = true } },
+                transmogSetsOfSource = { [11] = { 1783 } },
+                transmogSets = {
+                    [1783] = {
+                        name = "Bloodfang Armor",
+                        label = "Heroic",
+                        -- The piece that dropped is one of the three, and it goes on with the
+                        -- rest rather than separately: the whole set is what is being shown.
+                        pieces = {
+                            { sourceID = 101, collected = true },
+                            { sourceID = 11, collected = true },
+                            { sourceID = 103, collected = false },
+                        },
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            local frame = panelFrame(recorded)
+            ---Clicks the first row on screen saying `needle`. Looked up afresh each time,
+            ---because a click repaints the panel and the rows are pooled.
+            ---@param needle string
+            ---@param button string
+            local function click(needle, button)
+                -- Through `regionsOf`, because the body is drawn inside the viewport that
+                -- scrolls it rather than on the panel frame itself.
+                for _, fontString in ipairs((fake.regionsOf(frame))) do
+                    if fontString.shown and (fontString.text or ""):find(needle, 1, true) then
+                        fontString:run("OnMouseUp", button)
+                        return
+                    end
+                end
+                error("no row saying " .. needle .. " to click")
+            end
+
+            -- The heading first: the item's own row is not drawn until the block it sits in
+            -- has been opened.
+            click("Transmog", "LeftButton")
+            recorded.setShiftDown(true)
+            click("Item 19019", "LeftButton")
+            click("Item 19019", "RightButton")
+
+            -- Stripped once, and then every piece of the set in the order the client listed
+            -- them — as source ids, which is what a set's pieces are.
+            assert.same({
+                { call = "dressUp", link = "item:19019" },
+                { call = "undress" },
+                { call = "tryOn", link = 101 },
+                { call = "tryOn", link = 11 },
+                { call = "tryOn", link = 103 },
+            }, recorded.dressingRoom())
+            assert.same({ 1783 }, recorded.openedTransmogSets())
+        end)
+
+        -- The look a set wears on some other item, end to end. A set lists the exact source
+        -- rows it is made of, so the client answers nothing when it is asked which sets contain
+        -- the world drop — and the whole of the answer here is a second env function that turns
+        -- the drop into its look and the look back into every item wearing it, wired into the
+        -- set lookup the panel already had. Nothing smaller can say it was: the module is
+        -- perfectly happy with a dep that is never handed to it, so the seam left unwired is a
+        -- panel that has simply gone quiet again about the most interesting drop there is.
+        it("draws a set's fraction over a drop the set names on another item", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                -- One look worn by two items. The world drop is what landed; the tier piece
+                -- beside it is what Bloodfang Armor actually lists, and the set is attached to
+                -- that one alone — which is the client's own arrangement rather than a
+                -- convenience of the fixture.
+                transmogSources = {
+                    [11] = { item = 19019, newAppearance = true, visualID = 700 },
+                    [12] = { item = 16832, visualID = 700 },
+                },
+                transmogSetsOfSource = { [12] = { 1783 } },
+                transmogSets = {
+                    [1783] = {
+                        name = "Bloodfang Armor",
+                        pieces = {
+                            { sourceID = 12, collected = true },
+                            { sourceID = 13, collected = false },
+                            { sourceID = 14, collected = false },
+                        },
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            local frame = panelFrame(recorded)
+            -- The heading, because the item's own row is not drawn until the block it sits in
+            -- has been opened.
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
+                if fontString.shown and (fontString.text or ""):find("Transmog", 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            -- One of the three, counted off the set the drop reached through rather than off
+            -- the drop, which is in no set at all.
+            assert.is_truthy(panelValueFor(frame, "  Item 19019"):find("1/3", 1, true))
         end)
 
         it("registers the events that feed the segment panel", function()
@@ -4019,6 +4150,27 @@ describe("addon integration", function()
     end)
 
     describe("the account's own census", function()
+        ---What `src/Settings.lua` says when somebody has ticked the box on the Collection screen.
+        ---
+        ---Off in the bundle, so every test below that wants a loading screen to provoke a walk
+        ---has to say so — which is the point: the ones that do not say so are the ones proving
+        ---it does not.
+        local CENSUS_ON = { sync = { census = true } }
+
+        -- Why the box exists, and why it starts unticked. The walk behind a census is thousands
+        -- of client calls, a loading screen is what provokes it, and a player who wanted their
+        -- lockouts and their evening never asked for it. Nothing has been removed — the pass is
+        -- in Census.lua and `/chronie census refresh` still runs it — but nothing starts it by
+        -- itself until somebody says so.
+        it("walks nothing on a loading screen until it has been switched on", function()
+            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            assert.is_nil(recorded.db.census)
+        end)
+
         -- The hole neither the segments nor the pane sweep can close. Both of those record
         -- something happening, so the record of what an account has collected begins empty and
         -- fills in one at a time — and never at all for a mount bought on a laptop or an
@@ -4030,6 +4182,7 @@ describe("addon integration", function()
                 playerName = "Thrall",
                 realmName = "Ragnaros",
                 now = 1700000000,
+                settings = CENSUS_ON,
             })
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
@@ -4061,6 +4214,7 @@ describe("addon integration", function()
                 playerName = "Thrall",
                 realmName = "Ragnaros",
                 now = 1700000000,
+                settings = CENSUS_ON,
                 censusFactions = {
                     [529] = {
                         factionID = 529,
@@ -4089,7 +4243,11 @@ describe("addon integration", function()
         -- in the instant the world arrives is asking the client questions the server has not
         -- told it the answers to yet — the achievement tree in particular lands after login.
         it("asks the client nothing until the world has had a moment", function()
-            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = CENSUS_ON,
+            })
 
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
 
@@ -4099,7 +4257,11 @@ describe("addon integration", function()
         -- Cheap on every loading screen but the first, which is what makes it safe to provoke
         -- from one at all: in the steady state the audit names nothing and no pass is started.
         it("does not walk it again on a loading screen with nothing to find", function()
-            local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                settings = CENSUS_ON,
+            })
             recorded.frame:fire("PLAYER_ENTERING_WORLD")
             recorded.settle()
 
@@ -4144,7 +4306,11 @@ describe("addon integration", function()
         -- numbers on the line are of different things.
         it("puts what the walk found beside what the client counts", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
-            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            -- Seeded by asking for the walk rather than by zoning into one, because zoning does
+            -- not start one unless somebody has ticked the box. Which is the better seed anyway:
+            -- what the report has to pair with is a walk, and this is the walk every install can
+            -- provoke whatever its settings say.
+            recorded.slashRegistrations[1].handler("census refresh")
             recorded.settle()
 
             recorded.slashRegistrations[1].handler("census")
@@ -4160,7 +4326,7 @@ describe("addon integration", function()
         -- not changed.
         it("walks every collection again when asked to refresh", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
-            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.slashRegistrations[1].handler("census refresh")
             recorded.settle()
 
             recorded.slashRegistrations[1].handler("census refresh")
@@ -4210,6 +4376,28 @@ describe("addon integration", function()
             assert.same({ "mounts", "appearances", "achievements" }, done.domains)
         end)
 
+        -- The asymmetry the switch is drawn along, and the reason it gates one call and not the
+        -- other: a resync is a walk somebody pressed a button to ask for, so it is carried out
+        -- whatever `sync.census` says, while the audit deciding by itself that a reading looks
+        -- stale is exactly what an unticked box means. What tells the two apart here is what got
+        -- walked — the request named mounts, and the audit's own pass would have named the rest.
+        it("is carried out even with the automatic walk switched off", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                censusRequests = { { id = 4, domains = { "mounts" } } },
+            })
+
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.settle()
+
+            local done = recorded.db.censusRequests.done[4]
+            assert.equal("walked", done.outcome)
+            assert.same({ "mounts" }, done.domains)
+            assert.is_truthy(recorded.db.census.account.mounts)
+            assert.is_nil(recorded.db.census.account.achievements)
+        end)
+
         -- The ordering `sweepCensus` documents. The audit has something to say on this loading
         -- screen — nothing has ever been walked — so if its pass went first it would be in
         -- flight when the request was picked up, `census.run` would refuse the second one, and
@@ -4220,6 +4408,7 @@ describe("addon integration", function()
             local _, recorded = boot({
                 playerName = "Thrall",
                 realmName = "Ragnaros",
+                settings = { sync = { census = true } },
                 censusRequests = { { id = 4, domains = { "mounts" } } },
             })
 
@@ -4767,7 +4956,7 @@ describe("addon integration", function()
             end
             assert.is_table(panel)
 
-            for _, fontString in ipairs(panel.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(panel))) do
                 if fontString.shown and (fontString.text or ""):find("Reputation", 1, true) then
                     fontString:run("OnMouseUp", "LeftButton")
                     break
@@ -4777,7 +4966,7 @@ describe("addon integration", function()
             -- Labels and values are told apart by justification and paired in drawn order,
             -- which is how every other reading of this panel reconstructs a line.
             local labels, values = {}, {}
-            for _, fontString in ipairs(panel.fontStrings) do
+            for _, fontString in ipairs((fake.regionsOf(panel))) do
                 local row = fontString.shown and fontString.template == "GameFontHighlightSmall"
                 if row and fontString.justify == "LEFT" then
                     labels[#labels + 1] = fontString.text
