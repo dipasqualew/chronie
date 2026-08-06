@@ -1035,6 +1035,11 @@ function fake.newEnv(options)
     -- collected = } } } }`, and `transmogSetsOfSource` says which sets a source sits in. Empty
     -- by default, which is the ordinary case — most appearances belong to no set at all, and a
     -- test that never mentions sets gets the panel exactly as it was before they existed.
+    --
+    -- `transmogSetsOfSource` is keyed by source and not by look, exactly as the client's own
+    -- call is: a set names the item-modified-appearance rows it lists and says nothing about
+    -- the other items wearing those looks. Two sources filed under one `visualID` in
+    -- `transmogSources` are how a test says one look reaches a set through another item.
     local transmogSets = options.transmogSets or {}
     local transmogSetsOfSource = options.transmogSetsOfSource or {}
     -- Whether shift is held. Mutable through the returned handle rather than fixed at build,
@@ -1333,6 +1338,30 @@ function fake.newEnv(options)
                 visualID = source.visualID,
                 newAppearance = source.newAppearance,
             }
+        end,
+        ---Every source wearing the same look as this one, which is every source filed under
+        ---one `visualID` — the same relation the real client's `GetAllAppearanceSources`
+        ---answers, read off the table a test already writes to say what a drop was.
+        ---
+        ---The source asked about is in its own answer, as the client's is. Nothing at all for
+        ---a source this client has no row for, and nothing for one whose look it will not name:
+        ---two sources of no visual are not two sources of one look, and a fake that folded
+        ---them together would find sets over every plain drop in every test that has two.
+        transmogSharedSources = function(sourceID)
+            local source = transmogSources[sourceID]
+            if not source or not source.visualID then
+                return nil
+            end
+            local shared = {}
+            for other, row in pairs(transmogSources) do
+                if row.visualID == source.visualID then
+                    shared[#shared + 1] = other
+                end
+            end
+            -- Sorted, because `pairs` has no order and a fake whose answer changed between
+            -- runs would make a test that reads the first one flake.
+            table.sort(shared)
+            return shared
         end,
         equipmentSets = function()
             return equipmentSets

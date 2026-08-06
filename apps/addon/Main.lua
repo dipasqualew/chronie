@@ -82,6 +82,8 @@ local addonName, ns = ...
 ---@field transmogSetInfo fun(setID: integer): table? What the client will say about a set.
 ---@field transmogSetPieces fun(setID: integer): { sourceID: integer, collected: boolean }[] Every
 ---piece of a set and whether the account holds it.
+---@field transmogSharedSources fun(sourceID: integer): integer[]? Every source wearing the same
+---look as this one, itself included, which is how a set is found over an item it does not list.
 ---@field shiftDown fun(): boolean Whether shift is held right now.
 ---@field itemName fun(itemID: integer): string?
 ---@field playerGUID fun(): string? UnitGUID("player"), the client's own unique character id.
@@ -354,6 +356,7 @@ function ns.main(env)
         setsContaining = env.transmogSetsContaining,
         setInfo = env.transmogSetInfo,
         setPieces = env.transmogSetPieces,
+        sharedSources = env.transmogSharedSources,
     })
 
     -- Declared before the panel and filled in after the log and the tracker they read from,
@@ -2092,6 +2095,23 @@ if CreateFrame then
             end,
             transmogSetInfo = function(setID)
                 return C_TransmogSets.GetSetInfo(setID)
+            end,
+            ---Every source in the game wearing the same look as this one.
+            ---
+            ---Two hops, because the client has no call from a source to its siblings: the
+            ---source names the visual it belongs to, and the visual names every source of it.
+            ---`GetAllAppearanceSources` rather than `GetAppearanceSources` — the second answers
+            ---the wardrobe's own question, cut to a category and to what is collected, and the
+            ---item that puts a look in a set is exactly the one the account may not hold.
+            ---
+            ---The list includes the source asked about, which `newTransmogSets` relies on
+            ---knowing: it skips it rather than asking the client about it twice.
+            transmogSharedSources = function(sourceID)
+                local info = C_TransmogCollection.GetSourceInfo(sourceID)
+                if not info or not info.visualID then
+                    return nil
+                end
+                return C_TransmogCollection.GetAllAppearanceSources(info.visualID)
             end,
             ---Every piece of a set, and whether the account holds it.
             ---

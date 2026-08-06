@@ -3422,6 +3422,56 @@ describe("addon integration", function()
             assert.same({ 1783 }, recorded.openedTransmogSets())
         end)
 
+        -- The look a set wears on some other item, end to end. A set lists the exact source
+        -- rows it is made of, so the client answers nothing when it is asked which sets contain
+        -- the world drop — and the whole of the answer here is a second env function that turns
+        -- the drop into its look and the look back into every item wearing it, wired into the
+        -- set lookup the panel already had. Nothing smaller can say it was: the module is
+        -- perfectly happy with a dep that is never handed to it, so the seam left unwired is a
+        -- panel that has simply gone quiet again about the most interesting drop there is.
+        it("draws a set's fraction over a drop the set names on another item", function()
+            local _, recorded = boot({
+                playerName = "Thrall",
+                realmName = "Ragnaros",
+                instanceType = "party",
+                -- One look worn by two items. The world drop is what landed; the tier piece
+                -- beside it is what Bloodfang Armor actually lists, and the set is attached to
+                -- that one alone — which is the client's own arrangement rather than a
+                -- convenience of the fixture.
+                transmogSources = {
+                    [11] = { item = 19019, newAppearance = true, visualID = 700 },
+                    [12] = { item = 16832, visualID = 700 },
+                },
+                transmogSetsOfSource = { [12] = { 1783 } },
+                transmogSets = {
+                    [1783] = {
+                        name = "Bloodfang Armor",
+                        pieces = {
+                            { sourceID = 12, collected = true },
+                            { sourceID = 13, collected = false },
+                            { sourceID = 14, collected = false },
+                        },
+                    },
+                },
+            })
+            recorded.frame:fire("PLAYER_ENTERING_WORLD")
+            recorded.frame:fire("TRANSMOG_COLLECTION_SOURCE_ADDED", 11)
+
+            local frame = panelFrame(recorded)
+            -- The heading, because the item's own row is not drawn until the block it sits in
+            -- has been opened.
+            for _, fontString in ipairs((fake.regionsOf(frame))) do
+                if fontString.shown and (fontString.text or ""):find("Transmog", 1, true) then
+                    fontString:run("OnMouseUp", "LeftButton")
+                    break
+                end
+            end
+
+            -- One of the three, counted off the set the drop reached through rather than off
+            -- the drop, which is in no set at all.
+            assert.is_truthy(panelValueFor(frame, "  Item 19019"):find("1/3", 1, true))
+        end)
+
         it("registers the events that feed the segment panel", function()
             local _, recorded = boot({ playerName = "Thrall", realmName = "Ragnaros" })
 

@@ -6,11 +6,16 @@ describe("Blizzard's own transmog sets", function()
     local SOURCE = 4242
     local SET = 1783
     local OTHER_SET = 1784
+    -- Two other items in the game wearing the same look as SOURCE, in the order the client
+    -- lists them. A set names item-modified-appearance rows rather than looks, so a set that
+    -- lists one of these says nothing at all about SOURCE when it is asked directly.
+    local SHARED = 4243
+    local LATER_SHARED = 4244
 
-    ---The client's three set calls, each answering out of a table of its own and each writing
+    ---The client's four set calls, each answering out of a table of its own and each writing
     ---down what it was asked about.
     ---
-    ---Three separate deps rather than one lookup because the client separates them, and each
+    ---Four separate deps rather than one lookup because the client separates them, and each
     ---refuses independently: a build will happily name the sets a source sits in and then
     ---decline to describe one of them, or list a set's pieces and refuse its name. Keying the
     ---fixtures by set id apart from each other is what lets a case model exactly one of those
@@ -20,12 +25,14 @@ describe("Blizzard's own transmog sets", function()
     ---repaint, so a lookup made before the cheap refusal is a cost paid on every frame the
     ---panel is on screen, and only a count of the calls can say it was not.
     ---@param options table? `{ containing = table<integer, integer[]>,
-    ---info = table<integer, table>, pieces = table<integer, table[]> }`
+    ---info = table<integer, table>, pieces = table<integer, table[]>,
+    ---shared = table<integer, integer[]> }`
     ---@return TransmogSets sets
-    ---@return table asked `{ containing = integer[], info = integer[], pieces = integer[] }`
+    ---@return table asked `{ containing = integer[], info = integer[], pieces = integer[],
+    ---shared = integer[] }`
     local function newSets(options)
         options = options or {}
-        local asked = { containing = {}, info = {}, pieces = {} }
+        local asked = { containing = {}, info = {}, pieces = {}, shared = {} }
         local sets = ns.newTransmogSets({
             setsContaining = function(sourceID)
                 asked.containing[#asked.containing + 1] = sourceID
@@ -46,6 +53,19 @@ describe("Blizzard's own transmog sets", function()
             setPieces = function(setID)
                 asked.pieces[#asked.pieces + 1] = setID
                 return (options.pieces or {})[setID]
+            end,
+            sharedSources = function(sourceID)
+                asked.shared[#asked.shared + 1] = sourceID
+                -- A list of one by default, holding the source itself. The client's own
+                -- answer always has it in there, and an item nothing else in the game shares
+                -- a look with is the ordinary reading — so a case that says nothing about
+                -- sharing gets the widening finding nothing rather than the widening being
+                -- switched off. Nothing at all is a different answer, and it is one a case
+                -- makes on purpose by passing `shared` and leaving the source out of it.
+                if options.shared == nil then
+                    return { sourceID }
+                end
+                return options.shared[sourceID]
             end,
         })
         return sets, asked
@@ -136,12 +156,15 @@ describe("Blizzard's own transmog sets", function()
         -- The tally files a source id with every collected appearance, but nothing guarantees
         -- one: an event the client would not resolve leaves the row with an item and no
         -- source. Asking the client which sets contain nothing is a call per row per repaint
-        -- that can only ever answer nothing.
+        -- that can only ever answer nothing — and so is asking it what else in the game wears
+        -- the look of nothing, which is the road the widening would otherwise take on exactly
+        -- these rows, every one of them having found no set to begin with.
         it("asks the client nothing at all when there is no source id to ask about", function()
             local sets, asked = newSets({ containing = { [SOURCE] = { SET } } })
 
             assert.is_nil(sets.forSource(nil))
             assert.same({}, asked.containing)
+            assert.same({}, asked.shared)
         end)
 
         -- All four are the ordinary case rather than the exception: most appearances in the
@@ -269,6 +292,146 @@ describe("Blizzard's own transmog sets", function()
             assert.is_nil(sets.forSource(SOURCE))
             assert.same({}, asked.pieces)
         end)
+
+        -- The whole of what the widening is for. A set lists the exact item-modified-appearance
+        -- rows it is made of, and several different items wear one look — so the world drop
+        -- wearing a tier shoulder's look is in no set the client will name over it, while the
+        -- wardrobe files it under the same appearance and credits the set for either. The piece
+        -- counts and the sources are the *set's*, not the item's: what the player is being told
+        -- is how far into Bloodfang Armor they are, and the dressing room is handed Bloodfang
+        -- Armor to wear.
+        it("reports the set that names another item wearing the same look", function()
+            local sets = newSets({
+                containing = { [SHARED] = { SET } },
+                info = { [SET] = { name = "Bloodfang Armor", label = "Heroic" } },
+                pieces = { [SET] = eightPieces() },
+                shared = { [SOURCE] = { SOURCE, SHARED } },
+            })
+
+            assert.same({
+                setID = SET,
+                name = "Bloodfang Armor",
+                label = "Heroic",
+                collected = 3,
+                total = 8,
+                sources = { 101, 102, 103, 104, 105, 106, 107, 108 },
+                sharedLook = true,
+            }, sets.forSource(SOURCE))
+        end)
+
+        -- A piece the set itself lists is answered in the one lookup it always took, and that
+        -- is what keeps the cost of the widening where it belongs: this is asked once per
+        -- transmog row per repaint, and the list of everything wearing a look is a client call
+        -- plus a set lookup for each item in it. Paid on the rows that need it and on no other.
+        it("says nothing of a shared look, and asks nothing about one, for a piece its set names", function()
+            local sets, asked = newSets({
+                containing = { [SOURCE] = { SET } },
+                pieces = { [SET] = eightPieces() },
+            })
+
+            assert.is_nil(sets.forSource(SOURCE).sharedLook)
+            assert.same({}, asked.shared)
+        end)
+
+        -- The source is in its own shared list, because the client's answer is every item
+        -- wearing the look and this item wears it. Asking it a second time is a lookup per row
+        -- per repaint for an answer already known to be nothing.
+        it("passes over the source itself rather than asking it a second time", function()
+            local sets, asked = newSets({
+                containing = { [SHARED] = { SET } },
+                pieces = { [SET] = eightPieces() },
+                shared = { [SOURCE] = { SOURCE, SHARED } },
+            })
+
+            assert.equal(SET, sets.forSource(SOURCE).setID)
+            assert.same({ SOURCE, SHARED }, asked.containing)
+        end)
+
+        -- The same rule the source's own sets are chosen by, one step out: the client's order
+        -- decides, because the row has space for one set and any other tie-break moves the line
+        -- under the player as they collect. Two items wearing one look can each be in a set of
+        -- their own — a tier shoulder and its recoloured dungeon twin — and the first the
+        -- client lists is the one the panel speaks for.
+        it("takes the first item wearing the look that is in a set the client named", function()
+            local sets = newSets({
+                containing = { [SHARED] = { SET }, [LATER_SHARED] = { OTHER_SET } },
+                info = { [SET] = { name = "Bloodfang Armor" }, [OTHER_SET] = { name = "Nightslayer" } },
+                pieces = { [SET] = eightPieces(), [OTHER_SET] = { { sourceID = 201, collected = true } } },
+                shared = { [SOURCE] = { SOURCE, SHARED, LATER_SHARED } },
+            })
+
+            assert.equal("Bloodfang Armor", sets.forSource(SOURCE).name)
+        end)
+
+        -- And the naming rule reaches every item the look is worn by, not only the one that
+        -- dropped. The 46 unnamed grouping rows sort ahead of the real sets wherever they turn
+        -- up, so an item whose only set is one of them is exactly as much use to a player as an
+        -- item in no set at all — and stopping at it would hide the real set behind it.
+        it("passes over an item whose only set the client will not name for one behind it", function()
+            local sets = newSets({
+                containing = { [SHARED] = { OTHER_SET }, [LATER_SHARED] = { SET } },
+                info = { [OTHER_SET] = { name = "" }, [SET] = { name = "Magister's Regalia" } },
+                pieces = { [OTHER_SET] = { { sourceID = 999, collected = true } }, [SET] = eightPieces() },
+                shared = { [SOURCE] = { SOURCE, SHARED, LATER_SHARED } },
+            })
+
+            local membership = sets.forSource(SOURCE)
+
+            assert.equal(SET, membership.setID)
+            assert.equal("Magister's Regalia", membership.name)
+            assert.is_true(membership.sharedLook)
+        end)
+
+        -- "The source is in no set the client will name" is one state however it is arrived at:
+        -- a source in no set at all, and a source whose every set is one of the unnamed grouping
+        -- rows, are both a row with nothing to say about itself, and both are worth the look
+        -- outwards. Stopping at the second would leave the widening off precisely the sources
+        -- that touch the scaffolding rows, which is 635 of them.
+        it("looks outwards when none of the source's own sets can be named either", function()
+            local sets = newSets({
+                containing = { [SOURCE] = { OTHER_SET }, [SHARED] = { SET } },
+                info = { [OTHER_SET] = { name = "" }, [SET] = { name = "Bloodfang Armor" } },
+                pieces = { [SET] = eightPieces() },
+                shared = { [SOURCE] = { SOURCE, SHARED } },
+            })
+
+            local membership = sets.forSource(SOURCE)
+
+            assert.equal(SET, membership.setID)
+            assert.is_true(membership.sharedLook)
+        end)
+
+        -- Finding nothing is what the widening does nearly every time, and all three of these
+        -- have to end as quietly as the narrow lookup did: most appearances belong to no set
+        -- and are worn by nothing that does either. The client refusing to say what wears a
+        -- look is the same answer by another road — an unresolved source, or a build with no
+        -- row for it — and a row drawn over any of them would be a fraction of somebody else's
+        -- set.
+        for _, case in ipairs({
+            {
+                what = "no other item wearing the look is in a set either",
+                shared = { SOURCE, SHARED },
+            },
+            {
+                what = "the client would not say what else wears the look",
+                shared = nil,
+            },
+            {
+                what = "the client answered with an empty list of items wearing it",
+                shared = {},
+            },
+        }) do
+            it("answers nothing when " .. case.what, function()
+                local sets = newSets({
+                    containing = {},
+                    info = { [SET] = { name = "Bloodfang Armor" } },
+                    pieces = { [SET] = eightPieces() },
+                    shared = case.shared and { [SOURCE] = case.shared } or {},
+                })
+
+                assert.is_nil(sets.forSource(SOURCE))
+            end)
+        end
 
         -- Read live rather than filed with the drop: the account collects another piece on
         -- another character an hour later and the row has to say so the next time it is
@@ -446,6 +609,38 @@ describe("Blizzard's own transmog sets", function()
             local content = ns.transmogSetTooltip(membership({ label = "Mythic" }))
 
             assert.equal("note", lineSaying(content, "Mythic").role)
+        end)
+
+        -- The set is being named over an item the set does not list, and a player who knows
+        -- Bloodfang Armor — and knows this world drop is not a piece of it — is otherwise being
+        -- told something that looks plainly wrong. The line goes above the fraction because it
+        -- is what the fraction has to be read in the light of, and under the qualifier because
+        -- the qualifier is part of the set's name rather than a remark about this row.
+        it("says the set wears the look on another item, between the qualifier and the fraction", function()
+            assert.same({
+                "Bloodfang Armor",
+                "Heroic",
+                "The set wears this look on another item",
+                "Collected → 3 / 8",
+                "",
+                "Shift-click to try on the whole set",
+                "Shift-right-click to open it in Collections",
+            }, readable(ns.transmogSetTooltip(membership({ label = "Heroic", sharedLook = true }))))
+        end)
+
+        it("marks that as a remark about the row rather than as a figure", function()
+            local content = ns.transmogSetTooltip(membership({ sharedLook = true }))
+
+            assert.equal("note", lineSaying(content, "The set wears this look on another item").role)
+        end)
+
+        -- Left off every ordinary row, which is most of them. A piece the set itself lists is
+        -- being described exactly as it is, and the line over one would be telling the player
+        -- something untrue about a set they can see their own shoulder in.
+        it("says nothing of another item for a piece the set names itself", function()
+            local content = ns.transmogSetTooltip(membership())
+
+            assert.is_nil(lineSaying(content, "The set wears this look on another item"))
         end)
 
         -- Spaces around the slash, which is not the same string the row itself carries: the
