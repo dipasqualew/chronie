@@ -1421,15 +1421,76 @@ describe("ns.newResultsWindow", function()
             end)
         end
 
+        -- And the colour says it alone, the way a transmog row's does. "collected" is gone
+        -- from a row that has a colour: it was the word every one of them carried, so it told
+        -- two catches apart not at all, and the column it had is width the name gets.
+        for _, case in ipairs({
+            { what = "a species new to the collection", speciesFirst = true },
+            { what = "another of one already owned", speciesFirst = false },
+        }) do
+            it("says nothing in words beside " .. case.what, function()
+                local window, frames = newWindow()
+                window.update(summary({
+                    pets = { { id = 2, name = "Darkmoon Rabbit", speciesFirst = case.speciesFirst } },
+                }))
+
+                expand(frames[1], "Pets")
+
+                assert.equal("", valueFor(rowsOf(frames[1]), "  Darkmoon Rabbit"))
+            end)
+        end
+
+        -- Which is where a player who does not yet know the two colours learns them, the same
+        -- job the transmog and achievement headings do.
+        it("counts the catches in words on the heading over them", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                pets = {
+                    { id = 1, name = "Darkmoon Rabbit", speciesFirst = true },
+                    { id = 2, name = "Sen'jin Fetish", speciesFirst = false },
+                    { id = 3, name = "Stormwind Rat", speciesFirst = false },
+                },
+            }))
+
+            assert.equal(
+                "|cffb373ff1 new|r · |cff59d9732 duplicates|r",
+                valueForHeading(rowsOf(frames[1]), "Pets")
+            )
+        end)
+
         -- `speciesFirst` is absent rather than false where nobody read the owned count at the
         -- moment of the catch, and an unasked question is not a "no": the row says neither.
+        -- It keeps "collected", because that is then the whole of what is known about it, and
+        -- the heading falls back to a bare count rather than calling every catch new.
         it("leaves a pet nobody counted at the moment of the catch uncoloured", function()
             local window, frames = newWindow()
             window.update(summary({ pets = { { id = 2, name = "Darkmoon Rabbit" } } }))
 
+            assert.equal("1", valueForHeading(rowsOf(frames[1]), "Pets"))
+
             expand(frames[1], "Pets")
 
             assert.same({ 0.68, 0.68, 0.7 }, labelFor(frames[1], "Darkmoon Rabbit").color)
+            assert.equal("collected", valueFor(rowsOf(frames[1]), "  Darkmoon Rabbit"))
+        end)
+
+        -- Mounts and toys have no such split to draw, so nothing changed for them: one word
+        -- saying what happened, because there is no colour there to say it instead.
+        it("leaves a mount and a toy saying collected", function()
+            local window, frames = newWindow()
+            window.update(summary({
+                mounts = { { id = 1, name = "Alabaster Hyena" } },
+                toys = { { id = 3, name = "Katy's Stampwhistle" } },
+            }))
+
+            for _, heading in ipairs({ "Mounts", "Toys" }) do
+                expand(frames[1], heading)
+            end
+
+            local lines = rowsOf(frames[1])
+            assert.equal("collected", valueFor(lines, "  Alabaster Hyena"))
+            assert.equal("collected", valueFor(lines, "  Katy's Stampwhistle"))
         end)
 
         describe("a click on something newly collected", function()
@@ -1574,10 +1635,45 @@ describe("ns.newResultsWindow", function()
             end)
         end
 
+        -- Which leaves the colour carrying the whole of it, exactly as a transmog row's does.
+        -- The words beside the name are gone: a row that says one thing in two ways is a row
+        -- where the eye has to read the slower of them, and the column they had is width the
+        -- name gets instead.
+        for _, case in ipairs({
+            { what = "an account first", accountFirst = true },
+            { what = "a character first", accountFirst = false },
+        }) do
+            it("says nothing in words beside " .. case.what, function()
+                local window, frames = newWindow()
+
+                window.update(summary({
+                    achievements = { { id = 1, name = "The Loremaster", accountFirst = case.accountFirst } },
+                }))
+                expand(frames[1], "Achievements")
+
+                assert.equal("", valueFor(rowsOf(frames[1]), "  The Loremaster"))
+            end)
+        end
+
+        -- And the width that column had goes to the name, which is the point of taking the
+        -- word off: an achievement name is long and it was being clipped to make room for two
+        -- words the colour was already saying.
+        it("gives an achievement row no value column, so the name has the panel's width", function()
+            local window, frames = newWindow()
+
+            window.update(summary({
+                achievements = { { id = 1, name = "The Loremaster", accountFirst = true } },
+            }))
+            expand(frames[1], "Achievements")
+
+            assert.equal(244, labelFor(frames[1], "The Loremaster").width)
+        end)
+
         -- Green means "this character got there first" everywhere on this panel, and an
         -- achievement filed without the flag has not said that. So it keeps the panel's
-        -- ordinary label grey rather than claiming one of the two answers.
-        it("leaves an achievement nobody said either way about uncoloured", function()
+        -- ordinary label grey rather than claiming one of the two answers — and it is the one
+        -- row still carrying a word, because it is the one the colour cannot speak for.
+        it("leaves an achievement nobody said either way about uncoloured, and says earned", function()
             local window, frames = newWindow()
 
             window.update(summary({
@@ -1586,38 +1682,33 @@ describe("ns.newResultsWindow", function()
             expand(frames[1], "Achievements")
 
             assert.same({ 0.68, 0.68, 0.7 }, labelFor(frames[1], "The Loremaster").color)
+            assert.equal("earned", valueFor(rowsOf(frames[1]), "  The Loremaster"))
         end)
 
-        it("keeps long achievement and quest names out of the status column", function()
+        it("keeps a long quest name out of the status column beside it", function()
             local window, frames = newWindow()
-            local longAchievement = "  An Extremely Long Achievement Name That Cannot Fit Beside Its Status"
             local longQuest = "  An Extremely Long Quest Name That Cannot Fit Beside Its Status"
 
             window.update(summary({
-                achievements = {
-                    { id = 1, name = longAchievement:sub(3), accountFirst = false },
-                },
                 quests = {
                     { id = 2, name = longQuest:sub(3), characterFirst = true },
                 },
             }))
-            for _, heading in ipairs({ "Achievements", "Quests" }) do
-                expand(frames[1], heading)
-            end
+            expand(frames[1], "Quests")
 
             local labels = {}
             local values = {}
             for _, fontString in ipairs((regionsOf(frames[1]))) do
-                if fontString.text == longAchievement or fontString.text == longQuest then
+                if fontString.text == longQuest then
                     labels[#labels + 1] = fontString
                 elseif fontString.text == "character first" then
                     values[#values + 1] = fontString
                 end
             end
 
-            assert.equal(2, #labels)
-            assert.equal(2, #values)
-            for index = 1, 2 do
+            assert.equal(1, #labels)
+            assert.equal(1, #values)
+            for index = 1, 1 do
                 assert.is_false(labels[index].wordWrap)
                 assert.is_false(values[index].wordWrap)
                 assert.equal(144, labels[index].width)

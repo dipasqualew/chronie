@@ -990,32 +990,30 @@ function ns.newResultsWindow(deps)
             if expanded.achievements then
                 for _, event in ipairs(achievements) do
                     local current = event
-                    local scope = "earned"
-                    local color = REP_COLOR
-                    -- The name carries the colour as well as the word beside it, the way a
-                    -- transmog row's does: purple for the account's first and green for this
-                    -- character's own. The word stays — it is the legend the colours are
-                    -- learned from — but the colour is what a column of names is read by, and
-                    -- it belongs on the half of the row the eye is running down.
+                    -- The colour is the whole of what says which of the two this is, exactly
+                    -- as it is on a transmog row. It used to be said twice — the words
+                    -- "account first" beside a row already coloured purple — and a row that
+                    -- says one thing in two ways is a row where the eye has to read the slower
+                    -- of them. So the word is gone, and the column it had is width the name
+                    -- gets instead. The heading over the block still counts them in words,
+                    -- which is where a player who does not yet know the colours learns them.
                     --
                     -- Nil rather than REP_COLOR where nobody said which it was: green means
                     -- "this character got there first" everywhere on this panel, and an
-                    -- achievement filed without the flag has not said that.
-                    local nameColor
+                    -- achievement filed without the flag has not said that. That is the one
+                    -- row still carrying a word, because it is the one the colour cannot
+                    -- speak for.
+                    local scope, color = "earned", nil
                     if current.accountFirst == true then
-                        scope = "account first"
-                        color = ACCOUNT_COLOR
-                        nameColor = ACCOUNT_COLOR
+                        scope, color = "", ACCOUNT_COLOR
                     elseif current.accountFirst == false then
-                        scope = "character first"
-                        color = CHARACTER_COLOR
-                        nameColor = CHARACTER_COLOR
+                        scope, color = "", CHARACTER_COLOR
                     end
-                    line("  " .. current.name, scope, color, function()
+                    line("  " .. current.name, scope, color or REP_COLOR, function()
                         if deps.openAchievement then
                             deps.openAchievement(current.id)
                         end
-                    end, nil, nameColor)
+                    end, nil, color)
                 end
             end
         end
@@ -1063,11 +1061,15 @@ function ns.newResultsWindow(deps)
         ---@param tint fun(event: CollectionEvent): number[]? What colour this one is, for a
         ---collection where one row can mean something a different row does not. Nil, and a nil
         ---answer from it, leave the row in the panel's ordinary "collected" green.
-        local function collection(name, key, events, open, tint)
+        ---@param summarise fun(events: CollectionEvent[]): string? What the heading says in
+        ---place of a bare count: the words the colours under it are learned from. Nil, and a
+        ---nil answer from it, leave the count.
+        local function collection(name, key, events, open, tint, summarise)
             if #events == 0 then
                 return
             end
-            heading(name, key, tostring(#events))
+            local counted = summarise and summarise(events) or nil
+            heading(name, key, counted or tostring(#events), counted and SUMMARY_VALUE_WIDTH or nil)
             if expanded[key] then
                 for _, event in ipairs(events) do
                     local current = event
@@ -1075,7 +1077,13 @@ function ns.newResultsWindow(deps)
                         open(current)
                     end or nil
                     local color = tint and tint(current) or nil
-                    line("  " .. current.name, "collected", color or REP_COLOR, action, nil, color)
+                    -- A row whose colour has already said what it is does not say it again in
+                    -- a word: the column goes to the name instead, which is the rule the
+                    -- transmog block keeps. "collected" survives only where there is no colour
+                    -- to speak for the row — a mount, a toy, a pet nobody counted — and there
+                    -- it is the whole of what the row has to say.
+                    line("  " .. current.name, color and "" or "collected",
+                        color or REP_COLOR, action, nil, color)
                 end
             end
         end
@@ -1102,6 +1110,28 @@ function ns.newResultsWindow(deps)
                 return CHARACTER_COLOR
             end
             return nil
+        end, function(events)
+            -- The words the two colours under this heading are learned from, counted the way
+            -- the transmog block counts its own. A collection the client never gave an owned
+            -- count for has nothing to split, and falls back to the bare number rather than
+            -- claiming every catch was new.
+            local new, duplicate = 0, 0
+            for _, event in ipairs(events) do
+                if event.speciesFirst == true then
+                    new = new + 1
+                elseif event.speciesFirst == false then
+                    duplicate = duplicate + 1
+                end
+            end
+            if new + duplicate == 0 then
+                return nil
+            end
+            local text = ACCOUNT_HEX .. new .. " new" .. COLOR_END
+            if duplicate > 0 then
+                text = text .. " · " .. CHARACTER_HEX .. duplicate .. " duplicate"
+                    .. (duplicate ~= 1 and "s" or "") .. COLOR_END
+            end
+            return text
         end)
 
         if #quests > 0 then
