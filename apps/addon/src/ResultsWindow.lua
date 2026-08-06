@@ -25,6 +25,10 @@ local _, ns = ...
 ---@field saveSize fun(width: number, height: number, locked: boolean)? Persist a dragged size, or
 ---the lock being turned on or off.
 ---@field openAchievement fun(id: integer)?
+---@field openMount fun(mountID: integer)? The mount's own page in the collections journal, for
+---a click on the row that says it was collected.
+---@field openPet fun(speciesID: integer, guid: string?)? The same journal on its pets tab: the
+---very pet caught where the client filed a guid for it, the species otherwise.
 ---@field previewTransmog fun(itemID: integer)?
 ---@field openTransmogCollection fun(sourceID: integer)?
 ---@field previewTransmogSet fun(itemID: integer, sources: integer[])? The whole set on the body
@@ -1008,19 +1012,40 @@ function ns.newResultsWindow(deps)
             end
         end
 
-        local function collection(name, key, events)
+        ---A block of things collected: a count on the heading, one name per row under it.
+        ---@param name string
+        ---@param key string Which flag in `expanded` the block is opened by.
+        ---@param events CollectionEvent[]
+        ---@param open fun(event: CollectionEvent)? Where a click on one of these rows goes,
+        ---when the build wired somewhere for it to go. Withheld for a collection with no page
+        ---to open, and skipped for an event filed without the id the page is found by: a row
+        ---that cannot answer a click must not be mouse-enabled, or it becomes a dead spot on
+        ---the frame the player drags the panel around by.
+        local function collection(name, key, events, open)
             if #events == 0 then
                 return
             end
             heading(name, key, tostring(#events))
             if expanded[key] then
                 for _, event in ipairs(events) do
-                    line("  " .. event.name, "collected", REP_COLOR)
+                    local current = event
+                    local action = open and current.id and function()
+                        open(current)
+                    end or nil
+                    line("  " .. current.name, "collected", REP_COLOR, action)
                 end
             end
         end
-        collection("Mounts", "mounts", mounts)
-        collection("Pets", "pets", pets)
+        collection("Mounts", "mounts", mounts, deps.openMount and function(event)
+            deps.openMount(event.id)
+        end)
+        -- The guid as well as the species: a battle pet is the one collectible the game lets a
+        -- player own several of, so the journal can be opened on the very one that was caught
+        -- rather than on the species it belongs to. A drop filed without one — a learned pet
+        -- rather than a caught one — falls back to the species, which is what the row names.
+        collection("Pets", "pets", pets, deps.openPet and function(event)
+            deps.openPet(event.id, event.guid)
+        end)
 
         if #quests > 0 then
             local accountQuests, characterQuests = 0, 0
@@ -1141,7 +1166,14 @@ function ns.newResultsWindow(deps)
                 for index, event in ipairs(transmogs) do
                     local current = event
                     local itemName = deps.itemName and deps.itemName(current.id)
-                    local kind = current.newAppearance and "new" or "variant"
+                    -- The colour is the whole of what says which of the two this is. It used to
+                    -- be said twice — the word "new" or "variant" beside a row already coloured
+                    -- purple or green — and a row that says one thing in two ways is a row where
+                    -- the eye has to read the slower of them. So the item's own name carries the
+                    -- colour, the word is gone, and the value column beside it is free for the
+                    -- one thing a row can say that the colour cannot: the set's fraction. The
+                    -- heading over the block still counts them in words, which is where a player
+                    -- who does not yet know the colours learns them.
                     local kindColor = current.newAppearance and ACCOUNT_COLOR or CHARACTER_COLOR
                     local reviewKey = tostring(current.sourceID or current.id) .. ":" .. tostring(index)
                     local prefix = reviewedTransmogs[reviewKey] and REVIEWED_ICON or ""
@@ -1149,15 +1181,16 @@ function ns.newResultsWindow(deps)
                     -- as the account collects and a row drawn an hour ago would still be
                     -- claiming the count it was drawn with. See ns.newTransmogSets.
                     local set = deps.transmogSet and deps.transmogSet(current.sourceID)
-                    local valueText = kind
+                    local valueText = ""
                     local valueWidth
                     if set then
                         local hex = set.collected >= set.total and SET_COMPLETE_HEX or SET_HEX
-                        valueText = kind .. " " .. hex .. SET_ICON
+                        valueText = hex .. SET_ICON
                             .. set.collected .. "/" .. set.total .. COLOR_END
-                        -- The ordinary rows' 92 pixels hold "variant" and nothing else, so a
-                        -- row carrying a set fraction is given the wider column the summary
-                        -- headings use rather than clipping the numbers off its own end.
+                        -- The ordinary rows' 92 pixels are cut fine for an icon and a fraction
+                        -- of two double-digit numbers, so a row carrying one is given the wider
+                        -- column the summary headings use rather than clipping the numbers off
+                        -- its own end.
                         valueWidth = SUMMARY_VALUE_WIDTH
                     end
                     line("  " .. prefix .. (itemName or ("Item " .. current.id)), valueText, kindColor,
@@ -1197,7 +1230,7 @@ function ns.newResultsWindow(deps)
                                 deps.previewTransmog(current.id)
                             end
                             render(latest)
-                        end, valueWidth)
+                        end, valueWidth, kindColor)
                     hover(ns.transmogSetTooltip(set))
                 end
             end

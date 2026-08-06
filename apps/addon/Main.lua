@@ -69,6 +69,13 @@ local addonName, ns = ...
 ---@field toyInfo fun(id: integer): string? Localised name of a toy.
 ---@field housingItemInfo fun(id: integer): (string?, integer?) Localised name and warband-owned count.
 ---@field openAchievement fun(id: integer)
+---@field openMountJournal fun(mountID: integer) The collections journal, on the mount itself.
+---@field openPetJournal fun(speciesID: integer?, guid: string?) The same journal on its pets tab,
+---on the very pet the guid names where there is one and on the species otherwise.
+---@field className fun(classID: integer): string? Localised name of a class by its id, which is
+---how a transmog set's class mask becomes something a tooltip can print.
+---@field transmogArmorType fun(sourceID: integer): string? Localised armour type of the item
+---behind an appearance — cloth, leather, mail, plate — and nil for everything that has none.
 ---@field dressUpItem fun(link: string): boolean Client DressUpItemLink: opens the dressing room
 ---on the character as they are dressed and lays this item over the top. False when the client
 ---will not put the item on a body at all.
@@ -357,6 +364,8 @@ function ns.main(env)
         setInfo = env.transmogSetInfo,
         setPieces = env.transmogSetPieces,
         sharedSources = env.transmogSharedSources,
+        className = env.className,
+        armorType = env.transmogArmorType,
     })
 
     -- Declared before the panel and filled in after the log and the tracker they read from,
@@ -411,6 +420,8 @@ function ns.main(env)
             saved.width, saved.height, saved.locked = width, height, locked
         end,
         openAchievement = env.openAchievement,
+        openMount = env.openMountJournal,
+        openPet = env.openPetJournal,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
         previewTransmogSet = transmogPreview.showSet,
@@ -888,6 +899,8 @@ function ns.main(env)
             env.db.segmentDetailWindow = { width = width, height = height, locked = locked }
         end,
         openAchievement = env.openAchievement,
+        openMount = env.openMountJournal,
+        openPet = env.openPetJournal,
         previewTransmog = transmogPreview.show,
         openTransmogCollection = env.openTransmogCollection,
         previewTransmogSet = transmogPreview.showSet,
@@ -1541,6 +1554,15 @@ if CreateFrame then
         SlashCmdList["CHRONIE"] = handler
     end
 
+    -- What "you cannot wear this" is made of, as the item database numbers it:
+    -- `Enum.ItemClass.Armor` and the four `Enum.ItemArmorSubclass` values that are a material
+    -- rather than a shape. Written out rather than read off `Enum`, because these are indexed
+    -- at load and a build that renamed either table would take the whole addon down with it
+    -- over one line of a tooltip. Subclass 0 is Miscellaneous — rings, trinkets, necks — and
+    -- 6 is Shield, none of which restricts anybody by armour type.
+    local ARMOR_CLASS = 4
+    local ARMOR_SUBCLASSES = { [1] = true, [2] = true, [3] = true, [4] = true }
+
     -- SavedVariables only exist once the addon's variables have loaded.
     local bootstrap = CreateFrame("Frame")
     bootstrap:RegisterEvent("ADDON_LOADED")
@@ -2050,6 +2072,58 @@ if CreateFrame then
                 AchievementFrame_LoadUI()
                 ShowUIPanel(AchievementFrame)
                 AchievementFrame_SelectAchievement(id)
+            end,
+            -- The collections journal's tabs, by the same road the wardrobe below is opened
+            -- by: load the UI, toggle the journal onto the tab, then tell that tab's own frame
+            -- which entry to stand on. The tab numbers are `Enum.CollectionsJournalTab` on
+            -- 12.0.5 — mounts 1, pets 2, wardrobe 5 — and the two selection calls are globals
+            -- Blizzard_Collections defines rather than API namespaces, so each is nil-checked:
+            -- a build that renamed one leaves the journal open on the right tab, which is most
+            -- of what the click was for, rather than raising in a click handler.
+            openMountJournal = function(mountID)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(1)
+                if mountID and MountJournal_SelectByMountID then
+                    MountJournal_SelectByMountID(mountID)
+                end
+            end,
+            ---The pet the player caught, where the client said which one it was.
+            ---
+            ---A battle pet is the one collectible the game lets an account own several of, so
+            ---the journal separates "this pet" from "this species" and so does this: the guid
+            ---filed with the catch names the individual, and a pet learned rather than caught
+            ---has none, leaving the species as the whole of what is known.
+            openPetJournal = function(speciesID, guid)
+                CollectionsJournal_LoadUI()
+                ToggleCollectionsJournal(2)
+                if guid and PetJournal_SelectPet then
+                    PetJournal_SelectPet(nil, guid)
+                elseif speciesID and PetJournal_SelectSpecies then
+                    PetJournal_SelectSpecies(nil, speciesID)
+                end
+            end,
+            className = function(classID)
+                local info = C_CreatureInfo and C_CreatureInfo.GetClassInfo(classID)
+                return info and info.className or nil
+            end,
+            ---What an appearance's item is made of, where that is a restriction.
+            ---
+            ---The four armour subclasses and nothing else. A cloak, a ring, a shield and every
+            ---weapon in the game are all `Armor` or a class of their own with a subclass that
+            ---names a shape rather than a material — "Miscellaneous", "Warglaives" — and none
+            ---of those is the thing a player reading a tier set's tooltip is asking about. The
+            ---localised name comes off the client rather than being spelled here, because
+            ---"Plate" is "Plate" only in English.
+            transmogArmorType = function(sourceID)
+                local info = sourceID and C_TransmogCollection.GetSourceInfo(sourceID)
+                if not info or not info.itemID then
+                    return nil
+                end
+                local _, _, subType, _, _, classID, subclassID = GetItemInfoInstant(info.itemID)
+                if classID ~= ARMOR_CLASS or not ARMOR_SUBCLASSES[subclassID] then
+                    return nil
+                end
+                return subType
             end,
             dressUpItem = function(link)
                 return DressUpItemLink(link) and true or false

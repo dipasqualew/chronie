@@ -24,15 +24,20 @@ describe("Blizzard's own transmog sets", function()
     ---The recordings matter as much as the answers. This is asked once per transmog row per
     ---repaint, so a lookup made before the cheap refusal is a cost paid on every frame the
     ---panel is on screen, and only a count of the calls can say it was not.
+    ---`classes` and `armor` are the two the client may not have been wired at all, and they are
+    ---withheld unless a case names them. That is not tidiness: a set is described one line
+    ---shorter on a build without them, so a helper that always passed them would have quietly
+    ---changed the answer to every case in this file that asserts a whole membership.
     ---@param options table? `{ containing = table<integer, integer[]>,
     ---info = table<integer, table>, pieces = table<integer, table[]>,
-    ---shared = table<integer, integer[]> }`
+    ---shared = table<integer, integer[]>, classes = table<integer, string>,
+    ---armor = table<integer, string> }`
     ---@return TransmogSets sets
     ---@return table asked `{ containing = integer[], info = integer[], pieces = integer[],
-    ---shared = integer[] }`
+    ---shared = integer[], armor = integer[] }`
     local function newSets(options)
         options = options or {}
-        local asked = { containing = {}, info = {}, pieces = {}, shared = {} }
+        local asked = { containing = {}, info = {}, pieces = {}, shared = {}, armor = {}, classes = {} }
         local sets = ns.newTransmogSets({
             setsContaining = function(sourceID)
                 asked.containing[#asked.containing + 1] = sourceID
@@ -67,8 +72,45 @@ describe("Blizzard's own transmog sets", function()
                 end
                 return options.shared[sourceID]
             end,
+            className = options.classes and function(classID)
+                asked.classes[#asked.classes + 1] = classID
+                return options.classes[classID]
+            end or nil,
+            -- Recorded as well as answered, because *which source* this is asked about is the
+            -- whole of what the field means: the set may be tier plate and the item that
+            -- dropped wearing its look a mail world drop, and only the call says which of the
+            -- two the player was told about.
+            armorType = options.armor and function(sourceID)
+                asked.armor[#asked.armor + 1] = sourceID
+                return options.armor[sourceID]
+            end or nil,
         })
         return sets, asked
+    end
+
+    ---The classes the client will name, in its own id order, which is what a set's `classMask`
+    ---is read against: bit n, counting from zero, is class id n + 1.
+    ---
+    ---Five real classes rather than thirteen, because what the decoding turns on is the bit
+    ---position and how many classes the client will name *at all* — a mask covering every one
+    ---of them is not a restriction — and five says both as plainly as thirteen would. Id 6 is
+    ---left unnamed and id 7 named with an empty string, which are the two ways a live client
+    ---declines an id: a row past the end of the roster, and one it has no localisation for.
+    local CLASSES = {
+        [1] = "Warrior", [2] = "Paladin", [3] = "Hunter", [4] = "Rogue", [5] = "Priest",
+        [7] = "",
+    }
+
+    ---The bit a class id occupies in a `classMask`, so a fixture can say "Warrior and Paladin"
+    ---rather than 3 and leave the reader to work out which it meant.
+    ---@param ... integer class ids
+    ---@return integer mask
+    local function maskOf(...)
+        local mask = 0
+        for _, classID in ipairs({ ... }) do
+            mask = mask + 2 ^ (classID - 1)
+        end
+        return mask
     end
 
     ---An eight-piece set of which three are held, which is the ordinary shape of the thing:
@@ -433,6 +475,216 @@ describe("Blizzard's own transmog sets", function()
             end)
         end
 
+        -- Who the thing is actually for, which is the question a player standing over a drop
+        -- asks before "how far into the set am I": a mail wearer reading a plate set's
+        -- fraction is reading somebody else's number. All three come off different calls —
+        -- the armour off the item behind the appearance, the classes off the set's own mask,
+        -- the faction off its row — and land together on one membership.
+        it("says what the piece is made of and who the set is for", function()
+            local sets = newSets({
+                containing = { [SOURCE] = { SET } },
+                info = {
+                    [SET] = {
+                        name = "Bloodfang Armor",
+                        classMask = maskOf(1, 2),
+                        requiredFaction = "Horde",
+                    },
+                },
+                pieces = { [SET] = eightPieces() },
+                classes = CLASSES,
+                armor = { [SOURCE] = "Plate" },
+            })
+
+            assert.same({
+                setID = SET,
+                name = "Bloodfang Armor",
+                collected = 3,
+                total = 8,
+                sources = { 101, 102, 103, 104, 105, 106, 107, 108 },
+                armor = "Plate",
+                -- In the client's own class order, which is the order the mask is written in
+                -- and the order a player reads a class list in everywhere else in the game.
+                classes = { "Warrior", "Paladin" },
+                faction = "Horde",
+            }, sets.forSource(SOURCE))
+        end)
+
+        -- The armour is the *dropped item's*, and this is the case that says so. The set was
+        -- found through another item wearing the same look, so a reading taken off the set —
+        -- or off the source that led to it — would tell a mail wearer they had just picked up
+        -- plate. The one they are holding is the one they need to know about.
+        it("reports the armour of the source asked about, not of the item the set named", function()
+            local sets, asked = newSets({
+                containing = { [SHARED] = { SET } },
+                pieces = { [SET] = eightPieces() },
+                shared = { [SOURCE] = { SOURCE, SHARED } },
+                armor = { [SOURCE] = "Mail", [SHARED] = "Plate" },
+            })
+
+            assert.equal("Mail", sets.forSource(SOURCE).armor)
+            assert.same({ SOURCE }, asked.armor)
+        end)
+
+        -- Most of what drops has no armour type at all — a cloak, a ring, every weapon in the
+        -- game — and a build may not have been wired the lookup in the first place. Both are
+        -- described by saying nothing, because a line reading "Armor —" is worse than no line.
+        for _, case in ipairs({
+            { what = "the client will not say what the item is made of", armor = {} },
+            { what = "the build wired no armour lookup at all", armor = nil },
+        }) do
+            it("says nothing about armour when " .. case.what, function()
+                local sets = newSets({
+                    containing = { [SOURCE] = { SET } },
+                    pieces = { [SET] = eightPieces() },
+                    armor = case.armor,
+                })
+
+                assert.is_nil(sets.forSource(SOURCE).armor)
+            end)
+        end
+
+        -- The mask is a bitfield and every one of these is a way of reading it wrong. An
+        -- off-by-one in the bit position names the class next door — a plate set reported for
+        -- paladins and hunters — which is exactly the kind of wrong a player believes.
+        for _, case in ipairs({
+            {
+                what = "names the two classes a plate set is for",
+                mask = maskOf(1, 2),
+                classes = { "Warrior", "Paladin" },
+            },
+            -- The high bit of the roster, which is what catches a reader that stopped one id
+            -- short or counted the bits from one.
+            {
+                what = "names the single class a set is locked to",
+                mask = maskOf(5),
+                classes = { "Priest" },
+            },
+            {
+                what = "names classes either side of a gap in the mask",
+                mask = maskOf(1, 3, 5),
+                classes = { "Warrior", "Hunter", "Priest" },
+            },
+            -- A set anyone can wear is not a restriction, and the line would be on every
+            -- cosmetic and holiday set in the game saying nothing at all.
+            {
+                what = "is silent about a set every class the client names can wear",
+                mask = maskOf(1, 2, 3, 4, 5),
+                classes = nil,
+            },
+            -- Ids the client will not name count for neither side of that comparison. A mask
+            -- claiming one of them is still every class as far as a player is concerned, and
+            -- an id counted into the total would turn "anyone" back into a restriction.
+            {
+                what = "is silent where the mask also claims an id the client will not name",
+                mask = maskOf(1, 2, 3, 4, 5, 6, 7),
+                classes = nil,
+            },
+            {
+                what = "leaves an unnamed id out of the list it does draw",
+                mask = maskOf(1, 2, 6),
+                classes = { "Warrior", "Paladin" },
+            },
+            {
+                what = "leaves out an id the client named with an empty string",
+                mask = maskOf(1, 2, 7),
+                classes = { "Warrior", "Paladin" },
+            },
+            -- Nothing the client will name is selected, so there is nobody to name. Reported
+            -- as no restriction rather than as an empty list, which a tooltip would draw as a
+            -- "Classes" line with nothing after it.
+            {
+                what = "has nothing to say where only unnamed ids are claimed",
+                mask = maskOf(6, 7),
+                classes = nil,
+            },
+            { what = "has nothing to say for an empty mask", mask = 0, classes = nil },
+            { what = "has nothing to say where the set carries no mask", mask = nil, classes = nil },
+        }) do
+            it("decodes a class mask and " .. case.what, function()
+                local sets = newSets({
+                    containing = { [SOURCE] = { SET } },
+                    info = { [SET] = { name = "Bloodfang Armor", classMask = case.mask } },
+                    pieces = { [SET] = eightPieces() },
+                    classes = CLASSES,
+                })
+
+                assert.same(case.classes, sets.forSource(SOURCE).classes)
+            end)
+        end
+
+        -- The one answer in this module that is safe to remember, and the reason it is worth
+        -- remembering: everything else here is asked again on every repaint because it moves,
+        -- and the roster of classes the game has does not move while the client is running. Two
+        -- rows drawn and redrawn is four calls to `forSource` and would be ninety-six lookups
+        -- without this, for twenty-four facts. Asserted as the id walk itself rather than as a
+        -- count, so a cache that remembered the wrong thing cannot pass.
+        it("reads the roster of classes once however many sets it is asked about", function()
+            local sets, asked = newSets({
+                containing = { [SOURCE] = { SET }, [SHARED] = { OTHER_SET } },
+                info = {
+                    [SET] = { name = "Bloodfang Armor", classMask = maskOf(1, 2) },
+                    [OTHER_SET] = { name = "Nightslayer Armor", classMask = maskOf(4) },
+                },
+                pieces = { [SET] = eightPieces(), [OTHER_SET] = eightPieces() },
+                classes = CLASSES,
+            })
+
+            sets.forSource(SOURCE)
+            sets.forSource(SHARED)
+            sets.forSource(SOURCE)
+
+            local walked = {}
+            for classID = 1, 24 do
+                walked[classID] = classID
+            end
+            assert.same(walked, asked.classes)
+        end)
+
+        -- Never read at all where there is nothing to read it with. A build wired no `className`
+        -- must not pay the walk to discover that, on the first set or on any of them.
+        it("does not go looking for a roster on a build that has none", function()
+            local sets, asked = newSets({
+                containing = { [SOURCE] = { SET } },
+                info = { [SET] = { name = "Bloodfang Armor", classMask = maskOf(1, 2) } },
+                pieces = { [SET] = eightPieces() },
+            })
+
+            sets.forSource(SOURCE)
+
+            assert.same({}, asked.classes)
+        end)
+
+        -- A mask nobody can turn into names is a number, and a tooltip has no use for one. The
+        -- set is described exactly as it was before classes were read at all.
+        it("says nothing of classes on a build that will not name them", function()
+            local sets = newSets({
+                containing = { [SOURCE] = { SET } },
+                info = { [SET] = { name = "Bloodfang Armor", classMask = maskOf(1, 2) } },
+                pieces = { [SET] = eightPieces() },
+            })
+
+            assert.is_nil(sets.forSource(SOURCE).classes)
+        end)
+
+        -- The empty string is the client's own way of saying "either side", and it is the one
+        -- that matters: nearly every set in the game carries it, so a reader that passed it
+        -- through would draw "Faction →" with nothing after it on almost every tooltip.
+        for _, case in ipairs({
+            { what = "names the side that can collect it", required = "Alliance", faction = "Alliance" },
+            { what = "is silent where the client answered an empty string", required = "", faction = nil },
+            { what = "is silent where the set carries no faction at all", required = nil, faction = nil },
+        }) do
+            it("reads the required faction and " .. case.what, function()
+                local sets = newSets({
+                    containing = { [SOURCE] = { SET } },
+                    info = { [SET] = { name = "Bloodfang Armor", requiredFaction = case.required } },
+                    pieces = { [SET] = eightPieces() },
+                })
+
+                assert.same(case.faction, sets.forSource(SOURCE).faction)
+            end)
+        end
+
         -- Read live rather than filed with the drop: the account collects another piece on
         -- another character an hour later and the row has to say so the next time it is
         -- painted. A membership cached behind the first answer would leave every panel on
@@ -642,6 +894,81 @@ describe("Blizzard's own transmog sets", function()
 
             assert.is_nil(lineSaying(content, "The set wears this look on another item"))
         end)
+
+        -- Who may wear it, above how far into it the account has got, because a fraction is a
+        -- progress report and a progress report is only worth reading once the thing is yours
+        -- to make progress on. Under the shared-look note, which is about this row rather than
+        -- about the set. The whole tooltip is asserted rather than the three lines alone,
+        -- because the order between them is the only thing here a reader could get wrong.
+        it("says who the set is for between the shared-look note and the fraction", function()
+            assert.same({
+                "Bloodfang Armor",
+                "Heroic",
+                "The set wears this look on another item",
+                "Armor → Plate",
+                "Classes → Warrior, Paladin",
+                "Faction → Horde",
+                "Collected → 3 / 8",
+                "",
+                "Shift-click to try on the whole set",
+                "Shift-right-click to open it in Collections",
+            }, readable(ns.transmogSetTooltip(membership({
+                label = "Heroic",
+                sharedLook = true,
+                armor = "Plate",
+                classes = { "Warrior", "Paladin" },
+                faction = "Horde",
+            }))))
+        end)
+
+        -- One class is a lock and several are a list, and a tooltip that said "Classes →
+        -- Priest" would read as a client that had lost the rest of them.
+        for _, case in ipairs({
+            { what = "one class alone", classes = { "Priest" }, left = "Class", other = "Classes" },
+            {
+                what = "the several a plate set is for",
+                classes = { "Warrior", "Paladin" },
+                left = "Classes",
+                other = "Class",
+                right = "Warrior, Paladin",
+            },
+        }) do
+            it("labels the line for " .. case.what, function()
+                local content = ns.transmogSetTooltip(membership({ classes = case.classes }))
+
+                assert.equal(case.right or case.classes[1], lineSaying(content, case.left).right)
+                assert.is_nil(lineSaying(content, case.other))
+            end)
+        end
+
+        -- Facts about the set rather than figures the panel colours, which is what separates
+        -- them from the fraction under them: "other" is the neutral role, and a class list
+        -- drawn in the account's purple would read as a count of something.
+        for _, case in ipairs({
+            { what = "the armour", left = "Armor", overrides = { armor = "Plate" } },
+            { what = "the class list", left = "Classes", overrides = { classes = { "Warrior", "Paladin" } } },
+            { what = "the faction", left = "Faction", overrides = { faction = "Horde" } },
+        }) do
+            it("marks " .. case.what .. " as a plain fact about the set", function()
+                local content = ns.transmogSetTooltip(membership(case.overrides))
+
+                assert.equal("other", lineSaying(content, case.left).role)
+            end)
+        end
+
+        -- Left off the great majority of sets, which restrict nobody: a cosmetic set anyone
+        -- can wear on either side would otherwise carry three lines saying "anyone", and the
+        -- fraction — the part worth hovering for — would be three lines further down.
+        for _, case in ipairs({
+            { what = "an armour line for a set with no material", left = "Armor" },
+            { what = "a class line for a set every class can wear", left = "Classes" },
+            { what = "a singular class line either", left = "Class" },
+            { what = "a faction line for a set both sides can collect", left = "Faction" },
+        }) do
+            it("draws no " .. case.what, function()
+                assert.is_nil(lineSaying(ns.transmogSetTooltip(membership()), case.left))
+            end)
+        end
 
         -- Spaces around the slash, which is not the same string the row itself carries: the
         -- row is "3/8" squeezed into ninety pixels beside an icon, and the tooltip has the

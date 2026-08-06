@@ -32,6 +32,12 @@ local _, ns = ...
 ---@field sharedLook boolean? True where the set does not name this very source and names
 ---another one wearing the same look. Absent rather than false in the ordinary case, so a row
 ---that carries the field is a row with something extra to say about itself.
+---@field armor string? What the piece is made of — "Plate", "Mail" — for the armour that has a
+---type at all. The dropped piece's own rather than the set's: a player standing over a drop is
+---asking whether *they* can wear it.
+---@field classes string[]? Which classes the set is for, in the client's own class order, and
+---only where it is for some of them rather than all.
+---@field faction string? "Alliance" or "Horde", for the sets one side alone can collect.
 
 ---@class TransmogSets
 ---@field forSource fun(sourceID: integer?): TransmogSetMembership? Nil for an appearance that
@@ -51,6 +57,65 @@ local _, ns = ...
 ---@field sharedSources fun(sourceID: integer): integer[]? Every source in the game wearing the
 ---same look as this one, the source itself included, in the client's own order. The client's
 ---`GetAllAppearanceSources` over the visual the source belongs to — see `Main.lua`.
+---@field className fun(classID: integer): string? Localised name of a class by its id, which is
+---what turns a set's class mask into something a player can read. Optional: without it the set
+---is described exactly as it was before, one line shorter.
+---@field armorType fun(sourceID: integer): string? What the piece is made of, localised, for the
+---four armour subclasses that are a restriction — cloth, leather, mail, plate — and nothing for
+---anything else. Optional on the same terms.
+
+---The highest class id worth asking about. Thirteen exist on 12.0.5 and `classMask` is a 32-bit
+---field, so this is room to grow rather than a limit: an id the client will not name is skipped,
+---which is what every id past the last real class is.
+local MAX_CLASS_ID = 24
+
+---Every class the client will name, in id order, read once and kept.
+---
+---The one thing in here that is safe to remember. A fraction moves as the account collects and
+---is asked again on every repaint for exactly that reason; the roster of classes the game has
+---does not move at all while the client is running, and asking twenty-four times per set-bearing
+---row per repaint would be the module's whole cost budget spent on an answer known in advance.
+---@param className fun(classID: integer): string?
+---@return { names: table<integer, string>, count: integer }
+local function readClasses(className)
+    local names, count = {}, 0
+    for classID = 1, MAX_CLASS_ID do
+        local name = className(classID)
+        if name and name ~= "" then
+            names[classID] = name
+            count = count + 1
+        end
+    end
+    return { names = names, count = count }
+end
+
+---Which classes a set's class mask names, where that is a restriction at all.
+---
+---A mask covering every class the client will name is the ordinary case — a cosmetic set, a
+---holiday set — and it is not news: the line would be on every one of those tooltips and would
+---say nothing. So it comes back nil, the same as no mask at all.
+---@param roster { names: table<integer, string>, count: integer }?
+---@param mask integer?
+---@return string[]?
+local function restrictedTo(roster, mask)
+    if not roster or not mask or mask <= 0 then
+        return nil
+    end
+    local chosen = {}
+    for classID = 1, MAX_CLASS_ID do
+        local name = roster.names[classID]
+        -- Arithmetic rather than the client's `bit` library, because this module is one of the
+        -- pair that runs outside the game under a plain Lua: `floor(mask / 2^n) % 2` is the nth
+        -- bit on any Lua there is.
+        if name and math.floor(mask / 2 ^ (classID - 1)) % 2 == 1 then
+            chosen[#chosen + 1] = name
+        end
+    end
+    if #chosen == 0 or #chosen >= roster.count then
+        return nil
+    end
+    return chosen
+end
 
 ---The first set containing this very source that the client will actually *name*.
 ---
@@ -82,6 +147,18 @@ end
 ---@param deps TransmogSetsDeps
 ---@return TransmogSets
 function ns.newTransmogSets(deps)
+    -- Read on the first set that needs it rather than here, because a session can go a long
+    -- while without collecting an appearance that belongs to one — and on a build with no
+    -- `className` at all it is never read, which is the same as never being wired.
+    local classes
+    ---@return { names: table<integer, string>, count: integer }?
+    local function roster()
+        if classes == nil then
+            classes = deps.className and readClasses(deps.className) or false
+        end
+        return classes or nil
+    end
+
     return {
         ---@param sourceID integer?
         ---@return TransmogSetMembership?
@@ -149,6 +226,18 @@ function ns.newTransmogSets(deps)
                 -- Absent rather than false for the ordinary reading, so that the field is
                 -- only ever there to say something.
                 sharedLook = sharedLook or nil,
+                -- Who the thing is actually for. Three separate questions with three separate
+                -- answers, and each of them absent where the client has nothing to say: an
+                -- appearance every class can wear on any faction is the ordinary case, and it
+                -- is described by saying nothing rather than by three lines of "anyone".
+                --
+                -- The armour is asked of the source the row is about rather than of the set,
+                -- which is the difference that matters on a shared look: the set may be tier
+                -- plate while the item that dropped wearing its look is a mail world drop, and
+                -- the one the player is holding is the one they need to know about.
+                armor = deps.armorType and deps.armorType(sourceID) or nil,
+                classes = restrictedTo(roster(), info.classMask),
+                faction = info.requiredFaction ~= "" and info.requiredFaction or nil,
             }
         end,
     }
@@ -202,6 +291,22 @@ function ns.transmogSetTooltip(membership)
     -- plainly wrong. One line turns that into the news it actually is.
     if membership.sharedLook then
         lines[#lines + 1] = { left = "The set wears this look on another item", role = "note" }
+    end
+    -- Who may wear it, above how much of it the account holds, because "3 / 8" is a progress
+    -- report and a progress report is only interesting once the thing is yours to make progress
+    -- on. A mail wearer reading a plate set's fraction is reading the wrong number.
+    if membership.armor then
+        lines[#lines + 1] = { left = "Armor", right = membership.armor, role = "other" }
+    end
+    if membership.classes then
+        lines[#lines + 1] = {
+            left = #membership.classes == 1 and "Class" or "Classes",
+            right = table.concat(membership.classes, ", "),
+            role = "other",
+        }
+    end
+    if membership.faction then
+        lines[#lines + 1] = { left = "Faction", right = membership.faction, role = "other" }
     end
     lines[#lines + 1] = {
         left = "Collected",

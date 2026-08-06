@@ -18,6 +18,8 @@ describe("ns.newResultsWindow", function()
     ---The picker needs both a list and a way to choose from it, so either half can be
     ---withheld on its own — `views = false`, or `select = false` — because the detail window
     ---is handed neither and must come out of it a panel with a plain title.
+    ---`options.openers = false` withholds the mount and pet journal openers, which is the build
+    ---that can name what was collected and was given nowhere to send a click on it.
     ---`options.set` is the membership every transmog row's appearance is said to belong to —
     ---a table, or a function of the source id for a case where one row is in a set and the
     ---next is not. `set = false` withholds the lookup entirely, which is the build that has
@@ -42,6 +44,8 @@ describe("ns.newResultsWindow", function()
             sizeLoads = 0,
             loadCalls = 0,
             achievements = {},
+            mounts = {},
+            pets = {},
             previews = {},
             collections = {},
             setPreviews = {},
@@ -115,6 +119,18 @@ describe("ns.newResultsWindow", function()
             openAchievement = function(id)
                 recorded.achievements[#recorded.achievements + 1] = id
             end,
+            -- Withheld together on `options.openers = false`, which is the build that can name
+            -- a mount and a pet and was given nowhere to send a click on either. Both are
+            -- optional deps, so a panel without them has to stay a panel rather than raise on
+            -- the first row it draws.
+            openMount = options.openers ~= false and function(mountID)
+                recorded.mounts[#recorded.mounts + 1] = mountID
+            end or nil,
+            -- Both arguments kept, because the species alone is the answer to a different
+            -- question: a battle pet is the one collectible an account may own several of.
+            openPet = options.openers ~= false and function(speciesID, guid)
+                recorded.pets[#recorded.pets + 1] = { id = speciesID, guid = guid }
+            end or nil,
             previewTransmog = function(id)
                 recorded.previews[#recorded.previews + 1] = id
             end,
@@ -481,6 +497,23 @@ describe("ns.newResultsWindow", function()
         error("no row saying " .. name .. " on screen")
     end
 
+    ---Whether the row saying `name` answers a click at all — both halves of what that takes,
+    ---because a row that took the mouse and had no handler on it would be a dead spot on the
+    ---frame the player drags the panel around by, which is the failure this guards against
+    ---quite as much as a click that goes nowhere.
+    ---@param frame table
+    ---@param name string
+    ---@return boolean
+    local function clickable(frame, name)
+        for _, fontString in ipairs((regionsOf(frame))) do
+            if fontString.shown and fontString.template == ROW_FONT and fontString.justify == "LEFT"
+                and (fontString.text or ""):find(name, 1, true) then
+                return fontString.mouseEnabled == true and fontString.scripts.OnMouseUp ~= nil
+            end
+        end
+        error("no row saying " .. name .. " on screen")
+    end
+
     ---The tooltip as it reads: the title first, then `left` or `left → right` per line.
     ---@param recorded table
     ---@return string[]
@@ -648,6 +681,12 @@ describe("ns.newResultsWindow", function()
 
             -- Purple for what is new to the account's wardrobe, green for a variant of
             -- something it already had, the same two colours achievements are counted in.
+            --
+            -- Pinned to the word as well as to the colour, because the heading is now the only
+            -- place either word is written down: the rows under it dropped them and say which
+            -- they are in colour alone. This is where a player who does not yet know the two
+            -- colours learns them, so a heading that lost its wording would take the meaning
+            -- of every transmog row on the panel with it.
             assert.equal(
                 "|cffb373ff0 new|r · |cff59d9733 variants|r",
                 valueForHeading(rowsOf(frames[1]), "Transmog")
@@ -1316,6 +1355,114 @@ describe("ns.newResultsWindow", function()
             assert.equal("collected", valueFor(lines, "  Katy's Stampwhistle"))
         end)
 
+        describe("a click on something newly collected", function()
+            local MOUNT = { id = 1, name = "Alabaster Hyena" }
+            local PET = { id = 2, name = "Darkmoon Rabbit", guid = "BattlePet-0-000018A9C0D2" }
+            local TOY = { id = 3, name = "Katy's Stampwhistle" }
+
+            ---Draws the panel with all three blocks open, which is where every one of these
+            ---starts: a collected row is not on screen until the heading over it is clicked.
+            ---@param options table? Passed to newWindow.
+            ---@param overrides table? Fields of the summary the rows are drawn from.
+            ---@return table frame, table recorded
+            local function collected(options, overrides)
+                local window, frames, recorded = newWindow(options)
+                local drawn = { mounts = { MOUNT }, pets = { PET }, toys = { TOY } }
+                for key, value in pairs(overrides or {}) do
+                    drawn[key] = value
+                end
+                window.update(summary(drawn))
+                for _, heading in ipairs({ "Mounts", "Pets", "Toys" }) do
+                    expand(frames[1], heading)
+                end
+                return frames[1], recorded
+            end
+
+            ---Clicks the row saying `name`. The same reach `expand` makes — a row and the
+            ---heading over it are both a font string with a handler on it, as far as the panel
+            ---is concerned — said with the word that fits what it is being used for here.
+            ---@param frame table
+            ---@param name string
+            local function click(frame, name)
+                expand(frame, name)
+            end
+
+            -- The row already names the mount; the click is what gets the player to it. The
+            -- journal's own page is where a mount is favourited, renamed and summoned from, and
+            -- finding it by hand means opening Collections and typing the name back in.
+            it("opens the journal on the mount that was collected", function()
+                local frame, recorded = collected()
+
+                click(frame, MOUNT.name)
+
+                assert.same({ MOUNT.id }, recorded.mounts)
+            end)
+
+            -- Both halves of what the tally filed, because a battle pet is the one collectible
+            -- the game lets an account own several of: the species says which rabbit it is, and
+            -- the guid says which of the player's rabbits this one is. Passing the species
+            -- alone would open the journal on a pet caught three years ago.
+            it("opens the journal on the very pet that was caught", function()
+                local frame, recorded = collected()
+
+                click(frame, PET.name)
+
+                assert.same({ { id = PET.id, guid = PET.guid } }, recorded.pets)
+            end)
+
+            -- A pet learned rather than caught — off a vendor, out of a satchel — reaches the
+            -- tally with no guid, and the species is then the whole of what is known about it.
+            -- The journal can still be opened on that, which is most of what the click was for.
+            it("falls back to the species for a pet filed with no guid", function()
+                local frame, recorded = collected({}, {
+                    pets = { { id = PET.id, name = PET.name } },
+                })
+
+                click(frame, PET.name)
+
+                assert.same({ { id = PET.id } }, recorded.pets)
+            end)
+
+            -- Toys have no page of their own in the journal to be opened on, so the row is left
+            -- alone rather than mouse-enabled for a click that would go nowhere: a row that
+            -- takes the mouse and does nothing is a dead spot on the frame the panel is dragged
+            -- around by, and it reads to a player as the panel being broken.
+            it("leaves a toy alone, having nowhere to send it", function()
+                local frame = collected()
+
+                assert.is_false(clickable(frame, TOY.name))
+            end)
+
+            -- The tally files a collected thing with whatever the client said about it, and an
+            -- event the client would not name an id for is a row with nothing to look anything
+            -- up by. It still draws — the name is news — and it answers no click.
+            for _, case in ipairs({
+                { what = "mount", key = "mounts", name = "Alabaster Hyena" },
+                { what = "pet", key = "pets", name = "Darkmoon Rabbit" },
+            }) do
+                it("leaves a " .. case.what .. " filed without an id unclickable", function()
+                    local frame = collected({}, { [case.key] = { { name = case.name } } })
+
+                    assert.is_false(clickable(frame, case.name))
+                end)
+            end
+
+            -- Both openers are optional, so this is the panel on a build that was wired
+            -- neither: the rows are drawn exactly as they always were, and neither takes the
+            -- mouse. Asserted on both, because each is passed separately and a panel that
+            -- wired one of them to the other's absence would still pass on the one it kept.
+            for _, case in ipairs({
+                { what = "mount", name = "Alabaster Hyena" },
+                { what = "pet", name = "Darkmoon Rabbit" },
+            }) do
+                it("leaves a " .. case.what .. " alone where the build wired no opener", function()
+                    local frame = collected({ openers = false })
+
+                    assert.is_false(clickable(frame, case.name))
+                end)
+            end
+        end)
+
         it("names each achievement earned", function()
             local window, frames = newWindow()
 
@@ -1462,7 +1609,9 @@ describe("ns.newResultsWindow", function()
                 end
             end
             assert.is_not_nil(reviewed)
-            assert.equal("new", reviewed.value)
+            -- And nothing beside it. The row used to spell out "new" here; the colour of the
+            -- name says it now, and the column is kept for the one thing colour cannot say.
+            assert.equal("", reviewed.value)
             assert.truthy(reviewed.label:find("|TInterface", 1, true))
         end)
 
@@ -1562,23 +1711,26 @@ describe("ns.newResultsWindow", function()
                 return frames[1], recorded
             end
 
-            -- The fraction is the whole point of the feature: a dropped shoulder is one thing
-            -- and the fifth of eight is another. It is drawn after the word the row already
-            -- carried rather than instead of it, because "new" and "variant" answer a
-            -- different question — whether the account had ever seen this look — and the set
-            -- says nothing about that.
+            -- The value column now holds the fraction and nothing else. It used to carry the
+            -- word "new" or "variant" in front of it, which said in text what the row was
+            -- already saying in colour, and a row that says one thing twice is a row where the
+            -- eye has to read the slower of the two. The fraction is the one thing on a
+            -- transmog row that colour cannot carry: a dropped shoulder is one thing and the
+            -- fifth of eight is another.
             for _, case in ipairs({
                 {
                     what = "a new appearance part way into its set",
                     set = {},
                     newAppearance = true,
-                    expected = "new |cffadadb3" .. SET_ICON .. "3/8|r",
+                    expected = "|cffadadb3" .. SET_ICON .. "3/8|r",
                 },
+                -- Same string for a variant as for a new look, which is the point: the two are
+                -- told apart by the colour of the name beside this, not by anything in here.
                 {
                     what = "a variant of something the account already had",
                     set = {},
                     newAppearance = false,
-                    expected = "variant |cffadadb3" .. SET_ICON .. "3/8|r",
+                    expected = "|cffadadb3" .. SET_ICON .. "3/8|r",
                 },
                 -- The gold the client uses for a completed collection everywhere else. The
                 -- grey above is a set still being worked on, and the two hexes are the only
@@ -1587,10 +1739,10 @@ describe("ns.newResultsWindow", function()
                     what = "the piece that finished the set",
                     set = { collected = 8 },
                     newAppearance = true,
-                    expected = "new |cffffd100" .. SET_ICON .. "8/8|r",
+                    expected = "|cffffd100" .. SET_ICON .. "8/8|r",
                 },
             }) do
-                it("draws the set's fraction beside " .. case.what, function()
+                it("draws the set's fraction alone beside " .. case.what, function()
                     local frame = showing(
                         { set = membership(case.set) },
                         { newAppearance = case.newAppearance }
@@ -1600,10 +1752,43 @@ describe("ns.newResultsWindow", function()
                 end)
             end
 
+            -- Which leaves the colour of the name carrying the whole of "new versus variant".
+            -- Purple for a look the account had never seen and green for a recolour of one it
+            -- had, the same two colours the achievements and quests above are counted in — and
+            -- the same two the heading over this block spells out in words. Asserted on the
+            -- label rather than on the value, because that is what moved: the colour used to
+            -- be on the word in the column beside it, and the word is gone.
+            for _, case in ipairs({
+                { what = "a look new to the account", newAppearance = true, color = { 0.7, 0.45, 1 } },
+                {
+                    what = "a variant of one it already had",
+                    newAppearance = false,
+                    color = { 0.35, 0.85, 0.45 },
+                },
+            }) do
+                it("colours the name of " .. case.what, function()
+                    local frame = showing({ set = membership() }, { newAppearance = case.newAppearance })
+
+                    local label = regionsFor(frame, ROW)
+                    assert.same(case.color, label.color)
+                end)
+            end
+
+            -- And the colour is the row's whether or not there is a set behind it, because it
+            -- is answering a question the set has nothing to do with. A panel that coloured
+            -- only the rows carrying a fraction would leave the great majority of transmog
+            -- rows — the ones in no set at all — saying nothing about themselves at all.
+            it("colours the name of a row that belongs to no set at all", function()
+                local frame = showing({}, { newAppearance = false })
+
+                local label = regionsFor(frame, ROW)
+                assert.same({ 0.35, 0.85, 0.45 }, label.color)
+            end)
+
             -- The regression that matters most. Most appearances in the game belong to no set
             -- at all, so this is what nearly every transmog row in nearly every segment looks
-            -- like, and the set feature must be invisible on all of them: same word, same
-            -- width, same everything it was drawn with before sets existed.
+            -- like: nothing in the value column, and so no column at all. The words that used
+            -- to fill it are gone from the row and live only in the heading over the block.
             for _, case in ipairs({
                 { what = "the appearance belongs to no set the client knows of", options = {} },
                 { what = "the build never wired a set lookup at all", options = { set = false } },
@@ -1611,19 +1796,39 @@ describe("ns.newResultsWindow", function()
                 -- would not resolve a source for has nothing to look a set up by.
                 { what = "the drop was filed with no source id", options = {}, sourceID = false },
             }) do
-                it("draws the row exactly as it always was when " .. case.what, function()
+                it("leaves the value column empty when " .. case.what, function()
                     local frame = showing(case.options, { sourceID = case.sourceID })
 
-                    assert.equal("new", valueFor(rowsOf(frame), "  " .. ROW))
+                    assert.equal("", valueFor(rowsOf(frame), "  " .. ROW))
                 end)
             end
 
-            -- Ninety-two pixels hold "variant" and nothing else. A row carrying a word, an
-            -- icon and a fraction needs the wider column the summary headings use, or the
-            -- numbers — the only part that is news — are the part clipped off the end.
+            -- Neither word anywhere on the row, in the column or in front of the name. They
+            -- were on every transmog row the panel drew until now, so "the value is empty" on
+            -- its own would still pass with "new" moved into the label.
+            for _, case in ipairs({
+                { what = "a new appearance", newAppearance = true },
+                { what = "a variant", newAppearance = false },
+            }) do
+                it("says neither word on the row for " .. case.what, function()
+                    local frame = showing({ set = membership() }, { newAppearance = case.newAppearance })
+
+                    local label, value = regionsFor(frame, ROW)
+                    for _, text in ipairs({ label.text, value.text }) do
+                        assert.is_nil(text:find("new", 1, true))
+                        assert.is_nil(text:find("variant", 1, true))
+                    end
+                end)
+            end
+
+            -- A row carrying an icon and a fraction of two double-digit numbers needs the
+            -- wider column the summary headings use, or the numbers — the only part that is
+            -- news — are the part clipped off the end. A row carrying nothing gets no column:
+            -- zero rather than the ninety-two the word used to need, which is ninety-two more
+            -- pixels of the panel's width for the item's own name.
             for _, case in ipairs({
                 { what = "widens the value column for a row carrying a fraction", set = true, width = 140 },
-                { what = "leaves an ordinary row on the narrow column", set = false, width = 92 },
+                { what = "gives a row with nothing to say no value column at all", set = false, width = 0 },
             }) do
                 it(case.what, function()
                     local frame = showing({ set = case.set and membership() or nil })
