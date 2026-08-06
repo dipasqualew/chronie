@@ -136,6 +136,79 @@ pub(super) fn sync_warband(
     Ok(())
 }
 
+/// Every currency any character has reported, from whichever of the two readings is the fresher.
+///
+/// **Two writers, one question.** `character_currencies` is the pane sweep — live and shallow,
+/// taken at every zoning-in and again at logout, and blind to any currency the player has left
+/// under a collapsed group. `census_currencies` is the walk — complete and occasional, asking
+/// `GetCurrencyInfo` about ids so no pane setting can hide anything from it, and carrying the caps
+/// besides. `docs/account-census.md` argues for keeping them in tables of their own, and that is
+/// still right: they are different claims with different ages, and one table with two writers and
+/// no column saying which is which would be worse than two that each say what they are.
+///
+/// What was wrong was reading only one of them. Nothing read the census tables at all, so the
+/// currencies and reputations the walk exists to reach — the whole point of it — never arrived on
+/// a screen. The join is a read-model concern and belongs exactly here.
+///
+/// Per character and per currency, the newer `at` wins outright rather than being merged field by
+/// field: each row is one reading of one wallet at one moment, and half of an old one beside half
+/// of a new one is a balance nobody ever held. A tie falls to the census, which is the deeper of
+/// the two — and `character_id` is what both are keyed on, so a sweep and a walk by the *same*
+/// character are the only pair that ever compete.
+const MERGED_CURRENCIES: &str = "
+    WITH held AS (
+        SELECT character_id, currency_id, name, total, observed_at AS at, account_wide,
+               0 AS depth
+          FROM character_currencies
+        UNION ALL
+        SELECT character_id, currency_id, name, total, seen_at AS at, account_wide,
+               1 AS depth
+          FROM census_currencies
+    ),
+    freshest AS (
+        SELECT *, ROW_NUMBER() OVER (
+                   PARTITION BY character_id, currency_id
+                   ORDER BY IFNULL(at, 0) DESC, depth DESC
+               ) AS standing
+          FROM held
+    )
+    SELECT h.currency_id, h.name, h.total, h.at, c.source_key, h.account_wide
+      FROM freshest h
+      JOIN characters c ON c.id = h.character_id
+     WHERE h.standing = 1
+     ORDER BY h.currency_id, c.source_key";
+
+/// And every standing, the same way and for the same reason.
+///
+/// The reputations are the sharper half of it. The pane sweep reads the reputation *pane*, and the
+/// pane hides every legacy faction unless the player has gone and asked for them — which is most
+/// of the game's factions — so a roster's worth of standings drawn from it alone is a fraction of
+/// what those characters actually have. `census_standings` is walked by faction id and has no pane
+/// in front of it at all.
+const MERGED_STANDINGS: &str = "
+    WITH stood AS (
+        SELECT character_id, faction_id, name, standing, standing_current, standing_max,
+               ladder_rank, ladder, observed_at AS at, account_wide, 0 AS depth
+          FROM character_standings
+        UNION ALL
+        SELECT character_id, faction_id, name, standing, standing_current, standing_max,
+               ladder_rank, ladder, seen_at AS at, account_wide, 1 AS depth
+          FROM census_standings
+    ),
+    freshest AS (
+        SELECT *, ROW_NUMBER() OVER (
+                   PARTITION BY character_id, faction_id
+                   ORDER BY IFNULL(at, 0) DESC, depth DESC
+               ) AS pick
+          FROM stood
+    )
+    SELECT s.faction_id, s.name, s.standing, s.standing_current, s.standing_max,
+           s.ladder_rank, s.ladder, s.at, c.source_key, s.account_wide
+      FROM freshest s
+      JOIN characters c ON c.id = s.character_id
+     WHERE s.pick = 1
+     ORDER BY s.faction_id, c.source_key";
+
 /// What the account as a whole holds, aggregated from the per-character snapshots.
 ///
 /// Aggregated here rather than in the addon because here it can be done for real: the
@@ -144,12 +217,7 @@ pub(super) fn sync_warband(
 /// summarised away — a total that cannot be broken back down into who holds what is a number
 /// nobody can check, and the ages are what say how much of it is stale.
 pub(super) fn account_holdings(connection: &Connection) -> Result<Value, Failure> {
-    let mut statement = connection.prepare(
-        "SELECT h.currency_id, h.name, h.total, h.observed_at, c.source_key, h.account_wide
-             FROM character_currencies h
-             JOIN characters c ON c.id = h.character_id
-             ORDER BY h.currency_id, c.source_key",
-    )?;
+    let mut statement = connection.prepare(MERGED_CURRENCIES)?;
     let rows = statement.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -213,13 +281,7 @@ pub(super) fn account_holdings(connection: &Connection) -> Result<Value, Failure
         }
     }
 
-    let mut statement = connection.prepare(
-        "SELECT s.faction_id, s.name, s.standing, s.standing_current, s.standing_max,
-                    s.ladder_rank, s.ladder, s.observed_at, c.source_key, s.account_wide
-             FROM character_standings s
-             JOIN characters c ON c.id = s.character_id
-             ORDER BY s.faction_id, c.source_key",
-    )?;
+    let mut statement = connection.prepare(MERGED_STANDINGS)?;
     let rows = statement.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -504,6 +566,203 @@ mod tests {
         // A currency nobody has said is shared is every character's own, and summing it is
         // the right answer rather than the bug.
         assert_eq!(valorstones["accountWide"], false);
+    }
+
+    /// One character's finished census walk, holding a currency and a standing the reputation
+    /// and currency panes would never have shown: a legacy faction, which the pane hides by
+    /// default, and a currency the player has left under a collapsed group.
+    const MAIN_WALKED: &str = r#"
+        ["characters"] = {
+            ["Main-Ravencrest"] = {
+                ["currencies"] = {
+                    ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                    ["entries"] = {
+                        [1166] = {
+                            ["name"] = "Timewarped Badge", ["total"] = 640,
+                            ["seen"] = 2000000000,
+                        },
+                    },
+                },
+                ["reputations"] = {
+                    ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                    ["entries"] = {
+                        [529] = {
+                            ["name"] = "Argent Dawn", ["standing"] = "Exalted",
+                            ["current"] = 999, ["max"] = 1000, ["rank"] = 8,
+                            ["system"] = "reaction", ["seen"] = 2000000000,
+                        },
+                    },
+                },
+            },
+        },
+    "#;
+
+    fn currency_of(install: &Install, id: i64) -> Value {
+        install.dashboard()["holdings"]["currencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == id)
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    fn faction_of(install: &Install, id: i64) -> Value {
+        install.dashboard()["holdings"]["factions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == id)
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    /// The bug this whole change is about. The census walks by id and so reaches the currencies a
+    /// collapsed group hides and the legacy reputations the pane will not draw at all — and until
+    /// this, nothing read either table, so the one thing the walk exists for never arrived on a
+    /// screen.
+    #[test]
+    fn rolls_up_a_currency_only_the_census_walk_ever_saw() {
+        let install = Install::of(
+            &SavedVariables::new()
+                .holdings(TWO_CHARACTERS)
+                .census(MAIN_WALKED),
+        );
+
+        install.collect(2_000_000_100);
+
+        let badge = currency_of(&install, 1166);
+        assert_eq!(badge["total"], 640);
+        assert_eq!(badge["name"], "Timewarped Badge");
+        assert_eq!(badge["characters"][0]["character"], "Main-Ravencrest");
+        // And the pane sweep's own currencies are all still there beside it: this is a union,
+        // not a replacement.
+        assert_eq!(currency_of(&install, 3008)["total"], 2000);
+    }
+
+    /// The legacy reputations are the sharper half of it — most of the game's factions, and every
+    /// one of them invisible to a walk of the pane.
+    #[test]
+    fn rolls_up_a_standing_the_reputation_pane_would_never_have_listed() {
+        let install = Install::of(
+            &SavedVariables::new()
+                .holdings(TWO_CHARACTERS)
+                .census(MAIN_WALKED),
+        );
+
+        install.collect(2_000_000_100);
+
+        let argent = faction_of(&install, 529);
+        assert_eq!(argent["faction"], "Argent Dawn");
+        assert_eq!(argent["best"]["character"], "Main-Ravencrest");
+        assert_eq!(argent["best"]["standing"], "Exalted");
+        assert_eq!(faction_of(&install, 2574)["faction"], "Dream Wardens");
+    }
+
+    /// Where the two readings meet, they are not merged field by field: each row is one reading
+    /// of one wallet at one moment, and half of an old one beside half of a new one is a balance
+    /// nobody ever held. The pane sweep is the live one and wins when it is the later of the two.
+    #[test]
+    fn believes_whichever_of_the_two_readings_is_the_later() {
+        let install = Install::of(
+            &SavedVariables::new()
+                .holdings(
+                    r#"["Main-Ravencrest"] = { ["currencies"] = {
+                        [3008] = {
+                            ["name"] = "Valorstones", ["total"] = 1200,
+                            ["at"] = 2000000000,
+                        },
+                    } },"#,
+                )
+                .census(
+                    r#"["characters"] = { ["Main-Ravencrest"] = { ["currencies"] = {
+                        ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                        ["entries"] = {
+                            [3008] = {
+                                ["name"] = "Valorstones", ["total"] = 50,
+                                ["seen"] = 1999000000,
+                            },
+                        },
+                    } } },"#,
+                ),
+        );
+
+        install.collect(2_000_000_100);
+
+        let valorstones = currency_of(&install, 3008);
+        assert_eq!(valorstones["total"], 1200);
+        // Counted once, from one of the two readings — a union that summed them would have said
+        // this character was holding 1,250.
+        assert_eq!(valorstones["characters"].as_array().unwrap().len(), 1);
+    }
+
+    /// And the other way round, which is the ordinary case a few hours into a session: the sweep
+    /// ran at login, the walk finished after it, and the walk is the reading to believe.
+    #[test]
+    fn believes_the_walk_where_it_finished_after_the_sweep() {
+        let install = Install::of(
+            &SavedVariables::new()
+                .holdings(
+                    r#"["Main-Ravencrest"] = { ["currencies"] = {
+                        [3008] = {
+                            ["name"] = "Valorstones", ["total"] = 1200,
+                            ["at"] = 1999000000,
+                        },
+                    } },"#,
+                )
+                .census(
+                    r#"["characters"] = { ["Main-Ravencrest"] = { ["currencies"] = {
+                        ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                        ["entries"] = {
+                            [3008] = {
+                                ["name"] = "Valorstones", ["total"] = 1450,
+                                ["seen"] = 2000000000,
+                            },
+                        },
+                    } } },"#,
+                ),
+        );
+
+        install.collect(2_000_000_100);
+
+        assert_eq!(currency_of(&install, 3008)["total"], 1450);
+    }
+
+    /// Two alts' wallets are two wallets, and the merge must never let one character's reading
+    /// stand in for another's — which is what it would do if the two feeds were matched on the
+    /// currency alone.
+    #[test]
+    fn never_lets_one_characters_reading_answer_for_another() {
+        let install = Install::of(
+            &SavedVariables::new()
+                .holdings(
+                    r#"["Alt-Ravencrest"] = { ["currencies"] = {
+                        [3008] = {
+                            ["name"] = "Valorstones", ["total"] = 800,
+                            ["at"] = 1999000000,
+                        },
+                    } },"#,
+                )
+                .census(
+                    r#"["characters"] = { ["Main-Ravencrest"] = { ["currencies"] = {
+                        ["complete"] = true, ["revision"] = 1, ["held"] = 1,
+                        ["entries"] = {
+                            [3008] = {
+                                ["name"] = "Valorstones", ["total"] = 1200,
+                                ["seen"] = 2000000000,
+                            },
+                        },
+                    } } },"#,
+                ),
+        );
+
+        install.collect(2_000_000_100);
+
+        let valorstones = currency_of(&install, 3008);
+        // Both characters, both balances, summed — the alt's older reading is not beaten by the
+        // main's newer one, because they are answers to different questions.
+        assert_eq!(valorstones["total"], 2000);
+        assert_eq!(valorstones["characters"].as_array().unwrap().len(), 2);
     }
 
     /// A history collected before the shared flag existed has no column to put one in. The

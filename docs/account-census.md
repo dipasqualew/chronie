@@ -103,24 +103,63 @@ not being complete apart and they mean different things: **never walked** is wai
 **cut short** is waiting for the rest of one, and **part of an answer** is a `partial` domain that
 will never be whole however long it is left.
 
-### And the audit itself is off unless somebody asks for it
+### And the same thing in the segments window, while it is happening
 
-Everything above is about *when* a pass should be provoked, and it is still the right answer to
-that question. What it does not settle is whether the addon should be the one asking, and the
-default is that it is not: `settings.sync.census` ships `false`, `sweepCensus` reads it, and a
-loading screen provokes nothing on an install nobody has configured.
+A command answers a question somebody thought to ask. The failure this is for is the one where
+they did not: the census ran in complete silence, so a client that felt slightly worse for a
+minute after every zone gave a player nothing whatever to point at, and the thing they reached for
+was the switch.
 
-The reason is the one thing the argument above cannot make cheap. "A handful of calls at every
-load screen, naming nothing in the steady state" is true, and the steady state is not the whole
-of anybody's life with the game: the first pass walks every id the client will answer for, a
-patch puts every install back to a first pass, and a `partial` domain is walked once a session
-by design. That is a bill a player who wanted their lockouts never agreed to.
+`ns.newCensusReport.section` is the same reading as a block of `/chronie segments`, under the
+totals and over the days — a row per domain saying what it claims, what it holds, what the client
+counts and how long ago, with a bar on the one being walked and a heading naming which domain of
+how many the pass is on. `Census.lua` reports after every slice and `Main.lua` throttles that to
+once a second, and to nothing at all when the window is closed: a repaint rebuilds every row of a
+window that may be holding a week of segments, so painting per slice would cost more than the walk
+it was drawing.
 
-**Nothing is removed by the switch.** `Census.lua` walks exactly as it always did, `audit` still
-decides what a pass would cover, and both routes below still reach it — a walk somebody asked
-for by name is not the addon running by itself, so neither is gated. The box is on Settings under
-**Game and sync**; the desktop app writes the flag into `src/Settings.lua` with the rest of them,
-so it takes effect at the next login or `/reload`.
+### Two families, and only one of them is behind a switch
+
+Everything above is about *when* a pass should be provoked. What it does not settle is whether the
+addon should be the one asking — and the answer turns out to be different for the two kinds of
+thing a census covers, which is why `CensusDomain.group` exists.
+
+**`holdings` is the wallet and the standings**, and they are walked whatever any switch says.
+Three reasons, and the third is the one that was learned the hard way.
+
+They are what the app is *drawn from*. A character's currencies and its reputations are on the
+Characters screen and in every rollup `collector::holdings` produces; the account's mounts and
+achievements are one screen that a reader opens on purpose.
+
+They **complete a sweep that already runs unasked**. `HoldingsSweep` walks the same two panes at
+every loading screen and again at logout, with nobody's permission, and does it blind to a
+collapsed currency group and to every legacy reputation. The census reaching the rest of the same
+question is not a new imposition, it is the other half of one already being paid for.
+
+And they are **character-scoped**, which nothing else here except titles is. An account domain is
+answered the same by whoever is logged in, so a walk deferred is a walk somebody else does later;
+an alt that is never played is an alt nothing can ever say a wallet or a standing for. They also
+cost nine thousand ids against the wardrobe's fifty-five, which is why they go first in the queue.
+
+**`collections` is everything else** — mounts, pets, toys, heirlooms, titles, appearances,
+achievements — and that is what `settings.sync.census` gates. It ships `true`.
+
+It shipped `false` for a while, and the switch was the wrong lever: what was wrong was the walk,
+and "Cost, and why the player never notices" below is the account of what it now does instead. The
+switch stayed because the collections really are the expensive end and somebody should be able to
+say no to them.
+
+**One switch over both families was the defect.** Turning off a wardrobe walk nobody could afford
+also stopped every currency and reputation the app knew about — silently, with no line in the file
+and nothing on a screen to say so — and the Characters view went on drawing holdings out of
+whatever the reputation pane happened to have been showing. That is the shape of bug two families
+make impossible rather than merely unlikely.
+
+**And nothing is removed by the switch either way.** `Census.lua` walks exactly as it always did,
+`audit` still decides what a pass would cover, and both routes below still reach every domain — a
+walk somebody asked for by name is not the addon running by itself, so neither is gated. The box
+is on Settings under **Game and sync**; the desktop app writes the flag into `src/Settings.lua`
+with the rest of them, so it takes effect at the next login or `/reload`.
 
 ### Asking for a walk
 
@@ -218,6 +257,17 @@ live and shallow in `character_currencies`; the census is complete and occasiona
 writers of different freshness, and no column saying which of them a row came from, would be
 worse than two tables that each say what they are.
 
+**Which leaves somebody having to read both, and for a long time nobody did.** The census tables
+were written and then read by nothing at all, so the currencies under a collapsed group and the
+legacy reputations — the entire reason these two domains exist — never reached a screen. The join
+is a read-model concern and lives in `collector::holdings::account_holdings`: the two tables are
+unioned per character and per id, and the later `at` wins outright rather than being merged field
+by field, because each row is one reading of one wallet at one moment and half of an old one
+beside half of a new one is a balance nobody ever held. A tie falls to the census, being the
+deeper of the two. Both are keyed on `character_id`, so the only pair that ever competes is a
+sweep and a walk by the *same* character — two alts' wallets are two wallets and are summed like
+anything else.
+
 ## Reputations, and the hole nothing else could reach
 
 `reputations` is the second `scope = "character"` domain, and the one that closes the largest
@@ -287,10 +337,53 @@ position then costs one call rather than two — 13,700 reads instead of 27,400.
 
 ## Cost, and why the player never notices
 
-A walk is spread a slice per frame through `C_Timer.After`, 200 ids at a time. It starts ten
-seconds after the world arrives, which is not politeness: the achievement tree is sent by the
-server *after* login, and a walk that began before it landed would find nothing and then
-claim, in writing, that the account had earned nothing.
+**This section used to describe a walk a player switched the census off to be rid of**, and the
+five things wrong with it are worth keeping written down, because each is a plausible-looking
+decision that turns out to be a tax on every evening.
+
+**A slice ran every frame.** `C_Timer.After(0, …)` is "next frame", and the reasoning for it was
+that the budget below already bounded the work — so the pass would be over quickly. What it
+actually asked for was a share of *every* frame for as long as the pass lasted. It is now
+`SLICE_DELAY`, a twentieth of a second, which is a duty cycle of a few per cent rather than a
+claim on all of them.
+
+**A slice was bounded by a count.** Two hundred positions was chosen against the mount journal,
+where a position is one cheap call. A reputation is up to four calls, one of which reaches the
+major-faction and friendship tables; an appearance is a table index behind a call already made.
+A count can only ever be right for the domain it was picked against. The bound is now
+`SLICE_MILLISECONDS` — a tenth of a frame at sixty, read off `debugprofilestop` every
+`CLOCK_EVERY` positions — with the count kept as a ceiling over it for a client that has no such
+clock.
+
+**Nothing waited out a fight.** A slice landing during a pull is the same slice as any other and
+is the only one anybody will ever notice. `deps.busy` is `InCombatLockdown`, and a busy moment is
+waited out rather than worked through: nothing is lost, because the queue, the plan and everything
+already observed are all still there when it ends.
+
+**The plan was drawn inside one frame.** `list` was allowed to be "arithmetic and a handful of
+calls", and it was — but it also built an entry per position: three arrays of up to fifty-five
+thousand for the wardrobe, in the single frame the whole slicing mechanism exists to protect. A
+domain whose positions are an unbroken run now returns an integer and the walk counts, and the two
+domains that walk a plan hold it as about eighty boundaries with a binary search over them.
+
+**And the big one: the wardrobe was re-walked at every loading screen.** `audit` runs on the far
+side of each of them, and two of its answers never settle — a `partial` domain is never complete
+by construction, and a counter that disagrees for a reason of the client's own goes on
+disagreeing. So both were named *every time*, and a player zoning in and out of a dungeon paid for
+a full pass on each. This document said a partial domain was walked once a session; nothing
+enforced it. A finished pass now buys quiet: `DEFAULT_QUIET` of a quarter of an hour, an hour for
+a partial domain, keyed on the persisted `completedAt` so logging in and out does not reset it —
+and asked *after* who did the walking, so the mage's pass ten minutes ago is no reason at all to
+refuse the paladin, which is what keeps the union across the roster happening. A build that has
+changed goes through the quiet whatever the clock says, because that is not a stale reading but a
+reading of a different game.
+
+The whole of a census is now a couple of seconds of client work spread over about half a minute of
+wall clock at a few per cent of a frame.
+
+It still starts ten seconds after the world arrives, which is not politeness: the achievement tree
+is sent by the server *after* login, and a walk that began before it landed would find nothing and
+then claim, in writing, that the account had earned nothing.
 
 Ten seconds makes that unlikely rather than impossible, so it is not the only defence. **A
 walk that ends having observed nothing at all, against a reading that held something, is
@@ -339,11 +432,13 @@ So the domain declares `partial`, and three things follow from it:
   already has, and it is the "character that can only see part of what the account owns" case the
   rule at the top of this document was written for. `census_domains.complete` for this domain is 0
   permanently, and nothing in `collector::census` may delete one of its rows.
-- **It is never settled by an audit, so it is walked once a session.** Every other domain here is
-  also fed by a client event between passes; this one is not, and the character in front of the
-  client is a different part of the answer every time. It is affordable: the plan is fifty-five
-  thousand positions of array indexing behind thirty client calls, which is five seconds of slices
-  against the achievement walk's minute.
+- **It is never settled by an audit, so what decides when it is walked again is the clock.** Every
+  other domain here is also fed by a client event between passes; this one is not, and the
+  character in front of the client is a different part of the answer every time. That is what
+  `PARTIAL_QUIET` is for — an hour between passes by the same character, and none at all against a
+  different one, which is what lets a paladin's login add the plate a mage's could not see. Before
+  it there was no interval and this domain was re-walked at every loading screen, which is the
+  single largest thing that was wrong with the census.
 - **No filter of the player's can make it wrong.** Whether `GetCategoryAppearances` applies the
   collected, source-type and faction filters in the client or leaves them to Lua could not be
   settled from the install — Blizzard's own `WardrobeItemsCollectionMixin:FilterVisuals` on

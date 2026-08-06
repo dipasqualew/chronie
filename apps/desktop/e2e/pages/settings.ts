@@ -71,10 +71,14 @@ export class GameAndSync {
     return this.panel.getByRole("status");
   }
 
-  /** The one box on this panel: whether the addon walks the account off its own bat. */
+  /**
+   * The one box on this panel: whether the addon walks the account's *collections* off its own
+   * bat. A character's currencies and reputations are walked whatever it says, which is why the
+   * words on it name the half it actually gates.
+   */
   census(): Locator {
     return this.panel.getByRole("checkbox", {
-      name: "Walk the whole account after a loading screen",
+      name: "Walk the collections after a loading screen",
     });
   }
 
