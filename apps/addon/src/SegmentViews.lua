@@ -31,13 +31,19 @@ local _, ns = ...
 ---the exception to the exception — parking there is a deliberate "show me the evening", and
 ---the evening is still the evening after a loading screen.
 ---
----"This session" is the same evening the desktop app draws: the segment being played, and
----every earlier one that chains back to it across a gap of no more than five minutes,
----whichever character played it. That rule lives in `apps/desktop/src/sessions.ts` as
----SESSION_GAP_SECONDS, and it is repeated here rather than invented afresh, because a panel
----that called an evening one thing while the app it feeds called it another would be worse
----than either. It also means a reload does not fork the evening in half: the log survives
----one, so the chain walks straight back through it.
+---"This session" is the evening the desktop app draws, narrowed to whoever is playing: the
+---segment being played, and every earlier one *of this character's* that chains back to it
+---across gaps of no more than five minutes. The chaining rule lives in
+---`apps/desktop/src/sessions.ts` as SESSION_GAP_SECONDS, and it is repeated here rather than
+---invented afresh, because a panel that measured an evening one way while the app it feeds
+---measured it another would be worse than either. It also means a reload does not fork the
+---evening in half: the log survives one, so the chain walks straight back through it.
+---
+---The narrowing is where the two part company, and deliberately. The app is read afterwards,
+---at a desk, where "what happened tonight" is a fair question across every character that was
+---logged in. The panel is read mid-pull by somebody standing in a dungeon, and there the only
+---evening that means anything is the one they can still add to — a row for the alt's raid
+---offers a run they cannot get back to without logging out.
 ---@class SegmentViews
 ---@field selected fun(): SegmentView What the panel should be drawing.
 ---@field list fun(): SegmentView[] The whole list, in order, for a picker to draw. Named
@@ -224,7 +230,7 @@ function ns.newSegmentViews(deps)
     -- index would silently start pointing at a different segment than the player chose.
     local selection = { kind = "live", key = "live" }
 
-    ---Every segment already finished that belongs to this evening, newest first.
+    ---Every segment this character already finished this evening, newest first.
     ---
     ---Walked backwards from the open segment: a record joins while it ended within the gap
     ---of the earliest start the session has reached so far, and the first one that did not
@@ -232,6 +238,12 @@ function ns.newSegmentViews(deps)
     ---earliest start rather than the previous record's is what the app's forward pass does
     ---with its frontier, and for the same reason — two characters' segments can overlap, and
     ---a short one nested inside a long one must not look like a break in the evening.
+    ---
+    ---The walk crosses every character's segments and collects only this one's. Those are two
+    ---separate questions and they get separate answers: how far back tonight reaches is a
+    ---wall clock fact, so an hour on the alt in the middle of the evening is an hour this
+    ---character was quiet for a reason and the run from before it is still tonight's; what
+    ---the panel is *for* is the character being played, so that hour is not on the list.
     ---@return SegmentRecord[]
     local function history()
         local records = {}
@@ -245,13 +257,16 @@ function ns.newSegmentViews(deps)
             return (left.endedAt or 0) > (right.endedAt or 0)
         end)
 
+        local playing = deps.character()
         local earliest = deps.liveStart() or deps.now()
         local list = {}
         for _, record in ipairs(records) do
             if earliest - (record.endedAt or 0) > SESSION_GAP then
                 break
             end
-            list[#list + 1] = record
+            if record.character == playing then
+                list[#list + 1] = record
+            end
             earliest = math.min(earliest, record.startedAt or earliest)
         end
         return list
@@ -281,11 +296,10 @@ function ns.newSegmentViews(deps)
         }
         for index = #finished, 1, -1 do
             local record = finished[index]
-            -- An evening survives hopping alts, so the list holds the alt's segments too, and
-            -- a row that named only the place would read as somewhere this character had been.
-            -- Every row says whose it was rather than only the alts' — a name in front of some
-            -- rows and not others reads as a list of two different kinds of thing, and the
-            -- question the menu is opened to answer is which run, on which character.
+            -- Every row is this character's now, and the row for the segment being played has
+            -- carried the name since before there was a list at all. Naming the finished ones
+            -- too is what keeps them reading as one character's evening: a name in front of
+            -- some rows and not others reads as a list of two different kinds of thing.
             local who = named(record.character)
             local ended = record.endedAt or now
             local label = (who and who .. " — " or "") .. (record.instance or "Unknown")

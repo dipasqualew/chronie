@@ -400,11 +400,10 @@ describe("segment views", function()
             }, titlesOf(listed))
         end)
 
-        -- An evening survives hopping alts — that is the app's own rule for what a session
-        -- is — so the dungeon run that happened on the alt before this character logged in
-        -- is part of it. It says whose it was, or it would read as somewhere this character
-        -- has been.
-        it("keeps an alt's segments on the list, and says whose they were", function()
+        -- A session played is one character's: what the alt was doing before this one logged
+        -- in is that character's evening, and a row for it here offers a player a run they
+        -- were not asking about and cannot get back to without logging out.
+        it("leaves the alt's segments off the list", function()
             local views = newViews({
                 segments = {
                     record({ id = "mine", instance = "Stockade", endedAt = OPENED - 60 }),
@@ -415,9 +414,24 @@ describe("segment views", function()
 
             local listed = views.list()
 
-            assert.equal(4, #listed)
-            assert.equal("Alt — Deadmines · 9m ago", listed[2].title)
-            assert.equal("Main — Stockade · 3m ago", listed[3].title)
+            assert.same({ "session", "record:mine", "live" }, keysOf(listed))
+            assert.equal("Main — Stockade · 3m ago", listed[2].title)
+        end)
+
+        -- Leaving the alt's segments off the list is not the same as pretending they never
+        -- happened. The evening is a wall clock thing, so an hour spent on the alt in the
+        -- middle of it is an hour this character was quiet for a reason, and the run from
+        -- before it is still part of tonight.
+        it("chains this character's evening across the alt's segments", function()
+            local views = newViews({
+                segments = {
+                    record({ id = "theirs", startedAt = OPENED - 3600, endedAt = OPENED - 60,
+                        character = "Alt-Ravencrest" }),
+                    record({ id = "mine", endedAt = OPENED - 3660 }),
+                },
+            })
+
+            assert.same({ "session", "record:mine", "live" }, keysOf(views.list()))
         end)
 
         -- An evening is what the desktop app says it is: segments chained across silences of
@@ -511,6 +525,20 @@ describe("segment views", function()
                     assert.equal(case.title, views.select("session").title)
                 end)
             end
+
+            -- The count says how many rows the menu under it holds, so it counts what the
+            -- menu holds: a header claiming three beside two segments and the one being
+            -- played would be counting somebody else's evening into this one.
+            it("counts only this character's segments into the session", function()
+                local views = newViews({
+                    segments = {
+                        record({ id = "mine", endedAt = OPENED - 60 }),
+                        record({ id = "theirs", endedAt = OPENED - 420, character = "Alt-Ravencrest" }),
+                    },
+                })
+
+                assert.equal("Session · 2 segments", views.select("session").title)
+            end)
 
             it("names the open segment after whoever is playing it and where", function()
                 local views = newViews({ location = "Wailing Caverns" })
@@ -614,24 +642,25 @@ describe("segment views", function()
                 assert.equal("playing", view.detail)
             end)
 
-            -- An evening survives hopping alts, so the list holds the alt's segments too, and
-            -- a row that named only the place would read as somewhere this character had been.
-            -- Every row says whose it was rather than only the alts': a name in front of some
-            -- rows and not others reads as a list of two different kinds of thing. Only the
-            -- first name — the realm is this evening's either way.
+            -- Every row on the list is this character's, and the row for the segment being
+            -- played has said whose it is since before there was a list at all. Naming the
+            -- finished ones too is what keeps them reading as one character's evening rather
+            -- than as two kinds of thing. Only the first name — the realm is the same one on
+            -- every row it could appear on.
             it("puts whoever played a segment in front of the place, on every row", function()
                 local views = newViews({
+                    location = "Wailing Caverns",
                     segments = {
-                        record({ id = "mine", instance = "Stockade", endedAt = OPENED - 60 }),
-                        record({ id = "theirs", instance = "Deadmines", endedAt = OPENED - 420,
-                            character = "Alt-Ravencrest" }),
+                        record({ id = "newer", instance = "Stockade", endedAt = OPENED - 60 }),
+                        record({ id = "older", instance = "Deadmines", endedAt = OPENED - 420 }),
                     },
                 })
 
                 local listed = views.list()
 
-                assert.equal("Alt — Deadmines", listed[2].label)
+                assert.equal("Main — Deadmines", listed[2].label)
                 assert.equal("Main — Stockade", listed[3].label)
+                assert.equal("Main — Wailing Caverns", listed[4].label)
             end)
 
             -- The same reasoning the header's own dates were given: "now" is a fine staleness
@@ -658,6 +687,22 @@ describe("segment views", function()
                 })
 
                 assert.equal(125, views.select("session").summary.lootValue)
+            end)
+
+            -- The total is the total of what the menu offers. Loot the alt picked up an hour
+            -- ago is not this character's evening, and a session line that quietly held it
+            -- would be a number the rows under it never add up to.
+            it("adds up only this character's segments, and the tally on top of them", function()
+                local views = newViews({
+                    live = summary({ lootValue = 5 }),
+                    segments = {
+                        record({ id = "mine", lootValue = 20, endedAt = OPENED - 60 }),
+                        record({ id = "theirs", lootValue = 100, endedAt = OPENED - 420,
+                            character = "Alt-Ravencrest" }),
+                    },
+                })
+
+                assert.equal(25, views.select("session").summary.lootValue)
             end)
 
             it("reads the session's events forward in time, ending on what is happening now", function()

@@ -396,16 +396,16 @@ describe("ns.newResultsWindow", function()
 
     ---The list as ns.newSegmentViews.list hands it over: the session first, then the evening
     ---in the order it happened — the segments already filed, oldest first, and the one being
-    ---played last. One of them is an alt's, because an evening survives hopping characters
-    ---and the label says so when it does.
+    ---played last. Every row is the character being played, which is the whole list the
+    ---panel offers, and each names them in front of the place.
     ---@param current string? the key the panel is standing on; the open segment by default
     ---@return SegmentView[]
     local function offered(current)
         local listed = {
             { kind = "session", key = "session", title = "Session · 3 segments",
                 label = "Session", detail = "3 segments" },
-            { kind = "record", key = "record:a", title = "Alt — Deadmines · 20m ago",
-                label = "Alt — Deadmines", detail = "8m · 20m ago" },
+            { kind = "record", key = "record:a", title = "Main — Deadmines · 20m ago",
+                label = "Main — Deadmines", detail = "8m · 20m ago" },
             { kind = "live", key = "live", title = "Westfall",
                 label = "Westfall", detail = "12m · playing" },
         }
@@ -2502,7 +2502,7 @@ describe("ns.newResultsWindow", function()
 
             assert.same({
                 { label = "Session", value = "3 segments" },
-                { label = "Alt — Deadmines", value = "8m · 20m ago" },
+                { label = "Main — Deadmines", value = "8m · 20m ago" },
                 { label = "Westfall", value = "12m · playing" },
             }, rowsOf(pickerOf(frames)))
         end)
